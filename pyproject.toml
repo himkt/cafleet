@@ -1,0 +1,13 @@
+[project]
+name = "hikyaku"
+version = "0.1.0"
+description = "A2A-native message broker and agent registry for coding agents"
+requires-python = ">=3.12"
+
+[tool.uv.workspace]
+members = ["registry", "client"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

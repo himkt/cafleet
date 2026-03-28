@@ -1,0 +1,23 @@
+[project]
+name = "hikyaku-registry"
+version = "0.1.0"
+description = "A2A-native message broker and agent registry server"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "a2a-sdk",
+    "redis[hiredis]",
+    "pydantic",
+    "pydantic-settings",
+]
+
+[tool.uv.sources]
+a2a-sdk = { git = "https://github.com/google/a2a-python.git" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hikyaku_registry"]
