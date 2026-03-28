@@ -36,18 +36,31 @@ from hikyaku_registry.task_store import RedisTaskStore
 # ---------------------------------------------------------------------------
 
 
+_DEFAULT_SHARED_KEY = "hky_00000000000000000000000000000001"
+_DEFAULT_SHARED_HASH = hashlib.sha256(_DEFAULT_SHARED_KEY.encode()).hexdigest()
+
+
 @pytest.fixture
 async def env():
-    """Set up BrokerExecutor with fakeredis-backed stores and test agents."""
+    """Set up BrokerExecutor with fakeredis-backed stores and test agents.
+
+    All agents share the same API key (same tenant) for basic tests.
+    """
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     store = RegistryStore(redis)
     task_store = RedisTaskStore(redis)
     executor = BrokerExecutor(registry_store=store, task_store=task_store)
 
-    # Register test agents
-    agent_a = await store.create_agent(name="Agent A", description="Sender")
-    agent_b = await store.create_agent(name="Agent B", description="Recipient")
-    agent_c = await store.create_agent(name="Agent C", description="Third agent")
+    # Register test agents in the same tenant
+    agent_a = await store.create_agent(
+        name="Agent A", description="Sender", api_key=_DEFAULT_SHARED_KEY
+    )
+    agent_b = await store.create_agent(
+        name="Agent B", description="Recipient", api_key=_DEFAULT_SHARED_KEY
+    )
+    agent_c = await store.create_agent(
+        name="Agent C", description="Third agent", api_key=_DEFAULT_SHARED_KEY
+    )
 
     yield {
         "executor": executor,
@@ -68,9 +81,9 @@ async def env():
 
 
 def _make_call_context(agent_id: str) -> ServerCallContext:
-    """Create a ServerCallContext with the authenticated agent_id."""
+    """Create a ServerCallContext with the authenticated agent_id and tenant_id."""
     return ServerCallContext(
-        state={"agent_id": agent_id},
+        state={"agent_id": agent_id, "tenant_id": _DEFAULT_SHARED_HASH},
     )
 
 
