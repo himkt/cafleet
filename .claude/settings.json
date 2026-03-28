@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest *)"
+    ],
+    "deny": [
+      "Bash(uv run python -m *)",
+      "Bash(uv run --package *)"
+    ]
+  },
+  "enabledPlugins": {}
+}
