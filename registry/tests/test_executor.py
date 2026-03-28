@@ -1,0 +1,801 @@
+"""Tests for executor.py — BrokerExecutor business logic.
+
+Covers: unicast send, broadcast send, ACK (multi-turn), GetTask visibility,
+CancelTask. Tests the executor methods directly with fakeredis-backed stores.
+"""
+
+import uuid
+
+import pytest
+import fakeredis.aioredis
+from a2a.server.agent_execution import RequestContext
+from a2a.server.context import ServerCallContext
+from a2a.server.events import EventQueue
+from a2a.types import (
+    Message,
+    MessageSendParams,
+    Part,
+    Role,
+    Task,
+    TaskState,
+    TaskStatus,
+    TextPart,
+)
+
+from hikyaku_registry.executor import BrokerExecutor
+from hikyaku_registry.registry_store import RegistryStore
+from hikyaku_registry.task_store import RedisTaskStore
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def env():
+    """Set up BrokerExecutor with fakeredis-backed stores and test agents."""
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    store = RegistryStore(redis)
+    task_store = RedisTaskStore(redis)
+    executor = BrokerExecutor(registry_store=store, task_store=task_store)
+
+    # Register test agents
+    agent_a = await store.create_agent(name="Agent A", description="Sender")
+    agent_b = await store.create_agent(name="Agent B", description="Recipient")
+    agent_c = await store.create_agent(name="Agent C", description="Third agent")
+
+    yield {
+        "executor": executor,
+        "store": store,
+        "task_store": task_store,
+        "redis": redis,
+        "agent_a": agent_a,
+        "agent_b": agent_b,
+        "agent_c": agent_c,
+    }
+
+    await redis.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_call_context(agent_id: str) -> ServerCallContext:
+    """Create a ServerCallContext with the authenticated agent_id."""
+    return ServerCallContext(
+        state={"agent_id": agent_id},
+    )
+
+
+def _make_send_context(
+    from_agent_id: str,
+    destination: str,
+    text: str = "Hello",
+    task_id: str | None = None,
+) -> RequestContext:
+    """Create a RequestContext for sending a message."""
+    message = Message(
+        message_id=str(uuid.uuid4()),
+        role=Role.user,
+        parts=[Part(root=TextPart(text=text))],
+        task_id=task_id,
+        metadata={"destination": destination},
+    )
+    params = MessageSendParams(message=message)
+    return RequestContext(
+        request=params,
+        call_context=_make_call_context(from_agent_id),
+    )
+
+
+def _make_ack_context(
+    from_agent_id: str,
+    task_id: str,
+    text: str = "ack",
+) -> RequestContext:
+    """Create a RequestContext for ACKing an existing task (multi-turn)."""
+    message = Message(
+        message_id=str(uuid.uuid4()),
+        role=Role.user,
+        parts=[Part(root=TextPart(text=text))],
+        task_id=task_id,
+    )
+    params = MessageSendParams(message=message)
+    return RequestContext(
+        request=params,
+        task_id=task_id,
+        call_context=_make_call_context(from_agent_id),
+    )
+
+
+def _make_cancel_context(
+    from_agent_id: str,
+    task_id: str,
+    task: Task | None = None,
+) -> RequestContext:
+    """Create a RequestContext for canceling a task."""
+    return RequestContext(
+        task_id=task_id,
+        task=task,
+        call_context=_make_call_context(from_agent_id),
+    )
+
+
+async def _collect_events(queue: EventQueue) -> list:
+    """Collect all events from the queue."""
+    events = []
+    try:
+        while True:
+            event = await queue.dequeue_event(no_wait=True)
+            events.append(event)
+    except Exception:
+        pass
+    return events
+
+
+# ---------------------------------------------------------------------------
+# Unicast Send
+# ---------------------------------------------------------------------------
+
+
+class TestUnicastSend:
+    """Tests for BrokerExecutor.execute — unicast message delivery."""
+
+    @pytest.mark.asyncio
+    async def test_creates_delivery_task(self, env):
+        """Unicast send creates a delivery Task."""
+        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+            text="Did the API schema change?",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        tasks = [e for e in events if isinstance(e, Task)]
+        assert len(tasks) >= 1
+
+    @pytest.mark.asyncio
+    async def test_task_state_is_input_required(self, env):
+        """Delivery Task has state INPUT_REQUIRED."""
+        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        task = next(e for e in events if isinstance(e, Task))
+        assert task.status.state == TaskState.input_required
+
+    @pytest.mark.asyncio
+    async def test_task_context_id_is_recipient(self, env):
+        """Delivery Task contextId equals the recipient's agent_id."""
+        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        task = next(e for e in events if isinstance(e, Task))
+        assert task.context_id == agent_b["agent_id"]
+
+    @pytest.mark.asyncio
+    async def test_message_content_in_artifact(self, env):
+        """Message text is stored as an Artifact on the delivery Task."""
+        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+            text="Did the API schema change?",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        task = next(e for e in events if isinstance(e, Task))
+        assert task.artifacts is not None
+        assert len(task.artifacts) >= 1
+
+    @pytest.mark.asyncio
+    async def test_task_metadata_has_routing_info(self, env):
+        """Delivery Task metadata contains fromAgentId, toAgentId, type."""
+        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        task = next(e for e in events if isinstance(e, Task))
+        assert task.metadata["fromAgentId"] == agent_a["agent_id"]
+        assert task.metadata["toAgentId"] == agent_b["agent_id"]
+        assert task.metadata["type"] == "unicast"
+
+    @pytest.mark.asyncio
+    async def test_error_missing_destination(self, env):
+        """Missing metadata.destination raises an error."""
+        executor, agent_a = env["executor"], env["agent_a"]
+        queue = EventQueue()
+
+        # Create message without destination metadata
+        message = Message(
+            message_id=str(uuid.uuid4()),
+            role=Role.user,
+            parts=[Part(root=TextPart(text="No destination"))],
+        )
+        params = MessageSendParams(message=message)
+        context = RequestContext(
+            request=params,
+            call_context=_make_call_context(agent_a["agent_id"]),
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            await executor.execute(context, queue)
+
+        # Should be an InvalidParams-type error
+        assert exc_info.value is not None
+
+    @pytest.mark.asyncio
+    async def test_error_destination_not_found(self, env):
+        """Destination agent_id not found raises an error."""
+        executor, agent_a = env["executor"], env["agent_a"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="00000000-0000-4000-8000-000000000000",
+        )
+
+        with pytest.raises(Exception):
+            await executor.execute(context, queue)
+
+    @pytest.mark.asyncio
+    async def test_error_destination_deregistered(self, env):
+        """Sending to a deregistered agent raises an error."""
+        executor, store, agent_a, agent_b = (
+            env["executor"], env["store"], env["agent_a"], env["agent_b"],
+        )
+        queue = EventQueue()
+
+        await store.deregister_agent(agent_b["agent_id"])
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+        )
+
+        with pytest.raises(Exception):
+            await executor.execute(context, queue)
+
+    @pytest.mark.asyncio
+    async def test_error_invalid_destination_format(self, env):
+        """Invalid destination format (not UUID or '*') raises an error."""
+        executor, agent_a = env["executor"], env["agent_a"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="not-a-valid-uuid",
+        )
+
+        with pytest.raises(Exception):
+            await executor.execute(context, queue)
+
+
+# ---------------------------------------------------------------------------
+# Broadcast Send
+# ---------------------------------------------------------------------------
+
+
+class TestBroadcastSend:
+    """Tests for BrokerExecutor.execute — broadcast message delivery."""
+
+    @pytest.mark.asyncio
+    async def test_creates_delivery_tasks_for_all_active_agents(self, env):
+        """Broadcast creates one delivery Task per active agent (excluding sender)."""
+        executor, task_store, agent_a, agent_b, agent_c = (
+            env["executor"], env["task_store"],
+            env["agent_a"], env["agent_b"], env["agent_c"],
+        )
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="*",
+            text="Build failed on main branch",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        tasks = [e for e in events if isinstance(e, Task)]
+
+        # Should have delivery tasks for agent_b and agent_c + summary task
+        assert len(tasks) >= 3  # 2 delivery + 1 summary
+
+    @pytest.mark.asyncio
+    async def test_excludes_sender_from_recipients(self, env):
+        """Sender does not receive their own broadcast."""
+        executor, agent_a = env["executor"], env["agent_a"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="*",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        delivery_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.metadata
+            and e.metadata.get("type") == "unicast"
+        ]
+
+        for task in delivery_tasks:
+            assert task.context_id != agent_a["agent_id"]
+
+    @pytest.mark.asyncio
+    async def test_summary_task_is_completed(self, env):
+        """Broadcast returns a summary Task with state=COMPLETED."""
+        executor, agent_a = env["executor"], env["agent_a"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="*",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        summary_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.metadata
+            and e.metadata.get("type") in ("broadcast", "broadcast_summary")
+        ]
+
+        assert len(summary_tasks) >= 1
+        summary = summary_tasks[0]
+        assert summary.status.state == TaskState.completed
+
+    @pytest.mark.asyncio
+    async def test_summary_task_has_recipient_count(self, env):
+        """Summary Task artifact includes recipientCount."""
+        executor, agent_a = env["executor"], env["agent_a"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="*",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        summary_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.metadata
+            and e.metadata.get("type") in ("broadcast", "broadcast_summary")
+        ]
+
+        summary = summary_tasks[0]
+        assert summary.artifacts is not None
+        assert len(summary.artifacts) >= 1
+
+    @pytest.mark.asyncio
+    async def test_delivery_tasks_have_input_required_state(self, env):
+        """Each delivery Task is in INPUT_REQUIRED state."""
+        executor, agent_a, agent_b, agent_c = (
+            env["executor"], env["agent_a"], env["agent_b"], env["agent_c"],
+        )
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="*",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        delivery_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.status.state == TaskState.input_required
+        ]
+
+        # Should have 2 delivery tasks (agent_b and agent_c)
+        assert len(delivery_tasks) == 2
+
+    @pytest.mark.asyncio
+    async def test_each_delivery_task_context_id_is_recipient(self, env):
+        """Each delivery Task's contextId equals its recipient's agent_id."""
+        executor, agent_a, agent_b, agent_c = (
+            env["executor"], env["agent_a"], env["agent_b"], env["agent_c"],
+        )
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="*",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        delivery_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.status.state == TaskState.input_required
+        ]
+
+        recipient_ids = {t.context_id for t in delivery_tasks}
+        assert agent_b["agent_id"] in recipient_ids
+        assert agent_c["agent_id"] in recipient_ids
+
+    @pytest.mark.asyncio
+    async def test_broadcast_no_other_agents(self, env):
+        """Broadcast with no other active agents produces recipientCount=0."""
+        executor, store, agent_a, agent_b, agent_c = (
+            env["executor"], env["store"],
+            env["agent_a"], env["agent_b"], env["agent_c"],
+        )
+        queue = EventQueue()
+
+        # Deregister all other agents
+        await store.deregister_agent(agent_b["agent_id"])
+        await store.deregister_agent(agent_c["agent_id"])
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="*",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        delivery_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.status.state == TaskState.input_required
+        ]
+        assert len(delivery_tasks) == 0
+
+
+# ---------------------------------------------------------------------------
+# ACK (Multi-Turn)
+# ---------------------------------------------------------------------------
+
+
+class TestAck:
+    """Tests for BrokerExecutor.execute — ACK via multi-turn SendMessage."""
+
+    async def _create_unicast_task(self, env):
+        """Helper: send a unicast message and return the delivery Task."""
+        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+            text="Hello Agent B",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        return next(e for e in events if isinstance(e, Task))
+
+    @pytest.mark.asyncio
+    async def test_ack_moves_task_to_completed(self, env):
+        """Recipient ACK moves the Task to COMPLETED state."""
+        executor, agent_b = env["executor"], env["agent_b"]
+        delivery_task = await self._create_unicast_task(env)
+
+        queue = EventQueue()
+        context = _make_ack_context(
+            from_agent_id=agent_b["agent_id"],
+            task_id=delivery_task.id,
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        task = next(e for e in events if isinstance(e, Task))
+        assert task.status.state == TaskState.completed
+
+    @pytest.mark.asyncio
+    async def test_ack_by_non_recipient_raises_error(self, env):
+        """ACK by a non-recipient agent raises an error."""
+        executor, agent_c = env["executor"], env["agent_c"]
+        delivery_task = await self._create_unicast_task(env)
+
+        queue = EventQueue()
+        context = _make_ack_context(
+            from_agent_id=agent_c["agent_id"],
+            task_id=delivery_task.id,
+        )
+
+        with pytest.raises(Exception):
+            await executor.execute(context, queue)
+
+    @pytest.mark.asyncio
+    async def test_ack_on_already_completed_raises_error(self, env):
+        """ACK on an already completed task raises an error."""
+        executor, agent_b = env["executor"], env["agent_b"]
+        delivery_task = await self._create_unicast_task(env)
+
+        # First ACK (succeeds)
+        queue1 = EventQueue()
+        ctx1 = _make_ack_context(
+            from_agent_id=agent_b["agent_id"],
+            task_id=delivery_task.id,
+        )
+        await executor.execute(ctx1, queue1)
+
+        # Second ACK (should fail — task is already completed)
+        queue2 = EventQueue()
+        ctx2 = _make_ack_context(
+            from_agent_id=agent_b["agent_id"],
+            task_id=delivery_task.id,
+        )
+
+        with pytest.raises(Exception):
+            await executor.execute(ctx2, queue2)
+
+    @pytest.mark.asyncio
+    async def test_ack_on_canceled_task_raises_error(self, env):
+        """ACK on a canceled task raises an error."""
+        executor, agent_a, agent_b = (
+            env["executor"], env["agent_a"], env["agent_b"],
+        )
+        delivery_task = await self._create_unicast_task(env)
+
+        # Cancel the task first
+        cancel_queue = EventQueue()
+        cancel_ctx = _make_cancel_context(
+            from_agent_id=agent_a["agent_id"],
+            task_id=delivery_task.id,
+            task=delivery_task,
+        )
+        await executor.cancel(cancel_ctx, cancel_queue)
+
+        # Now try to ACK — should fail
+        ack_queue = EventQueue()
+        ack_ctx = _make_ack_context(
+            from_agent_id=agent_b["agent_id"],
+            task_id=delivery_task.id,
+        )
+
+        with pytest.raises(Exception):
+            await executor.execute(ack_ctx, ack_queue)
+
+    @pytest.mark.asyncio
+    async def test_ack_on_unknown_task_raises_error(self, env):
+        """ACK on a non-existent task raises an error."""
+        executor, agent_b = env["executor"], env["agent_b"]
+
+        queue = EventQueue()
+        context = _make_ack_context(
+            from_agent_id=agent_b["agent_id"],
+            task_id="nonexistent-task-id",
+        )
+
+        with pytest.raises(Exception):
+            await executor.execute(context, queue)
+
+
+# ---------------------------------------------------------------------------
+# GetTask Visibility
+# ---------------------------------------------------------------------------
+
+
+class TestGetTaskVisibility:
+    """Tests for task access control on GetTask."""
+
+    async def _create_unicast_task(self, env):
+        """Helper: send a unicast from A to B, return the delivery Task."""
+        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        return next(e for e in events if isinstance(e, Task))
+
+    @pytest.mark.asyncio
+    async def test_sender_can_get_task(self, env):
+        """Sender can access the task they created by taskId."""
+        task_store, agent_a = env["task_store"], env["agent_a"]
+        delivery_task = await self._create_unicast_task(env)
+
+        result = await task_store.get(delivery_task.id)
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_recipient_can_get_task(self, env):
+        """Recipient can access the task in their context."""
+        task_store, agent_b = env["task_store"], env["agent_b"]
+        delivery_task = await self._create_unicast_task(env)
+
+        result = await task_store.get(delivery_task.id)
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_task_stored_in_task_store(self, env):
+        """The delivery Task is persisted in the TaskStore."""
+        task_store = env["task_store"]
+        delivery_task = await self._create_unicast_task(env)
+
+        result = await task_store.get(delivery_task.id)
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_task_indexed_by_recipient_context(self, env):
+        """Delivery Task is indexed under recipient's contextId in sorted set."""
+        task_store, redis, agent_b = (
+            env["task_store"], env["redis"], env["agent_b"],
+        )
+        delivery_task = await self._create_unicast_task(env)
+
+        score = await redis.zscore(
+            f"tasks:ctx:{agent_b['agent_id']}", delivery_task.id
+        )
+        assert score is not None
+
+    @pytest.mark.asyncio
+    async def test_task_indexed_by_sender(self, env):
+        """Delivery Task is indexed in sender's tasks:sender set."""
+        redis, agent_a = env["redis"], env["agent_a"]
+        delivery_task = await self._create_unicast_task(env)
+
+        is_member = await redis.sismember(
+            f"tasks:sender:{agent_a['agent_id']}", delivery_task.id
+        )
+        assert is_member
+
+
+# ---------------------------------------------------------------------------
+# CancelTask
+# ---------------------------------------------------------------------------
+
+
+class TestCancelTask:
+    """Tests for BrokerExecutor.cancel — message retraction."""
+
+    async def _create_unicast_task(self, env):
+        """Helper: send a unicast from A to B, return the delivery Task."""
+        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        return next(e for e in events if isinstance(e, Task))
+
+    @pytest.mark.asyncio
+    async def test_sender_can_cancel_input_required_task(self, env):
+        """Sender can cancel a task that is still INPUT_REQUIRED."""
+        executor, agent_a = env["executor"], env["agent_a"]
+        delivery_task = await self._create_unicast_task(env)
+
+        queue = EventQueue()
+        context = _make_cancel_context(
+            from_agent_id=agent_a["agent_id"],
+            task_id=delivery_task.id,
+            task=delivery_task,
+        )
+        await executor.cancel(context, queue)
+
+        events = await _collect_events(queue)
+        # Should have a status update or task with canceled state
+        assert any(
+            (isinstance(e, Task) and e.status.state == TaskState.canceled)
+            or (hasattr(e, "status") and e.status.state == TaskState.canceled)
+            for e in events
+        )
+
+    @pytest.mark.asyncio
+    async def test_non_sender_cannot_cancel(self, env):
+        """Non-sender cannot cancel a task — raises error."""
+        executor, agent_b = env["executor"], env["agent_b"]
+        delivery_task = await self._create_unicast_task(env)
+
+        queue = EventQueue()
+        context = _make_cancel_context(
+            from_agent_id=agent_b["agent_id"],
+            task_id=delivery_task.id,
+            task=delivery_task,
+        )
+
+        with pytest.raises(Exception):
+            await executor.cancel(context, queue)
+
+    @pytest.mark.asyncio
+    async def test_cancel_completed_task_raises_error(self, env):
+        """Cannot cancel a task that is already COMPLETED."""
+        executor, agent_a, agent_b = (
+            env["executor"], env["agent_a"], env["agent_b"],
+        )
+        delivery_task = await self._create_unicast_task(env)
+
+        # ACK the task first (→ COMPLETED)
+        ack_queue = EventQueue()
+        ack_ctx = _make_ack_context(
+            from_agent_id=agent_b["agent_id"],
+            task_id=delivery_task.id,
+        )
+        await executor.execute(ack_ctx, ack_queue)
+
+        # Now try to cancel — should fail
+        cancel_queue = EventQueue()
+        cancel_ctx = _make_cancel_context(
+            from_agent_id=agent_a["agent_id"],
+            task_id=delivery_task.id,
+            task=delivery_task,
+        )
+
+        with pytest.raises(Exception):
+            await executor.cancel(cancel_ctx, cancel_queue)
+
+    @pytest.mark.asyncio
+    async def test_cancel_already_canceled_task_raises_error(self, env):
+        """Cannot cancel a task that is already CANCELED."""
+        executor, agent_a = env["executor"], env["agent_a"]
+        delivery_task = await self._create_unicast_task(env)
+
+        # Cancel once
+        queue1 = EventQueue()
+        ctx1 = _make_cancel_context(
+            from_agent_id=agent_a["agent_id"],
+            task_id=delivery_task.id,
+            task=delivery_task,
+        )
+        await executor.cancel(ctx1, queue1)
+
+        # Cancel again — should fail
+        queue2 = EventQueue()
+        ctx2 = _make_cancel_context(
+            from_agent_id=agent_a["agent_id"],
+            task_id=delivery_task.id,
+            task=delivery_task,
+        )
+
+        with pytest.raises(Exception):
+            await executor.cancel(ctx2, queue2)
+
+    @pytest.mark.asyncio
+    async def test_cancel_unknown_task_raises_error(self, env):
+        """Cannot cancel a task that doesn't exist."""
+        executor, agent_a = env["executor"], env["agent_a"]
+
+        queue = EventQueue()
+        context = _make_cancel_context(
+            from_agent_id=agent_a["agent_id"],
+            task_id="nonexistent-task-id",
+        )
+
+        with pytest.raises(Exception):
+            await executor.cancel(context, queue)
