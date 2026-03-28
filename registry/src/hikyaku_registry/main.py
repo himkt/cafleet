@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from a2a.server.apps.jsonrpc.starlette_app import A2AStarletteApplication
 from a2a.server.context import ServerCallContext
 from a2a.server.request_handlers.default_request_handler import (
@@ -15,7 +15,11 @@ from a2a.types import Task
 
 from hikyaku_registry.agent_card import build_agent_card
 from hikyaku_registry.cleanup import cleanup_expired_agents
-from hikyaku_registry.api.registry import registry_router
+from hikyaku_registry.api.registry import (
+    get_registry_store,
+    registry_router,
+)
+from hikyaku_registry.auth import get_authenticated_agent
 from hikyaku_registry.config import settings
 from hikyaku_registry.executor import BrokerExecutor
 from hikyaku_registry.redis_client import close_pool, get_redis
@@ -88,16 +92,27 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
-def create_app() -> FastAPI:
+def create_app(redis=None) -> FastAPI:
     app = FastAPI(title="Hikyaku Broker", version="0.1.0", lifespan=lifespan)
     app.include_router(registry_router, prefix="/api/v1")
 
-    redis = get_redis()
+    if redis is None:
+        redis = get_redis()
     registry_store = RegistryStore(redis)
     task_store = RedisTaskStore(redis)
     executor = BrokerExecutor(
         registry_store=registry_store, task_store=task_store
     )
+
+    # Override dependencies so API endpoints use the same redis
+    async def _get_store():
+        return registry_store
+
+    async def _get_auth(request: Request):
+        return await get_authenticated_agent(request, store=registry_store)
+
+    app.dependency_overrides[get_registry_store] = _get_store
+    app.dependency_overrides[get_authenticated_agent] = _get_auth
 
     agent_card = build_agent_card()
     handler = DefaultRequestHandler(
