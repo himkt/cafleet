@@ -1,0 +1,38 @@
+services:
+  valkey:
+    image: valkey/valkey:9.0.3-alpine3.23
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey-data:/data
+  ngrok:
+    profiles: ["macos"]
+    image: ngrok/ngrok
+    ports:
+      - "4040:4040"
+    volumes:
+      - ~/.config/ngrok/ngrok.yml:/etc/ngrok.yml
+    command:
+      - "http"
+      - "--domain=${NGROK_HOST}"
+      - "host.docker.internal:8000"
+      - "--config"
+      - "/etc/ngrok.yml"
+  ngrok-linux:
+    profiles: ["linux"]
+    image: ngrok/ngrok
+    ports:
+      - "4040:4040"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ~/.config/ngrok/ngrok.yml:/etc/ngrok.yml
+    command:
+      - "http"
+      - "--domain=${NGROK_HOST}"
+      - "host.docker.internal:8000"
+      - "--config"
+      - "/etc/ngrok.yml"
+
+volumes:
+  valkey-data:
