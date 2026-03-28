@@ -803,3 +803,104 @@ class TestErrorHandling:
         )
 
         assert result.exit_code != 0
+
+
+# ===========================================================================
+# Multi-tenant CLI tests (access-control feature)
+# ===========================================================================
+
+JOIN_TENANT_KEY = "hky_existingTenantKey0000000000000"
+
+
+class TestRegisterJoinTenant:
+    """Tests for `hikyaku register --api-key` (join tenant flow).
+
+    The register command gains an optional --api-key flag that sends
+    the API key in the Authorization header to join an existing tenant.
+    """
+
+    def test_register_with_api_key_passes_key(self, runner):
+        """Register with --api-key passes api_key to api.register_agent."""
+        mock = AsyncMock(return_value=SAMPLE_AGENT)
+        with patch("hikyaku_client.cli.api.register_agent", mock):
+            result = runner.invoke(
+                cli,
+                ["--url", BROKER_URL, "register",
+                 "--name", "Joiner", "--description", "Join tenant",
+                 "--api-key", JOIN_TENANT_KEY],
+            )
+
+        assert result.exit_code == 0
+        # Verify api_key was passed to api.register_agent
+        call_kwargs = mock.call_args
+        assert call_kwargs is not None
+        # api_key should be in the call (positional or keyword)
+        all_args = list(call_kwargs.args) + list(call_kwargs.kwargs.values())
+        assert JOIN_TENANT_KEY in all_args or call_kwargs.kwargs.get("api_key") == JOIN_TENANT_KEY
+
+    def test_register_without_api_key_no_key_passed(self, runner):
+        """Register without --api-key does not pass api_key to api."""
+        mock = AsyncMock(return_value=SAMPLE_AGENT)
+        with patch("hikyaku_client.cli.api.register_agent", mock):
+            result = runner.invoke(
+                cli,
+                ["--url", BROKER_URL, "register",
+                 "--name", "Creator", "--description", "New tenant"],
+            )
+
+        assert result.exit_code == 0
+        call_kwargs = mock.call_args
+        # api_key should be None or not provided
+        api_key_val = call_kwargs.kwargs.get("api_key")
+        if api_key_val is not None:
+            assert api_key_val is None  # explicitly None means not joining
+
+    def test_register_join_tenant_shows_output(self, runner):
+        """Register with --api-key shows agent_id and api_key."""
+        joined_agent = {
+            **SAMPLE_AGENT,
+            "api_key": JOIN_TENANT_KEY,  # echoed back
+        }
+        mock = AsyncMock(return_value=joined_agent)
+        with patch("hikyaku_client.cli.api.register_agent", mock):
+            result = runner.invoke(
+                cli,
+                ["--url", BROKER_URL, "register",
+                 "--name", "Joiner", "--description", "Join",
+                 "--api-key", JOIN_TENANT_KEY],
+            )
+
+        assert result.exit_code == 0
+        assert AGENT_ID in result.output
+
+    def test_register_join_tenant_json_output(self, runner):
+        """Register with --api-key and --json outputs valid JSON."""
+        joined_agent = {
+            **SAMPLE_AGENT,
+            "api_key": JOIN_TENANT_KEY,
+        }
+        mock = AsyncMock(return_value=joined_agent)
+        with patch("hikyaku_client.cli.api.register_agent", mock):
+            result = runner.invoke(
+                cli,
+                ["--url", BROKER_URL, "--json", "register",
+                 "--name", "Joiner", "--description", "Join",
+                 "--api-key", JOIN_TENANT_KEY],
+            )
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["api_key"] == JOIN_TENANT_KEY
+
+    def test_register_join_tenant_api_error(self, runner):
+        """Register with invalid --api-key shows error."""
+        mock = AsyncMock(side_effect=Exception("401: Invalid API key"))
+        with patch("hikyaku_client.cli.api.register_agent", mock):
+            result = runner.invoke(
+                cli,
+                ["--url", BROKER_URL, "register",
+                 "--name", "Joiner", "--description", "Join",
+                 "--api-key", "hky_invalid000000000000000000000000"],
+            )
+
+        assert result.exit_code != 0

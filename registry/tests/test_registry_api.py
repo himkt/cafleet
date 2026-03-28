@@ -3,7 +3,12 @@
 Covers: POST /api/v1/agents, GET /api/v1/agents, GET /api/v1/agents/{id},
 DELETE /api/v1/agents/{id}.
 Tests authentication requirements, ownership checks, and error responses.
+
+Also covers tenant-scoped registration, list, and get operations
+(access-control feature).
 """
+
+import hashlib
 
 import pytest
 import fakeredis.aioredis
@@ -457,3 +462,261 @@ class TestDeregisterAgent:
 
         resp = await client.delete(f"/api/v1/agents/{r['agent_id']}")
         assert resp.status_code == 401
+
+
+# ===========================================================================
+# Multi-tenant API tests (access-control feature)
+# ===========================================================================
+
+
+def _override_auth_as_tenant(app: FastAPI, agent_id: str, tenant_id: str):
+    """Override auth dependency to return a (agent_id, tenant_id) tuple."""
+
+    async def _fixed_auth():
+        return (agent_id, tenant_id)
+
+    app.dependency_overrides[get_authenticated_agent] = _fixed_auth
+
+
+async def _register_agent_with_key(
+    client,
+    api_key: str,
+    name: str = "Joining Agent",
+    description: str = "Joins tenant",
+):
+    """Register an agent with Authorization header (join-tenant flow)."""
+    body = {"name": name, "description": description}
+    resp = await client.post(
+        "/api/v1/agents",
+        json=body,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    return resp
+
+
+class TestRegisterAgentTenant:
+    """Tests for tenant-aware registration via POST /api/v1/agents.
+
+    Without Authorization → creates new tenant (new API key).
+    With Authorization → joins existing tenant (reuses API key).
+    """
+
+    @pytest.mark.asyncio
+    async def test_register_without_auth_creates_new_tenant(self, api_env):
+        """Registration without Authorization creates a new tenant with new key."""
+        client = api_env["client"]
+        data = await _register_agent(client, name="New Tenant Agent")
+
+        assert "api_key" in data
+        assert data["api_key"].startswith("hky_")
+        assert "agent_id" in data
+
+    @pytest.mark.asyncio
+    async def test_register_with_auth_joins_existing_tenant(self, api_env):
+        """Registration with Authorization header joins the existing tenant."""
+        client = api_env["client"]
+
+        # First: create a tenant
+        first = await _register_agent(client, name="Tenant Creator")
+        api_key = first["api_key"]
+
+        # Second: join the tenant
+        resp = await _register_agent_with_key(
+            client, api_key, name="Tenant Joiner"
+        )
+        assert resp.status_code == 201
+
+        data = resp.json()
+        assert data["name"] == "Tenant Joiner"
+        assert "agent_id" in data
+
+    @pytest.mark.asyncio
+    async def test_join_tenant_returns_same_api_key(self, api_env):
+        """Join-tenant registration echoes back the same API key."""
+        client = api_env["client"]
+
+        first = await _register_agent(client, name="Creator")
+        api_key = first["api_key"]
+
+        resp = await _register_agent_with_key(
+            client, api_key, name="Joiner"
+        )
+        data = resp.json()
+
+        assert data["api_key"] == api_key
+
+    @pytest.mark.asyncio
+    async def test_join_tenant_different_agent_ids(self, api_env):
+        """Each agent joining a tenant gets a unique agent_id."""
+        client = api_env["client"]
+
+        first = await _register_agent(client, name="Agent 1")
+        api_key = first["api_key"]
+
+        resp = await _register_agent_with_key(
+            client, api_key, name="Agent 2"
+        )
+        second = resp.json()
+
+        assert first["agent_id"] != second["agent_id"]
+
+    @pytest.mark.asyncio
+    async def test_join_dead_tenant_returns_401(self, api_env):
+        """Joining a tenant whose API key has no active agents → 401."""
+        client, store = api_env["client"], api_env["store"]
+
+        # Create and immediately deregister the only agent
+        first = await _register_agent(client, name="Solo Agent")
+        await store.deregister_agent(first["agent_id"])
+
+        resp = await _register_agent_with_key(
+            client, first["api_key"], name="Late Joiner"
+        )
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_join_with_invalid_key_returns_401(self, api_env):
+        """Registration with an API key that was never used → 401."""
+        client = api_env["client"]
+
+        resp = await _register_agent_with_key(
+            client, "hky_00000000000000000000000000000000", name="Invalid"
+        )
+        assert resp.status_code == 401
+
+
+class TestTenantScopedListAgents:
+    """Tests for GET /api/v1/agents with tenant isolation.
+
+    List returns only agents in the caller's tenant.
+    """
+
+    @pytest.mark.asyncio
+    async def test_list_returns_only_same_tenant_agents(self, api_env):
+        """List agents returns only agents in the caller's tenant."""
+        client, app, store = (
+            api_env["client"], api_env["app"], api_env["store"],
+        )
+
+        # Create agents in tenant A
+        a1 = await store.create_agent(
+            name="A1", description="Tenant A", api_key="hky_tenantAAAAAAAAAAAAAAAAAAAAAAAA"
+        )
+        a2 = await store.create_agent(
+            name="A2", description="Tenant A", api_key="hky_tenantAAAAAAAAAAAAAAAAAAAAAAAA"
+        )
+        tenant_a_hash = hashlib.sha256(
+            b"hky_tenantAAAAAAAAAAAAAAAAAAAAAAAA"
+        ).hexdigest()
+
+        # Create agent in tenant B
+        await store.create_agent(
+            name="B1", description="Tenant B", api_key="hky_tenantBBBBBBBBBBBBBBBBBBBBBBBB"
+        )
+
+        _override_auth_as_tenant(app, a1["agent_id"], tenant_a_hash)
+
+        resp = await client.get("/api/v1/agents")
+        assert resp.status_code == 200
+
+        data = resp.json()
+        names = {a["name"] for a in data["agents"]}
+        assert "A1" in names
+        assert "A2" in names
+        assert "B1" not in names
+
+    @pytest.mark.asyncio
+    async def test_list_empty_tenant_returns_empty(self, api_env):
+        """List agents for a tenant with no agents returns empty array."""
+        client, app = api_env["client"], api_env["app"]
+
+        _override_auth_as_tenant(app, "any-agent", "nonexistent-tenant-hash")
+
+        resp = await client.get("/api/v1/agents")
+        assert resp.status_code == 200
+        assert resp.json()["agents"] == []
+
+
+class TestTenantScopedGetAgent:
+    """Tests for GET /api/v1/agents/{id} with tenant isolation.
+
+    Cross-tenant lookups return 404 (same as nonexistent).
+    """
+
+    @pytest.mark.asyncio
+    async def test_get_same_tenant_agent_succeeds(self, api_env):
+        """Getting an agent in the same tenant returns 200."""
+        client, app, store = (
+            api_env["client"], api_env["app"], api_env["store"],
+        )
+
+        key = "hky_sameTenantKEYKEYKEYKEYKEYKEYKE"
+        tenant_hash = hashlib.sha256(key.encode()).hexdigest()
+
+        a1 = await store.create_agent(
+            name="A1", description="Same tenant", api_key=key
+        )
+        a2 = await store.create_agent(
+            name="A2", description="Same tenant", api_key=key
+        )
+
+        _override_auth_as_tenant(app, a1["agent_id"], tenant_hash)
+
+        resp = await client.get(f"/api/v1/agents/{a2['agent_id']}")
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "A2"
+
+    @pytest.mark.asyncio
+    async def test_get_cross_tenant_agent_returns_404(self, api_env):
+        """Getting an agent from a different tenant returns 404."""
+        client, app, store = (
+            api_env["client"], api_env["app"], api_env["store"],
+        )
+
+        key_a = "hky_crossTenantAAAAAAAAAAAAAAAAAA"
+        key_b = "hky_crossTenantBBBBBBBBBBBBBBBBBB"
+        tenant_a_hash = hashlib.sha256(key_a.encode()).hexdigest()
+
+        a1 = await store.create_agent(
+            name="A1", description="Tenant A", api_key=key_a
+        )
+        b1 = await store.create_agent(
+            name="B1", description="Tenant B", api_key=key_b
+        )
+
+        _override_auth_as_tenant(app, a1["agent_id"], tenant_a_hash)
+
+        resp = await client.get(f"/api/v1/agents/{b1['agent_id']}")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_cross_tenant_404_same_as_nonexistent(self, api_env):
+        """Cross-tenant 404 looks identical to nonexistent agent 404."""
+        client, app, store = (
+            api_env["client"], api_env["app"], api_env["store"],
+        )
+
+        key_a = "hky_leakCheckAAAAAAAAAAAAAAAAAAAA"
+        key_b = "hky_leakCheckBBBBBBBBBBBBBBBBBBBB"
+        tenant_a_hash = hashlib.sha256(key_a.encode()).hexdigest()
+
+        a1 = await store.create_agent(
+            name="A1", description="Tenant A", api_key=key_a
+        )
+        b1 = await store.create_agent(
+            name="B1", description="Tenant B", api_key=key_b
+        )
+
+        _override_auth_as_tenant(app, a1["agent_id"], tenant_a_hash)
+
+        # Cross-tenant lookup
+        cross_resp = await client.get(f"/api/v1/agents/{b1['agent_id']}")
+        # Nonexistent lookup
+        ghost_resp = await client.get(
+            "/api/v1/agents/00000000-0000-4000-8000-000000000000"
+        )
+
+        assert cross_resp.status_code == 404
+        assert ghost_resp.status_code == 404
+        # Both should have the same error structure
+        assert cross_resp.json()["error"]["code"] == ghost_resp.json()["error"]["code"]
