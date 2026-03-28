@@ -26,6 +26,7 @@ def build_agent_card() -> AgentCard:
                     "Send a unicast or broadcast message to other agents. "
                     "Set metadata.destination to a target agent_id or '*' for broadcast."
                 ),
+                tags=["messaging", "unicast", "broadcast"],
             ),
             AgentSkill(
                 id="ack-message",
@@ -34,6 +35,7 @@ def build_agent_card() -> AgentCard:
                     "Acknowledge receipt of a message by sending a multi-turn "
                     "reply referencing the delivery task_id."
                 ),
+                tags=["messaging", "ack"],
             ),
         ],
     )

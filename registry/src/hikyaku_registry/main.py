@@ -1,4 +1,6 @@
+import asyncio
 import hashlib
+import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -12,6 +14,7 @@ from a2a.server.tasks import TaskStore
 from a2a.types import Task
 
 from hikyaku_registry.agent_card import build_agent_card
+from hikyaku_registry.cleanup import cleanup_expired_agents
 from hikyaku_registry.api.registry import registry_router
 from hikyaku_registry.config import settings
 from hikyaku_registry.executor import BrokerExecutor
@@ -51,9 +54,37 @@ def _build_call_context(request) -> ServerCallContext:
     return ServerCallContext(state={"api_key_hash": token_hash})
 
 
+logger = logging.getLogger(__name__)
+
+
+async def _cleanup_loop(redis, ttl_days: int, interval: int) -> None:
+    """Periodically clean up expired deregistered agents."""
+    while True:
+        try:
+            count = await cleanup_expired_agents(redis, ttl_days=ttl_days)
+            if count > 0:
+                logger.info("Cleaned up %d expired agent(s)", count)
+        except Exception:
+            logger.exception("Error during agent cleanup")
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    redis = get_redis()
+    cleanup_task = asyncio.create_task(
+        _cleanup_loop(
+            redis,
+            ttl_days=settings.deregistered_task_ttl_days,
+            interval=settings.cleanup_interval_seconds,
+        )
+    )
     yield
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
     await close_pool()
 
 
