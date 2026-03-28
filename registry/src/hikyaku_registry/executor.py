@@ -29,6 +29,7 @@ class BrokerExecutor(AgentExecutor):
         self, context: RequestContext, event_queue: EventQueue
     ) -> None:
         agent_id = context.call_context.state["agent_id"]
+        tenant_id = context.call_context.state.get("tenant_id")
         message = context.message
 
         # Determine flow: ACK (multi-turn) vs send
@@ -48,9 +49,13 @@ class BrokerExecutor(AgentExecutor):
         destination = message.metadata["destination"]
 
         if destination == "*":
-            await self._handle_broadcast(event_queue, agent_id, message)
+            await self._handle_broadcast(
+                event_queue, agent_id, message, tenant_id
+            )
         else:
-            await self._handle_unicast(event_queue, agent_id, destination, message)
+            await self._handle_unicast(
+                event_queue, agent_id, destination, message, tenant_id
+            )
 
     async def cancel(
         self, context: RequestContext, event_queue: EventQueue
@@ -89,6 +94,7 @@ class BrokerExecutor(AgentExecutor):
         from_agent_id: str,
         destination: str,
         message,
+        tenant_id: str | None = None,
     ) -> None:
         try:
             uuid.UUID(destination)
@@ -98,6 +104,15 @@ class BrokerExecutor(AgentExecutor):
         agent = await self._registry_store.get_agent(destination)
         if agent is None or agent.get("status") == "deregistered":
             raise ValueError(f"Destination agent not found: {destination}")
+
+        if tenant_id is not None:
+            is_same_tenant = await self._registry_store.verify_agent_tenant(
+                destination, tenant_id
+            )
+            if not is_same_tenant:
+                raise ValueError(
+                    f"Destination agent not found: {destination}"
+                )
 
         now = datetime.now(UTC).isoformat()
         delivery_task = Task(
@@ -125,8 +140,11 @@ class BrokerExecutor(AgentExecutor):
         event_queue: EventQueue,
         from_agent_id: str,
         message,
+        tenant_id: str | None = None,
     ) -> None:
-        active_agents = await self._registry_store.list_active_agents()
+        active_agents = await self._registry_store.list_active_agents(
+            tenant_id=tenant_id
+        )
         recipients = [
             a for a in active_agents if a["agent_id"] != from_agent_id
         ]

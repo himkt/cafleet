@@ -2,8 +2,12 @@
 
 Covers: unicast send, broadcast send, ACK (multi-turn), GetTask visibility,
 CancelTask. Tests the executor methods directly with fakeredis-backed stores.
+
+Also covers cross-tenant unicast rejection and tenant-scoped broadcast
+(access-control feature).
 """
 
+import hashlib
 import uuid
 
 import pytest
@@ -32,18 +36,31 @@ from hikyaku_registry.task_store import RedisTaskStore
 # ---------------------------------------------------------------------------
 
 
+_DEFAULT_SHARED_KEY = "hky_00000000000000000000000000000001"
+_DEFAULT_SHARED_HASH = hashlib.sha256(_DEFAULT_SHARED_KEY.encode()).hexdigest()
+
+
 @pytest.fixture
 async def env():
-    """Set up BrokerExecutor with fakeredis-backed stores and test agents."""
+    """Set up BrokerExecutor with fakeredis-backed stores and test agents.
+
+    All agents share the same API key (same tenant) for basic tests.
+    """
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     store = RegistryStore(redis)
     task_store = RedisTaskStore(redis)
     executor = BrokerExecutor(registry_store=store, task_store=task_store)
 
-    # Register test agents
-    agent_a = await store.create_agent(name="Agent A", description="Sender")
-    agent_b = await store.create_agent(name="Agent B", description="Recipient")
-    agent_c = await store.create_agent(name="Agent C", description="Third agent")
+    # Register test agents in the same tenant
+    agent_a = await store.create_agent(
+        name="Agent A", description="Sender", api_key=_DEFAULT_SHARED_KEY
+    )
+    agent_b = await store.create_agent(
+        name="Agent B", description="Recipient", api_key=_DEFAULT_SHARED_KEY
+    )
+    agent_c = await store.create_agent(
+        name="Agent C", description="Third agent", api_key=_DEFAULT_SHARED_KEY
+    )
 
     yield {
         "executor": executor,
@@ -64,9 +81,9 @@ async def env():
 
 
 def _make_call_context(agent_id: str) -> ServerCallContext:
-    """Create a ServerCallContext with the authenticated agent_id."""
+    """Create a ServerCallContext with the authenticated agent_id and tenant_id."""
     return ServerCallContext(
-        state={"agent_id": agent_id},
+        state={"agent_id": agent_id, "tenant_id": _DEFAULT_SHARED_HASH},
     )
 
 
@@ -799,3 +816,371 @@ class TestCancelTask:
 
         with pytest.raises(Exception):
             await executor.cancel(context, queue)
+
+
+# ===========================================================================
+# Multi-tenant executor tests (access-control feature)
+# ===========================================================================
+
+# Fixed tenant API keys
+_TENANT_A_KEY = "hky_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1"
+_TENANT_A_HASH = hashlib.sha256(_TENANT_A_KEY.encode()).hexdigest()
+
+_TENANT_B_KEY = "hky_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1"
+_TENANT_B_HASH = hashlib.sha256(_TENANT_B_KEY.encode()).hexdigest()
+
+
+@pytest.fixture
+async def tenant_env():
+    """Set up BrokerExecutor with agents in two separate tenants.
+
+    Tenant A: agent_a1, agent_a2
+    Tenant B: agent_b1
+    """
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    store = RegistryStore(redis)
+    task_store = RedisTaskStore(redis)
+    executor = BrokerExecutor(registry_store=store, task_store=task_store)
+
+    agent_a1 = await store.create_agent(
+        name="Agent A1", description="Tenant A first", api_key=_TENANT_A_KEY
+    )
+    agent_a2 = await store.create_agent(
+        name="Agent A2", description="Tenant A second", api_key=_TENANT_A_KEY
+    )
+    agent_b1 = await store.create_agent(
+        name="Agent B1", description="Tenant B only", api_key=_TENANT_B_KEY
+    )
+
+    yield {
+        "executor": executor,
+        "store": store,
+        "task_store": task_store,
+        "redis": redis,
+        "agent_a1": agent_a1,
+        "agent_a2": agent_a2,
+        "agent_b1": agent_b1,
+    }
+
+    await redis.aclose()
+
+
+def _make_tenant_call_context(
+    agent_id: str, tenant_id: str
+) -> ServerCallContext:
+    """Create a ServerCallContext with agent_id and tenant_id."""
+    return ServerCallContext(
+        state={"agent_id": agent_id, "tenant_id": tenant_id},
+    )
+
+
+def _make_tenant_send_context(
+    from_agent_id: str,
+    tenant_id: str,
+    destination: str,
+    text: str = "Hello",
+    task_id: str | None = None,
+) -> RequestContext:
+    """Create a RequestContext for sending with tenant context."""
+    message = Message(
+        message_id=str(uuid.uuid4()),
+        role=Role.user,
+        parts=[Part(root=TextPart(text=text))],
+        task_id=task_id,
+        metadata={"destination": destination},
+    )
+    params = MessageSendParams(message=message)
+    return RequestContext(
+        request=params,
+        call_context=_make_tenant_call_context(from_agent_id, tenant_id),
+    )
+
+
+class TestCrossTenantUnicast:
+    """Tests for cross-tenant unicast rejection.
+
+    Unicast must verify destination agent's api_key_hash matches sender's
+    tenant. Cross-tenant sends produce "agent not found" errors.
+    """
+
+    @pytest.mark.asyncio
+    async def test_same_tenant_unicast_succeeds(self, tenant_env):
+        """Agent A1 sends to Agent A2 (same tenant) → succeeds."""
+        executor = tenant_env["executor"]
+        agent_a1, agent_a2 = tenant_env["agent_a1"], tenant_env["agent_a2"]
+        queue = EventQueue()
+
+        context = _make_tenant_send_context(
+            from_agent_id=agent_a1["agent_id"],
+            tenant_id=_TENANT_A_HASH,
+            destination=agent_a2["agent_id"],
+            text="Hello teammate",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        tasks = [e for e in events if isinstance(e, Task)]
+        assert len(tasks) >= 1
+        task = tasks[0]
+        assert task.status.state == TaskState.input_required
+        assert task.context_id == agent_a2["agent_id"]
+
+    @pytest.mark.asyncio
+    async def test_cross_tenant_unicast_raises_error(self, tenant_env):
+        """Agent A1 sends to Agent B1 (different tenant) → error."""
+        executor = tenant_env["executor"]
+        agent_a1, agent_b1 = tenant_env["agent_a1"], tenant_env["agent_b1"]
+        queue = EventQueue()
+
+        context = _make_tenant_send_context(
+            from_agent_id=agent_a1["agent_id"],
+            tenant_id=_TENANT_A_HASH,
+            destination=agent_b1["agent_id"],
+        )
+
+        with pytest.raises(Exception):
+            await executor.execute(context, queue)
+
+    @pytest.mark.asyncio
+    async def test_cross_tenant_error_indistinguishable_from_not_found(
+        self, tenant_env
+    ):
+        """Cross-tenant error message is the same as 'agent not found'.
+
+        The caller cannot distinguish between 'agent exists in another tenant'
+        and 'agent does not exist at all'.
+        """
+        executor = tenant_env["executor"]
+        agent_a1, agent_b1 = tenant_env["agent_a1"], tenant_env["agent_b1"]
+        queue = EventQueue()
+
+        # Cross-tenant send
+        cross_ctx = _make_tenant_send_context(
+            from_agent_id=agent_a1["agent_id"],
+            tenant_id=_TENANT_A_HASH,
+            destination=agent_b1["agent_id"],
+        )
+
+        with pytest.raises(Exception) as cross_exc:
+            await executor.execute(cross_ctx, queue)
+
+        # Non-existent agent send
+        ghost_ctx = _make_tenant_send_context(
+            from_agent_id=agent_a1["agent_id"],
+            tenant_id=_TENANT_A_HASH,
+            destination="00000000-0000-4000-8000-000000000000",
+        )
+
+        with pytest.raises(Exception) as ghost_exc:
+            await executor.execute(ghost_ctx, queue)
+
+        # Both should produce the same type of error
+        assert type(cross_exc.value) == type(ghost_exc.value)
+
+    @pytest.mark.asyncio
+    async def test_reverse_cross_tenant_also_blocked(self, tenant_env):
+        """Agent B1 sends to Agent A1 (reverse direction) → also blocked."""
+        executor = tenant_env["executor"]
+        agent_a1, agent_b1 = tenant_env["agent_a1"], tenant_env["agent_b1"]
+        queue = EventQueue()
+
+        context = _make_tenant_send_context(
+            from_agent_id=agent_b1["agent_id"],
+            tenant_id=_TENANT_B_HASH,
+            destination=agent_a1["agent_id"],
+        )
+
+        with pytest.raises(Exception):
+            await executor.execute(context, queue)
+
+    @pytest.mark.asyncio
+    async def test_cross_tenant_no_task_created(self, tenant_env):
+        """Cross-tenant send does not persist any delivery task."""
+        executor, task_store = tenant_env["executor"], tenant_env["task_store"]
+        agent_a1, agent_b1 = tenant_env["agent_a1"], tenant_env["agent_b1"]
+        queue = EventQueue()
+
+        context = _make_tenant_send_context(
+            from_agent_id=agent_a1["agent_id"],
+            tenant_id=_TENANT_A_HASH,
+            destination=agent_b1["agent_id"],
+        )
+
+        with pytest.raises(Exception):
+            await executor.execute(context, queue)
+
+        # No tasks should be in B1's context
+        tasks = await task_store.list(agent_b1["agent_id"])
+        assert len(tasks) == 0
+
+
+class TestTenantScopedBroadcast:
+    """Tests for tenant-scoped broadcast.
+
+    Broadcast from tenant A → only delivers to agents in tenant A.
+    Agents in tenant B never receive the broadcast.
+    """
+
+    @pytest.mark.asyncio
+    async def test_broadcast_delivers_only_to_same_tenant(self, tenant_env):
+        """Broadcast from A1 delivers to A2 only, not B1."""
+        executor = tenant_env["executor"]
+        agent_a1, agent_a2 = tenant_env["agent_a1"], tenant_env["agent_a2"]
+        agent_b1 = tenant_env["agent_b1"]
+        queue = EventQueue()
+
+        context = _make_tenant_send_context(
+            from_agent_id=agent_a1["agent_id"],
+            tenant_id=_TENANT_A_HASH,
+            destination="*",
+            text="Tenant A broadcast",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        delivery_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.status.state == TaskState.input_required
+        ]
+
+        recipient_ids = {t.context_id for t in delivery_tasks}
+        assert agent_a2["agent_id"] in recipient_ids
+        assert agent_b1["agent_id"] not in recipient_ids
+
+    @pytest.mark.asyncio
+    async def test_broadcast_excludes_sender(self, tenant_env):
+        """Broadcast excludes the sender even within the same tenant."""
+        executor = tenant_env["executor"]
+        agent_a1 = tenant_env["agent_a1"]
+        queue = EventQueue()
+
+        context = _make_tenant_send_context(
+            from_agent_id=agent_a1["agent_id"],
+            tenant_id=_TENANT_A_HASH,
+            destination="*",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        delivery_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.status.state == TaskState.input_required
+        ]
+
+        for task in delivery_tasks:
+            assert task.context_id != agent_a1["agent_id"]
+
+    @pytest.mark.asyncio
+    async def test_broadcast_delivery_count_matches_tenant_size(
+        self, tenant_env
+    ):
+        """Number of delivery tasks equals (tenant agents - 1)."""
+        executor = tenant_env["executor"]
+        agent_a1 = tenant_env["agent_a1"]
+        queue = EventQueue()
+
+        context = _make_tenant_send_context(
+            from_agent_id=agent_a1["agent_id"],
+            tenant_id=_TENANT_A_HASH,
+            destination="*",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        delivery_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.status.state == TaskState.input_required
+        ]
+
+        # Tenant A has 2 agents (a1, a2), so 1 delivery task (to a2)
+        assert len(delivery_tasks) == 1
+
+    @pytest.mark.asyncio
+    async def test_broadcast_summary_reflects_tenant_recipients(
+        self, tenant_env
+    ):
+        """Summary task recipientCount counts only same-tenant agents."""
+        executor = tenant_env["executor"]
+        agent_a1 = tenant_env["agent_a1"]
+        queue = EventQueue()
+
+        context = _make_tenant_send_context(
+            from_agent_id=agent_a1["agent_id"],
+            tenant_id=_TENANT_A_HASH,
+            destination="*",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        summary_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.metadata
+            and e.metadata.get("type") in ("broadcast", "broadcast_summary")
+        ]
+
+        assert len(summary_tasks) == 1
+        summary = summary_tasks[0]
+        assert summary.metadata["recipientCount"] == 1
+
+    @pytest.mark.asyncio
+    async def test_tenant_b_broadcast_does_not_reach_tenant_a(
+        self, tenant_env
+    ):
+        """Broadcast from tenant B delivers only within tenant B."""
+        executor, task_store = tenant_env["executor"], tenant_env["task_store"]
+        agent_a1, agent_a2 = tenant_env["agent_a1"], tenant_env["agent_a2"]
+        agent_b1 = tenant_env["agent_b1"]
+        queue = EventQueue()
+
+        context = _make_tenant_send_context(
+            from_agent_id=agent_b1["agent_id"],
+            tenant_id=_TENANT_B_HASH,
+            destination="*",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        delivery_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.status.state == TaskState.input_required
+        ]
+
+        # B1 is alone in tenant B, so no delivery tasks
+        assert len(delivery_tasks) == 0
+
+        # Verify nothing landed in tenant A agents' inboxes
+        a1_tasks = await task_store.list(agent_a1["agent_id"])
+        a2_tasks = await task_store.list(agent_a2["agent_id"])
+        assert len(a1_tasks) == 0
+        assert len(a2_tasks) == 0
+
+    @pytest.mark.asyncio
+    async def test_broadcast_after_deregister_in_tenant(self, tenant_env):
+        """Broadcast skips deregistered agents within the same tenant."""
+        executor, store = tenant_env["executor"], tenant_env["store"]
+        agent_a1, agent_a2 = tenant_env["agent_a1"], tenant_env["agent_a2"]
+        queue = EventQueue()
+
+        await store.deregister_agent(agent_a2["agent_id"])
+
+        context = _make_tenant_send_context(
+            from_agent_id=agent_a1["agent_id"],
+            tenant_id=_TENANT_A_HASH,
+            destination="*",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        delivery_tasks = [
+            e for e in events
+            if isinstance(e, Task)
+            and e.status.state == TaskState.input_required
+        ]
+
+        # A2 deregistered, so no delivery tasks
+        assert len(delivery_tasks) == 0
