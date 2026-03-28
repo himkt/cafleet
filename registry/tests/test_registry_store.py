@@ -439,3 +439,401 @@ class TestLookupByApiKey:
         # Verify the key exists at the expected Redis path
         stored_id = await redis_client.get(f"apikey:{api_key_hash}")
         assert stored_id == created["agent_id"]
+
+
+# ===========================================================================
+# Multi-tenant registry store tests (access-control feature)
+# ===========================================================================
+
+# Fixed test API keys for deterministic multi-tenant tests
+_TENANT_A_KEY = "hky_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1"
+_TENANT_A_HASH = hashlib.sha256(_TENANT_A_KEY.encode()).hexdigest()
+
+_TENANT_B_KEY = "hky_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1"
+_TENANT_B_HASH = hashlib.sha256(_TENANT_B_KEY.encode()).hexdigest()
+
+
+class TestCreateAgentTenant:
+    """Tests for create_agent with tenant support.
+
+    create_agent gains an optional api_key parameter:
+    - Without api_key: generates new key + new tenant set
+    - With api_key: reuses key, joins existing tenant set
+    """
+
+    @pytest.mark.asyncio
+    async def test_new_tenant_creates_tenant_set(self, store, redis_client):
+        """Creating agent without api_key adds agent to a new tenant set."""
+        result = await store.create_agent(name="New Agent", description="Test")
+        api_key_hash = hashlib.sha256(result["api_key"].encode()).hexdigest()
+
+        members = await redis_client.smembers(f"tenant:{api_key_hash}:agents")
+        assert result["agent_id"] in members
+
+    @pytest.mark.asyncio
+    async def test_new_tenant_generates_api_key(self, store):
+        """Creating agent without api_key generates a new hky_ prefixed key."""
+        result = await store.create_agent(name="New Agent", description="Test")
+        assert result["api_key"].startswith("hky_")
+
+    @pytest.mark.asyncio
+    async def test_join_tenant_reuses_provided_api_key(self, store):
+        """Creating agent with api_key echoes back the provided key."""
+        result = await store.create_agent(
+            name="Joining Agent", description="Test", api_key=_TENANT_A_KEY
+        )
+        assert result["api_key"] == _TENANT_A_KEY
+
+    @pytest.mark.asyncio
+    async def test_join_tenant_adds_to_existing_tenant_set(
+        self, store, redis_client
+    ):
+        """Joining a tenant adds the new agent to the existing tenant set."""
+        r1 = await store.create_agent(
+            name="Agent 1", description="First", api_key=_TENANT_A_KEY
+        )
+        r2 = await store.create_agent(
+            name="Agent 2", description="Second", api_key=_TENANT_A_KEY
+        )
+
+        members = await redis_client.smembers(
+            f"tenant:{_TENANT_A_HASH}:agents"
+        )
+        assert r1["agent_id"] in members
+        assert r2["agent_id"] in members
+
+    @pytest.mark.asyncio
+    async def test_join_tenant_stores_same_api_key_hash(
+        self, store, redis_client
+    ):
+        """Agents joining the same tenant have matching api_key_hash in their records."""
+        r1 = await store.create_agent(
+            name="Agent 1", description="First", api_key=_TENANT_A_KEY
+        )
+        r2 = await store.create_agent(
+            name="Agent 2", description="Second", api_key=_TENANT_A_KEY
+        )
+
+        hash1 = await redis_client.hget(
+            f"agent:{r1['agent_id']}", "api_key_hash"
+        )
+        hash2 = await redis_client.hget(
+            f"agent:{r2['agent_id']}", "api_key_hash"
+        )
+        assert hash1 == hash2 == _TENANT_A_HASH
+
+    @pytest.mark.asyncio
+    async def test_join_tenant_generates_unique_agent_id(self, store):
+        """Each agent joining a tenant gets a unique agent_id."""
+        r1 = await store.create_agent(
+            name="Agent 1", description="First", api_key=_TENANT_A_KEY
+        )
+        r2 = await store.create_agent(
+            name="Agent 2", description="Second", api_key=_TENANT_A_KEY
+        )
+        assert r1["agent_id"] != r2["agent_id"]
+
+    @pytest.mark.asyncio
+    async def test_multiple_agents_same_tenant_all_in_set(
+        self, store, redis_client
+    ):
+        """Three agents with the same api_key all appear in the tenant set."""
+        ids = []
+        for i in range(3):
+            r = await store.create_agent(
+                name=f"Agent {i}", description=f"Agent {i}",
+                api_key=_TENANT_A_KEY,
+            )
+            ids.append(r["agent_id"])
+
+        members = await redis_client.smembers(
+            f"tenant:{_TENANT_A_HASH}:agents"
+        )
+        for agent_id in ids:
+            assert agent_id in members
+        assert len(members) == 3
+
+    @pytest.mark.asyncio
+    async def test_different_tenants_separate_sets(self, store, redis_client):
+        """Agents in different tenants have separate tenant sets."""
+        r_a = await store.create_agent(
+            name="Tenant A Agent", description="A", api_key=_TENANT_A_KEY
+        )
+        r_b = await store.create_agent(
+            name="Tenant B Agent", description="B", api_key=_TENANT_B_KEY
+        )
+
+        members_a = await redis_client.smembers(
+            f"tenant:{_TENANT_A_HASH}:agents"
+        )
+        members_b = await redis_client.smembers(
+            f"tenant:{_TENANT_B_HASH}:agents"
+        )
+
+        assert r_a["agent_id"] in members_a
+        assert r_a["agent_id"] not in members_b
+        assert r_b["agent_id"] in members_b
+        assert r_b["agent_id"] not in members_a
+
+    @pytest.mark.asyncio
+    async def test_join_tenant_still_adds_to_active_set(
+        self, store, redis_client
+    ):
+        """Agents joining a tenant are still added to the global agents:active set."""
+        result = await store.create_agent(
+            name="Agent", description="Test", api_key=_TENANT_A_KEY
+        )
+        assert await redis_client.sismember(
+            "agents:active", result["agent_id"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_join_tenant_returns_required_fields(self, store):
+        """Join-tenant response includes agent_id, api_key, name, registered_at."""
+        result = await store.create_agent(
+            name="Join Agent", description="Test", api_key=_TENANT_A_KEY
+        )
+        assert "agent_id" in result
+        assert "api_key" in result
+        assert "name" in result
+        assert "registered_at" in result
+        assert result["name"] == "Join Agent"
+
+
+class TestListActiveAgentsTenant:
+    """Tests for list_active_agents with tenant_id parameter.
+
+    list_active_agents(tenant_id) queries tenant:{tenant_id}:agents
+    instead of the global agents:active set.
+    """
+
+    @pytest.mark.asyncio
+    async def test_returns_only_tenant_agents(self, store):
+        """Returns only agents belonging to the specified tenant."""
+        await store.create_agent(
+            name="A1", description="Tenant A", api_key=_TENANT_A_KEY
+        )
+        await store.create_agent(
+            name="A2", description="Tenant A", api_key=_TENANT_A_KEY
+        )
+        await store.create_agent(
+            name="B1", description="Tenant B", api_key=_TENANT_B_KEY
+        )
+
+        agents = await store.list_active_agents(tenant_id=_TENANT_A_HASH)
+        names = {a["name"] for a in agents}
+        assert names == {"A1", "A2"}
+
+    @pytest.mark.asyncio
+    async def test_does_not_return_other_tenant_agents(self, store):
+        """Agents from other tenants are excluded."""
+        await store.create_agent(
+            name="A1", description="Tenant A", api_key=_TENANT_A_KEY
+        )
+        await store.create_agent(
+            name="B1", description="Tenant B", api_key=_TENANT_B_KEY
+        )
+
+        agents = await store.list_active_agents(tenant_id=_TENANT_B_HASH)
+        assert len(agents) == 1
+        assert agents[0]["name"] == "B1"
+
+    @pytest.mark.asyncio
+    async def test_empty_tenant_returns_empty_list(self, store):
+        """Tenant with no agents returns empty list."""
+        agents = await store.list_active_agents(
+            tenant_id="nonexistent_tenant_hash"
+        )
+        assert agents == []
+
+    @pytest.mark.asyncio
+    async def test_excludes_deregistered_agents_in_tenant(self, store):
+        """Deregistered agents within a tenant are not returned."""
+        r1 = await store.create_agent(
+            name="A1", description="Tenant A", api_key=_TENANT_A_KEY
+        )
+        await store.create_agent(
+            name="A2", description="Tenant A", api_key=_TENANT_A_KEY
+        )
+        await store.deregister_agent(r1["agent_id"])
+
+        agents = await store.list_active_agents(tenant_id=_TENANT_A_HASH)
+        assert len(agents) == 1
+        assert agents[0]["name"] == "A2"
+
+    @pytest.mark.asyncio
+    async def test_each_record_has_required_fields(self, store):
+        """Each agent record in tenant list has expected summary fields."""
+        await store.create_agent(
+            name="Agent", description="Test", api_key=_TENANT_A_KEY
+        )
+        agents = await store.list_active_agents(tenant_id=_TENANT_A_HASH)
+        assert len(agents) == 1
+        agent = agents[0]
+        assert "agent_id" in agent
+        assert "name" in agent
+        assert "description" in agent
+        assert "registered_at" in agent
+
+
+class TestDeregisterAgentTenant:
+    """Tests for deregister_agent tenant set cleanup.
+
+    Deregistration must also remove the agent from tenant:{hash}:agents set.
+    """
+
+    @pytest.mark.asyncio
+    async def test_removes_from_tenant_set(self, store, redis_client):
+        """Deregistered agent is removed from its tenant set."""
+        result = await store.create_agent(
+            name="Agent", description="Test", api_key=_TENANT_A_KEY
+        )
+        agent_id = result["agent_id"]
+
+        assert await redis_client.sismember(
+            f"tenant:{_TENANT_A_HASH}:agents", agent_id
+        )
+
+        await store.deregister_agent(agent_id)
+
+        assert not await redis_client.sismember(
+            f"tenant:{_TENANT_A_HASH}:agents", agent_id
+        )
+
+    @pytest.mark.asyncio
+    async def test_does_not_affect_other_agents_in_tenant(
+        self, store, redis_client
+    ):
+        """Deregistering one agent doesn't remove others from the tenant set."""
+        r1 = await store.create_agent(
+            name="Agent 1", description="First", api_key=_TENANT_A_KEY
+        )
+        r2 = await store.create_agent(
+            name="Agent 2", description="Second", api_key=_TENANT_A_KEY
+        )
+
+        await store.deregister_agent(r1["agent_id"])
+
+        # Agent 2 still in tenant set
+        assert await redis_client.sismember(
+            f"tenant:{_TENANT_A_HASH}:agents", r2["agent_id"]
+        )
+        # Agent 1 removed
+        assert not await redis_client.sismember(
+            f"tenant:{_TENANT_A_HASH}:agents", r1["agent_id"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_last_agent_leaves_empty_tenant_set(
+        self, store, redis_client
+    ):
+        """When the last agent deregisters, the tenant set becomes empty."""
+        result = await store.create_agent(
+            name="Solo Agent", description="Only one", api_key=_TENANT_A_KEY
+        )
+        await store.deregister_agent(result["agent_id"])
+
+        count = await redis_client.scard(f"tenant:{_TENANT_A_HASH}:agents")
+        assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_does_not_affect_other_tenant_sets(
+        self, store, redis_client
+    ):
+        """Deregistering agent in tenant A doesn't affect tenant B."""
+        r_a = await store.create_agent(
+            name="Tenant A", description="A", api_key=_TENANT_A_KEY
+        )
+        r_b = await store.create_agent(
+            name="Tenant B", description="B", api_key=_TENANT_B_KEY
+        )
+
+        await store.deregister_agent(r_a["agent_id"])
+
+        assert await redis_client.sismember(
+            f"tenant:{_TENANT_B_HASH}:agents", r_b["agent_id"]
+        )
+
+
+class TestLookupByApiKeyRemoved:
+    """Tests that lookup_by_api_key method has been removed.
+
+    The apikey:{hash} → agent_id mapping is replaced by tenant set
+    membership. The method should no longer exist on RegistryStore.
+    """
+
+    @pytest.mark.asyncio
+    async def test_method_does_not_exist(self, store):
+        """lookup_by_api_key should not exist on RegistryStore."""
+        assert not hasattr(store, "lookup_by_api_key")
+
+
+class TestVerifyAgentTenant:
+    """Tests for verify_agent_tenant(agent_id, tenant_id) — new method.
+
+    Returns True if the agent's api_key_hash matches the given tenant_id.
+    Returns False otherwise (agent doesn't exist or hash mismatch).
+    """
+
+    @pytest.mark.asyncio
+    async def test_matching_tenant_returns_true(self, store):
+        """Agent whose api_key_hash matches tenant_id → True."""
+        result = await store.create_agent(
+            name="Agent", description="Test", api_key=_TENANT_A_KEY
+        )
+        is_member = await store.verify_agent_tenant(
+            result["agent_id"], _TENANT_A_HASH
+        )
+        assert is_member is True
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_agent_returns_false(self, store):
+        """Non-existent agent_id → False."""
+        is_member = await store.verify_agent_tenant(
+            "00000000-0000-4000-8000-000000000000", _TENANT_A_HASH
+        )
+        assert is_member is False
+
+    @pytest.mark.asyncio
+    async def test_wrong_tenant_returns_false(self, store):
+        """Agent in a different tenant → False."""
+        result = await store.create_agent(
+            name="Agent", description="Test", api_key=_TENANT_A_KEY
+        )
+        is_member = await store.verify_agent_tenant(
+            result["agent_id"], _TENANT_B_HASH
+        )
+        assert is_member is False
+
+    @pytest.mark.asyncio
+    async def test_deregistered_agent_still_verifiable(self, store):
+        """Deregistered agent's record still has api_key_hash for verification."""
+        result = await store.create_agent(
+            name="Agent", description="Test", api_key=_TENANT_A_KEY
+        )
+        await store.deregister_agent(result["agent_id"])
+
+        # Agent record still exists with api_key_hash, even though deregistered
+        is_member = await store.verify_agent_tenant(
+            result["agent_id"], _TENANT_A_HASH
+        )
+        assert is_member is True
+
+    @pytest.mark.asyncio
+    async def test_multiple_agents_same_tenant_all_verify(self, store):
+        """All agents in a tenant verify correctly."""
+        ids = []
+        for i in range(3):
+            r = await store.create_agent(
+                name=f"Agent {i}", description=f"Agent {i}",
+                api_key=_TENANT_A_KEY,
+            )
+            ids.append(r["agent_id"])
+
+        for agent_id in ids:
+            assert await store.verify_agent_tenant(
+                agent_id, _TENANT_A_HASH
+            ) is True
+            assert await store.verify_agent_tenant(
+                agent_id, _TENANT_B_HASH
+            ) is False
