@@ -1,17 +1,21 @@
 import asyncio
-import hashlib
 import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, Request
-from a2a.server.apps.jsonrpc.starlette_app import A2AStarletteApplication
+from fastapi.responses import JSONResponse
+from a2a.server.agent_execution import RequestContext
 from a2a.server.context import ServerCallContext
-from a2a.server.request_handlers.default_request_handler import (
-    DefaultRequestHandler,
+from a2a.server.events import EventQueue
+from a2a.types import (
+    Message,
+    MessageSendParams,
+    Part,
+    Role,
+    Task,
+    TextPart,
 )
-from a2a.server.tasks import TaskStore
-from a2a.types import Task
 
 from hikyaku_registry.agent_card import build_agent_card
 from hikyaku_registry.cleanup import cleanup_expired_agents
@@ -25,37 +29,6 @@ from hikyaku_registry.executor import BrokerExecutor
 from hikyaku_registry.redis_client import close_pool, get_redis
 from hikyaku_registry.registry_store import RegistryStore
 from hikyaku_registry.task_store import RedisTaskStore
-
-
-class A2ATaskStoreAdapter(TaskStore):
-    """Adapts RedisTaskStore to the a2a-sdk TaskStore interface."""
-
-    def __init__(self, store: RedisTaskStore) -> None:
-        self._store = store
-
-    async def save(
-        self, task: Task, context: ServerCallContext | None = None
-    ) -> None:
-        await self._store.save(task)
-
-    async def get(
-        self, task_id: str, context: ServerCallContext | None = None
-    ) -> Task | None:
-        return await self._store.get(task_id)
-
-    async def delete(
-        self, task_id: str, context: ServerCallContext | None = None
-    ) -> None:
-        await self._store.delete(task_id)
-
-
-def _build_call_context(request) -> ServerCallContext:
-    """Extract agent_id from Bearer token and build ServerCallContext."""
-    auth_header = request.headers.get("authorization", "")
-    parts = auth_header.split(" ", 1)
-    token = parts[1].strip() if len(parts) == 2 else ""
-    token_hash = hashlib.sha256(token.encode()).hexdigest() if token else ""
-    return ServerCallContext(state={"api_key_hash": token_hash})
 
 
 logger = logging.getLogger(__name__)
@@ -92,6 +65,151 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
+def _task_to_dict(task: Task) -> dict:
+    """Serialize a Task to JSON-compatible dict with camelCase keys."""
+    return task.model_dump(mode="json", by_alias=True)
+
+
+def _jsonrpc_success(result: dict, req_id: str | None) -> JSONResponse:
+    return JSONResponse({"jsonrpc": "2.0", "result": result, "id": req_id})
+
+
+def _jsonrpc_error(
+    code: int, message: str, req_id: str | None, status_code: int = 200
+) -> JSONResponse:
+    return JSONResponse(
+        {"jsonrpc": "2.0", "error": {"code": code, "message": message}, "id": req_id},
+        status_code=status_code,
+    )
+
+
+async def _handle_send_message(
+    executor: BrokerExecutor, agent_id: str, params: dict
+) -> dict:
+    """Handle SendMessage JSON-RPC method."""
+    message_data = params["message"]
+
+    parts = []
+    for p in message_data.get("parts", []):
+        if p.get("kind") == "text":
+            parts.append(Part(root=TextPart(text=p["text"])))
+
+    msg = Message(
+        message_id=message_data.get("messageId"),
+        role=Role(message_data.get("role", "user")),
+        parts=parts,
+        metadata=message_data.get("metadata"),
+        task_id=message_data.get("taskId"),
+    )
+
+    call_context = ServerCallContext(state={"agent_id": agent_id})
+    send_params = MessageSendParams(message=msg)
+
+    context = RequestContext(
+        request=send_params,
+        task_id=message_data.get("taskId"),
+        call_context=call_context,
+    )
+
+    event_queue = EventQueue()
+    await executor.execute(context, event_queue)
+
+    # Drain all events from the queue
+    events = []
+    try:
+        while True:
+            event = event_queue.queue.get_nowait()
+            events.append(event)
+    except asyncio.QueueEmpty:
+        pass
+
+    # Return the last Task event
+    last_task = None
+    for event in reversed(events):
+        if isinstance(event, Task):
+            last_task = event
+            break
+
+    if last_task is None:
+        raise ValueError("No task produced by executor")
+
+    return {"task": _task_to_dict(last_task)}
+
+
+async def _handle_get_task(task_store: RedisTaskStore, params: dict) -> dict:
+    """Handle GetTask JSON-RPC method."""
+    task_id = params.get("id")
+    if not task_id:
+        raise ValueError("Missing task id")
+
+    task = await task_store.get(task_id)
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+
+    return {"task": _task_to_dict(task)}
+
+
+async def _handle_cancel_task(
+    executor: BrokerExecutor, agent_id: str, params: dict
+) -> dict:
+    """Handle CancelTask JSON-RPC method."""
+    task_id = params.get("id")
+    if not task_id:
+        raise ValueError("Missing task id")
+
+    call_context = ServerCallContext(state={"agent_id": agent_id})
+    context = RequestContext(
+        task_id=task_id,
+        call_context=call_context,
+    )
+
+    event_queue = EventQueue()
+    await executor.cancel(context, event_queue)
+
+    # Drain events
+    events = []
+    try:
+        while True:
+            event = event_queue.queue.get_nowait()
+            events.append(event)
+    except asyncio.QueueEmpty:
+        pass
+
+    last_task = None
+    for event in reversed(events):
+        if isinstance(event, Task):
+            last_task = event
+            break
+
+    if last_task is None:
+        raise ValueError("No task produced by executor")
+
+    return {"task": _task_to_dict(last_task)}
+
+
+async def _handle_list_tasks(
+    task_store: RedisTaskStore, params: dict
+) -> dict:
+    """Handle ListTasks JSON-RPC method."""
+    context_id = params.get("contextId")
+    if not context_id:
+        raise ValueError("Missing contextId")
+
+    status_filter = params.get("status")
+    tasks = await task_store.list(context_id)
+
+    # Filter out broadcast summary tasks (not actual messages)
+    tasks = [
+        t for t in tasks
+        if not (t.metadata and t.metadata.get("type") == "broadcast_summary")
+    ]
+
+    if status_filter:
+        tasks = [t for t in tasks if t.status.state.value == status_filter]
+
+    return {"tasks": [_task_to_dict(t) for t in tasks]}
+
+
 def create_app(redis=None) -> FastAPI:
     app = FastAPI(title="Hikyaku Broker", version="0.1.0", lifespan=lifespan)
     app.include_router(registry_router, prefix="/api/v1")
@@ -114,17 +232,63 @@ def create_app(redis=None) -> FastAPI:
     app.dependency_overrides[get_registry_store] = _get_store
     app.dependency_overrides[get_authenticated_agent] = _get_auth
 
+    # Agent Card endpoint
     agent_card = build_agent_card()
-    handler = DefaultRequestHandler(
-        agent_executor=executor,
-        task_store=A2ATaskStoreAdapter(task_store),
-    )
 
-    a2a_app = A2AStarletteApplication(
-        agent_card=agent_card,
-        http_handler=handler,
-    )
-    a2a_app.add_routes_to_app(app)
+    @app.get("/.well-known/agent-card.json")
+    async def get_agent_card():
+        return JSONResponse(
+            agent_card.model_dump(mode="json", by_alias=True)
+        )
+
+    # JSON-RPC endpoint for A2A operations
+    @app.post("/")
+    async def jsonrpc_endpoint(request: Request):
+        # Authenticate
+        auth_header = request.headers.get("authorization", "")
+        parts = auth_header.split(" ", 1)
+        token = (
+            parts[1].strip()
+            if len(parts) == 2 and parts[0] == "Bearer"
+            else ""
+        )
+        if not token:
+            return JSONResponse(
+                status_code=401, content={"error": "Unauthorized"}
+            )
+
+        agent_id = await registry_store.lookup_by_api_key(token)
+        if agent_id is None:
+            return JSONResponse(
+                status_code=401, content={"error": "Unauthorized"}
+            )
+
+        # Parse JSON-RPC request
+        body = await request.json()
+        method = body.get("method")
+        params = body.get("params", {})
+        req_id = body.get("id")
+
+        # Route to handler
+        try:
+            if method == "SendMessage":
+                result = await _handle_send_message(
+                    executor, agent_id, params
+                )
+            elif method == "GetTask":
+                result = await _handle_get_task(task_store, params)
+            elif method == "CancelTask":
+                result = await _handle_cancel_task(
+                    executor, agent_id, params
+                )
+            elif method == "ListTasks":
+                result = await _handle_list_tasks(task_store, params)
+            else:
+                return _jsonrpc_error(-32601, "Method not found", req_id)
+
+            return _jsonrpc_success(result, req_id)
+        except (ValueError, PermissionError) as e:
+            return _jsonrpc_error(-32000, str(e), req_id)
 
     return app
 

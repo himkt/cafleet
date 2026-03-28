@@ -7,6 +7,7 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "a2a-sdk",
+    "sse-starlette",
     "redis[hiredis]",
     "pydantic",
     "pydantic-settings",
