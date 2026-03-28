@@ -1,6 +1,6 @@
 """Tests for deregistered agent cleanup task.
 
-Covers: cleanup_deregistered_agents function that scans for expired
+Covers: cleanup_expired_agents function that scans for expired
 deregistered agents and removes their tasks, indexes, and agent records.
 """
 
@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 import pytest
 import fakeredis.aioredis
 
-from hikyaku_registry.cleanup import cleanup_deregistered_agents
+from hikyaku_registry.cleanup import cleanup_expired_agents
 from hikyaku_registry.registry_store import RegistryStore
 from hikyaku_registry.task_store import RedisTaskStore
 
@@ -104,7 +104,7 @@ class TestCleanupExpiredAgents:
         result = await _register_and_deregister(store, redis, days_ago=10)
         agent_id = result["agent_id"]
 
-        await cleanup_deregistered_agents(redis, ttl_days=7)
+        await cleanup_expired_agents(redis, ttl_days=7)
 
         exists = await redis.exists(f"agent:{agent_id}")
         assert not exists
@@ -122,7 +122,7 @@ class TestCleanupExpiredAgents:
         task_id_1 = await _create_task_for_agent(redis, task_store, agent_id)
         task_id_2 = await _create_task_for_agent(redis, task_store, agent_id)
 
-        await cleanup_deregistered_agents(redis, ttl_days=7)
+        await cleanup_expired_agents(redis, ttl_days=7)
 
         assert not await redis.exists(f"task:{task_id_1}")
         assert not await redis.exists(f"task:{task_id_2}")
@@ -139,7 +139,7 @@ class TestCleanupExpiredAgents:
 
         await _create_task_for_agent(redis, task_store, agent_id)
 
-        await cleanup_deregistered_agents(redis, ttl_days=7)
+        await cleanup_expired_agents(redis, ttl_days=7)
 
         exists = await redis.exists(f"tasks:ctx:{agent_id}")
         assert not exists
@@ -162,7 +162,7 @@ class TestCleanupExpiredAgents:
         # Verify task is in sender set before cleanup
         assert await redis.sismember(f"tasks:sender:{sender_id}", task_id)
 
-        await cleanup_deregistered_agents(redis, ttl_days=7)
+        await cleanup_expired_agents(redis, ttl_days=7)
 
         assert not await redis.sismember(f"tasks:sender:{sender_id}", task_id)
 
@@ -174,7 +174,7 @@ class TestCleanupExpiredAgents:
         await _register_and_deregister(store, redis, name="Expired 1", days_ago=10)
         await _register_and_deregister(store, redis, name="Expired 2", days_ago=15)
 
-        count = await cleanup_deregistered_agents(redis, ttl_days=7)
+        count = await cleanup_expired_agents(redis, ttl_days=7)
 
         assert count == 2
 
@@ -195,7 +195,7 @@ class TestCleanupRetentionPeriod:
         result = await _register_and_deregister(store, redis, days_ago=3)
         agent_id = result["agent_id"]
 
-        await cleanup_deregistered_agents(redis, ttl_days=7)
+        await cleanup_expired_agents(redis, ttl_days=7)
 
         # Agent record should still exist
         exists = await redis.exists(f"agent:{agent_id}")
@@ -209,7 +209,7 @@ class TestCleanupRetentionPeriod:
         result = await store.create_agent(name="Active Agent", description="Still active")
         agent_id = result["agent_id"]
 
-        await cleanup_deregistered_agents(redis, ttl_days=7)
+        await cleanup_expired_agents(redis, ttl_days=7)
 
         exists = await redis.exists(f"agent:{agent_id}")
         assert exists
@@ -222,7 +222,7 @@ class TestCleanupRetentionPeriod:
         expired = await _register_and_deregister(store, redis, name="Old", days_ago=10)
         recent = await _register_and_deregister(store, redis, name="Recent", days_ago=3)
 
-        await cleanup_deregistered_agents(redis, ttl_days=7)
+        await cleanup_expired_agents(redis, ttl_days=7)
 
         assert not await redis.exists(f"agent:{expired['agent_id']}")
         assert await redis.exists(f"agent:{recent['agent_id']}")
@@ -237,11 +237,11 @@ class TestCleanupRetentionPeriod:
         agent_id = result["agent_id"]
 
         # With 7-day TTL: should NOT be cleaned
-        await cleanup_deregistered_agents(redis, ttl_days=7)
+        await cleanup_expired_agents(redis, ttl_days=7)
         assert await redis.exists(f"agent:{agent_id}")
 
         # With 3-day TTL: should be cleaned
-        await cleanup_deregistered_agents(redis, ttl_days=3)
+        await cleanup_expired_agents(redis, ttl_days=3)
         assert not await redis.exists(f"agent:{agent_id}")
 
 
@@ -269,7 +269,7 @@ class TestCleanupIsolation:
             redis, task_store, active["agent_id"]
         )
 
-        await cleanup_deregistered_agents(redis, ttl_days=7)
+        await cleanup_expired_agents(redis, ttl_days=7)
 
         # Active agent's task should still exist
         assert await redis.exists(f"task:{active_task_id}")
@@ -300,7 +300,7 @@ class TestCleanupIsolation:
             redis, task_store, expired["agent_id"], sender_id=sender_id
         )
 
-        await cleanup_deregistered_agents(redis, ttl_days=7)
+        await cleanup_expired_agents(redis, ttl_days=7)
 
         # Active task still in sender set
         assert await redis.sismember(f"tasks:sender:{sender_id}", active_task)
@@ -321,7 +321,7 @@ class TestCleanupNoOp:
         """Cleanup with no agents in Redis returns 0."""
         redis = cleanup_env["redis"]
 
-        count = await cleanup_deregistered_agents(redis, ttl_days=7)
+        count = await cleanup_expired_agents(redis, ttl_days=7)
         assert count == 0
 
     @pytest.mark.asyncio
@@ -332,7 +332,7 @@ class TestCleanupNoOp:
         await store.create_agent(name="Active 1", description="Active")
         await store.create_agent(name="Active 2", description="Active")
 
-        count = await cleanup_deregistered_agents(redis, ttl_days=7)
+        count = await cleanup_expired_agents(redis, ttl_days=7)
         assert count == 0
 
     @pytest.mark.asyncio
@@ -343,7 +343,23 @@ class TestCleanupNoOp:
         result = await _register_and_deregister(store, redis, days_ago=10)
         agent_id = result["agent_id"]
 
-        count = await cleanup_deregistered_agents(redis, ttl_days=7)
+        count = await cleanup_expired_agents(redis, ttl_days=7)
 
         assert count == 1
         assert not await redis.exists(f"agent:{agent_id}")
+
+    @pytest.mark.asyncio
+    async def test_idempotent_second_run_returns_zero(self, cleanup_env):
+        """Running cleanup twice: second run returns 0 (already cleaned)."""
+        redis, store, task_store = (
+            cleanup_env["redis"], cleanup_env["store"], cleanup_env["task_store"],
+        )
+
+        result = await _register_and_deregister(store, redis, days_ago=10)
+        await _create_task_for_agent(redis, task_store, result["agent_id"])
+
+        first_count = await cleanup_expired_agents(redis, ttl_days=7)
+        assert first_count == 1
+
+        second_count = await cleanup_expired_agents(redis, ttl_days=7)
+        assert second_count == 0
