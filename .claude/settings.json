@@ -1,11 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(uv run pytest *)"
+      "Bash(mise lint)",
+      "Bash(mise format)",
+      "Bash(mise typecheck)",
+      "Bash(mise test)"
     ],
     "deny": [
+      "Bash(uv run pytest *)",
       "Bash(uv run python -m *)",
-      "Bash(uv run --package *)"
+      "Bash(uv run --package *)",
+      "Bash(mise run *)"
     ]
   },
   "enabledPlugins": {}

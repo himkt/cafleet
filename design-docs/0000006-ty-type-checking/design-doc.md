@@ -1,7 +1,7 @@
 # Introduce Type Checking with ty
 
-**Status**: Approved
-**Progress**: 0/12 tasks complete
+**Status**: Complete
+**Progress**: 12/12 tasks complete
 **Last Updated**: 2026-03-29
 
 ## Overview
@@ -138,33 +138,33 @@ dev = [
 
 ### Step 1: Documentation
 
-- [ ] Update `CLAUDE.md` commands section to include `uv run ty check` <!-- completed: -->
+- [x] Update `CLAUDE.md` commands section to include `uv run ty check` <!-- completed: 2026-03-29T11:52 -->
 
 ### Step 2: Add ty dependency and configuration
 
-- [ ] Add `ty` to dev dependencies in root `pyproject.toml` <!-- completed: -->
-- [ ] Add `[tool.ty]` configuration to root `pyproject.toml` <!-- completed: -->
-- [ ] Run `uv sync` to verify dependency resolution <!-- completed: -->
+- [x] Add `ty` to dev dependencies in root `pyproject.toml` <!-- completed: 2026-03-29T11:52 -->
+- [x] Add `[tool.ty]` configuration to root `pyproject.toml` <!-- completed: 2026-03-29T11:52 -->
+- [x] Run `uv sync` to verify dependency resolution <!-- completed: 2026-03-29T11:52 -->
 
 ### Step 3: Add type annotations to registry package
 
-- [ ] Add `TypedDict` classes to `registry_store.py` and refine `dict` return types on `create_agent`, `get_agent`, `list_active_agents` <!-- completed: -->
-- [ ] Add `Message` type to `message` param in `executor.py` (`_handle_unicast`, `_handle_broadcast`) <!-- completed: -->
-- [ ] Add `RegistryStore | None` type to `store` param in `auth.py` (`get_authenticated_agent`, `get_registration_tenant`) <!-- completed: -->
-- [ ] Add `aioredis.Redis` type to `redis` param in `main.py` (`_cleanup_loop`, `create_app`) and return types to inner closures <!-- completed: -->
-- [ ] Add return type annotations to all endpoint functions in `api/registry.py` <!-- completed: -->
+- [x] Add `TypedDict` classes to `registry_store.py` and refine `dict` return types on `create_agent`, `get_agent`, `list_active_agents` <!-- completed: 2026-03-29T12:05 -->
+- [x] Add `Message` type to `message` param in `executor.py` (`_handle_unicast`, `_handle_broadcast`) <!-- completed: 2026-03-29T12:05 -->
+- [x] Add `RegistryStore | None` type to `store` param in `auth.py` (`get_authenticated_agent`, `get_registration_tenant`) <!-- completed: 2026-03-29T12:05 -->
+- [x] Add `aioredis.Redis` type to `redis` param in `main.py` (`_cleanup_loop`, `create_app`) and return types to inner closures <!-- completed: 2026-03-29T12:05 -->
+- [x] Add return type annotations to all endpoint functions in `api/registry.py` <!-- completed: 2026-03-29T12:05 -->
 
 ### Step 4: Add type annotations to client package
 
-- [ ] Add annotations to `cli.py` (`_run`, `_require_auth`) and `output.py` (`format_json` data param) <!-- completed: -->
+- [x] Add annotations to `cli.py` (`_run`, `_require_auth`) and `output.py` (`format_json` data param) <!-- completed: 2026-03-29T12:05 -->
 
 ### Step 5: Run ty and fix errors
 
-- [ ] Run `uv run ty check` locally, fix any remaining errors, and tune `allowed-unresolved-imports` as needed <!-- completed: -->
+- [x] Run `uv run ty check` locally, fix any remaining errors, and tune `allowed-unresolved-imports` as needed <!-- completed: 2026-03-29T12:10 -->
 
 ### Step 6: CI integration
 
-- [ ] Add `uv run ty check` step to the `lint` job in `.github/workflows/ci.yml` <!-- completed: -->
+- [x] Add `uv run ty check` step to the `lint` job in `.github/workflows/ci.yml` <!-- completed: 2026-03-29T12:12 -->
 
 ---
 
@@ -173,3 +173,4 @@ dev = [
 | Date | Changes |
 |------|---------|
 | 2026-03-29 | Initial draft |
+| 2026-03-29 | Implementation complete |

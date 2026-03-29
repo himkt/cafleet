@@ -5,6 +5,7 @@ from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.types import (
     Artifact,
+    Message,
     Part,
     Task,
     TaskState,
@@ -30,6 +31,7 @@ class BrokerExecutor(AgentExecutor):
     async def execute(
         self, context: RequestContext, event_queue: EventQueue
     ) -> None:
+        assert context.call_context is not None
         agent_id = context.call_context.state["agent_id"]
         tenant_id = context.call_context.state.get("tenant_id")
         message = context.message
@@ -48,6 +50,8 @@ class BrokerExecutor(AgentExecutor):
         if not has_destination:
             raise ValueError("Missing destination in message metadata")
 
+        assert message is not None
+        assert message.metadata is not None
         destination = message.metadata["destination"]
 
         if destination == "*":
@@ -62,8 +66,10 @@ class BrokerExecutor(AgentExecutor):
     async def cancel(
         self, context: RequestContext, event_queue: EventQueue
     ) -> None:
+        assert context.call_context is not None
         agent_id = context.call_context.state["agent_id"]
         task_id = context.task_id
+        assert task_id is not None
 
         task = await self._task_store.get(task_id)
         if task is None:
@@ -95,7 +101,7 @@ class BrokerExecutor(AgentExecutor):
         event_queue: EventQueue,
         from_agent_id: str,
         destination: str,
-        message,
+        message: Message,
         tenant_id: str | None = None,
     ) -> None:
         try:
@@ -145,7 +151,7 @@ class BrokerExecutor(AgentExecutor):
         self,
         event_queue: EventQueue,
         from_agent_id: str,
-        message,
+        message: Message,
         tenant_id: str | None = None,
     ) -> None:
         active_agents = await self._registry_store.list_active_agents(
@@ -219,6 +225,7 @@ class BrokerExecutor(AgentExecutor):
         agent_id: str,
     ) -> None:
         task_id = context.task_id
+        assert task_id is not None
         task = await self._task_store.get(task_id)
 
         if task is None:

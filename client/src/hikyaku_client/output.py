@@ -1,7 +1,8 @@
 import json
+from typing import Any
 
 
-def format_json(data) -> str:
+def format_json(data: Any) -> str:
     return json.dumps(data, indent=2)
 
 

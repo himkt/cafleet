@@ -3,8 +3,34 @@ import json
 import secrets
 import uuid
 from datetime import UTC, datetime
+from typing import TypedDict
 
 import redis.asyncio as aioredis
+
+
+class CreateAgentResult(TypedDict):
+    agent_id: str
+    api_key: str
+    name: str
+    registered_at: str
+
+
+class AgentRecord(TypedDict, total=False):
+    agent_id: str
+    name: str
+    description: str
+    agent_card_json: str
+    status: str
+    registered_at: str
+    deregistered_at: str
+
+
+class AgentListItem(TypedDict):
+    agent_id: str
+    name: str
+    description: str
+    registered_at: str
+    agent_card_json: str
 
 
 class RegistryStore:
@@ -17,7 +43,7 @@ class RegistryStore:
         description: str,
         skills: list[dict] | None = None,
         api_key: str | None = None,
-    ) -> dict:
+    ) -> CreateAgentResult:
         agent_id = str(uuid.uuid4())
         if api_key is None:
             api_key = "hky_" + secrets.token_hex(16)
@@ -53,7 +79,7 @@ class RegistryStore:
             "registered_at": registered_at,
         }
 
-    async def get_agent(self, agent_id: str) -> dict | None:
+    async def get_agent(self, agent_id: str) -> AgentRecord | None:
         record = await self._redis.hgetall(f"agent:{agent_id}")
         if not record:
             return None
@@ -62,7 +88,7 @@ class RegistryStore:
 
     async def list_active_agents(
         self, tenant_id: str | None = None
-    ) -> list[dict]:
+    ) -> list[AgentListItem]:
         if tenant_id is not None:
             member_ids = await self._redis.smembers(
                 f"tenant:{tenant_id}:agents"

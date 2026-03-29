@@ -1,5 +1,7 @@
 import asyncio
 import json
+from collections.abc import Coroutine
+from typing import Any
 
 import click
 
@@ -7,12 +9,12 @@ from hikyaku_client import api
 from hikyaku_client import output
 
 
-def _run(coro):
+def _run(coro: Coroutine) -> Any:
     """Run an async coroutine synchronously."""
     return asyncio.run(coro)
 
 
-def _require_auth(ctx):
+def _require_auth(ctx: click.Context) -> None:
     """Validate that api_key and agent_id are set."""
     if not ctx.obj.get("api_key"):
         click.echo("Error: --api-key is required (or set HIKYAKU_API_KEY)", err=True)

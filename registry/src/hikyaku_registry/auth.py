@@ -21,7 +21,7 @@ def _extract_bearer_token(request: Request) -> str:
 
 
 async def get_authenticated_agent(
-    request: Request = None, store=None
+    request: Request = None, store=None  # ty: ignore[invalid-parameter-default]
 ) -> tuple[str, str]:
     """Authenticate a request using Authorization + X-Agent-Id headers.
 
@@ -49,7 +49,7 @@ async def get_authenticated_agent(
 
 
 async def get_registration_tenant(
-    request: Request = None, store=None
+    request: Request = None, store=None  # ty: ignore[invalid-parameter-default]
 ) -> tuple[str, str] | None:
     """Extract optional Authorization header for registration flow.
 
