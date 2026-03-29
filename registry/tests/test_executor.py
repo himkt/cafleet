@@ -1183,3 +1183,240 @@ class TestTenantScopedBroadcast:
 
         # A2 deregistered, so no delivery tasks
         assert len(delivery_tasks) == 0
+
+
+# ---------------------------------------------------------------------------
+# Pub/Sub Publish Integration
+# ---------------------------------------------------------------------------
+
+
+class TestExecutorPubSubIntegration:
+    """Tests for BrokerExecutor publish integration with PubSubManager.
+
+    Verifies that:
+    - BrokerExecutor.__init__ accepts a pubsub parameter
+    - _handle_unicast publishes task_id to inbox:{destination} after save
+    - _handle_broadcast publishes task_id for each recipient's inbox channel
+    """
+
+    @pytest.fixture
+    async def pubsub_env(self):
+        """Set up BrokerExecutor with a mock PubSubManager and test agents."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        store = RegistryStore(redis)
+        task_store = RedisTaskStore(redis)
+
+        # Mock PubSubManager
+        mock_pubsub = MagicMock()
+        mock_pubsub.publish = AsyncMock()
+
+        executor = BrokerExecutor(
+            registry_store=store,
+            task_store=task_store,
+            pubsub=mock_pubsub,
+        )
+
+        # Register test agents in the same tenant
+        agent_a = await store.create_agent(
+            name="Agent A", description="Sender", api_key=_DEFAULT_SHARED_KEY
+        )
+        agent_b = await store.create_agent(
+            name="Agent B", description="Recipient", api_key=_DEFAULT_SHARED_KEY
+        )
+        agent_c = await store.create_agent(
+            name="Agent C", description="Third agent", api_key=_DEFAULT_SHARED_KEY
+        )
+
+        yield {
+            "executor": executor,
+            "store": store,
+            "task_store": task_store,
+            "redis": redis,
+            "mock_pubsub": mock_pubsub,
+            "agent_a": agent_a,
+            "agent_b": agent_b,
+            "agent_c": agent_c,
+        }
+
+        await redis.aclose()
+
+    @pytest.mark.asyncio
+    async def test_init_accepts_pubsub_parameter(self, pubsub_env):
+        """BrokerExecutor.__init__ accepts a pubsub parameter."""
+        executor = pubsub_env["executor"]
+        # If we got here without error, __init__ accepted pubsub
+        assert executor is not None
+
+    @pytest.mark.asyncio
+    async def test_unicast_publishes_task_id_to_recipient_channel(self, pubsub_env):
+        """After unicast send, publish is called on inbox:{destination} with task_id."""
+        executor = pubsub_env["executor"]
+        agent_a = pubsub_env["agent_a"]
+        agent_b = pubsub_env["agent_b"]
+        mock_pubsub = pubsub_env["mock_pubsub"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+            text="Hello via unicast",
+        )
+        await executor.execute(context, queue)
+
+        # Verify publish was called once for the recipient
+        mock_pubsub.publish.assert_called_once()
+        call_args = mock_pubsub.publish.call_args
+        channel = call_args[0][0] if call_args[0] else call_args[1].get("channel", call_args.kwargs.get("channel"))
+
+        assert channel == f"inbox:{agent_b['agent_id']}"
+
+    @pytest.mark.asyncio
+    async def test_unicast_publishes_task_id_as_payload(self, pubsub_env):
+        """Unicast publish payload is the task_id string, not full Task JSON."""
+        executor = pubsub_env["executor"]
+        agent_a = pubsub_env["agent_a"]
+        agent_b = pubsub_env["agent_b"]
+        mock_pubsub = pubsub_env["mock_pubsub"]
+        task_store = pubsub_env["task_store"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+            text="Task ID payload check",
+        )
+        await executor.execute(context, queue)
+
+        # Get the published task_id
+        call_args = mock_pubsub.publish.call_args
+        published_task_id = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("message", call_args.kwargs.get("message"))
+
+        # Verify it's a valid task_id (string, not JSON)
+        assert isinstance(published_task_id, str)
+        assert "{" not in published_task_id  # Not JSON
+
+        # Verify the task_id can be looked up in task_store
+        task = await task_store.get(published_task_id)
+        assert task is not None
+
+    @pytest.mark.asyncio
+    async def test_broadcast_publishes_to_each_recipient_channel(self, pubsub_env):
+        """After broadcast, publish is called for each recipient's inbox channel."""
+        executor = pubsub_env["executor"]
+        agent_a = pubsub_env["agent_a"]
+        agent_b = pubsub_env["agent_b"]
+        agent_c = pubsub_env["agent_c"]
+        mock_pubsub = pubsub_env["mock_pubsub"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="*",
+            text="Broadcast message",
+        )
+        await executor.execute(context, queue)
+
+        # Should have published to inbox:{agent_b} and inbox:{agent_c}
+        published_channels = [
+            call[0][0] for call in mock_pubsub.publish.call_args_list
+        ]
+        expected_channels = {
+            f"inbox:{agent_b['agent_id']}",
+            f"inbox:{agent_c['agent_id']}",
+        }
+
+        assert set(published_channels) == expected_channels
+
+    @pytest.mark.asyncio
+    async def test_broadcast_does_not_publish_to_sender(self, pubsub_env):
+        """Broadcast does not publish to the sender's own inbox channel."""
+        executor = pubsub_env["executor"]
+        agent_a = pubsub_env["agent_a"]
+        mock_pubsub = pubsub_env["mock_pubsub"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="*",
+            text="Broadcast no self",
+        )
+        await executor.execute(context, queue)
+
+        published_channels = [
+            call[0][0] for call in mock_pubsub.publish.call_args_list
+        ]
+
+        assert f"inbox:{agent_a['agent_id']}" not in published_channels
+
+    @pytest.mark.asyncio
+    async def test_broadcast_publishes_task_ids_not_json(self, pubsub_env):
+        """Broadcast publishes task_id strings, not full Task JSON."""
+        executor = pubsub_env["executor"]
+        agent_a = pubsub_env["agent_a"]
+        mock_pubsub = pubsub_env["mock_pubsub"]
+        task_store = pubsub_env["task_store"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination="*",
+            text="Broadcast payload check",
+        )
+        await executor.execute(context, queue)
+
+        for call in mock_pubsub.publish.call_args_list:
+            task_id = call[0][1]
+            assert isinstance(task_id, str)
+            assert "{" not in task_id  # Not JSON
+            # Each published task_id should exist in task_store
+            task = await task_store.get(task_id)
+            assert task is not None
+
+    @pytest.mark.asyncio
+    async def test_no_pubsub_parameter_still_works(self):
+        """BrokerExecutor without pubsub parameter works (backward compat)."""
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        store = RegistryStore(redis)
+        task_store = RedisTaskStore(redis)
+
+        # No pubsub parameter — should still construct without error
+        executor = BrokerExecutor(
+            registry_store=store,
+            task_store=task_store,
+        )
+        assert executor is not None
+        await redis.aclose()
+
+    @pytest.mark.asyncio
+    async def test_unicast_no_pubsub_skips_publish(self):
+        """Unicast without pubsub does not fail (graceful no-op)."""
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        store = RegistryStore(redis)
+        task_store = RedisTaskStore(redis)
+        executor = BrokerExecutor(
+            registry_store=store,
+            task_store=task_store,
+        )
+
+        agent_a = await store.create_agent(
+            name="A", description="Sender", api_key=_DEFAULT_SHARED_KEY
+        )
+        agent_b = await store.create_agent(
+            name="B", description="Recipient", api_key=_DEFAULT_SHARED_KEY
+        )
+
+        queue = EventQueue()
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            destination=agent_b["agent_id"],
+        )
+        # Should not raise even though pubsub is None
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        tasks = [e for e in events if isinstance(e, Task)]
+        assert len(tasks) >= 1
+
+        await redis.aclose()
