@@ -17,6 +17,7 @@ jobs:
       - run: uv python install 3.13
       - run: uv sync
       - run: uv run ruff check .
+      - run: uv run ty check
 
   test-registry:
     runs-on: ubuntu-latest

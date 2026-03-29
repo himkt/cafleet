@@ -1,7 +1,7 @@
 # Introduce Type Checking with ty
 
 **Status**: Approved
-**Progress**: 11/12 tasks complete
+**Progress**: 12/12 tasks complete
 **Last Updated**: 2026-03-29
 
 ## Overview
@@ -164,7 +164,7 @@ dev = [
 
 ### Step 6: CI integration
 
-- [ ] Add `uv run ty check` step to the `lint` job in `.github/workflows/ci.yml` <!-- completed: -->
+- [x] Add `uv run ty check` step to the `lint` job in `.github/workflows/ci.yml` <!-- completed: 2026-03-29T12:12 -->
 
 ---
 
