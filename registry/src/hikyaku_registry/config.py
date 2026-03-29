@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     cleanup_interval_seconds: int = 3600
     auth0_domain: str = ""
     auth0_client_id: str = ""
+    auth0_audience: str = ""
 
     model_config = {"env_prefix": ""}
 

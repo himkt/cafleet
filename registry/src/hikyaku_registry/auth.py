@@ -107,7 +107,7 @@ async def verify_auth0_user(
             jwt=cred.credentials,
             key=signing_key.key,
             algorithms=["RS256"],
-            audience=settings.auth0_client_id,
+            audience=settings.auth0_audience,
         )
     except jwt.exceptions.InvalidTokenError:
         raise HTTPException(

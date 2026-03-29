@@ -55,6 +55,7 @@ async function request<T>(
 export async function getAuthConfig(): Promise<{
   domain: string;
   client_id: string;
+  audience: string;
 }> {
   const resp = await fetch("/ui/api/auth/config");
   if (!resp.ok) {

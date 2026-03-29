@@ -27,11 +27,12 @@ from hikyaku_registry.auth import Auth0Verifier, verify_auth0_user, get_user_id
 
 _TEST_AUTH0_DOMAIN = "test-tenant.auth0.com"
 _TEST_AUTH0_CLIENT_ID = "test-client-id-123"
+_TEST_AUTH0_AUDIENCE = "https://api.test.example.com"
 _TEST_JWT_TOKEN = "eyJhbGciOiJSUzI1NiJ9.test-payload.test-signature"
 _TEST_SUB = "auth0|user123"
 _TEST_DECODED_TOKEN = {
     "sub": _TEST_SUB,
-    "aud": _TEST_AUTH0_CLIENT_ID,
+    "aud": _TEST_AUTH0_AUDIENCE,
     "iss": f"https://{_TEST_AUTH0_DOMAIN}/",
     "exp": 9999999999,
     "iat": 1000000000,
@@ -186,7 +187,7 @@ class TestVerifyAuth0User:
         self, mock_get_jwks, mock_decode, mock_settings
     ):
         """Valid JWT: decoded token stored in request.scope['auth0']."""
-        mock_settings.auth0_client_id = _TEST_AUTH0_CLIENT_ID
+        mock_settings.auth0_audience = _TEST_AUTH0_AUDIENCE
         mock_key = MagicMock()
         mock_get_jwks.return_value.get_signing_key_from_jwt.return_value = mock_key
         mock_decode.return_value = _TEST_DECODED_TOKEN
@@ -204,7 +205,7 @@ class TestVerifyAuth0User:
         self, mock_get_jwks, mock_decode, mock_settings
     ):
         """Valid JWT: raw token string stored in request.scope['token']."""
-        mock_settings.auth0_client_id = _TEST_AUTH0_CLIENT_ID
+        mock_settings.auth0_audience = _TEST_AUTH0_AUDIENCE
         mock_key = MagicMock()
         mock_get_jwks.return_value.get_signing_key_from_jwt.return_value = mock_key
         mock_decode.return_value = _TEST_DECODED_TOKEN
@@ -221,8 +222,8 @@ class TestVerifyAuth0User:
     async def test_decodes_with_rs256_and_correct_audience(
         self, mock_get_jwks, mock_decode, mock_settings
     ):
-        """JWT decoded with RS256 algorithm and auth0_client_id as audience."""
-        mock_settings.auth0_client_id = _TEST_AUTH0_CLIENT_ID
+        """JWT decoded with RS256 algorithm and auth0_audience as audience."""
+        mock_settings.auth0_audience = _TEST_AUTH0_AUDIENCE
         mock_key = MagicMock()
         mock_get_jwks.return_value.get_signing_key_from_jwt.return_value = mock_key
         mock_decode.return_value = _TEST_DECODED_TOKEN
@@ -233,7 +234,7 @@ class TestVerifyAuth0User:
             jwt=_TEST_JWT_TOKEN,
             key=mock_key.key,
             algorithms=["RS256"],
-            audience=_TEST_AUTH0_CLIENT_ID,
+            audience=_TEST_AUTH0_AUDIENCE,
         )
 
     @pytest.mark.asyncio
@@ -244,7 +245,7 @@ class TestVerifyAuth0User:
         self, mock_get_jwks, mock_decode, mock_settings
     ):
         """Signing key is extracted from JWT via get_signing_key_from_jwt."""
-        mock_settings.auth0_client_id = _TEST_AUTH0_CLIENT_ID
+        mock_settings.auth0_audience = _TEST_AUTH0_AUDIENCE
         mock_jwks = MagicMock()
         mock_get_jwks.return_value = mock_jwks
         mock_decode.return_value = _TEST_DECODED_TOKEN

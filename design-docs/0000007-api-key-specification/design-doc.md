@@ -350,7 +350,7 @@ if (tenantId) {
 
 ### Step 1: Auth0 Configuration & JWT Validation
 
-- [x] Add `auth0_domain`, `auth0_client_id` to `Settings` in `config.py` <!-- completed: 2026-03-29T13:58 -->
+- [x] Add `auth0_domain`, `auth0_client_id`, `auth0_audience` to `Settings` in `config.py` <!-- completed: 2026-03-29T13:58, audience added: 2026-03-30 -->
 - [x] Add `PyJWT[crypto]` to `registry/pyproject.toml` <!-- completed: 2026-03-29T13:58 -->
 - [x] Implement `Auth0Verifier` class in `auth.py` with `PyJWKClient` (24-hour key cache via `lifespan`) <!-- completed: 2026-03-29T13:58 -->
 - [x] Implement `verify_auth0_user(request, cred)` FastAPI dependency: validates JWT, stores decoded token in `request.scope["auth0"]` <!-- completed: 2026-03-29T13:58 -->

@@ -65,6 +65,7 @@ function App() {
   const [authConfig, setAuthConfig] = useState<{
     domain: string;
     client_id: string;
+    audience: string;
   } | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
 
@@ -98,7 +99,7 @@ function App() {
       clientId={authConfig.client_id}
       authorizationParams={{
         redirect_uri: window.location.origin,
-        audience: authConfig.client_id,
+        audience: authConfig.audience,
       }}
     >
       <AppContent />

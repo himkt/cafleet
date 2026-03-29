@@ -198,7 +198,11 @@ class SendMessageRequest(BaseModel):
 
 @webui_router.get("/auth/config")
 async def auth_config():
-    return {"domain": settings.auth0_domain, "client_id": settings.auth0_client_id}
+    return {
+        "domain": settings.auth0_domain,
+        "client_id": settings.auth0_client_id,
+        "audience": settings.auth0_audience,
+    }
 
 
 @webui_router.post("/keys", status_code=201)
