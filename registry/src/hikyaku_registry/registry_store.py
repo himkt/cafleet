@@ -42,11 +42,10 @@ class RegistryStore:
         name: str,
         description: str,
         skills: list[dict] | None = None,
-        api_key: str | None = None,
+        *,
+        api_key: str,
     ) -> CreateAgentResult:
         agent_id = str(uuid.uuid4())
-        if api_key is None:
-            api_key = "hky_" + secrets.token_hex(16)
         api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
         registered_at = datetime.now(UTC).isoformat()
 

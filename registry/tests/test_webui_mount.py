@@ -64,12 +64,12 @@ class TestWebuiRouterMounted:
     """
 
     @pytest.mark.asyncio
-    async def test_login_route_accessible(self, mounted_app):
-        """POST /ui/api/login is reachable (returns 401 without auth, not 404)."""
+    async def test_auth_config_route_accessible(self, mounted_app):
+        """GET /ui/api/auth/config is reachable (returns 200)."""
         client = mounted_app["client"]
 
-        resp = await client.post("/ui/api/login")
-        assert resp.status_code == 401
+        resp = await client.get("/ui/api/auth/config")
+        assert resp.status_code == 200
 
     @pytest.mark.asyncio
     async def test_agents_route_accessible(self, mounted_app):
@@ -160,19 +160,15 @@ class TestRoutePrecedence:
     """
 
     @pytest.mark.asyncio
-    async def test_login_returns_json_not_html(self, mounted_app):
-        """POST /ui/api/login returns JSON (API), not HTML (static fallback)."""
+    async def test_auth_config_returns_json_not_html(self, mounted_app):
+        """GET /ui/api/auth/config returns JSON (API), not HTML (static fallback)."""
         client = mounted_app["client"]
 
-        resp = await client.post("/ui/api/login")
-        assert resp.status_code == 401
+        resp = await client.get("/ui/api/auth/config")
+        assert resp.status_code == 200
 
-        # Must be JSON from the API handler, not HTML from static fallback
         content_type = resp.headers.get("content-type", "")
         assert "application/json" in content_type
-
-        data = resp.json()
-        assert "error" in data
 
     @pytest.mark.asyncio
     async def test_agents_returns_json_not_html(self, mounted_app):

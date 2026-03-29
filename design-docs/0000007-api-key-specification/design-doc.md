@@ -1,7 +1,7 @@
 # API Key Specification: WebUI-Issued Keys with Auth0
 
 **Status**: Approved
-**Progress**: 28/43 tasks complete
+**Progress**: 33/43 tasks complete
 **Last Updated**: 2026-03-29
 
 ## Overview
@@ -386,11 +386,11 @@ if (tenantId) {
 
 ### Step 5: Agent Auth & Registration Changes (Server)
 
-- [ ] Update `get_authenticated_agent` in `auth.py` to check `apikey:{hash}` status <!-- completed: -->
-- [ ] Update `get_registration_tenant` in `auth.py` to always require auth and check `apikey:{hash}` <!-- completed: -->
-- [ ] Make `api_key` parameter required in `RegistryStore.create_agent`, remove key generation <!-- completed: -->
-- [ ] Update `register_agent` endpoint to handle required auth (no more `None` from `get_registration_tenant`) <!-- completed: -->
-- [ ] Add tests for registration with revoked key, without auth, with valid key <!-- completed: -->
+- [x] Update `get_authenticated_agent` in `auth.py` to check `apikey:{hash}` status <!-- completed: 2026-03-29 -->
+- [x] Update `get_registration_tenant` in `auth.py` to always require auth and check `apikey:{hash}` <!-- completed: 2026-03-29 -->
+- [x] Make `api_key` parameter required in `RegistryStore.create_agent`, remove key generation <!-- completed: 2026-03-29 -->
+- [x] Update `register_agent` endpoint to handle required auth (no more `None` from `get_registration_tenant`) <!-- completed: 2026-03-29 -->
+- [x] Add tests for registration with revoked key, without auth, with valid key <!-- completed: 2026-03-29 -->
 
 ### Step 6: CLI Changes
 

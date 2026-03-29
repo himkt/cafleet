@@ -14,6 +14,7 @@ import pytest
 from fastapi import HTTPException
 
 from hikyaku_registry.auth import get_authenticated_agent, get_registration_tenant
+from hikyaku_registry.registry_store import RegistryStore
 
 
 # ---------------------------------------------------------------------------

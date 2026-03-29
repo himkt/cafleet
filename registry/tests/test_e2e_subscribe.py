@@ -15,6 +15,7 @@ Success criteria from design doc:
 """
 
 import asyncio
+import hashlib
 import json
 import uuid
 from unittest.mock import AsyncMock
@@ -27,6 +28,9 @@ from hikyaku_registry.main import create_app
 from hikyaku_registry.pubsub import PubSubManager
 from hikyaku_registry.task_store import RedisTaskStore
 from hikyaku_registry.api.subscribe import event_generator
+
+_E2E_API_KEY = "hky_e2esubscribeKEYKEYKEYKEYKEYKEY"
+_E2E_API_KEY_HASH = hashlib.sha256(_E2E_API_KEY.encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -41,25 +45,38 @@ async def env():
     Also exposes pubsub and task_store for direct integration verification.
     """
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+
+    # Set up active API key
+    await redis.hset(
+        f"apikey:{_E2E_API_KEY_HASH}",
+        mapping={
+            "owner_sub": "auth0|e2e-test",
+            "created_at": "2026-03-29T00:00:00+00:00",
+            "status": "active",
+            "key_prefix": _E2E_API_KEY[:8],
+        },
+    )
+
     app = create_app(redis=redis)
     transport = ASGITransport(app=app)
     pubsub = PubSubManager(redis)
     task_store = RedisTaskStore(redis)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Register agent A (creates tenant)
+        # Register agent A
         resp_a = await client.post(
             "/api/v1/agents",
             json={"name": "AgentA", "description": "Sender"},
+            headers={"Authorization": f"Bearer {_E2E_API_KEY}"},
         )
         assert resp_a.status_code == 201
         agent_a = resp_a.json()
 
-        # Register agent B (joins tenant)
+        # Register agent B (same tenant)
         resp_b = await client.post(
             "/api/v1/agents",
             json={"name": "AgentB", "description": "Receiver"},
-            headers={"Authorization": f"Bearer {agent_a['api_key']}"},
+            headers={"Authorization": f"Bearer {_E2E_API_KEY}"},
         )
         assert resp_b.status_code == 201
         agent_b = resp_b.json()

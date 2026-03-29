@@ -9,6 +9,7 @@ Response: text/event-stream
 """
 
 import asyncio
+import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
@@ -24,6 +25,11 @@ from hikyaku_registry.pubsub import PubSubManager
 from hikyaku_registry.task_store import RedisTaskStore
 from hikyaku_registry.api.subscribe import event_generator
 
+_SSE_API_KEY = "hky_ssetestdefaultKEYKEYKEYKEYKEYKE"
+_SSE_API_KEY_HASH = hashlib.sha256(_SSE_API_KEY.encode()).hexdigest()
+_SSE_OTHER_API_KEY = "hky_ssetestotherKEYKEYKEYKEYKEYKEY"
+_SSE_OTHER_API_KEY_HASH = hashlib.sha256(_SSE_OTHER_API_KEY.encode()).hexdigest()
+
 
 # ---------------------------------------------------------------------------
 # Fixtures — HTTP (for auth tests)
@@ -35,18 +41,36 @@ async def sse_env():
     """Provide a full ASGI app with fakeredis for SSE endpoint testing.
 
     Yields a dict with client, redis, stores, and pre-registered agents.
-    First agent creates a new tenant; second agent joins via returned api_key.
     """
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+
+    # Set up active API keys
+    await redis.hset(
+        f"apikey:{_SSE_API_KEY_HASH}",
+        mapping={
+            "owner_sub": "auth0|sse-test",
+            "created_at": "2026-03-29T00:00:00+00:00",
+            "status": "active",
+            "key_prefix": _SSE_API_KEY[:8],
+        },
+    )
+    await redis.hset(
+        f"apikey:{_SSE_OTHER_API_KEY_HASH}",
+        mapping={
+            "owner_sub": "auth0|sse-test-other",
+            "created_at": "2026-03-29T00:00:00+00:00",
+            "status": "active",
+            "key_prefix": _SSE_OTHER_API_KEY[:8],
+        },
+    )
+
     app = create_app(redis=redis)
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Register agent_a without api_key — creates a new tenant
-        agent_a = await _register_agent(client, "Agent A", "Sender")
+        agent_a = await _register_agent(client, "Agent A", "Sender", api_key=_SSE_API_KEY)
         api_key = agent_a["api_key"]
 
-        # Register agent_b with agent_a's api_key — joins the same tenant
         agent_b = await _register_agent(
             client, "Agent B", "Receiver", api_key=api_key
         )
@@ -235,9 +259,9 @@ class TestSSEAuth:
         client = sse_env["client"]
         api_key = sse_env["api_key"]
 
-        # Register an agent without api_key — creates a new (different) tenant
+        # Register an agent with a different api_key — different tenant
         other_agent = await _register_agent(
-            client, "Other Agent", "Different tenant"
+            client, "Other Agent", "Different tenant", api_key=_SSE_OTHER_API_KEY
         )
 
         # Try to subscribe using the first tenant's API key with the other agent

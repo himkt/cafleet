@@ -39,6 +39,10 @@ async def get_authenticated_agent(
     token = _extract_bearer_token(request)
     tenant_id = hashlib.sha256(token.encode()).hexdigest()
 
+    key_status = await store._redis.hget(f"apikey:{tenant_id}", "status")
+    if key_status != "active":
+        raise HTTPException(status_code=401)
+
     agent_id = request.headers.get("x-agent-id")
     if not agent_id:
         raise HTTPException(status_code=401)
@@ -55,25 +59,21 @@ async def get_authenticated_agent(
 
 async def get_registration_tenant(
     request: Request = None, store=None  # ty: ignore[invalid-parameter-default]
-) -> tuple[str, str] | None:
-    """Extract optional Authorization header for registration flow.
+) -> tuple[str, str]:
+    """Extract and validate Authorization header for registration flow.
 
-    Returns None if no Authorization header (new tenant flow).
-    Returns (api_key, api_key_hash) if valid auth with existing tenant.
-    Raises HTTPException(401) if auth is malformed or tenant is dead.
+    Always requires a valid, active API key.
+    Returns (api_key, api_key_hash).
+    Raises HTTPException(401) if auth is missing, malformed, or key is not active.
     """
     if request is None or store is None:
         raise HTTPException(status_code=401)
 
-    auth_header = request.headers.get("authorization")
-    if not auth_header:
-        return None
-
     token = _extract_bearer_token(request)
     api_key_hash = hashlib.sha256(token.encode()).hexdigest()
 
-    tenant_count = await store._redis.scard(f"tenant:{api_key_hash}:agents")
-    if tenant_count == 0:
+    key_status = await store._redis.hget(f"apikey:{api_key_hash}", "status")
+    if key_status != "active":
         raise HTTPException(status_code=401)
 
     return (token, api_key_hash)

@@ -7,6 +7,7 @@ Tests end-to-end flows through the ASGI app (FastAPI + A2A Starlette mount):
 - CancelTask retraction
 """
 
+import hashlib
 import uuid
 
 import pytest
@@ -14,6 +15,10 @@ import fakeredis.aioredis
 from httpx import AsyncClient, ASGITransport
 
 from hikyaku_registry.main import create_app
+
+# Default API key for integration tests
+_DEFAULT_API_KEY = "hky_a2atestdefaultKEYKEYKEYKEYKEYK"
+_DEFAULT_API_KEY_HASH = hashlib.sha256(_DEFAULT_API_KEY.encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -25,6 +30,18 @@ from hikyaku_registry.main import create_app
 async def broker_client():
     """Full broker ASGI app backed by fakeredis, exposed via httpx client."""
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+
+    # Set up active API key for registration
+    await redis.hset(
+        f"apikey:{_DEFAULT_API_KEY_HASH}",
+        mapping={
+            "owner_sub": "auth0|a2a-test",
+            "created_at": "2026-03-29T00:00:00+00:00",
+            "status": "active",
+            "key_prefix": _DEFAULT_API_KEY[:8],
+        },
+    )
+
     app = create_app(redis=redis)
     transport = ASGITransport(app=app)
 
@@ -34,14 +51,12 @@ async def broker_client():
     await redis.aclose()
 
 
-async def _register_agent(client, name="Test Agent", description="A test agent", skills=None, api_key=None):
+async def _register_agent(client, name="Test Agent", description="A test agent", skills=None, api_key=_DEFAULT_API_KEY):
     """Register an agent via POST and return the response data."""
     body = {"name": name, "description": description}
     if skills is not None:
         body["skills"] = skills
-    headers = {}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    headers = {"Authorization": f"Bearer {api_key}"}
     resp = await client.post("/api/v1/agents", json=body, headers=headers)
     assert resp.status_code == 201, f"Registration failed: {resp.text}"
     return resp.json()

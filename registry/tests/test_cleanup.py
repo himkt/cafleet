@@ -45,9 +45,12 @@ async def cleanup_env():
 # ---------------------------------------------------------------------------
 
 
+_CLEANUP_API_KEY = "hky_cleanuptestKEYKEYKEYKEYKEYKEY"
+
+
 async def _register_and_deregister(store, redis, name="Expired Agent", days_ago=10):
     """Register an agent, deregister it, and backdate deregistered_at."""
-    result = await store.create_agent(name=name, description="Will be cleaned up")
+    result = await store.create_agent(name=name, description="Will be cleaned up", api_key=_CLEANUP_API_KEY)
     agent_id = result["agent_id"]
     await store.deregister_agent(agent_id)
 
@@ -209,7 +212,7 @@ class TestCleanupRetentionPeriod:
         """Active (not deregistered) agents are never cleaned up."""
         redis, store = cleanup_env["redis"], cleanup_env["store"]
 
-        result = await store.create_agent(name="Active Agent", description="Still active")
+        result = await store.create_agent(name="Active Agent", description="Still active", api_key=_CLEANUP_API_KEY)
         agent_id = result["agent_id"]
 
         await cleanup_expired_agents(redis, ttl_days=7)
@@ -267,7 +270,7 @@ class TestCleanupIsolation:
         _expired = await _register_and_deregister(store, redis, name="Expired", days_ago=10)
 
         # Agent B: active, has tasks
-        active = await store.create_agent(name="Active Agent", description="Active")
+        active = await store.create_agent(name="Active Agent", description="Active", api_key=_CLEANUP_API_KEY)
         active_task_id = await _create_task_for_agent(
             redis, task_store, active["agent_id"]
         )
@@ -288,11 +291,11 @@ class TestCleanupIsolation:
             cleanup_env["redis"], cleanup_env["store"], cleanup_env["task_store"],
         )
 
-        sender = await store.create_agent(name="Sender", description="Sends msgs")
+        sender = await store.create_agent(name="Sender", description="Sends msgs", api_key=_CLEANUP_API_KEY)
         sender_id = sender["agent_id"]
 
         # Create task for an active agent from this sender
-        active = await store.create_agent(name="Active Recv", description="Active")
+        active = await store.create_agent(name="Active Recv", description="Active", api_key=_CLEANUP_API_KEY)
         active_task = await _create_task_for_agent(
             redis, task_store, active["agent_id"], sender_id=sender_id
         )
@@ -332,8 +335,8 @@ class TestCleanupNoOp:
         """Cleanup with only active agents returns 0."""
         redis, store = cleanup_env["redis"], cleanup_env["store"]
 
-        await store.create_agent(name="Active 1", description="Active")
-        await store.create_agent(name="Active 2", description="Active")
+        await store.create_agent(name="Active 1", description="Active", api_key=_CLEANUP_API_KEY)
+        await store.create_agent(name="Active 2", description="Active", api_key=_CLEANUP_API_KEY)
 
         count = await cleanup_expired_agents(redis, ttl_days=7)
         assert count == 0
