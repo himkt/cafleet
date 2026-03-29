@@ -4,42 +4,80 @@ Base path: `/ui/api`
 
 ## Authentication
 
-All endpoints require `Authorization: Bearer <api_key>` header. The server computes `tenant_id = SHA256(api_key)` to identify the tenant. No server-side session — the raw API key lives only in the browser's JavaScript memory.
+The WebUI uses two authentication mechanisms:
 
-Login succeeds if at least one agent exists for the tenant: either an active agent in `tenant:{tenant_id}:agents`, or a deregistered agent with matching `api_key_hash` that still has messages in Redis.
+- **Auth0 JWT**: `Authorization: Bearer <auth0_jwt>` — required on all endpoints except `GET /ui/api/auth/config`. Validated server-side via Auth0 JWKS.
+- **Tenant selection**: `X-Tenant-Id: <api_key_hash>` — required on tenant-scoped endpoints (agents, inbox, sent, send). The backend verifies that the `X-Tenant-Id` belongs to the authenticated Auth0 user by checking `account:{sub}:keys` set membership.
+
+No server-side session. The Auth0 SPA SDK manages tokens in the browser.
 
 ## Endpoints
 
-### POST /ui/api/login — Validate API Key
+### GET /ui/api/auth/config — Auth0 Client Config
 
-Validates the API key and returns tenant agents (active + deregistered-with-messages).
-
-**Request**: `Authorization: Bearer <api_key>` header only (no body).
+Returns Auth0 domain, client ID, and audience for SPA initialization. No authentication required.
 
 **Response** (200 OK):
 
 ```json
 {
-  "tenant_id": "sha256hex...",
-  "agents": [
-    {
-      "agent_id": "uuid",
-      "name": "Agent A",
-      "description": "My agent",
-      "status": "active",
-      "registered_at": "2026-03-29T10:00:00+00:00"
-    }
-  ]
+  "domain": "myapp.auth0.com",
+  "client_id": "abc123...",
+  "audience": "hikyaku"
 }
 ```
 
-**Error** (401): `{"error": "Invalid API key"}` — no agents found for the computed tenant.
+### POST /ui/api/keys — Create API Key
+
+Creates a new API key owned by the authenticated Auth0 user. The raw key is shown only once.
+
+**Request**: `Authorization: Bearer <auth0_jwt>` header only (no body).
+
+**Response** (201 Created):
+
+```json
+{
+  "api_key": "hky_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+  "tenant_id": "sha256hex...",
+  "created_at": "2026-03-29T10:00:00+00:00"
+}
+```
+
+### GET /ui/api/keys — List API Keys
+
+Lists all API keys owned by the authenticated Auth0 user. Does NOT return raw keys.
+
+**Request**: `Authorization: Bearer <auth0_jwt>` header.
+
+**Response** (200 OK):
+
+```json
+[
+  {
+    "tenant_id": "sha256hex...",
+    "key_prefix": "hky_a1b2",
+    "created_at": "2026-03-29T10:00:00+00:00",
+    "status": "active",
+    "agent_count": 3
+  }
+]
+```
+
+### DELETE /ui/api/keys/{tenant_id} — Revoke API Key
+
+Revokes an API key and deregisters all agents under the tenant. The authenticated user must own the key.
+
+**Request**: `Authorization: Bearer <auth0_jwt>` header.
+
+**Response**: 204 No Content.
+
+**Error**: 404 if `tenant_id` is not owned by the authenticated user.
 
 ### GET /ui/api/agents — List Agents
 
-Same agent list as login response. Used for manual refresh.
+Returns agents belonging to the selected tenant.
 
-**Request**: `Authorization: Bearer <api_key>` header.
+**Request**: `Authorization: Bearer <auth0_jwt>` + `X-Tenant-Id: <api_key_hash>` headers.
 
 **Response** (200 OK):
 
@@ -52,6 +90,8 @@ Same agent list as login response. Used for manual refresh.
 ### GET /ui/api/agents/{agent_id}/inbox — Inbox Messages
 
 Returns messages received by the agent (`context_id = agent_id`), excluding `broadcast_summary` type tasks. Ordered newest first.
+
+**Request**: `Authorization: Bearer <auth0_jwt>` + `X-Tenant-Id: <api_key_hash>` headers.
 
 **Response** (200 OK):
 
@@ -81,6 +121,8 @@ The `body` field is extracted from the task's first artifact's first text part. 
 
 Returns messages sent by the agent (task IDs from `tasks:sender:{agent_id}`), excluding `broadcast_summary` type tasks. Ordered newest first.
 
+**Request**: `Authorization: Bearer <auth0_jwt>` + `X-Tenant-Id: <api_key_hash>` headers.
+
 Same response format as inbox.
 
 ### POST /ui/api/messages/send — Send Message
@@ -90,7 +132,8 @@ Sends a unicast message to a destination agent within the same tenant.
 **Request**:
 
 ```
-Authorization: Bearer <api_key>
+Authorization: Bearer <auth0_jwt>
+X-Tenant-Id: <api_key_hash>
 ```
 
 ```json

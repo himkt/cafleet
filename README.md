@@ -15,7 +15,7 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 - **MCP Server** -- Transparent proxy for Claude Code and other MCP clients; `poll` returns instantly from SSE-buffered messages
 - **Message Lifecycle** -- Acknowledge, cancel (retract), and track message status
 - **Two-Header Auth** -- API key (tenant) + Agent-Id (identity) required on all authenticated requests
-- **WebUI** -- Browser-based message viewer and sender; operators log in with their tenant API key to browse agents and message history
+- **WebUI** -- Browser-based dashboard with Auth0 login; users manage API keys, select tenants, and browse agents and message history
 - **CLI Tool** -- Full-featured command-line client for all broker operations
 
 ## Architecture
@@ -51,8 +51,9 @@ Key design decisions:
 - The `contextId` field is set to the recipient's agent ID on every delivery Task, enabling inbox discovery via `ListTasks(contextId=myAgentId)`.
 - Task states map to message lifecycle: `INPUT_REQUIRED` (unread), `COMPLETED` (acknowledged), `CANCELED` (retracted), `FAILED` (routing error).
 - FastAPI is the ASGI parent; the A2A SDK handler is mounted at the root path. FastAPI routes (`/api/v1/*`) take priority.
-- Tenants are ephemeral: when the last agent in a tenant deregisters, the API key becomes invalid. A new registration without auth is needed to create a fresh tenant.
+- Tenants are created via WebUI API key management. Revoking a key deregisters all agents and invalidates the tenant. An empty tenant (no agents) remains valid as long as its key is active.
 - The broker exposes three API surfaces: A2A Server (JSON-RPC 2.0), Registry REST API (`/api/v1/`), and WebUI (`/ui/`).
+- The WebUI uses Auth0 for user authentication. Agent-to-broker communication uses API keys (unchanged).
 
 ## Quick Start
 
@@ -61,6 +62,7 @@ Key design decisions:
 - Python 3.12+
 - Redis (running locally or via Docker)
 - [uv](https://docs.astral.sh/uv/)
+- [Auth0](https://auth0.com/) account (for WebUI user authentication)
 
 ### Start the Broker Server
 
@@ -78,21 +80,24 @@ cd client
 uv tool install .
 ```
 
-### Register an Agent (new tenant)
+### Create an API Key
+
+Log into the WebUI at `http://localhost:8000/ui/` via Auth0, then create an API key from the key management page. The raw key is shown only once -- save it securely.
+
+### Register an Agent
 
 ```bash
+hikyaku --api-key "hky_..." register --name "my-agent" --description "A coding assistant"
+```
+
+Or via environment variable (recommended):
+
+```bash
+export HIKYAKU_API_KEY="hky_..."
 hikyaku register --name "my-agent" --description "A coding assistant"
 ```
 
-This creates a new tenant and returns an agent ID and API key. Save both -- the API key is shown only once.
-
-### Register a Second Agent (join existing tenant)
-
-```bash
-hikyaku --api-key "hky_..." register --name "my-second-agent" --description "Another agent"
-```
-
-Providing `--api-key` (or `HIKYAKU_API_KEY`) at registration joins the existing tenant.
+Registration always requires a valid API key created through the WebUI. The `--api-key` flag (or `HIKYAKU_API_KEY` env var) is mandatory.
 
 ### Set Credentials
 
@@ -125,7 +130,7 @@ All commands accept `--url` (default: `http://localhost:8000`), `--api-key`, `--
 
 | Command | Description |
 |---|---|
-| `hikyaku register` | Register a new agent; omit `--api-key` to create a new tenant, include it to join an existing one |
+| `hikyaku register` | Register a new agent; `--api-key` (or `HIKYAKU_API_KEY`) is always required |
 | `hikyaku send` | Send a unicast message to another agent in the same tenant |
 | `hikyaku broadcast` | Broadcast a message to all agents in the same tenant |
 | `hikyaku poll` | Poll inbox for incoming messages |
@@ -139,14 +144,16 @@ All commands accept `--url` (default: `http://localhost:8000`), `--api-key`, `--
 
 ### Authentication
 
-All requests (except initial registration and the Agent Card endpoint) require two headers:
+**Agent-to-broker**: All requests require two headers:
 
 | Header | Purpose |
 |---|---|
 | `Authorization: Bearer <api_key>` | Authenticates the tenant (`SHA-256(api_key)` = `tenant_id`) |
 | `X-Agent-Id: <agent_id>` | Identifies the specific agent within the tenant |
 
-API keys use the format `hky_` + 32 random hex characters (e.g., `hky_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4`).
+API keys use the format `hky_` + 32 random hex characters (e.g., `hky_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4`). Keys are created through the WebUI key management interface (requires Auth0 login).
+
+**WebUI**: Auth0 JWT in `Authorization` header. Tenant-scoped endpoints additionally require `X-Tenant-Id` header.
 
 ### Registry API (REST)
 
@@ -154,7 +161,7 @@ Base path: `/api/v1`
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/api/v1/agents` | Optional | Register a new agent; no auth creates a new tenant, auth header joins existing tenant |
+| POST | `/api/v1/agents` | Bearer | Register a new agent; API key (created via WebUI) is always required |
 | GET | `/api/v1/agents` | Bearer + Agent-Id | List agents in the caller's tenant |
 | GET | `/api/v1/agents/{id}` | Bearer + Agent-Id | Get agent detail (404 if not in same tenant) |
 | DELETE | `/api/v1/agents/{id}` | Bearer + Agent-Id | Deregister an agent (self only) |
@@ -203,15 +210,18 @@ Registry API errors use a consistent JSON envelope:
 
 Base path: `/ui/api`
 
-The WebUI API is consumed by the browser SPA. Authentication uses `Authorization: Bearer <api_key>` only (no `X-Agent-Id` required). No server-side session; the key lives in browser memory.
+The WebUI API is consumed by the browser SPA. Authentication uses Auth0 JWT (`Authorization: Bearer <auth0_jwt>`). Tenant-scoped endpoints require an `X-Tenant-Id` header to select which tenant's data to view.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/ui/api/login` | Validate API key; returns tenant agent list |
-| GET | `/ui/api/agents` | List agents in the tenant |
-| GET | `/ui/api/agents/{id}/inbox` | Inbox messages for an agent (newest first) |
-| GET | `/ui/api/agents/{id}/sent` | Sent messages for an agent (newest first) |
-| POST | `/ui/api/messages/send` | Send a unicast message between two same-tenant agents |
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/ui/api/auth/config` | None | Returns Auth0 domain + client_id for SPA initialization |
+| POST | `/ui/api/keys` | JWT | Create a new API key (raw key shown once) |
+| GET | `/ui/api/keys` | JWT | List API keys owned by the authenticated user |
+| DELETE | `/ui/api/keys/{tenant_id}` | JWT | Revoke an API key and deregister all its agents |
+| GET | `/ui/api/agents` | JWT + Tenant-Id | List agents in the selected tenant |
+| GET | `/ui/api/agents/{id}/inbox` | JWT + Tenant-Id | Inbox messages for an agent (newest first) |
+| GET | `/ui/api/agents/{id}/sent` | JWT + Tenant-Id | Sent messages for an agent (newest first) |
+| POST | `/ui/api/messages/send` | JWT + Tenant-Id | Send a unicast message between two same-tenant agents |
 
 The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vite + React + TypeScript + Tailwind CSS).
 

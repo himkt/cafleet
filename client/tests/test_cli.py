@@ -95,8 +95,17 @@ class TestRegisterCommand:
         ):
             result = runner.invoke(
                 cli,
-                ["--url", BROKER_URL, "register", "--name", "test-agent",
-                 "--description", "A test agent"],
+                [
+                    "--url",
+                    BROKER_URL,
+                    "--api-key",
+                    API_KEY,
+                    "register",
+                    "--name",
+                    "test-agent",
+                    "--description",
+                    "A test agent",
+                ],
             )
 
         assert result.exit_code == 0
@@ -112,8 +121,17 @@ class TestRegisterCommand:
         ):
             result = runner.invoke(
                 cli,
-                ["--url", BROKER_URL, "register", "--name", "test-agent",
-                 "--description", "A test agent"],
+                [
+                    "--url",
+                    BROKER_URL,
+                    "--api-key",
+                    API_KEY,
+                    "register",
+                    "--name",
+                    "test-agent",
+                    "--description",
+                    "A test agent",
+                ],
             )
 
         assert result.exit_code == 0
@@ -130,8 +148,18 @@ class TestRegisterCommand:
         ):
             result = runner.invoke(
                 cli,
-                ["--url", BROKER_URL, "--json", "register", "--name", "test-agent",
-                 "--description", "A test agent"],
+                [
+                    "--url",
+                    BROKER_URL,
+                    "--api-key",
+                    API_KEY,
+                    "--json",
+                    "register",
+                    "--name",
+                    "test-agent",
+                    "--description",
+                    "A test agent",
+                ],
             )
 
         assert result.exit_code == 0
@@ -139,8 +167,8 @@ class TestRegisterCommand:
         assert data["agent_id"] == AGENT_ID
         assert data["api_key"] == API_KEY
 
-    def test_register_no_auth_required(self, runner):
-        """Register does not require --api-key or --agent-id."""
+    def test_register_requires_api_key(self, runner):
+        """Register requires global --api-key."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -148,33 +176,65 @@ class TestRegisterCommand:
         ):
             result = runner.invoke(
                 cli,
-                ["--url", BROKER_URL, "register", "--name", "test-agent",
-                 "--description", "A test agent"],
+                [
+                    "--url",
+                    BROKER_URL,
+                    "register",
+                    "--name",
+                    "test-agent",
+                    "--description",
+                    "A test agent",
+                ],
             )
 
-        assert result.exit_code == 0
+        assert result.exit_code != 0
 
     def test_register_requires_name(self, runner):
         """Register fails if --name is not provided."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "register", "--description", "A test agent"],
+            [
+                "--url",
+                BROKER_URL,
+                "--api-key",
+                API_KEY,
+                "register",
+                "--description",
+                "A test agent",
+            ],
         )
 
         assert result.exit_code != 0
 
     def test_register_with_skills(self, runner):
         """Register passes skills JSON to api.register_agent."""
-        skills_json = json.dumps([
-            {"id": "frontend", "name": "Frontend Dev",
-             "description": "React/TS", "tags": ["react", "typescript"]}
-        ])
+        skills_json = json.dumps(
+            [
+                {
+                    "id": "frontend",
+                    "name": "Frontend Dev",
+                    "description": "React/TS",
+                    "tags": ["react", "typescript"],
+                }
+            ]
+        )
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
-                ["--url", BROKER_URL, "register", "--name", "test-agent",
-                 "--description", "A test agent", "--skills", skills_json],
+                [
+                    "--url",
+                    BROKER_URL,
+                    "--api-key",
+                    API_KEY,
+                    "register",
+                    "--name",
+                    "test-agent",
+                    "--description",
+                    "A test agent",
+                    "--skills",
+                    skills_json,
+                ],
             )
 
         assert result.exit_code == 0
@@ -191,8 +251,17 @@ class TestRegisterCommand:
         ):
             result = runner.invoke(
                 cli,
-                ["--url", BROKER_URL, "register", "--name", "test-agent",
-                 "--description", "A test agent"],
+                [
+                    "--url",
+                    BROKER_URL,
+                    "--api-key",
+                    API_KEY,
+                    "register",
+                    "--name",
+                    "test-agent",
+                    "--description",
+                    "A test agent",
+                ],
             )
 
         assert result.exit_code != 0
@@ -213,8 +282,7 @@ class TestSendCommand:
         with patch("hikyaku_client.cli.api.send_message", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "send", "--to", target_id,
-                 "--text", "Hello from CLI"],
+                [*_auth_opts(), "send", "--to", target_id, "--text", "Hello from CLI"],
             )
 
         assert result.exit_code == 0
@@ -226,8 +294,15 @@ class TestSendCommand:
         with patch("hikyaku_client.cli.api.send_message", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "--json", "send", "--to", "target-001",
-                 "--text", "Hello"],
+                [
+                    *_auth_opts(),
+                    "--json",
+                    "send",
+                    "--to",
+                    "target-001",
+                    "--text",
+                    "Hello",
+                ],
             )
 
         assert result.exit_code == 0
@@ -256,8 +331,7 @@ class TestSendCommand:
         """Send fails without --api-key."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "send", "--to", "target-001",
-             "--text", "Hello"],
+            ["--url", BROKER_URL, "send", "--to", "target-001", "--text", "Hello"],
         )
 
         assert result.exit_code != 0
@@ -289,8 +363,13 @@ class TestBroadcastCommand:
         with patch("hikyaku_client.cli.api.broadcast_message", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "--json", "broadcast",
-                 "--text", "Build failed on main"],
+                [
+                    *_auth_opts(),
+                    "--json",
+                    "broadcast",
+                    "--text",
+                    "Build failed on main",
+                ],
             )
 
         assert result.exit_code == 0
@@ -682,7 +761,7 @@ class TestGlobalOptions:
             result = runner.invoke(
                 cli,
                 ["register", "--name", "test-agent", "--description", "test"],
-                env={"HIKYAKU_URL": BROKER_URL},
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
             )
 
         assert result.exit_code == 0
@@ -725,8 +804,17 @@ class TestGlobalOptions:
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
-                ["--url", "http://custom:9000", "register",
-                 "--name", "test-agent", "--description", "test"],
+                [
+                    "--url",
+                    "http://custom:9000",
+                    "--api-key",
+                    API_KEY,
+                    "register",
+                    "--name",
+                    "test-agent",
+                    "--description",
+                    "test",
+                ],
                 env={"HIKYAKU_URL": BROKER_URL},
             )
 
@@ -741,7 +829,15 @@ class TestGlobalOptions:
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
-                ["register", "--name", "test-agent", "--description", "test"],
+                [
+                    "--api-key",
+                    API_KEY,
+                    "register",
+                    "--name",
+                    "test-agent",
+                    "--description",
+                    "test",
+                ],
                 env={},
             )
 
@@ -779,8 +875,7 @@ class TestErrorHandling:
         ):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "send", "--to", "nonexistent",
-                 "--text", "Hello"],
+                [*_auth_opts(), "send", "--to", "nonexistent", "--text", "Hello"],
             )
 
         assert result.exit_code != 0
@@ -789,8 +884,19 @@ class TestErrorHandling:
         """Register with invalid --skills JSON shows error."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "register", "--name", "test-agent",
-             "--description", "test", "--skills", "not-valid-json"],
+            [
+                "--url",
+                BROKER_URL,
+                "--api-key",
+                API_KEY,
+                "register",
+                "--name",
+                "test-agent",
+                "--description",
+                "test",
+                "--skills",
+                "not-valid-json",
+            ],
         )
 
         assert result.exit_code != 0
@@ -809,98 +915,102 @@ class TestErrorHandling:
 # Multi-tenant CLI tests (access-control feature)
 # ===========================================================================
 
-JOIN_TENANT_KEY = "hky_existingTenantKey0000000000000"
 
+class TestRegisterWithGlobalApiKey:
+    """Tests for register using the global --api-key.
 
-class TestRegisterJoinTenant:
-    """Tests for `hikyaku register --api-key` (join tenant flow).
-
-    The register command gains an optional --api-key flag that sends
-    the API key in the Authorization header to join an existing tenant.
+    The register command no longer has its own --api-key option.
+    It always uses the global --api-key from the cli group.
     """
 
-    def test_register_with_api_key_passes_key(self, runner):
-        """Register with --api-key passes api_key to api.register_agent."""
+    def test_register_global_api_key_passes_key(self, runner):
+        """Register with global --api-key passes api_key to api.register_agent."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
-                ["--url", BROKER_URL, "register",
-                 "--name", "Joiner", "--description", "Join tenant",
-                 "--api-key", JOIN_TENANT_KEY],
+                [
+                    "--url",
+                    BROKER_URL,
+                    "--api-key",
+                    API_KEY,
+                    "register",
+                    "--name",
+                    "Joiner",
+                    "--description",
+                    "Join tenant",
+                ],
             )
 
         assert result.exit_code == 0
-        # Verify api_key was passed to api.register_agent
         call_kwargs = mock.call_args
         assert call_kwargs is not None
-        # api_key should be in the call (positional or keyword)
         all_args = list(call_kwargs.args) + list(call_kwargs.kwargs.values())
-        assert JOIN_TENANT_KEY in all_args or call_kwargs.kwargs.get("api_key") == JOIN_TENANT_KEY
+        assert API_KEY in all_args or call_kwargs.kwargs.get("api_key") == API_KEY
 
-    def test_register_without_api_key_no_key_passed(self, runner):
-        """Register without --api-key does not pass api_key to api."""
+    def test_register_shows_output(self, runner):
+        """Register with global --api-key shows agent_id."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
-                ["--url", BROKER_URL, "register",
-                 "--name", "Creator", "--description", "New tenant"],
-            )
-
-        assert result.exit_code == 0
-        call_kwargs = mock.call_args
-        # api_key should be None or not provided
-        api_key_val = call_kwargs.kwargs.get("api_key")
-        if api_key_val is not None:
-            assert api_key_val is None  # explicitly None means not joining
-
-    def test_register_join_tenant_shows_output(self, runner):
-        """Register with --api-key shows agent_id and api_key."""
-        joined_agent = {
-            **SAMPLE_AGENT,
-            "api_key": JOIN_TENANT_KEY,  # echoed back
-        }
-        mock = AsyncMock(return_value=joined_agent)
-        with patch("hikyaku_client.cli.api.register_agent", mock):
-            result = runner.invoke(
-                cli,
-                ["--url", BROKER_URL, "register",
-                 "--name", "Joiner", "--description", "Join",
-                 "--api-key", JOIN_TENANT_KEY],
+                [
+                    "--url",
+                    BROKER_URL,
+                    "--api-key",
+                    API_KEY,
+                    "register",
+                    "--name",
+                    "Joiner",
+                    "--description",
+                    "Join",
+                ],
             )
 
         assert result.exit_code == 0
         assert AGENT_ID in result.output
 
-    def test_register_join_tenant_json_output(self, runner):
-        """Register with --api-key and --json outputs valid JSON."""
-        joined_agent = {
-            **SAMPLE_AGENT,
-            "api_key": JOIN_TENANT_KEY,
-        }
-        mock = AsyncMock(return_value=joined_agent)
+    def test_register_json_output(self, runner):
+        """Register with global --api-key and --json outputs valid JSON."""
+        mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
-                ["--url", BROKER_URL, "--json", "register",
-                 "--name", "Joiner", "--description", "Join",
-                 "--api-key", JOIN_TENANT_KEY],
+                [
+                    "--url",
+                    BROKER_URL,
+                    "--api-key",
+                    API_KEY,
+                    "--json",
+                    "register",
+                    "--name",
+                    "Joiner",
+                    "--description",
+                    "Join",
+                ],
             )
 
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert data["api_key"] == JOIN_TENANT_KEY
+        assert data["agent_id"] == AGENT_ID
 
-    def test_register_join_tenant_api_error(self, runner):
-        """Register with invalid --api-key shows error."""
+    def test_register_api_error(self, runner):
+        """Register with invalid API key shows error."""
         mock = AsyncMock(side_effect=Exception("401: Invalid API key"))
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
-                ["--url", BROKER_URL, "register",
-                 "--name", "Joiner", "--description", "Join",
-                 "--api-key", "hky_invalid000000000000000000000000"],
+                [
+                    "--url",
+                    BROKER_URL,
+                    "--api-key",
+                    "hky_invalid000000000000000000000000",
+                    "register",
+                    "--name",
+                    "Joiner",
+                    "--description",
+                    "Join",
+                ],
             )
 
         assert result.exit_code != 0

@@ -28,8 +28,7 @@ async def register_agent(
     request: Request,
     store: RegistryStore = Depends(get_registry_store),
 ) -> CreateAgentResult:
-    tenant_info = await get_registration_tenant(request, store)
-    api_key = tenant_info[0] if tenant_info is not None else None
+    api_key, _tenant_id = await get_registration_tenant(request, store)
 
     result = await store.create_agent(
         name=body.name,

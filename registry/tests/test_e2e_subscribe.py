@@ -15,6 +15,7 @@ Success criteria from design doc:
 """
 
 import asyncio
+import hashlib
 import json
 import uuid
 from unittest.mock import AsyncMock
@@ -27,6 +28,9 @@ from hikyaku_registry.main import create_app
 from hikyaku_registry.pubsub import PubSubManager
 from hikyaku_registry.task_store import RedisTaskStore
 from hikyaku_registry.api.subscribe import event_generator
+
+_E2E_API_KEY = "hky_e2esubscribeKEYKEYKEYKEYKEYKEY"
+_E2E_API_KEY_HASH = hashlib.sha256(_E2E_API_KEY.encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -41,25 +45,38 @@ async def env():
     Also exposes pubsub and task_store for direct integration verification.
     """
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+
+    # Set up active API key
+    await redis.hset(
+        f"apikey:{_E2E_API_KEY_HASH}",
+        mapping={
+            "owner_sub": "auth0|e2e-test",
+            "created_at": "2026-03-29T00:00:00+00:00",
+            "status": "active",
+            "key_prefix": _E2E_API_KEY[:8],
+        },
+    )
+
     app = create_app(redis=redis)
     transport = ASGITransport(app=app)
     pubsub = PubSubManager(redis)
     task_store = RedisTaskStore(redis)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Register agent A (creates tenant)
+        # Register agent A
         resp_a = await client.post(
             "/api/v1/agents",
             json={"name": "AgentA", "description": "Sender"},
+            headers={"Authorization": f"Bearer {_E2E_API_KEY}"},
         )
         assert resp_a.status_code == 201
         agent_a = resp_a.json()
 
-        # Register agent B (joins tenant)
+        # Register agent B (same tenant)
         resp_b = await client.post(
             "/api/v1/agents",
             json={"name": "AgentB", "description": "Receiver"},
-            headers={"Authorization": f"Bearer {agent_a['api_key']}"},
+            headers={"Authorization": f"Bearer {_E2E_API_KEY}"},
         )
         assert resp_b.status_code == 201
         agent_b = resp_b.json()
@@ -104,9 +121,7 @@ async def _send_message(client, api_key, from_id, to_id, text):
         },
         "id": str(uuid.uuid4()),
     }
-    resp = await client.post(
-        "/", json=body, headers=_auth(api_key, from_id)
-    )
+    resp = await client.post("/", json=body, headers=_auth(api_key, from_id))
     resp.raise_for_status()
     data = resp.json()
     assert "result" in data, f"Expected 'result' in response, got: {data}"
@@ -128,9 +143,7 @@ async def _broadcast_message(client, api_key, from_id, text):
         },
         "id": str(uuid.uuid4()),
     }
-    resp = await client.post(
-        "/", json=body, headers=_auth(api_key, from_id)
-    )
+    resp = await client.post("/", json=body, headers=_auth(api_key, from_id))
     resp.raise_for_status()
     data = resp.json()
     assert "result" in data, f"Expected 'result' in response, got: {data}"
@@ -207,8 +220,7 @@ class TestE2EExecutorPublishIntegration:
 
         # Send message via JSON-RPC (this goes through BrokerExecutor)
         result = await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], "E2E pubsub test"
+            client, api_key, agent_a["agent_id"], agent_b["agent_id"], "E2E pubsub test"
         )
         task_id = result["result"]["task"]["id"]
 
@@ -253,8 +265,7 @@ class TestE2EExecutorPublishIntegration:
         await asyncio.sleep(0.1)
 
         await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], "Full JSON check"
+            client, api_key, agent_a["agent_id"], agent_b["agent_id"], "Full JSON check"
         )
 
         await asyncio.wait_for(consumer_task, timeout=5.0)
@@ -304,8 +315,7 @@ class TestE2EExecutorPublishIntegration:
         await asyncio.sleep(0.1)
 
         await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], "Metadata check"
+            client, api_key, agent_a["agent_id"], agent_b["agent_id"], "Metadata check"
         )
 
         await asyncio.wait_for(consumer_task, timeout=5.0)
@@ -353,8 +363,7 @@ class TestE2EExecutorPublishIntegration:
         sent_ids = []
         for text in ["msg-1", "msg-2", "msg-3"]:
             result = await _send_message(
-                client, api_key, agent_a["agent_id"],
-                agent_b["agent_id"], text
+                client, api_key, agent_a["agent_id"], agent_b["agent_id"], text
             )
             sent_ids.append(result["result"]["task"]["id"])
 
@@ -395,9 +404,7 @@ class TestE2EExecutorPublishIntegration:
         consumer_task = asyncio.create_task(consume())
         await asyncio.sleep(0.1)
 
-        await _broadcast_message(
-            client, api_key, agent_a["agent_id"], "Broadcast E2E"
-        )
+        await _broadcast_message(client, api_key, agent_a["agent_id"], "Broadcast E2E")
 
         await asyncio.wait_for(consumer_task, timeout=5.0)
 
@@ -427,8 +434,7 @@ class TestE2EExistingAPIWorks:
         agent_b = env["agent_b"]
 
         result = await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], "List test"
+            client, api_key, agent_a["agent_id"], agent_b["agent_id"], "List test"
         )
         task_id = result["result"]["task"]["id"]
 
@@ -439,7 +445,8 @@ class TestE2EExistingAPIWorks:
             "id": str(uuid.uuid4()),
         }
         list_resp = await client.post(
-            "/", json=list_body,
+            "/",
+            json=list_body,
             headers=_auth(api_key, agent_b["agent_id"]),
         )
         list_resp.raise_for_status()
@@ -455,8 +462,7 @@ class TestE2EExistingAPIWorks:
         agent_b = env["agent_b"]
 
         result = await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], "GetTask test"
+            client, api_key, agent_a["agent_id"], agent_b["agent_id"], "GetTask test"
         )
         task_id = result["result"]["task"]["id"]
 
@@ -467,7 +473,8 @@ class TestE2EExistingAPIWorks:
             "id": str(uuid.uuid4()),
         }
         get_resp = await client.post(
-            "/", json=get_body,
+            "/",
+            json=get_body,
             headers=_auth(api_key, agent_b["agent_id"]),
         )
         get_resp.raise_for_status()
@@ -482,8 +489,7 @@ class TestE2EExistingAPIWorks:
         agent_b = env["agent_b"]
 
         result = await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], "ACK test"
+            client, api_key, agent_a["agent_id"], agent_b["agent_id"], "ACK test"
         )
         task_id = result["result"]["task"]["id"]
 
@@ -501,7 +507,8 @@ class TestE2EExistingAPIWorks:
             "id": str(uuid.uuid4()),
         }
         ack_resp = await client.post(
-            "/", json=ack_body,
+            "/",
+            json=ack_body,
             headers=_auth(api_key, agent_b["agent_id"]),
         )
         ack_resp.raise_for_status()
@@ -517,8 +524,7 @@ class TestE2EExistingAPIWorks:
         agent_b = env["agent_b"]
 
         result = await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], "Cancel test"
+            client, api_key, agent_a["agent_id"], agent_b["agent_id"], "Cancel test"
         )
         task_id = result["result"]["task"]["id"]
 
@@ -529,7 +535,8 @@ class TestE2EExistingAPIWorks:
             "id": str(uuid.uuid4()),
         }
         cancel_resp = await client.post(
-            "/", json=cancel_body,
+            "/",
+            json=cancel_body,
             headers=_auth(api_key, agent_a["agent_id"]),
         )
         cancel_resp.raise_for_status()
@@ -582,8 +589,11 @@ class TestE2ESSEAndPollingCoexist:
         await asyncio.sleep(0.1)
 
         result = await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], "Both SSE and poll"
+            client,
+            api_key,
+            agent_a["agent_id"],
+            agent_b["agent_id"],
+            "Both SSE and poll",
         )
         task_id = result["result"]["task"]["id"]
 
@@ -604,7 +614,8 @@ class TestE2ESSEAndPollingCoexist:
             "id": str(uuid.uuid4()),
         }
         list_resp = await client.post(
-            "/", json=list_body,
+            "/",
+            json=list_body,
             headers=_auth(api_key, agent_b["agent_id"]),
         )
         list_resp.raise_for_status()
