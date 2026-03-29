@@ -5,6 +5,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from starlette.responses import Response
 from a2a.server.agent_execution import RequestContext
 from a2a.server.context import ServerCallContext
 from a2a.server.events import EventQueue
@@ -234,6 +235,7 @@ async def revoke_key(
     success = await store.revoke_api_key(tenant_id, user_id)
     if not success:
         raise HTTPException(status_code=404)
+    return Response(status_code=204)
 
 
 @webui_router.get("/agents")

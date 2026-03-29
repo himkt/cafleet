@@ -58,9 +58,12 @@ export default function KeyManagement({ onSelectTenant }: KeyManagementProps) {
   };
 
   const handleCopy = async () => {
-    if (newRawKey) {
+    if (!newRawKey) return;
+    try {
       await navigator.clipboard.writeText(newRawKey);
       setCopied(true);
+    } catch {
+      setError("Failed to copy to clipboard. Please copy manually.");
     }
   };
 

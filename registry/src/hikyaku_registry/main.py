@@ -317,6 +317,12 @@ def create_app(
             return JSONResponse(status_code=401, content={"error": "Unauthorized"})
 
         tenant_id = hashlib.sha256(token.encode()).hexdigest()
+
+        # Verify API key is active
+        key_status = await registry_store._redis.hget(f"apikey:{tenant_id}", "status")
+        if key_status != "active":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
         agent_id = request.headers.get("x-agent-id")
         if not agent_id:
             return JSONResponse(status_code=401, content={"error": "Unauthorized"})

@@ -15,14 +15,15 @@ No server-side session. The Auth0 SPA SDK manages tokens in the browser.
 
 ### GET /ui/api/auth/config — Auth0 Client Config
 
-Returns Auth0 domain and client ID for SPA initialization. No authentication required.
+Returns Auth0 domain, client ID, and audience for SPA initialization. No authentication required.
 
 **Response** (200 OK):
 
 ```json
 {
   "domain": "myapp.auth0.com",
-  "client_id": "abc123..."
+  "client_id": "abc123...",
+  "audience": "hikyaku"
 }
 ```
 
@@ -51,17 +52,15 @@ Lists all API keys owned by the authenticated Auth0 user. Does NOT return raw ke
 **Response** (200 OK):
 
 ```json
-{
-  "keys": [
-    {
-      "tenant_id": "sha256hex...",
-      "key_prefix": "hky_a1b2",
-      "created_at": "2026-03-29T10:00:00+00:00",
-      "status": "active",
-      "agent_count": 3
-    }
-  ]
-}
+[
+  {
+    "tenant_id": "sha256hex...",
+    "key_prefix": "hky_a1b2",
+    "created_at": "2026-03-29T10:00:00+00:00",
+    "status": "active",
+    "agent_count": 3
+  }
+]
 ```
 
 ### DELETE /ui/api/keys/{tenant_id} — Revoke API Key

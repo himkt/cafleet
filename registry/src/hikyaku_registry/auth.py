@@ -77,7 +77,6 @@ async def get_registration_tenant(
     key_status = await store._redis.hget(f"apikey:{api_key_hash}", "status")
     if key_status != "active":
         raise HTTPException(status_code=401)
-
     return (token, api_key_hash)
 
 

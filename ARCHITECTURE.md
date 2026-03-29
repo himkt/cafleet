@@ -190,7 +190,7 @@ Auth0 provides user identity for the WebUI only. Agent-to-broker communication c
 - **User identity**: Auth0 `sub` claim (stable, unique per user)
 - **Server-side validation**: `Auth0Verifier` class in `auth.py` uses `jwt.PyJWKClient` with 24-hour key cache. The `verify_auth0_user` FastAPI dependency validates JWTs and stores the decoded token in `request.scope["auth0"]`.
 
-**Configuration**: `AUTH0_DOMAIN` (tenant domain) and `AUTH0_CLIENT_ID` (SPA client ID, also used as JWT audience).
+**Configuration**: AUTH0_DOMAIN (tenant domain), AUTH0_CLIENT_ID (SPA client ID for the WebUI), and AUTH0_AUDIENCE (API audience for JWT validation).
 
 ## WebUI
 
