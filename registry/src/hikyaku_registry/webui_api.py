@@ -260,7 +260,10 @@ async def get_inbox(
     store: RegistryStore = Depends(get_webui_store),
     task_store: RedisTaskStore = Depends(get_webui_task_store),
 ):
-    await _authenticate_tenant(request, store, task_store)
+    tenant_id = await _authenticate_tenant(request, store, task_store)
+
+    if not await store.verify_agent_tenant(agent_id, tenant_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
 
     tasks = await task_store.list(agent_id)
     tasks = [
@@ -284,7 +287,10 @@ async def get_sent(
     store: RegistryStore = Depends(get_webui_store),
     task_store: RedisTaskStore = Depends(get_webui_task_store),
 ):
-    await _authenticate_tenant(request, store, task_store)
+    tenant_id = await _authenticate_tenant(request, store, task_store)
+
+    if not await store.verify_agent_tenant(agent_id, tenant_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
 
     task_ids = await task_store._redis.smembers(f"tasks:sender:{agent_id}")
     if not task_ids:
