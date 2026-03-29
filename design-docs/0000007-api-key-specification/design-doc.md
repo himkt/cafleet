@@ -1,7 +1,7 @@
 # API Key Specification: WebUI-Issued Keys with Auth0
 
 **Status**: Approved
-**Progress**: 10/43 tasks complete
+**Progress**: 15/43 tasks complete
 **Last Updated**: 2026-03-29
 
 ## Overview
@@ -359,11 +359,11 @@ if (tenantId) {
 
 ### Step 2: Redis Schema for API Key Records
 
-- [ ] Add `create_api_key(owner_sub)` to `RegistryStore`: generates key, stores `apikey:{hash}` record, adds to `account:{sub}:keys` <!-- completed: -->
-- [ ] Add `list_api_keys(owner_sub)` to `RegistryStore`: reads `account:{sub}:keys` and `apikey:{hash}` records <!-- completed: -->
-- [ ] Add `revoke_api_key(tenant_id, owner_sub)` to `RegistryStore`: verifies ownership, sets status to "revoked", deregisters all tenant agents <!-- completed: -->
-- [ ] Add `get_api_key_status(tenant_id)` to `RegistryStore`: returns status from `apikey:{hash}` <!-- completed: -->
-- [ ] Add tests for key CRUD (create, list, revoke, revoke non-owned key) <!-- completed: -->
+- [x] Add `create_api_key(owner_sub)` to `RegistryStore`: generates key, stores `apikey:{hash}` record, adds to `account:{sub}:keys` <!-- completed: 2026-03-29T14:02 -->
+- [x] Add `list_api_keys(owner_sub)` to `RegistryStore`: reads `account:{sub}:keys` and `apikey:{hash}` records <!-- completed: 2026-03-29T14:02 -->
+- [x] Add `revoke_api_key(tenant_id, owner_sub)` to `RegistryStore`: verifies ownership, sets status to "revoked", deregisters all tenant agents <!-- completed: 2026-03-29T14:02 -->
+- [x] Add `get_api_key_status(tenant_id)` to `RegistryStore`: returns status from `apikey:{hash}` <!-- completed: 2026-03-29T14:02 -->
+- [x] Add tests for key CRUD (create, list, revoke, revoke non-owned key) <!-- completed: 2026-03-29T14:02 -->
 
 ### Step 3: Key Management Endpoints (WebUI Backend)
 
