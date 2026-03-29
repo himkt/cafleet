@@ -6,8 +6,15 @@ to the broker via RegistryForwarder.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import UTC, datetime
 
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import TextContent, Tool
+
+from hikyaku_mcp.config import get_config
 from hikyaku_mcp.registry import RegistryForwarder
 from hikyaku_mcp.sse_client import SSEClient
 
@@ -94,3 +101,85 @@ async def handle_register(
 async def handle_deregister(*, forwarder: RegistryForwarder) -> dict:
     """Forward deregister to RegistryForwarder."""
     return await forwarder.deregister()
+
+
+def _build_server() -> tuple[Server, SSEClient, RegistryForwarder]:
+    """Build MCP server with tool definitions."""
+    config = get_config()
+    sse_client = SSEClient(
+        broker_url=config["broker_url"],
+        api_key=config["api_key"],
+        agent_id=config["agent_id"],
+    )
+    forwarder = RegistryForwarder(
+        broker_url=config["broker_url"],
+        api_key=config["api_key"],
+        agent_id=config["agent_id"],
+    )
+
+    server = Server("hikyaku-mcp")
+
+    @server.list_tools()
+    async def list_tools() -> list[Tool]:
+        return [
+            Tool(name="poll", description="Poll inbox for messages (returns from local SSE buffer)", inputSchema={"type": "object", "properties": {"since": {"type": "string", "description": "Filter tasks since timestamp"}, "page_size": {"type": "integer", "description": "Max number of tasks to return"}}}),
+            Tool(name="send", description="Send a unicast message to another agent", inputSchema={"type": "object", "properties": {"to": {"type": "string", "description": "Recipient agent ID"}, "text": {"type": "string", "description": "Message text"}}, "required": ["to", "text"]}),
+            Tool(name="broadcast", description="Broadcast a message to all agents in the tenant", inputSchema={"type": "object", "properties": {"text": {"type": "string", "description": "Message text"}}, "required": ["text"]}),
+            Tool(name="ack", description="Acknowledge receipt of a message", inputSchema={"type": "object", "properties": {"task_id": {"type": "string", "description": "Task ID to acknowledge"}}, "required": ["task_id"]}),
+            Tool(name="cancel", description="Cancel (retract) a sent message", inputSchema={"type": "object", "properties": {"task_id": {"type": "string", "description": "Task ID to cancel"}}, "required": ["task_id"]}),
+            Tool(name="get_task", description="Get details of a specific task", inputSchema={"type": "object", "properties": {"task_id": {"type": "string", "description": "Task ID to retrieve"}}, "required": ["task_id"]}),
+            Tool(name="agents", description="List registered agents or get agent detail", inputSchema={"type": "object", "properties": {"id": {"type": "string", "description": "Specific agent ID for detail view"}}}),
+            Tool(name="register", description="Register a new agent with the broker", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Agent name"}, "description": {"type": "string", "description": "Agent description"}, "skills": {"type": "string", "description": "Skills as JSON string"}, "api_key": {"type": "string", "description": "API key to join existing tenant"}}, "required": ["name", "description"]}),
+            Tool(name="deregister", description="Deregister this agent from the broker", inputSchema={"type": "object", "properties": {}}),
+        ]
+
+    @server.call_tool()
+    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+        if name == "poll":
+            result = await handle_poll(
+                sse_client=sse_client,
+                page_size=arguments.get("page_size"),
+                since=arguments.get("since"),
+            )
+        elif name == "send":
+            result = await handle_send(forwarder=forwarder, to=arguments["to"], text=arguments["text"])
+        elif name == "broadcast":
+            result = await handle_broadcast(forwarder=forwarder, text=arguments["text"])
+        elif name == "ack":
+            result = await handle_ack(forwarder=forwarder, task_id=arguments["task_id"])
+        elif name == "cancel":
+            result = await handle_cancel(forwarder=forwarder, task_id=arguments["task_id"])
+        elif name == "get_task":
+            result = await handle_get_task(forwarder=forwarder, task_id=arguments["task_id"])
+        elif name == "agents":
+            result = await handle_agents(forwarder=forwarder, id=arguments.get("id"))
+        elif name == "register":
+            result = await handle_register(
+                forwarder=forwarder,
+                name=arguments["name"],
+                description=arguments["description"],
+                skills=arguments.get("skills"),
+                api_key=arguments.get("api_key"),
+            )
+        elif name == "deregister":
+            result = await handle_deregister(forwarder=forwarder)
+        else:
+            return [TextContent(type="text", text=f"Unknown tool: {name}")]
+
+        return [TextContent(type="text", text=json.dumps(result, default=str))]
+
+    return server, sse_client, forwarder
+
+
+def main():
+    """Entry point for hikyaku-mcp CLI."""
+    async def _run():
+        server, sse_client, _forwarder = _build_server()
+        await sse_client.connect()
+        try:
+            async with stdio_server() as (read_stream, write_stream):
+                await server.run(read_stream, write_stream, server.create_initialization_options())
+        finally:
+            await sse_client.disconnect()
+
+    asyncio.run(_run())
