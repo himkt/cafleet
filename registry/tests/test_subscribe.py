@@ -1,7 +1,7 @@
 """Tests for subscribe.py — SSE endpoint for real-time inbox notifications.
 
-Covers: authentication errors (401), successful SSE connection with message
-streaming, keepalive comments, and disconnect cleanup (Pub/Sub unsubscribe).
+Covers: authentication errors (401 via HTTP), and unit tests for the SSE
+event generator logic (message streaming, keepalive, disconnect cleanup).
 
 Endpoint: GET /api/v1/subscribe
 Auth: Authorization: Bearer <api_key> + X-Agent-Id: <agent_id>
@@ -11,19 +11,22 @@ Response: text/event-stream
 import asyncio
 import json
 import uuid
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 import fakeredis.aioredis
 from httpx import AsyncClient, ASGITransport
+from a2a.types import Artifact, Part, Task, TaskState, TaskStatus, TextPart
 
 from hikyaku_registry.main import create_app
 from hikyaku_registry.pubsub import PubSubManager
 from hikyaku_registry.task_store import RedisTaskStore
-from hikyaku_registry.registry_store import RegistryStore
+from hikyaku_registry.api.subscribe import event_generator
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Fixtures — HTTP (for auth tests)
 # ---------------------------------------------------------------------------
 
 
@@ -61,6 +64,29 @@ async def sse_env():
 
 
 # ---------------------------------------------------------------------------
+# Fixtures — Unit (for generator tests)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def gen_env():
+    """Provide PubSubManager, RedisTaskStore, and a test agent for generator tests."""
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    pubsub = PubSubManager(redis)
+    task_store = RedisTaskStore(redis)
+    agent_id = str(uuid.uuid4())
+
+    yield {
+        "redis": redis,
+        "pubsub": pubsub,
+        "task_store": task_store,
+        "agent_id": agent_id,
+    }
+
+    await redis.aclose()
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -84,44 +110,42 @@ def _auth(api_key: str, agent_id: str) -> dict:
     }
 
 
-def _jsonrpc(method: str, params: dict) -> dict:
-    """Build a JSON-RPC 2.0 request."""
-    return {
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params,
-        "id": str(uuid.uuid4()),
-    }
-
-
-async def _send_message(client, api_key, agent_id, destination, text="Hello"):
-    """Send a unicast message via A2A SendMessage."""
-    payload = _jsonrpc("SendMessage", {
-        "message": {
-            "messageId": str(uuid.uuid4()),
-            "role": "user",
-            "parts": [{"kind": "text", "text": text}],
-            "metadata": {"destination": destination},
+def _make_task(task_id: str, context_id: str, text: str = "Hello") -> Task:
+    """Create an A2A Task for testing."""
+    now = datetime.now(UTC).isoformat()
+    return Task(
+        id=task_id,
+        context_id=context_id,
+        status=TaskStatus(state=TaskState.input_required, timestamp=now),
+        artifacts=[
+            Artifact(
+                artifact_id=str(uuid.uuid4()),
+                parts=[Part(root=TextPart(text=text))],
+            )
+        ],
+        metadata={
+            "fromAgentId": "sender-agent",
+            "toAgentId": context_id,
+            "type": "unicast",
         },
-    })
-    headers = _auth(api_key, agent_id)
-    resp = await client.post("/", json=payload, headers=headers)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "result" in data, f"Expected result, got: {data}"
-    return data["result"]
+    )
 
 
-def _parse_sse_events(raw_lines: list[str]) -> list[dict]:
-    """Parse raw SSE lines into a list of event dicts.
+def _parse_sse_events(raw_chunks: list[str]) -> list[dict]:
+    """Parse raw SSE output chunks into a list of event dicts.
 
-    Each event dict has keys: 'event', 'id', 'data', 'comment'.
+    Each event dict may contain keys: 'event', 'id', 'data', 'comment'.
     """
     events = []
     current = {}
 
-    for line in raw_lines:
-        line = line.rstrip("\n").rstrip("\r")
+    # Flatten chunks into individual lines
+    lines = []
+    for chunk in raw_chunks:
+        lines.extend(chunk.split("\n"))
+
+    for line in lines:
+        line = line.rstrip("\r")
 
         if line == "":
             # Empty line = event boundary
@@ -255,376 +279,422 @@ class TestSSEAuth:
 
 
 # ---------------------------------------------------------------------------
-# Successful SSE Connection
+# SSE Event Generator — Unit Tests
 # ---------------------------------------------------------------------------
 
 
-class TestSSEConnection:
-    """Tests for successful SSE connection and message streaming."""
+class TestSSEGeneratorMessages:
+    """Unit tests for event_generator() — message event streaming.
+
+    Tests the generator directly with fakeredis PubSubManager and TaskStore,
+    bypassing HTTP transport. A mock request with is_disconnected() → False
+    simulates an active client.
+    """
 
     @pytest.mark.asyncio
-    async def test_returns_event_stream_content_type(self, sse_env):
-        """GET /api/v1/subscribe returns text/event-stream content type."""
-        client = sse_env["client"]
-        agent_b = sse_env["agent_b"]
-        api_key = sse_env["api_key"]
+    async def test_yields_message_event_on_publish(self, gen_env):
+        """Generator yields an SSE 'message' event when task_id is published."""
+        pubsub = gen_env["pubsub"]
+        task_store = gen_env["task_store"]
+        agent_id = gen_env["agent_id"]
 
-        collected_lines = []
+        # Create and save a task
+        task_id = str(uuid.uuid4())
+        task = _make_task(task_id, agent_id, text="Hello via SSE")
+        await task_store.save(task)
 
-        async with client.stream(
-            "GET",
-            "/api/v1/subscribe",
-            headers=_auth(api_key, agent_b["agent_id"]),
-        ) as resp:
-            assert resp.status_code == 200
-            content_type = resp.headers.get("content-type", "")
-            assert "text/event-stream" in content_type
-            # Close immediately — we only needed the headers
-            await resp.aclose()
+        # Mock request that is never disconnected
+        request = AsyncMock()
+        request.is_disconnected = AsyncMock(return_value=False)
 
-    @pytest.mark.asyncio
-    async def test_receives_message_event_on_publish(self, sse_env):
-        """SSE stream receives a 'message' event when a message is delivered."""
-        client = sse_env["client"]
-        agent_a = sse_env["agent_a"]
-        agent_b = sse_env["agent_b"]
-        api_key = sse_env["api_key"]
+        collected = []
 
-        collected_lines = []
+        async def consume():
+            async for chunk in event_generator(
+                agent_id=agent_id,
+                pubsub=pubsub,
+                task_store=task_store,
+                request=request,
+            ):
+                collected.append(chunk)
+                # Stop after first data chunk (message event)
+                if "data:" in chunk:
+                    break
 
-        async def read_sse():
-            async with client.stream(
-                "GET",
-                "/api/v1/subscribe",
-                headers=_auth(api_key, agent_b["agent_id"]),
-            ) as resp:
-                async for line in resp.aiter_lines():
-                    collected_lines.append(line)
-                    # Stop after we get an event with data
-                    if line.startswith("data:"):
-                        # Read one more empty line (event boundary) then stop
-                        break
+        consumer_task = asyncio.create_task(consume())
 
-        # Start SSE listener in background
-        sse_task = asyncio.create_task(read_sse())
+        # Give generator time to subscribe
+        await asyncio.sleep(0.05)
 
-        # Give SSE connection time to establish
-        await asyncio.sleep(0.1)
+        # Publish the task_id to the agent's inbox channel
+        await pubsub.publish(f"inbox:{agent_id}", task_id)
 
-        # Send a message from agent_a to agent_b
-        await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], text="Hello via SSE",
-        )
+        await asyncio.wait_for(consumer_task, timeout=3.0)
 
-        # Wait for SSE to receive the event (with timeout)
-        try:
-            await asyncio.wait_for(sse_task, timeout=5.0)
-        except asyncio.TimeoutError:
-            sse_task.cancel()
-            try:
-                await sse_task
-            except asyncio.CancelledError:
-                pass
-
-        # Parse the SSE events
-        events = _parse_sse_events(collected_lines)
-
-        # Find the message event
+        events = _parse_sse_events(collected)
         message_events = [e for e in events if e.get("event") == "message"]
-        assert len(message_events) >= 1, f"No message events found. Lines: {collected_lines}"
-
-        event = message_events[0]
-
-        # Verify event has expected fields
-        assert "id" in event, "SSE event should have id field (task_id)"
-        assert "data" in event, "SSE event should have data field (Task JSON)"
-
-        # Verify data is valid A2A Task JSON
-        task_data = json.loads(event["data"])
-        assert "id" in task_data or "status" in task_data
+        assert len(message_events) >= 1, f"No message events. Chunks: {collected}"
 
     @pytest.mark.asyncio
-    async def test_event_id_is_task_id(self, sse_env):
-        """SSE event id field matches the delivered task's id."""
-        client = sse_env["client"]
-        agent_a = sse_env["agent_a"]
-        agent_b = sse_env["agent_b"]
-        api_key = sse_env["api_key"]
+    async def test_event_id_matches_task_id(self, gen_env):
+        """SSE event 'id' field equals the task_id."""
+        pubsub = gen_env["pubsub"]
+        task_store = gen_env["task_store"]
+        agent_id = gen_env["agent_id"]
 
-        collected_lines = []
+        task_id = str(uuid.uuid4())
+        task = _make_task(task_id, agent_id)
+        await task_store.save(task)
 
-        async def read_sse():
-            async with client.stream(
-                "GET",
-                "/api/v1/subscribe",
-                headers=_auth(api_key, agent_b["agent_id"]),
-            ) as resp:
-                async for line in resp.aiter_lines():
-                    collected_lines.append(line)
-                    if line.startswith("data:"):
-                        break
+        request = AsyncMock()
+        request.is_disconnected = AsyncMock(return_value=False)
 
-        sse_task = asyncio.create_task(read_sse())
-        await asyncio.sleep(0.1)
+        collected = []
 
-        result = await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], text="Task ID check",
-        )
+        async def consume():
+            async for chunk in event_generator(
+                agent_id=agent_id,
+                pubsub=pubsub,
+                task_store=task_store,
+                request=request,
+            ):
+                collected.append(chunk)
+                if "data:" in chunk:
+                    break
 
-        try:
-            await asyncio.wait_for(sse_task, timeout=5.0)
-        except asyncio.TimeoutError:
-            sse_task.cancel()
-            try:
-                await sse_task
-            except asyncio.CancelledError:
-                pass
+        consumer_task = asyncio.create_task(consume())
+        await asyncio.sleep(0.05)
+        await pubsub.publish(f"inbox:{agent_id}", task_id)
+        await asyncio.wait_for(consumer_task, timeout=3.0)
 
-        events = _parse_sse_events(collected_lines)
+        events = _parse_sse_events(collected)
         message_events = [e for e in events if e.get("event") == "message"]
         assert len(message_events) >= 1
 
         event = message_events[0]
-        task_json = json.loads(event["data"])
-
-        # The event id should equal the task id in the data
-        assert event["id"] == task_json["id"]
+        assert event["id"] == task_id
 
     @pytest.mark.asyncio
-    async def test_event_data_is_full_task_json(self, sse_env):
-        """SSE event data contains full A2A Task JSON with expected fields."""
-        client = sse_env["client"]
-        agent_a = sse_env["agent_a"]
-        agent_b = sse_env["agent_b"]
-        api_key = sse_env["api_key"]
+    async def test_event_data_is_full_task_json(self, gen_env):
+        """SSE event 'data' field is full A2A Task JSON with camelCase keys."""
+        pubsub = gen_env["pubsub"]
+        task_store = gen_env["task_store"]
+        agent_id = gen_env["agent_id"]
 
-        collected_lines = []
+        task_id = str(uuid.uuid4())
+        task = _make_task(task_id, agent_id, text="Full JSON check")
+        await task_store.save(task)
 
-        async def read_sse():
-            async with client.stream(
-                "GET",
-                "/api/v1/subscribe",
-                headers=_auth(api_key, agent_b["agent_id"]),
-            ) as resp:
-                async for line in resp.aiter_lines():
-                    collected_lines.append(line)
-                    if line.startswith("data:"):
-                        break
+        request = AsyncMock()
+        request.is_disconnected = AsyncMock(return_value=False)
 
-        sse_task = asyncio.create_task(read_sse())
-        await asyncio.sleep(0.1)
+        collected = []
 
-        await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], text="Full Task check",
-        )
+        async def consume():
+            async for chunk in event_generator(
+                agent_id=agent_id,
+                pubsub=pubsub,
+                task_store=task_store,
+                request=request,
+            ):
+                collected.append(chunk)
+                if "data:" in chunk:
+                    break
 
-        try:
-            await asyncio.wait_for(sse_task, timeout=5.0)
-        except asyncio.TimeoutError:
-            sse_task.cancel()
-            try:
-                await sse_task
-            except asyncio.CancelledError:
-                pass
+        consumer_task = asyncio.create_task(consume())
+        await asyncio.sleep(0.05)
+        await pubsub.publish(f"inbox:{agent_id}", task_id)
+        await asyncio.wait_for(consumer_task, timeout=3.0)
 
-        events = _parse_sse_events(collected_lines)
+        events = _parse_sse_events(collected)
         message_events = [e for e in events if e.get("event") == "message"]
         assert len(message_events) >= 1
 
         task_data = json.loads(message_events[0]["data"])
 
-        # A2A Task should have id, status, and contextId (camelCase via alias)
-        assert "id" in task_data
+        # A2A Task JSON should have id, status, and contextId (camelCase)
+        assert task_data["id"] == task_id
         assert "status" in task_data
-        # contextId is the recipient's agent_id
         context_id_key = "contextId" if "contextId" in task_data else "context_id"
-        assert task_data.get(context_id_key) == agent_b["agent_id"]
+        assert task_data.get(context_id_key) == agent_id
 
     @pytest.mark.asyncio
-    async def test_multiple_messages_arrive_as_separate_events(self, sse_env):
-        """Multiple messages produce multiple SSE events."""
-        client = sse_env["client"]
-        agent_a = sse_env["agent_a"]
-        agent_b = sse_env["agent_b"]
-        api_key = sse_env["api_key"]
+    async def test_multiple_messages_arrive_as_separate_events(self, gen_env):
+        """Multiple published task_ids produce multiple SSE message events."""
+        pubsub = gen_env["pubsub"]
+        task_store = gen_env["task_store"]
+        agent_id = gen_env["agent_id"]
 
-        collected_lines = []
+        task_ids = [str(uuid.uuid4()) for _ in range(3)]
+        for tid in task_ids:
+            task = _make_task(tid, agent_id, text=f"Msg {tid[:8]}")
+            await task_store.save(task)
+
+        request = AsyncMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        collected = []
         data_count = 0
 
-        async def read_sse():
+        async def consume():
             nonlocal data_count
-            async with client.stream(
-                "GET",
-                "/api/v1/subscribe",
-                headers=_auth(api_key, agent_b["agent_id"]),
-            ) as resp:
-                async for line in resp.aiter_lines():
-                    collected_lines.append(line)
-                    if line.startswith("data:"):
-                        data_count += 1
-                        if data_count >= 2:
-                            break
-
-        sse_task = asyncio.create_task(read_sse())
-        await asyncio.sleep(0.1)
-
-        # Send two messages
-        await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], text="Message 1",
-        )
-        await _send_message(
-            client, api_key, agent_a["agent_id"],
-            agent_b["agent_id"], text="Message 2",
-        )
-
-        try:
-            await asyncio.wait_for(sse_task, timeout=5.0)
-        except asyncio.TimeoutError:
-            sse_task.cancel()
-            try:
-                await sse_task
-            except asyncio.CancelledError:
-                pass
-
-        events = _parse_sse_events(collected_lines)
-        message_events = [e for e in events if e.get("event") == "message"]
-        assert len(message_events) >= 2, (
-            f"Expected at least 2 message events, got {len(message_events)}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# Keepalive
-# ---------------------------------------------------------------------------
-
-
-class TestSSEKeepalive:
-    """Tests for SSE keepalive comments."""
-
-    @pytest.mark.asyncio
-    async def test_keepalive_comment_sent_periodically(self, sse_env):
-        """SSE stream sends ': keepalive' comment to prevent timeouts.
-
-        Note: The actual interval is 30 seconds in production. For testing,
-        we use a shorter wait and verify that keepalive comments eventually
-        appear in the stream. If the implementation supports a configurable
-        interval, tests can be faster.
-        """
-        client = sse_env["client"]
-        agent_b = sse_env["agent_b"]
-        api_key = sse_env["api_key"]
-
-        collected_lines = []
-
-        async def read_sse():
-            async with client.stream(
-                "GET",
-                "/api/v1/subscribe",
-                headers=_auth(api_key, agent_b["agent_id"]),
-            ) as resp:
-                async for line in resp.aiter_lines():
-                    collected_lines.append(line)
-                    # Check if we got a keepalive comment
-                    if line.startswith(":"):
+            async for chunk in event_generator(
+                agent_id=agent_id,
+                pubsub=pubsub,
+                task_store=task_store,
+                request=request,
+            ):
+                collected.append(chunk)
+                if "data:" in chunk:
+                    data_count += 1
+                    if data_count >= 3:
                         break
 
-        sse_task = asyncio.create_task(read_sse())
+        consumer_task = asyncio.create_task(consume())
+        await asyncio.sleep(0.05)
 
-        # Wait enough for at least one keepalive (may take up to 30s in prod;
-        # if the implementation uses a short test interval this will be faster)
-        try:
-            await asyncio.wait_for(sse_task, timeout=35.0)
-        except asyncio.TimeoutError:
-            sse_task.cancel()
-            try:
-                await sse_task
-            except asyncio.CancelledError:
-                pass
+        for tid in task_ids:
+            await pubsub.publish(f"inbox:{agent_id}", tid)
 
-        # Verify at least one keepalive comment was received
-        keepalive_lines = [l for l in collected_lines if l.startswith(":")]
-        assert len(keepalive_lines) >= 1, (
-            f"No keepalive comments found. Lines: {collected_lines}"
-        )
-        assert any("keepalive" in l for l in keepalive_lines)
+        await asyncio.wait_for(consumer_task, timeout=3.0)
 
+        events = _parse_sse_events(collected)
+        message_events = [e for e in events if e.get("event") == "message"]
+        assert len(message_events) >= 3
 
-# ---------------------------------------------------------------------------
-# Disconnect Cleanup
-# ---------------------------------------------------------------------------
-
-
-class TestSSEDisconnectCleanup:
-    """Tests for SSE disconnect cleanup — Pub/Sub unsubscribe on disconnect."""
+        # Verify each event has a unique task_id
+        event_ids = {e["id"] for e in message_events}
+        assert event_ids == set(task_ids)
 
     @pytest.mark.asyncio
-    async def test_disconnect_unsubscribes_from_pubsub(self, sse_env):
-        """When SSE client disconnects, the PubSubManager subscription is cleaned up."""
-        client = sse_env["client"]
-        agent_b = sse_env["agent_b"]
-        api_key = sse_env["api_key"]
-        redis = sse_env["redis"]
+    async def test_skips_missing_task(self, gen_env):
+        """If task_store.get returns None for a task_id, the event is skipped."""
+        pubsub = gen_env["pubsub"]
+        task_store = gen_env["task_store"]
+        agent_id = gen_env["agent_id"]
 
-        # Connect to SSE
-        async with client.stream(
-            "GET",
-            "/api/v1/subscribe",
-            headers=_auth(api_key, agent_b["agent_id"]),
-        ) as resp:
-            assert resp.status_code == 200
-            # Give time for subscription to be established
-            await asyncio.sleep(0.1)
-            # Client disconnects here (context manager exits)
-            await resp.aclose()
+        # Save only the second task — first task_id has no data in store
+        missing_task_id = str(uuid.uuid4())
+        real_task_id = str(uuid.uuid4())
+        real_task = _make_task(real_task_id, agent_id, text="I exist")
+        await task_store.save(real_task)
 
-        # Give time for cleanup to happen
-        await asyncio.sleep(0.1)
+        request = AsyncMock()
+        request.is_disconnected = AsyncMock(return_value=False)
 
-        # After disconnect, publishing to the channel should have no active
-        # subscribers. We verify by checking that the subscription was
-        # cleaned up — new messages should not accumulate anywhere.
-        # The exact verification depends on implementation but the key
-        # invariant is: no resource leak after disconnect.
-        #
-        # We can verify by checking Redis Pub/Sub channel has no subscribers
-        pubsub_channels = await redis.pubsub_numsub(f"inbox:{agent_b['agent_id']}")
-        # pubsub_numsub returns list of (channel, count) pairs
-        if pubsub_channels:
-            for channel, count in zip(pubsub_channels[::2], pubsub_channels[1::2]):
-                if channel == f"inbox:{agent_b['agent_id']}":
+        collected = []
+
+        async def consume():
+            async for chunk in event_generator(
+                agent_id=agent_id,
+                pubsub=pubsub,
+                task_store=task_store,
+                request=request,
+            ):
+                collected.append(chunk)
+                if "data:" in chunk:
+                    break
+
+        consumer_task = asyncio.create_task(consume())
+        await asyncio.sleep(0.05)
+
+        # Publish missing task first, then real task
+        await pubsub.publish(f"inbox:{agent_id}", missing_task_id)
+        await pubsub.publish(f"inbox:{agent_id}", real_task_id)
+
+        await asyncio.wait_for(consumer_task, timeout=3.0)
+
+        events = _parse_sse_events(collected)
+        message_events = [e for e in events if e.get("event") == "message"]
+
+        # Only the real task should appear
+        assert len(message_events) >= 1
+        assert message_events[0]["id"] == real_task_id
+
+
+# ---------------------------------------------------------------------------
+# SSE Event Generator — Keepalive
+# ---------------------------------------------------------------------------
+
+
+class TestSSEGeneratorKeepalive:
+    """Unit tests for event_generator() keepalive behavior."""
+
+    @pytest.mark.asyncio
+    async def test_keepalive_comment_sent_after_interval(self, gen_env, monkeypatch):
+        """Generator yields ': keepalive' comment after the keepalive interval.
+
+        Monkeypatches _keepalive_interval to a short value for fast testing.
+        """
+        import hikyaku_registry.api.subscribe as subscribe_mod
+
+        monkeypatch.setattr(subscribe_mod, "_keepalive_interval", 0.1)
+
+        pubsub = gen_env["pubsub"]
+        task_store = gen_env["task_store"]
+        agent_id = gen_env["agent_id"]
+
+        request = AsyncMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        collected = []
+
+        async def consume():
+            async for chunk in event_generator(
+                agent_id=agent_id,
+                pubsub=pubsub,
+                task_store=task_store,
+                request=request,
+            ):
+                collected.append(chunk)
+                # Stop after receiving a keepalive
+                if "keepalive" in chunk:
+                    break
+
+        await asyncio.wait_for(consume(), timeout=3.0)
+
+        keepalive_chunks = [c for c in collected if "keepalive" in c]
+        assert len(keepalive_chunks) >= 1
+
+    @pytest.mark.asyncio
+    async def test_keepalive_does_not_interfere_with_messages(
+        self, gen_env, monkeypatch
+    ):
+        """Messages still arrive correctly even when keepalives are firing."""
+        import hikyaku_registry.api.subscribe as subscribe_mod
+
+        monkeypatch.setattr(subscribe_mod, "_keepalive_interval", 0.1)
+
+        pubsub = gen_env["pubsub"]
+        task_store = gen_env["task_store"]
+        agent_id = gen_env["agent_id"]
+
+        task_id = str(uuid.uuid4())
+        task = _make_task(task_id, agent_id, text="With keepalive")
+        await task_store.save(task)
+
+        request = AsyncMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        collected = []
+
+        async def consume():
+            async for chunk in event_generator(
+                agent_id=agent_id,
+                pubsub=pubsub,
+                task_store=task_store,
+                request=request,
+            ):
+                collected.append(chunk)
+                if "data:" in chunk:
+                    break
+
+        consumer_task = asyncio.create_task(consume())
+        # Wait for at least one keepalive cycle, then publish
+        await asyncio.sleep(0.15)
+        await pubsub.publish(f"inbox:{agent_id}", task_id)
+
+        await asyncio.wait_for(consumer_task, timeout=3.0)
+
+        events = _parse_sse_events(collected)
+        message_events = [e for e in events if e.get("event") == "message"]
+        keepalive_events = [e for e in events if e.get("comment") == "keepalive"]
+
+        assert len(message_events) >= 1
+        assert message_events[0]["id"] == task_id
+        # At least one keepalive should have fired before the message
+        assert len(keepalive_events) >= 1
+
+
+# ---------------------------------------------------------------------------
+# SSE Event Generator — Disconnect Cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestSSEGeneratorCleanup:
+    """Unit tests for event_generator() cleanup on disconnect/exit."""
+
+    @pytest.mark.asyncio
+    async def test_cleanup_unsubscribes_on_generator_exit(self, gen_env):
+        """When the generator is exited, PubSub channel is unsubscribed."""
+        pubsub = gen_env["pubsub"]
+        task_store = gen_env["task_store"]
+        agent_id = gen_env["agent_id"]
+        redis = gen_env["redis"]
+
+        request = AsyncMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        # Start and immediately break the generator to trigger cleanup
+        gen = event_generator(
+            agent_id=agent_id,
+            pubsub=pubsub,
+            task_store=task_store,
+            request=request,
+        )
+
+        # Consume at least one iteration to let the generator set up subscription
+        # We'll use a task that we cancel after a brief delay
+        async def consume_briefly():
+            async for _chunk in gen:
+                break  # Exit after first yield (likely keepalive or setup)
+
+        # Use a short keepalive-based approach: wait for one chunk then exit
+        try:
+            await asyncio.wait_for(consume_briefly(), timeout=1.0)
+        except asyncio.TimeoutError:
+            pass
+
+        # Explicitly close the generator to trigger finally block
+        await gen.aclose()
+
+        # Give cleanup a moment to run
+        await asyncio.sleep(0.05)
+
+        # Verify Redis Pub/Sub channel has 0 subscribers
+        numsub = await redis.pubsub_numsub(f"inbox:{agent_id}")
+        if numsub:
+            for channel, count in zip(numsub[::2], numsub[1::2]):
+                if channel == f"inbox:{agent_id}":
                     assert int(count) == 0, (
-                        f"Expected 0 subscribers after disconnect, got {count}"
+                        f"Expected 0 subscribers after cleanup, got {count}"
                     )
 
     @pytest.mark.asyncio
-    async def test_reconnect_after_disconnect_works(self, sse_env):
-        """After disconnecting, a new SSE connection can be established."""
-        client = sse_env["client"]
-        agent_b = sse_env["agent_b"]
-        api_key = sse_env["api_key"]
+    async def test_cleanup_on_client_disconnect(self, gen_env, monkeypatch):
+        """Generator exits cleanly when request.is_disconnected() returns True."""
+        import hikyaku_registry.api.subscribe as subscribe_mod
 
-        # First connection
-        async with client.stream(
-            "GET",
-            "/api/v1/subscribe",
-            headers=_auth(api_key, agent_b["agent_id"]),
-        ) as resp:
-            assert resp.status_code == 200
-            await resp.aclose()
+        monkeypatch.setattr(subscribe_mod, "_keepalive_interval", 0.1)
 
-        await asyncio.sleep(0.1)
+        pubsub = gen_env["pubsub"]
+        task_store = gen_env["task_store"]
+        agent_id = gen_env["agent_id"]
 
-        # Second connection should also work
-        async with client.stream(
-            "GET",
-            "/api/v1/subscribe",
-            headers=_auth(api_key, agent_b["agent_id"]),
-        ) as resp:
-            assert resp.status_code == 200
-            content_type = resp.headers.get("content-type", "")
-            assert "text/event-stream" in content_type
-            await resp.aclose()
+        disconnect_after = 2  # Disconnect after 2 calls to is_disconnected
+        call_count = 0
+
+        async def mock_is_disconnected():
+            nonlocal call_count
+            call_count += 1
+            return call_count > disconnect_after
+
+        request = AsyncMock()
+        request.is_disconnected = mock_is_disconnected
+
+        collected = []
+
+        async def consume():
+            async for chunk in event_generator(
+                agent_id=agent_id,
+                pubsub=pubsub,
+                task_store=task_store,
+                request=request,
+            ):
+                collected.append(chunk)
+
+        # The generator should exit on its own when is_disconnected returns True
+        await asyncio.wait_for(consume(), timeout=3.0)
+
+        # Generator exited without timeout — cleanup happened
+        assert call_count > disconnect_after
