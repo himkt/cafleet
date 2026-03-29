@@ -91,9 +91,7 @@ async def key_env():
     app.dependency_overrides[get_user_id] = lambda: _TEST_SUB_A
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield {
             "client": client,
             "store": store,
@@ -215,9 +213,7 @@ class TestCreateKey:
         resp = await client.post("/ui/api/keys", headers=_jwt_header())
         data = resp.json()
 
-        expected_hash = hashlib.sha256(
-            data["api_key"].encode()
-        ).hexdigest()
+        expected_hash = hashlib.sha256(data["api_key"].encode()).hexdigest()
         assert data["tenant_id"] == expected_hash
 
     @pytest.mark.asyncio
@@ -240,9 +236,7 @@ class TestCreateKey:
         resp = await client.post("/ui/api/keys", headers=_jwt_header())
         tenant_id = resp.json()["tenant_id"]
 
-        is_member = await redis.sismember(
-            f"account:{_TEST_SUB_A}:keys", tenant_id
-        )
+        is_member = await redis.sismember(f"account:{_TEST_SUB_A}:keys", tenant_id)
         assert is_member
 
     @pytest.mark.asyncio
@@ -365,18 +359,12 @@ class TestListKeys:
         """agent_count matches the number of agents in the tenant."""
         client, store = key_env["client"], key_env["store"]
 
-        create_resp = await client.post(
-            "/ui/api/keys", headers=_jwt_header()
-        )
+        create_resp = await client.post("/ui/api/keys", headers=_jwt_header())
         api_key = create_resp.json()["api_key"]
 
         # Register agents under this key
-        await store.create_agent(
-            name="Agent 1", description="Test", api_key=api_key
-        )
-        await store.create_agent(
-            name="Agent 2", description="Test", api_key=api_key
-        )
+        await store.create_agent(name="Agent 1", description="Test", api_key=api_key)
+        await store.create_agent(name="Agent 2", description="Test", api_key=api_key)
 
         resp = await client.get("/ui/api/keys", headers=_jwt_header())
         data = resp.json()
@@ -386,11 +374,7 @@ class TestListKeys:
     @pytest.mark.asyncio
     async def test_does_not_return_other_users_keys(self, key_env):
         """Keys created by other users are not returned."""
-        app, client, store = (
-            key_env["app"],
-            key_env["client"],
-            key_env["store"],
-        )
+        app, client = key_env["app"], key_env["client"]
 
         # User A creates a key
         await client.post("/ui/api/keys", headers=_jwt_header())
@@ -433,14 +417,10 @@ class TestRevokeKey:
         """DELETE /ui/api/keys/{tenant_id} returns 204 on success."""
         client = key_env["client"]
 
-        create_resp = await client.post(
-            "/ui/api/keys", headers=_jwt_header()
-        )
+        create_resp = await client.post("/ui/api/keys", headers=_jwt_header())
         tenant_id = create_resp.json()["tenant_id"]
 
-        resp = await client.delete(
-            f"/ui/api/keys/{tenant_id}", headers=_jwt_header()
-        )
+        resp = await client.delete(f"/ui/api/keys/{tenant_id}", headers=_jwt_header())
 
         assert resp.status_code == 204
 
@@ -449,14 +429,10 @@ class TestRevokeKey:
         """Revoked key has status 'revoked' in Redis."""
         client, redis = key_env["client"], key_env["redis"]
 
-        create_resp = await client.post(
-            "/ui/api/keys", headers=_jwt_header()
-        )
+        create_resp = await client.post("/ui/api/keys", headers=_jwt_header())
         tenant_id = create_resp.json()["tenant_id"]
 
-        await client.delete(
-            f"/ui/api/keys/{tenant_id}", headers=_jwt_header()
-        )
+        await client.delete(f"/ui/api/keys/{tenant_id}", headers=_jwt_header())
 
         status = await redis.hget(f"apikey:{tenant_id}", "status")
         assert status == "revoked"
@@ -470,9 +446,7 @@ class TestRevokeKey:
             key_env["redis"],
         )
 
-        create_resp = await client.post(
-            "/ui/api/keys", headers=_jwt_header()
-        )
+        create_resp = await client.post("/ui/api/keys", headers=_jwt_header())
         data = create_resp.json()
         api_key, tenant_id = data["api_key"], data["tenant_id"]
 
@@ -483,9 +457,7 @@ class TestRevokeKey:
             name="Agent 2", description="Test", api_key=api_key
         )
 
-        await client.delete(
-            f"/ui/api/keys/{tenant_id}", headers=_jwt_header()
-        )
+        await client.delete(f"/ui/api/keys/{tenant_id}", headers=_jwt_header())
 
         status1 = await redis.hget(f"agent:{r1['agent_id']}", "status")
         status2 = await redis.hget(f"agent:{r2['agent_id']}", "status")
@@ -498,17 +470,13 @@ class TestRevokeKey:
         app, client = key_env["app"], key_env["client"]
 
         # User A creates a key
-        create_resp = await client.post(
-            "/ui/api/keys", headers=_jwt_header()
-        )
+        create_resp = await client.post("/ui/api/keys", headers=_jwt_header())
         tenant_id = create_resp.json()["tenant_id"]
 
         # Switch to user B
         _set_user(app, _TEST_SUB_B)
 
-        resp = await client.delete(
-            f"/ui/api/keys/{tenant_id}", headers=_jwt_header()
-        )
+        resp = await client.delete(f"/ui/api/keys/{tenant_id}", headers=_jwt_header())
 
         assert resp.status_code == 404
 
@@ -528,18 +496,12 @@ class TestRevokeKey:
         """After revocation, key still appears in GET /ui/api/keys with status 'revoked'."""
         client = key_env["client"]
 
-        create_resp = await client.post(
-            "/ui/api/keys", headers=_jwt_header()
-        )
+        create_resp = await client.post("/ui/api/keys", headers=_jwt_header())
         tenant_id = create_resp.json()["tenant_id"]
 
-        await client.delete(
-            f"/ui/api/keys/{tenant_id}", headers=_jwt_header()
-        )
+        await client.delete(f"/ui/api/keys/{tenant_id}", headers=_jwt_header())
 
-        list_resp = await client.get(
-            "/ui/api/keys", headers=_jwt_header()
-        )
+        list_resp = await client.get("/ui/api/keys", headers=_jwt_header())
         keys = list_resp.json()
 
         assert len(keys) == 1
@@ -556,9 +518,7 @@ class TestRevokeKey:
         tenant_id_1 = resp1.json()["tenant_id"]
         tenant_id_2 = resp2.json()["tenant_id"]
 
-        await client.delete(
-            f"/ui/api/keys/{tenant_id_1}", headers=_jwt_header()
-        )
+        await client.delete(f"/ui/api/keys/{tenant_id_1}", headers=_jwt_header())
 
         status = await redis.hget(f"apikey:{tenant_id_2}", "status")
         assert status == "active"

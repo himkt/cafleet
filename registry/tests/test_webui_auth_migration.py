@@ -7,7 +7,6 @@ and removal of _authenticate_tenant helper.
 Design doc reference: Step 4 — WebUI Auth Migration (Backend).
 """
 
-import hashlib
 import uuid
 from datetime import UTC, datetime
 
@@ -123,9 +122,7 @@ async def auth_env():
     _set_user_on_app(app, _TEST_SUB_A)
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield {
             "client": client,
             "store": store,
@@ -180,9 +177,7 @@ class TestGetWebuiTenant:
 
         _, tenant_id, _ = await _setup_tenant(store, _TEST_SUB_A)
 
-        resp = await client.get(
-            "/ui/api/agents", headers=_jwt_header(tenant_id)
-        )
+        resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id))
 
         assert resp.status_code == 200
 
@@ -192,9 +187,7 @@ class TestGetWebuiTenant:
         client = auth_env["client"]
 
         # JWT present but no X-Tenant-Id
-        resp = await client.get(
-            "/ui/api/agents", headers=_jwt_header(tenant_id=None)
-        )
+        resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id=None))
 
         assert resp.status_code == 400
 
@@ -212,9 +205,7 @@ class TestGetWebuiTenant:
 
         # User A tries to access user B's tenant
         _set_user_on_app(app, _TEST_SUB_A)
-        resp = await client.get(
-            "/ui/api/agents", headers=_jwt_header(tenant_id_b)
-        )
+        resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id_b))
 
         assert resp.status_code == 403
 
@@ -233,9 +224,7 @@ class TestGetWebuiTenant:
         app.dependency_overrides.pop(verify_auth0_user, None)
         app.dependency_overrides.pop(get_user_id, None)
 
-        resp = await client.get(
-            "/ui/api/agents", headers={"X-Tenant-Id": tenant_id}
-        )
+        resp = await client.get("/ui/api/agents", headers={"X-Tenant-Id": tenant_id})
 
         assert resp.status_code == 401 or resp.status_code == 403
 
@@ -268,13 +257,9 @@ class TestAgentsListJwt:
         """Returns agents belonging to the specified tenant."""
         store, client = auth_env["store"], auth_env["client"]
 
-        api_key, tenant_id, agent_id = await _setup_tenant(
-            store, _TEST_SUB_A
-        )
+        api_key, tenant_id, agent_id = await _setup_tenant(store, _TEST_SUB_A)
 
-        resp = await client.get(
-            "/ui/api/agents", headers=_jwt_header(tenant_id)
-        )
+        resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id))
 
         assert resp.status_code == 200
         ids = {a["agent_id"] for a in resp.json()["agents"]}
@@ -293,9 +278,7 @@ class TestAgentsListJwt:
             name="Other Agent", description="Test", api_key=api_key_b
         )
 
-        resp = await client.get(
-            "/ui/api/agents", headers=_jwt_header(tenant_id_a)
-        )
+        resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id_a))
 
         ids = {a["agent_id"] for a in resp.json()["agents"]}
         assert agent_a in ids
@@ -306,9 +289,7 @@ class TestAgentsListJwt:
         """GET /agents without X-Tenant-Id returns 400."""
         client = auth_env["client"]
 
-        resp = await client.get(
-            "/ui/api/agents", headers=_jwt_header(tenant_id=None)
-        )
+        resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id=None))
 
         assert resp.status_code == 400
 
@@ -319,9 +300,7 @@ class TestAgentsListJwt:
 
         _, tenant_id_b, _ = await _setup_tenant(store, _TEST_SUB_B)
 
-        resp = await client.get(
-            "/ui/api/agents", headers=_jwt_header(tenant_id_b)
-        )
+        resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id_b))
 
         assert resp.status_code == 403
 
@@ -343,16 +322,14 @@ class TestInboxJwt:
             auth_env["client"],
         )
 
-        api_key, tenant_id, agent_id = await _setup_tenant(
-            store, _TEST_SUB_A
-        )
+        api_key, tenant_id, agent_id = await _setup_tenant(store, _TEST_SUB_A)
 
         # Create a second agent as sender
         r_sender = await store.create_agent(
             name="Sender", description="Test", api_key=api_key
         )
 
-        task = await _create_task(
+        await _create_task(
             task_store,
             from_agent_id=r_sender["agent_id"],
             to_agent_id=agent_id,
@@ -451,9 +428,7 @@ class TestSentJwt:
             auth_env["redis"],
         )
 
-        api_key, tenant_id, sender_id = await _setup_tenant(
-            store, _TEST_SUB_A
-        )
+        api_key, tenant_id, sender_id = await _setup_tenant(store, _TEST_SUB_A)
         r_recipient = await store.create_agent(
             name="Recipient", description="Test", api_key=api_key
         )

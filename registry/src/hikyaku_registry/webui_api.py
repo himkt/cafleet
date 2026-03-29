@@ -1,11 +1,9 @@
 """WebUI API endpoints for the Hikyaku message viewer."""
 
 import asyncio
-import hashlib
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from a2a.server.agent_execution import RequestContext
 from a2a.server.context import ServerCallContext
@@ -77,13 +75,15 @@ async def _get_tenant_agents(
     # Active agents
     active_agents = await store.list_active_agents(tenant_id=tenant_id)
     for a in active_agents:
-        agents.append({
-            "agent_id": a["agent_id"],
-            "name": a["name"],
-            "description": a["description"],
-            "status": "active",
-            "registered_at": a["registered_at"],
-        })
+        agents.append(
+            {
+                "agent_id": a["agent_id"],
+                "name": a["name"],
+                "description": a["description"],
+                "status": "active",
+                "registered_at": a["registered_at"],
+            }
+        )
 
     # Deregistered agents with messages
     cursor = 0
@@ -98,17 +98,17 @@ async def _get_tenant_agents(
                 and record.get("status") == "deregistered"
             ):
                 agent_id = record["agent_id"]
-                has_messages = await store._redis.zcard(
-                    f"tasks:ctx:{agent_id}"
-                )
+                has_messages = await store._redis.zcard(f"tasks:ctx:{agent_id}")
                 if has_messages > 0:
-                    agents.append({
-                        "agent_id": agent_id,
-                        "name": record.get("name", ""),
-                        "description": record.get("description", ""),
-                        "status": "deregistered",
-                        "registered_at": record.get("registered_at", ""),
-                    })
+                    agents.append(
+                        {
+                            "agent_id": agent_id,
+                            "name": record.get("name", ""),
+                            "description": record.get("description", ""),
+                            "status": "deregistered",
+                            "registered_at": record.get("registered_at", ""),
+                        }
+                    )
         if cursor == 0:
             break
 
@@ -130,9 +130,7 @@ async def get_webui_tenant(
     if not tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-Id header required")
 
-    is_owner = await store._redis.sismember(
-        f"account:{user_id}:keys", tenant_id
-    )
+    is_owner = await store._redis.sismember(f"account:{user_id}:keys", tenant_id)
     if not is_owner:
         raise HTTPException(status_code=403)
 
@@ -167,9 +165,7 @@ async def _format_message(
     from_name = await _resolve_agent_name(store, from_id) if from_id else ""
     to_name = await _resolve_agent_name(store, to_id) if to_id else ""
 
-    created_at = (
-        await task_store._redis.hget(f"task:{task.id}", "created_at") or ""
-    )
+    created_at = await task_store._redis.hget(f"task:{task.id}", "created_at") or ""
 
     return {
         "task_id": task.id,
@@ -329,14 +325,10 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Agent not found")
 
     if to_agent.get("status") == "deregistered":
-        raise HTTPException(
-            status_code=400, detail="Agent is deregistered"
-        )
+        raise HTTPException(status_code=400, detail="Agent is deregistered")
 
     # Verify to_agent is in same tenant
-    to_in_tenant = await store.verify_agent_tenant(
-        body.to_agent_id, tenant_id
-    )
+    to_in_tenant = await store.verify_agent_tenant(body.to_agent_id, tenant_id)
     if not to_in_tenant:
         raise HTTPException(status_code=404, detail="Agent not found")
 
