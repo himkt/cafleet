@@ -6,3 +6,18 @@ config_roots = [
   "client",
   "admin",
 ]
+
+[tasks.lint]
+run = "uv run ruff check ."
+description = "Run ruff linter"
+
+[tasks.format]
+run = "uv run ruff format --check ."
+description = "Check code formatting with ruff"
+
+[tasks.typecheck]
+run = "uv run ty check"
+description = "Run ty type checker"
+
+[env]
+HIKYAKU_URL = "localhost:8000"

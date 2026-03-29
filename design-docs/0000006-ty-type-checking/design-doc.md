@@ -1,7 +1,7 @@
 # Introduce Type Checking with ty
 
 **Status**: Approved
-**Progress**: 0/12 tasks complete
+**Progress**: 4/12 tasks complete
 **Last Updated**: 2026-03-29
 
 ## Overview
@@ -138,13 +138,13 @@ dev = [
 
 ### Step 1: Documentation
 
-- [ ] Update `CLAUDE.md` commands section to include `uv run ty check` <!-- completed: -->
+- [x] Update `CLAUDE.md` commands section to include `uv run ty check` <!-- completed: 2026-03-29T11:52 -->
 
 ### Step 2: Add ty dependency and configuration
 
-- [ ] Add `ty` to dev dependencies in root `pyproject.toml` <!-- completed: -->
-- [ ] Add `[tool.ty]` configuration to root `pyproject.toml` <!-- completed: -->
-- [ ] Run `uv sync` to verify dependency resolution <!-- completed: -->
+- [x] Add `ty` to dev dependencies in root `pyproject.toml` <!-- completed: 2026-03-29T11:52 -->
+- [x] Add `[tool.ty]` configuration to root `pyproject.toml` <!-- completed: 2026-03-29T11:52 -->
+- [x] Run `uv sync` to verify dependency resolution <!-- completed: 2026-03-29T11:52 -->
 
 ### Step 3: Add type annotations to registry package
 

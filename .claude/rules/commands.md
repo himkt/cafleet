@@ -9,3 +9,4 @@
 - Start broker server: `cd registry` then `uv run uvicorn hikyaku_registry.main:app`
 - Start MCP server: `cd mcp-server` then `uv run hikyaku-mcp`
 - Sync workspace: `uv sync` (from project root)
+- Type check: `uv run ty check` (from project root)
