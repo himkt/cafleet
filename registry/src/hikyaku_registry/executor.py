@@ -5,6 +5,7 @@ from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.types import (
     Artifact,
+    Message,
     Part,
     Task,
     TaskState,
@@ -95,7 +96,7 @@ class BrokerExecutor(AgentExecutor):
         event_queue: EventQueue,
         from_agent_id: str,
         destination: str,
-        message,
+        message: Message,
         tenant_id: str | None = None,
     ) -> None:
         try:
@@ -145,7 +146,7 @@ class BrokerExecutor(AgentExecutor):
         self,
         event_queue: EventQueue,
         from_agent_id: str,
-        message,
+        message: Message,
         tenant_id: str | None = None,
     ) -> None:
         active_agents = await self._registry_store.list_active_agents(

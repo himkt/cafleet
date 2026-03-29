@@ -25,7 +25,7 @@ async def register_agent(
     body: RegisterAgentRequest,
     request: Request,
     store: RegistryStore = Depends(get_registry_store),
-):
+) -> RegisterAgentResponse:
     tenant_info = await get_registration_tenant(request, store)
     api_key = tenant_info[0] if tenant_info is not None else None
 
@@ -42,7 +42,7 @@ async def register_agent(
 async def list_agents(
     auth: tuple = Depends(get_authenticated_agent),
     store: RegistryStore = Depends(get_registry_store),
-):
+) -> ListAgentsResponse:
     _agent_id, tenant_id = auth
     agents = await store.list_active_agents(tenant_id=tenant_id)
     return {"agents": agents}
@@ -53,7 +53,7 @@ async def get_agent_detail(
     agent_id: str,
     auth: tuple = Depends(get_authenticated_agent),
     store: RegistryStore = Depends(get_registry_store),
-):
+) -> JSONResponse | dict:
     _caller_id, tenant_id = auth
 
     agent = await store.get_agent(agent_id)
@@ -88,7 +88,7 @@ async def deregister_agent(
     agent_id: str,
     auth: tuple = Depends(get_authenticated_agent),
     store: RegistryStore = Depends(get_registry_store),
-):
+) -> Response | JSONResponse:
     caller_id, _tenant_id = auth
 
     agent = await store.get_agent(agent_id)

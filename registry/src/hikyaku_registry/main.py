@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import redis.asyncio as aioredis
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -50,7 +51,7 @@ from hikyaku_registry.webui_api import (
 logger = logging.getLogger(__name__)
 
 
-async def _cleanup_loop(redis, ttl_days: int, interval: int) -> None:
+async def _cleanup_loop(redis: aioredis.Redis, ttl_days: int, interval: int) -> None:
     """Periodically clean up expired deregistered agents."""
     while True:
         try:
@@ -255,7 +256,7 @@ async def _handle_list_tasks(
     return {"tasks": [_task_to_dict(t) for t in tasks]}
 
 
-def create_app(redis=None, webui_dist_dir=None) -> FastAPI:
+def create_app(redis: aioredis.Redis | None = None, webui_dist_dir: str | None = None) -> FastAPI:
     app = FastAPI(title="Hikyaku Broker", version="0.1.0", lifespan=lifespan)
     app.include_router(registry_router, prefix="/api/v1")
     app.include_router(subscribe_router, prefix="/api/v1")
@@ -272,10 +273,10 @@ def create_app(redis=None, webui_dist_dir=None) -> FastAPI:
     )
 
     # Override dependencies so API endpoints use the same redis
-    async def _get_store():
+    async def _get_store() -> RegistryStore:
         return registry_store
 
-    async def _get_auth(request: Request):
+    async def _get_auth(request: Request) -> tuple[str, str]:
         return await get_authenticated_agent(request, store=registry_store)
 
     app.dependency_overrides[get_registry_store] = _get_store
