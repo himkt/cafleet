@@ -5,16 +5,18 @@ description = "A2A-native message broker and agent registry for coding agents"
 requires-python = ">=3.12"
 
 [tool.uv.workspace]
-members = ["registry", "client"]
+members = ["registry", "client", "mcp-server"]
 
 [tool.uv.sources]
 hikyaku-registry = { workspace = true }
 hikyaku-client = { workspace = true }
+hikyaku-mcp = { workspace = true }
 
 [dependency-groups]
 dev = [
     "hikyaku-registry",
     "hikyaku-client",
+    "hikyaku-mcp",
     "fakeredis>=2.34.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",

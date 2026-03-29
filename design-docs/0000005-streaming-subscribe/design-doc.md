@@ -1,7 +1,7 @@
 # Streaming Subscribe (MCP Server)
 
 **Status**: Approved
-**Progress**: 16/22 tasks complete
+**Progress**: 22/22 tasks complete
 **Last Updated**: 2026-03-29
 
 ## Overview
@@ -420,12 +420,12 @@ Agent                    MCP Server (proxy)       Registry
 
 ### Step 4: MCP Server Package
 
-- [ ] Create `mcp-server/` package with `pyproject.toml`, `[project.scripts]` entry point, and add to root workspace members <!-- completed: -->
-- [ ] Implement `SSEClient` connection manager with auto-connect on startup in `sse_client.py` <!-- completed: -->
-- [ ] Implement registry API forwarder in `registry.py` (send, broadcast, ack, cancel, get_task, agents, register, deregister) <!-- completed: -->
-- [ ] Implement `poll` MCP tool that drains local buffer with optional `since` filter and `page_size` limit <!-- completed: -->
-- [ ] Implement forwarding MCP tools (send, broadcast, ack, cancel, get_task, agents, register, deregister) <!-- completed: -->
-- [ ] Add unit tests for MCP server tools (poll from buffer, forwarding, SSE auto-connect, buffer overflow) <!-- completed: -->
+- [x] Create `mcp-server/` package with `pyproject.toml`, `[project.scripts]` entry point, and add to root workspace members <!-- completed: 2026-03-29 -->
+- [x] Implement `SSEClient` connection manager with auto-connect on startup in `sse_client.py` <!-- completed: 2026-03-29 -->
+- [x] Implement registry API forwarder in `registry.py` (send, broadcast, ack, cancel, get_task, agents, register, deregister) <!-- completed: 2026-03-29 -->
+- [x] Implement `poll` MCP tool that drains local buffer with optional `since` filter and `page_size` limit <!-- completed: 2026-03-29 -->
+- [x] Implement forwarding MCP tools (send, broadcast, ack, cancel, get_task, agents, register, deregister) <!-- completed: 2026-03-29 -->
+- [x] Add unit tests for MCP server tools (poll from buffer, forwarding, SSE auto-connect, buffer overflow) <!-- completed: 2026-03-29 -->
 
 ---
 
