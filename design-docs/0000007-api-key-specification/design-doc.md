@@ -1,7 +1,7 @@
 # API Key Specification: WebUI-Issued Keys with Auth0
 
 **Status**: Approved
-**Progress**: 15/43 tasks complete
+**Progress**: 20/43 tasks complete
 **Last Updated**: 2026-03-29
 
 ## Overview
@@ -367,11 +367,11 @@ if (tenantId) {
 
 ### Step 3: Key Management Endpoints (WebUI Backend)
 
-- [ ] Add `GET /ui/api/auth/config` endpoint returning Auth0 client config (no auth required) <!-- completed: -->
-- [ ] Add `POST /ui/api/keys` endpoint (JWT auth) <!-- completed: -->
-- [ ] Add `GET /ui/api/keys` endpoint (JWT auth) <!-- completed: -->
-- [ ] Add `DELETE /ui/api/keys/{tenant_id}` endpoint (JWT auth + ownership check) <!-- completed: -->
-- [ ] Add tests for key management endpoints <!-- completed: -->
+- [x] Add `GET /ui/api/auth/config` endpoint returning Auth0 client config (no auth required) <!-- completed: 2026-03-29T14:06 -->
+- [x] Add `POST /ui/api/keys` endpoint (JWT auth) <!-- completed: 2026-03-29T14:06 -->
+- [x] Add `GET /ui/api/keys` endpoint (JWT auth) <!-- completed: 2026-03-29T14:06 -->
+- [x] Add `DELETE /ui/api/keys/{tenant_id}` endpoint (JWT auth + ownership check) <!-- completed: 2026-03-29T14:06 -->
+- [x] Add tests for key management endpoints <!-- completed: 2026-03-29T14:06 -->
 
 ### Step 4: WebUI Auth Migration (Backend)
 

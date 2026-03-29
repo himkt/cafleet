@@ -19,6 +19,8 @@ from a2a.types import (
     TextPart,
 )
 
+from hikyaku_registry.auth import verify_auth0_user, get_user_id
+from hikyaku_registry.config import settings
 from hikyaku_registry.executor import BrokerExecutor
 from hikyaku_registry.redis_client import get_redis
 from hikyaku_registry.registry_store import RegistryStore
@@ -209,6 +211,42 @@ class SendMessageRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@webui_router.get("/auth/config")
+async def auth_config():
+    return {"domain": settings.auth0_domain, "client_id": settings.auth0_client_id}
+
+
+@webui_router.post("/keys", status_code=201)
+async def create_key(
+    _auth: None = Depends(verify_auth0_user),
+    user_id: str = Depends(get_user_id),
+    store: RegistryStore = Depends(get_webui_store),
+):
+    api_key, api_key_hash, created_at = await store.create_api_key(user_id)
+    return {"api_key": api_key, "tenant_id": api_key_hash, "created_at": created_at}
+
+
+@webui_router.get("/keys")
+async def list_keys(
+    _auth: None = Depends(verify_auth0_user),
+    user_id: str = Depends(get_user_id),
+    store: RegistryStore = Depends(get_webui_store),
+):
+    return await store.list_api_keys(user_id)
+
+
+@webui_router.delete("/keys/{tenant_id}", status_code=204)
+async def revoke_key(
+    tenant_id: str,
+    _auth: None = Depends(verify_auth0_user),
+    user_id: str = Depends(get_user_id),
+    store: RegistryStore = Depends(get_webui_store),
+):
+    success = await store.revoke_api_key(tenant_id, user_id)
+    if not success:
+        raise HTTPException(status_code=404)
 
 
 @webui_router.post("/login")
