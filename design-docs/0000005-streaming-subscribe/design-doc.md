@@ -1,7 +1,7 @@
 # Streaming Subscribe (MCP Server)
 
-**Status**: Approved
-**Progress**: 0/22 tasks complete
+**Status**: Complete
+**Progress**: 22/22 tasks complete
 **Last Updated**: 2026-03-29
 
 ## Overview
@@ -395,37 +395,37 @@ Agent                    MCP Server (proxy)       Registry
 
 ### Step 1: Documentation & Architecture Update
 
-- [ ] Update `ARCHITECTURE.md` with streaming subscribe architecture (SSE endpoint, Redis Pub/Sub notification, MCP server package) <!-- completed: -->
-- [ ] Update `docs/` directory with streaming subscribe usage and configuration <!-- completed: -->
-- [ ] Update `/hikyaku` skill documentation with subscribe workflow <!-- completed: -->
-- [ ] Add MCP server configuration example to README <!-- completed: -->
-- [ ] Update project rules (`.claude/rules/`) with streaming subscribe endpoint and MCP server details <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` with streaming subscribe architecture (SSE endpoint, Redis Pub/Sub notification, MCP server package) <!-- completed: 2026-03-29T08:35 -->
+- [x] Update `docs/` directory with streaming subscribe usage and configuration <!-- completed: 2026-03-29T08:35 -->
+- [x] Update `/hikyaku` skill documentation with subscribe workflow <!-- completed: 2026-03-29T08:35 -->
+- [x] Add MCP server configuration example to README <!-- completed: 2026-03-29T08:36 -->
+- [x] Update project rules (`.claude/rules/`) with streaming subscribe endpoint and MCP server details <!-- completed: 2026-03-29T08:36 -->
 
 ### Step 2: Redis Pub/Sub Integration
 
-- [ ] Add `PubSubManager` class to registry (`registry/src/hikyaku_registry/pubsub.py`) for subscribing/publishing to `inbox:{agent_id}` channels <!-- completed: -->
-- [ ] Add `pubsub` parameter to `BrokerExecutor.__init__` and wire it up in `create_app()` (`main.py`) <!-- completed: -->
-- [ ] Integrate publish call into `BrokerExecutor._handle_unicast()` after `task_store.save()` <!-- completed: -->
-- [ ] Integrate publish call into `BrokerExecutor._handle_broadcast()` for each recipient <!-- completed: -->
-- [ ] Add unit tests for `PubSubManager` (publish, subscribe, unsubscribe) <!-- completed: -->
-- [ ] Add unit tests for executor publish integration (verify publish called on delivery) <!-- completed: -->
+- [x] Add `PubSubManager` class to registry (`registry/src/hikyaku_registry/pubsub.py`) for subscribing/publishing to `inbox:{agent_id}` channels <!-- completed: 2026-03-29T08:40 -->
+- [x] Add `pubsub` parameter to `BrokerExecutor.__init__` and wire it up in `create_app()` (`main.py`) <!-- completed: 2026-03-29T08:40 -->
+- [x] Integrate publish call into `BrokerExecutor._handle_unicast()` after `task_store.save()` <!-- completed: 2026-03-29T08:40 -->
+- [x] Integrate publish call into `BrokerExecutor._handle_broadcast()` for each recipient <!-- completed: 2026-03-29T08:40 -->
+- [x] Add unit tests for `PubSubManager` (publish, subscribe, unsubscribe) <!-- completed: 2026-03-29T08:40 -->
+- [x] Add unit tests for executor publish integration (verify publish called on delivery) <!-- completed: 2026-03-29T08:40 -->
 
 ### Step 3: Server-side SSE Endpoint
 
-- [ ] Add `GET /api/v1/subscribe` FastAPI endpoint with `Authorization` + `X-Agent-Id` authentication <!-- completed: -->
-- [ ] Implement SSE `StreamingResponse` that reads from `PubSubManager` subscription <!-- completed: -->
-- [ ] Add 30-second keepalive ping via periodic `:keepalive` comment <!-- completed: -->
-- [ ] Add connection cleanup on client disconnect (unsubscribe from Redis Pub/Sub) <!-- completed: -->
-- [ ] Add tests for SSE endpoint (auth errors, message streaming, keepalive, disconnect cleanup) <!-- completed: -->
+- [x] Add `GET /api/v1/subscribe` FastAPI endpoint with `Authorization` + `X-Agent-Id` authentication <!-- completed: 2026-03-29T09:10 -->
+- [x] Implement SSE `StreamingResponse` that reads from `PubSubManager` subscription <!-- completed: 2026-03-29T09:10 -->
+- [x] Add 30-second keepalive ping via periodic `:keepalive` comment <!-- completed: 2026-03-29T09:10 -->
+- [x] Add connection cleanup on client disconnect (unsubscribe from Redis Pub/Sub) <!-- completed: 2026-03-29T09:10 -->
+- [x] Add tests for SSE endpoint (auth errors, message streaming, keepalive, disconnect cleanup) <!-- completed: 2026-03-29T09:10 -->
 
 ### Step 4: MCP Server Package
 
-- [ ] Create `mcp-server/` package with `pyproject.toml`, `[project.scripts]` entry point, and add to root workspace members <!-- completed: -->
-- [ ] Implement `SSEClient` connection manager with auto-connect on startup in `sse_client.py` <!-- completed: -->
-- [ ] Implement registry API forwarder in `registry.py` (send, broadcast, ack, cancel, get_task, agents, register, deregister) <!-- completed: -->
-- [ ] Implement `poll` MCP tool that drains local buffer with optional `since` filter and `page_size` limit <!-- completed: -->
-- [ ] Implement forwarding MCP tools (send, broadcast, ack, cancel, get_task, agents, register, deregister) <!-- completed: -->
-- [ ] Add unit tests for MCP server tools (poll from buffer, forwarding, SSE auto-connect, buffer overflow) <!-- completed: -->
+- [x] Create `mcp-server/` package with `pyproject.toml`, `[project.scripts]` entry point, and add to root workspace members <!-- completed: 2026-03-29 -->
+- [x] Implement `SSEClient` connection manager with auto-connect on startup in `sse_client.py` <!-- completed: 2026-03-29 -->
+- [x] Implement registry API forwarder in `registry.py` (send, broadcast, ack, cancel, get_task, agents, register, deregister) <!-- completed: 2026-03-29 -->
+- [x] Implement `poll` MCP tool that drains local buffer with optional `since` filter and `page_size` limit <!-- completed: 2026-03-29 -->
+- [x] Implement forwarding MCP tools (send, broadcast, ack, cancel, get_task, agents, register, deregister) <!-- completed: 2026-03-29 -->
+- [x] Add unit tests for MCP server tools (poll from buffer, forwarding, SSE auto-connect, buffer overflow) <!-- completed: 2026-03-29 -->
 
 ---
 
@@ -434,3 +434,4 @@ Agent                    MCP Server (proxy)       Registry
 | Date | Changes |
 |------|---------|
 | 2026-03-29 | Initial draft |
+| 2026-03-29 | Implementation complete |
