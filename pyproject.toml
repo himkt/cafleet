@@ -18,4 +18,5 @@ dev = [
     "fakeredis>=2.34.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "ruff>=0.11.0",
 ]
