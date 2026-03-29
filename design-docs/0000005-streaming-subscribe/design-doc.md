@@ -1,7 +1,7 @@
 # Streaming Subscribe (MCP Server)
 
 **Status**: Approved
-**Progress**: 11/22 tasks complete
+**Progress**: 16/22 tasks complete
 **Last Updated**: 2026-03-29
 
 ## Overview
@@ -412,11 +412,11 @@ Agent                    MCP Server (proxy)       Registry
 
 ### Step 3: Server-side SSE Endpoint
 
-- [ ] Add `GET /api/v1/subscribe` FastAPI endpoint with `Authorization` + `X-Agent-Id` authentication <!-- completed: -->
-- [ ] Implement SSE `StreamingResponse` that reads from `PubSubManager` subscription <!-- completed: -->
-- [ ] Add 30-second keepalive ping via periodic `:keepalive` comment <!-- completed: -->
-- [ ] Add connection cleanup on client disconnect (unsubscribe from Redis Pub/Sub) <!-- completed: -->
-- [ ] Add tests for SSE endpoint (auth errors, message streaming, keepalive, disconnect cleanup) <!-- completed: -->
+- [x] Add `GET /api/v1/subscribe` FastAPI endpoint with `Authorization` + `X-Agent-Id` authentication <!-- completed: 2026-03-29T09:10 -->
+- [x] Implement SSE `StreamingResponse` that reads from `PubSubManager` subscription <!-- completed: 2026-03-29T09:10 -->
+- [x] Add 30-second keepalive ping via periodic `:keepalive` comment <!-- completed: 2026-03-29T09:10 -->
+- [x] Add connection cleanup on client disconnect (unsubscribe from Redis Pub/Sub) <!-- completed: 2026-03-29T09:10 -->
+- [x] Add tests for SSE endpoint (auth errors, message streaming, keepalive, disconnect cleanup) <!-- completed: 2026-03-29T09:10 -->
 
 ### Step 4: MCP Server Package
 
