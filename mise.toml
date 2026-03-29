@@ -4,4 +4,5 @@ experimental_monorepo_root = true
 config_roots = [
   "registry",
   "client",
+  "admin",
 ]

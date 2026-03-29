@@ -1,0 +1,8 @@
+[tasks.lint]
+run = "bun lint"
+
+[tasks.dev]
+run = "bun dev"
+
+[tasks.build]
+run = "bun build"
