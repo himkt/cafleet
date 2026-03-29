@@ -287,7 +287,6 @@ The `admin/dist/` directory is gitignored. The build step (`npm run build` in `a
 | `registry/src/hikyaku_registry/webui_api.py` | **New**: FastAPI router with login, agents, inbox, sent, send endpoints |
 | `registry/src/hikyaku_registry/main.py` | Include `webui_router` BEFORE mounting `StaticFiles` at `/ui` (router must take precedence over static file catch-all) |
 | `admin/` | **New**: Entire SPA project (Vite + React + TypeScript + Tailwind) |
-| `registry/pyproject.toml` | Add `jinja2` dependency (required by `StaticFiles` HTML mode for SPA fallback) |
 | `.gitignore` | Add `admin/dist/`, `admin/node_modules/` |
 
 ### Error Handling
@@ -322,8 +321,7 @@ The `admin/dist/` directory is gitignored. The build step (`npm run build` in `a
 ### Step 2: Mount WebUI in FastAPI
 
 - [x] Modify `main.py`: import and include `webui_router` BEFORE `StaticFiles` mount so API routes take precedence <!-- completed: 2026-03-29T12:30 -->
-- [x] Mount `StaticFiles` at `/ui` pointing to `admin/dist/` with `html=True` for SPA fallback (must come AFTER router inclusion) <!-- completed: 2026-03-29T12:30 -->
-- [x] Add `jinja2` to `registry/pyproject.toml` dependencies (required by Starlette's `StaticFiles` html mode) <!-- completed: 2026-03-29T12:30 -->
+- [x] Mount `SPAStaticFiles` at `/ui` pointing to `admin/dist/` with custom 404→index.html fallback (must come AFTER router inclusion) <!-- completed: 2026-03-29T12:30 -->
 
 ### Step 3: SPA Project Setup
 

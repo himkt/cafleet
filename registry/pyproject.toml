@@ -11,7 +11,6 @@ dependencies = [
     "redis[hiredis]",
     "pydantic",
     "pydantic-settings",
-    "jinja2",
 ]
 
 [build-system]

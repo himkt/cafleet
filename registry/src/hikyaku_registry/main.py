@@ -358,7 +358,7 @@ def create_app(redis=None, webui_dist_dir=None) -> FastAPI:
     if dist_path.exists():
         app.mount(
             "/ui",
-            SPAStaticFiles(directory=str(dist_path), html=True),
+            SPAStaticFiles(directory=str(dist_path)),
             name="webui",
         )
 
