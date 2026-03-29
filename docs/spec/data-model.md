@@ -7,9 +7,10 @@ All core data structures — `Task`, `Message`, `Part`, `Artifact`, `AgentCard`,
 | Key Pattern | Type | Description | TTL |
 |---|---|---|---|
 | `agent:{agent_id}` | Hash | Agent metadata + serialized Agent Card. The `api_key_hash` field serves as `tenant_id`. | None |
-| ~~`apikey:{sha256(key)}`~~ | ~~String~~ | ~~Maps hashed API key → agent_id~~ | **Removed** — replaced by tenant set membership check. Multiple agents now share one API key, so this 1:1 mapping is no longer valid. |
+| `apikey:{api_key_hash}` | Hash | API key metadata: `owner_sub`, `created_at`, `status`, `key_prefix`. Source of truth for key existence and validity. | None |
+| `account:{auth0_sub}:keys` | Set | Set of `api_key_hash` values owned by this Auth0 account. Used for key listing and ownership validation. | None |
 | `agents:active` | Set | Set of active agent_id UUIDs. **Retained for cleanup scanning only** — application queries use tenant sets instead. | None |
-| `tenant:{api_key_hash}:agents` | Set | **New.** Set of active agent_ids belonging to this tenant. Updated on registration (SADD) and deregistration (SREM). This is the canonical source for tenant membership. | None |
+| `tenant:{api_key_hash}:agents` | Set | Set of active agent_ids belonging to this tenant. Updated on registration (SADD) and deregistration (SREM). This is the canonical source for tenant membership. | None |
 | `task:{task_id}` | Hash | Full A2A Task JSON + routing metadata | None |
 | `tasks:ctx:{context_id}` | Sorted Set | task_ids scored by status timestamp (updated on state change) | None |
 | `tasks:sender:{agent_id}` | Set | task_ids created by this sender | None |
@@ -28,6 +29,24 @@ All core data structures — `Task`, `Message`, `Part`, `Artifact`, `AgentCard`,
   "deregistered_at": "ISO 8601 | null"
 }
 ```
+
+## API Key Record (`apikey:{api_key_hash}`)
+
+```json
+{
+  "owner_sub": "auth0|abc123",
+  "created_at": "ISO 8601",
+  "status": "active | revoked",
+  "key_prefix": "hky_a1b2"
+}
+```
+
+- `owner_sub`: Auth0 `sub` claim of the user who created the key
+- `created_at`: Timestamp when the key was created via the WebUI
+- `status`: `"active"` (valid for use) or `"revoked"` (key is disabled; all agent requests using this key are rejected with 401)
+- `key_prefix`: First 8 characters of the raw API key, for display in the WebUI key list
+
+The `apikey:{hash}` record is the source of truth for key existence and validity. Every authenticated request (both agent-to-broker and WebUI tenant-scoped) checks this record. Revoking a key sets `status` to `"revoked"` and deregisters all agents in `tenant:{hash}:agents`.
 
 ## Task Record (`task:{task_id}`)
 
@@ -56,7 +75,11 @@ This enables efficient inbox queries:
 
 ## Tenant Lifecycle
 
-Tenants are ephemeral. When the last agent in a tenant deregisters, the `tenant:{api_key_hash}:agents` set becomes empty. At that point, no new agent can join using that API key (the join flow rejects empty/missing tenant sets). The API key effectively dies with the last agent. To re-create the tenant, an agent must register without auth to get a fresh API key.
+Tenants are created when a user creates an API key via the WebUI. The `apikey:{hash}` record is the source of truth for tenant existence. Agents join the tenant by registering with the API key.
+
+When all agents in a tenant deregister, the `tenant:{api_key_hash}:agents` set becomes empty, but the tenant remains valid — new agents can still register using the API key as long as its `apikey:{hash}` status is `"active"`.
+
+Revoking a key (via `DELETE /ui/api/keys/{tenant_id}`) sets the status to `"revoked"` and deregisters all agents. A revoked key cannot be used for agent registration or authentication.
 
 ## Task Visibility Rules
 

@@ -54,16 +54,23 @@ An A2A-native message broker and agent registry for coding agents. Enables ephem
 
 The API key serves as the tenant boundary. All agents sharing the same API key form a tenant. The `SHA-256(api_key)` hash is stored as `api_key_hash` in agent records and used as the `tenant_id`.
 
-**Authentication requires two headers on all requests (except registration)**:
+**Two authentication surfaces**:
+
+| Surface | Mechanism | Purpose |
+|---|---|---|
+| Agent-to-broker | `Authorization: Bearer <api_key>` + `X-Agent-Id: <agent_id>` | Tenant auth + agent identity for all A2A and Registry API requests |
+| WebUI | `Authorization: Bearer <auth0_jwt>` (+ `X-Tenant-Id` on tenant-scoped endpoints) | Auth0 user identity for key management and dashboard |
+
+**Agent authentication** requires two headers on all requests:
 
 | Header | Purpose |
 |---|---|
-| `Authorization: Bearer <api_key>` | Authenticates the tenant |
+| `Authorization: Bearer <api_key>` | Authenticates the tenant (`SHA-256(api_key)` = `tenant_id`) |
 | `X-Agent-Id: <agent_id>` | Identifies the specific agent within the tenant |
 
-**Registration** has two flows:
-- **No `Authorization` header**: Creates a new tenant with a fresh API key
-- **With `Authorization: Bearer <api_key>`**: Joins an existing tenant
+Additionally, the API key must have an active `apikey:{hash}` record (status = `"active"`). Revoking a key via the WebUI immediately invalidates all agent requests using that key.
+
+**Registration** always requires a valid API key (`Authorization: Bearer <api_key>`). API keys are created through the WebUI key management interface, not during registration. The previous "create new tenant without auth" flow has been removed.
 
 **Isolation rules**: Every operation that reads or writes agent/task data enforces tenant boundaries. Cross-tenant requests always produce "not found" errors indistinguishable from the resource not existing.
 
@@ -106,7 +113,7 @@ The `hikyaku-mcp` package (`mcp-server/`) is a transparent proxy that exposes th
 |---|---|---|
 | `main.py` | `registry/src/hikyaku_registry/` | ASGI app: mount A2A + FastAPI |
 | `config.py` | `registry/src/hikyaku_registry/` | Settings via pydantic-settings |
-| `auth.py` | `registry/src/hikyaku_registry/` | API key + X-Agent-Id auth, tenant membership verification (shared by REST + A2A) |
+| `auth.py` | `registry/src/hikyaku_registry/` | API key + X-Agent-Id auth (agents), Auth0 JWT validation (WebUI), tenant membership verification (shared by REST + A2A) |
 | `redis_client.py` | `registry/src/hikyaku_registry/` | Redis connection pool |
 | `models.py` | `registry/src/hikyaku_registry/` | Pydantic models (Registry API) |
 | `executor.py` | `registry/src/hikyaku_registry/` | BrokerExecutor (A2A AgentExecutor) |
@@ -116,7 +123,7 @@ The `hikyaku-mcp` package (`mcp-server/`) is a transparent proxy that exposes th
 | `api/registry.py` | `registry/src/hikyaku_registry/api/` | Registry API router |
 | `pubsub.py` | `registry/src/hikyaku_registry/` | PubSubManager for Redis Pub/Sub (inbox notification channels) |
 | `subscribe.py` | `registry/src/hikyaku_registry/api/` | SSE endpoint router (`GET /api/v1/subscribe`) |
-| `webui_api.py` | `registry/src/hikyaku_registry/` | WebUI API router (`/ui/api/*`) — login, agents, inbox, sent, send |
+| `webui_api.py` | `registry/src/hikyaku_registry/` | WebUI API router (`/ui/api/*`) — auth config, key management, agents, inbox, sent, send |
 | `admin/` | Project root | WebUI SPA (Vite + React + TypeScript + Tailwind CSS) |
 | `cli.py` | `client/src/hikyaku_client/` | click group + subcommands |
 | `api.py` | `client/src/hikyaku_client/` | Helper functions (httpx / a2a-sdk) |
@@ -174,13 +181,25 @@ a2a_app = A2AStarletteApplication(agent_card=broker_card, http_handler=handler)
 fastapi_app.mount("/", a2a_app.build())
 ```
 
+## Auth0 Integration
+
+Auth0 provides user identity for the WebUI only. Agent-to-broker communication continues to use API keys.
+
+- **WebUI login**: Auth0 SPA SDK (PKCE flow) → Auth0 JWT
+- **WebUI API auth**: `Authorization: Bearer <auth0_jwt>` validated via `PyJWKClient` + Auth0 JWKS endpoint
+- **User identity**: Auth0 `sub` claim (stable, unique per user)
+- **Server-side validation**: `Auth0Verifier` class in `auth.py` uses `jwt.PyJWKClient` with 24-hour key cache. The `verify_auth0_user` FastAPI dependency validates JWTs and stores the decoded token in `request.scope["auth0"]`.
+
+**Configuration**: `AUTH0_DOMAIN` (tenant domain) and `AUTH0_CLIENT_ID` (SPA client ID, also used as JWT audience).
+
 ## WebUI
 
-A browser-based message viewer served as a SPA at `/ui/`. Operators log in with their tenant API key and can browse agents, view message history (inbox/sent), and send unicast messages.
+A browser-based dashboard served as a SPA at `/ui/`. Users log in via Auth0 (OIDC), manage API keys, select a tenant, and browse agents/messages.
 
-- **Frontend**: `admin/` — Vite + React 19 + TypeScript + Tailwind CSS 4
-- **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — login, agent list, inbox, sent, send
-- **Auth**: Bearer API key in `Authorization` header (same key as A2A API). No server-side session; key stored in browser memory only.
+- **Frontend**: `admin/` — Vite + React 19 + TypeScript + Tailwind CSS 4 + `@auth0/auth0-react`
+- **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — auth config, key management, agent list, inbox, sent, send
+- **Auth**: Auth0 JWT in `Authorization` header. Tenant-scoped endpoints require `X-Tenant-Id` header (validated against `account:{sub}:keys` ownership).
+- **Key management**: Users create, list, and revoke API keys through `/ui/api/keys` endpoints. Each key corresponds to a tenant. Revoking a key deregisters all agents under that tenant.
 - **Static serving**: `StaticFiles` mount at `/ui` serves `admin/dist/` (production build)
 
 ## Monorepo Structure

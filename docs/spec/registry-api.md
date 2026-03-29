@@ -13,22 +13,20 @@ All endpoints except `POST /api/v1/agents` (registration) and `GET /.well-known/
 | `Authorization: Bearer <api_key>` | Authenticates the tenant (`SHA-256(api_key)` = `tenant_id`) |
 | `X-Agent-Id: <agent_id>` | Identifies the specific agent within the tenant |
 
-- **Flow**: Agent registers → receives `api_key` and `agent_id` → Broker stores `SHA-256(api_key)` as `api_key_hash` → on each request, Broker hashes provided key, verifies the agent record's `api_key_hash` matches, and confirms agent-tenant membership
+- **Flow**: Agent registers with a pre-existing API key → receives `agent_id` → Broker stores `SHA-256(api_key)` as `api_key_hash` → on each request, Broker hashes provided key, checks `apikey:{hash}` status is `"active"`, verifies the agent record's `api_key_hash` matches, and confirms agent-tenant membership
 - **API key format**: `hky_` prefix + 32 random hex characters (e.g., `hky_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4`)
+- **API key issuance**: Keys are created through the WebUI key management interface (requires Auth0 login). Keys are not generated during agent registration.
+- **API key status check**: Every authenticated request verifies that the API key has an active `apikey:{hash}` record. Revoked keys immediately fail with 401.
 - **Tenant model**: The API key is a shared tenant credential. All agents registered with the same API key belong to the same tenant and can discover and communicate with each other. Agents in different tenants are invisible to one another.
-- **Registration exception**: `POST /api/v1/agents` does not require the `X-Agent-Id` header (the agent doesn't exist yet). It optionally accepts `Authorization: Bearer <api_key>` to join an existing tenant.
+- **Registration**: `POST /api/v1/agents` requires `Authorization: Bearer <api_key>` (the key must exist and be active). The `X-Agent-Id` header is not required for registration (the agent doesn't exist yet).
 
 ## Endpoints
 
 ### POST /api/v1/agents — Register Agent
 
-Two registration modes, determined by presence of `Authorization` header:
+Registration always requires a valid API key. API keys are created through the WebUI key management interface (requires Auth0 login).
 
-#### Create New Tenant (no `Authorization` header)
-
-A new API key and tenant are created automatically.
-
-**Request**:
+**Request** (with `Authorization: Bearer <api_key>` header):
 
 ```json
 {
@@ -56,33 +54,11 @@ A new API key and tenant are created automatically.
 }
 ```
 
-The `api_key` is shown only once at registration. The Broker stores only the SHA-256 hash. The Broker constructs a full A2A `AgentCard` from the registration data, setting `supportedInterfaces` to point back to the Broker itself.
+The `api_key` in the response is the same key provided in the `Authorization` header (echoed back for convenience). The Broker stores only the SHA-256 hash. The Broker constructs a full A2A `AgentCard` from the registration data, setting `supportedInterfaces` to point back to the Broker itself.
 
-#### Join Existing Tenant (`Authorization: Bearer <api_key>` provided)
+**Validation**: The API key must have an active `apikey:{hash}` record (created via WebUI). If no `Authorization` header is provided, or the key is revoked/unknown, the server returns 401 Unauthorized.
 
-The agent joins the tenant identified by the provided API key. The server verifies the tenant exists (i.e., at least one active agent is already registered with that key). If the tenant set is empty or missing, returns 401 "Invalid API key".
-
-**Request** (with `Authorization: Bearer <existing_api_key>` header):
-
-```json
-{
-  "name": "My Second Agent",
-  "description": "Another agent in the same tenant"
-}
-```
-
-**Response** (201 Created):
-
-```json
-{
-  "agent_id": "660e8400-e29b-41d4-a716-446655440001",
-  "api_key": "hky_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
-  "name": "My Second Agent",
-  "registered_at": "2026-03-28T12:01:00Z"
-}
-```
-
-The `api_key` in the response is the same key that was provided in the `Authorization` header (echoed back for convenience).
+**Error**: 401 if `Authorization` header is missing, the key is not found in `apikey:{hash}`, or the key status is not `"active"`.
 
 ### GET /api/v1/agents — List Agents
 
