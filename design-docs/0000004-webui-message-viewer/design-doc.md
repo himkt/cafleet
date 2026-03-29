@@ -1,7 +1,7 @@
 # WebUI Message Viewer
 
 **Status**: Approved
-**Progress**: 10/23 tasks complete
+**Progress**: 15/23 tasks complete
 **Last Updated**: 2026-03-29
 
 ## Overview
@@ -327,11 +327,11 @@ The `admin/dist/` directory is gitignored. The build step (`npm run build` in `a
 
 ### Step 3: SPA Project Setup
 
-- [ ] Set up `admin/` with `package.json` (Vite 8.x, React 19.x, TypeScript, Tailwind CSS 4.x) <!-- completed: -->
-- [ ] Configure `vite.config.ts` with API proxy to `http://localhost:8000` for dev mode <!-- completed: -->
-- [ ] Set up Tailwind CSS 4.x (CSS-first config via `@import "tailwindcss"`) <!-- completed: -->
-- [ ] Create `src/api.ts`: fetch wrapper that injects `Authorization: Bearer` header from in-memory API key <!-- completed: -->
-- [ ] Create `src/types.ts`: TypeScript interfaces for Agent, Message, API responses <!-- completed: -->
+- [x] Set up `admin/` with `package.json` (Vite 8.x, React 19.x, TypeScript, Tailwind CSS 4.x) <!-- completed: 2026-03-29T13:00 -->
+- [x] Configure `vite.config.ts` with API proxy to `http://localhost:8000` for dev mode <!-- completed: 2026-03-29T13:00 -->
+- [x] Set up Tailwind CSS 4.x (CSS-first config via `@import "tailwindcss"`) <!-- completed: 2026-03-29T13:00 -->
+- [x] Create `src/api.ts`: fetch wrapper that injects `Authorization: Bearer` header from in-memory API key <!-- completed: 2026-03-29T13:00 -->
+- [x] Create `src/types.ts`: TypeScript interfaces for Agent, Message, API responses <!-- completed: 2026-03-29T13:00 -->
 
 ### Step 4: SPA UI Components
 

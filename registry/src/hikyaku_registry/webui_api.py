@@ -217,7 +217,20 @@ async def login(
     store: RegistryStore = Depends(get_webui_store),
     task_store: RedisTaskStore = Depends(get_webui_task_store),
 ):
-    token = _extract_bearer(request)
+    # Inline auth extraction so all 401s return {"error": ...} format
+    auth_header = request.headers.get("authorization")
+    if not auth_header:
+        return JSONResponse(
+            status_code=401, content={"error": "Invalid API key"}
+        )
+
+    parts = auth_header.split(" ", 1)
+    if len(parts) != 2 or parts[0] != "Bearer" or not parts[1].strip():
+        return JSONResponse(
+            status_code=401, content={"error": "Invalid API key"}
+        )
+
+    token = parts[1].strip()
     tenant_id = hashlib.sha256(token.encode()).hexdigest()
 
     agents = await _get_tenant_agents(tenant_id, store, task_store)
