@@ -1,7 +1,7 @@
 # API Key Specification: WebUI-Issued Keys with Auth0
 
 **Status**: Approved
-**Progress**: 20/43 tasks complete
+**Progress**: 28/43 tasks complete
 **Last Updated**: 2026-03-29
 
 ## Overview
@@ -375,14 +375,14 @@ if (tenantId) {
 
 ### Step 4: WebUI Auth Migration (Backend)
 
-- [ ] Create `get_webui_tenant(request, store)` dependency: uses `verify_auth0_user` + `get_user_id` for JWT auth, extracts `X-Tenant-Id`, verifies user owns the tenant via `account:{sub}:keys` <!-- completed: -->
-- [ ] Update `GET /ui/api/agents` to use JWT + `X-Tenant-Id` auth <!-- completed: -->
-- [ ] Update `GET /ui/api/agents/{agent_id}/inbox` to use JWT + `X-Tenant-Id` auth <!-- completed: -->
-- [ ] Update `GET /ui/api/agents/{agent_id}/sent` to use JWT + `X-Tenant-Id` auth <!-- completed: -->
-- [ ] Update `POST /ui/api/messages/send` to use JWT + `X-Tenant-Id` auth <!-- completed: -->
-- [ ] Remove `POST /ui/api/login` endpoint <!-- completed: -->
-- [ ] Remove `_authenticate_tenant` helper (replaced by `get_webui_tenant`) <!-- completed: -->
-- [ ] Add tests for JWT-based WebUI auth (valid, invalid, wrong tenant ownership) <!-- completed: -->
+- [x] Create `get_webui_tenant(request, store)` dependency: uses `verify_auth0_user` + `get_user_id` for JWT auth, extracts `X-Tenant-Id`, verifies user owns the tenant via `account:{sub}:keys` <!-- completed: 2026-03-29T14:11 -->
+- [x] Update `GET /ui/api/agents` to use JWT + `X-Tenant-Id` auth <!-- completed: 2026-03-29T14:11 -->
+- [x] Update `GET /ui/api/agents/{agent_id}/inbox` to use JWT + `X-Tenant-Id` auth <!-- completed: 2026-03-29T14:11 -->
+- [x] Update `GET /ui/api/agents/{agent_id}/sent` to use JWT + `X-Tenant-Id` auth <!-- completed: 2026-03-29T14:11 -->
+- [x] Update `POST /ui/api/messages/send` to use JWT + `X-Tenant-Id` auth <!-- completed: 2026-03-29T14:11 -->
+- [x] Remove `POST /ui/api/login` endpoint <!-- completed: 2026-03-29T14:11 -->
+- [x] Remove `_authenticate_tenant` helper (replaced by `get_webui_tenant`) <!-- completed: 2026-03-29T14:11 -->
+- [x] Add tests for JWT-based WebUI auth (valid, invalid, wrong tenant ownership) <!-- completed: 2026-03-29T14:11 -->
 
 ### Step 5: Agent Auth & Registration Changes (Server)
 

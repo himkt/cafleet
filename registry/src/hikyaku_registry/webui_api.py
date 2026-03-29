@@ -115,41 +115,28 @@ async def _get_tenant_agents(
     return agents
 
 
-async def _authenticate_tenant(
+async def get_webui_tenant(
     request: Request,
-    store: RegistryStore,
-    task_store: RedisTaskStore,
+    _auth: None = Depends(verify_auth0_user),
+    user_id: str = Depends(get_user_id),
+    store: RegistryStore = Depends(get_webui_store),
 ) -> str:
-    token = _extract_bearer(request)
-    tenant_id = hashlib.sha256(token.encode()).hexdigest()
+    """Extract and validate X-Tenant-Id header for tenant-scoped endpoints.
 
-    # Quick check: active agents in tenant?
-    active_count = await store._redis.scard(f"tenant:{tenant_id}:agents")
-    if active_count > 0:
-        return tenant_id
+    Requires JWT auth. Verifies the tenant belongs to the authenticated user.
+    Returns tenant_id.
+    """
+    tenant_id = request.headers.get("x-tenant-id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-Id header required")
 
-    # Slow check: deregistered agents with messages?
-    cursor = 0
-    while True:
-        cursor, keys = await store._redis.scan(
-            cursor=cursor, match="agent:*", count=100
-        )
-        for key in keys:
-            record = await store._redis.hgetall(key)
-            if (
-                record.get("api_key_hash") == tenant_id
-                and record.get("status") == "deregistered"
-            ):
-                agent_id = record["agent_id"]
-                has_messages = await store._redis.zcard(
-                    f"tasks:ctx:{agent_id}"
-                )
-                if has_messages > 0:
-                    return tenant_id
-        if cursor == 0:
-            break
+    is_owner = await store._redis.sismember(
+        f"account:{user_id}:keys", tenant_id
+    )
+    if not is_owner:
+        raise HTTPException(status_code=403)
 
-    raise HTTPException(status_code=401)
+    return tenant_id
 
 
 def _extract_body(task: Task) -> str:
@@ -249,44 +236,12 @@ async def revoke_key(
         raise HTTPException(status_code=404)
 
 
-@webui_router.post("/login")
-async def login(
-    request: Request,
-    store: RegistryStore = Depends(get_webui_store),
-    task_store: RedisTaskStore = Depends(get_webui_task_store),
-):
-    # Inline auth extraction so all 401s return {"error": ...} format
-    auth_header = request.headers.get("authorization")
-    if not auth_header:
-        return JSONResponse(
-            status_code=401, content={"error": "Invalid API key"}
-        )
-
-    parts = auth_header.split(" ", 1)
-    if len(parts) != 2 or parts[0] != "Bearer" or not parts[1].strip():
-        return JSONResponse(
-            status_code=401, content={"error": "Invalid API key"}
-        )
-
-    token = parts[1].strip()
-    tenant_id = hashlib.sha256(token.encode()).hexdigest()
-
-    agents = await _get_tenant_agents(tenant_id, store, task_store)
-    if not agents:
-        return JSONResponse(
-            status_code=401, content={"error": "Invalid API key"}
-        )
-
-    return {"tenant_id": tenant_id, "agents": agents}
-
-
 @webui_router.get("/agents")
 async def list_agents(
-    request: Request,
+    tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
     task_store: RedisTaskStore = Depends(get_webui_task_store),
 ):
-    tenant_id = await _authenticate_tenant(request, store, task_store)
     agents = await _get_tenant_agents(tenant_id, store, task_store)
     return {"agents": agents}
 
@@ -294,11 +249,10 @@ async def list_agents(
 @webui_router.get("/agents/{agent_id}/inbox")
 async def get_inbox(
     agent_id: str,
-    request: Request,
+    tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
     task_store: RedisTaskStore = Depends(get_webui_task_store),
 ):
-    tenant_id = await _authenticate_tenant(request, store, task_store)
 
     if not await store.verify_agent_tenant(agent_id, tenant_id):
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -321,11 +275,10 @@ async def get_inbox(
 @webui_router.get("/agents/{agent_id}/sent")
 async def get_sent(
     agent_id: str,
-    request: Request,
+    tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
     task_store: RedisTaskStore = Depends(get_webui_task_store),
 ):
-    tenant_id = await _authenticate_tenant(request, store, task_store)
 
     if not await store.verify_agent_tenant(agent_id, tenant_id):
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -356,13 +309,12 @@ async def get_sent(
 
 @webui_router.post("/messages/send")
 async def send_message(
-    request: Request,
     body: SendMessageRequest,
+    tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
     task_store: RedisTaskStore = Depends(get_webui_task_store),
     executor: BrokerExecutor = Depends(get_webui_executor),
 ):
-    tenant_id = await _authenticate_tenant(request, store, task_store)
 
     # Verify from_agent belongs to tenant
     from_in_tenant = await store._redis.sismember(
