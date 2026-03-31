@@ -6,4 +6,4 @@ admin/dist/
 admin/node_modules/
 .vite
 
-sample
+.mise/config.toml

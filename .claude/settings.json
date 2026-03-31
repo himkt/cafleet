@@ -2,9 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(mise lint)",
+      "Bash(mise lint *)",
       "Bash(mise format)",
+      "Bash(mise format *)",
       "Bash(mise typecheck)",
-      "Bash(mise test)"
+      "Bash(mise typecheck *)",
+      "Bash(mise test)",
+      "Bash(mise test *)"
     ],
     "deny": [
       "Bash(uv run pytest *)",
