@@ -1,7 +1,7 @@
 # mise Task Full-Path Specification
 
 **Status**: Approved
-**Progress**: 2/7 tasks complete
+**Progress**: 3/7 tasks complete
 **Last Updated**: 2026-03-30
 
 ## Overview
@@ -186,7 +186,7 @@ Key changes for `.claude/CLAUDE.md`:
 
 ### Step 3: Update .claude/rules/commands.md
 
-- [ ] Rewrite commands.md with full-path notation and remove `cd` instructions <!-- completed: -->
+- [x] Rewrite commands.md with full-path notation and remove `cd` instructions <!-- completed: 2026-03-31T14:40 -->
 
 ### Step 4: Update CLAUDE.md files
 
