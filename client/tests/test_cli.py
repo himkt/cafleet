@@ -87,7 +87,7 @@ class TestRegisterCommand:
     """Tests for `hikyaku register`."""
 
     def test_register_success(self, runner):
-        """Register prints agent_id, api_key, and export statements."""
+        """Register prints agent_id and name but not api_key."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -107,10 +107,10 @@ class TestRegisterCommand:
 
         assert result.exit_code == 0
         assert AGENT_ID in result.output
-        assert API_KEY in result.output
+        assert API_KEY not in result.output
 
     def test_register_prints_export_statements(self, runner):
-        """Register output includes export statements for shell integration."""
+        """Register output includes only HIKYAKU_AGENT_ID export."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -129,12 +129,12 @@ class TestRegisterCommand:
             )
 
         assert result.exit_code == 0
-        assert "export HIKYAKU_URL=" in result.output
-        assert "export HIKYAKU_API_KEY=" in result.output
         assert "export HIKYAKU_AGENT_ID=" in result.output
+        assert "export HIKYAKU_API_KEY=" not in result.output
+        assert "export HIKYAKU_URL=" not in result.output
 
     def test_register_json_output(self, runner):
-        """Register with --json outputs valid JSON."""
+        """Register with --json outputs valid JSON without api_key."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -156,7 +156,29 @@ class TestRegisterCommand:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["agent_id"] == AGENT_ID
-        assert data["api_key"] == API_KEY
+        assert "api_key" not in data
+
+    def test_register_output_shows_name(self, runner):
+        """Register output includes the agent name."""
+        with patch(
+            "hikyaku_client.cli.api.register_agent",
+            new_callable=AsyncMock,
+            return_value=SAMPLE_AGENT,
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "register",
+                    "--name",
+                    "test-agent",
+                    "--description",
+                    "A test agent",
+                ],
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+            )
+
+        assert result.exit_code == 0
+        assert "test-agent" in result.output
 
     def test_register_requires_api_key(self, runner):
         """Register requires HIKYAKU_API_KEY environment variable."""
