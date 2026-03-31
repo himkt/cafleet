@@ -1,7 +1,7 @@
 # mise Task Full-Path Specification
 
 **Status**: Approved
-**Progress**: 3/7 tasks complete
+**Progress**: 5/7 tasks complete
 **Last Updated**: 2026-03-30
 
 ## Overview
@@ -190,8 +190,8 @@ Key changes for `.claude/CLAUDE.md`:
 
 ### Step 4: Update CLAUDE.md files
 
-- [ ] Update root `CLAUDE.md` Commands section to use full-path notation <!-- completed: -->
-- [ ] Update `.claude/CLAUDE.md` Commands section to use full-path notation <!-- completed: -->
+- [x] Update root `CLAUDE.md` Commands section to use full-path notation <!-- completed: 2026-03-31T14:48 -->
+- [x] Update `.claude/CLAUDE.md` Commands section to use full-path notation <!-- completed: 2026-03-31T14:48 -->
 
 ---
 

@@ -7,3 +7,9 @@ admin/node_modules/
 .vite
 
 .mise/config.toml
+
+!.claude
+!.claude/agents
+!.claude/rules
+!.claude/skills
+!.claude/settings.json
