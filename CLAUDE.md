@@ -36,14 +36,21 @@ A2A-native message broker + agent registry for coding agents.
 
 ## Commands
 
-**IMPORTANT**: Always `cd` into the package directory before running tests. Running from the project root causes module-not-found errors.
+**IMPORTANT**: Always use mise full-path tasks. Run from the project root — do NOT `cd` into package directories.
 
-- Run registry tests: `cd registry` then `uv run pytest tests/ -v`
-- Run client tests: `cd client` then `uv run pytest tests/ -v`
-- Run MCP server tests: `cd mcp-server` then `uv run pytest tests/ -v`
-- Run specific test file: `cd registry` then `uv run pytest tests/test_executor.py -v`
-- Start broker server: `cd registry` then `uv run uvicorn hikyaku_registry.main:app`
-- Start MCP server: `cd mcp-server` then `uv run hikyaku-mcp`
+- Run registry tests: `mise //registry:test`
+- Run client tests: `mise //client:test`
+- Run MCP server tests: `mise //mcp-server:test`
+- Lint (root): `mise //:lint`
+- Lint (registry): `mise //registry:lint`
+- Lint (client): `mise //client:lint`
+- Lint (admin): `mise //admin:lint`
+- Lint (mcp-server): `mise //mcp-server:lint`
+- Format check (root): `mise //:format`
+- Type check: `mise //:typecheck`
 - Sync workspace: `uv sync` (from project root)
-- Type check: `uv run ty check` (from project root)
+- Start broker server: `mise //registry:dev`
+- Start MCP server: `mise //mcp-server:dev`
+- Start admin dev server: `mise //admin:dev`
+- Build admin: `mise //admin:build`
 

@@ -1,8 +1,8 @@
 # mise Task Full-Path Specification
 
-**Status**: Approved
-**Progress**: 0/7 tasks complete
-**Last Updated**: 2026-03-30
+**Status**: Complete
+**Progress**: 7/7 tasks complete
+**Last Updated**: 2026-03-31
 
 ## Overview
 
@@ -10,11 +10,11 @@ Switch all mise task invocations from short-form notation (`mise test`) to full-
 
 ## Success Criteria
 
-- [ ] All `mise tasks --all` tasks (including mcp-server) are callable via full-path notation from the project root
-- [ ] `.claude/settings.json` allows only full-path task invocations and denies short-form
-- [ ] `.claude/rules/commands.md` documents full-path notation exclusively
-- [ ] Both `CLAUDE.md` files reference full-path notation in their Commands sections
-- [ ] No `cd` into package directories is required for running mise tasks
+- [x] All `mise tasks --all` tasks (including mcp-server) are callable via full-path notation from the project root
+- [x] `.claude/settings.json` allows only full-path task invocations and denies short-form
+- [x] `.claude/rules/commands.md` documents full-path notation exclusively
+- [x] Both `CLAUDE.md` files reference full-path notation in their Commands sections
+- [x] No `cd` into package directories is required for running mise tasks
 
 ---
 
@@ -172,8 +172,8 @@ Key changes for `.claude/CLAUDE.md`:
 
 ### Step 1: Update mise.toml monorepo config
 
-- [ ] Add `mcp-server` to `monorepo.config_roots` in root `mise.toml` <!-- completed: -->
-- [ ] Verify `mise tasks --all` shows mcp-server tasks (`//mcp-server:test`, etc.) <!-- completed: -->
+- [x] Add `mcp-server` to `monorepo.config_roots` in root `mise.toml` <!-- completed: 2026-03-31T14:39 -->
+- [x] Verify `mise tasks --all` shows mcp-server tasks (`//mcp-server:test`, etc.) <!-- completed: 2026-03-31T14:39 -->
 
 > After verification, proceed to Steps 3-4 (documentation updates) before Step 2 (settings.json), following the project rule that documentation is updated first.
 
@@ -181,17 +181,17 @@ Key changes for `.claude/CLAUDE.md`:
 
 ### Step 2: Update .claude/settings.json
 
-- [ ] Replace allow list with package-level full-path wildcard patterns <!-- completed: -->
-- [ ] Add short-form task names (`mise test`, `mise lint`, etc.) to deny list <!-- completed: -->
+- [x] Replace allow list with package-level full-path wildcard patterns <!-- completed: 2026-03-31T14:52 -->
+- [x] Add short-form task names (`mise test`, `mise lint`, etc.) to deny list <!-- completed: 2026-03-31T14:52 -->
 
 ### Step 3: Update .claude/rules/commands.md
 
-- [ ] Rewrite commands.md with full-path notation and remove `cd` instructions <!-- completed: -->
+- [x] Rewrite commands.md with full-path notation and remove `cd` instructions <!-- completed: 2026-03-31T14:40 -->
 
 ### Step 4: Update CLAUDE.md files
 
-- [ ] Update root `CLAUDE.md` Commands section to use full-path notation <!-- completed: -->
-- [ ] Update `.claude/CLAUDE.md` Commands section to use full-path notation <!-- completed: -->
+- [x] Update root `CLAUDE.md` Commands section to use full-path notation <!-- completed: 2026-03-31T14:48 -->
+- [x] Update `.claude/CLAUDE.md` Commands section to use full-path notation <!-- completed: 2026-03-31T14:48 -->
 
 ---
 
@@ -203,3 +203,4 @@ Key changes for `.claude/CLAUDE.md`:
 | 2026-03-30 | Add `dev`/`build` short-form to deny list; add implementation order notes |
 | 2026-03-30 | Enumerate root tasks individually instead of `//:*` wildcard |
 | 2026-03-30 | Approved |
+| 2026-04-01 | Implementation complete. Removed `Bash(mise //package:* *)` patterns (Claude Code `:*` validation requires it at end of pattern) |
