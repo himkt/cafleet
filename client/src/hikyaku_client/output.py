@@ -10,12 +10,9 @@ def format_register(data: dict) -> str:
     lines = [
         "Agent registered successfully!",
         f"  agent_id:  {data['agent_id']}",
-        f"  api_key:   {data['api_key']}",
         f"  name:      {data.get('name', '')}",
         "",
-        "# Set these environment variables for subsequent commands:",
-        "export HIKYAKU_URL=${HIKYAKU_URL:-http://localhost:8000}",
-        f"export HIKYAKU_API_KEY={data['api_key']}",
+        "# Use this agent ID for subsequent commands:",
         f"export HIKYAKU_AGENT_ID={data['agent_id']}",
     ]
     return "\n".join(lines)

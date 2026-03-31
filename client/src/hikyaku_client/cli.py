@@ -73,7 +73,8 @@ def register(ctx, name, description, skills):
         )
 
         if ctx.obj["json_output"]:
-            click.echo(output.format_json(result))
+            sanitized = {k: v for k, v in result.items() if k != "api_key"}
+            click.echo(output.format_json(sanitized))
         else:
             click.echo(output.format_register(result))
     except Exception as e:

@@ -108,16 +108,13 @@ class RegistryForwarder:
         name: str,
         description: str,
         skills: str | None = None,
-        api_key: str | None = None,
     ) -> dict:
         """Register a new agent."""
         body: dict = {"name": name, "description": description}
         if skills is not None:
             body["skills"] = json.loads(skills)
 
-        headers = {}
-        if api_key is not None:
-            headers["Authorization"] = f"Bearer {api_key}"
+        headers = {"Authorization": f"Bearer {self._api_key}"}
 
         response = await self._client.post(
             f"{self._broker_url}/api/v1/agents",
