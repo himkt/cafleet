@@ -319,24 +319,22 @@ class TestForwardRegister:
         assert body["description"] == "Test agent"
 
     @pytest.mark.asyncio
-    async def test_register_with_api_key_sends_auth_header(
+    async def test_register_always_sends_configured_api_key(
         self, forwarder, mock_httpx_client
     ):
-        """register() with api_key sends Authorization header to join tenant."""
+        """register() always sends Authorization header with configured API key."""
         mock_response = MagicMock()
         mock_response.status_code = 201
         mock_response.json.return_value = SAMPLE_REGISTER_RESPONSE
         mock_response.raise_for_status = MagicMock()
         mock_httpx_client.post.return_value = mock_response
 
-        join_key = "hky_joinkey00000000000000000000000"
-        await forwarder.register(
-            name="Joining Agent", description="Joining", api_key=join_key
-        )
+        await forwarder.register(name="New Agent", description="Test agent")
 
         call_args = mock_httpx_client.post.call_args
         headers = call_args[1].get("headers", {})
-        assert headers.get("Authorization") == f"Bearer {join_key}"
+        assert "Authorization" in headers
+        assert headers["Authorization"] == f"Bearer {API_KEY}"
 
     @pytest.mark.asyncio
     async def test_register_with_skills(self, forwarder, mock_httpx_client):
