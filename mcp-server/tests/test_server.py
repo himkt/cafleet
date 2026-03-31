@@ -8,11 +8,13 @@ The MCP server is a transparent proxy: poll reads from the SSEClient buffer,
 all other tools forward to the registry via RegistryForwarder.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from hikyaku_mcp.server import (
+    _build_server,
     handle_poll,
     handle_send,
     handle_broadcast,
@@ -324,7 +326,7 @@ class TestRegisterTool:
 
     @pytest.mark.asyncio
     async def test_register_calls_forwarder_register(self, mock_forwarder):
-        """register tool calls RegistryForwarder.register."""
+        """register tool calls RegistryForwarder.register without api_key."""
         await handle_register(
             forwarder=mock_forwarder,
             name="New Agent",
@@ -335,21 +337,46 @@ class TestRegisterTool:
         call_kwargs = mock_forwarder.register.call_args[1]
         assert call_kwargs["name"] == "New Agent"
         assert call_kwargs["description"] == "Test agent"
+        assert "api_key" not in call_kwargs
 
     @pytest.mark.asyncio
-    async def test_register_with_optional_params(self, mock_forwarder):
-        """register tool passes optional skills and api_key."""
+    async def test_register_with_optional_skills(self, mock_forwarder):
+        """register tool passes optional skills (api_key is not accepted)."""
         await handle_register(
             forwarder=mock_forwarder,
             name="Skilled Agent",
             description="Has skills",
             skills='[{"name": "code-review"}]',
-            api_key="hky_joinkey",
         )
 
         call_kwargs = mock_forwarder.register.call_args[1]
         assert call_kwargs["skills"] == '[{"name": "code-review"}]'
-        assert call_kwargs["api_key"] == "hky_joinkey"
+        assert "api_key" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_register_does_not_accept_api_key(self, mock_forwarder):
+        """handle_register does not accept api_key parameter."""
+        with pytest.raises(TypeError):
+            await handle_register(
+                forwarder=mock_forwarder,
+                name="Agent",
+                description="Test",
+                api_key="hky_test",
+            )
+
+    @pytest.mark.asyncio
+    async def test_register_output_includes_api_key_for_call_tool(self, mock_forwarder):
+        """handle_register returns agent_id and api_key so call_tool can later strip api_key."""
+        mock_forwarder.register = AsyncMock(
+            return_value={"agent_id": "new-agent", "api_key": "hky_secret", "name": "test"}
+        )
+        result = await handle_register(
+            forwarder=mock_forwarder,
+            name="Agent",
+            description="Test",
+        )
+        assert "agent_id" in result
+        assert result["agent_id"] == "new-agent"
 
 
 # ---------------------------------------------------------------------------
@@ -366,3 +393,55 @@ class TestDeregisterTool:
         await handle_deregister(forwarder=mock_forwarder)
 
         mock_forwarder.deregister.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# call_tool — register output stripping
+# ---------------------------------------------------------------------------
+
+
+class TestCallToolRegisterOutputStripping:
+    """Tests for call_tool stripping api_key from register tool output."""
+
+    @pytest.mark.asyncio
+    async def test_call_tool_register_strips_api_key(self):
+        """call_tool strips api_key from register result in JSON output."""
+        mock_fwd = AsyncMock()
+        mock_fwd.register = AsyncMock(
+            return_value={"agent_id": "new-agent", "api_key": "hky_secret", "name": "test"}
+        )
+
+        with patch("hikyaku_mcp.server.get_config") as mock_config, \
+             patch("hikyaku_mcp.server.SSEClient") as mock_sse_cls, \
+             patch("hikyaku_mcp.server.RegistryForwarder") as mock_fwd_cls:
+            mock_config.return_value = {
+                "broker_url": "http://localhost:8000",
+                "api_key": "hky_test",
+                "agent_id": "agent-1",
+            }
+            mock_sse_cls.return_value = MagicMock()
+            mock_fwd_cls.return_value = mock_fwd
+
+            server, _, _ = _build_server()
+
+            from mcp.types import CallToolRequest, CallToolRequestParams
+
+            handler = server.request_handlers.get(CallToolRequest)
+            assert handler is not None
+
+            request = CallToolRequest(
+                method="tools/call",
+                params=CallToolRequestParams(
+                    name="register",
+                    arguments={"name": "Agent", "description": "Test"},
+                ),
+            )
+            result = await handler(request)
+
+            # ServerResult wraps CallToolResult in .root
+            output_text = result.root.content[0].text
+            parsed = json.loads(output_text)
+            assert "agent_id" in parsed
+            assert parsed["agent_id"] == "new-agent"
+            assert "name" in parsed
+            assert "api_key" not in parsed

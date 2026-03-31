@@ -73,9 +73,9 @@ SAMPLE_COMPLETED_TASK = {
 }
 
 
-def _auth_opts():
-    """Common authentication CLI options."""
-    return ["--url", BROKER_URL, "--api-key", API_KEY, "--agent-id", AGENT_ID]
+def _auth_env():
+    """Environment variables for authentication."""
+    return {"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY}
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ class TestRegisterCommand:
     """Tests for `hikyaku register`."""
 
     def test_register_success(self, runner):
-        """Register prints agent_id, api_key, and export statements."""
+        """Register prints agent_id and name but not api_key."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -96,24 +96,21 @@ class TestRegisterCommand:
             result = runner.invoke(
                 cli,
                 [
-                    "--url",
-                    BROKER_URL,
-                    "--api-key",
-                    API_KEY,
                     "register",
                     "--name",
                     "test-agent",
                     "--description",
                     "A test agent",
                 ],
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
             )
 
         assert result.exit_code == 0
         assert AGENT_ID in result.output
-        assert API_KEY in result.output
+        assert API_KEY not in result.output
 
     def test_register_prints_export_statements(self, runner):
-        """Register output includes export statements for shell integration."""
+        """Register output includes only HIKYAKU_AGENT_ID export."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -122,25 +119,22 @@ class TestRegisterCommand:
             result = runner.invoke(
                 cli,
                 [
-                    "--url",
-                    BROKER_URL,
-                    "--api-key",
-                    API_KEY,
                     "register",
                     "--name",
                     "test-agent",
                     "--description",
                     "A test agent",
                 ],
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
             )
 
         assert result.exit_code == 0
-        assert "export HIKYAKU_URL=" in result.output
-        assert "export HIKYAKU_API_KEY=" in result.output
         assert "export HIKYAKU_AGENT_ID=" in result.output
+        assert "export HIKYAKU_API_KEY=" not in result.output
+        assert "export HIKYAKU_URL=" not in result.output
 
     def test_register_json_output(self, runner):
-        """Register with --json outputs valid JSON."""
+        """Register with --json outputs valid JSON without api_key."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -149,10 +143,6 @@ class TestRegisterCommand:
             result = runner.invoke(
                 cli,
                 [
-                    "--url",
-                    BROKER_URL,
-                    "--api-key",
-                    API_KEY,
                     "--json",
                     "register",
                     "--name",
@@ -160,15 +150,16 @@ class TestRegisterCommand:
                     "--description",
                     "A test agent",
                 ],
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
             )
 
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["agent_id"] == AGENT_ID
-        assert data["api_key"] == API_KEY
+        assert "api_key" not in data
 
-    def test_register_requires_api_key(self, runner):
-        """Register requires global --api-key."""
+    def test_register_output_shows_name(self, runner):
+        """Register output includes the agent name."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -177,14 +168,35 @@ class TestRegisterCommand:
             result = runner.invoke(
                 cli,
                 [
-                    "--url",
-                    BROKER_URL,
                     "register",
                     "--name",
                     "test-agent",
                     "--description",
                     "A test agent",
                 ],
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+            )
+
+        assert result.exit_code == 0
+        assert "test-agent" in result.output
+
+    def test_register_requires_api_key(self, runner):
+        """Register requires HIKYAKU_API_KEY environment variable."""
+        with patch(
+            "hikyaku_client.cli.api.register_agent",
+            new_callable=AsyncMock,
+            return_value=SAMPLE_AGENT,
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "register",
+                    "--name",
+                    "test-agent",
+                    "--description",
+                    "A test agent",
+                ],
+                env={"HIKYAKU_URL": BROKER_URL},
             )
 
         assert result.exit_code != 0
@@ -194,14 +206,11 @@ class TestRegisterCommand:
         result = runner.invoke(
             cli,
             [
-                "--url",
-                BROKER_URL,
-                "--api-key",
-                API_KEY,
                 "register",
                 "--description",
                 "A test agent",
             ],
+            env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
         )
 
         assert result.exit_code != 0
@@ -223,10 +232,6 @@ class TestRegisterCommand:
             result = runner.invoke(
                 cli,
                 [
-                    "--url",
-                    BROKER_URL,
-                    "--api-key",
-                    API_KEY,
                     "register",
                     "--name",
                     "test-agent",
@@ -235,6 +240,7 @@ class TestRegisterCommand:
                     "--skills",
                     skills_json,
                 ],
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
             )
 
         assert result.exit_code == 0
@@ -252,16 +258,13 @@ class TestRegisterCommand:
             result = runner.invoke(
                 cli,
                 [
-                    "--url",
-                    BROKER_URL,
-                    "--api-key",
-                    API_KEY,
                     "register",
                     "--name",
                     "test-agent",
                     "--description",
                     "A test agent",
                 ],
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
             )
 
         assert result.exit_code != 0
@@ -282,7 +285,8 @@ class TestSendCommand:
         with patch("hikyaku_client.cli.api.send_message", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "send", "--to", target_id, "--text", "Hello from CLI"],
+                ["send", "--agent-id", AGENT_ID, "--to", target_id, "--text", "Hello from CLI"],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -295,14 +299,16 @@ class TestSendCommand:
             result = runner.invoke(
                 cli,
                 [
-                    *_auth_opts(),
                     "--json",
                     "send",
+                    "--agent-id",
+                    AGENT_ID,
                     "--to",
                     "target-001",
                     "--text",
                     "Hello",
                 ],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -313,7 +319,8 @@ class TestSendCommand:
         """Send fails without --to option."""
         result = runner.invoke(
             cli,
-            [*_auth_opts(), "send", "--text", "Hello"],
+            ["send", "--agent-id", AGENT_ID, "--text", "Hello"],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
@@ -322,16 +329,28 @@ class TestSendCommand:
         """Send fails without --text option."""
         result = runner.invoke(
             cli,
-            [*_auth_opts(), "send", "--to", "target-001"],
+            ["send", "--agent-id", AGENT_ID, "--to", "target-001"],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
 
     def test_send_requires_auth(self, runner):
-        """Send fails without --api-key."""
+        """Send fails without HIKYAKU_API_KEY."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "send", "--to", "target-001", "--text", "Hello"],
+            ["send", "--agent-id", AGENT_ID, "--to", "target-001", "--text", "Hello"],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+
+        assert result.exit_code != 0
+
+    def test_send_requires_agent_id(self, runner):
+        """Send fails without --agent-id."""
+        result = runner.invoke(
+            cli,
+            ["send", "--to", "target-001", "--text", "Hello"],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
@@ -351,7 +370,8 @@ class TestBroadcastCommand:
         with patch("hikyaku_client.cli.api.broadcast_message", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "broadcast", "--text", "Build failed on main"],
+                ["broadcast", "--agent-id", AGENT_ID, "--text", "Build failed on main"],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -364,12 +384,14 @@ class TestBroadcastCommand:
             result = runner.invoke(
                 cli,
                 [
-                    *_auth_opts(),
                     "--json",
                     "broadcast",
+                    "--agent-id",
+                    AGENT_ID,
                     "--text",
                     "Build failed on main",
                 ],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -380,16 +402,28 @@ class TestBroadcastCommand:
         """Broadcast fails without --text."""
         result = runner.invoke(
             cli,
-            [*_auth_opts(), "broadcast"],
+            ["broadcast", "--agent-id", AGENT_ID],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
 
     def test_broadcast_requires_auth(self, runner):
-        """Broadcast fails without --api-key."""
+        """Broadcast fails without HIKYAKU_API_KEY."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "broadcast", "--text", "Hello"],
+            ["broadcast", "--agent-id", AGENT_ID, "--text", "Hello"],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+
+        assert result.exit_code != 0
+
+    def test_broadcast_requires_agent_id(self, runner):
+        """Broadcast fails without --agent-id."""
+        result = runner.invoke(
+            cli,
+            ["broadcast", "--text", "Hello"],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
@@ -409,7 +443,8 @@ class TestPollCommand:
         with patch("hikyaku_client.cli.api.poll_tasks", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "poll"],
+                ["poll", "--agent-id", AGENT_ID],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -421,7 +456,8 @@ class TestPollCommand:
         with patch("hikyaku_client.cli.api.poll_tasks", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "poll"],
+                ["poll", "--agent-id", AGENT_ID],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -432,7 +468,8 @@ class TestPollCommand:
         with patch("hikyaku_client.cli.api.poll_tasks", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "--json", "poll"],
+                ["--json", "poll", "--agent-id", AGENT_ID],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -446,7 +483,8 @@ class TestPollCommand:
         with patch("hikyaku_client.cli.api.poll_tasks", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "poll", "--since", "2026-03-28T12:00:00Z"],
+                ["poll", "--agent-id", AGENT_ID, "--since", "2026-03-28T12:00:00Z"],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -457,16 +495,28 @@ class TestPollCommand:
         with patch("hikyaku_client.cli.api.poll_tasks", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "poll", "--page-size", "50"],
+                ["poll", "--agent-id", AGENT_ID, "--page-size", "50"],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
 
     def test_poll_requires_auth(self, runner):
-        """Poll fails without --api-key."""
+        """Poll fails without HIKYAKU_API_KEY."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "poll"],
+            ["poll", "--agent-id", AGENT_ID],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+
+        assert result.exit_code != 0
+
+    def test_poll_requires_agent_id(self, runner):
+        """Poll fails without --agent-id."""
+        result = runner.invoke(
+            cli,
+            ["poll"],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
@@ -486,7 +536,8 @@ class TestAckCommand:
         with patch("hikyaku_client.cli.api.ack_task", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "ack", "--task-id", "task-001"],
+                ["ack", "--agent-id", AGENT_ID, "--task-id", "task-001"],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -498,7 +549,8 @@ class TestAckCommand:
         with patch("hikyaku_client.cli.api.ack_task", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "--json", "ack", "--task-id", "task-001"],
+                ["--json", "ack", "--agent-id", AGENT_ID, "--task-id", "task-001"],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -509,16 +561,28 @@ class TestAckCommand:
         """Ack fails without --task-id."""
         result = runner.invoke(
             cli,
-            [*_auth_opts(), "ack"],
+            ["ack", "--agent-id", AGENT_ID],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
 
     def test_ack_requires_auth(self, runner):
-        """Ack fails without --api-key."""
+        """Ack fails without HIKYAKU_API_KEY."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "ack", "--task-id", "task-001"],
+            ["ack", "--agent-id", AGENT_ID, "--task-id", "task-001"],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+
+        assert result.exit_code != 0
+
+    def test_ack_requires_agent_id(self, runner):
+        """Ack fails without --agent-id."""
+        result = runner.invoke(
+            cli,
+            ["ack", "--task-id", "task-001"],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
@@ -542,7 +606,8 @@ class TestCancelCommand:
         with patch("hikyaku_client.cli.api.cancel_task", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "cancel", "--task-id", "task-001"],
+                ["cancel", "--agent-id", AGENT_ID, "--task-id", "task-001"],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -558,7 +623,8 @@ class TestCancelCommand:
         with patch("hikyaku_client.cli.api.cancel_task", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "--json", "cancel", "--task-id", "task-001"],
+                ["--json", "cancel", "--agent-id", AGENT_ID, "--task-id", "task-001"],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -569,16 +635,28 @@ class TestCancelCommand:
         """Cancel fails without --task-id."""
         result = runner.invoke(
             cli,
-            [*_auth_opts(), "cancel"],
+            ["cancel", "--agent-id", AGENT_ID],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
 
     def test_cancel_requires_auth(self, runner):
-        """Cancel fails without --api-key."""
+        """Cancel fails without HIKYAKU_API_KEY."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "cancel", "--task-id", "task-001"],
+            ["cancel", "--agent-id", AGENT_ID, "--task-id", "task-001"],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+
+        assert result.exit_code != 0
+
+    def test_cancel_requires_agent_id(self, runner):
+        """Cancel fails without --agent-id."""
+        result = runner.invoke(
+            cli,
+            ["cancel", "--task-id", "task-001"],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
@@ -598,7 +676,8 @@ class TestGetTaskCommand:
         with patch("hikyaku_client.cli.api.get_task", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "get-task", "--task-id", "task-001"],
+                ["get-task", "--agent-id", AGENT_ID, "--task-id", "task-001"],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -610,7 +689,8 @@ class TestGetTaskCommand:
         with patch("hikyaku_client.cli.api.get_task", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "--json", "get-task", "--task-id", "task-001"],
+                ["--json", "get-task", "--agent-id", AGENT_ID, "--task-id", "task-001"],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -621,16 +701,28 @@ class TestGetTaskCommand:
         """Get-task fails without --task-id."""
         result = runner.invoke(
             cli,
-            [*_auth_opts(), "get-task"],
+            ["get-task", "--agent-id", AGENT_ID],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
 
     def test_get_task_requires_auth(self, runner):
-        """Get-task fails without --api-key."""
+        """Get-task fails without HIKYAKU_API_KEY."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "get-task", "--task-id", "task-001"],
+            ["get-task", "--agent-id", AGENT_ID, "--task-id", "task-001"],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+
+        assert result.exit_code != 0
+
+    def test_get_task_requires_agent_id(self, runner):
+        """Get-task fails without --agent-id."""
+        result = runner.invoke(
+            cli,
+            ["get-task", "--task-id", "task-001"],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
@@ -650,7 +742,8 @@ class TestAgentsCommand:
         with patch("hikyaku_client.cli.api.list_agents", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "agents"],
+                ["agents", "--agent-id", AGENT_ID],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -662,7 +755,8 @@ class TestAgentsCommand:
         with patch("hikyaku_client.cli.api.list_agents", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "--json", "agents"],
+                ["--json", "agents", "--agent-id", AGENT_ID],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -677,7 +771,8 @@ class TestAgentsCommand:
         with patch("hikyaku_client.cli.api.list_agents", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "agents", "--id", AGENT_ID],
+                ["agents", "--agent-id", AGENT_ID, "--id", AGENT_ID],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -688,7 +783,8 @@ class TestAgentsCommand:
         with patch("hikyaku_client.cli.api.list_agents", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "--json", "agents", "--id", AGENT_ID],
+                ["--json", "agents", "--agent-id", AGENT_ID, "--id", AGENT_ID],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -696,10 +792,21 @@ class TestAgentsCommand:
         assert data["agent_id"] == AGENT_ID
 
     def test_agents_requires_auth(self, runner):
-        """Agents fails without --api-key."""
+        """Agents fails without HIKYAKU_API_KEY."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "agents"],
+            ["agents", "--agent-id", AGENT_ID],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+
+        assert result.exit_code != 0
+
+    def test_agents_requires_agent_id(self, runner):
+        """Agents fails without --agent-id."""
+        result = runner.invoke(
+            cli,
+            ["agents"],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
@@ -719,7 +826,8 @@ class TestDeregisterCommand:
         with patch("hikyaku_client.cli.api.deregister_agent", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "deregister"],
+                ["deregister", "--agent-id", AGENT_ID],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -731,16 +839,28 @@ class TestDeregisterCommand:
         with patch("hikyaku_client.cli.api.deregister_agent", mock):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "--json", "deregister"],
+                ["--json", "deregister", "--agent-id", AGENT_ID],
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
 
     def test_deregister_requires_auth(self, runner):
-        """Deregister fails without --api-key."""
+        """Deregister fails without HIKYAKU_API_KEY."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "deregister"],
+            ["deregister", "--agent-id", AGENT_ID],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+
+        assert result.exit_code != 0
+
+    def test_deregister_requires_agent_id(self, runner):
+        """Deregister fails without --agent-id."""
+        result = runner.invoke(
+            cli,
+            ["deregister"],
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
@@ -752,10 +872,10 @@ class TestDeregisterCommand:
 
 
 class TestGlobalOptions:
-    """Tests for global CLI options and env var fallback."""
+    """Tests for global CLI options and environment variables."""
 
     def test_url_from_env(self, runner):
-        """--url falls back to HIKYAKU_URL env var."""
+        """Broker URL is read from HIKYAKU_URL env var."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
@@ -767,81 +887,52 @@ class TestGlobalOptions:
         assert result.exit_code == 0
 
     def test_api_key_from_env(self, runner):
-        """--api-key falls back to HIKYAKU_API_KEY env var."""
-        mock = AsyncMock(return_value=[SAMPLE_TASK])
-        with patch("hikyaku_client.cli.api.poll_tasks", mock):
-            result = runner.invoke(
-                cli,
-                ["poll"],
-                env={
-                    "HIKYAKU_URL": BROKER_URL,
-                    "HIKYAKU_API_KEY": API_KEY,
-                    "HIKYAKU_AGENT_ID": AGENT_ID,
-                },
-            )
-
-        assert result.exit_code == 0
-
-    def test_agent_id_from_env(self, runner):
-        """--agent-id falls back to HIKYAKU_AGENT_ID env var."""
-        mock = AsyncMock(return_value=[SAMPLE_TASK])
-        with patch("hikyaku_client.cli.api.poll_tasks", mock):
-            result = runner.invoke(
-                cli,
-                ["poll"],
-                env={
-                    "HIKYAKU_URL": BROKER_URL,
-                    "HIKYAKU_API_KEY": API_KEY,
-                    "HIKYAKU_AGENT_ID": AGENT_ID,
-                },
-            )
-
-        assert result.exit_code == 0
-
-    def test_cli_option_overrides_env(self, runner):
-        """CLI options take priority over environment variables."""
+        """API key is read from HIKYAKU_API_KEY env var."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
-                [
-                    "--url",
-                    "http://custom:9000",
-                    "--api-key",
-                    API_KEY,
-                    "register",
-                    "--name",
-                    "test-agent",
-                    "--description",
-                    "test",
-                ],
-                env={"HIKYAKU_URL": BROKER_URL},
+                ["register", "--name", "test-agent", "--description", "test"],
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
             )
 
         assert result.exit_code == 0
-        # The mock was called — verify the broker_url passed
-        call_kwargs = mock.call_args
-        assert call_kwargs is not None
 
     def test_default_url(self, runner):
-        """Default URL is http://localhost:8000 when neither CLI nor env is set."""
+        """Default URL is http://localhost:8000 when HIKYAKU_URL is not set."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
-                    "--api-key",
-                    API_KEY,
                     "register",
                     "--name",
                     "test-agent",
                     "--description",
                     "test",
                 ],
-                env={},
+                env={"HIKYAKU_API_KEY": API_KEY},
             )
 
         assert result.exit_code == 0
+
+    def test_missing_api_key_env_var_error(self, runner):
+        """Missing HIKYAKU_API_KEY shows error referencing the env var."""
+        result = runner.invoke(
+            cli,
+            [
+                "register",
+                "--name",
+                "test-agent",
+                "--description",
+                "test",
+            ],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+
+        assert result.exit_code != 0
+        output = result.output + (result.stderr or "")
+        assert "HIKYAKU_API_KEY" in output
 
 
 # ---------------------------------------------------------------------------
@@ -861,7 +952,8 @@ class TestErrorHandling:
         ):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "poll"],
+                ["poll", "--agent-id", AGENT_ID],
+                env=_auth_env(),
             )
 
         assert result.exit_code != 0
@@ -875,7 +967,8 @@ class TestErrorHandling:
         ):
             result = runner.invoke(
                 cli,
-                [*_auth_opts(), "send", "--to", "nonexistent", "--text", "Hello"],
+                ["send", "--agent-id", AGENT_ID, "--to", "nonexistent", "--text", "Hello"],
+                env=_auth_env(),
             )
 
         assert result.exit_code != 0
@@ -885,10 +978,6 @@ class TestErrorHandling:
         result = runner.invoke(
             cli,
             [
-                "--url",
-                BROKER_URL,
-                "--api-key",
-                API_KEY,
                 "register",
                 "--name",
                 "test-agent",
@@ -897,6 +986,7 @@ class TestErrorHandling:
                 "--skills",
                 "not-valid-json",
             ],
+            env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
         )
 
         assert result.exit_code != 0
@@ -905,7 +995,7 @@ class TestErrorHandling:
         """Unknown subcommand shows usage error."""
         result = runner.invoke(
             cli,
-            ["--url", BROKER_URL, "nonexistent-command"],
+            ["nonexistent-command"],
         )
 
         assert result.exit_code != 0
@@ -916,30 +1006,27 @@ class TestErrorHandling:
 # ===========================================================================
 
 
-class TestRegisterWithGlobalApiKey:
-    """Tests for register using the global --api-key.
+class TestRegisterWithEnvApiKey:
+    """Tests for register using HIKYAKU_API_KEY env var.
 
-    The register command no longer has its own --api-key option.
-    It always uses the global --api-key from the cli group.
+    The register command reads api_key from ctx.obj['api_key'],
+    which is populated from the HIKYAKU_API_KEY environment variable.
     """
 
-    def test_register_global_api_key_passes_key(self, runner):
-        """Register with global --api-key passes api_key to api.register_agent."""
+    def test_register_env_api_key_passes_key(self, runner):
+        """Register with HIKYAKU_API_KEY env var passes api_key to api.register_agent."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
-                    "--url",
-                    BROKER_URL,
-                    "--api-key",
-                    API_KEY,
                     "register",
                     "--name",
                     "Joiner",
                     "--description",
                     "Join tenant",
                 ],
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
             )
 
         assert result.exit_code == 0
@@ -949,38 +1036,31 @@ class TestRegisterWithGlobalApiKey:
         assert API_KEY in all_args or call_kwargs.kwargs.get("api_key") == API_KEY
 
     def test_register_shows_output(self, runner):
-        """Register with global --api-key shows agent_id."""
+        """Register with env var shows agent_id."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
-                    "--url",
-                    BROKER_URL,
-                    "--api-key",
-                    API_KEY,
                     "register",
                     "--name",
                     "Joiner",
                     "--description",
                     "Join",
                 ],
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
             )
 
         assert result.exit_code == 0
         assert AGENT_ID in result.output
 
     def test_register_json_output(self, runner):
-        """Register with global --api-key and --json outputs valid JSON."""
+        """Register with env var and --json outputs valid JSON."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
-                    "--url",
-                    BROKER_URL,
-                    "--api-key",
-                    API_KEY,
                     "--json",
                     "register",
                     "--name",
@@ -988,6 +1068,7 @@ class TestRegisterWithGlobalApiKey:
                     "--description",
                     "Join",
                 ],
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
             )
 
         assert result.exit_code == 0
@@ -1001,16 +1082,16 @@ class TestRegisterWithGlobalApiKey:
             result = runner.invoke(
                 cli,
                 [
-                    "--url",
-                    BROKER_URL,
-                    "--api-key",
-                    "hky_invalid000000000000000000000000",
                     "register",
                     "--name",
                     "Joiner",
                     "--description",
                     "Join",
                 ],
+                env={
+                    "HIKYAKU_URL": BROKER_URL,
+                    "HIKYAKU_API_KEY": "hky_invalid000000000000000000000000",
+                },
             )
 
         assert result.exit_code != 0

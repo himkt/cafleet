@@ -84,11 +84,10 @@ async def handle_register(
     name: str,
     description: str,
     skills: str | None = None,
-    api_key: str | None = None,
 ) -> dict:
     """Forward register to RegistryForwarder."""
     return await forwarder.register(
-        name=name, description=description, skills=skills, api_key=api_key
+        name=name, description=description, skills=skills
     )
 
 
@@ -226,10 +225,6 @@ def _build_server() -> tuple[Server, SSEClient, RegistryForwarder]:
                             "type": "string",
                             "description": "Skills as JSON string",
                         },
-                        "api_key": {
-                            "type": "string",
-                            "description": "API key to join existing tenant",
-                        },
                     },
                     "required": ["name", "description"],
                 },
@@ -273,8 +268,9 @@ def _build_server() -> tuple[Server, SSEClient, RegistryForwarder]:
                 name=arguments["name"],
                 description=arguments["description"],
                 skills=arguments.get("skills"),
-                api_key=arguments.get("api_key"),
             )
+            sanitized = {k: v for k, v in result.items() if k != "api_key"}
+            return [TextContent(type="text", text=json.dumps(sanitized, default=str))]
         elif name == "deregister":
             result = await handle_deregister(forwarder=forwarder)
         else:
