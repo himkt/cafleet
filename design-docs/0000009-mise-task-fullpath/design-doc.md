@@ -1,6 +1,6 @@
 # mise Task Full-Path Specification
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 7/7 tasks complete
 **Last Updated**: 2026-03-30
 
@@ -10,11 +10,11 @@ Switch all mise task invocations from short-form notation (`mise test`) to full-
 
 ## Success Criteria
 
-- [ ] All `mise tasks --all` tasks (including mcp-server) are callable via full-path notation from the project root
-- [ ] `.claude/settings.json` allows only full-path task invocations and denies short-form
-- [ ] `.claude/rules/commands.md` documents full-path notation exclusively
-- [ ] Both `CLAUDE.md` files reference full-path notation in their Commands sections
-- [ ] No `cd` into package directories is required for running mise tasks
+- [x] All `mise tasks --all` tasks (including mcp-server) are callable via full-path notation from the project root
+- [x] `.claude/settings.json` allows only full-path task invocations and denies short-form
+- [x] `.claude/rules/commands.md` documents full-path notation exclusively
+- [x] Both `CLAUDE.md` files reference full-path notation in their Commands sections
+- [x] No `cd` into package directories is required for running mise tasks
 
 ---
 
@@ -203,3 +203,4 @@ Key changes for `.claude/CLAUDE.md`:
 | 2026-03-30 | Add `dev`/`build` short-form to deny list; add implementation order notes |
 | 2026-03-30 | Enumerate root tasks individually instead of `//:*` wildcard |
 | 2026-03-30 | Approved |
+| 2026-04-01 | Implementation complete. Removed `Bash(mise //package:* *)` patterns (Claude Code `:*` validation requires it at end of pattern) |
