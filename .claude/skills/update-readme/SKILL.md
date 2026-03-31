@@ -14,7 +14,7 @@ Use the Agent tool to spawn an agent with the following parameters:
 
 - **subagent_type**: `general-purpose`
 - **model**: `sonnet`
-- **mode**: `bypassPermissions`
+- **mode**: `default`
 - **description**: `"Update README from docs"`
 
 Use the following as the agent prompt:
@@ -51,7 +51,7 @@ The README must include these sections in order:
 - Keep it concise and developer-friendly
 - Preserve any manual additions in README.md that are not covered by the source materials
 - CLI command is `hikyaku`
-- Server start: `cd registry && uv run uvicorn hikyaku_registry.main:app`
+- Server start: `mise //registry:dev` (from the project root)
 - Client install: `cd client && uv tool install .`
 - If a section has no changes from the source materials, keep it as-is
 ~~~
