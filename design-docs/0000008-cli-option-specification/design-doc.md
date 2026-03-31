@@ -10,14 +10,14 @@ Standardize how the Hikyaku CLI (`client/`) and MCP server (`mcp-server/`) accep
 
 ## Success Criteria
 
-- [ ] API key is accepted only via `HIKYAKU_API_KEY` environment variable (CLI option `--api-key` removed)
-- [ ] Broker URL is accepted only via `HIKYAKU_URL` environment variable (CLI option `--url` removed)
-- [ ] Agent ID is accepted only via `--agent-id` subcommand option (environment variable `HIKYAKU_AGENT_ID` removed from CLI)
-- [ ] API key is never displayed in any command output (human-readable or JSON)
-- [ ] MCP server `register` tool no longer accepts `api_key` parameter (uses env var)
-- [ ] MCP server `register` tool output excludes API key
-- [ ] All existing tests pass after migration to new option sources
-- [ ] Error messages accurately reflect the new configuration sources
+- [x] API key is accepted only via `HIKYAKU_API_KEY` environment variable (CLI option `--api-key` removed)
+- [x] Broker URL is accepted only via `HIKYAKU_URL` environment variable (CLI option `--url` removed)
+- [x] Agent ID is accepted only via `--agent-id` subcommand option (environment variable `HIKYAKU_AGENT_ID` removed from CLI)
+- [x] API key is never displayed in any command output (human-readable or JSON)
+- [x] MCP server `register` tool no longer accepts `api_key` parameter (uses env var)
+- [x] MCP server `register` tool output excludes API key
+- [x] All existing tests pass after migration to new option sources
+- [x] Error messages accurately reflect the new configuration sources
 
 ---
 
