@@ -14,3 +14,5 @@ admin/node_modules/
 !.claude/skills
 !.claude/settings.json
 .claude/scheduled_tasks.lock
+
+__pycache__
