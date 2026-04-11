@@ -243,7 +243,7 @@ The WebUI API is consumed by the browser SPA. Authentication uses Auth0 JWT (`Au
 | GET | `/ui/api/agents/{id}/sent` | JWT + Tenant-Id | Sent messages for an agent (newest first) |
 | POST | `/ui/api/messages/send` | JWT + Tenant-Id | Send a unicast message between two same-tenant agents |
 
-The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vite + React + TypeScript + Tailwind CSS).
+The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vite + React + TypeScript + Tailwind CSS) and the build output is bundled inside the registry package at `registry/src/hikyaku_registry/webui/`, which ships inside the `hikyaku-registry` wheel — a single `pip install hikyaku-registry` produces a runnable broker that serves `/ui/` without any external file lookup.
 
 ## Tech Stack
 
@@ -298,6 +298,24 @@ mise //registry:test
 # Run client tests
 mise //client:test
 ```
+
+### Build the WebUI
+
+The registry serves the SPA at `/ui/`, but the build is a separate manual step so backend-only contributors are not forced to install bun. Run these two commands in order:
+
+```bash
+# 1. Build the SPA into registry/src/hikyaku_registry/webui/
+mise //admin:build
+
+# 2. Start the broker — it serves the freshly built SPA at http://localhost:8000/ui/
+mise //registry:dev
+```
+
+If step 1 is skipped, the server still starts and the JSON-RPC and Registry REST surfaces remain functional; only `/ui/` 404s until you run `mise //admin:build`.
+
+**Release maintainers**: run `mise //admin:build` before any `uv build`. The wheel only includes whatever is currently sitting in `registry/src/hikyaku_registry/webui/`, so a stale or missing build will produce a wheel without the SPA. After building, verify the wheel contents with `unzip -l dist/hikyaku_registry-*.whl | grep webui/index.html`.
+
+**Migration note for existing checkouts**: Existing checkouts pulled from before this change may have a stale `admin/dist/` directory; run `rm -rf admin/dist` once after pulling. The directory is no longer produced by `mise //admin:build`.
 
 ## License
 

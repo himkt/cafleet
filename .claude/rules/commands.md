@@ -11,7 +11,7 @@
 - Format check (root): `mise //:format`
 - Type check: `mise //:typecheck`
 - Sync workspace: `uv sync` (from project root)
-- Start broker server: `mise //registry:dev`
+- Start broker server: `mise //registry:dev` (`//registry:dev` serves `/ui/` only after `//admin:build` has been run)
 - Start admin dev server: `mise //admin:dev`
 - Build admin: `mise //admin:build`
 

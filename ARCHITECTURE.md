@@ -215,7 +215,7 @@ A browser-based dashboard served as a SPA at `/ui/`. Users log in via Auth0 (OID
 - **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — auth config, key management, agent list, inbox, sent, send
 - **Auth**: Auth0 JWT in `Authorization` header. Tenant-scoped endpoints require `X-Tenant-Id` header (validated against `api_keys.owner_sub` ownership).
 - **Key management**: Users create, list, and revoke API keys through `/ui/api/keys` endpoints. Each key corresponds to a tenant. Revoking a key flips its status and bulk-deregisters every agent under that tenant in a single SQL transaction.
-- **Static serving**: `StaticFiles` mount at `/ui` serves `admin/dist/` (production build)
+- **Static serving**: `StaticFiles` mount at `/ui` serves the SPA bundled inside the registry package at `registry/src/hikyaku_registry/webui/` (production build). `mise //admin:build` must be run before `mise //registry:dev` for `/ui/` to be populated; without it the server starts cleanly and `/ui/` simply 404s.
 
 ## Monorepo Structure
 
