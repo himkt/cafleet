@@ -28,6 +28,7 @@ packages = ["src/hikyaku_registry"]
 include = [
   "src/hikyaku_registry/alembic.ini",
   "src/hikyaku_registry/alembic/**/*",
+  "src/hikyaku_registry/webui/**/*",
 ]
 
 [tool.pytest.ini_options]

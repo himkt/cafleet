@@ -5,11 +5,16 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: '/ui/',
   plugins: [
     react(),
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
   ],
+  build: {
+    outDir: '../registry/src/hikyaku_registry/webui',
+    emptyOutDir: true,
+  },
   server: {
     proxy: {
       '/ui/api': {

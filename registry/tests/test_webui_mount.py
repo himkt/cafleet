@@ -8,9 +8,12 @@ These tests verify integration/mounting behavior, not endpoint logic
 (which is covered by test_webui_api.py).
 """
 
+from pathlib import Path
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import hikyaku_registry
 from hikyaku_registry.main import create_app
 
 
@@ -197,3 +200,82 @@ class TestExistingRoutesUnaffected:
 
         resp = await client.get("/.well-known/agent-card.json")
         assert resp.status_code == 200
+
+
+# ===========================================================================
+# Default webui_dist_dir resolves inside the installed package
+# ===========================================================================
+
+
+class TestDefaultWebuiDistDir:
+    """Verify _default_webui_dist_dir() points inside the installed package.
+
+    This protects against future package-layout refactors silently breaking
+    the install-time path: when a wheel is installed, the helper must resolve
+    to ``site-packages/hikyaku_registry/webui``, not a sibling repo directory.
+    """
+
+    def test_default_points_inside_package(self):
+        """_default_webui_dist_dir() returns <package>/webui as a Path."""
+        from hikyaku_registry.main import _default_webui_dist_dir
+
+        result = _default_webui_dist_dir()
+        expected = Path(hikyaku_registry.__file__).resolve().parent / "webui"
+        assert isinstance(result, Path)
+        assert result == expected
+
+    async def test_default_mount_serves_spa(self, db_sessionmaker):
+        """create_app() with no webui_dist_dir mounts the package-bundled SPA at /ui/.
+
+        Also asserts the emitted index.html references its assets under the
+        ``/ui/`` prefix (Vite ``base`` config). Absolute-root asset paths
+        (``/assets/...``) would 404 because StaticFiles is mounted at ``/ui``.
+        """
+        package_dir = Path(hikyaku_registry.__file__).resolve().parent
+        if not (package_dir / "webui" / "index.html").exists():
+            pytest.skip("webui/ not built; run `mise //admin:build` first")
+
+        app = create_app(sessionmaker=db_sessionmaker)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/ui/")
+
+        assert resp.status_code == 200
+        assert resp.headers.get("content-type", "").startswith("text/html")
+        body = resp.text
+        assert body.lstrip().lower().startswith("<!doctype html>")
+        # Vite base must be '/ui/' so assets resolve under the StaticFiles mount.
+        assert 'src="/assets/' not in body, (
+            "index.html references /assets/ at the root; "
+            "set base: '/ui/' in admin/vite.config.ts"
+        )
+        assert 'href="/assets/' not in body, (
+            "index.html references /assets/ at the root; "
+            "set base: '/ui/' in admin/vite.config.ts"
+        )
+        assert '/ui/assets/' in body, (
+            "index.html does not reference /ui/assets/; "
+            "check Vite base config"
+        )
+
+    async def test_default_mount_serves_asset_files(self, db_sessionmaker):
+        """Assets referenced by index.html are actually fetchable under /ui/assets/."""
+        import re
+
+        package_dir = Path(hikyaku_registry.__file__).resolve().parent
+        if not (package_dir / "webui" / "index.html").exists():
+            pytest.skip("webui/ not built; run `mise //admin:build` first")
+
+        app = create_app(sessionmaker=db_sessionmaker)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            index_resp = await client.get("/ui/")
+            asset_paths = re.findall(
+                r'(?:src|href)="(/ui/assets/[^"]+)"', index_resp.text
+            )
+            assert asset_paths, "no /ui/assets/ references found in index.html"
+            for path in asset_paths:
+                asset_resp = await client.get(path)
+                assert asset_resp.status_code == 200, (
+                    f"{path} returned {asset_resp.status_code}"
+                )

@@ -77,7 +77,15 @@ export default function KeyManagement({ onSelectTenant }: KeyManagementProps) {
           Hikyaku — API Keys
         </h1>
         <button
-          onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
+          onClick={() =>
+            logout({
+              logoutParams: {
+                returnTo:
+                  import.meta.env.VITE_AUTH0_REDIRECT_URI ||
+                  window.location.origin + "/ui/",
+              },
+            })
+          }
           className="text-sm text-gray-500 hover:text-gray-700"
         >
           Logout

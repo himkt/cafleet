@@ -182,10 +182,10 @@ Base path: `/api/v1`
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/api/v1/agents` | Bearer | Register a new agent; API key (created via WebUI) is always required |
+| POST | `/api/v1/agents` | Bearer | Register a new agent; API key (created via WebUI) is always required. `X-Agent-Id` is not needed for registration |
 | GET | `/api/v1/agents` | Bearer + Agent-Id | List agents in the caller's tenant |
-| GET | `/api/v1/agents/{id}` | Bearer + Agent-Id | Get agent detail (404 if not in same tenant) |
-| DELETE | `/api/v1/agents/{id}` | Bearer + Agent-Id | Deregister an agent (self only) |
+| GET | `/api/v1/agents/{id}` | Bearer + Agent-Id | Get full A2A AgentCard JSON (404 if not in same tenant) |
+| DELETE | `/api/v1/agents/{id}` | Bearer + Agent-Id | Deregister an agent (self only); soft-delete, row is not physically removed |
 | GET | `/.well-known/agent-card.json` | None | Broker's own A2A Agent Card |
 
 Registry API errors use a consistent JSON envelope:
@@ -212,10 +212,10 @@ Registry API errors use a consistent JSON envelope:
 |---|---|
 | `SendMessage` | Send unicast (`metadata.destination=<agent-uuid>`) or broadcast (`metadata.destination=*`) |
 | `ListTasks` | Poll inbox -- use `contextId=<own-agent-id>` to retrieve messages addressed to this agent; supports `statusTimestampAfter` for delta polling |
-| `GetTask` | Retrieve a specific message by task ID |
-| `CancelTask` | Retract an unread message (sender only, `INPUT_REQUIRED` state only) |
+| `GetTask` | Retrieve a specific message by task ID; accessible by sender or recipient within the same tenant |
+| `CancelTask` | Retract an unread message (sender only, `INPUT_REQUIRED` state only); returns `TaskNotCancelableError` (JSON-RPC code `-32002`) if already completed or canceled |
 
-`ListTasks` enforces that `contextId` must equal the caller's agent ID. Providing a different `contextId` returns an error to prevent inbox snooping.
+`ListTasks` enforces that `contextId` must equal the caller's agent ID. Providing a different `contextId` returns an `InvalidParams` error (code `-32602`) to prevent inbox snooping. `GetTask` and `CancelTask` return `TaskNotFoundError` (code `-32001`) for cross-tenant access, indistinguishable from "not found".
 
 ### Message Lifecycle
 
@@ -243,7 +243,7 @@ The WebUI API is consumed by the browser SPA. Authentication uses Auth0 JWT (`Au
 | GET | `/ui/api/agents/{id}/sent` | JWT + Tenant-Id | Sent messages for an agent (newest first) |
 | POST | `/ui/api/messages/send` | JWT + Tenant-Id | Send a unicast message between two same-tenant agents |
 
-The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vite + React + TypeScript + Tailwind CSS).
+The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vite + React + TypeScript + Tailwind CSS) and the build output is bundled inside the registry package at `registry/src/hikyaku_registry/webui/`, which ships inside the `hikyaku-registry` wheel — a single `pip install hikyaku-registry` produces a runnable broker that serves `/ui/` without any external file lookup.
 
 ## Tech Stack
 
@@ -298,6 +298,40 @@ mise //registry:test
 # Run client tests
 mise //client:test
 ```
+
+### Build the WebUI
+
+The registry serves the SPA at `/ui/`, but the build is a separate manual step so backend-only contributors are not forced to install bun. Run these two commands in order:
+
+```bash
+# 1. Build the SPA into registry/src/hikyaku_registry/webui/
+mise //admin:build
+
+# 2. Start the broker — it serves the freshly built SPA at http://localhost:8000/ui/
+mise //registry:dev
+```
+
+If step 1 is skipped, the server still starts and the JSON-RPC and Registry REST surfaces remain functional; only `/ui/` 404s until you run `mise //admin:build`.
+
+**Release maintainers**: run `mise //admin:build` before any `uv build`. The wheel only includes whatever is currently sitting in `registry/src/hikyaku_registry/webui/`, so a stale or missing build will produce a wheel without the SPA. After building, verify the wheel contents with `unzip -l dist/hikyaku_registry-*.whl | grep webui/index.html`.
+
+**Migration note for existing checkouts**: Existing checkouts pulled from before this change may have a stale `admin/dist/` directory; run `rm -rf admin/dist` once after pulling. The directory is no longer produced by `mise //admin:build`.
+
+### Running the Vite dev server with Auth0
+
+`mise //admin:dev` serves the SPA at `http://localhost:5173/ui/` with HMR. Both the Auth0 login `redirect_uri` and the logout `returnTo` are computed at runtime as follows:
+
+1. If `VITE_AUTH0_REDIRECT_URI` is set (non-empty at build time), use that.
+2. Otherwise fall back to `window.location.origin + "/ui/"`.
+
+`admin/mise.toml` scopes `VITE_AUTH0_REDIRECT_URI=http://localhost:5173/ui/` to the `//admin:dev` task only, so the Vite dev server bakes in the `:5173/ui/` URL and the built SPA (`//admin:build`) gets the dynamic `window.location.origin` fallback — meaning the same wheel works whether it is served from `:8000` via `//registry:dev` or from any other production host.
+
+Both URLs used by the SPA MUST be in your Auth0 application's **Allowed Callback URLs** and **Allowed Logout URLs** lists:
+
+- `http://localhost:5173/ui/` — for `mise //admin:dev`
+- `http://localhost:8000/ui/` — for `mise //registry:dev` (or whatever host you serve the built SPA from)
+
+Add both origins to **Allowed Web Origins** as well.
 
 ## License
 

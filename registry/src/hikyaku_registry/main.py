@@ -44,6 +44,10 @@ from hikyaku_registry.webui_api import (
 logger = logging.getLogger(__name__)
 
 
+def _default_webui_dist_dir() -> Path:
+    return Path(__file__).resolve().parent / "webui"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
@@ -329,9 +333,7 @@ def create_app(
 
     # Mount StaticFiles for WebUI SPA (AFTER router so API routes take precedence)
     if webui_dist_dir is None:
-        webui_dist_dir = str(
-            Path(__file__).resolve().parent.parent.parent.parent / "admin" / "dist"
-        )
+        webui_dist_dir = str(_default_webui_dist_dir())
     dist_path = Path(webui_dist_dir)
     if dist_path.exists():
         app.mount(
