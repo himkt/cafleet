@@ -1,8 +1,8 @@
 # Admin Discord-style Timeline
 
 **Status**: Approved
-**Progress**: 0/38 tasks complete
-**Last Updated**: 2026-04-11
+**Progress**: 5/38 tasks complete
+**Last Updated**: 2026-04-12
 
 ## Overview
 
@@ -354,11 +354,11 @@ On success, calls `sendMessage(fromAgentId, resolvedTo, body)`. On 2xx, clears t
 
 Per `.claude/rules/design-doc-numbering.md`, documentation is updated first.
 
-- [ ] Update `ARCHITECTURE.md` `## WebUI` section (lines ~210-218): replace the "browse agents/messages" language with a description of the Discord-style unified timeline + sender selector, and add `GET /ui/api/timeline` to the Backend-API bullet line. <!-- completed: -->
-- [ ] Update `README.md` line 16 (the WebUI bullet) to mention the Discord-style unified timeline. Add a `GET /ui/api/timeline` row to the WebUI API table (~lines 229-246) and annotate the `POST /ui/api/messages/send` row that `to_agent_id="*"` triggers a broadcast. <!-- completed: -->
-- [ ] Update `docs/spec/webui-api.md`: add a `### GET /ui/api/timeline` section (auth headers, response schema including `origin_task_id` + `created_at` + `status_timestamp`, 200-row cap, broadcast-grouping note). Update the `POST /ui/api/messages/send` section to document `to_agent_id="*"` semantics. <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md`: add an `origin_task_id` row to the `tasks` schema table with the NULL-unicast / self-referencing-summary semantics. Add a new "Broadcast Grouping" subsection capturing the grouping convention AND the known design debt on `completed.status_timestamp` ≈ `acknowledged_at`. <!-- completed: -->
-- [ ] Use Grep to verify `.claude/skills/hikyaku/SKILL.md` references no CLI flag or workflow that this design changes, and that no `plugins/**/SKILL.md` files exist. Record both results in this design doc's Changelog so the SKILL-drift check is traceable. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` `## WebUI` section (lines ~210-218): replace the "browse agents/messages" language with a description of the Discord-style unified timeline + sender selector, and add `GET /ui/api/timeline` to the Backend-API bullet line. <!-- completed: 2026-04-12T10:00 -->
+- [x] Update `README.md` line 16 (the WebUI bullet) to mention the Discord-style unified timeline. Add a `GET /ui/api/timeline` row to the WebUI API table (~lines 229-246) and annotate the `POST /ui/api/messages/send` row that `to_agent_id="*"` triggers a broadcast. <!-- completed: 2026-04-12T10:05 -->
+- [x] Update `docs/spec/webui-api.md`: add a `### GET /ui/api/timeline` section (auth headers, response schema including `origin_task_id` + `created_at` + `status_timestamp`, 200-row cap, broadcast-grouping note). Update the `POST /ui/api/messages/send` section to document `to_agent_id="*"` semantics. <!-- completed: 2026-04-12T10:10 -->
+- [x] Update `docs/spec/data-model.md`: add an `origin_task_id` row to the `tasks` schema table with the NULL-unicast / self-referencing-summary semantics. Add a new "Broadcast Grouping" subsection capturing the grouping convention AND the known design debt on `completed.status_timestamp` ≈ `acknowledged_at`. <!-- completed: 2026-04-12T10:15 -->
+- [x] Use Grep to verify `.claude/skills/hikyaku/SKILL.md` references no CLI flag or workflow that this design changes, and that no `plugins/**/SKILL.md` files exist. Record both results in this design doc's Changelog so the SKILL-drift check is traceable. <!-- completed: 2026-04-12T10:20 -->
 
 ### Step 2: Registry schema + migration
 
@@ -419,3 +419,4 @@ Run on a fresh SQLite file. Each task is an independent scenario so partial prog
 | 2026-04-11 | Initial draft |
 | 2026-04-11 | Reviewer pass 1: replaced two `U+2705` emoji markers in the ASCII layout diagram with `[ack]` (no-emoji rule); split Step 6 manual-verification from one bundled checkbox into 8 per-scenario checkboxes (setup, unicast send, unicast ACK, broadcast send, broadcast partial ACK, deregistered sidebar, canceled rendering, parser negative cases); added a canceled-message verification scenario and a `@nonexistent` parser-negative case that were implicit in the Specification but not exercised by the original checklist. Progress counter updated 31 → 38 |
 | 2026-04-11 | User approved; Status → Approved |
+| 2026-04-12 | Step 1 SKILL-drift verification: Grep-read `.claude/skills/hikyaku/SKILL.md` and confirmed it references only CLI surface (`hikyaku register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `--json`, `--agent-id`, `HIKYAKU_URL`, `HIKYAKU_API_KEY`) — none of which are modified by this design doc (no `client/` files in the Affected files list). Glob `plugins/**/SKILL.md` from project root returned zero matches — no plugin skill files exist in this repo. Both checks pass; no SKILL.md edits required |

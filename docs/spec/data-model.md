@@ -59,6 +59,7 @@ Deregistration is a soft-delete: `status='deregistered'` plus `deregistered_at` 
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; first-write only, preserved across UPSERT. |
 | `status_state` | `TEXT` | `NOT NULL` | A2A `TaskState` enum value (e.g., `TASK_STATE_INPUT_REQUIRED`). |
 | `status_timestamp` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; updated on every state change. Used for `ORDER BY DESC`. |
+| `origin_task_id` | `TEXT` | nullable | Broadcast grouping link. `NULL` on unicast deliveries. On broadcast delivery rows, holds the summary task's `task_id`, shared across every delivery row in the same broadcast. On the broadcast summary row itself, holds its own `task_id` (self-reference) so the delivery rows and the summary row all share a single grouping value. Historical rows from before the migration are `NULL`. |
 | `task_json` | `TEXT` | `NOT NULL` | Full A2A `Task` blob, stored verbatim. |
 
 Indexes:
@@ -136,6 +137,27 @@ Revoking a key (via `DELETE /ui/api/keys/{tenant_id}`) flips its `status` to `'r
 | Sender (same-tenant agent matching `from_agent_id`) | `GetTask` by known taskId, `CancelTask` |
 
 `ListTasks` enforces that `contextId` must equal the caller's `agent_id`. If a different `contextId` is provided, the Broker returns an error. This prevents inbox snooping — even within the same tenant. `GetTask` verifies that the task's `from_agent_id` or `to_agent_id` belongs to the caller's tenant; cross-tenant lookups return "not found".
+
+## Broadcast Grouping
+
+Broadcast fan-out in `BrokerExecutor._handle_broadcast` produces N+1 rows per `SendMessage(destination="*")` — one delivery task per active recipient plus one `broadcast_summary` task — and the admin WebUI timeline needs to present all of them as a single entry. The `tasks.origin_task_id` column is the grouping link:
+
+| Row kind | `origin_task_id` value |
+|---|---|
+| Unicast delivery (today's `_handle_unicast`) | `NULL` |
+| Broadcast delivery row (one per recipient) | The summary task's `task_id` (shared across all N delivery rows in the same broadcast) |
+| Broadcast summary row | Its own `task_id` (self-reference) |
+| Historical row from before the `0002_add_origin_task_id` migration | `NULL` (no backfill) |
+
+The column is populated by pre-allocating the summary task's UUID **before** the delivery loop in `_handle_broadcast`, then threading that UUID into every delivery task's metadata as `originTaskId`. `TaskStore.save` reads `metadata.get("originTaskId")` and writes it into the column on both `INSERT` and `ON CONFLICT DO UPDATE` so idempotent re-saves preserve the value. `_handle_unicast` is NOT touched — the absence of `originTaskId` in its metadata writes the column as `NULL`.
+
+The grouping predicate on the wire is `origin_task_id IS NOT NULL`, which cleanly partitions the timeline into "standalone unicast entry" vs "part of a broadcast group". The summary task's `metadata["recipientIds"]` is extended from the existing `recipientCount` to carry the full recipient list so readers that need sender-side fan-out introspection (not the timeline itself) can reconstruct the recipient set.
+
+### Known design debt — ACK timestamp inference
+
+The timeline UI renders a per-recipient ACK time in each broadcast's hover tooltip. That time is read from the `status_timestamp` of the matching delivery row whose `status_state == 'completed'`. This works today because **delivery tasks make exactly one state transition over their lifetime**: `input_required → completed` via `BrokerExecutor._handle_ack`, which overwrites `status_timestamp` with the ACK moment. Consequently, for any completed delivery row, `status_timestamp` IS the ACK timestamp.
+
+**No dedicated `acknowledged_at` column is added.** If any future change introduces a second state transition on a delivery task — retry, resurrect, a metadata-only re-save that moves `status_timestamp`, or any other path that rewrites `status_timestamp` after ACK — this invariant breaks and the reaction tooltip silently starts showing wrong times. At that point a dedicated `acknowledged_at` TEXT column MUST be added to `tasks`, populated in `_handle_ack`, and the WebUI tooltip code MUST be switched to read it instead of `status_timestamp`. This is accepted residual risk for the first cut of the Discord-style timeline and is explicitly flagged here so the next contributor who breaks the invariant knows exactly which column to add.
 
 ## Deregistered Agents
 

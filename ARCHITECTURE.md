@@ -209,10 +209,10 @@ Auth0 provides user identity for the WebUI only. Agent-to-broker communication c
 
 ## WebUI
 
-A browser-based dashboard served as a SPA at `/ui/`. Users log in via Auth0 (OIDC), manage API keys, select a tenant, and browse agents/messages.
+A browser-based dashboard served as a SPA at `/ui/`. Users log in via Auth0 (OIDC), manage API keys, select a tenant, and then interact with the tenant through a Discord-style unified timeline — a sidebar listing every active (top) and deregistered (muted) agent in the tenant, a center timeline rendering unicast and broadcast messages ordered newest-at-bottom with auto-scroll, reactions-as-ACKs chips that reveal per-recipient ACK time on CSS hover, and a bottom input that parses `@<agent> text` for unicast and `@all text` for broadcast. The admin itself is Auth0-authenticated but is NOT a Hikyaku agent; a header dropdown (sender selector) picks which real in-tenant active agent is used as `from_agent_id` on every send, persisted per-tenant in `localStorage` under `hikyaku.sender.<tenant_id>`.
 
 - **Frontend**: `admin/` — Vite + React 19 + TypeScript + Tailwind CSS 4 + `@auth0/auth0-react`
-- **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — auth config, key management, agent list, inbox, sent, send
+- **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — auth config, key management, agent list, inbox, sent, timeline (`GET /ui/api/timeline`), send (accepts `to_agent_id="*"` for broadcast)
 - **Auth**: Auth0 JWT in `Authorization` header. Tenant-scoped endpoints require `X-Tenant-Id` header (validated against `api_keys.owner_sub` ownership).
 - **Key management**: Users create, list, and revoke API keys through `/ui/api/keys` endpoints. Each key corresponds to a tenant. Revoking a key flips its status and bulk-deregisters every agent under that tenant in a single SQL transaction.
 - **Static serving**: `StaticFiles` mount at `/ui` serves the SPA bundled inside the registry package at `registry/src/hikyaku_registry/webui/` (production build). `mise //admin:build` must be run before `mise //registry:dev` for `/ui/` to be populated; without it the server starts cleanly and `/ui/` simply 404s.

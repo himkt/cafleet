@@ -13,7 +13,7 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 - **Inbox Polling** -- Agents poll for new messages at their own pace; supports delta polling via `statusTimestampAfter`
 - **Message Lifecycle** -- Acknowledge, cancel (retract), and track message status
 - **Two-Header Auth** -- API key (tenant) + Agent-Id (identity) required on all authenticated requests
-- **WebUI** -- Browser-based dashboard with Auth0 login; users manage API keys, select tenants, and browse agents and message history
+- **WebUI** -- Browser-based dashboard with Auth0 login; users manage API keys, select a tenant, and interact through a Discord-style unified timeline (sidebar of active/deregistered agents, message timeline with broadcasts collapsed to one entry + per-recipient ACK reactions on hover, and an `@<agent>` / `@all` input)
 - **CLI Tool** -- Full-featured command-line client for all broker operations
 - **SQLite Storage** -- Single-file database; no daemon required. Schema managed by Alembic via `hikyaku-registry db init`
 
@@ -241,7 +241,8 @@ The WebUI API is consumed by the browser SPA. Authentication uses Auth0 JWT (`Au
 | GET | `/ui/api/agents` | JWT + Tenant-Id | List agents in the selected tenant |
 | GET | `/ui/api/agents/{id}/inbox` | JWT + Tenant-Id | Inbox messages for an agent (newest first) |
 | GET | `/ui/api/agents/{id}/sent` | JWT + Tenant-Id | Sent messages for an agent (newest first) |
-| POST | `/ui/api/messages/send` | JWT + Tenant-Id | Send a unicast message between two same-tenant agents |
+| GET | `/ui/api/timeline` | JWT + Tenant-Id | Unified tenant timeline (up to 200 most-recent non-`broadcast_summary` tasks, newest first, each row carrying `origin_task_id` + `created_at` + `status_timestamp` for client-side broadcast grouping) |
+| POST | `/ui/api/messages/send` | JWT + Tenant-Id | Send a message from a same-tenant sender. `to_agent_id=<uuid>` is unicast; `to_agent_id="*"` triggers a broadcast to every active agent in the tenant |
 
 The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vite + React + TypeScript + Tailwind CSS) and the build output is bundled inside the registry package at `registry/src/hikyaku_registry/webui/`, which ships inside the `hikyaku-registry` wheel — a single `pip install hikyaku-registry` produces a runnable broker that serves `/ui/` without any external file lookup.
 

@@ -125,9 +125,57 @@ Returns messages sent by the agent (single SQL query against `tasks` filtered by
 
 Same response format as inbox.
 
+### GET /ui/api/timeline — Unified Tenant Timeline
+
+Returns up to 200 most-recent non-`broadcast_summary` tasks for the selected tenant, newest first. Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_task_id` into a single broadcast entry client-side.
+
+**Request**: `Authorization: Bearer <auth0_jwt>` + `X-Tenant-Id: <api_key_hash>` headers.
+
+Tenant scoping is reached through the `tasks.context_id → agents.agent_id → agents.tenant_id` join. Only tasks whose recipient belongs to the header tenant are returned; cross-tenant tasks are invisible.
+
+**Response** (200 OK):
+
+```json
+{
+  "messages": [
+    {
+      "task_id": "uuid",
+      "from_agent_id": "uuid",
+      "from_agent_name": "Claude-A",
+      "to_agent_id": "uuid",
+      "to_agent_name": "reviewer-bot",
+      "type": "unicast",
+      "status": "input_required",
+      "created_at": "2026-04-11T10:00:00+00:00",
+      "status_timestamp": "2026-04-11T10:00:00+00:00",
+      "origin_task_id": null,
+      "body": "Please review PR #42"
+    }
+  ]
+}
+```
+
+**Ordering**: `status_timestamp DESC` (newest first). The frontend re-orders ascending for newest-at-bottom chat rendering.
+
+**Row cap**: Hard-capped at 200 rows. No pagination in the first cut.
+
+**Exclusions**: Rows with `type == "broadcast_summary"` are filtered out of the response. The summary row's metadata (`recipientIds`) is not needed for the UI; the grouping convention below lets the frontend reconstruct broadcasts from their delivery rows alone.
+
+**Broadcast grouping**: Every row carries an `origin_task_id` field:
+
+| Case | `origin_task_id` |
+|---|---|
+| Unicast delivery | `null` |
+| Broadcast delivery | The broadcast's summary task id (shared across all N delivery rows in the same broadcast) |
+| Historical row from before the `origin_task_id` migration | `null` |
+
+The client groups rows by `origin_task_id` (non-null rows sharing a value form one broadcast entry; null rows are standalone unicast entries). Each broadcast entry's sort key is the `MIN(created_at)` of its rows — stable, so a broadcast never drifts when a lagging recipient ACKs.
+
+**ACK timestamps**: Per-recipient ACK time is read from the `status_timestamp` of a `completed` delivery row. Delivery tasks make exactly one state transition over their lifetime (`input_required → completed` on ACK), so for `status == "completed"` rows `status_timestamp` IS the ACK moment. If this invariant is ever broken by a future change, the timeline will silently show wrong ACK times until a dedicated `acknowledged_at` column is added. See `docs/spec/data-model.md` for the accompanying design-debt note.
+
 ### POST /ui/api/messages/send — Send Message
 
-Sends a unicast message to a destination agent within the same tenant.
+Sends a message from a same-tenant active agent. Supports both unicast (`to_agent_id=<uuid>`) and broadcast (`to_agent_id="*"`).
 
 **Request**:
 
@@ -139,12 +187,14 @@ X-Tenant-Id: <api_key_hash>
 ```json
 {
   "from_agent_id": "uuid",
-  "to_agent_id": "uuid",
+  "to_agent_id": "uuid | *",
   "text": "Hello!"
 }
 ```
 
-The server verifies both agents belong to the caller's tenant and that the destination is active.
+**Unicast** (`to_agent_id` is a UUID): the server verifies both the sender and the destination belong to the caller's tenant and that the destination is active.
+
+**Broadcast** (`to_agent_id == "*"`): the server skips destination validation (no specific recipient to verify) and hands the message to `BrokerExecutor._handle_broadcast`, which fans out to every active agent in the tenant as individual delivery tasks plus a summary task. The sender is still required to be active and in the caller's tenant. The response's `task_id` is the summary task's id.
 
 **Response** (200 OK):
 
