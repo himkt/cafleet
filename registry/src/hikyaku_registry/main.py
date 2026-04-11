@@ -274,7 +274,7 @@ def create_app(
         redis = get_redis()
     registry_store = RegistryStore(redis)
     task_store = TaskStore(redis)
-    pubsub_manager = PubSubManager(redis)
+    pubsub_manager = PubSubManager()
     executor = BrokerExecutor(
         registry_store=registry_store,
         task_store=task_store,

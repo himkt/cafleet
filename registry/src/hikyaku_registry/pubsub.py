@@ -1,54 +1,58 @@
-"""PubSubManager for Redis Pub/Sub inbox notifications.
+"""In-process Pub/Sub fan-out, replacing the old Redis Pub/Sub manager.
 
-Channel pattern: inbox:{agent_id}
-Payload: task_id string (lightweight; full Task fetched separately by SSE endpoint)
+Design: per-channel subscriber sets, each subscriber is an
+``asyncio.Queue``. ``publish()`` iterates the subscriber set and calls
+``put_nowait`` on every queue. ``subscribe()`` constructs a fresh queue,
+registers it, and returns a ``_Subscription`` wrapping the queue.
+
+Single-process only: the subscriber registry lives in this process's
+memory, so a publish in uvicorn worker A cannot reach a subscriber in
+worker B. The registry server MUST run with a single worker.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
-from typing import Any
 
 
 class _Subscription:
-    """Async iterator wrapper around a Redis Pub/Sub subscription."""
+    """Async iterator wrapping a single subscriber's queue."""
 
-    def __init__(self, pubsub) -> None:
-        self._pubsub = pubsub
+    def __init__(self, queue: asyncio.Queue[str]) -> None:
+        self._queue = queue
 
     def __aiter__(self) -> AsyncIterator[str]:
         return self
 
     async def __anext__(self) -> str:
-        while True:
-            msg = await self._pubsub.get_message(
-                ignore_subscribe_messages=True, timeout=1.0
-            )
-            if msg is not None and msg["type"] == "message":
-                return msg["data"]
+        return await self._queue.get()
 
 
 class PubSubManager:
-    """Manages Redis Pub/Sub subscriptions for inbox notification channels."""
+    """In-process Pub/Sub fan-out for inbox notification channels."""
 
-    def __init__(self, redis) -> None:
-        self._redis = redis
-        self._subscriptions: dict[str, Any] = {}
+    def __init__(self) -> None:
+        self._subscribers: dict[str, set[asyncio.Queue[str]]] = {}
 
     async def publish(self, channel: str, message: str) -> None:
-        """Publish a message (task_id) to a Redis Pub/Sub channel."""
-        await self._redis.publish(channel, message)
+        subscribers = self._subscribers.get(channel)
+        if not subscribers:
+            return
+        for queue in subscribers:
+            queue.put_nowait(message)
 
     async def subscribe(self, channel: str) -> _Subscription:
-        """Subscribe to a channel and return an async iterator that yields messages."""
-        pubsub = self._redis.pubsub()
-        await pubsub.subscribe(channel)
-        self._subscriptions[channel] = pubsub
-        return _Subscription(pubsub)
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        self._subscribers.setdefault(channel, set()).add(queue)
+        return _Subscription(queue)
 
-    async def unsubscribe(self, channel: str) -> None:
-        """Unsubscribe from a channel and clean up resources."""
-        pubsub = self._subscriptions.pop(channel, None)
-        if pubsub is not None:
-            await pubsub.unsubscribe(channel)
-            await pubsub.aclose()
+    async def unsubscribe(
+        self, channel: str, subscription: _Subscription
+    ) -> None:
+        subscribers = self._subscribers.get(channel)
+        if subscribers is None:
+            return
+        subscribers.discard(subscription._queue)
+        if not subscribers:
+            del self._subscribers[channel]
