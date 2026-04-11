@@ -125,3 +125,36 @@ def test_alembic_version_table_records_applied_revision(alembic_upgraded_db):
         )
     finally:
         engine.dispose()
+
+
+def test_tasks_table_has_origin_task_id_column(alembic_upgraded_db):
+    """Migration 0002 adds ``origin_task_id`` as a nullable TEXT column on ``tasks``.
+
+    This is the ONLY test that exercises the real Alembic migration
+    script — the fast in-memory fixture in ``conftest.py`` uses
+    ``Base.metadata.create_all`` and bypasses Alembic entirely. A
+    ``db/models.py`` update without a matching ``0002_add_origin_task_id.py``
+    (or vice versa) slips past every other test in the suite and is only
+    caught here.
+
+    The column MUST be nullable: unicast deliveries and historical rows
+    predating the migration carry NULL, and the broadcast-grouping
+    predicate documented in design doc 0000013 is
+    ``origin_task_id IS NOT NULL``.
+    """
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
+    try:
+        insp = inspect(engine)
+        cols = {col["name"]: col for col in insp.get_columns("tasks")}
+
+        assert "origin_task_id" in cols, (
+            "migration 0002_add_origin_task_id did not add the "
+            "origin_task_id column to the tasks table. "
+            f"columns found: {sorted(cols)}"
+        )
+        assert cols["origin_task_id"]["nullable"] is True, (
+            "migration 0002 added origin_task_id as NOT NULL — it must "
+            "be nullable because unicast + historical rows store NULL"
+        )
+    finally:
+        engine.dispose()
