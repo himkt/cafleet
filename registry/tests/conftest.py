@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import (
 
 from hikyaku_registry.db.models import Base
 from hikyaku_registry.registry_store import RegistryStore
+from hikyaku_registry.task_store import TaskStore
 
 
 @event.listens_for(Engine, "connect")
@@ -61,3 +62,10 @@ async def store(
     db_sessionmaker: async_sessionmaker[AsyncSession],
 ) -> RegistryStore:
     return RegistryStore(db_sessionmaker)
+
+
+@pytest.fixture
+async def task_store(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+) -> TaskStore:
+    return TaskStore(db_sessionmaker)

@@ -23,7 +23,7 @@ from hikyaku_registry.config import settings
 from hikyaku_registry.executor import BrokerExecutor
 from hikyaku_registry.redis_client import get_redis
 from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import RedisTaskStore
+from hikyaku_registry.task_store import TaskStore
 
 
 webui_router = APIRouter(prefix="/ui/api")
@@ -38,8 +38,8 @@ def get_webui_store() -> RegistryStore:
     return RegistryStore(get_redis())
 
 
-def get_webui_task_store() -> RedisTaskStore:
-    return RedisTaskStore(get_redis())
+def get_webui_task_store() -> TaskStore:
+    return TaskStore(get_redis())
 
 
 def get_webui_executor() -> BrokerExecutor:
@@ -69,7 +69,7 @@ def _extract_bearer(request: Request) -> str:
 async def _get_tenant_agents(
     tenant_id: str,
     store: RegistryStore,
-    task_store: RedisTaskStore,
+    task_store: TaskStore,
 ) -> list[dict]:
     agents = []
 
@@ -157,7 +157,7 @@ async def _resolve_agent_name(store: RegistryStore, agent_id: str) -> str:
 async def _format_message(
     task: Task,
     store: RegistryStore,
-    task_store: RedisTaskStore,
+    task_store: TaskStore,
 ) -> dict:
     metadata = task.metadata or {}
     from_id = metadata.get("fromAgentId", "")
@@ -242,7 +242,7 @@ async def revoke_key(
 async def list_agents(
     tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
-    task_store: RedisTaskStore = Depends(get_webui_task_store),
+    task_store: TaskStore = Depends(get_webui_task_store),
 ):
     agents = await _get_tenant_agents(tenant_id, store, task_store)
     return {"agents": agents}
@@ -253,7 +253,7 @@ async def get_inbox(
     agent_id: str,
     tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
-    task_store: RedisTaskStore = Depends(get_webui_task_store),
+    task_store: TaskStore = Depends(get_webui_task_store),
 ):
 
     if not await store.verify_agent_tenant(agent_id, tenant_id):
@@ -279,7 +279,7 @@ async def get_sent(
     agent_id: str,
     tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
-    task_store: RedisTaskStore = Depends(get_webui_task_store),
+    task_store: TaskStore = Depends(get_webui_task_store),
 ):
 
     if not await store.verify_agent_tenant(agent_id, tenant_id):
@@ -314,7 +314,7 @@ async def send_message(
     body: SendMessageRequest,
     tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
-    task_store: RedisTaskStore = Depends(get_webui_task_store),
+    task_store: TaskStore = Depends(get_webui_task_store),
     executor: BrokerExecutor = Depends(get_webui_executor),
 ):
 

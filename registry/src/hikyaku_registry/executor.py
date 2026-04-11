@@ -14,14 +14,14 @@ from a2a.types import (
 )
 
 from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import RedisTaskStore
+from hikyaku_registry.task_store import TaskStore
 
 
 class BrokerExecutor(AgentExecutor):
     def __init__(
         self,
         registry_store: RegistryStore,
-        task_store: RedisTaskStore,
+        task_store: TaskStore,
         pubsub=None,
     ) -> None:
         self._registry_store = registry_store

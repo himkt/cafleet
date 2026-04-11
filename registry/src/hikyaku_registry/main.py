@@ -39,7 +39,7 @@ from hikyaku_registry.executor import BrokerExecutor
 from hikyaku_registry.pubsub import PubSubManager
 from hikyaku_registry.redis_client import close_pool, get_redis
 from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import RedisTaskStore
+from hikyaku_registry.task_store import TaskStore
 from hikyaku_registry.webui_api import (
     webui_router,
     get_webui_store,
@@ -168,7 +168,7 @@ async def _handle_send_message(
 
 
 async def _handle_get_task(
-    task_store: RedisTaskStore,
+    task_store: TaskStore,
     tenant_id: str,
     registry_store: RegistryStore,
     params: dict,
@@ -237,7 +237,7 @@ async def _handle_cancel_task(
 
 
 async def _handle_list_tasks(
-    task_store: RedisTaskStore, agent_id: str, params: dict
+    task_store: TaskStore, agent_id: str, params: dict
 ) -> dict:
     """Handle ListTasks JSON-RPC method."""
     context_id = params.get("contextId")
@@ -273,7 +273,7 @@ def create_app(
     if redis is None:
         redis = get_redis()
     registry_store = RegistryStore(redis)
-    task_store = RedisTaskStore(redis)
+    task_store = TaskStore(redis)
     pubsub_manager = PubSubManager(redis)
     executor = BrokerExecutor(
         registry_store=registry_store,
