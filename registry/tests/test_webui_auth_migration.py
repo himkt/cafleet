@@ -3,17 +3,12 @@
 Covers: get_webui_tenant dependency, modified endpoints (agents, inbox, sent,
 messages/send) with JWT + X-Tenant-Id auth, removal of POST /ui/api/login,
 and removal of _authenticate_tenant helper.
-
-Design doc reference: Step 4 — WebUI Auth Migration (Backend).
 """
 
 import uuid
 from datetime import UTC, datetime
 
 import pytest
-import fakeredis.aioredis
-from httpx import AsyncClient, ASGITransport
-from fastapi import FastAPI
 from a2a.types import (
     Artifact,
     Part,
@@ -22,17 +17,19 @@ from a2a.types import (
     TaskStatus,
     TextPart,
 )
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
+from hikyaku_registry.auth import get_user_id, verify_auth0_user
+from hikyaku_registry.executor import BrokerExecutor
+from hikyaku_registry.registry_store import RegistryStore
+from hikyaku_registry.task_store import TaskStore
 from hikyaku_registry.webui_api import (
-    webui_router,
+    get_webui_executor,
     get_webui_store,
     get_webui_task_store,
-    get_webui_executor,
+    webui_router,
 )
-from hikyaku_registry.auth import verify_auth0_user, get_user_id
-from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import RedisTaskStore
-from hikyaku_registry.executor import BrokerExecutor
 
 
 # ---------------------------------------------------------------------------
@@ -58,14 +55,14 @@ def _jwt_header(tenant_id: str | None = None) -> dict:
 
 
 async def _create_task(
-    task_store: RedisTaskStore,
+    task_store: TaskStore,
     from_agent_id: str,
     to_agent_id: str,
     text: str = "Hello",
     msg_type: str = "unicast",
     state: TaskState = TaskState.input_required,
 ) -> Task:
-    """Create and save a task in Redis. Returns the saved Task."""
+    """Create and save a task via TaskStore. Returns the saved Task."""
     created_at = datetime.now(UTC).isoformat()
 
     task = Task(
@@ -94,21 +91,17 @@ async def _create_task(
 
 
 @pytest.fixture
-async def auth_env():
+async def auth_env(store: RegistryStore, task_store: TaskStore):
     """Set up test FastAPI app with JWT auth dependency overrides.
 
-    Auth0 user defaults to _TEST_SUB_A. Use _set_user() to switch.
+    Auth0 user defaults to _TEST_SUB_A. Use _set_user_on_app to switch.
 
     Yields a dict with:
       - client: httpx.AsyncClient
-      - store: RegistryStore (fakeredis)
-      - task_store: RedisTaskStore (fakeredis)
-      - redis: raw fakeredis client
+      - store: RegistryStore (in-memory aiosqlite)
+      - task_store: TaskStore (in-memory aiosqlite)
       - app: FastAPI app
     """
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    store = RegistryStore(redis)
-    task_store = RedisTaskStore(redis)
     executor = BrokerExecutor(registry_store=store, task_store=task_store)
 
     app = FastAPI()
@@ -118,7 +111,6 @@ async def auth_env():
     app.dependency_overrides[get_webui_task_store] = lambda: task_store
     app.dependency_overrides[get_webui_executor] = lambda: executor
 
-    # Default auth: user A
     _set_user_on_app(app, _TEST_SUB_A)
 
     transport = ASGITransport(app=app)
@@ -127,11 +119,8 @@ async def auth_env():
             "client": client,
             "store": store,
             "task_store": task_store,
-            "redis": redis,
             "app": app,
         }
-
-    await redis.aclose()
 
 
 def _set_user_on_app(app: FastAPI, sub: str):
@@ -170,7 +159,6 @@ class TestGetWebuiTenant:
     Validates JWT auth, X-Tenant-Id extraction, and ownership verification.
     """
 
-    @pytest.mark.asyncio
     async def test_valid_jwt_and_owned_tenant_returns_200(self, auth_env):
         """Valid JWT + owned X-Tenant-Id returns 200."""
         store, client = auth_env["store"], auth_env["client"]
@@ -181,17 +169,14 @@ class TestGetWebuiTenant:
 
         assert resp.status_code == 200
 
-    @pytest.mark.asyncio
     async def test_missing_tenant_id_header_returns_400(self, auth_env):
         """Missing X-Tenant-Id header returns 400."""
         client = auth_env["client"]
 
-        # JWT present but no X-Tenant-Id
         resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id=None))
 
         assert resp.status_code == 400
 
-    @pytest.mark.asyncio
     async def test_non_owned_tenant_returns_403(self, auth_env):
         """X-Tenant-Id not owned by the authenticated user returns 403."""
         app, store, client = (
@@ -200,16 +185,13 @@ class TestGetWebuiTenant:
             auth_env["client"],
         )
 
-        # User B creates a tenant
         _, tenant_id_b, _ = await _setup_tenant(store, _TEST_SUB_B)
 
-        # User A tries to access user B's tenant
         _set_user_on_app(app, _TEST_SUB_A)
         resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id_b))
 
         assert resp.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_missing_jwt_returns_401(self, auth_env):
         """Missing JWT returns 401."""
         app, store, client = (
@@ -220,15 +202,13 @@ class TestGetWebuiTenant:
 
         _, tenant_id, _ = await _setup_tenant(store, _TEST_SUB_A)
 
-        # Remove auth overrides
         app.dependency_overrides.pop(verify_auth0_user, None)
         app.dependency_overrides.pop(get_user_id, None)
 
         resp = await client.get("/ui/api/agents", headers={"X-Tenant-Id": tenant_id})
 
-        assert resp.status_code == 401 or resp.status_code == 403
+        assert resp.status_code in (401, 403)
 
-    @pytest.mark.asyncio
     async def test_nonexistent_tenant_id_returns_403(self, auth_env):
         """X-Tenant-Id that exists nowhere returns 403."""
         client = auth_env["client"]
@@ -252,12 +232,11 @@ class TestAgentsListJwt:
     Replaces API key auth. Returns agents in the specified tenant.
     """
 
-    @pytest.mark.asyncio
     async def test_returns_tenant_agents(self, auth_env):
         """Returns agents belonging to the specified tenant."""
         store, client = auth_env["store"], auth_env["client"]
 
-        api_key, tenant_id, agent_id = await _setup_tenant(store, _TEST_SUB_A)
+        _, tenant_id, agent_id = await _setup_tenant(store, _TEST_SUB_A)
 
         resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id))
 
@@ -265,15 +244,13 @@ class TestAgentsListJwt:
         ids = {a["agent_id"] for a in resp.json()["agents"]}
         assert agent_id in ids
 
-    @pytest.mark.asyncio
     async def test_excludes_other_tenant_agents(self, auth_env):
         """Agents from other tenants are excluded."""
         store, client = auth_env["store"], auth_env["client"]
 
         _, tenant_id_a, agent_a = await _setup_tenant(store, _TEST_SUB_A)
 
-        # Create another tenant under same user
-        api_key_b, tenant_id_b, _ = await store.create_api_key(_TEST_SUB_A)
+        api_key_b, _, _ = await store.create_api_key(_TEST_SUB_A)
         r_b = await store.create_agent(
             name="Other Agent", description="Test", api_key=api_key_b
         )
@@ -284,7 +261,6 @@ class TestAgentsListJwt:
         assert agent_a in ids
         assert r_b["agent_id"] not in ids
 
-    @pytest.mark.asyncio
     async def test_400_without_tenant_id(self, auth_env):
         """GET /agents without X-Tenant-Id returns 400."""
         client = auth_env["client"]
@@ -293,7 +269,6 @@ class TestAgentsListJwt:
 
         assert resp.status_code == 400
 
-    @pytest.mark.asyncio
     async def test_403_for_non_owned_tenant(self, auth_env):
         """GET /agents with non-owned X-Tenant-Id returns 403."""
         store, client = auth_env["store"], auth_env["client"]
@@ -313,7 +288,6 @@ class TestAgentsListJwt:
 class TestInboxJwt:
     """Tests for GET /ui/api/agents/{agent_id}/inbox with JWT + X-Tenant-Id."""
 
-    @pytest.mark.asyncio
     async def test_returns_inbox_messages(self, auth_env):
         """Returns messages for the specified agent in the tenant."""
         store, task_store, client = (
@@ -324,7 +298,6 @@ class TestInboxJwt:
 
         api_key, tenant_id, agent_id = await _setup_tenant(store, _TEST_SUB_A)
 
-        # Create a second agent as sender
         r_sender = await store.create_agent(
             name="Sender", description="Test", api_key=api_key
         )
@@ -346,7 +319,6 @@ class TestInboxJwt:
         assert len(msgs) == 1
         assert msgs[0]["body"] == "Hello from sender"
 
-    @pytest.mark.asyncio
     async def test_empty_inbox(self, auth_env):
         """Agent with no messages returns empty list."""
         store, client = auth_env["store"], auth_env["client"]
@@ -361,7 +333,6 @@ class TestInboxJwt:
         assert resp.status_code == 200
         assert resp.json()["messages"] == []
 
-    @pytest.mark.asyncio
     async def test_400_without_tenant_id(self, auth_env):
         """Inbox without X-Tenant-Id returns 400."""
         store, client = auth_env["store"], auth_env["client"]
@@ -375,7 +346,6 @@ class TestInboxJwt:
 
         assert resp.status_code == 400
 
-    @pytest.mark.asyncio
     async def test_403_for_non_owned_tenant(self, auth_env):
         """Inbox with non-owned X-Tenant-Id returns 403."""
         store, client = auth_env["store"], auth_env["client"]
@@ -389,14 +359,12 @@ class TestInboxJwt:
 
         assert resp.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_agent_not_in_tenant_returns_404(self, auth_env):
         """Agent belonging to a different tenant returns 404."""
         store, client = auth_env["store"], auth_env["client"]
 
         _, tenant_id_a, _ = await _setup_tenant(store, _TEST_SUB_A)
 
-        # Create agent under a different tenant (same user)
         api_key_b, _, _ = await store.create_api_key(_TEST_SUB_A)
         r_b = await store.create_agent(
             name="Other Agent", description="Test", api_key=api_key_b
@@ -418,14 +386,12 @@ class TestInboxJwt:
 class TestSentJwt:
     """Tests for GET /ui/api/agents/{agent_id}/sent with JWT + X-Tenant-Id."""
 
-    @pytest.mark.asyncio
     async def test_returns_sent_messages(self, auth_env):
         """Returns messages sent by the specified agent."""
-        store, task_store, client, redis = (
+        store, task_store, client = (
             auth_env["store"],
             auth_env["task_store"],
             auth_env["client"],
-            auth_env["redis"],
         )
 
         api_key, tenant_id, sender_id = await _setup_tenant(store, _TEST_SUB_A)
@@ -433,15 +399,12 @@ class TestSentJwt:
             name="Recipient", description="Test", api_key=api_key
         )
 
-        task = await _create_task(
+        await _create_task(
             task_store,
             from_agent_id=sender_id,
             to_agent_id=r_recipient["agent_id"],
             text="Sent message",
         )
-
-        # Track sender for the sent endpoint
-        await redis.sadd(f"tasks:sender:{sender_id}", task.id)
 
         resp = await client.get(
             f"/ui/api/agents/{sender_id}/sent",
@@ -453,7 +416,6 @@ class TestSentJwt:
         assert len(msgs) == 1
         assert msgs[0]["body"] == "Sent message"
 
-    @pytest.mark.asyncio
     async def test_empty_sent(self, auth_env):
         """Agent with no sent messages returns empty list."""
         store, client = auth_env["store"], auth_env["client"]
@@ -468,7 +430,6 @@ class TestSentJwt:
         assert resp.status_code == 200
         assert resp.json()["messages"] == []
 
-    @pytest.mark.asyncio
     async def test_400_without_tenant_id(self, auth_env):
         """Sent without X-Tenant-Id returns 400."""
         store, client = auth_env["store"], auth_env["client"]
@@ -482,7 +443,6 @@ class TestSentJwt:
 
         assert resp.status_code == 400
 
-    @pytest.mark.asyncio
     async def test_403_for_non_owned_tenant(self, auth_env):
         """Sent with non-owned X-Tenant-Id returns 403."""
         store, client = auth_env["store"], auth_env["client"]
@@ -496,7 +456,6 @@ class TestSentJwt:
 
         assert resp.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_agent_not_in_tenant_returns_404(self, auth_env):
         """Agent belonging to a different tenant returns 404."""
         store, client = auth_env["store"], auth_env["client"]
@@ -524,7 +483,6 @@ class TestSentJwt:
 class TestSendMessageJwt:
     """Tests for POST /ui/api/messages/send with JWT + X-Tenant-Id."""
 
-    @pytest.mark.asyncio
     async def test_400_without_tenant_id(self, auth_env):
         """Send without X-Tenant-Id returns 400."""
         store, client = auth_env["store"], auth_env["client"]
@@ -546,7 +504,6 @@ class TestSendMessageJwt:
 
         assert resp.status_code == 400
 
-    @pytest.mark.asyncio
     async def test_403_for_non_owned_tenant(self, auth_env):
         """Send with non-owned X-Tenant-Id returns 403."""
         store, client = auth_env["store"], auth_env["client"]
@@ -565,7 +522,6 @@ class TestSendMessageJwt:
 
         assert resp.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_401_without_jwt(self, auth_env):
         """Send without JWT returns 401."""
         app, store, client = (
@@ -589,7 +545,7 @@ class TestSendMessageJwt:
             },
         )
 
-        assert resp.status_code == 401 or resp.status_code == 403
+        assert resp.status_code in (401, 403)
 
 
 # ===========================================================================
@@ -603,7 +559,6 @@ class TestLoginRemoved:
     The login endpoint is replaced by Auth0 OIDC flow.
     """
 
-    @pytest.mark.asyncio
     async def test_login_endpoint_removed(self, auth_env):
         """POST /ui/api/login returns 404 or 405 (endpoint no longer exists)."""
         client = auth_env["client"]

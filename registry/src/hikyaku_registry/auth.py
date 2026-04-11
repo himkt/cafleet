@@ -40,19 +40,14 @@ async def get_authenticated_agent(
     token = _extract_bearer_token(request)
     tenant_id = hashlib.sha256(token.encode()).hexdigest()
 
-    key_status = await store._redis.hget(f"apikey:{tenant_id}", "status")
-    if key_status != "active":
+    if not await store.is_api_key_active(tenant_id):
         raise HTTPException(status_code=401)
 
     agent_id = request.headers.get("x-agent-id")
     if not agent_id:
         raise HTTPException(status_code=401)
 
-    agent_key_hash = await store._redis.hget(f"agent:{agent_id}", "api_key_hash")
-    if agent_key_hash is None:
-        raise HTTPException(status_code=401)
-
-    if agent_key_hash != tenant_id:
+    if not await store.verify_agent_tenant(agent_id, tenant_id):
         raise HTTPException(status_code=401)
 
     return (agent_id, tenant_id)
@@ -74,8 +69,7 @@ async def get_registration_tenant(
     token = _extract_bearer_token(request)
     api_key_hash = hashlib.sha256(token.encode()).hexdigest()
 
-    key_status = await store._redis.hget(f"apikey:{api_key_hash}", "status")
-    if key_status != "active":
+    if not await store.is_api_key_active(api_key_hash):
         raise HTTPException(status_code=401)
     return (token, api_key_hash)
 

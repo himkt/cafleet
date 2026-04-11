@@ -1,27 +1,71 @@
-"""Shared test fixtures for hikyaku-registry tests."""
+"""Shared test fixtures for hikyaku-registry tests.
+
+A function-scoped in-memory aiosqlite engine + SQLAlchemy
+``Base.metadata.create_all`` is the canonical fast-path described in
+the design doc's Testing Strategy section: each test gets a clean DB
+with no Alembic overhead, and FK enforcement is guaranteed by a
+module-level ``connect`` listener that mirrors ``db/engine.py``.
+
+The fixture stack here is intentionally minimal — only what Step 5
+needs (RegistryStore). ``task_store`` and ``pubsub_manager`` fixtures
+land alongside Steps 6 and 7 respectively.
+"""
 
 import pytest
-import fakeredis.aioredis
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
+from hikyaku_registry.db.models import Base
 from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import RedisTaskStore
+from hikyaku_registry.task_store import TaskStore
+
+
+@event.listens_for(Engine, "connect")
+def _enable_fk_pragma(dbapi_conn, _record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 @pytest.fixture
-async def redis_client():
-    """Provide a fake async Redis client for testing."""
-    client = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    yield client
-    await client.aclose()
+async def db_engine() -> AsyncEngine:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    await engine.dispose()
 
 
 @pytest.fixture
-async def store(redis_client):
-    """Provide a RegistryStore instance with fake Redis."""
-    return RegistryStore(redis_client)
+async def db_sessionmaker(
+    db_engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(db_engine, expire_on_commit=False)
 
 
 @pytest.fixture
-async def task_store(redis_client):
-    """Provide a RedisTaskStore instance with fake Redis."""
-    return RedisTaskStore(redis_client)
+async def db_session(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+) -> AsyncSession:
+    async with db_sessionmaker() as session:
+        yield session
+
+
+@pytest.fixture
+async def store(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+) -> RegistryStore:
+    return RegistryStore(db_sessionmaker)
+
+
+@pytest.fixture
+async def task_store(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+) -> TaskStore:
+    return TaskStore(db_sessionmaker)

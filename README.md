@@ -17,6 +17,7 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 - **Two-Header Auth** -- API key (tenant) + Agent-Id (identity) required on all authenticated requests
 - **WebUI** -- Browser-based dashboard with Auth0 login; users manage API keys, select tenants, and browse agents and message history
 - **CLI Tool** -- Full-featured command-line client for all broker operations
+- **SQLite Storage** -- Single-file database; no daemon required. Schema managed by Alembic via `hikyaku-registry db init`
 
 ## Architecture
 
@@ -31,19 +32,21 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
     |                  Bearer <api_key>   |           |                |
                        X-Agent-Id: <id>   |           v                |
     | +-------------+         |           |  +--------------------+    |
-      |  Agent B     | ListTasks          |  | Redis              |    |
+      |  Agent B     | ListTasks          |  | SQLite (SQLAlchemy)|    |
     | | (recipient)  |<-------------------+  | +----------------+ |    |
-      +-------------+         |           |  | | Agent Store    | |    |
-    |                                     |  | | Task Store     | |    |
-     - - - - - - - - - - - - -            |  | | Tenant Sets    | |    |
-                                          |  | | Pub/Sub Chans  | |    |
+      +-------------+         |           |  | | api_keys       | |    |
+    |                                     |  | | agents         | |    |
+     - - - - - - - - - - - - -            |  | | tasks          | |    |
+                                          |  | | alembic_version| |    |
      Tenant Y (different API key)         |  | +----------------+ |    |
     + - - - - - - - - - - - - +           |  +--------------------+    |
       +-------------+                     |                            |
     | |  Agent C     | (isolated) |       |  +--------------------+    |
       | (discovery)  |                    |  | SSE Endpoint       |    |
     | +-------------+            |        |  | /api/v1/subscribe  |    |
-     - - - - - - - - - - - - -            |  +--------------------+    |
+     - - - - - - - - - - - - -            |  | (in-process Pub/   |    |
+                                          |  |  Sub fan-out)      |    |
+                                          |  +--------------------+    |
                                           +----------------------------+
 
   +---------------+  MCP tools   +--------------------------------------+
@@ -75,15 +78,27 @@ Key design decisions:
 - Tenants are created via WebUI API key management. Revoking a key deregisters all agents and invalidates the tenant. An empty tenant (no agents) remains valid as long as its key is active.
 - The broker exposes three API surfaces: A2A Server (JSON-RPC 2.0), Registry REST API (`/api/v1/`), and WebUI (`/ui/`).
 - The WebUI uses Auth0 for user authentication. Agent-to-broker communication uses API keys (unchanged).
+- **Storage layer**: All data is persisted in a single SQLite file (`~/.local/share/hikyaku/registry.db` by default). Indexed fields are columns; A2A protocol payloads (`AgentCard`, `Task`) are stored as JSON blobs. No physical cleanup loop -- deregistered agents and tasks persist forever and are invisible to normal traffic via `status='active'` filters.
+- **Single-worker constraint**: The in-process Pub/Sub fan-out for SSE lives in the worker's memory. The registry server **must** run with `--workers=1` (enforced by `mise //registry:dev`). Multi-worker mode silently breaks SSE delivery.
 
 ## Quick Start
 
 ### Prerequisites
 
 - Python 3.12+
-- Redis (running locally or via Docker)
+- SQLite (built into Python via `aiosqlite`; no daemon needed)
 - [uv](https://docs.astral.sh/uv/)
 - [Auth0](https://auth0.com/) account (for WebUI user authentication)
+
+### Initialize the Schema (one-time)
+
+Before starting the server for the first time, apply the database schema:
+
+```bash
+hikyaku-registry db init
+```
+
+This command is idempotent -- running it on a database that is already at head is a no-op. The database file is created at `~/.local/share/hikyaku/registry.db` by default. Override with `HIKYAKU_DATABASE_URL` (e.g. `sqlite+aiosqlite:////var/lib/hikyaku/registry.db`).
 
 ### Start the Broker Server
 
@@ -93,11 +108,12 @@ mise //registry:dev
 
 The broker will be available at `http://localhost:8000`.
 
+> **Note**: The broker must run with a single worker (`--workers=1`). The `mise //registry:dev` task enforces this. Do not override to multiple workers -- SSE delivery will silently break.
+
 ### Install the CLI Client
 
 ```bash
-cd client
-uv tool install .
+cd client && uv tool install .
 ```
 
 ### Create an API Key
@@ -139,6 +155,8 @@ hikyaku ack --agent-id <your-agent-id> --task-id <task-id>
 
 ## CLI Usage
 
+### Client CLI (`hikyaku`)
+
 Credentials are set via environment variables:
 
 | Variable | Required | Description |
@@ -159,6 +177,16 @@ The `--agent-id` option is a per-subcommand option required by most commands. Th
 | `hikyaku get-task` | Required | Get details of a specific task/message |
 | `hikyaku agents` | Required | List agents in the tenant or get detail for a specific agent |
 | `hikyaku deregister` | Required | Deregister this agent from the broker |
+
+### Server CLI (`hikyaku-registry`)
+
+The `hikyaku-registry` console script manages the broker server's database schema.
+
+| Command | Description |
+|---|---|
+| `hikyaku-registry db init` | Apply Alembic migrations to bring the schema to head (idempotent) |
+
+`hikyaku-registry db init` must be run once before the server starts. It handles six database states: missing file (creates it), empty schema, at head (no-op), behind head (upgrades), ahead of head (error), and legacy tables without Alembic version (error with manual instructions).
 
 ## API Overview
 
@@ -274,7 +302,7 @@ The MCP server auto-connects to the broker's SSE endpoint on startup. All tools 
 ## Tech Stack
 
 - **Python 3.12+** with uv workspace
-- **Server**: FastAPI + Redis + a2a-sdk + Pydantic + pydantic-settings
+- **Server**: FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk + Pydantic + pydantic-settings
 - **CLI**: click + httpx + a2a-sdk
 - **MCP Server**: mcp + httpx + httpx-sse
 - **WebUI**: Vite + React 19 + TypeScript + Tailwind CSS 4
@@ -286,6 +314,9 @@ hikyaku/
   pyproject.toml          # Workspace root (uv workspace)
   registry/               # hikyaku-registry server package
     src/hikyaku_registry/
+      db/                 # SQLAlchemy models, engine, Alembic env
+      alembic/            # Alembic migration scripts (versions/)
+      alembic.ini         # Alembic config (bundled into wheel)
     tests/
     pyproject.toml
   client/                 # hikyaku-client CLI package
@@ -318,17 +349,17 @@ cd hikyaku
 # Install all workspace dependencies
 uv sync
 
+# Initialize the database schema (one-time)
+hikyaku-registry db init
+
 # Run registry tests
-cd registry
-mise test
+mise //registry:test
 
 # Run client tests
-cd client
-mise test
+mise //client:test
 
 # Run MCP server tests
-cd mcp-server
-mise test
+mise //mcp-server:test
 ```
 
 ## License

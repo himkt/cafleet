@@ -4,11 +4,11 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import redis.asyncio as aioredis
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from a2a.server.agent_execution import RequestContext
 from a2a.server.context import ServerCallContext
@@ -23,7 +23,6 @@ from a2a.types import (
 )
 
 from hikyaku_registry.agent_card import build_agent_card
-from hikyaku_registry.cleanup import cleanup_expired_agents
 from hikyaku_registry.api.registry import (
     get_registry_store,
     registry_router,
@@ -35,11 +34,11 @@ from hikyaku_registry.api.subscribe import (
 )
 from hikyaku_registry.auth import get_authenticated_agent
 from hikyaku_registry.config import settings
+from hikyaku_registry.db.engine import dispose_engine, get_sessionmaker
 from hikyaku_registry.executor import BrokerExecutor
 from hikyaku_registry.pubsub import PubSubManager
-from hikyaku_registry.redis_client import close_pool, get_redis
 from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import RedisTaskStore
+from hikyaku_registry.task_store import TaskStore
 from hikyaku_registry.webui_api import (
     webui_router,
     get_webui_store,
@@ -51,35 +50,10 @@ from hikyaku_registry.webui_api import (
 logger = logging.getLogger(__name__)
 
 
-async def _cleanup_loop(redis: aioredis.Redis, ttl_days: int, interval: int) -> None:
-    """Periodically clean up expired deregistered agents."""
-    while True:
-        try:
-            count = await cleanup_expired_agents(redis, ttl_days=ttl_days)
-            if count > 0:
-                logger.info("Cleaned up %d expired agent(s)", count)
-        except Exception:
-            logger.exception("Error during agent cleanup")
-        await asyncio.sleep(interval)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    redis = get_redis()
-    cleanup_task = asyncio.create_task(
-        _cleanup_loop(
-            redis,
-            ttl_days=settings.deregistered_task_ttl_days,
-            interval=settings.cleanup_interval_seconds,
-        )
-    )
     yield
-    cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
-    await close_pool()
+    await dispose_engine()
 
 
 class SPAStaticFiles(StaticFiles):
@@ -168,7 +142,7 @@ async def _handle_send_message(
 
 
 async def _handle_get_task(
-    task_store: RedisTaskStore,
+    task_store: TaskStore,
     tenant_id: str,
     registry_store: RegistryStore,
     params: dict,
@@ -182,16 +156,22 @@ async def _handle_get_task(
     if task is None:
         raise ValueError(f"Task {task_id} not found")
 
-    # Verify task belongs to caller's tenant
-    from_agent = await registry_store._redis.hget(f"task:{task_id}", "from_agent_id")
-    to_agent = await registry_store._redis.hget(f"task:{task_id}", "to_agent_id")
+    # Read sender/recipient from the Task metadata blob rather than issuing
+    # a second SELECT for the endpoints columns — BrokerExecutor writes
+    # both fields on every save (executor.py _handle_unicast / _handle_broadcast).
+    metadata = task.metadata or {}
+    from_agent = metadata.get("fromAgentId", "")
+    to_agent = metadata.get("toAgentId", "")
 
     from_ok = from_agent and await registry_store.verify_agent_tenant(
         from_agent, tenant_id
     )
-    to_ok = to_agent and await registry_store.verify_agent_tenant(to_agent, tenant_id)
-    if not from_ok and not to_ok:
-        raise ValueError(f"Task {task_id} not found")
+    if not from_ok:
+        to_ok = to_agent and await registry_store.verify_agent_tenant(
+            to_agent, tenant_id
+        )
+        if not to_ok:
+            raise ValueError(f"Task {task_id} not found")
 
     return {"task": _task_to_dict(task)}
 
@@ -237,7 +217,7 @@ async def _handle_cancel_task(
 
 
 async def _handle_list_tasks(
-    task_store: RedisTaskStore, agent_id: str, params: dict
+    task_store: TaskStore, agent_id: str, params: dict
 ) -> dict:
     """Handle ListTasks JSON-RPC method."""
     context_id = params.get("contextId")
@@ -264,24 +244,25 @@ async def _handle_list_tasks(
 
 
 def create_app(
-    redis: aioredis.Redis | None = None, webui_dist_dir: str | None = None
+    sessionmaker: async_sessionmaker[AsyncSession] | None = None,
+    webui_dist_dir: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Hikyaku Broker", version="0.1.0", lifespan=lifespan)
     app.include_router(registry_router, prefix="/api/v1")
     app.include_router(subscribe_router, prefix="/api/v1")
 
-    if redis is None:
-        redis = get_redis()
-    registry_store = RegistryStore(redis)
-    task_store = RedisTaskStore(redis)
-    pubsub_manager = PubSubManager(redis)
+    if sessionmaker is None:
+        sessionmaker = get_sessionmaker()
+    registry_store = RegistryStore(sessionmaker)
+    task_store = TaskStore(sessionmaker)
+    pubsub_manager = PubSubManager()
     executor = BrokerExecutor(
         registry_store=registry_store,
         task_store=task_store,
         pubsub=pubsub_manager,
     )
 
-    # Override dependencies so API endpoints use the same redis
+    # Override dependencies so API endpoints use the same stores
     async def _get_store() -> RegistryStore:
         return registry_store
 
@@ -318,20 +299,14 @@ def create_app(
 
         tenant_id = hashlib.sha256(token.encode()).hexdigest()
 
-        # Verify API key is active
-        key_status = await registry_store._redis.hget(f"apikey:{tenant_id}", "status")
-        if key_status != "active":
+        if not await registry_store.is_api_key_active(tenant_id):
             return JSONResponse(status_code=401, content={"error": "Unauthorized"})
 
         agent_id = request.headers.get("x-agent-id")
         if not agent_id:
             return JSONResponse(status_code=401, content={"error": "Unauthorized"})
 
-        # Verify agent belongs to tenant
-        agent_key_hash = await registry_store._redis.hget(
-            f"agent:{agent_id}", "api_key_hash"
-        )
-        if agent_key_hash is None or agent_key_hash != tenant_id:
+        if not await registry_store.verify_agent_tenant(agent_id, tenant_id):
             return JSONResponse(status_code=401, content={"error": "Unauthorized"})
 
         # Parse JSON-RPC request
@@ -383,6 +358,12 @@ app = create_app()
 
 
 if __name__ == "__main__":
+    # ``reload=True`` is a developer convenience and must NOT be used in
+    # production: uvicorn's reloader spawns worker subprocesses, which breaks
+    # PubSubManager's single-process fan-out (a publish in the reloader's
+    # worker cannot reach subscribers in a sibling worker). The canonical
+    # dev command is ``mise //registry:dev``; the entry below is only used
+    # for ``python -m hikyaku_registry.main`` ad-hoc runs.
     uvicorn.run(
         "hikyaku_registry.main:app",
         host=settings.broker_host,

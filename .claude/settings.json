@@ -7,10 +7,10 @@
       "Bash(mise //:format *)",
       "Bash(mise //:typecheck)",
       "Bash(mise //:typecheck *)",
-      "Bash(mise //admin:*)",
-      "Bash(mise //client:*)",
-      "Bash(mise //mcp-server:*)",
-      "Bash(mise //registry:*)"
+      "Bash(mise //admin*)",
+      "Bash(mise //client*)",
+      "Bash(mise //registry*)",
+      "Skill(update-readme)"
     ],
     "deny": [
       "Bash(uv run pytest *)",

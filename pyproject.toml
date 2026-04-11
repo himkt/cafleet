@@ -17,7 +17,6 @@ dev = [
     "hikyaku-registry",
     "hikyaku-client",
     "hikyaku-mcp",
-    "fakeredis>=2.34.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "ruff>=0.11.0",
@@ -37,8 +36,6 @@ include = ["registry/src", "client/src"]
 # Add more patterns as needed when new dependencies are introduced.
 allowed-unresolved-imports = [
     "a2a.*",
-    "redis.*",
-    "fakeredis.*",
     "pydantic_settings.*",
     "sse_starlette.*",
     "starlette.*",
@@ -48,12 +45,6 @@ allowed-unresolved-imports = [
     "httpx.*",
     "httpx_sse.*",
 ]
-
-[tool.ty.rules]
-# Suppress false positives from redis.asyncio type stubs that return
-# Union[Awaitable[T], T] for sync/async compatibility. All instances
-# in this codebase are redis async calls that are correctly awaited.
-invalid-await = "ignore"
 
 [tool.ruff]
 exclude = ["vendor/"]

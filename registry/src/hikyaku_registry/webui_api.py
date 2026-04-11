@@ -20,10 +20,10 @@ from a2a.types import (
 
 from hikyaku_registry.auth import verify_auth0_user, get_user_id
 from hikyaku_registry.config import settings
+from hikyaku_registry.db.engine import get_sessionmaker
 from hikyaku_registry.executor import BrokerExecutor
-from hikyaku_registry.redis_client import get_redis
 from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import RedisTaskStore
+from hikyaku_registry.task_store import TaskStore
 
 
 webui_router = APIRouter(prefix="/ui/api")
@@ -35,11 +35,11 @@ webui_router = APIRouter(prefix="/ui/api")
 
 
 def get_webui_store() -> RegistryStore:
-    return RegistryStore(get_redis())
+    return RegistryStore(get_sessionmaker())
 
 
-def get_webui_task_store() -> RedisTaskStore:
-    return RedisTaskStore(get_redis())
+def get_webui_task_store() -> TaskStore:
+    return TaskStore(get_sessionmaker())
 
 
 def get_webui_executor() -> BrokerExecutor:
@@ -69,11 +69,9 @@ def _extract_bearer(request: Request) -> str:
 async def _get_tenant_agents(
     tenant_id: str,
     store: RegistryStore,
-    task_store: RedisTaskStore,
 ) -> list[dict]:
-    agents = []
+    agents: list[dict] = []
 
-    # Active agents
     active_agents = await store.list_active_agents(tenant_id=tenant_id)
     for a in active_agents:
         agents.append(
@@ -86,32 +84,17 @@ async def _get_tenant_agents(
             }
         )
 
-    # Deregistered agents with messages
-    cursor = 0
-    while True:
-        cursor, keys = await store._redis.scan(
-            cursor=cursor, match="agent:*", count=100
+    deregistered = await store.list_deregistered_agents_with_tasks(tenant_id)
+    for d in deregistered:
+        agents.append(
+            {
+                "agent_id": d["agent_id"],
+                "name": d["name"],
+                "description": d["description"],
+                "status": "deregistered",
+                "registered_at": d["registered_at"],
+            }
         )
-        for key in keys:
-            record = await store._redis.hgetall(key)
-            if (
-                record.get("api_key_hash") == tenant_id
-                and record.get("status") == "deregistered"
-            ):
-                agent_id = record["agent_id"]
-                has_messages = await store._redis.zcard(f"tasks:ctx:{agent_id}")
-                if has_messages > 0:
-                    agents.append(
-                        {
-                            "agent_id": agent_id,
-                            "name": record.get("name", ""),
-                            "description": record.get("description", ""),
-                            "status": "deregistered",
-                            "registered_at": record.get("registered_at", ""),
-                        }
-                    )
-        if cursor == 0:
-            break
 
     return agents
 
@@ -131,8 +114,7 @@ async def get_webui_tenant(
     if not tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-Id header required")
 
-    is_owner = await store._redis.sismember(f"account:{user_id}:keys", tenant_id)
-    if not is_owner:
+    if not await store.is_key_owner(tenant_id, user_id):
         raise HTTPException(status_code=403)
 
     return tenant_id
@@ -149,36 +131,58 @@ def _extract_body(task: Task) -> str:
     return ""
 
 
-async def _resolve_agent_name(store: RegistryStore, agent_id: str) -> str:
-    name = await store._redis.hget(f"agent:{agent_id}", "name")
-    return name or ""
-
-
-async def _format_message(
-    task: Task,
+async def _format_messages(
+    tasks: list[Task],
     store: RegistryStore,
-    task_store: RedisTaskStore,
-) -> dict:
-    metadata = task.metadata or {}
-    from_id = metadata.get("fromAgentId", "")
-    to_id = metadata.get("toAgentId", "")
+    task_store: TaskStore,
+) -> list[dict]:
+    """Format a batch of Tasks into WebUI message dicts.
 
-    from_name = await _resolve_agent_name(store, from_id) if from_id else ""
-    to_name = await _resolve_agent_name(store, to_id) if to_id else ""
+    Batches the three lookups that would otherwise be N+1:
 
-    created_at = await task_store._redis.hget(f"task:{task.id}", "created_at") or ""
+      - ``created_at`` for every task (one SELECT over ``task_id IN (...)``)
+      - agent name for every unique ``fromAgentId`` / ``toAgentId``
+        (one SELECT over ``agent_id IN (...)``)
 
-    return {
-        "task_id": task.id,
-        "from_agent_id": from_id,
-        "from_agent_name": from_name,
-        "to_agent_id": to_id,
-        "to_agent_name": to_name,
-        "type": metadata.get("type", ""),
-        "status": task.status.state.name,
-        "created_at": created_at,
-        "body": _extract_body(task),
-    }
+    Empty or missing ids resolve to an empty string, matching the prior
+    ``get_agent_name`` / ``get_created_at or ""`` behavior.
+    """
+    if not tasks:
+        return []
+
+    task_ids = [task.id for task in tasks]
+    created_ats = await task_store.get_created_ats(task_ids)
+
+    agent_ids: set[str] = set()
+    for task in tasks:
+        metadata = task.metadata or {}
+        from_id = metadata.get("fromAgentId", "")
+        to_id = metadata.get("toAgentId", "")
+        if from_id:
+            agent_ids.add(from_id)
+        if to_id:
+            agent_ids.add(to_id)
+    agent_names = await store.get_agent_names(list(agent_ids))
+
+    messages: list[dict] = []
+    for task in tasks:
+        metadata = task.metadata or {}
+        from_id = metadata.get("fromAgentId", "")
+        to_id = metadata.get("toAgentId", "")
+        messages.append(
+            {
+                "task_id": task.id,
+                "from_agent_id": from_id,
+                "from_agent_name": agent_names.get(from_id, "") if from_id else "",
+                "to_agent_id": to_id,
+                "to_agent_name": agent_names.get(to_id, "") if to_id else "",
+                "type": metadata.get("type", ""),
+                "status": task.status.state.name,
+                "created_at": created_ats.get(task.id, ""),
+                "body": _extract_body(task),
+            }
+        )
+    return messages
 
 
 # ---------------------------------------------------------------------------
@@ -242,9 +246,8 @@ async def revoke_key(
 async def list_agents(
     tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
-    task_store: RedisTaskStore = Depends(get_webui_task_store),
 ):
-    agents = await _get_tenant_agents(tenant_id, store, task_store)
+    agents = await _get_tenant_agents(tenant_id, store)
     return {"agents": agents}
 
 
@@ -253,7 +256,7 @@ async def get_inbox(
     agent_id: str,
     tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
-    task_store: RedisTaskStore = Depends(get_webui_task_store),
+    task_store: TaskStore = Depends(get_webui_task_store),
 ):
 
     if not await store.verify_agent_tenant(agent_id, tenant_id):
@@ -266,11 +269,7 @@ async def get_inbox(
         if not (t.metadata and t.metadata.get("type") == "broadcast_summary")
     ]
 
-    messages = []
-    for task in tasks:
-        msg = await _format_message(task, store, task_store)
-        messages.append(msg)
-
+    messages = await _format_messages(tasks, store, task_store)
     return {"messages": messages}
 
 
@@ -279,33 +278,20 @@ async def get_sent(
     agent_id: str,
     tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
-    task_store: RedisTaskStore = Depends(get_webui_task_store),
+    task_store: TaskStore = Depends(get_webui_task_store),
 ):
 
     if not await store.verify_agent_tenant(agent_id, tenant_id):
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    task_ids = await task_store._redis.smembers(f"tasks:sender:{agent_id}")
-    if not task_ids:
-        return {"messages": []}
+    tasks = await task_store.list_by_sender(agent_id)
+    filtered_tasks = [
+        t
+        for t in tasks
+        if not (t.metadata and t.metadata.get("type") == "broadcast_summary")
+    ]
 
-    filtered_tasks = []
-    for task_id in task_ids:
-        task = await task_store.get(task_id)
-        if task is None:
-            continue
-        if task.metadata and task.metadata.get("type") == "broadcast_summary":
-            continue
-        filtered_tasks.append(task)
-
-    # Sort by status timestamp descending (newest first)
-    filtered_tasks.sort(key=lambda t: t.status.timestamp, reverse=True)
-
-    messages = []
-    for task in filtered_tasks:
-        msg = await _format_message(task, store, task_store)
-        messages.append(msg)
-
+    messages = await _format_messages(filtered_tasks, store, task_store)
     return {"messages": messages}
 
 
@@ -314,16 +300,16 @@ async def send_message(
     body: SendMessageRequest,
     tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
-    task_store: RedisTaskStore = Depends(get_webui_task_store),
+    task_store: TaskStore = Depends(get_webui_task_store),
     executor: BrokerExecutor = Depends(get_webui_executor),
 ):
 
-    # Verify from_agent belongs to tenant
-    from_in_tenant = await store._redis.sismember(
-        f"tenant:{tenant_id}:agents", body.from_agent_id
-    )
-    if not from_in_tenant:
+    if not await store.verify_agent_tenant(body.from_agent_id, tenant_id):
         raise HTTPException(status_code=400, detail="from_agent not in tenant")
+
+    from_agent = await store.get_agent(body.from_agent_id)
+    if from_agent is None or from_agent.get("status") == "deregistered":
+        raise HTTPException(status_code=400, detail="from_agent is deregistered")
 
     # Verify to_agent exists and is active
     to_agent = await store.get_agent(body.to_agent_id)

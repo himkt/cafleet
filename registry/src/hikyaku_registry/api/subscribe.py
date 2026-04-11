@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 
 from hikyaku_registry.auth import get_authenticated_agent
 from hikyaku_registry.pubsub import PubSubManager
-from hikyaku_registry.task_store import RedisTaskStore
+from hikyaku_registry.task_store import TaskStore
 
 subscribe_router = APIRouter()
 
@@ -29,21 +29,21 @@ def _get_pubsub() -> PubSubManager:
     raise RuntimeError("PubSubManager dependency not configured")
 
 
-def _get_task_store() -> RedisTaskStore:
-    raise RuntimeError("RedisTaskStore dependency not configured")
+def _get_task_store() -> TaskStore:
+    raise RuntimeError("TaskStore dependency not configured")
 
 
 async def event_generator(
     agent_id: str,
     pubsub: PubSubManager,
-    task_store: RedisTaskStore,
+    task_store: TaskStore,
     request: Request,
 ) -> AsyncGenerator[str, None]:
     """Async generator that yields SSE events for an agent's inbox.
 
-    Subscribes to Redis Pub/Sub channel inbox:{agent_id}, fetches full Task
-    objects from task_store, and yields them as SSE message events. Sends
-    keepalive comments every _keepalive_interval seconds.
+    Subscribes to the in-process Pub/Sub channel inbox:{agent_id}, fetches
+    full Task objects from task_store, and yields them as SSE message
+    events. Sends keepalive comments every _keepalive_interval seconds.
     """
     channel = f"inbox:{agent_id}"
     subscription = await pubsub.subscribe(channel)
@@ -69,7 +69,7 @@ async def event_generator(
             except (asyncio.CancelledError, GeneratorExit):
                 break
     finally:
-        await pubsub.unsubscribe(channel)
+        await pubsub.unsubscribe(channel, subscription)
 
 
 @subscribe_router.get("/subscribe")
@@ -77,7 +77,7 @@ async def subscribe(
     request: Request,
     auth: tuple[str, str] = Depends(get_authenticated_agent),
     pubsub: PubSubManager = Depends(_get_pubsub),
-    task_store: RedisTaskStore = Depends(_get_task_store),
+    task_store: TaskStore = Depends(_get_task_store),
 ):
     agent_id, tenant_id = auth
 
