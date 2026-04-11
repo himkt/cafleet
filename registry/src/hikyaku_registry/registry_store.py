@@ -313,6 +313,26 @@ class RegistryStore:
             row = result.first()
         return row[0] if row else ""
 
+    async def get_agent_names(self, agent_ids: list[str]) -> dict[str, str]:
+        """Batch lookup for agent names.
+
+        Returns a dict mapping ``agent_id`` -> ``name`` for every id that
+        exists in the ``agents`` table. Missing ids are simply absent from
+        the returned dict (callers should use ``.get(id, "")`` if they
+        want the same empty-string fallback as ``get_agent_name``).
+
+        Used by ``webui_api._format_messages`` to avoid N+1 lookups when
+        rendering a batch of inbox/sent messages.
+        """
+        if not agent_ids:
+            return {}
+        async with self._sessionmaker() as session:
+            result = await session.execute(
+                select(Agent.agent_id, Agent.name).where(Agent.agent_id.in_(agent_ids))
+            )
+            rows = result.all()
+        return {row.agent_id: row.name for row in rows}
+
     async def list_deregistered_agents_with_tasks(self, tenant_id: str) -> list[dict]:
         has_task = (
             select(Task.task_id).where(Task.context_id == Agent.agent_id).exists()

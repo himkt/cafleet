@@ -69,7 +69,6 @@ def _extract_bearer(request: Request) -> str:
 async def _get_tenant_agents(
     tenant_id: str,
     store: RegistryStore,
-    task_store: TaskStore,
 ) -> list[dict]:
     agents: list[dict] = []
 
@@ -132,35 +131,58 @@ def _extract_body(task: Task) -> str:
     return ""
 
 
-async def _resolve_agent_name(store: RegistryStore, agent_id: str) -> str:
-    return await store.get_agent_name(agent_id)
-
-
-async def _format_message(
-    task: Task,
+async def _format_messages(
+    tasks: list[Task],
     store: RegistryStore,
     task_store: TaskStore,
-) -> dict:
-    metadata = task.metadata or {}
-    from_id = metadata.get("fromAgentId", "")
-    to_id = metadata.get("toAgentId", "")
+) -> list[dict]:
+    """Format a batch of Tasks into WebUI message dicts.
 
-    from_name = await _resolve_agent_name(store, from_id) if from_id else ""
-    to_name = await _resolve_agent_name(store, to_id) if to_id else ""
+    Batches the three lookups that would otherwise be N+1:
 
-    created_at = await task_store.get_created_at(task.id) or ""
+      - ``created_at`` for every task (one SELECT over ``task_id IN (...)``)
+      - agent name for every unique ``fromAgentId`` / ``toAgentId``
+        (one SELECT over ``agent_id IN (...)``)
 
-    return {
-        "task_id": task.id,
-        "from_agent_id": from_id,
-        "from_agent_name": from_name,
-        "to_agent_id": to_id,
-        "to_agent_name": to_name,
-        "type": metadata.get("type", ""),
-        "status": task.status.state.name,
-        "created_at": created_at,
-        "body": _extract_body(task),
-    }
+    Empty or missing ids resolve to an empty string, matching the prior
+    ``get_agent_name`` / ``get_created_at or ""`` behavior.
+    """
+    if not tasks:
+        return []
+
+    task_ids = [task.id for task in tasks]
+    created_ats = await task_store.get_created_ats(task_ids)
+
+    agent_ids: set[str] = set()
+    for task in tasks:
+        metadata = task.metadata or {}
+        from_id = metadata.get("fromAgentId", "")
+        to_id = metadata.get("toAgentId", "")
+        if from_id:
+            agent_ids.add(from_id)
+        if to_id:
+            agent_ids.add(to_id)
+    agent_names = await store.get_agent_names(list(agent_ids))
+
+    messages: list[dict] = []
+    for task in tasks:
+        metadata = task.metadata or {}
+        from_id = metadata.get("fromAgentId", "")
+        to_id = metadata.get("toAgentId", "")
+        messages.append(
+            {
+                "task_id": task.id,
+                "from_agent_id": from_id,
+                "from_agent_name": agent_names.get(from_id, "") if from_id else "",
+                "to_agent_id": to_id,
+                "to_agent_name": agent_names.get(to_id, "") if to_id else "",
+                "type": metadata.get("type", ""),
+                "status": task.status.state.name,
+                "created_at": created_ats.get(task.id, ""),
+                "body": _extract_body(task),
+            }
+        )
+    return messages
 
 
 # ---------------------------------------------------------------------------
@@ -224,9 +246,8 @@ async def revoke_key(
 async def list_agents(
     tenant_id: str = Depends(get_webui_tenant),
     store: RegistryStore = Depends(get_webui_store),
-    task_store: TaskStore = Depends(get_webui_task_store),
 ):
-    agents = await _get_tenant_agents(tenant_id, store, task_store)
+    agents = await _get_tenant_agents(tenant_id, store)
     return {"agents": agents}
 
 
@@ -248,11 +269,7 @@ async def get_inbox(
         if not (t.metadata and t.metadata.get("type") == "broadcast_summary")
     ]
 
-    messages = []
-    for task in tasks:
-        msg = await _format_message(task, store, task_store)
-        messages.append(msg)
-
+    messages = await _format_messages(tasks, store, task_store)
     return {"messages": messages}
 
 
@@ -274,11 +291,7 @@ async def get_sent(
         if not (t.metadata and t.metadata.get("type") == "broadcast_summary")
     ]
 
-    messages = []
-    for task in filtered_tasks:
-        msg = await _format_message(task, store, task_store)
-        messages.append(msg)
-
+    messages = await _format_messages(filtered_tasks, store, task_store)
     return {"messages": messages}
 
 

@@ -30,13 +30,6 @@ def db() -> None:
     """Database schema management commands."""
 
 
-def _build_alembic_config(sync_url: str) -> Config:
-    ini_path = importlib.resources.files("hikyaku_registry") / "alembic.ini"
-    cfg = Config(str(ini_path))
-    cfg.set_main_option("sqlalchemy.url", sync_url)
-    return cfg
-
-
 def _sync_db_url() -> str:
     return str(make_url(settings.database_url).set(drivername="sqlite"))
 
@@ -62,58 +55,68 @@ def init() -> None:
 
     db_file.parent.mkdir(parents=True, exist_ok=True)
 
-    cfg = _build_alembic_config(sync_url)
+    # ``importlib.resources.as_file`` guarantees a real filesystem path
+    # even when ``hikyaku_registry`` is imported from a zipped wheel,
+    # where ``files(...)`` would otherwise return a virtual ``Traversable``
+    # that Alembic cannot open. The context manager is held open for the
+    # entire ``command.upgrade`` call so the extracted file is not
+    # cleaned up prematurely.
+    with importlib.resources.as_file(
+        importlib.resources.files("hikyaku_registry") / "alembic.ini"
+    ) as ini_path:
+        cfg = Config(str(ini_path))
+        cfg.set_main_option("sqlalchemy.url", sync_url)
 
-    engine = create_engine(sync_url)
-    try:
-        with engine.connect() as conn:
-            inspector = inspect(conn)
-            tables = set(inspector.get_table_names())
-            has_alembic_version = "alembic_version" in tables
-            non_alembic_tables = tables - {"alembic_version"}
+        engine = create_engine(sync_url)
+        try:
+            with engine.connect() as conn:
+                inspector = inspect(conn)
+                tables = set(inspector.get_table_names())
+                has_alembic_version = "alembic_version" in tables
+                non_alembic_tables = tables - {"alembic_version"}
 
-            current_rev: str | None = None
-            if has_alembic_version:
-                ctx = MigrationContext.configure(conn)
-                current_rev = ctx.get_current_revision()
+                current_rev: str | None = None
+                if has_alembic_version:
+                    ctx = MigrationContext.configure(conn)
+                    current_rev = ctx.get_current_revision()
 
-        if non_alembic_tables and not has_alembic_version:
-            click.echo(
-                "ERROR: DB has existing tables but no alembic_version. "
-                "Run `alembic stamp head` manually if you are sure the "
-                "schema matches.",
-                err=True,
-            )
-            sys.exit(1)
-
-        script = ScriptDirectory.from_config(cfg)
-        head_rev = script.get_current_head()
-
-        if current_rev is not None:
-            known_revisions = {rev.revision for rev in script.walk_revisions()}
-            if current_rev not in known_revisions:
+            if non_alembic_tables and not has_alembic_version:
                 click.echo(
-                    f"ERROR: DB schema is at revision {current_rev} which is "
-                    f"unknown to this version of hikyaku-registry. Refusing "
-                    f"to downgrade automatically.",
+                    "ERROR: DB has existing tables but no alembic_version. "
+                    "Run `alembic stamp head` manually if you are sure the "
+                    "schema matches.",
                     err=True,
                 )
                 sys.exit(1)
 
-        if current_rev == head_rev:
-            click.echo(f"Already at head ({head_rev}); nothing to do.")
-            return
+            script = ScriptDirectory.from_config(cfg)
+            head_rev = script.get_current_head()
 
-        old_rev = current_rev or "(empty)"
-        command.upgrade(cfg, "head")
-        if current_rev is None:
-            click.echo(
-                f"Created {db_file} and applied migrations to head ({head_rev})."
-            )
-        else:
-            click.echo(f"Upgraded from {old_rev} to {head_rev}.")
-    finally:
-        engine.dispose()
+            if current_rev is not None:
+                known_revisions = {rev.revision for rev in script.walk_revisions()}
+                if current_rev not in known_revisions:
+                    click.echo(
+                        f"ERROR: DB schema is at revision {current_rev} which "
+                        f"is unknown to this version of hikyaku-registry. "
+                        f"Refusing to downgrade automatically.",
+                        err=True,
+                    )
+                    sys.exit(1)
+
+            if current_rev == head_rev:
+                click.echo(f"Already at head ({head_rev}); nothing to do.")
+                return
+
+            old_rev = current_rev or "(empty)"
+            command.upgrade(cfg, "head")
+            if current_rev is None:
+                click.echo(
+                    f"Created {db_file} and applied migrations to head ({head_rev})."
+                )
+            else:
+                click.echo(f"Upgraded from {old_rev} to {head_rev}.")
+        finally:
+            engine.dispose()
 
 
 if __name__ == "__main__":

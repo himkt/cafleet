@@ -132,3 +132,24 @@ class TaskStore:
             )
             row = result.first()
         return row[0] if row else None
+
+    async def get_created_ats(self, task_ids: _TaskList[str]) -> dict[str, str]:
+        """Batch lookup for ``created_at`` timestamps.
+
+        Returns a dict mapping ``task_id`` -> ``created_at`` ISO string
+        for every task_id that exists in the ``tasks`` table. Missing
+        ids are absent from the result.
+
+        Used by ``webui_api._format_messages`` to avoid N+1 lookups when
+        rendering a batch of inbox/sent messages.
+        """
+        if not task_ids:
+            return {}
+        async with self._sessionmaker() as session:
+            result = await session.execute(
+                select(TaskModel.task_id, TaskModel.created_at).where(
+                    TaskModel.task_id.in_(task_ids)
+                )
+            )
+            rows = result.all()
+        return {row.task_id: row.created_at for row in rows}
