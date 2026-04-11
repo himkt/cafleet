@@ -1,7 +1,7 @@
 # Remove MCP Server and SSE Endpoint
 
 **Status**: Approved
-**Progress**: 21/45 tasks complete
+**Progress**: 22/45 tasks complete
 **Last Updated**: 2026-04-11
 
 ## Overview
@@ -176,7 +176,7 @@ All three greps must return zero hits in production code. Historical design docs
 
 ### Step 5: Delete the mcp-server package
 
-- [ ] `rm -r mcp-server/` (removes `src/hikyaku_mcp/{__init__,server,sse_client,registry,config}.py`, `tests/{__init__,test_server,test_sse_client,test_registry}.py`, `pyproject.toml`, and `mise.toml`) <!-- completed: -->
+- [x] `rm -r mcp-server/` (removes `src/hikyaku_mcp/{__init__,server,sse_client,registry,config}.py`, `tests/{__init__,test_server,test_sse_client,test_registry}.py`, `pyproject.toml`, and `mise.toml`) <!-- completed: 2026-04-11T11:45 -->
 
 ### Step 6: Delete SSE server code
 
