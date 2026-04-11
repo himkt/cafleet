@@ -1,36 +1,37 @@
 """E2E integration tests for streaming subscribe feature.
 
 Tests the full integration chain:
-1. Send message via JSON-RPC → executor publishes to Redis Pub/Sub →
+1. Send message via JSON-RPC → executor publishes to in-process Pub/Sub →
    event_generator receives and yields SSE event
 2. Existing API operations (send, list, get, ack, cancel) still work
    with the pubsub-enabled executor
 
-Uses fakeredis + ASGI transport (same as existing tests).
+Uses the SQL conftest fixtures + ASGI transport.
 
-Success criteria from design doc:
-- Server pushes new messages via SSE within 1 second of delivery
-- Existing API continues to work independently
-- No messages are lost
+Because ``create_app`` wires its own ``PubSubManager`` / ``TaskStore``
+into the executor, this fixture retrieves those exact instances via
+``app.dependency_overrides[_get_pubsub]()`` so the event_generator runs
+against the same objects the executor publishes to.
 """
 
 import asyncio
-import hashlib
 import json
 import uuid
 from unittest.mock import AsyncMock
 
 import pytest
-import fakeredis.aioredis
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
+from hikyaku_registry.api.subscribe import (
+    _get_pubsub,
+    _get_task_store as _get_subscribe_task_store,
+    event_generator,
+)
 from hikyaku_registry.main import create_app
-from hikyaku_registry.pubsub import PubSubManager
-from hikyaku_registry.task_store import RedisTaskStore
-from hikyaku_registry.api.subscribe import event_generator
+from hikyaku_registry.registry_store import RegistryStore
 
-_E2E_API_KEY = "hky_e2esubscribeKEYKEYKEYKEYKEYKEY"
-_E2E_API_KEY_HASH = hashlib.sha256(_E2E_API_KEY.encode()).hexdigest()
+
+_E2E_OWNER_SUB = "auth0|e2e-test"
 
 
 # ---------------------------------------------------------------------------
@@ -39,59 +40,47 @@ _E2E_API_KEY_HASH = hashlib.sha256(_E2E_API_KEY.encode()).hexdigest()
 
 
 @pytest.fixture
-async def env():
-    """Full ASGI app with fakeredis, two registered agents in the same tenant.
+async def env(db_sessionmaker):
+    """Full ASGI app with the SQL store + two registered agents in one tenant.
 
-    Also exposes pubsub and task_store for direct integration verification.
+    Also exposes the pubsub and task_store instances that ``create_app``
+    created so event_generator tests share state with the executor.
     """
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    store = RegistryStore(db_sessionmaker)
+    api_key, _, _ = await store.create_api_key(_E2E_OWNER_SUB)
 
-    # Set up active API key
-    await redis.hset(
-        f"apikey:{_E2E_API_KEY_HASH}",
-        mapping={
-            "owner_sub": "auth0|e2e-test",
-            "created_at": "2026-03-29T00:00:00+00:00",
-            "status": "active",
-            "key_prefix": _E2E_API_KEY[:8],
-        },
-    )
-
-    app = create_app(redis=redis)
+    app = create_app(sessionmaker=db_sessionmaker)
     transport = ASGITransport(app=app)
-    pubsub = PubSubManager(redis)
-    task_store = RedisTaskStore(redis)
+
+    # Retrieve the exact pubsub/task_store instances the executor uses.
+    pubsub = app.dependency_overrides[_get_pubsub]()
+    task_store = app.dependency_overrides[_get_subscribe_task_store]()
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Register agent A
         resp_a = await client.post(
             "/api/v1/agents",
             json={"name": "AgentA", "description": "Sender"},
-            headers={"Authorization": f"Bearer {_E2E_API_KEY}"},
+            headers={"Authorization": f"Bearer {api_key}"},
         )
         assert resp_a.status_code == 201
         agent_a = resp_a.json()
 
-        # Register agent B (same tenant)
         resp_b = await client.post(
             "/api/v1/agents",
             json={"name": "AgentB", "description": "Receiver"},
-            headers={"Authorization": f"Bearer {_E2E_API_KEY}"},
+            headers={"Authorization": f"Bearer {api_key}"},
         )
         assert resp_b.status_code == 201
         agent_b = resp_b.json()
 
         yield {
             "client": client,
-            "redis": redis,
             "pubsub": pubsub,
             "task_store": task_store,
-            "api_key": agent_a["api_key"],
+            "api_key": api_key,
             "agent_a": agent_a,
             "agent_b": agent_b,
         }
-
-    await redis.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +178,6 @@ class TestE2EExecutorPublishIntegration:
     """Verify that sending a message via JSON-RPC triggers Pub/Sub publish,
     and the SSE event_generator picks up the message end-to-end."""
 
-    @pytest.mark.asyncio
     async def test_unicast_triggers_pubsub_and_sse_receives(self, env):
         """Send via API → executor publishes → event_generator yields Task event."""
         client = env["client"]
@@ -199,7 +187,6 @@ class TestE2EExecutorPublishIntegration:
         pubsub = env["pubsub"]
         task_store = env["task_store"]
 
-        # Start event_generator for agent B
         request = AsyncMock()
         request.is_disconnected = AsyncMock(return_value=False)
         collected = []
@@ -218,25 +205,25 @@ class TestE2EExecutorPublishIntegration:
         consumer_task = asyncio.create_task(consume())
         await asyncio.sleep(0.1)
 
-        # Send message via JSON-RPC (this goes through BrokerExecutor)
         result = await _send_message(
-            client, api_key, agent_a["agent_id"], agent_b["agent_id"], "E2E pubsub test"
+            client,
+            api_key,
+            agent_a["agent_id"],
+            agent_b["agent_id"],
+            "E2E pubsub test",
         )
         task_id = result["result"]["task"]["id"]
 
-        # Wait for SSE generator to receive the message
         await asyncio.wait_for(consumer_task, timeout=5.0)
 
         events = _parse_sse_events(collected)
         msg_events = [e for e in events if e.get("event") == "message"]
         assert len(msg_events) >= 1
 
-        # Verify the SSE event matches the sent task
         task_data = json.loads(msg_events[0]["data"])
         assert task_data["id"] == task_id
         assert msg_events[0]["id"] == task_id
 
-    @pytest.mark.asyncio
     async def test_sse_event_has_full_task_json(self, env):
         """SSE event data contains complete A2A Task JSON."""
         client = env["client"]
@@ -265,7 +252,11 @@ class TestE2EExecutorPublishIntegration:
         await asyncio.sleep(0.1)
 
         await _send_message(
-            client, api_key, agent_a["agent_id"], agent_b["agent_id"], "Full JSON check"
+            client,
+            api_key,
+            agent_a["agent_id"],
+            agent_b["agent_id"],
+            "Full JSON check",
         )
 
         await asyncio.wait_for(consumer_task, timeout=5.0)
@@ -274,19 +265,16 @@ class TestE2EExecutorPublishIntegration:
         msg_events = [e for e in events if e.get("event") == "message"]
         task_data = json.loads(msg_events[0]["data"])
 
-        # Verify A2A Task fields
         assert "id" in task_data
         assert "status" in task_data
         assert task_data["status"]["state"] == "input-required"
         assert "artifacts" in task_data
         assert len(task_data["artifacts"]) >= 1
 
-        # Verify text content
         parts = task_data["artifacts"][0]["parts"]
         texts = [p["text"] for p in parts if "text" in p]
         assert "Full JSON check" in texts
 
-    @pytest.mark.asyncio
     async def test_sse_event_has_correct_metadata(self, env):
         """SSE event metadata has fromAgentId and toAgentId."""
         client = env["client"]
@@ -315,7 +303,11 @@ class TestE2EExecutorPublishIntegration:
         await asyncio.sleep(0.1)
 
         await _send_message(
-            client, api_key, agent_a["agent_id"], agent_b["agent_id"], "Metadata check"
+            client,
+            api_key,
+            agent_a["agent_id"],
+            agent_b["agent_id"],
+            "Metadata check",
         )
 
         await asyncio.wait_for(consumer_task, timeout=5.0)
@@ -328,7 +320,6 @@ class TestE2EExecutorPublishIntegration:
         assert task_data["metadata"]["toAgentId"] == agent_b["agent_id"]
         assert task_data["metadata"]["type"] == "unicast"
 
-    @pytest.mark.asyncio
     async def test_multiple_messages_arrive_via_sse(self, env):
         """Multiple messages sent sequentially all arrive via SSE."""
         client = env["client"]
@@ -376,7 +367,6 @@ class TestE2EExecutorPublishIntegration:
         received_ids = [json.loads(e["data"])["id"] for e in msg_events]
         assert received_ids == sent_ids
 
-    @pytest.mark.asyncio
     async def test_broadcast_triggers_pubsub_for_recipient(self, env):
         """Broadcast via API triggers Pub/Sub for each recipient."""
         client = env["client"]
@@ -404,7 +394,9 @@ class TestE2EExecutorPublishIntegration:
         consumer_task = asyncio.create_task(consume())
         await asyncio.sleep(0.1)
 
-        await _broadcast_message(client, api_key, agent_a["agent_id"], "Broadcast E2E")
+        await _broadcast_message(
+            client, api_key, agent_a["agent_id"], "Broadcast E2E"
+        )
 
         await asyncio.wait_for(consumer_task, timeout=5.0)
 
@@ -425,7 +417,6 @@ class TestE2EExecutorPublishIntegration:
 class TestE2EExistingAPIWorks:
     """Existing API operations still work independently with pubsub-enabled executor."""
 
-    @pytest.mark.asyncio
     async def test_send_and_list_tasks(self, env):
         """Send → ListTasks flow works."""
         client = env["client"]
@@ -453,7 +444,6 @@ class TestE2EExistingAPIWorks:
         tasks = list_resp.json()["result"]["tasks"]
         assert any(t["id"] == task_id for t in tasks)
 
-    @pytest.mark.asyncio
     async def test_get_task(self, env):
         """GetTask works."""
         client = env["client"]
@@ -480,7 +470,6 @@ class TestE2EExistingAPIWorks:
         get_resp.raise_for_status()
         assert get_resp.json()["result"]["task"]["id"] == task_id
 
-    @pytest.mark.asyncio
     async def test_ack(self, env):
         """ACK flow works."""
         client = env["client"]
@@ -515,7 +504,6 @@ class TestE2EExistingAPIWorks:
         state = ack_resp.json()["result"]["task"]["status"]["state"]
         assert state == "completed"
 
-    @pytest.mark.asyncio
     async def test_cancel(self, env):
         """CancelTask works."""
         client = env["client"]
@@ -543,7 +531,6 @@ class TestE2EExistingAPIWorks:
         state = cancel_resp.json()["result"]["task"]["status"]["state"]
         assert state == "canceled"
 
-    @pytest.mark.asyncio
     async def test_agent_card(self, env):
         """Agent card endpoint still works."""
         client = env["client"]
@@ -560,7 +547,6 @@ class TestE2EExistingAPIWorks:
 class TestE2ESSEAndPollingCoexist:
     """Message is available via both SSE and traditional polling."""
 
-    @pytest.mark.asyncio
     async def test_message_visible_via_sse_and_list_tasks(self, env):
         """Same message is accessible via SSE event AND ListTasks."""
         client = env["client"]
@@ -599,14 +585,12 @@ class TestE2ESSEAndPollingCoexist:
 
         await asyncio.wait_for(consumer_task, timeout=5.0)
 
-        # Verify via SSE
         events = _parse_sse_events(collected)
         msg_events = [e for e in events if e.get("event") == "message"]
         assert len(msg_events) >= 1
         sse_task_id = json.loads(msg_events[0]["data"])["id"]
         assert sse_task_id == task_id
 
-        # Verify via ListTasks (polling)
         list_body = {
             "jsonrpc": "2.0",
             "method": "ListTasks",

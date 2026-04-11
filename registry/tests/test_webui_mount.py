@@ -6,11 +6,14 @@ under /ui/api/* must take precedence over the static file catch-all.
 
 These tests verify integration/mounting behavior, not endpoint logic
 (which is covered by test_webui_api.py).
+
+The Redis-backed predecessor constructed ``create_app(redis=fakeredis)`` —
+the SQL rewrite swaps that for ``create_app(sessionmaker=db_sessionmaker)``
+using the in-memory aiosqlite fixture from conftest.py.
 """
 
 import pytest
-import fakeredis.aioredis
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from hikyaku_registry.main import create_app
 
@@ -21,34 +24,28 @@ from hikyaku_registry.main import create_app
 
 
 @pytest.fixture
-async def mounted_app(tmp_path):
-    """Create the main app with fakeredis and a temporary dist directory.
+async def mounted_app(tmp_path, db_sessionmaker):
+    """Create the main app with the in-memory SQL sessionmaker and a temp dist dir.
 
     The dist directory contains an index.html so StaticFiles can serve it.
-    create_app is expected to accept a `webui_dist_dir` parameter (same
-    testability pattern as the existing `redis` parameter).
+    ``create_app`` accepts both ``sessionmaker`` and ``webui_dist_dir`` for
+    test-time injection.
     """
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-
-    # Create temporary dist directory with index.html
     dist_dir = tmp_path / "dist"
     dist_dir.mkdir()
     (dist_dir / "index.html").write_text(
         "<!DOCTYPE html><html><body>Hikyaku WebUI</body></html>"
     )
 
-    app = create_app(redis=redis, webui_dist_dir=str(dist_dir))
+    app = create_app(sessionmaker=db_sessionmaker, webui_dist_dir=str(dist_dir))
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield {
             "client": client,
             "app": app,
-            "redis": redis,
             "dist_dir": dist_dir,
         }
-
-    await redis.aclose()
 
 
 # ===========================================================================
@@ -63,7 +60,6 @@ class TestWebuiRouterMounted:
     the router is mounted. Without auth, endpoints return 401.
     """
 
-    @pytest.mark.asyncio
     async def test_auth_config_route_accessible(self, mounted_app):
         """GET /ui/api/auth/config is reachable (returns 200)."""
         client = mounted_app["client"]
@@ -71,7 +67,6 @@ class TestWebuiRouterMounted:
         resp = await client.get("/ui/api/auth/config")
         assert resp.status_code == 200
 
-    @pytest.mark.asyncio
     async def test_agents_route_accessible(self, mounted_app):
         """GET /ui/api/agents is reachable (returns 401 without auth, not 404)."""
         client = mounted_app["client"]
@@ -79,7 +74,6 @@ class TestWebuiRouterMounted:
         resp = await client.get("/ui/api/agents")
         assert resp.status_code == 401
 
-    @pytest.mark.asyncio
     async def test_inbox_route_accessible(self, mounted_app):
         """GET /ui/api/agents/{id}/inbox is reachable (not 404)."""
         client = mounted_app["client"]
@@ -87,7 +81,6 @@ class TestWebuiRouterMounted:
         resp = await client.get("/ui/api/agents/some-agent-id/inbox")
         assert resp.status_code != 404
 
-    @pytest.mark.asyncio
     async def test_sent_route_accessible(self, mounted_app):
         """GET /ui/api/agents/{id}/sent is reachable (not 404)."""
         client = mounted_app["client"]
@@ -95,7 +88,6 @@ class TestWebuiRouterMounted:
         resp = await client.get("/ui/api/agents/some-agent-id/sent")
         assert resp.status_code != 404
 
-    @pytest.mark.asyncio
     async def test_send_route_accessible(self, mounted_app):
         """POST /ui/api/messages/send is reachable (not 404)."""
         client = mounted_app["client"]
@@ -115,7 +107,6 @@ class TestWebuiRouterMounted:
 class TestStaticFilesMounted:
     """Verify StaticFiles is mounted at /ui serving the SPA."""
 
-    @pytest.mark.asyncio
     async def test_ui_root_serves_index_html(self, mounted_app):
         """GET /ui/ serves index.html from the dist directory."""
         client = mounted_app["client"]
@@ -124,7 +115,6 @@ class TestStaticFilesMounted:
         assert resp.status_code == 200
         assert "Hikyaku WebUI" in resp.text
 
-    @pytest.mark.asyncio
     async def test_static_file_served(self, mounted_app):
         """Static files in dist directory are accessible at /ui/."""
         dist_dir = mounted_app["dist_dir"]
@@ -136,12 +126,10 @@ class TestStaticFilesMounted:
         assert resp.status_code == 200
         assert "console.log" in resp.text
 
-    @pytest.mark.asyncio
     async def test_spa_fallback_returns_index_html(self, mounted_app):
         """Non-existent paths under /ui/ return index.html (html=True SPA fallback)."""
         client = mounted_app["client"]
 
-        # /ui/dashboard doesn't exist as a file — SPA fallback serves index.html
         resp = await client.get("/ui/dashboard")
         assert resp.status_code == 200
         assert "Hikyaku WebUI" in resp.text
@@ -159,7 +147,6 @@ class TestRoutePrecedence:
     /ui/api/* requests hit the API handler, not the static file handler.
     """
 
-    @pytest.mark.asyncio
     async def test_auth_config_returns_json_not_html(self, mounted_app):
         """GET /ui/api/auth/config returns JSON (API), not HTML (static fallback)."""
         client = mounted_app["client"]
@@ -170,7 +157,6 @@ class TestRoutePrecedence:
         content_type = resp.headers.get("content-type", "")
         assert "application/json" in content_type
 
-    @pytest.mark.asyncio
     async def test_agents_returns_json_not_html(self, mounted_app):
         """GET /ui/api/agents returns JSON (API), not HTML (static fallback)."""
         client = mounted_app["client"]
@@ -181,7 +167,6 @@ class TestRoutePrecedence:
         content_type = resp.headers.get("content-type", "")
         assert "application/json" in content_type
 
-    @pytest.mark.asyncio
     async def test_send_returns_json_not_html(self, mounted_app):
         """POST /ui/api/messages/send returns JSON (API), not HTML (static fallback)."""
         client = mounted_app["client"]
@@ -203,16 +188,13 @@ class TestRoutePrecedence:
 class TestExistingRoutesUnaffected:
     """Verify existing routes still work after WebUI mount changes."""
 
-    @pytest.mark.asyncio
     async def test_registry_api_still_accessible(self, mounted_app):
         """GET /api/v1/agents is still accessible (registry router unaffected)."""
         client = mounted_app["client"]
 
-        # Registry list requires auth — expect 401, not 404
         resp = await client.get("/api/v1/agents")
         assert resp.status_code != 404
 
-    @pytest.mark.asyncio
     async def test_agent_card_still_accessible(self, mounted_app):
         """GET /.well-known/agent-card.json is still accessible."""
         client = mounted_app["client"]

@@ -1,24 +1,28 @@
 """Integration tests for the full broker: Registry + A2A operations.
 
-Tests end-to-end flows through the ASGI app (FastAPI + A2A Starlette mount):
+Tests end-to-end flows through the ASGI app (FastAPI + JSON-RPC):
 - Registry flow: register → list → get → deregister
 - Unicast flow: send → list → get → ACK → verify COMPLETED
 - Broadcast flow: send → each recipient lists → ACK → verify all COMPLETED
 - CancelTask retraction
+
+The Redis-backed predecessor seeded an active ``apikey:`` hash into
+fakeredis under a hard-coded constant. The SQL rewrite cannot hard-code
+keys because ``create_api_key`` generates them randomly, so the fixture
+calls ``store.create_api_key`` at setup and yields the generated key
+alongside the httpx client.
 """
 
-import hashlib
 import uuid
 
 import pytest
-import fakeredis.aioredis
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from hikyaku_registry.main import create_app
+from hikyaku_registry.registry_store import RegistryStore
 
-# Default API key for integration tests
-_DEFAULT_API_KEY = "hky_a2atestdefaultKEYKEYKEYKEYKEYK"
-_DEFAULT_API_KEY_HASH = hashlib.sha256(_DEFAULT_API_KEY.encode()).hexdigest()
+
+_TEST_OWNER_SUB = "auth0|a2a-test"
 
 
 # ---------------------------------------------------------------------------
@@ -27,36 +31,29 @@ _DEFAULT_API_KEY_HASH = hashlib.sha256(_DEFAULT_API_KEY.encode()).hexdigest()
 
 
 @pytest.fixture
-async def broker_client():
-    """Full broker ASGI app backed by fakeredis, exposed via httpx client."""
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+async def broker_env(db_sessionmaker):
+    """Full broker ASGI app backed by in-memory aiosqlite.
 
-    # Set up active API key for registration
-    await redis.hset(
-        f"apikey:{_DEFAULT_API_KEY_HASH}",
-        mapping={
-            "owner_sub": "auth0|a2a-test",
-            "created_at": "2026-03-29T00:00:00+00:00",
-            "status": "active",
-            "key_prefix": _DEFAULT_API_KEY[:8],
-        },
-    )
+    Yields a dict with ``client`` (httpx.AsyncClient) and ``api_key``
+    (a freshly minted active API key). Tests register agents through
+    the HTTP API using this key.
+    """
+    store = RegistryStore(db_sessionmaker)
+    api_key, _tenant_id, _ = await store.create_api_key(_TEST_OWNER_SUB)
 
-    app = create_app(redis=redis)
+    app = create_app(sessionmaker=db_sessionmaker)
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        yield client
-
-    await redis.aclose()
+        yield {"client": client, "api_key": api_key}
 
 
 async def _register_agent(
     client,
-    name="Test Agent",
-    description="A test agent",
+    api_key: str,
+    name: str = "Test Agent",
+    description: str = "A test agent",
     skills=None,
-    api_key=_DEFAULT_API_KEY,
 ):
     """Register an agent via POST and return the response data."""
     body = {"name": name, "description": description}
@@ -168,21 +165,20 @@ async def _cancel_task(client, api_key, agent_id, task_id):
 class TestRegistryFlow:
     """End-to-end test of Registry REST API operations."""
 
-    @pytest.mark.asyncio
-    async def test_full_lifecycle(self, broker_client):
+    async def test_full_lifecycle(self, broker_env):
         """Register → list → get detail → deregister → verify removed."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
         # 1. Register
-        agent = await _register_agent(client, name="Flow Agent", description="E2E test")
+        agent = await _register_agent(
+            client, api_key, name="Flow Agent", description="E2E test"
+        )
         agent_id = agent["agent_id"]
-        api_key = agent["api_key"]
 
         assert agent["name"] == "Flow Agent"
-        assert api_key.startswith("hky_")
 
         # Register a second agent in same tenant for later verification
-        checker = await _register_agent(client, name="Checker", api_key=api_key)
+        checker = await _register_agent(client, api_key, name="Checker")
 
         # 2. List — should include this agent
         resp = await client.get("/api/v1/agents", headers=_auth(api_key, agent_id))
@@ -213,17 +209,14 @@ class TestRegistryFlow:
         agent_ids = {a["agent_id"] for a in agents}
         assert agent_id not in agent_ids
 
-    @pytest.mark.asyncio
-    async def test_register_multiple_and_list(self, broker_client):
+    async def test_register_multiple_and_list(self, broker_env):
         """Register multiple agents and verify all appear in list."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
-        first = await _register_agent(client, name="Agent 0", description="Agent 0")
-        api_key = first["api_key"]
-        agents = [first]
-        for i in range(1, 3):
+        agents = []
+        for i in range(3):
             a = await _register_agent(
-                client, name=f"Agent {i}", description=f"Agent {i}", api_key=api_key
+                client, api_key, name=f"Agent {i}", description=f"Agent {i}"
             )
             agents.append(a)
 
@@ -246,15 +239,13 @@ class TestRegistryFlow:
 class TestUnicastFlow:
     """End-to-end test of unicast message delivery and acknowledgment."""
 
-    @pytest.mark.asyncio
-    async def test_send_list_get_ack(self, broker_client):
+    async def test_send_list_get_ack(self, broker_env):
         """Full unicast: A sends to B → B lists → B gets → B ACKs → COMPLETED."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
         # Register 2 agents in the same tenant
-        agent_a = await _register_agent(client, name="Sender A")
-        api_key = agent_a["api_key"]
-        agent_b = await _register_agent(client, name="Recipient B", api_key=api_key)
+        agent_a = await _register_agent(client, api_key, name="Sender A")
+        agent_b = await _register_agent(client, api_key, name="Recipient B")
 
         # 1. Agent A sends unicast to Agent B
         result = await _send_message(
@@ -293,14 +284,12 @@ class TestUnicastFlow:
         ack_task = ack_result["task"]
         assert ack_task["status"]["state"] == "completed"
 
-    @pytest.mark.asyncio
-    async def test_sender_can_get_task_after_send(self, broker_client):
+    async def test_sender_can_get_task_after_send(self, broker_env):
         """Sender can retrieve the task by its ID after sending."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
-        agent_a = await _register_agent(client, name="Sender")
-        api_key = agent_a["api_key"]
-        agent_b = await _register_agent(client, name="Recipient", api_key=api_key)
+        agent_a = await _register_agent(client, api_key, name="Sender")
+        agent_b = await _register_agent(client, api_key, name="Recipient")
 
         result = await _send_message(
             client, api_key, agent_a["agent_id"], destination=agent_b["agent_id"]
@@ -310,12 +299,11 @@ class TestUnicastFlow:
         get_result = await _get_task(client, api_key, agent_a["agent_id"], task_id)
         assert "result" in get_result
 
-    @pytest.mark.asyncio
-    async def test_send_to_nonexistent_agent_returns_error(self, broker_client):
+    async def test_send_to_nonexistent_agent_returns_error(self, broker_env):
         """Sending to a non-existent agent returns a JSON-RPC error."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
-        agent_a = await _register_agent(client, name="Sender")
+        agent_a = await _register_agent(client, api_key, name="Sender")
 
         payload = _jsonrpc(
             "SendMessage",
@@ -329,16 +317,15 @@ class TestUnicastFlow:
             },
         )
         resp = await client.post(
-            "/", json=payload, headers=_auth(agent_a["api_key"], agent_a["agent_id"])
+            "/", json=payload, headers=_auth(api_key, agent_a["agent_id"])
         )
         data = resp.json()
 
         assert "error" in data
 
-    @pytest.mark.asyncio
-    async def test_unauthenticated_send_returns_401(self, broker_client):
+    async def test_unauthenticated_send_returns_401(self, broker_env):
         """A2A SendMessage without auth returns HTTP 401."""
-        client = broker_client
+        client = broker_env["client"]
 
         payload = _jsonrpc(
             "SendMessage",
@@ -363,16 +350,13 @@ class TestUnicastFlow:
 class TestBroadcastFlow:
     """End-to-end test of broadcast message delivery."""
 
-    @pytest.mark.asyncio
-    async def test_broadcast_and_ack_all(self, broker_client):
+    async def test_broadcast_and_ack_all(self, broker_env):
         """Broadcast: A sends to * → B and C each list and ACK → all COMPLETED."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
-        # Register 3 agents in the same tenant
-        agent_a = await _register_agent(client, name="Broadcaster A")
-        api_key = agent_a["api_key"]
-        agent_b = await _register_agent(client, name="Recipient B", api_key=api_key)
-        agent_c = await _register_agent(client, name="Recipient C", api_key=api_key)
+        agent_a = await _register_agent(client, api_key, name="Broadcaster A")
+        agent_b = await _register_agent(client, api_key, name="Recipient B")
+        agent_c = await _register_agent(client, api_key, name="Recipient C")
 
         # 1. Agent A broadcasts
         result = await _send_message(
@@ -409,14 +393,12 @@ class TestBroadcastFlow:
         ack_c = await _ack_task(client, api_key, agent_c["agent_id"], c_task_id)
         assert ack_c["task"]["status"]["state"] == "completed"
 
-    @pytest.mark.asyncio
-    async def test_broadcast_excludes_sender(self, broker_client):
+    async def test_broadcast_excludes_sender(self, broker_env):
         """Sender does not receive their own broadcast."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
-        agent_a = await _register_agent(client, name="Broadcaster")
-        api_key = agent_a["api_key"]
-        _agent_b = await _register_agent(client, name="Listener", api_key=api_key)
+        agent_a = await _register_agent(client, api_key, name="Broadcaster")
+        _agent_b = await _register_agent(client, api_key, name="Listener")
 
         await _send_message(client, api_key, agent_a["agent_id"], destination="*")
 
@@ -439,87 +421,72 @@ class TestBroadcastFlow:
 class TestCancelTaskFlow:
     """End-to-end test of message retraction via CancelTask."""
 
-    @pytest.mark.asyncio
-    async def test_sender_cancels_unread_message(self, broker_client):
+    async def test_sender_cancels_unread_message(self, broker_env):
         """Sender cancels an unread (INPUT_REQUIRED) message → CANCELED."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
-        agent_a = await _register_agent(client, name="Sender")
-        api_key = agent_a["api_key"]
-        agent_b = await _register_agent(client, name="Recipient", api_key=api_key)
+        agent_a = await _register_agent(client, api_key, name="Sender")
+        agent_b = await _register_agent(client, api_key, name="Recipient")
 
-        # Send a message
         result = await _send_message(
             client, api_key, agent_a["agent_id"], destination=agent_b["agent_id"]
         )
         task_id = result["task"]["id"]
 
-        # Cancel it
         cancel_result = await _cancel_task(
             client, api_key, agent_a["agent_id"], task_id
         )
         assert "result" in cancel_result
         assert cancel_result["result"]["task"]["status"]["state"] == "canceled"
 
-    @pytest.mark.asyncio
-    async def test_cancel_already_acked_returns_error(self, broker_client):
+    async def test_cancel_already_acked_returns_error(self, broker_env):
         """Cannot cancel a message that has already been ACKed."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
-        agent_a = await _register_agent(client, name="Sender")
-        api_key = agent_a["api_key"]
-        agent_b = await _register_agent(client, name="Recipient", api_key=api_key)
+        agent_a = await _register_agent(client, api_key, name="Sender")
+        agent_b = await _register_agent(client, api_key, name="Recipient")
 
-        # Send and ACK
         result = await _send_message(
             client, api_key, agent_a["agent_id"], destination=agent_b["agent_id"]
         )
         task_id = result["task"]["id"]
         await _ack_task(client, api_key, agent_b["agent_id"], task_id)
 
-        # Try to cancel → should fail
         cancel_result = await _cancel_task(
             client, api_key, agent_a["agent_id"], task_id
         )
         assert "error" in cancel_result
 
-    @pytest.mark.asyncio
-    async def test_non_sender_cannot_cancel(self, broker_client):
+    async def test_non_sender_cannot_cancel(self, broker_env):
         """Recipient cannot cancel a task — only the sender can."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
-        agent_a = await _register_agent(client, name="Sender")
-        api_key = agent_a["api_key"]
-        agent_b = await _register_agent(client, name="Recipient", api_key=api_key)
+        agent_a = await _register_agent(client, api_key, name="Sender")
+        agent_b = await _register_agent(client, api_key, name="Recipient")
 
         result = await _send_message(
             client, api_key, agent_a["agent_id"], destination=agent_b["agent_id"]
         )
         task_id = result["task"]["id"]
 
-        # Recipient tries to cancel → should fail
         cancel_result = await _cancel_task(
             client, api_key, agent_b["agent_id"], task_id
         )
         assert "error" in cancel_result
 
-    @pytest.mark.asyncio
-    async def test_canceled_message_not_in_inbox(self, broker_client):
+    async def test_canceled_message_not_in_inbox(self, broker_env):
         """After cancellation, the message should not appear as unread in recipient's inbox."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
-        agent_a = await _register_agent(client, name="Sender")
-        api_key = agent_a["api_key"]
-        agent_b = await _register_agent(client, name="Recipient", api_key=api_key)
+        agent_a = await _register_agent(client, api_key, name="Sender")
+        agent_b = await _register_agent(client, api_key, name="Recipient")
 
-        # Send then cancel
         result = await _send_message(
             client, api_key, agent_a["agent_id"], destination=agent_b["agent_id"]
         )
         task_id = result["task"]["id"]
         await _cancel_task(client, api_key, agent_a["agent_id"], task_id)
 
-        # Recipient polls for unread — should not find the canceled task
         list_result = await _list_tasks(
             client,
             api_key,
@@ -532,24 +499,19 @@ class TestCancelTaskFlow:
             task_ids = [t["id"] if isinstance(t, dict) else t for t in tasks]
             assert task_id not in task_ids
 
-    @pytest.mark.asyncio
-    async def test_broadcast_cancel_one_delivery(self, broker_client):
+    async def test_broadcast_cancel_one_delivery(self, broker_env):
         """Sender can cancel one delivery task from a broadcast."""
-        client = broker_client
+        client, api_key = broker_env["client"], broker_env["api_key"]
 
-        agent_a = await _register_agent(client, name="Broadcaster")
-        api_key = agent_a["api_key"]
-        _agent_b = await _register_agent(client, name="Recipient B", api_key=api_key)
-        _agent_c = await _register_agent(client, name="Recipient C", api_key=api_key)
+        agent_a = await _register_agent(client, api_key, name="Broadcaster")
+        _agent_b = await _register_agent(client, api_key, name="Recipient B")
+        _agent_c = await _register_agent(client, api_key, name="Recipient C")
 
-        # Broadcast
         result = await _send_message(
             client, api_key, agent_a["agent_id"], destination="*"
         )
         summary = result["task"]
 
-        # Get delivery task IDs from summary artifact
-        # The summary should contain deliveryTaskIds
         delivery_ids = []
         if summary.get("artifacts"):
             for artifact in summary["artifacts"]:
@@ -560,13 +522,11 @@ class TestCancelTaskFlow:
                             delivery_ids = data["deliveryTaskIds"]
 
         if delivery_ids:
-            # Cancel the first delivery task
             cancel_result = await _cancel_task(
                 client, api_key, agent_a["agent_id"], delivery_ids[0]
             )
             assert "result" in cancel_result
 
-            # The other delivery task should still be available
             if len(delivery_ids) > 1:
                 get_result = await _get_task(
                     client, api_key, agent_a["agent_id"], delivery_ids[1]
