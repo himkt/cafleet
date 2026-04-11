@@ -1,7 +1,7 @@
 # Remove MCP Server and SSE Endpoint
 
 **Status**: Approved
-**Progress**: 7/41 tasks complete
+**Progress**: 9/41 tasks complete
 **Last Updated**: 2026-04-11
 
 ## Overview
@@ -151,8 +151,8 @@ All three greps must return zero hits in production code. Historical design docs
 
 ### Step 2: Update docs/spec/
 
-- [ ] Delete `docs/spec/streaming-subscribe.md` entirely <!-- completed: -->
-- [ ] Edit `docs/spec/cli-options.md`: drop the MCP Server column from the Option Source Matrix, drop the `HIKYAKU_AGENT_ID` "for the MCP server" subsection, and reword any remaining sentences so they refer to the `hikyaku` CLI only <!-- completed: -->
+- [x] Delete `docs/spec/streaming-subscribe.md` entirely <!-- completed: 2026-04-11T11:00 -->
+- [x] Edit `docs/spec/cli-options.md`: drop the MCP Server column from the Option Source Matrix, drop the `HIKYAKU_AGENT_ID` "for the MCP server" subsection, and reword any remaining sentences so they refer to the `hikyaku` CLI only <!-- completed: 2026-04-11T11:00 -->
 
 ### Step 3: Update README.md
 
