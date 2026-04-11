@@ -14,9 +14,10 @@ import json
 import secrets
 import uuid
 from datetime import UTC, datetime
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from sqlalchemy import and_, func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hikyaku_registry.db.models import Agent, ApiKey, Task
@@ -146,16 +147,19 @@ class RegistryStore:
     async def deregister_agent(self, agent_id: str) -> bool:
         async with self._sessionmaker() as session:
             async with session.begin():
-                result = await session.execute(
-                    update(Agent)
-                    .where(
-                        Agent.agent_id == agent_id,
-                        Agent.status == "active",
-                    )
-                    .values(
-                        status="deregistered",
-                        deregistered_at=_now_iso(),
-                    )
+                result = cast(
+                    CursorResult,
+                    await session.execute(
+                        update(Agent)
+                        .where(
+                            Agent.agent_id == agent_id,
+                            Agent.status == "active",
+                        )
+                        .values(
+                            status="deregistered",
+                            deregistered_at=_now_iso(),
+                        )
+                    ),
                 )
             return result.rowcount > 0
 
@@ -230,13 +234,16 @@ class RegistryStore:
     async def revoke_api_key(self, tenant_id: str, owner_sub: str) -> bool:
         async with self._sessionmaker() as session:
             async with session.begin():
-                result = await session.execute(
-                    update(ApiKey)
-                    .where(
-                        ApiKey.api_key_hash == tenant_id,
-                        ApiKey.owner_sub == owner_sub,
-                    )
-                    .values(status="revoked")
+                result = cast(
+                    CursorResult,
+                    await session.execute(
+                        update(ApiKey)
+                        .where(
+                            ApiKey.api_key_hash == tenant_id,
+                            ApiKey.owner_sub == owner_sub,
+                        )
+                        .values(status="revoked")
+                    ),
                 )
                 if result.rowcount == 0:
                     return False

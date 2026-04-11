@@ -23,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hikyaku_registry.db.models import Task as TaskModel
 
+_TaskList = list
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -86,7 +88,7 @@ class TaskStore:
                     delete(TaskModel).where(TaskModel.task_id == task_id)
                 )
 
-    async def list(self, context_id: str) -> list[Task]:
+    async def list(self, context_id: str) -> _TaskList[Task]:
         stmt = (
             select(TaskModel.task_json)
             .where(TaskModel.context_id == context_id)
@@ -97,7 +99,7 @@ class TaskStore:
             rows = result.all()
         return [Task.model_validate_json(row[0]) for row in rows]
 
-    async def list_by_sender(self, agent_id: str) -> list[Task]:
+    async def list_by_sender(self, agent_id: str) -> _TaskList[Task]:
         stmt = (
             select(TaskModel.task_json)
             .where(TaskModel.from_agent_id == agent_id)
