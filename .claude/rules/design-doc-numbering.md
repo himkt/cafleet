@@ -28,8 +28,10 @@ When implementing a design document, ALWAYS update documentation FIRST before wr
 The first implementation step in every design document must be:
 - Update `ARCHITECTURE.md` with the new feature's architecture
 - Update `docs/` directory with usage and configuration details
-- Update relevant skill documentation
-- Update README if needed
+- Update `README.md` so it stays consistent with `ARCHITECTURE.md` and `docs/` (use the `/update-readme` skill when the change surface is large)
+- Update relevant skill documentation (including `.claude/skills/*/SKILL.md`)
 - Update project rules if needed
+
+`README.md` is a first-class documentation target on par with `ARCHITECTURE.md` and `docs/`. Any change that affects architecture, CLI surface, API surface, configuration, or project structure MUST be reflected in `README.md` in the same design-doc cycle. Treat README drift as a blocker for "documentation complete".
 
 Only after documentation is complete should code implementation begin.

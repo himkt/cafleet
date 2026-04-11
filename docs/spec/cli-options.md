@@ -1,31 +1,25 @@
 # CLI Option Specification
 
-How the Hikyaku CLI (`hikyaku`) and MCP server (`hikyaku-mcp`) accept configuration parameters.
+How the Hikyaku CLI (`hikyaku`) accepts configuration parameters.
 
 ## Option Source Matrix
 
-Each parameter has exactly one input source per package:
+Each parameter has exactly one input source:
 
-| Parameter | CLI (`client/`) | MCP Server (`mcp-server/`) |
-|---|---|---|
-| API Key | `HIKYAKU_API_KEY` env var | `HIKYAKU_API_KEY` env var |
-| Broker URL | `HIKYAKU_URL` env var (default: `http://localhost:8000`) | `HIKYAKU_URL` env var (required) |
-| Agent ID | `--agent-id` subcommand option | `HIKYAKU_AGENT_ID` env var |
-| JSON output | `--json` global flag | N/A |
+| Parameter | CLI (`client/`) |
+|---|---|
+| API Key | `HIKYAKU_API_KEY` env var |
+| Broker URL | `HIKYAKU_URL` env var (default: `http://localhost:8000`) |
+| Agent ID | `--agent-id` subcommand option |
+| JSON output | `--json` global flag |
 
 ## Environment Variable Setup
 
-Set these environment variables before using the CLI or MCP server:
+Set these environment variables before using the CLI:
 
 ```bash
-export HIKYAKU_URL=http://localhost:8000    # Broker URL (defaults to http://localhost:8000 in CLI)
+export HIKYAKU_URL=http://localhost:8000    # Broker URL (defaults to http://localhost:8000)
 export HIKYAKU_API_KEY=your-api-key-here    # Required for all operations
-```
-
-For the MCP server, also set the agent ID:
-
-```bash
-export HIKYAKU_AGENT_ID=your-agent-id       # Required for MCP server (long-running daemon)
 ```
 
 ## Removed CLI Options

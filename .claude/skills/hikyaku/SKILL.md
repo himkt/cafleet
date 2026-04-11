@@ -11,7 +11,6 @@ Use the `hikyaku` CLI to register as an agent, send and receive messages, and di
 - Registering this agent with a message broker
 - Sending a message to another agent (unicast or broadcast)
 - Checking for new messages (polling inbox)
-- Receiving real-time inbox notifications (via MCP server with SSE)
 - Acknowledging received messages
 - Discovering other registered agents
 - Canceling (retracting) a sent message
@@ -19,24 +18,23 @@ Use the `hikyaku` CLI to register as an agent, send and receive messages, and di
 
 ## Environment Variables
 
-Set these after registration (the `register` command prints export statements):
+Set these before running any `hikyaku` command (including `register`). The CLI exits with an error if `HIKYAKU_API_KEY` is not set.
 
 - `HIKYAKU_URL` — Broker URL (default: `http://localhost:8000`)
-- `HIKYAKU_API_KEY` — API key received at registration (format: `hky_` + 32 hex chars)
-- `HIKYAKU_AGENT_ID` — Agent UUID received at registration
+- `HIKYAKU_API_KEY` — API key created via the Hikyaku WebUI key-management page (format: `hky_` + 32 hex chars). Keys are shown only once at creation.
 
 ## Command Reference
 
 ### Register
 
-Register a new agent with the broker. Does not require authentication.
+Register a new agent with the broker. Requires `HIKYAKU_API_KEY` to be set (create the key via the Hikyaku WebUI first).
 
 ```bash
 hikyaku register --name "My Agent" --description "What this agent does"
 hikyaku register --name "My Agent" --description "Frontend dev" --skills '[{"id":"react","name":"React Dev","description":"React/TS"}]'
 ```
 
-Output includes `export HIKYAKU_*` statements — run them to set env vars for subsequent commands.
+Returns the newly created `agent_id`. Note it and pass it via `--agent-id` on every subsequent command.
 
 ### Send (Unicast)
 
@@ -111,15 +109,14 @@ All commands accept these options (or fall back to env vars):
 
 - `--url <broker-url>` — Override HIKYAKU_URL
 - `--api-key <key>` — Override HIKYAKU_API_KEY
-- `--agent-id <id>` — Override HIKYAKU_AGENT_ID
 - `--json` — Output in JSON format instead of human-readable text
 
 ## Typical Workflow
 
-1. **Register** with the broker:
+1. **Register** with the broker (`HIKYAKU_API_KEY` must already be set; create the key in the Hikyaku WebUI first):
    ```bash
    hikyaku register --name "Code Review Agent" --description "Reviews pull requests"
-   # Copy and run the export statements from the output
+   # Note the returned agent_id; pass it via --agent-id on subsequent commands
    ```
 
 2. **Discover** other agents:
@@ -150,52 +147,6 @@ Messages are modeled as A2A Tasks with this lifecycle:
 - **INPUT_REQUIRED** — Message delivered, waiting for recipient to ACK
 - **COMPLETED** — Recipient acknowledged the message
 - **CANCELED** — Sender retracted the message before ACK
-
-## MCP Server (Transparent Proxy)
-
-For agents running as MCP clients (e.g., Claude Code), the `hikyaku-mcp` package provides a transparent proxy with the same tool interface as the CLI. The key advantage: `poll` returns instantly from a local buffer pre-populated via SSE, eliminating polling latency.
-
-### Configuration (Claude Code `settings.json`)
-
-```json
-{
-  "mcpServers": {
-    "hikyaku": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/hikyaku/mcp-server", "hikyaku-mcp"],
-      "env": {
-        "HIKYAKU_URL": "http://localhost:8000",
-        "HIKYAKU_API_KEY": "hky_...",
-        "HIKYAKU_AGENT_ID": "..."
-      }
-    }
-  }
-}
-```
-
-### MCP Workflow
-
-The agent's workflow is unchanged from the CLI-based approach. The MCP server is transparent:
-
-1. On startup, the MCP server auto-connects to the broker's SSE endpoint (`/api/v1/subscribe`)
-2. Incoming messages are buffered locally in an `asyncio.Queue`
-3. When the agent calls `poll`, buffered messages are returned instantly (no round-trip)
-4. All other tools (`send`, `ack`, `broadcast`, etc.) forward to the registry as usual
-5. If the SSE connection drops, the agent can fall back to `hikyaku poll --since` via CLI
-
-### Available MCP Tools
-
-| Tool | Description |
-|---|---|
-| `register` | Register a new agent with the broker |
-| `send` | Send a unicast message to another agent |
-| `broadcast` | Broadcast a message to all agents in the tenant |
-| `poll` | Poll inbox (returns from local SSE buffer instantly) |
-| `ack` | Acknowledge receipt of a message |
-| `cancel` | Cancel (retract) a sent message |
-| `get_task` | Get details of a specific task |
-| `agents` | List registered agents or get agent detail |
-| `deregister` | Deregister this agent from the broker |
 
 ## Error Handling
 

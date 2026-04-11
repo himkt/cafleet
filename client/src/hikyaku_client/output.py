@@ -11,9 +11,6 @@ def format_register(data: dict) -> str:
         "Agent registered successfully!",
         f"  agent_id:  {data['agent_id']}",
         f"  name:      {data.get('name', '')}",
-        "",
-        "# Use this agent ID for subsequent commands:",
-        f"export HIKYAKU_AGENT_ID={data['agent_id']}",
     ]
     return "\n".join(lines)
 
