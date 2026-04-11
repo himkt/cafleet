@@ -385,9 +385,7 @@ class TestRevokeKey:
         create_resp = await client.post("/ui/api/keys", headers=_jwt_header())
         tenant_id = create_resp.json()["tenant_id"]
 
-        resp = await client.delete(
-            f"/ui/api/keys/{tenant_id}", headers=_jwt_header()
-        )
+        resp = await client.delete(f"/ui/api/keys/{tenant_id}", headers=_jwt_header())
 
         assert resp.status_code == 204
 
@@ -434,9 +432,7 @@ class TestRevokeKey:
 
         _set_user(app, _TEST_SUB_B)
 
-        resp = await client.delete(
-            f"/ui/api/keys/{tenant_id}", headers=_jwt_header()
-        )
+        resp = await client.delete(f"/ui/api/keys/{tenant_id}", headers=_jwt_header())
 
         assert resp.status_code == 404
 
@@ -475,9 +471,7 @@ class TestRevokeKey:
         tenant_id_1 = resp1.json()["tenant_id"]
         tenant_id_2 = resp2.json()["tenant_id"]
 
-        await client.delete(
-            f"/ui/api/keys/{tenant_id_1}", headers=_jwt_header()
-        )
+        await client.delete(f"/ui/api/keys/{tenant_id_1}", headers=_jwt_header())
 
         status = await store.get_api_key_status(tenant_id_2)
         assert status == "active"

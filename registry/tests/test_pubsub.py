@@ -191,12 +191,10 @@ async def test_pubsub_fanout_two_subscribers(manager):
     received1, received2 = await asyncio.gather(collect(sub1), collect(sub2))
 
     assert received1 == ["t-1", "t-2", "t-3"], (
-        f"first subscriber should receive all 3 messages in order; "
-        f"got {received1}"
+        f"first subscriber should receive all 3 messages in order; got {received1}"
     )
     assert received2 == ["t-1", "t-2", "t-3"], (
-        f"second subscriber should receive all 3 messages in order; "
-        f"got {received2}"
+        f"second subscriber should receive all 3 messages in order; got {received2}"
     )
 
 

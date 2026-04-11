@@ -202,9 +202,7 @@ class TestSaveAndGet:
             "UPSERT must overwrite task_json (artifact text changed)"
         )
 
-    async def test_save_preserves_created_at_across_updates(
-        self, task_store, store
-    ):
+    async def test_save_preserves_created_at_across_updates(self, task_store, store):
         """UPSERT must NOT touch ``created_at`` — it's set once at first save.
 
         This is the core invariant of the Redis → SQL migration: the
@@ -303,12 +301,8 @@ class TestList:
         """Tasks under a different context_id must not appear in the result."""
         agent_a, agent_b = await _seed_two_agents(store)
         for i in range(2):
-            await task_store.save(
-                _make_task(task_id=f"a-{i}", context_id=agent_a)
-            )
-            await task_store.save(
-                _make_task(task_id=f"b-{i}", context_id=agent_b)
-            )
+            await task_store.save(_make_task(task_id=f"a-{i}", context_id=agent_a))
+            await task_store.save(_make_task(task_id=f"b-{i}", context_id=agent_b))
 
         a_tasks = await task_store.list(agent_a)
         b_tasks = await task_store.list(agent_b)
@@ -331,9 +325,7 @@ class TestList:
 class TestListBySender:
     """list_by_sender ordering + sender isolation."""
 
-    async def test_list_by_sender_returns_tasks_in_desc_order(
-        self, task_store, store
-    ):
+    async def test_list_by_sender_returns_tasks_in_desc_order(self, task_store, store):
         """``list_by_sender`` is DESC by status_timestamp, same as ``list``."""
         agent_id = await _seed_agent(store)
         base = datetime(2026, 4, 1, 12, 0, 0, tzinfo=UTC)
@@ -350,8 +342,7 @@ class TestListBySender:
         tasks = await task_store.list_by_sender("sender-desc")
         ids = [t.id for t in tasks]
         assert ids == ["s-2", "s-1", "s-0"], (
-            f"list_by_sender must return tasks DESC by status_timestamp; "
-            f"got {ids}"
+            f"list_by_sender must return tasks DESC by status_timestamp; got {ids}"
         )
 
     async def test_list_by_sender_filters_by_sender(self, task_store, store):
@@ -431,9 +422,7 @@ class TestGetCreatedAt:
     async def test_get_created_at_returns_iso_string(self, task_store, store):
         """Returns an ISO 8601 string that round-trips through ``fromisoformat``."""
         agent_id = await _seed_agent(store)
-        await task_store.save(
-            _make_task(task_id="task-ca", context_id=agent_id)
-        )
+        await task_store.save(_make_task(task_id="task-ca", context_id=agent_id))
 
         created_at = await task_store.get_created_at("task-ca")
         assert created_at is not None

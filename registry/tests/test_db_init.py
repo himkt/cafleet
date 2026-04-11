@@ -97,17 +97,13 @@ def test_db_init_creates_schema(tmp_path, monkeypatch):
     result = runner.invoke(main, ["db", "init"])
 
     assert result.exit_code == 0, (
-        f"db init failed.\n"
-        f"output: {result.output}\n"
-        f"exception: {result.exception}"
+        f"db init failed.\noutput: {result.output}\nexception: {result.exception}"
     )
     assert db_file.parent.exists(), (
         "db init should have created the parent directory via "
         "Path.parent.mkdir(parents=True, exist_ok=True)"
     )
-    assert db_file.exists(), (
-        f"db init should have created the DB file at {db_file}"
-    )
+    assert db_file.exists(), f"db init should have created the DB file at {db_file}"
 
     tables = _table_names(db_file)
     expected = {"api_keys", "agents", "tasks", "alembic_version"}
@@ -157,9 +153,7 @@ def test_db_init_idempotent(tmp_path, monkeypatch):
 
     first = runner.invoke(main, ["db", "init"])
     assert first.exit_code == 0, (
-        f"first db init failed.\n"
-        f"output: {first.output}\n"
-        f"exception: {first.exception}"
+        f"first db init failed.\noutput: {first.output}\nexception: {first.exception}"
     )
 
     tables_after_first = _table_names(db_file)
@@ -305,8 +299,7 @@ def test_db_init_ahead_errors(tmp_path, monkeypatch):
             "(version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
         )
         conn.execute(
-            "INSERT INTO alembic_version (version_num) "
-            "VALUES ('9999_future_revision')"
+            "INSERT INTO alembic_version (version_num) VALUES ('9999_future_revision')"
         )
         conn.commit()
     finally:
@@ -334,9 +327,7 @@ def test_db_init_ahead_errors(tmp_path, monkeypatch):
 
     conn = sqlite3.connect(str(db_file))
     try:
-        rows = conn.execute(
-            "SELECT version_num FROM alembic_version"
-        ).fetchall()
+        rows = conn.execute("SELECT version_num FROM alembic_version").fetchall()
     finally:
         conn.close()
     assert rows == [("9999_future_revision",)], (

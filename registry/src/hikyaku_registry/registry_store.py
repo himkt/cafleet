@@ -52,9 +52,7 @@ def _now_iso() -> str:
 
 
 class RegistryStore:
-    def __init__(
-        self, sessionmaker: async_sessionmaker[AsyncSession]
-    ) -> None:
+    def __init__(self, sessionmaker: async_sessionmaker[AsyncSession]) -> None:
         self._sessionmaker = sessionmaker
 
     async def create_agent(
@@ -161,9 +159,7 @@ class RegistryStore:
                 )
             return result.rowcount > 0
 
-    async def verify_agent_tenant(
-        self, agent_id: str, tenant_id: str
-    ) -> bool:
+    async def verify_agent_tenant(self, agent_id: str, tenant_id: str) -> bool:
         async with self._sessionmaker() as session:
             result = await session.execute(
                 select(Agent.agent_id).where(
@@ -231,9 +227,7 @@ class RegistryStore:
             for row in rows
         ]
 
-    async def revoke_api_key(
-        self, tenant_id: str, owner_sub: str
-    ) -> bool:
+    async def revoke_api_key(self, tenant_id: str, owner_sub: str) -> bool:
         async with self._sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(
@@ -262,9 +256,7 @@ class RegistryStore:
     async def get_api_key_status(self, tenant_id: str) -> str | None:
         async with self._sessionmaker() as session:
             result = await session.execute(
-                select(ApiKey.status).where(
-                    ApiKey.api_key_hash == tenant_id
-                )
+                select(ApiKey.status).where(ApiKey.api_key_hash == tenant_id)
             )
             row = result.first()
         return row[0] if row else None
@@ -279,9 +271,7 @@ class RegistryStore:
             )
             return result.first() is not None
 
-    async def is_key_owner(
-        self, tenant_id: str, owner_sub: str
-    ) -> bool:
+    async def is_key_owner(self, tenant_id: str, owner_sub: str) -> bool:
         async with self._sessionmaker() as session:
             result = await session.execute(
                 select(ApiKey.api_key_hash).where(
@@ -299,13 +289,9 @@ class RegistryStore:
             row = result.first()
         return row[0] if row else ""
 
-    async def list_deregistered_agents_with_tasks(
-        self, tenant_id: str
-    ) -> list[dict]:
+    async def list_deregistered_agents_with_tasks(self, tenant_id: str) -> list[dict]:
         has_task = (
-            select(Task.task_id)
-            .where(Task.context_id == Agent.agent_id)
-            .exists()
+            select(Task.task_id).where(Task.context_id == Agent.agent_id).exists()
         )
         stmt = select(
             Agent.agent_id,

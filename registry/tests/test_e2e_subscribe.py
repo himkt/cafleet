@@ -394,9 +394,7 @@ class TestE2EExecutorPublishIntegration:
         consumer_task = asyncio.create_task(consume())
         await asyncio.sleep(0.1)
 
-        await _broadcast_message(
-            client, api_key, agent_a["agent_id"], "Broadcast E2E"
-        )
+        await _broadcast_message(client, api_key, agent_a["agent_id"], "Broadcast E2E")
 
         await asyncio.wait_for(consumer_task, timeout=5.0)
 

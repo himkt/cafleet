@@ -173,7 +173,9 @@ class TestApiKeysSchema:
         """All api_keys columns are NOT NULL per the design doc schema."""
         async with engine.connect() as conn:
             cols = await conn.run_sync(
-                lambda c: {col["name"]: col for col in inspect(c).get_columns("api_keys")}
+                lambda c: {
+                    col["name"]: col for col in inspect(c).get_columns("api_keys")
+                }
             )
         for name in ("api_key_hash", "owner_sub", "key_prefix", "status", "created_at"):
             assert cols[name]["nullable"] is False, f"{name} should be NOT NULL"
@@ -350,9 +352,7 @@ class TestIndexes:
     @pytest.mark.asyncio
     async def test_idx_api_keys_owner(self, engine):
         async with engine.connect() as conn:
-            indexes = await conn.run_sync(
-                lambda c: inspect(c).get_indexes("api_keys")
-            )
+            indexes = await conn.run_sync(lambda c: inspect(c).get_indexes("api_keys"))
         match = [idx for idx in indexes if idx["name"] == "idx_api_keys_owner"]
         assert len(match) == 1, (
             f"expected idx_api_keys_owner, got: {[i['name'] for i in indexes]}"
@@ -455,9 +455,7 @@ class TestForeignKeyEnforcement:
         )
         await session.commit()  # must not raise
 
-        result = await session.execute(
-            select(Task).where(Task.task_id == "task-ok")
-        )
+        result = await session.execute(select(Task).where(Task.task_id == "task-ok"))
         row = result.scalar_one()
         assert row.context_id == "agent-x"
 
@@ -527,9 +525,7 @@ class TestForeignKeyEnforcement:
         await session.commit()
 
         with pytest.raises(IntegrityError):
-            await session.execute(
-                delete(Agent).where(Agent.agent_id == "agent-s")
-            )
+            await session.execute(delete(Agent).where(Agent.agent_id == "agent-s"))
 
 
 # ---------------------------------------------------------------------------
@@ -588,8 +584,6 @@ class TestRoundtrip:
         session.add(task)
         await session.commit()
 
-        result = await session.execute(
-            select(Task).where(Task.task_id == "rt-task")
-        )
+        result = await session.execute(select(Task).where(Task.task_id == "rt-task"))
         row = result.scalar_one()
         assert json.loads(row.task_json) == payload

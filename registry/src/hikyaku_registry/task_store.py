@@ -29,9 +29,7 @@ def _now_iso() -> str:
 
 
 class TaskStore:
-    def __init__(
-        self, sessionmaker: async_sessionmaker[AsyncSession]
-    ) -> None:
+    def __init__(self, sessionmaker: async_sessionmaker[AsyncSession]) -> None:
         self._sessionmaker = sessionmaker
 
     async def save(self, task: Task) -> None:
@@ -74,9 +72,7 @@ class TaskStore:
     async def get(self, task_id: str) -> Task | None:
         async with self._sessionmaker() as session:
             result = await session.execute(
-                select(TaskModel.task_json).where(
-                    TaskModel.task_id == task_id
-                )
+                select(TaskModel.task_json).where(TaskModel.task_id == task_id)
             )
             row = result.first()
         if row is None:
@@ -112,14 +108,12 @@ class TaskStore:
             rows = result.all()
         return [Task.model_validate_json(row[0]) for row in rows]
 
-    async def get_endpoints(
-        self, task_id: str
-    ) -> tuple[str, str] | None:
+    async def get_endpoints(self, task_id: str) -> tuple[str, str] | None:
         async with self._sessionmaker() as session:
             result = await session.execute(
-                select(
-                    TaskModel.from_agent_id, TaskModel.to_agent_id
-                ).where(TaskModel.task_id == task_id)
+                select(TaskModel.from_agent_id, TaskModel.to_agent_id).where(
+                    TaskModel.task_id == task_id
+                )
             )
             row = result.first()
         if row is None:
@@ -129,9 +123,7 @@ class TaskStore:
     async def get_created_at(self, task_id: str) -> str | None:
         async with self._sessionmaker() as session:
             result = await session.execute(
-                select(TaskModel.created_at).where(
-                    TaskModel.task_id == task_id
-                )
+                select(TaskModel.created_at).where(TaskModel.task_id == task_id)
             )
             row = result.first()
         return row[0] if row else None

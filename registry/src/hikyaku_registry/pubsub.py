@@ -47,9 +47,7 @@ class PubSubManager:
         self._subscribers.setdefault(channel, set()).add(queue)
         return _Subscription(queue)
 
-    async def unsubscribe(
-        self, channel: str, subscription: _Subscription
-    ) -> None:
+    async def unsubscribe(self, channel: str, subscription: _Subscription) -> None:
         subscribers = self._subscribers.get(channel)
         if subscribers is None:
             return

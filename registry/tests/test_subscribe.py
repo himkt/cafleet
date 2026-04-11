@@ -56,12 +56,8 @@ async def sse_env(db_sessionmaker):
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        agent_a = await _register_agent(
-            client, "Agent A", "Sender", api_key=api_key
-        )
-        agent_b = await _register_agent(
-            client, "Agent B", "Receiver", api_key=api_key
-        )
+        agent_a = await _register_agent(client, "Agent A", "Sender", api_key=api_key)
+        agent_b = await _register_agent(client, "Agent B", "Receiver", api_key=api_key)
 
         yield {
             "client": client,
@@ -560,9 +556,7 @@ class TestSSEGeneratorKeepalive:
         agent_id = gen_env["agent_id"]
 
         task_id = str(uuid.uuid4())
-        task = _make_task(
-            task_id, agent_id, sender_id=agent_id, text="With keepalive"
-        )
+        task = _make_task(task_id, agent_id, sender_id=agent_id, text="With keepalive")
         await task_store.save(task)
 
         request = AsyncMock()

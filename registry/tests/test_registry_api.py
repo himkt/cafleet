@@ -13,8 +13,6 @@ fixture and creates API keys via ``store.create_api_key(owner_sub)``
 api_keys row — required by the FK on agents.tenant_id).
 """
 
-import hashlib
-
 import pytest
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
@@ -134,7 +132,9 @@ class TestRegisterAgent:
     async def test_register_returns_agent_id_and_api_key(self, api_env):
         """Response contains agent_id, api_key, name, registered_at."""
         client, api_key = api_env["client"], api_env["api_key"]
-        data = await _register_agent(client, api_key, name="My Agent", description="Coder")
+        data = await _register_agent(
+            client, api_key, name="My Agent", description="Coder"
+        )
 
         assert "agent_id" in data
         assert "api_key" in data

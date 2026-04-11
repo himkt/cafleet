@@ -211,9 +211,7 @@ class TestGetWebuiTenant:
         app.dependency_overrides.pop(verify_auth0_user, None)
         app.dependency_overrides.pop(get_user_id, None)
 
-        resp = await client.get(
-            "/ui/api/agents", headers={"X-Tenant-Id": tenant_id}
-        )
+        resp = await client.get("/ui/api/agents", headers={"X-Tenant-Id": tenant_id})
 
         assert resp.status_code in (401, 403)
 
@@ -263,9 +261,7 @@ class TestAgentsListJwt:
             name="Other Agent", description="Test", api_key=api_key_b
         )
 
-        resp = await client.get(
-            "/ui/api/agents", headers=_jwt_header(tenant_id_a)
-        )
+        resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id_a))
 
         ids = {a["agent_id"] for a in resp.json()["agents"]}
         assert agent_a in ids
@@ -275,9 +271,7 @@ class TestAgentsListJwt:
         """GET /agents without X-Tenant-Id returns 400."""
         client = auth_env["client"]
 
-        resp = await client.get(
-            "/ui/api/agents", headers=_jwt_header(tenant_id=None)
-        )
+        resp = await client.get("/ui/api/agents", headers=_jwt_header(tenant_id=None))
 
         assert resp.status_code == 400
 

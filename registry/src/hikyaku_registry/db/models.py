@@ -23,9 +23,7 @@ class ApiKey(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
 
-    __table_args__ = (
-        Index("idx_api_keys_owner", "owner_sub"),
-    )
+    __table_args__ = (Index("idx_api_keys_owner", "owner_sub"),)
 
 
 class Agent(Base):
@@ -44,9 +42,7 @@ class Agent(Base):
     deregistered_at: Mapped[str | None] = mapped_column(String, nullable=True)
     agent_card_json: Mapped[str] = mapped_column(String, nullable=False)
 
-    __table_args__ = (
-        Index("idx_agents_tenant_status", "tenant_id", "status"),
-    )
+    __table_args__ = (Index("idx_agents_tenant_status", "tenant_id", "status"),)
 
 
 class Task(Base):

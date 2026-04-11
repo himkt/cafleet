@@ -187,9 +187,7 @@ class TestCreateAgent:
                 "tags": ["lang"],
             }
         ]
-        result = await store.create_agent(
-            "Skilled", "desc", skills, api_key=api_key
-        )
+        result = await store.create_agent("Skilled", "desc", skills, api_key=api_key)
         agent = await store.get_agent(result["agent_id"])
         assert agent is not None
         card = json.loads(agent["agent_card_json"])
@@ -217,9 +215,7 @@ class TestCreateAgent:
         """
         fake_api_key = "hky_" + "f" * 32
         with pytest.raises(IntegrityError):
-            await store.create_agent(
-                "Orphan", "desc", None, api_key=fake_api_key
-            )
+            await store.create_agent("Orphan", "desc", None, api_key=fake_api_key)
 
 
 # ---------------------------------------------------------------------------
@@ -339,9 +335,7 @@ class TestDeregisterAgent:
         assert second is False
 
     async def test_returns_false_for_missing_agent(self, store):
-        result = await store.deregister_agent(
-            "00000000-0000-4000-8000-000000000000"
-        )
+        result = await store.deregister_agent("00000000-0000-4000-8000-000000000000")
         assert result is False
 
 
@@ -439,9 +433,7 @@ class TestListApiKeys:
         for i in range(3):
             api_key, _, _ = await store.create_api_key(owner)
             for j in range(5):
-                await store.create_agent(
-                    f"a{i}-{j}", "d", None, api_key=api_key
-                )
+                await store.create_agent(f"a{i}-{j}", "d", None, api_key=api_key)
 
         captured: list[str] = []
 
@@ -452,15 +444,12 @@ class TestListApiKeys:
         try:
             result = await store.list_api_keys(owner)
         finally:
-            event.remove(
-                db_engine.sync_engine, "before_cursor_execute", _capture
-            )
+            event.remove(db_engine.sync_engine, "before_cursor_execute", _capture)
 
         api_key_selects = [
             s
             for s in captured
-            if s.lstrip().upper().startswith("SELECT")
-            and "api_keys" in s.lower()
+            if s.lstrip().upper().startswith("SELECT") and "api_keys" in s.lower()
         ]
         assert len(api_key_selects) == 1, (
             f"list_api_keys must emit exactly ONE SELECT against api_keys "
@@ -508,8 +497,7 @@ class TestRevokeApiKey:
         assert await store.get_api_key_status(api_key_hash) == "revoked"
         active = await store.list_active_agents(tenant_id=api_key_hash)
         assert active == [], (
-            f"all agents under the revoked tenant should be deregistered, "
-            f"got {active}"
+            f"all agents under the revoked tenant should be deregistered, got {active}"
         )
 
     async def test_atomic_failure_rolls_back(self, store, db_engine):
@@ -549,9 +537,7 @@ class TestRevokeApiKey:
             with pytest.raises(Exception, match=sentinel):
                 await store.revoke_api_key(api_key_hash, owner)
         finally:
-            event.remove(
-                db_engine.sync_engine, "before_cursor_execute", _intercept
-            )
+            event.remove(db_engine.sync_engine, "before_cursor_execute", _intercept)
 
         post_status = await store.get_api_key_status(api_key_hash)
         assert post_status == "active", (
@@ -663,9 +649,7 @@ class TestGetAgentName:
         ``webui_api.py`` so call sites can drop the fallback once they
         switch to this method.
         """
-        result = await store.get_agent_name(
-            "00000000-0000-4000-8000-000000000000"
-        )
+        result = await store.get_agent_name("00000000-0000-4000-8000-000000000000")
         assert result == "", (
             f"get_agent_name must return '' for missing agents (not None), "
             f"got {result!r}"
@@ -695,9 +679,7 @@ class TestListDeregisteredAgentsWithTasks:
     async def test_excludes_active_agents(self, store, db_engine):
         """Active agents (with or without tasks) are excluded from the result."""
         api_key, api_key_hash, _ = await _make_owner_with_key(store)
-        active = await store.create_agent(
-            "active", "d", None, api_key=api_key
-        )
+        active = await store.create_agent("active", "d", None, api_key=api_key)
         await _seed_task_for_agent(db_engine, agent_id=active["agent_id"])
 
         result = await store.list_deregistered_agents_with_tasks(api_key_hash)
