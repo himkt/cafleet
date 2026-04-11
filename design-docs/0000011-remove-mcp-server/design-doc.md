@@ -1,7 +1,7 @@
 # Remove MCP Server and SSE Endpoint
 
 **Status**: Approved
-**Progress**: 22/45 tasks complete
+**Progress**: 27/45 tasks complete
 **Last Updated**: 2026-04-11
 
 ## Overview
@@ -180,11 +180,11 @@ All three greps must return zero hits in production code. Historical design docs
 
 ### Step 6: Delete SSE server code
 
-- [ ] Delete `registry/src/hikyaku_registry/api/subscribe.py` <!-- completed: -->
-- [ ] Delete `registry/src/hikyaku_registry/pubsub.py` <!-- completed: -->
-- [ ] Delete `registry/tests/test_subscribe.py` <!-- completed: -->
-- [ ] Delete `registry/tests/test_pubsub.py` <!-- completed: -->
-- [ ] Delete `registry/tests/test_e2e_subscribe.py` <!-- completed: -->
+- [x] Delete `registry/src/hikyaku_registry/api/subscribe.py` <!-- completed: 2026-04-11T11:50 -->
+- [x] Delete `registry/src/hikyaku_registry/pubsub.py` <!-- completed: 2026-04-11T11:50 -->
+- [x] Delete `registry/tests/test_subscribe.py` <!-- completed: 2026-04-11T11:50 -->
+- [x] Delete `registry/tests/test_pubsub.py` <!-- completed: 2026-04-11T11:50 -->
+- [x] Delete `registry/tests/test_e2e_subscribe.py` <!-- completed: 2026-04-11T11:50 -->
 
 ### Step 7: Edit registry server code
 
