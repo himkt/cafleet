@@ -486,19 +486,32 @@ class TestForeignKeyEnforcement:
 
     @pytest.mark.asyncio
     async def test_deleting_api_key_with_referencing_agent_restricted(self, session):
-        """ON DELETE RESTRICT: cannot delete an api_key that has agents pointing at it."""
+        """ON DELETE RESTRICT: cannot delete an api_key that has agents pointing at it.
+
+        ``session.execute(delete(...))`` issues the DELETE statement
+        immediately (it is not deferred to commit-time flush like
+        ``session.delete(instance)`` would be), so the FK violation surfaces
+        from ``execute()`` itself — that is what ``pytest.raises`` must wrap.
+        """
         session.add(_make_api_key(api_key_hash="tenant-r"))
         await session.flush()
         session.add(_make_agent(agent_id="agent-r", tenant_id="tenant-r"))
         await session.commit()
 
-        await session.execute(delete(ApiKey).where(ApiKey.api_key_hash == "tenant-r"))
         with pytest.raises(IntegrityError):
-            await session.commit()
+            await session.execute(
+                delete(ApiKey).where(ApiKey.api_key_hash == "tenant-r")
+            )
 
     @pytest.mark.asyncio
     async def test_deleting_agent_with_referencing_task_restricted(self, session):
-        """ON DELETE RESTRICT: cannot delete an agent whose agent_id is a task context_id."""
+        """ON DELETE RESTRICT: cannot delete an agent whose agent_id is a task context_id.
+
+        ``session.execute(delete(...))`` issues the DELETE statement
+        immediately (Core-level execution, not deferred to commit-time flush),
+        so the FK violation surfaces from ``execute()`` itself — that is
+        what ``pytest.raises`` must wrap.
+        """
         session.add(_make_api_key(api_key_hash="tenant-s"))
         await session.flush()
         session.add(_make_agent(agent_id="agent-s", tenant_id="tenant-s"))
@@ -513,9 +526,10 @@ class TestForeignKeyEnforcement:
         )
         await session.commit()
 
-        await session.execute(delete(Agent).where(Agent.agent_id == "agent-s"))
         with pytest.raises(IntegrityError):
-            await session.commit()
+            await session.execute(
+                delete(Agent).where(Agent.agent_id == "agent-s")
+            )
 
 
 # ---------------------------------------------------------------------------
