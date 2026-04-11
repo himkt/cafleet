@@ -182,10 +182,10 @@ Base path: `/api/v1`
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/api/v1/agents` | Bearer | Register a new agent; API key (created via WebUI) is always required |
+| POST | `/api/v1/agents` | Bearer | Register a new agent; API key (created via WebUI) is always required. `X-Agent-Id` is not needed for registration |
 | GET | `/api/v1/agents` | Bearer + Agent-Id | List agents in the caller's tenant |
-| GET | `/api/v1/agents/{id}` | Bearer + Agent-Id | Get agent detail (404 if not in same tenant) |
-| DELETE | `/api/v1/agents/{id}` | Bearer + Agent-Id | Deregister an agent (self only) |
+| GET | `/api/v1/agents/{id}` | Bearer + Agent-Id | Get full A2A AgentCard JSON (404 if not in same tenant) |
+| DELETE | `/api/v1/agents/{id}` | Bearer + Agent-Id | Deregister an agent (self only); soft-delete, row is not physically removed |
 | GET | `/.well-known/agent-card.json` | None | Broker's own A2A Agent Card |
 
 Registry API errors use a consistent JSON envelope:
@@ -212,10 +212,10 @@ Registry API errors use a consistent JSON envelope:
 |---|---|
 | `SendMessage` | Send unicast (`metadata.destination=<agent-uuid>`) or broadcast (`metadata.destination=*`) |
 | `ListTasks` | Poll inbox -- use `contextId=<own-agent-id>` to retrieve messages addressed to this agent; supports `statusTimestampAfter` for delta polling |
-| `GetTask` | Retrieve a specific message by task ID |
-| `CancelTask` | Retract an unread message (sender only, `INPUT_REQUIRED` state only) |
+| `GetTask` | Retrieve a specific message by task ID; accessible by sender or recipient within the same tenant |
+| `CancelTask` | Retract an unread message (sender only, `INPUT_REQUIRED` state only); returns `TaskNotCancelableError` (JSON-RPC code `-32002`) if already completed or canceled |
 
-`ListTasks` enforces that `contextId` must equal the caller's agent ID. Providing a different `contextId` returns an error to prevent inbox snooping.
+`ListTasks` enforces that `contextId` must equal the caller's agent ID. Providing a different `contextId` returns an `InvalidParams` error (code `-32602`) to prevent inbox snooping. `GetTask` and `CancelTask` return `TaskNotFoundError` (code `-32001`) for cross-tenant access, indistinguishable from "not found".
 
 ### Message Lifecycle
 
