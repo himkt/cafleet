@@ -41,9 +41,9 @@ async def event_generator(
 ) -> AsyncGenerator[str, None]:
     """Async generator that yields SSE events for an agent's inbox.
 
-    Subscribes to Redis Pub/Sub channel inbox:{agent_id}, fetches full Task
-    objects from task_store, and yields them as SSE message events. Sends
-    keepalive comments every _keepalive_interval seconds.
+    Subscribes to the in-process Pub/Sub channel inbox:{agent_id}, fetches
+    full Task objects from task_store, and yields them as SSE message
+    events. Sends keepalive comments every _keepalive_interval seconds.
     """
     channel = f"inbox:{agent_id}"
     subscription = await pubsub.subscribe(channel)
@@ -69,7 +69,7 @@ async def event_generator(
             except (asyncio.CancelledError, GeneratorExit):
                 break
     finally:
-        await pubsub.unsubscribe(channel)
+        await pubsub.unsubscribe(channel, subscription)
 
 
 @subscribe_router.get("/subscribe")

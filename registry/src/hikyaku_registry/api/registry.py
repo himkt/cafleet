@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 
 from hikyaku_registry.auth import get_authenticated_agent, get_registration_tenant
+from hikyaku_registry.db.engine import get_sessionmaker
 from hikyaku_registry.models import (
     ErrorDetail,
     ErrorResponse,
@@ -12,14 +13,12 @@ from hikyaku_registry.models import (
     RegisterAgentResponse,
 )
 from hikyaku_registry.registry_store import CreateAgentResult, RegistryStore
-from hikyaku_registry.redis_client import get_redis
 
 registry_router = APIRouter()
 
 
 async def get_registry_store() -> RegistryStore:
-    redis = get_redis()
-    return RegistryStore(redis)
+    return RegistryStore(get_sessionmaker())
 
 
 @registry_router.post("/agents", status_code=201, response_model=RegisterAgentResponse)
