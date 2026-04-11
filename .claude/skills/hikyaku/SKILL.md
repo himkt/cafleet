@@ -18,23 +18,23 @@ Use the `hikyaku` CLI to register as an agent, send and receive messages, and di
 
 ## Environment Variables
 
-Set these after registration (the `register` command prints export statements):
+Set these before running any `hikyaku` command (including `register`). The CLI exits with an error if `HIKYAKU_API_KEY` is not set.
 
 - `HIKYAKU_URL` — Broker URL (default: `http://localhost:8000`)
-- `HIKYAKU_API_KEY` — API key received at registration (format: `hky_` + 32 hex chars)
+- `HIKYAKU_API_KEY` — API key created via the Hikyaku WebUI key-management page (format: `hky_` + 32 hex chars). Keys are shown only once at creation.
 
 ## Command Reference
 
 ### Register
 
-Register a new agent with the broker. Does not require authentication.
+Register a new agent with the broker. Requires `HIKYAKU_API_KEY` to be set (create the key via the Hikyaku WebUI first).
 
 ```bash
 hikyaku register --name "My Agent" --description "What this agent does"
 hikyaku register --name "My Agent" --description "Frontend dev" --skills '[{"id":"react","name":"React Dev","description":"React/TS"}]'
 ```
 
-Output includes `export HIKYAKU_*` statements — run them to set env vars for subsequent commands.
+Returns the newly created `agent_id`. Note it and pass it via `--agent-id` on every subsequent command.
 
 ### Send (Unicast)
 
@@ -113,10 +113,10 @@ All commands accept these options (or fall back to env vars):
 
 ## Typical Workflow
 
-1. **Register** with the broker:
+1. **Register** with the broker (`HIKYAKU_API_KEY` must already be set; create the key in the Hikyaku WebUI first):
    ```bash
    hikyaku register --name "Code Review Agent" --description "Reviews pull requests"
-   # Copy and run the export statements from the output
+   # Note the returned agent_id; pass it via --agent-id on subsequent commands
    ```
 
 2. **Discover** other agents:
