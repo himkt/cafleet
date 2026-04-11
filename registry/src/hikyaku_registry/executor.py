@@ -143,6 +143,8 @@ class BrokerExecutor(AgentExecutor):
         )
         recipients = [a for a in active_agents if a["agent_id"] != from_agent_id]
 
+        summary_task_id = str(uuid.uuid4())
+
         for agent in recipients:
             now = datetime.now(UTC).isoformat()
             delivery_task = Task(
@@ -159,6 +161,7 @@ class BrokerExecutor(AgentExecutor):
                     "fromAgentId": from_agent_id,
                     "toAgentId": agent["agent_id"],
                     "type": "unicast",
+                    "originTaskId": summary_task_id,
                 },
             )
 
@@ -166,7 +169,7 @@ class BrokerExecutor(AgentExecutor):
             await event_queue.enqueue_event(delivery_task)
 
         summary_task = Task(
-            id=str(uuid.uuid4()),
+            id=summary_task_id,
             context_id=from_agent_id,
             status=TaskStatus(
                 state=TaskState.completed,
@@ -188,6 +191,8 @@ class BrokerExecutor(AgentExecutor):
                 "fromAgentId": from_agent_id,
                 "type": "broadcast_summary",
                 "recipientCount": len(recipients),
+                "recipientIds": [a["agent_id"] for a in recipients],
+                "originTaskId": summary_task_id,
             },
         )
 

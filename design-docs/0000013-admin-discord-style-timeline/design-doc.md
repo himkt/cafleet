@@ -1,7 +1,7 @@
 # Admin Discord-style Timeline
 
 **Status**: Approved
-**Progress**: 11/38 tasks complete
+**Progress**: 14/38 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -371,9 +371,9 @@ Per `.claude/rules/design-doc-numbering.md`, documentation is updated first.
 
 ### Step 3: Executor broadcast logic
 
-- [ ] Edit `registry/src/hikyaku_registry/executor.py` `_handle_broadcast`: pre-allocate `summary_task_id = str(uuid.uuid4())` BEFORE the delivery loop; thread it into every delivery task's metadata as `"originTaskId": summary_task_id`; construct the summary task with `id=summary_task_id`, `metadata["originTaskId"] = summary_task_id`, and `metadata["recipientIds"] = [a["agent_id"] for a in recipients]`. Leave `metadata["recipientCount"]` in place for backwards compat with any existing reader. <!-- completed: -->
-- [ ] Add tests in `registry/tests/test_executor.py`: (a) broadcast to 3 recipients → 3 delivery tasks + 1 summary; assert every one of the 4 tasks has `origin_task_id == summary.task_id`; assert `summary.metadata["recipientIds"]` contains the three recipient ids; (b) unicast → `origin_task_id is None`. <!-- completed: -->
-- [ ] Run `mise //registry:test`. <!-- completed: -->
+- [x] Edit `registry/src/hikyaku_registry/executor.py` `_handle_broadcast`: pre-allocate `summary_task_id = str(uuid.uuid4())` BEFORE the delivery loop; thread it into every delivery task's metadata as `"originTaskId": summary_task_id`; construct the summary task with `id=summary_task_id`, `metadata["originTaskId"] = summary_task_id`, and `metadata["recipientIds"] = [a["agent_id"] for a in recipients]`. Leave `metadata["recipientCount"]` in place for backwards compat with any existing reader. <!-- completed: 2026-04-12T10:45 -->
+- [x] Add tests in `registry/tests/test_executor.py`: (a) broadcast to 3 recipients → 3 delivery tasks + 1 summary; assert every one of the 4 tasks has `origin_task_id == summary.task_id`; assert `summary.metadata["recipientIds"]` contains the three recipient ids; (b) unicast → `origin_task_id is None`. <!-- completed: 2026-04-12T10:40 -->
+- [x] Run `mise //registry:test`. <!-- completed: 2026-04-12T10:48 -->
 
 ### Step 4: Timeline API + broadcast send API
 
