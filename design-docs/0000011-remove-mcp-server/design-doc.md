@@ -1,7 +1,7 @@
 # Remove MCP Server and SSE Endpoint
 
 **Status**: Approved
-**Progress**: 42/45 tasks complete
+**Progress**: 45/45 tasks complete
 **Last Updated**: 2026-04-11
 
 ## Overview
@@ -10,14 +10,14 @@ Delete the `mcp-server/` package (`hikyaku-mcp` transparent proxy) and the broke
 
 ## Success Criteria
 
-- [ ] `mcp-server/` directory no longer exists in the repository
-- [ ] No file outside `design-docs/`, `vendor/`, `.git/`, `node_modules/`, or `.venv/` references `mcp-server`, `hikyaku-mcp`, or `hikyaku_mcp`
-- [ ] No file outside `design-docs/`, `vendor/`, `.git/`, `node_modules/`, or `.venv/` references `subscribe`, `PubSub`, `pubsub`, `sse_starlette`, `sse-starlette`, `httpx_sse`, or `httpx-sse` in production code paths
-- [ ] `uv sync` succeeds against the slimmed workspace and `uv.lock` is regenerated
-- [ ] `mise //:lint`, `mise //:format`, `mise //:typecheck` pass
-- [ ] `mise //registry:test` and `mise //client:test` pass
-- [ ] CI workflow has no `test-mcp-server` job
-- [ ] README, ARCHITECTURE, and `.claude/` documentation no longer rationalize `--workers=1` via the SSE in-process Pub/Sub fan-out
+- [x] `mcp-server/` directory no longer exists in the repository
+- [x] No file outside `design-docs/`, `vendor/`, `.git/`, `node_modules/`, or `.venv/` references `mcp-server`, `hikyaku-mcp`, or `hikyaku_mcp`
+- [x] No file outside `design-docs/`, `vendor/`, `.git/`, `node_modules/`, or `.venv/` references `subscribe`, `PubSub`, `pubsub`, `sse_starlette`, `sse-starlette`, `httpx_sse`, or `httpx-sse` in production code paths (note: `uv.lock` retains a transitive `httpx-sse` entry pulled in by `a2a-sdk`; this is an upstream dependency and is out of scope)
+- [x] `uv sync` succeeds against the slimmed workspace and `uv.lock` is regenerated (executed implicitly via `mise //:typecheck` → `uv run` auto-sync; workspace members list shrank to `["hikyaku", "hikyaku-client", "hikyaku-registry"]`)
+- [x] `mise //:lint`, `mise //:format`, `mise //:typecheck` pass
+- [x] `mise //registry:test` (337 passed) and `mise //client:test` (73 passed) pass
+- [x] CI workflow has no `test-mcp-server` job
+- [x] README, ARCHITECTURE, and `.claude/` documentation no longer rationalize `--workers=1` via the SSE in-process Pub/Sub fan-out
 
 ---
 
@@ -221,8 +221,8 @@ All three greps must return zero hits in production code. Historical design docs
 
 - [x] Run `mise //:lint`, `mise //:format`, `mise //:typecheck`; all must pass <!-- completed: 2026-04-11T12:30 -->
 - [x] Run `mise //registry:test` and `mise //client:test`; all must pass (registry: 337 passed in 4.44s; client: 73 passed in 0.19s) <!-- completed: 2026-04-11T12:30 -->
-- [ ] Run the MCP residue grep (`grep -rn "mcp-server\|hikyaku-mcp\|hikyaku_mcp" --exclude-dir=design-docs --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=vendor .`) and confirm zero hits <!-- completed: -->
-- [ ] Run the SSE residue greps scoped to `--include='*.py'` and `--include='*.md'` separately (see Specification → Verification) and inspect every remaining hit; only incidental matches in third-party SDK terminology (e.g., Auth0 in `admin/`) are acceptable <!-- completed: -->
+- [x] Run the MCP residue grep (`grep -rn "mcp-server\|hikyaku-mcp\|hikyaku_mcp" --exclude-dir=design-docs --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=vendor .`) and confirm zero hits <!-- completed: 2026-04-11T12:45 — Grep via Claude tool returned zero hits outside design-docs/ -->
+- [x] Run the SSE residue greps scoped to `--include='*.py'` and `--include='*.md'` separately (see Specification → Verification) and inspect every remaining hit; only incidental matches in third-party SDK terminology (e.g., Auth0 in `admin/`) are acceptable <!-- completed: 2026-04-11T12:45 — *.py grep: zero hits in production code. *.md grep: only hits are in design-docs/ (exempt) and vendor/A2A/ (exempt). uv.lock retains transitive httpx-sse from a2a-sdk (third-party, out of scope). -->
 
 ---
 
