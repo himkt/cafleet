@@ -8,9 +8,12 @@ These tests verify integration/mounting behavior, not endpoint logic
 (which is covered by test_webui_api.py).
 """
 
+from pathlib import Path
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import hikyaku_registry
 from hikyaku_registry.main import create_app
 
 
@@ -197,3 +200,26 @@ class TestExistingRoutesUnaffected:
 
         resp = await client.get("/.well-known/agent-card.json")
         assert resp.status_code == 200
+
+
+# ===========================================================================
+# Default webui_dist_dir resolves inside the installed package
+# ===========================================================================
+
+
+class TestDefaultWebuiDistDir:
+    """Verify _default_webui_dist_dir() points inside the installed package.
+
+    This protects against future package-layout refactors silently breaking
+    the install-time path: when a wheel is installed, the helper must resolve
+    to ``site-packages/hikyaku_registry/webui``, not a sibling repo directory.
+    """
+
+    def test_default_points_inside_package(self):
+        """_default_webui_dist_dir() returns <package>/webui as a Path."""
+        from hikyaku_registry.main import _default_webui_dist_dir
+
+        result = _default_webui_dist_dir()
+        expected = Path(hikyaku_registry.__file__).resolve().parent / "webui"
+        assert isinstance(result, Path)
+        assert result == expected
