@@ -1,10 +1,63 @@
 """Shared test fixtures for hikyaku-registry tests.
 
-The Redis-based fixtures (redis_client, store, task_store) were removed in the
-SQLite migration (Step 1) because fakeredis is no longer in the dependency
-group. The full SQLAlchemy-based fixture stack lands in Step 12.
+A function-scoped in-memory aiosqlite engine + SQLAlchemy
+``Base.metadata.create_all`` is the canonical fast-path described in
+the design doc's Testing Strategy section: each test gets a clean DB
+with no Alembic overhead, and FK enforcement is guaranteed by a
+module-level ``connect`` listener that mirrors ``db/engine.py``.
 
-Until then, test files that depended on the old fixtures will error on fixture
-resolution at collection time — that brokenness is intentional and gets fixed
-as each store is rewritten in Steps 5/6/7.
+The fixture stack here is intentionally minimal — only what Step 5
+needs (RegistryStore). ``task_store`` and ``pubsub_manager`` fixtures
+land alongside Steps 6 and 7 respectively.
 """
+
+import pytest
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+from hikyaku_registry.db.models import Base
+from hikyaku_registry.registry_store import RegistryStore
+
+
+@event.listens_for(Engine, "connect")
+def _enable_fk_pragma(dbapi_conn, _record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
+@pytest.fixture
+async def db_engine() -> AsyncEngine:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+async def db_sessionmaker(
+    db_engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(db_engine, expire_on_commit=False)
+
+
+@pytest.fixture
+async def db_session(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+) -> AsyncSession:
+    async with db_sessionmaker() as session:
+        yield session
+
+
+@pytest.fixture
+async def store(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+) -> RegistryStore:
+    return RegistryStore(db_sessionmaker)
