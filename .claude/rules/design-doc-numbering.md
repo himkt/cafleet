@@ -29,9 +29,11 @@ The first implementation step in every design document must be:
 - Update `ARCHITECTURE.md` with the new feature's architecture
 - Update `docs/` directory with usage and configuration details
 - Update `README.md` so it stays consistent with `ARCHITECTURE.md` and `docs/` (use the `/update-readme` skill when the change surface is large)
-- Update relevant skill documentation (including `.claude/skills/*/SKILL.md`)
+- Update every affected skill under `.claude/skills/*/SKILL.md` and `plugins/*/skills/*/SKILL.md`
 - Update project rules if needed
 
 `README.md` is a first-class documentation target on par with `ARCHITECTURE.md` and `docs/`. Any change that affects architecture, CLI surface, API surface, configuration, or project structure MUST be reflected in `README.md` in the same design-doc cycle. Treat README drift as a blocker for "documentation complete".
+
+`SKILL.md` files are **equally** first-class documentation targets. Any change that alters CLI commands, flags, environment variables, required arguments, output formats, or the expected invocation workflow MUST be reflected in every affected `SKILL.md` in the same design-doc cycle. Skill drift — where a `SKILL.md` example no longer matches the actual CLI — is a blocker for "documentation complete", because Claude Code loads these skills as ground truth and will produce broken tool calls when they go stale.
 
 Only after documentation is complete should code implementation begin.
