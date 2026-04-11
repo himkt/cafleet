@@ -1,7 +1,7 @@
 # Remove MCP Server and SSE Endpoint
 
 **Status**: Approved
-**Progress**: 27/45 tasks complete
+**Progress**: 33/45 tasks complete
 **Last Updated**: 2026-04-11
 
 ## Overview
@@ -188,12 +188,12 @@ All three greps must return zero hits in production code. Historical design docs
 
 ### Step 7: Edit registry server code
 
-- [ ] Edit `registry/src/hikyaku_registry/executor.py`: drop the `pubsub` parameter from `BrokerExecutor.__init__`, drop the `self._pubsub = pubsub` assignment, and delete the two `if self._pubsub is not None: await self._pubsub.publish(f"inbox:{...}", delivery_task.id)` blocks in `_handle_unicast` and `_handle_broadcast`. The executor must still call `self._task_store.save(...)` and `event_queue.enqueue_event(...)` exactly as before <!-- completed: -->
-- [ ] Edit `registry/src/hikyaku_registry/main.py`: remove the imports of `subscribe_router`, `_get_pubsub`, `_get_task_store as _get_subscribe_task_store`, and `PubSubManager`. Delete the `pubsub_manager = PubSubManager()` line and the `pubsub=pubsub_manager` argument to `BrokerExecutor(...)`. Delete the `app.include_router(subscribe_router, prefix="/api/v1")` line. Delete the `app.dependency_overrides[_get_pubsub]` and `app.dependency_overrides[_get_subscribe_task_store]` lines. Rewrite the `__main__` block's comment so it no longer mentions `PubSubManager` or the SSE fan-out — keep it as a short note about `reload=True` being a developer convenience only <!-- completed: -->
-- [ ] Edit `registry/tests/conftest.py`: remove the `pubsub_manager` mention in the module docstring (Step 7 reference no longer exists) <!-- completed: -->
-- [ ] Edit `registry/tests/test_executor.py`: delete the `TestExecutorPubSubIntegration` class (every test method that exercises the `pubsub` parameter, including `test_init_accepts_pubsub_parameter`, the publish-channel tests, and the no-pubsub backward-compat tests) <!-- completed: -->
-- [ ] Edit `client/src/hikyaku_client/output.py`: remove the `f"export HIKYAKU_AGENT_ID={data['agent_id']}"` line and the preceding `"# Use this agent ID for subsequent commands:"` line from `format_register`. The register output should end at the `name:` line <!-- completed: -->
-- [ ] Edit `client/tests/test_cli.py`: update the register output test (line ~113) — remove the `assert "export HIKYAKU_AGENT_ID=" in result.output` line, update the test docstring to no longer mention HIKYAKU_AGENT_ID, and keep the assertions that `agent_id` appears in output and that `HIKYAKU_API_KEY` / `HIKYAKU_URL` export lines are NOT present <!-- completed: -->
+- [x] Edit `registry/src/hikyaku_registry/executor.py`: drop the `pubsub` parameter from `BrokerExecutor.__init__`, drop the `self._pubsub = pubsub` assignment, and delete the two `if self._pubsub is not None: await self._pubsub.publish(f"inbox:{...}", delivery_task.id)` blocks in `_handle_unicast` and `_handle_broadcast`. The executor must still call `self._task_store.save(...)` and `event_queue.enqueue_event(...)` exactly as before <!-- completed: 2026-04-11T12:05 -->
+- [x] Edit `registry/src/hikyaku_registry/main.py`: remove the imports of `subscribe_router`, `_get_pubsub`, `_get_task_store as _get_subscribe_task_store`, and `PubSubManager`. Delete the `pubsub_manager = PubSubManager()` line and the `pubsub=pubsub_manager` argument to `BrokerExecutor(...)`. Delete the `app.include_router(subscribe_router, prefix="/api/v1")` line. Delete the `app.dependency_overrides[_get_pubsub]` and `app.dependency_overrides[_get_subscribe_task_store]` lines. Rewrite the `__main__` block's comment so it no longer mentions `PubSubManager` or the SSE fan-out — keep it as a short note about `reload=True` being a developer convenience only <!-- completed: 2026-04-11T12:05 -->
+- [x] Edit `registry/tests/conftest.py`: remove the `pubsub_manager` mention in the module docstring (Step 7 reference no longer exists) <!-- completed: 2026-04-11T12:05 -->
+- [x] Edit `registry/tests/test_executor.py`: delete the `TestExecutorPubSubIntegration` class (every test method that exercises the `pubsub` parameter, including `test_init_accepts_pubsub_parameter`, the publish-channel tests, and the no-pubsub backward-compat tests) <!-- completed: 2026-04-11T12:05 -->
+- [x] Edit `client/src/hikyaku_client/output.py`: remove the `f"export HIKYAKU_AGENT_ID={data['agent_id']}"` line and the preceding `"# Use this agent ID for subsequent commands:"` line from `format_register`. The register output should end at the `name:` line <!-- completed: 2026-04-11T12:05 -->
+- [x] Edit `client/tests/test_cli.py`: update the register output test (line ~113) — remove the `assert "export HIKYAKU_AGENT_ID=" in result.output` line, update the test docstring to no longer mention HIKYAKU_AGENT_ID, and keep the assertions that `agent_id` appears in output and that `HIKYAKU_API_KEY` / `HIKYAKU_URL` export lines are NOT present <!-- completed: 2026-04-11T12:05 -->
 
 ### Step 8: Edit registry/pyproject.toml
 

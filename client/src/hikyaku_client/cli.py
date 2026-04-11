@@ -23,7 +23,9 @@ def _require_api_key(ctx: click.Context) -> None:
 
 
 @click.group()
-@click.option("--json", "json_output", is_flag=True, default=False, help="Output in JSON format")
+@click.option(
+    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format"
+)
 @click.pass_context
 def cli(ctx, json_output):
     """Hikyaku — CLI for the A2A message broker."""

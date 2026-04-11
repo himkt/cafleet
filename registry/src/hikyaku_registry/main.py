@@ -27,16 +27,10 @@ from hikyaku_registry.api.registry import (
     get_registry_store,
     registry_router,
 )
-from hikyaku_registry.api.subscribe import (
-    subscribe_router,
-    _get_pubsub,
-    _get_task_store as _get_subscribe_task_store,
-)
 from hikyaku_registry.auth import get_authenticated_agent
 from hikyaku_registry.config import settings
 from hikyaku_registry.db.engine import dispose_engine, get_sessionmaker
 from hikyaku_registry.executor import BrokerExecutor
-from hikyaku_registry.pubsub import PubSubManager
 from hikyaku_registry.registry_store import RegistryStore
 from hikyaku_registry.task_store import TaskStore
 from hikyaku_registry.webui_api import (
@@ -249,17 +243,14 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Hikyaku Broker", version="0.1.0", lifespan=lifespan)
     app.include_router(registry_router, prefix="/api/v1")
-    app.include_router(subscribe_router, prefix="/api/v1")
 
     if sessionmaker is None:
         sessionmaker = get_sessionmaker()
     registry_store = RegistryStore(sessionmaker)
     task_store = TaskStore(sessionmaker)
-    pubsub_manager = PubSubManager()
     executor = BrokerExecutor(
         registry_store=registry_store,
         task_store=task_store,
-        pubsub=pubsub_manager,
     )
 
     # Override dependencies so API endpoints use the same stores
@@ -271,8 +262,6 @@ def create_app(
 
     app.dependency_overrides[get_registry_store] = _get_store
     app.dependency_overrides[get_authenticated_agent] = _get_auth
-    app.dependency_overrides[_get_pubsub] = lambda: pubsub_manager
-    app.dependency_overrides[_get_subscribe_task_store] = lambda: task_store
 
     # WebUI router (must be included BEFORE StaticFiles mount)
     app.include_router(webui_router)
@@ -358,12 +347,7 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    # ``reload=True`` is a developer convenience and must NOT be used in
-    # production: uvicorn's reloader spawns worker subprocesses, which breaks
-    # PubSubManager's single-process fan-out (a publish in the reloader's
-    # worker cannot reach subscribers in a sibling worker). The canonical
-    # dev command is ``mise //registry:dev``; the entry below is only used
-    # for ``python -m hikyaku_registry.main`` ad-hoc runs.
+    # ``reload=True`` is a developer convenience for ad-hoc runs only.
     uvicorn.run(
         "hikyaku_registry.main:app",
         host=settings.broker_host,

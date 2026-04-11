@@ -7,8 +7,8 @@ with no Alembic overhead, and FK enforcement is guaranteed by a
 module-level ``connect`` listener that mirrors ``db/engine.py``.
 
 The fixture stack here is intentionally minimal — only what Step 5
-needs (RegistryStore). ``task_store`` and ``pubsub_manager`` fixtures
-land alongside Steps 6 and 7 respectively.
+needs (RegistryStore). The ``task_store`` fixture lands alongside
+Step 6.
 """
 
 import pytest

@@ -110,7 +110,7 @@ class TestRegisterCommand:
         assert API_KEY not in result.output
 
     def test_register_prints_export_statements(self, runner):
-        """Register output includes only HIKYAKU_AGENT_ID export."""
+        """Register output prints the agent_id and never leaks credentials."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -129,7 +129,8 @@ class TestRegisterCommand:
             )
 
         assert result.exit_code == 0
-        assert "export HIKYAKU_AGENT_ID=" in result.output
+        assert "agent_id:" in result.output
+        assert AGENT_ID in result.output
         assert "export HIKYAKU_API_KEY=" not in result.output
         assert "export HIKYAKU_URL=" not in result.output
 
@@ -285,7 +286,15 @@ class TestSendCommand:
         with patch("hikyaku_client.cli.api.send_message", mock):
             result = runner.invoke(
                 cli,
-                ["send", "--agent-id", AGENT_ID, "--to", target_id, "--text", "Hello from CLI"],
+                [
+                    "send",
+                    "--agent-id",
+                    AGENT_ID,
+                    "--to",
+                    target_id,
+                    "--text",
+                    "Hello from CLI",
+                ],
                 env=_auth_env(),
             )
 
@@ -967,7 +976,15 @@ class TestErrorHandling:
         ):
             result = runner.invoke(
                 cli,
-                ["send", "--agent-id", AGENT_ID, "--to", "nonexistent", "--text", "Hello"],
+                [
+                    "send",
+                    "--agent-id",
+                    AGENT_ID,
+                    "--to",
+                    "nonexistent",
+                    "--text",
+                    "Hello",
+                ],
                 env=_auth_env(),
             )
 
