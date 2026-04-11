@@ -1,6 +1,6 @@
 # Remove MCP Server and SSE Endpoint
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 45/45 tasks complete
 **Last Updated**: 2026-04-11
 
@@ -231,3 +231,4 @@ All three greps must return zero hits in production code. Historical design docs
 | Date | Changes |
 |------|---------|
 | 2026-04-11 | Initial draft. Scope expanded mid-clarification: SSE endpoint and `PubSubManager` are removed alongside `mcp-server/` because the MCP proxy was the only production consumer. |
+| 2026-04-11 | Implementation complete. 45/45 tasks across 13 steps. Scope expanded twice during execution: Step 1 gained a 7th task (CLI Option Sources column in ARCHITECTURE.md) and Step 4/Step 7 gained 4 tasks total (HIKYAKU_AGENT_ID dead code cleanup in SKILL.md, `client/src/hikyaku_client/output.py`, and `client/tests/test_cli.py`). Verification: 337 registry tests passed, 73 client tests passed, lint/format/typecheck green, MCP and SSE residue greps returned zero hits outside `design-docs/`/`vendor/`. PR #10 (Copilot review) flagged remaining SKILL.md env-var staleness exposed by the HIKYAKU_AGENT_ID removal; addressed in a follow-up commit. Branch `feat/remove-mcp-server`, 9 commits. |
