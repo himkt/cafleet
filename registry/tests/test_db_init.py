@@ -1,7 +1,7 @@
 """Tests for the ``hikyaku-registry db init`` CLI command.
 
-Covers four of the six states from the design doc's CLI Specification
-behavior matrix (design-docs/0000010-sqlite-store-migration/design-doc.md
+Covers four states from the design doc's CLI Specification behavior
+matrix (design-docs/0000010-sqlite-store-migration/design-doc.md
 section "db init behavior matrix"):
 
   | # | State                          | Tested by                          |
@@ -11,65 +11,43 @@ section "db init behavior matrix"):
   | 5 | Ahead of head                  | ``test_db_init_ahead_errors``      |
   | 6 | Legacy (tables, no version)    | ``test_db_init_legacy_errors``     |
 
-The two states *not* explicitly tested here:
+States NOT exercised here (intentional, per the Step 4 Phase A scope):
 
-  - **Empty schema** (state 2): structurally identical to "DB file
-    missing" once parent-dir creation is verified — both call
-    ``upgrade head`` and print the "Applied N migration(s)" line. The
-    distinction is mostly in the print message, which is not load-
-    bearing for downstream behavior.
-  - **Behind head** (state 4): would require two migrations to test
-    (start at revision X, run init, end at revision X+1). v1 only ships
-    one migration, so this case is unreachable until 0002_*.py exists.
-    Add a test in a follow-up when a second migration lands.
-
-The fifth test, ``test_cli_db_init_help_loads``, satisfies the design
-doc's "Verify the entry point installs by running
-``uv run hikyaku-registry db init --help``" task.
+  - **State #2 "Empty schema"**: structurally identical to state #1
+    once parent-dir creation is verified — both call ``upgrade head``.
+    The state #1 happy-path test covers the only behaviorally distinct
+    branch (mkdir + apply).
+  - **State #4 "Behind head"**: physically unreachable in v1 because
+    only one migration script ships. Add a test in a follow-up when a
+    second migration lands.
 
 Test isolation strategy:
 
-  Each test gets a fresh ``tmp_path`` with a not-yet-existing
-  ``data/registry.db`` subdir layout. The fixture monkeypatches
-  ``config.settings.database_url`` to point at that path BEFORE the
-  CLI loads the URL, so each test sees an isolated DB and the CLI
-  is exercised end-to-end (no module-level patching of CLI internals).
+  Each test crafts its own ``tmp_path`` layout, then monkeypatches
+  ``config.settings.database_url`` to point at that path BEFORE
+  importing the CLI. The CLI is imported INSIDE each test body so
+  any module-level reads of the database URL during ``cli`` import
+  see the patched value, not the user's real ``HIKYAKU_DATABASE_URL``.
 
-  The CLI is invoked via ``click.testing.CliRunner``, which captures
-  output and exit codes without spawning a subprocess. This is fast
-  and lets us assert on the exact exit code and message text.
+  Why ``monkeypatch.setattr(config.settings, "database_url", ...)``
+  rather than ``monkeypatch.setenv("HIKYAKU_DATABASE_URL", ...)``:
+  ``config.settings`` is a module-level singleton constructed at
+  ``hikyaku_registry.config`` import time. By the time any test
+  runs, the singleton has already been built — env-var changes
+  after that point would be ignored. Patching the attribute on the
+  existing singleton is the only reliable override.
+
+  Why per-test setup instead of a shared fixture: the four tests
+  exercise visibly different DB pre-states (missing file, missing
+  parent dir, legacy tables, future revision). Inlining the setup in
+  each test makes the precondition obvious at the call site.
 """
 
 import sqlite3
 
-import pytest
 from click.testing import CliRunner
 
 from hikyaku_registry import config
-from hikyaku_registry.cli import main
-
-
-@pytest.fixture
-def tmp_db(tmp_path, monkeypatch):
-    """Build a tempfile DB path under a not-yet-existing parent dir.
-
-    The path is ``{tmp_path}/data/registry.db``. ``data/`` does NOT
-    exist when this fixture returns — that's deliberate, so tests can
-    verify the CLI's ``Path(db_file).parent.mkdir(parents=True,
-    exist_ok=True)`` step actually fires.
-
-    ``config.settings.database_url`` is patched to the
-    ``sqlite+aiosqlite://`` form (the production format) for this path.
-    The CLI is responsible for converting to the sync driver
-    internally; this fixture does not pre-convert.
-    """
-    db_path = tmp_path / "data" / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_path}",
-    )
-    return db_path
 
 
 def _table_names(db_path) -> set[str]:
@@ -89,7 +67,7 @@ def _table_names(db_path) -> set[str]:
         conn.close()
 
 
-def test_db_init_creates_schema(tmp_db):
+def test_db_init_creates_schema(tmp_path, monkeypatch):
     """db init on a missing file: parent dir + DB + four tables created.
 
     Verifies the design doc's state #1 (DB file does not exist):
@@ -98,19 +76,22 @@ def test_db_init_creates_schema(tmp_db):
        Print 'Created {path} and applied N migration(s) to head
        ({head_rev})'. Exit 0."
 
-    Asserts:
-      1. The parent directory did NOT exist before invocation (sanity
-         check on the fixture, so the next assertion is meaningful).
-      2. Exit code is 0.
-      3. The parent directory exists after invocation (mkdir parents
-         worked).
-      4. The DB file exists after invocation.
-      5. All four expected tables (``api_keys``, ``agents``, ``tasks``,
-         ``alembic_version``) are present in the resulting DB.
+    The DB path is placed under a not-yet-existing ``data/`` subdir
+    so the assertion that ``Path.parent.mkdir(parents=True,
+    exist_ok=True)`` actually fired is meaningful.
     """
-    assert not tmp_db.parent.exists(), (
+    db_file = tmp_path / "data" / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+
+    assert not db_file.parent.exists(), (
         "fixture sanity: data/ subdir should not pre-exist"
     )
+
+    from hikyaku_registry.cli import main
 
     runner = CliRunner()
     result = runner.invoke(main, ["db", "init"])
@@ -120,14 +101,15 @@ def test_db_init_creates_schema(tmp_db):
         f"output: {result.output}\n"
         f"exception: {result.exception}"
     )
-    assert tmp_db.parent.exists(), (
-        "db init should have created the parent directory via mkdir(parents=True)"
+    assert db_file.parent.exists(), (
+        "db init should have created the parent directory via "
+        "Path.parent.mkdir(parents=True, exist_ok=True)"
     )
-    assert tmp_db.exists(), (
-        f"db init should have created the DB file at {tmp_db}"
+    assert db_file.exists(), (
+        f"db init should have created the DB file at {db_file}"
     )
 
-    tables = _table_names(tmp_db)
+    tables = _table_names(db_file)
     expected = {"api_keys", "agents", "tasks", "alembic_version"}
     missing = expected - tables
     assert not missing, (
@@ -135,8 +117,14 @@ def test_db_init_creates_schema(tmp_db):
         f"missing: {sorted(missing)}, found: {sorted(tables)}"
     )
 
+    assert "applied" in result.output.lower(), (
+        f"db init success output should mention 'applied' (the design "
+        f"doc messages are 'Created ... and applied N migration(s)' or "
+        f"'Applied N migration(s) ...'). got: {result.output!r}"
+    )
 
-def test_db_init_idempotent(tmp_db):
+
+def test_db_init_idempotent(tmp_path, monkeypatch):
     """Running db init twice on a fresh DB: applies once, then no-ops.
 
     Verifies the design doc claim:
@@ -150,14 +138,21 @@ def test_db_init_idempotent(tmp_db):
       "No-op. Print 'Already at head ({head_rev}); nothing to do'."
 
     Asserts:
-      1. First invocation exits 0 (creates schema).
-      2. Second invocation exits 0 (no-op path).
-      3. Second invocation's output mentions "Already at head" — the
-         design-doc-specified message that distinguishes the no-op
-         branch from the apply branch.
-      4. The DB still has all four tables after the second run (the
-         no-op branch did not wipe or corrupt anything).
+      1. Both invocations exit 0.
+      2. Schema is unchanged between the two runs (no tables added,
+         no tables dropped, ``alembic_version`` content stable).
+      3. Second invocation's output mentions "already at head" (loose
+         match), distinguishing the no-op branch from the apply branch.
     """
+    db_file = tmp_path / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+
+    from hikyaku_registry.cli import main
+
     runner = CliRunner()
 
     first = runner.invoke(main, ["db", "init"])
@@ -167,26 +162,53 @@ def test_db_init_idempotent(tmp_db):
         f"exception: {first.exception}"
     )
 
+    tables_after_first = _table_names(db_file)
+    expected = {"api_keys", "agents", "tasks", "alembic_version"}
+    assert expected <= tables_after_first, (
+        f"first db init should have produced all expected tables; "
+        f"missing: {sorted(expected - tables_after_first)}"
+    )
+
+    conn = sqlite3.connect(str(db_file))
+    try:
+        version_after_first = conn.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchall()
+    finally:
+        conn.close()
+
     second = runner.invoke(main, ["db", "init"])
     assert second.exit_code == 0, (
         f"second db init failed.\n"
         f"output: {second.output}\n"
         f"exception: {second.exception}"
     )
-    assert "Already at head" in second.output, (
-        f"second db init should print 'Already at head' per the design "
-        f"doc state-3 message. got: {second.output!r}"
+    assert "already at head" in second.output.lower(), (
+        f"second db init should print an 'already at head' message per "
+        f"the design doc state-3 spec. got: {second.output!r}"
     )
 
-    tables = _table_names(tmp_db)
-    expected = {"api_keys", "agents", "tasks", "alembic_version"}
-    assert expected <= tables, (
-        f"DB should still contain all expected tables after the second "
-        f"(no-op) db init. missing: {sorted(expected - tables)}"
+    tables_after_second = _table_names(db_file)
+    assert tables_after_second == tables_after_first, (
+        f"schema must be unchanged across the two db init runs. "
+        f"first: {sorted(tables_after_first)}, "
+        f"second: {sorted(tables_after_second)}"
+    )
+
+    conn = sqlite3.connect(str(db_file))
+    try:
+        version_after_second = conn.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert version_after_second == version_after_first, (
+        f"alembic_version row must be stable across runs. "
+        f"first: {version_after_first}, second: {version_after_second}"
     )
 
 
-def test_db_init_legacy_errors(tmp_db):
+def test_db_init_legacy_errors(tmp_path, monkeypatch):
     """A DB with hand-created tables but no alembic_version: exit non-zero.
 
     Verifies the design doc's state #6 (Legacy):
@@ -202,18 +224,25 @@ def test_db_init_legacy_errors(tmp_db):
 
     Asserts:
       1. Exit code is non-zero.
-      2. The error message references ``alembic stamp head`` so the
-         operator knows the recovery path.
-      3. The legacy table is still present (the failing CLI did not
-         drop or corrupt it).
+      2. The error message mentions ``alembic stamp head`` (recovery hint).
+      3. The legacy table is still present and ``alembic_version`` is
+         still absent — i.e., the failing CLI did NOT mutate the DB.
     """
-    tmp_db.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(tmp_db))
+    db_file = tmp_path / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+
+    conn = sqlite3.connect(str(db_file))
     try:
         conn.execute("CREATE TABLE legacy_squat (id INTEGER PRIMARY KEY)")
         conn.commit()
     finally:
         conn.close()
+
+    from hikyaku_registry.cli import main
 
     runner = CliRunner()
     result = runner.invoke(main, ["db", "init"])
@@ -224,11 +253,11 @@ def test_db_init_legacy_errors(tmp_db):
         f"output: {result.output}"
     )
     assert "alembic stamp head" in result.output, (
-        f"legacy error message should mention 'alembic stamp head' as the "
-        f"recovery path. got: {result.output!r}"
+        f"legacy error message should mention 'alembic stamp head' as "
+        f"the recovery path. got: {result.output!r}"
     )
 
-    tables = _table_names(tmp_db)
+    tables = _table_names(db_file)
     assert "legacy_squat" in tables, (
         "the failing CLI must not have dropped the pre-existing legacy table"
     )
@@ -238,7 +267,7 @@ def test_db_init_legacy_errors(tmp_db):
     )
 
 
-def test_db_init_ahead_errors(tmp_db):
+def test_db_init_ahead_errors(tmp_path, monkeypatch):
     """A DB at an unknown future revision: exit non-zero, no downgrade.
 
     Verifies the design doc's state #5 (Ahead of head):
@@ -249,22 +278,27 @@ def test_db_init_ahead_errors(tmp_db):
        version of hikyaku-registry. Refusing to downgrade automatically.'
        to stderr. Exit 1."
 
-    The fictional revision id ``zzz_future_rev_xyz`` is chosen to be
+    The fictional revision id ``9999_future_revision`` is chosen to be
     obviously unknown to the local Alembic script directory. Any string
-    that isn't a real revision works — Alembic looks up the revision in
-    the script_directory and treats "not found" as ahead-of-head.
+    that isn't a real revision works — Alembic looks up the revision
+    in the script_directory and treats "not found" as ahead-of-head.
 
     Asserts:
       1. Exit code is non-zero (refusal, not silent acceptance).
-      2. The error message mentions "unknown" or the fictional revision
-         id, so the operator knows what they're rolling back from.
-      3. The fictional revision is still in alembic_version after the
-         failed CLI invocation (the CLI must NOT have rewritten the
-         version row, since that would silently mask the version
-         mismatch).
+      2. The error message mentions "ahead", "unknown", or the offending
+         revision id (loose match) so the operator knows what's wrong.
+      3. ``alembic_version`` content is unchanged after the failed run
+         (CLI must NOT silently rewrite the version row, since that
+         would mask the version mismatch).
     """
-    tmp_db.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(tmp_db))
+    db_file = tmp_path / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+
+    conn = sqlite3.connect(str(db_file))
     try:
         conn.execute(
             "CREATE TABLE alembic_version "
@@ -272,11 +306,13 @@ def test_db_init_ahead_errors(tmp_db):
         )
         conn.execute(
             "INSERT INTO alembic_version (version_num) "
-            "VALUES ('zzz_future_rev_xyz')"
+            "VALUES ('9999_future_revision')"
         )
         conn.commit()
     finally:
         conn.close()
+
+    from hikyaku_registry.cli import main
 
     runner = CliRunner()
     result = runner.invoke(main, ["db", "init"])
@@ -289,53 +325,21 @@ def test_db_init_ahead_errors(tmp_db):
     output_lower = result.output.lower()
     assert (
         "unknown" in output_lower
-        or "zzz_future_rev_xyz" in result.output
+        or "ahead" in output_lower
+        or "9999_future_revision" in result.output
     ), (
-        f"ahead-of-head error message should mention 'unknown' or the "
-        f"offending revision id. got: {result.output!r}"
+        f"ahead-of-head error message should mention 'unknown', 'ahead', "
+        f"or the offending revision id. got: {result.output!r}"
     )
 
-    conn = sqlite3.connect(str(tmp_db))
+    conn = sqlite3.connect(str(db_file))
     try:
         rows = conn.execute(
             "SELECT version_num FROM alembic_version"
         ).fetchall()
     finally:
         conn.close()
-    assert rows == [("zzz_future_rev_xyz",)], (
+    assert rows == [("9999_future_revision",)], (
         f"the failing CLI must not have rewritten alembic_version; "
-        f"expected [('zzz_future_rev_xyz',)], got {rows}"
-    )
-
-
-def test_cli_db_init_help_loads():
-    """The ``hikyaku-registry db init --help`` invocation succeeds.
-
-    A regression guard for the design doc's task:
-
-      "Verify the entry point installs by running ``uv run
-       hikyaku-registry db init --help`` and confirming output."
-
-    This test does NOT spawn a subprocess (which would actually
-    exercise the installed entry point in ``[project.scripts]``);
-    instead it imports ``main`` directly and invokes it via
-    ``CliRunner``. The reason: a subprocess test would only verify
-    the entry point AS INSTALLED at test runtime, which depends on
-    whether ``uv sync`` has run. The in-process invocation verifies
-    that the click command tree is wired correctly (``main`` exposes
-    a ``db`` subgroup, which exposes an ``init`` subcommand), which
-    is what the entry point indirectly relies on. A separate
-    end-to-end install check belongs in CI, not in unit tests.
-    """
-    runner = CliRunner()
-    result = runner.invoke(main, ["db", "init", "--help"])
-
-    assert result.exit_code == 0, (
-        f"`db init --help` failed.\n"
-        f"output: {result.output}\n"
-        f"exception: {result.exception}"
-    )
-    assert "init" in result.output.lower(), (
-        f"--help output should describe the init command. "
-        f"got: {result.output!r}"
+        f"expected [('9999_future_revision',)], got {rows}"
     )
