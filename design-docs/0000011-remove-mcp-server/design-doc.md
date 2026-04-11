@@ -1,7 +1,7 @@
 # Remove MCP Server and SSE Endpoint
 
 **Status**: Approved
-**Progress**: 16/41 tasks complete
+**Progress**: 21/45 tasks complete
 **Last Updated**: 2026-04-11
 
 ## Overview
@@ -71,6 +71,8 @@ Historical design docs `0000005`, `0000007`, `0000008`, and `0000009` remain unc
 | `registry/src/hikyaku_registry/api/__init__.py` | Already empty; no edit required. (Listed here only to confirm there is no `subscribe_router` re-export to remove.) |
 | `registry/tests/conftest.py` | Drop the `pubsub_manager` mention in the module docstring. |
 | `registry/tests/test_executor.py` | Delete `class TestExecutorPubSubIntegration` (lines ~1131 to end of class). The class only validates publish behavior that no longer exists. |
+| `client/src/hikyaku_client/output.py` | Remove the `export HIKYAKU_AGENT_ID={data['agent_id']}` line and the preceding `"# Use this agent ID for subsequent commands:"` comment line from `format_register`. `HIKYAKU_AGENT_ID` was consumed by the MCP server only; the CLI never reads it. |
+| `client/tests/test_cli.py` | Update the `register` output test to no longer assert `export HIKYAKU_AGENT_ID=` is present (and adjust the docstring). Keep the assertions that the raw `agent_id` value appears in output and that `HIKYAKU_API_KEY` / `HIKYAKU_URL` export lines are NOT present. |
 
 ### Files to edit (workspace / build / CI)
 
@@ -92,7 +94,7 @@ Historical design docs `0000005`, `0000007`, `0000008`, and `0000009` remain unc
 | `CLAUDE.md` | Drop the `mcp-server/` workspace bullet, the `hikyaku-mcp` package bullet, and "MCP Server: mcp + httpx + httpx-sse" from Tech Stack. |
 | `.claude/CLAUDE.md` | Same as `CLAUDE.md`: drop the `mcp-server/` workspace bullet, the `hikyaku-mcp` package bullet, and "MCP Server: mcp + httpx + httpx-sse" from Tech Stack. |
 | `.claude/rules/commands.md` | Drop `mise //mcp-server:test`, `mise //mcp-server:lint`, and `mise //mcp-server:dev` lines. |
-| `.claude/skills/hikyaku/SKILL.md` | Drop the entire "MCP Server (Transparent Proxy)" section. Drop the "Receiving real-time inbox notifications" When-to-Use bullet. Drop any reference to the MCP server in the workflow narrative. |
+| `.claude/skills/hikyaku/SKILL.md` | Drop the entire "MCP Server (Transparent Proxy)" section. Drop the "Receiving real-time inbox notifications" When-to-Use bullet. Drop any reference to the MCP server in the workflow narrative. Drop the `HIKYAKU_AGENT_ID` Environment Variables bullet and the `--agent-id` "Override HIKYAKU_AGENT_ID" Global Options bullet — `HIKYAKU_AGENT_ID` was MCP-only and is no longer consumed by any package. |
 
 ### `--workers=1` decision
 
@@ -166,10 +168,11 @@ All three greps must return zero hits in production code. Historical design docs
 
 ### Step 4: Update CLAUDE.md, .claude/, and skill docs
 
-- [ ] Edit `CLAUDE.md`: drop the `mcp-server/` workspace bullet, the `hikyaku-mcp` package bullet, and "MCP Server: mcp + httpx + httpx-sse" from the Tech Stack list <!-- completed: -->
-- [ ] Edit `.claude/CLAUDE.md`: same edits as `CLAUDE.md` <!-- completed: -->
-- [ ] Edit `.claude/rules/commands.md`: drop the `mise //mcp-server:test`, `mise //mcp-server:lint`, and `mise //mcp-server:dev` lines from the Commands table <!-- completed: -->
-- [ ] Edit `.claude/skills/hikyaku/SKILL.md`: delete the entire `## MCP Server (Transparent Proxy)` section, the "Receiving real-time inbox notifications" When-to-Use bullet, and any other MCP server narrative <!-- completed: -->
+- [x] Edit `CLAUDE.md`: drop the `mcp-server/` workspace bullet, the `hikyaku-mcp` package bullet, and "MCP Server: mcp + httpx + httpx-sse" from the Tech Stack list <!-- completed: 2026-04-11T11:20 -->
+- [x] Edit `.claude/CLAUDE.md`: same edits as `CLAUDE.md` <!-- completed: 2026-04-11T11:20 -->
+- [x] Edit `.claude/rules/commands.md`: drop the `mise //mcp-server:test`, `mise //mcp-server:lint`, and `mise //mcp-server:dev` lines from the Commands table <!-- completed: 2026-04-11T11:20 -->
+- [x] Edit `.claude/skills/hikyaku/SKILL.md`: delete the entire `## MCP Server (Transparent Proxy)` section, the "Receiving real-time inbox notifications" When-to-Use bullet, and any other MCP server narrative <!-- completed: 2026-04-11T11:20 -->
+- [x] Edit `.claude/skills/hikyaku/SKILL.md`: remove the `HIKYAKU_AGENT_ID` bullet from the "Environment Variables" section and the `--agent-id` "Override HIKYAKU_AGENT_ID" bullet from the "Global Options" section (both reference a dead env var) <!-- completed: 2026-04-11T11:30 -->
 
 ### Step 5: Delete the mcp-server package
 
@@ -189,6 +192,8 @@ All three greps must return zero hits in production code. Historical design docs
 - [ ] Edit `registry/src/hikyaku_registry/main.py`: remove the imports of `subscribe_router`, `_get_pubsub`, `_get_task_store as _get_subscribe_task_store`, and `PubSubManager`. Delete the `pubsub_manager = PubSubManager()` line and the `pubsub=pubsub_manager` argument to `BrokerExecutor(...)`. Delete the `app.include_router(subscribe_router, prefix="/api/v1")` line. Delete the `app.dependency_overrides[_get_pubsub]` and `app.dependency_overrides[_get_subscribe_task_store]` lines. Rewrite the `__main__` block's comment so it no longer mentions `PubSubManager` or the SSE fan-out — keep it as a short note about `reload=True` being a developer convenience only <!-- completed: -->
 - [ ] Edit `registry/tests/conftest.py`: remove the `pubsub_manager` mention in the module docstring (Step 7 reference no longer exists) <!-- completed: -->
 - [ ] Edit `registry/tests/test_executor.py`: delete the `TestExecutorPubSubIntegration` class (every test method that exercises the `pubsub` parameter, including `test_init_accepts_pubsub_parameter`, the publish-channel tests, and the no-pubsub backward-compat tests) <!-- completed: -->
+- [ ] Edit `client/src/hikyaku_client/output.py`: remove the `f"export HIKYAKU_AGENT_ID={data['agent_id']}"` line and the preceding `"# Use this agent ID for subsequent commands:"` line from `format_register`. The register output should end at the `name:` line <!-- completed: -->
+- [ ] Edit `client/tests/test_cli.py`: update the register output test (line ~113) — remove the `assert "export HIKYAKU_AGENT_ID=" in result.output` line, update the test docstring to no longer mention HIKYAKU_AGENT_ID, and keep the assertions that `agent_id` appears in output and that `HIKYAKU_API_KEY` / `HIKYAKU_URL` export lines are NOT present <!-- completed: -->
 
 ### Step 8: Edit registry/pyproject.toml
 
