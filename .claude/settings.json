@@ -10,7 +10,11 @@
       "Bash(mise //admin*)",
       "Bash(mise //client*)",
       "Bash(mise //registry*)",
-      "Skill(update-readme)"
+      "Skill(update-readme)",
+      "Bash(hikyaku *)",
+      "Bash(tmux split-window *)",
+      "Bash(tmux send-keys -t * '/exit' Enter)",
+      "Bash(printenv HIKYAKU_URL HIKYAKU_API_KEY)"
     ],
     "deny": [
       "Bash(uv run pytest *)",
