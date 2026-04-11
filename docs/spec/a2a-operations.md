@@ -27,7 +27,7 @@ The sender specifies routing in `Message.metadata`:
 All SendMessage operations enforce tenant isolation:
 
 - **Unicast**: The Broker verifies the destination agent's `api_key_hash` matches the sender's tenant. If the destination is in a different tenant, the Broker returns an "agent not found" JSON-RPC error (indistinguishable from the agent not existing).
-- **Broadcast (`*`)**: The Broker queries only the sender's tenant set (`tenant:{api_key_hash}:agents`) for the recipient list, instead of all active agents. Agents in other tenants never receive the broadcast.
+- **Broadcast (`*`)**: The Broker queries only the sender's tenant via `RegistryStore.list_active_agents(tenant_id)` (a single SQL `SELECT` against the `agents` table filtered by `tenant_id` and `status='active'`). Agents in other tenants never receive the broadcast.
 
 ### Unicast — Send
 
@@ -97,7 +97,7 @@ All SendMessage operations enforce tenant isolation:
 ### Broadcast — Send
 
 1. Agent A calls `SendMessage` with `metadata.destination = "*"`
-2. Broker queries `tenant:{api_key_hash}:agents` for same-tenant agents (excluding sender)
+2. Broker calls `RegistryStore.list_active_agents(tenant_id)` (single SQL query against `agents` filtered by `tenant_id` and `status='active'`) to enumerate same-tenant recipients (excluding sender)
 3. Broker creates N delivery Tasks (one per same-tenant active agent, excluding sender), each with `contextId = recipient_agent_id`
 4. Broker returns a summary Task to Agent A (state=`COMPLETED`) with Artifact listing `recipientCount` and `deliveryTaskIds`
 

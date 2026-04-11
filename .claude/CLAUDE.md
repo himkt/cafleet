@@ -23,17 +23,19 @@ A2A-native message broker + agent registry for coding agents.
 
 - **Design document**: `design-docs/0000001-a2a-registry-broker/design-doc.md` (Status: Approved)
 - **Design document**: `design-docs/0000002-access-control/design-doc.md` — Tenant isolation via shared API key (Status: Approved)
+- **Design document**: `design-docs/0000010-sqlite-store-migration/design-doc.md` — SQLite + SQLAlchemy + Alembic store migration; in-process Pub/Sub fan-out (Status: In Progress)
 - **Monorepo structure** (uv workspace):
-  - `registry/` — `hikyaku-registry` (FastAPI + Redis + a2a-sdk)
+  - `registry/` — `hikyaku-registry` (FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk)
   - `client/` — `hikyaku-client` (click + httpx + a2a-sdk)
   - `mcp-server/` — `hikyaku-mcp` (mcp + httpx + httpx-sse)
-- **CLI command**: `hikyaku`
+- **Registry CLI command**: `hikyaku-registry` (with `db init` for schema management)
+- **Client CLI command**: `hikyaku`
 - **MCP server command**: `hikyaku-mcp`
 
 ## Tech Stack
 
 - Python 3.12+ with uv workspace
-- Server: FastAPI + Redis + a2a-sdk
+- Server: FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk
 - CLI: click + httpx + a2a-sdk
 - MCP Server: mcp + httpx + httpx-sse
 

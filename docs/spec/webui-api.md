@@ -7,7 +7,7 @@ Base path: `/ui/api`
 The WebUI uses two authentication mechanisms:
 
 - **Auth0 JWT**: `Authorization: Bearer <auth0_jwt>` — required on all endpoints except `GET /ui/api/auth/config`. Validated server-side via Auth0 JWKS.
-- **Tenant selection**: `X-Tenant-Id: <api_key_hash>` — required on tenant-scoped endpoints (agents, inbox, sent, send). The backend verifies that the `X-Tenant-Id` belongs to the authenticated Auth0 user by checking `account:{sub}:keys` set membership.
+- **Tenant selection**: `X-Tenant-Id: <api_key_hash>` — required on tenant-scoped endpoints (agents, inbox, sent, send). The backend verifies that the `X-Tenant-Id` belongs to the authenticated Auth0 user by calling `RegistryStore.is_key_owner(api_key_hash, owner_sub)` (single `SELECT` against the `api_keys` table).
 
 No server-side session. The Auth0 SPA SDK manages tokens in the browser.
 
@@ -119,7 +119,7 @@ The `body` field is extracted from the task's first artifact's first text part. 
 
 ### GET /ui/api/agents/{agent_id}/sent — Sent Messages
 
-Returns messages sent by the agent (task IDs from `tasks:sender:{agent_id}`), excluding `broadcast_summary` type tasks. Ordered newest first.
+Returns messages sent by the agent (single SQL query against `tasks` filtered by `from_agent_id` and ordered by `status_timestamp DESC`, served by `idx_tasks_from_agent_status_ts`), excluding `broadcast_summary` type tasks. Ordered newest first.
 
 **Request**: `Authorization: Bearer <auth0_jwt>` + `X-Tenant-Id: <api_key_hash>` headers.
 

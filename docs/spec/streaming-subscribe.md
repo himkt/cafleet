@@ -45,18 +45,29 @@ data: <A2A Task JSON>
 | Keepalive | `: keepalive\n\n` comment every 30 seconds |
 | Idle timeout | None — connection stays open until client disconnects |
 | Server shutdown | Graceful close via ASGI lifespan; unsubscribe all Pub/Sub channels |
-| Client disconnect | Server detects closed connection, unsubscribes from Redis Pub/Sub, cleans up |
+| Client disconnect | Server detects closed connection, unsubscribes from the in-process channel, drops the queue |
 | Reconnection | No server-side replay; client uses `poll --since` to catch up on missed messages |
 
-## Redis Pub/Sub Integration
+## In-Process Pub/Sub Integration
 
-When `BrokerExecutor` delivers a message (unicast or broadcast), it publishes the `task_id` to the recipient's Redis Pub/Sub channel.
+When `BrokerExecutor` delivers a message (unicast or broadcast), it publishes the `task_id` to the recipient's in-process Pub/Sub channel managed by `PubSubManager`.
 
 - **Channel pattern**: `inbox:{agent_id}`
 - **Payload**: `task_id` only (lightweight)
-- **Flow**: Executor saves Task to Redis, then publishes `task_id` to `inbox:{recipient_agent_id}`. The SSE endpoint subscriber receives the notification, fetches the full Task from Redis, and streams it as an SSE event.
+- **Implementation**: `PubSubManager` is an in-process fan-out built on `asyncio.Queue`. Each subscriber gets a private queue; `publish(channel, task_id)` calls `put_nowait` on every queue registered for that channel.
+- **Flow**: Executor saves the Task to SQLite via `TaskStore.save(...)`, then publishes `task_id` to `inbox:{recipient_agent_id}`. The SSE endpoint subscriber receives the notification, fetches the full Task from SQLite via `TaskStore.get(...)`, and streams it as an SSE event.
 
-Publishing only the `task_id` keeps Pub/Sub payloads small. Fetching the full Task from Redis ensures the SSE event reflects the current stored state.
+Publishing only the `task_id` keeps payloads small. Fetching the full Task from SQLite ensures the SSE event reflects the current stored state.
+
+### Single-worker constraint
+
+The fan-out lives in the worker's memory. The registry server **must** run with `uvicorn --workers=1` (the default). Multi-worker mode silently breaks delivery because a publish in worker A cannot reach a subscriber in worker B — SQLite has no equivalent of Redis Pub/Sub or PostgreSQL `LISTEN/NOTIFY`. CLI invocations of `hikyaku-registry` are unconstrained: they connect to SQLite directly and SQLite handles cross-process locking.
+
+The constraint is enforced by documentation only in v1; there is no startup-time guard.
+
+### Queue policy
+
+Subscriber queues are unbounded `asyncio.Queue` instances. `event_generator` polls `request.is_disconnected()` every 0.5 seconds and unsubscribes on disconnect, bounding the leak from stalled clients to roughly half a second of in-flight messages per orphan. Bounded queues with drop-oldest semantics are tracked as future work.
 
 ## MCP Server (Transparent Proxy)
 
