@@ -1,296 +1,407 @@
-"""Tests for pubsub.py — PubSubManager for Redis Pub/Sub notifications.
+"""Tests for the in-process ``PubSubManager``.
 
-Covers: publish to channel, subscribe to channel, unsubscribe from channel,
-multi-channel isolation (subscribers only receive their own messages).
+Replaces the fakeredis-based test suite with one that targets the new
+``asyncio.Queue``-backed fan-out described in design doc
+§"In-Process Pub/Sub Design"
+(design-docs/0000010-sqlite-store-migration/design-doc.md).
 
-Channel pattern: inbox:{agent_id}
-Payload: task_id string (lightweight; full Task fetched separately)
+Two regression tests are pulled verbatim from the doc's Testing
+Strategy table:
+
+  | Test                                     | Verifies                |
+  |------------------------------------------|-------------------------|
+  | ``test_pubsub_fanout_two_subscribers``   | Two subscribers on the  |
+  |                                          | same channel both       |
+  |                                          | receive a published msg |
+  | ``test_pubsub_unsubscribe_releases_queue`` | After unsubscribe the |
+  |                                          | channel entry is        |
+  |                                          | removed and a republish |
+  |                                          | does not raise          |
+
+The rest of the tests exercise the narrow public API the Programmer
+will expose in Phase B:
+
+  * ``PubSubManager()``                            — no-arg constructor
+  * ``publish(channel, message) -> None``          — sync-ish fan-out
+  * ``subscribe(channel) -> _Subscription``        — async iterator factory
+  * ``unsubscribe(channel, queue) -> None``        — remove one queue
+
+Why private state introspection is OK here
+------------------------------------------
+
+Two tests (``test_pubsub_unsubscribe_releases_queue`` and
+``test_unsubscribe_one_of_two_keeps_channel``) read
+``manager._subscribers`` directly to verify channel cleanup. This is an
+intentional coupling to the doc-specified internal shape:
+
+    self._subscribers: dict[str, set[asyncio.Queue[str]]]
+
+The design doc fixes this dict type as part of the contract (§"PubSubManager
+shape"), so treating it as observable state in tests is legitimate. The
+same lookup is also used to recover a queue reference for the
+``unsubscribe(channel, queue)`` call, because the ``_Subscription``
+wrapper is specified only in terms of its async-iterator protocol —
+there is no public ``.queue`` accessor guaranteed by the design doc.
+
+Timeouts
+--------
+
+Every ``__anext__`` call is wrapped in ``asyncio.wait_for`` with a
+1-second timeout. A hanging test would otherwise block forever if the
+fan-out were broken (the old Redis version had a 1-second blocking
+``get_message`` timeout that naturally unblocked; the new in-process
+version uses ``queue.get()`` which blocks indefinitely).
 """
 
 import asyncio
+import inspect
 
 import pytest
-import fakeredis.aioredis
 
 from hikyaku_registry.pubsub import PubSubManager
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-async def redis_client():
-    """Provide a fake async Redis client for testing."""
-    client = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    yield client
-    await client.aclose()
+async def _next_msg(subscription, timeout: float = 1.0) -> str:
+    """Pull one message off a subscription with a hard timeout.
+
+    Used instead of ``async for ... break`` so a broken fan-out fails
+    fast with ``TimeoutError`` rather than hanging the whole suite.
+    """
+    return await asyncio.wait_for(subscription.__anext__(), timeout=timeout)
 
 
-@pytest.fixture
-async def pubsub(redis_client):
-    """Provide a PubSubManager instance with fake Redis."""
-    return PubSubManager(redis_client)
+def _any_queue_for(manager: PubSubManager, channel: str):
+    """Return an arbitrary queue registered under ``channel``.
+
+    Used by unsubscribe tests to recover a queue reference for the
+    doc-specified ``unsubscribe(channel, queue)`` signature. Treats
+    ``manager._subscribers[channel]`` as read-only observable state.
+    """
+    return next(iter(manager._subscribers[channel]))
 
 
 # ---------------------------------------------------------------------------
-# Publish
+# Constructor
+# ---------------------------------------------------------------------------
+
+
+class TestConstructor:
+    """The new constructor takes no arguments — no Redis client to inject."""
+
+    def test_takes_no_arguments(self):
+        """``PubSubManager()`` is callable with zero positional args.
+
+        The old Redis-backed version took a ``redis`` client. The new
+        in-process version owns an internal ``_subscribers`` dict and
+        needs nothing from the caller. This test is a structural check:
+        if the signature regresses (someone accidentally re-adds a
+        required arg), construction raises and this test fails.
+        """
+        manager = PubSubManager()
+        assert manager is not None
+
+    def test_constructor_signature_has_only_self(self):
+        """``__init__`` has no required parameters beyond ``self``."""
+        sig = inspect.signature(PubSubManager.__init__)
+        required = [
+            p
+            for p in sig.parameters.values()
+            if p.name != "self"
+            and p.default is inspect.Parameter.empty
+            and p.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+        ]
+        assert required == [], (
+            f"PubSubManager.__init__ must accept no required args; "
+            f"got required params: {[p.name for p in required]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# publish
 # ---------------------------------------------------------------------------
 
 
 class TestPublish:
-    """Tests for PubSubManager.publish — publishing task_id to a channel."""
+    """publish happy path + no-subscriber no-op."""
 
-    @pytest.mark.asyncio
-    async def test_publish_sends_message_to_channel(self, redis_client, pubsub):
-        """publish() delivers task_id to the specified Redis Pub/Sub channel."""
-        channel = "inbox:agent-001"
+    async def test_publish_to_unknown_channel_is_noop(self):
+        """Publishing to a channel with no subscribers must not raise.
 
-        # Subscribe using raw Redis to verify publish works
-        raw_pubsub = redis_client.pubsub()
-        await raw_pubsub.subscribe(channel)
-        # Consume the subscribe confirmation message
-        await raw_pubsub.get_message(timeout=1)
+        This is the "republish does not raise" half of
+        ``test_pubsub_unsubscribe_releases_queue`` asserted in isolation
+        — without the prior subscribe/unsubscribe, on a fresh manager.
+        The in-process fan-out must treat "no subscribers" as a silent
+        no-op to match the Redis ``PUBLISH`` semantic (which just
+        returns 0).
+        """
+        manager = PubSubManager()
+        await manager.publish("inbox:nobody-home", "task-drop")
 
-        await pubsub.publish(channel, "task-abc-123")
+    async def test_publish_delivers_to_single_subscriber(self):
+        """A single subscriber receives the published message unchanged."""
+        manager = PubSubManager()
+        subscription = await manager.subscribe("inbox:solo")
 
-        msg = await raw_pubsub.get_message(timeout=1)
-        assert msg is not None
-        assert msg["type"] == "message"
-        assert msg["data"] == "task-abc-123"
-        assert msg["channel"] == channel
+        await manager.publish("inbox:solo", "task-solo-1")
 
-        await raw_pubsub.unsubscribe(channel)
-        await raw_pubsub.aclose()
-
-    @pytest.mark.asyncio
-    async def test_publish_to_correct_channel(self, redis_client, pubsub):
-        """publish() targets the exact channel name provided."""
-        channel_a = "inbox:agent-aaa"
-        channel_b = "inbox:agent-bbb"
-
-        raw_pubsub_a = redis_client.pubsub()
-        raw_pubsub_b = redis_client.pubsub()
-        await raw_pubsub_a.subscribe(channel_a)
-        await raw_pubsub_b.subscribe(channel_b)
-        await raw_pubsub_a.get_message(timeout=1)
-        await raw_pubsub_b.get_message(timeout=1)
-
-        # Publish only to channel_a
-        await pubsub.publish(channel_a, "task-only-a")
-
-        msg_a = await raw_pubsub_a.get_message(timeout=1)
-        msg_b = await raw_pubsub_b.get_message(timeout=1)
-
-        assert msg_a is not None
-        assert msg_a["data"] == "task-only-a"
-        assert msg_b is None  # channel_b should not receive anything
-
-        await raw_pubsub_a.unsubscribe(channel_a)
-        await raw_pubsub_b.unsubscribe(channel_b)
-        await raw_pubsub_a.aclose()
-        await raw_pubsub_b.aclose()
-
-    @pytest.mark.asyncio
-    async def test_publish_payload_is_task_id_string(self, redis_client, pubsub):
-        """Payload published is just the task_id string, not full Task JSON."""
-        channel = "inbox:agent-002"
-
-        raw_pubsub = redis_client.pubsub()
-        await raw_pubsub.subscribe(channel)
-        await raw_pubsub.get_message(timeout=1)
-
-        task_id = "550e8400-e29b-41d4-a716-446655440000"
-        await pubsub.publish(channel, task_id)
-
-        msg = await raw_pubsub.get_message(timeout=1)
-        assert msg["data"] == task_id
-
-        await raw_pubsub.unsubscribe(channel)
-        await raw_pubsub.aclose()
+        msg = await _next_msg(subscription)
+        assert msg == "task-solo-1"
 
 
 # ---------------------------------------------------------------------------
-# Subscribe
+# subscribe
 # ---------------------------------------------------------------------------
 
 
 class TestSubscribe:
-    """Tests for PubSubManager.subscribe — subscribing to a channel."""
+    """subscribe returns an async-iterator-compatible _Subscription."""
 
-    @pytest.mark.asyncio
-    async def test_subscribe_yields_published_messages(self, pubsub):
-        """subscribe() returns an async iterator that yields published messages."""
-        channel = "inbox:agent-sub-001"
-        received = []
+    async def test_subscribe_returns_async_iterator(self):
+        """The return value implements the async-iterator protocol.
 
-        subscription = await pubsub.subscribe(channel)
+        The design doc explicitly requires ``_Subscription`` to preserve
+        the async-iterator interface so ``event_generator`` in
+        ``api/subscribe.py`` does not need a structural change. This
+        test guards that contract: ``__aiter__`` and ``__anext__`` must
+        both be defined.
+        """
+        manager = PubSubManager()
+        subscription = await manager.subscribe("inbox:iter-check")
 
-        # Publish a message after subscribing
-        await pubsub.publish(channel, "task-sub-1")
+        assert hasattr(subscription, "__aiter__"), (
+            "_Subscription must implement __aiter__ for `async for` support"
+        )
+        assert hasattr(subscription, "__anext__"), (
+            "_Subscription must implement __anext__ for async iteration"
+        )
 
-        # Read from the subscription
-        async for msg in subscription:
-            received.append(msg)
-            break  # Just get one message
+    async def test_subscribe_yields_messages_in_publish_order(self):
+        """Three publishes are yielded in FIFO order on the subscription.
 
-        assert len(received) == 1
-        assert received[0] == "task-sub-1"
+        ``asyncio.Queue`` is FIFO-by-default, so this test also guards
+        against a future accidental switch to ``LifoQueue`` or
+        ``PriorityQueue``.
+        """
+        manager = PubSubManager()
+        subscription = await manager.subscribe("inbox:ordered")
 
-    @pytest.mark.asyncio
-    async def test_subscribe_yields_multiple_messages_in_order(self, pubsub):
-        """subscribe() yields messages in the order they were published."""
-        channel = "inbox:agent-sub-002"
-        received = []
+        await manager.publish("inbox:ordered", "task-1")
+        await manager.publish("inbox:ordered", "task-2")
+        await manager.publish("inbox:ordered", "task-3")
 
-        subscription = await pubsub.subscribe(channel)
-
-        await pubsub.publish(channel, "task-first")
-        await pubsub.publish(channel, "task-second")
-        await pubsub.publish(channel, "task-third")
-
-        count = 0
-        async for msg in subscription:
-            received.append(msg)
-            count += 1
-            if count >= 3:
-                break
-
-        assert received == ["task-first", "task-second", "task-third"]
-
-    @pytest.mark.asyncio
-    async def test_subscribe_only_receives_after_subscription(self, pubsub):
-        """Messages published before subscribe() are not received."""
-        channel = "inbox:agent-sub-003"
-
-        # Publish before subscribing
-        await pubsub.publish(channel, "task-before")
-
-        subscription = await pubsub.subscribe(channel)
-
-        # Publish after subscribing
-        await pubsub.publish(channel, "task-after")
-
-        async for msg in subscription:
-            assert msg == "task-after"
-            break
+        received = [
+            await _next_msg(subscription),
+            await _next_msg(subscription),
+            await _next_msg(subscription),
+        ]
+        assert received == ["task-1", "task-2", "task-3"]
 
 
 # ---------------------------------------------------------------------------
-# Unsubscribe
+# Fan-out — design-doc regression test
+# ---------------------------------------------------------------------------
+
+
+class TestFanout:
+    """Fan-out to multiple subscribers on the same channel."""
+
+    async def test_pubsub_fanout_two_subscribers(self):
+        """Two subscribers on the same channel both receive a published msg.
+
+        This is the exact regression test named in the design doc
+        Testing Strategy table. The in-process fan-out must iterate
+        over ALL queues registered under a given channel and
+        ``put_nowait`` the message on each — not just the first one.
+
+        The previous Redis Pub/Sub version got this for free (Redis
+        does the fan-out inside the server). The asyncio.Queue version
+        has to do it explicitly, which is exactly the code path this
+        test exercises.
+        """
+        manager = PubSubManager()
+        sub_a = await manager.subscribe("inbox:fan")
+        sub_b = await manager.subscribe("inbox:fan")
+
+        await manager.publish("inbox:fan", "task-fanout")
+
+        msg_a = await _next_msg(sub_a)
+        msg_b = await _next_msg(sub_b)
+
+        assert msg_a == "task-fanout", (
+            f"first subscriber should receive fanout message; got {msg_a!r}"
+        )
+        assert msg_b == "task-fanout", (
+            f"second subscriber should receive fanout message; got {msg_b!r}"
+        )
+
+    async def test_fanout_registers_distinct_queues(self):
+        """Two subscribes on the same channel create two independent queues.
+
+        Guards against an optimization-gone-wrong where the manager
+        reuses a single queue per channel (which would break the
+        fan-out because each message would be delivered to only one
+        subscriber).
+        """
+        manager = PubSubManager()
+        await manager.subscribe("inbox:distinct")
+        await manager.subscribe("inbox:distinct")
+
+        queues = manager._subscribers["inbox:distinct"]
+        assert len(queues) == 2, (
+            f"two subscribe() calls must register two distinct queues; "
+            f"got {len(queues)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# unsubscribe — design-doc regression test
 # ---------------------------------------------------------------------------
 
 
 class TestUnsubscribe:
-    """Tests for PubSubManager.unsubscribe — stopping message reception."""
+    """unsubscribe cleanup + post-unsubscribe publish safety."""
 
-    @pytest.mark.asyncio
-    async def test_unsubscribe_stops_receiving_messages(self, pubsub):
-        """After unsubscribe(), no more messages are received on that channel."""
-        channel = "inbox:agent-unsub-001"
-        received = []
+    async def test_pubsub_unsubscribe_releases_queue(self):
+        """After unsubscribing the only subscriber, the channel entry is gone
+        and a republish does not raise.
 
-        subscription = await pubsub.subscribe(channel)
+        This is the exact regression test named in the design doc
+        Testing Strategy table. It asserts TWO invariants in one place:
 
-        # Publish and receive one message
-        await pubsub.publish(channel, "task-before-unsub")
-        async for msg in subscription:
-            received.append(msg)
-            break
+          1. ``_subscribers[channel]`` empties and the channel key is
+             popped from the dict (memory hygiene — abandoned channels
+             MUST not accumulate).
+          2. Publishing to the now-empty channel is a silent no-op
+             (matches the Redis ``PUBLISH`` to-no-subscribers semantic).
 
-        assert received == ["task-before-unsub"]
+        If invariant 1 fails, the manager leaks channel entries
+        forever — a long-running server would slowly grow this dict.
+        If invariant 2 fails, the SSE finally-block cleanup in
+        ``event_generator`` would raise if a late publish came in
+        after the subscriber disconnected, which would spam error logs
+        without delivering anything.
+        """
+        manager = PubSubManager()
+        channel = "inbox:unsub-release"
+        await manager.subscribe(channel)
+        queue = _any_queue_for(manager, channel)
 
-        # Unsubscribe
-        await pubsub.unsubscribe(channel)
+        await manager.unsubscribe(channel, queue)
 
-        # Publish again — should not be received
-        await pubsub.publish(channel, "task-after-unsub")
+        assert channel not in manager._subscribers, (
+            f"unsubscribing the only queue must remove the channel entry; "
+            f"still present: {channel in manager._subscribers}, "
+            f"subscribers dict: {manager._subscribers}"
+        )
 
-        # Give a brief moment for any message to arrive (it shouldn't)
-        await asyncio.sleep(0.05)
+        await manager.publish(channel, "task-posthumous")
 
-        # Verify no new messages came through
-        assert len(received) == 1
+    async def test_unsubscribe_one_of_two_keeps_channel(self):
+        """Unsubscribing one queue leaves the other (and the channel) alive.
+
+        Partial unsubscribe must not drop the whole channel set — the
+        remaining subscriber must still receive new publishes. This
+        complements the "drop empty set" assertion above: both together
+        define the exact lifecycle of ``_subscribers[channel]``.
+        """
+        manager = PubSubManager()
+        channel = "inbox:unsub-partial"
+        sub_keep = await manager.subscribe(channel)
+        await manager.subscribe(channel)
+
+        queues = list(manager._subscribers[channel])
+        assert len(queues) == 2
+        # Drop exactly one of the two queues.
+        await manager.unsubscribe(channel, queues[0])
+
+        assert channel in manager._subscribers, (
+            "channel entry must remain while at least one subscriber is active"
+        )
+        assert len(manager._subscribers[channel]) == 1, (
+            f"exactly one queue should remain; "
+            f"got {len(manager._subscribers[channel])}"
+        )
+
+        # The surviving subscription must still receive new publishes.
+        # Note: queues[0] was dropped; sub_keep MIGHT wrap either queue
+        # (set iteration is unordered). To guarantee we read from the
+        # surviving queue, publish and let whichever subscription wraps
+        # the remaining queue observe it. If sub_keep happens to wrap
+        # the dropped queue, _next_msg will time out — that's a valid
+        # failure mode.
+        await manager.publish(channel, "task-surviving")
+        # We don't assert on sub_keep here because which wrapper got
+        # which queue is implementation-defined. Instead we assert on
+        # the remaining raw queue directly:
+        remaining = next(iter(manager._subscribers[channel]))
+        msg = await asyncio.wait_for(remaining.get(), timeout=1.0)
+        assert msg == "task-surviving"
 
 
 # ---------------------------------------------------------------------------
-# Multi-Channel Isolation
+# Multi-channel isolation
 # ---------------------------------------------------------------------------
 
 
 class TestMultiChannelIsolation:
-    """Tests for channel isolation — subscribers only get their channel's messages."""
+    """Channels are independent — publishes don't cross channels."""
 
-    @pytest.mark.asyncio
-    async def test_different_channels_receive_only_own_messages(self, pubsub):
-        """Subscribers on different channels receive only their own messages."""
-        channel_a = "inbox:agent-iso-aaa"
-        channel_b = "inbox:agent-iso-bbb"
-        received_a = []
-        received_b = []
+    async def test_publish_to_one_channel_does_not_reach_other(self):
+        """A publish to channel A must not arrive at a channel B subscriber.
 
-        sub_a = await pubsub.subscribe(channel_a)
-        sub_b = await pubsub.subscribe(channel_b)
+        This is the channel-isolation invariant — without it, the
+        inbox model collapses (every agent would see every other
+        agent's messages).
+        """
+        manager = PubSubManager()
+        sub_b = await manager.subscribe("inbox:bbb")
 
-        await pubsub.publish(channel_a, "task-for-a")
-        await pubsub.publish(channel_b, "task-for-b")
+        await manager.publish("inbox:aaa", "task-for-a")
 
-        async for msg in sub_a:
-            received_a.append(msg)
-            break
+        # sub_b must not see task-for-a. Verify by publishing to B
+        # afterwards and asserting the FIRST message received is B's.
+        await manager.publish("inbox:bbb", "task-for-b")
 
-        async for msg in sub_b:
-            received_b.append(msg)
-            break
+        first = await _next_msg(sub_b)
+        assert first == "task-for-b", (
+            f"channel B subscriber must NOT receive channel A messages; "
+            f"first message was {first!r}"
+        )
 
-        assert received_a == ["task-for-a"]
-        assert received_b == ["task-for-b"]
+    async def test_two_channels_deliver_independently(self):
+        """Two channels with independent subscribers each get their own msgs."""
+        manager = PubSubManager()
+        sub_x = await manager.subscribe("inbox:xxx")
+        sub_y = await manager.subscribe("inbox:yyy")
 
-    @pytest.mark.asyncio
-    async def test_publish_to_one_channel_does_not_leak_to_other(self, pubsub):
-        """Publishing to channel A does not deliver to channel B subscriber."""
-        channel_a = "inbox:agent-leak-aaa"
-        channel_b = "inbox:agent-leak-bbb"
+        await manager.publish("inbox:xxx", "x-only")
+        await manager.publish("inbox:yyy", "y-only")
 
-        sub_b = await pubsub.subscribe(channel_b)
+        msg_x = await _next_msg(sub_x)
+        msg_y = await _next_msg(sub_y)
 
-        await pubsub.publish(channel_a, "task-only-a")
+        assert msg_x == "x-only"
+        assert msg_y == "y-only"
 
-        # Give time for potential leaky delivery
-        await asyncio.sleep(0.05)
 
-        # Publish to channel_b so we can test it works normally
-        await pubsub.publish(channel_b, "task-for-b")
+@pytest.fixture(autouse=True)
+def _close_pending_tasks():
+    """Nothing to do post-test — function-scoped managers are GC'd.
 
-        async for msg in sub_b:
-            # First message should be task-for-b, not task-only-a
-            assert msg == "task-for-b"
-            break
-
-    @pytest.mark.asyncio
-    async def test_multiple_publishes_to_multiple_channels(self, pubsub):
-        """Multiple messages to multiple channels are correctly routed."""
-        channels = {
-            "inbox:agent-multi-1": [],
-            "inbox:agent-multi-2": [],
-            "inbox:agent-multi-3": [],
-        }
-        subscriptions = {}
-
-        for ch in channels:
-            subscriptions[ch] = await pubsub.subscribe(ch)
-
-        # Publish different task_ids to each channel
-        await pubsub.publish("inbox:agent-multi-1", "task-m1")
-        await pubsub.publish("inbox:agent-multi-2", "task-m2")
-        await pubsub.publish("inbox:agent-multi-3", "task-m3")
-
-        for ch, sub in subscriptions.items():
-            async for msg in sub:
-                channels[ch].append(msg)
-                break
-
-        assert channels["inbox:agent-multi-1"] == ["task-m1"]
-        assert channels["inbox:agent-multi-2"] == ["task-m2"]
-        assert channels["inbox:agent-multi-3"] == ["task-m3"]
+    The fixture is kept (as a no-op) to document that the new
+    in-process PubSubManager requires no async cleanup: there is no
+    Redis connection to aclose, no background task to cancel. If a
+    future change adds lifecycle hooks, this fixture is the natural
+    place to tear them down.
+    """
+    yield
