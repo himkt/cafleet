@@ -13,3 +13,4 @@ admin/node_modules/
 !.claude/rules
 !.claude/skills
 !.claude/settings.json
+.claude/scheduled_tasks.lock
