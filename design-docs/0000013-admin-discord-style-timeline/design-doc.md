@@ -1,7 +1,7 @@
 # Admin Discord-style Timeline
 
 **Status**: Approved
-**Progress**: 14/38 tasks complete
+**Progress**: 19/38 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -377,11 +377,11 @@ Per `.claude/rules/design-doc-numbering.md`, documentation is updated first.
 
 ### Step 4: Timeline API + broadcast send API
 
-- [ ] Edit `registry/src/hikyaku_registry/webui_api.py`: extend `_format_messages` to emit `origin_task_id`, `created_at`, and `status_timestamp` on every row. Update existing inbox/sent endpoints implicitly (no code change at call sites). <!-- completed: -->
-- [ ] Add a `GET /timeline` handler to `webui_router`, using `Depends(get_webui_tenant)`. Calls `task_store.list_timeline(tenant_id, limit=200)`, passes the list of Tasks into `_format_messages`, and zips `origin_task_id` + `created_at` back into each row dict. Returns `{"messages": [...]}`. <!-- completed: -->
-- [ ] Extend `webui_api.send_message` to short-circuit unicast validation when `body.to_agent_id == "*"`: skip `store.get_agent(body.to_agent_id)` and `store.verify_agent_tenant(body.to_agent_id, tenant_id)`; still enforce `from_agent_id` is active and in-tenant; build `Message(..., metadata={"destination": "*"})`. Drain events identically and return the summary task's id. <!-- completed: -->
-- [ ] Add tests in `registry/tests/test_webui_api.py`: (a) `GET /timeline` happy path — header-scoped tenant sees its own tasks ordered by `status_timestamp DESC`, `broadcast_summary` excluded, every row contains `origin_task_id` and `created_at`, 200-row cap honored; (b) cross-tenant isolation — tenant A's header must not see tenant B's tasks; (c) `POST /messages/send` with `to_agent_id="*"` from an in-tenant active sender → N delivery rows written, response returns the summary task id; (d) `POST /messages/send` with `to_agent_id="*"` from an out-of-tenant `from_agent_id` → 400. <!-- completed: -->
-- [ ] Run `mise //registry:test`. <!-- completed: -->
+- [x] Edit `registry/src/hikyaku_registry/webui_api.py`: extend `_format_messages` to emit `origin_task_id`, `created_at`, and `status_timestamp` on every row. Update existing inbox/sent endpoints implicitly (no code change at call sites). <!-- completed: 2026-04-12T10:55 -->
+- [x] Add a `GET /timeline` handler to `webui_router`, using `Depends(get_webui_tenant)`. Calls `task_store.list_timeline(tenant_id, limit=200)`, passes the list of Tasks into `_format_messages`, and zips `origin_task_id` + `created_at` back into each row dict. Returns `{"messages": [...]}`. <!-- completed: 2026-04-12T10:57 -->
+- [x] Extend `webui_api.send_message` to short-circuit unicast validation when `body.to_agent_id == "*"`: skip `store.get_agent(body.to_agent_id)` and `store.verify_agent_tenant(body.to_agent_id, tenant_id)`; still enforce `from_agent_id` is active and in-tenant; build `Message(..., metadata={"destination": "*"})`. Drain events identically and return the summary task's id. <!-- completed: 2026-04-12T10:58 -->
+- [x] Add tests in `registry/tests/test_webui_api.py`: (a) `GET /timeline` happy path — header-scoped tenant sees its own tasks ordered by `status_timestamp DESC`, `broadcast_summary` excluded, every row contains `origin_task_id` and `created_at`, 200-row cap honored; (b) cross-tenant isolation — tenant A's header must not see tenant B's tasks; (c) `POST /messages/send` with `to_agent_id="*"` from an in-tenant active sender → N delivery rows written, response returns the summary task id; (d) `POST /messages/send` with `to_agent_id="*"` from an out-of-tenant `from_agent_id` → 400. <!-- completed: 2026-04-12T10:50 -->
+- [x] Run `mise //registry:test`. <!-- completed: 2026-04-12T11:00 -->
 
 ### Step 5: Admin SPA rewrite
 
