@@ -8,11 +8,17 @@ dependencies = [
     "uvicorn[standard]",
     "a2a-sdk",
     "sse-starlette",
-    "redis[hiredis]",
+    "sqlalchemy>=2.0",
+    "alembic",
+    "aiosqlite",
+    "click",
     "pydantic",
     "pydantic-settings",
     "PyJWT[crypto]",
 ]
+
+[project.scripts]
+hikyaku-registry = "hikyaku_registry.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -20,6 +26,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hikyaku_registry"]
+include = [
+  "src/hikyaku_registry/alembic.ini",
+  "src/hikyaku_registry/alembic/**/*",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
