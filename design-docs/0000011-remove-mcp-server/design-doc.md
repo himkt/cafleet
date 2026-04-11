@@ -1,7 +1,7 @@
 # Remove MCP Server and SSE Endpoint
 
 **Status**: Approved
-**Progress**: 9/41 tasks complete
+**Progress**: 16/41 tasks complete
 **Last Updated**: 2026-04-11
 
 ## Overview
@@ -156,13 +156,13 @@ All three greps must return zero hits in production code. Historical design docs
 
 ### Step 3: Update README.md
 
-- [ ] Drop the "Real-time Inbox Notification" Features bullet and the "MCP Server" Features bullet <!-- completed: -->
-- [ ] Delete the entire `## MCP Server (Claude Code Integration)` section, including the configuration JSON example <!-- completed: -->
-- [ ] Remove the `hikyaku-mcp` proxy ASCII box from the architecture diagram <!-- completed: -->
-- [ ] Drop the `mcp-server/` directory row from the Project Structure tree <!-- completed: -->
-- [ ] Remove "MCP Server: mcp + httpx + httpx-sse" from the Tech Stack list <!-- completed: -->
-- [ ] Remove the `mise //mcp-server:test` line from the Development section <!-- completed: -->
-- [ ] Remove the "broker must run with a single worker (`--workers=1`)" Note paragraph and any other mention of `/api/v1/subscribe`, `PubSubManager`, `httpx-sse`, `sse-starlette`, or "in-process Pub/Sub" <!-- completed: -->
+- [x] Drop the "Real-time Inbox Notification" Features bullet and the "MCP Server" Features bullet <!-- completed: 2026-04-11T11:10 -->
+- [x] Delete the entire `## MCP Server (Claude Code Integration)` section, including the configuration JSON example <!-- completed: 2026-04-11T11:10 -->
+- [x] Remove the `hikyaku-mcp` proxy ASCII box from the architecture diagram <!-- completed: 2026-04-11T11:10 -->
+- [x] Drop the `mcp-server/` directory row from the Project Structure tree <!-- completed: 2026-04-11T11:10 -->
+- [x] Remove "MCP Server: mcp + httpx + httpx-sse" from the Tech Stack list <!-- completed: 2026-04-11T11:10 -->
+- [x] Remove the `mise //mcp-server:test` line from the Development section <!-- completed: 2026-04-11T11:10 -->
+- [x] Remove the "broker must run with a single worker (`--workers=1`)" Note paragraph and any other mention of `/api/v1/subscribe`, `PubSubManager`, `httpx-sse`, `sse-starlette`, or "in-process Pub/Sub" <!-- completed: 2026-04-11T11:10 -->
 
 ### Step 4: Update CLAUDE.md, .claude/, and skill docs
 

@@ -11,8 +11,6 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 - **Unicast Messaging** -- Send messages to a specific agent by ID (same-tenant only)
 - **Broadcast Messaging** -- Send messages to all agents in the same tenant
 - **Inbox Polling** -- Agents poll for new messages at their own pace; supports delta polling via `statusTimestampAfter`
-- **Real-time Inbox Notification** -- SSE endpoint (`/api/v1/subscribe`) pushes new messages as they arrive
-- **MCP Server** -- Transparent proxy for Claude Code and other MCP clients; `poll` returns instantly from SSE-buffered messages
 - **Message Lifecycle** -- Acknowledge, cancel (retract), and track message status
 - **Two-Header Auth** -- API key (tenant) + Agent-Id (identity) required on all authenticated requests
 - **WebUI** -- Browser-based dashboard with Auth0 login; users manage API keys, select tenants, and browse agents and message history
@@ -40,33 +38,11 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
                                           |  | | alembic_version| |    |
      Tenant Y (different API key)         |  | +----------------+ |    |
     + - - - - - - - - - - - - +           |  +--------------------+    |
-      +-------------+                     |                            |
-    | |  Agent C     | (isolated) |       |  +--------------------+    |
-      | (discovery)  |                    |  | SSE Endpoint       |    |
-    | +-------------+            |        |  | /api/v1/subscribe  |    |
-     - - - - - - - - - - - - -            |  | (in-process Pub/   |    |
-                                          |  |  Sub fan-out)      |    |
-                                          |  +--------------------+    |
-                                          +----------------------------+
-
-  +---------------+  MCP tools   +--------------------------------------+
-  | Claude Code   |------------->|  hikyaku-mcp (transparent proxy)     |
-  |  (agent)      |  poll, send, |                                      |
-  |               |  ack, ...    |  +----------+   +----------------+   |
-  +---------------+              |  | Buffer   |<--| SSE Client     |   |
-                                 |  | (Queue)  |   | (background)   |   |
-                                 |  +----+-----+   +-------+--------+   |
-                                 |       | poll            | SSE        |
-                                 |  +----+-----+   +-------+--------+   |
-                                 |  | Registry  |   | /api/v1/       |  |
-                                 |  | Forwarder |   | subscribe      |  |
-                                 |  +----+-----+   +-------+--------+   |
-                                 +-------+------------------+-----------+
-                                         | REST/JSON-RPC    | SSE
-                                         v                  v
-                                 +--------------------------------------+
-                                 |  hikyaku-registry (broker)           |
-                                 +--------------------------------------+
+      +-------------+                     +----------------------------+
+    | |  Agent C     | (isolated) |
+      | (discovery)  |
+    | +-------------+            |
+     - - - - - - - - - - - - -
 ```
 
 Key design decisions:
@@ -79,7 +55,6 @@ Key design decisions:
 - The broker exposes three API surfaces: A2A Server (JSON-RPC 2.0), Registry REST API (`/api/v1/`), and WebUI (`/ui/`).
 - The WebUI uses Auth0 for user authentication. Agent-to-broker communication uses API keys (unchanged).
 - **Storage layer**: All data is persisted in a single SQLite file (`~/.local/share/hikyaku/registry.db` by default). Indexed fields are columns; A2A protocol payloads (`AgentCard`, `Task`) are stored as JSON blobs. No physical cleanup loop -- deregistered agents and tasks persist forever and are invisible to normal traffic via `status='active'` filters.
-- **Single-worker constraint**: The in-process Pub/Sub fan-out for SSE lives in the worker's memory. The registry server **must** run with `--workers=1` (enforced by `mise //registry:dev`). Multi-worker mode silently breaks SSE delivery.
 
 ## Quick Start
 
@@ -107,8 +82,6 @@ mise //registry:dev
 ```
 
 The broker will be available at `http://localhost:8000`.
-
-> **Note**: The broker must run with a single worker (`--workers=1`). The `mise //registry:dev` task enforces this. Do not override to multiple workers -- SSE delivery will silently break.
 
 ### Install the CLI Client
 
@@ -213,7 +186,6 @@ Base path: `/api/v1`
 | GET | `/api/v1/agents` | Bearer + Agent-Id | List agents in the caller's tenant |
 | GET | `/api/v1/agents/{id}` | Bearer + Agent-Id | Get agent detail (404 if not in same tenant) |
 | DELETE | `/api/v1/agents/{id}` | Bearer + Agent-Id | Deregister an agent (self only) |
-| GET | `/api/v1/subscribe` | Bearer + Agent-Id | SSE stream for real-time inbox notifications |
 | GET | `/.well-known/agent-card.json` | None | Broker's own A2A Agent Card |
 
 Registry API errors use a consistent JSON envelope:
@@ -273,38 +245,11 @@ The WebUI API is consumed by the browser SPA. Authentication uses Auth0 JWT (`Au
 
 The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vite + React + TypeScript + Tailwind CSS).
 
-## MCP Server (Claude Code Integration)
-
-The `hikyaku-mcp` package provides a transparent MCP server proxy. It exposes the same tools as the CLI but `poll` returns instantly from a local SSE-buffered queue.
-
-### Configuration
-
-Add to your Claude Code `settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "hikyaku": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/hikyaku/mcp-server", "hikyaku-mcp"],
-      "env": {
-        "HIKYAKU_URL": "http://localhost:8000",
-        "HIKYAKU_API_KEY": "hky_...",
-        "HIKYAKU_AGENT_ID": "..."
-      }
-    }
-  }
-}
-```
-
-The MCP server auto-connects to the broker's SSE endpoint on startup. All tools (send, broadcast, ack, cancel, get_task, agents, register, deregister) forward to the registry; `poll` drains the local buffer.
-
 ## Tech Stack
 
 - **Python 3.12+** with uv workspace
 - **Server**: FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk + Pydantic + pydantic-settings
 - **CLI**: click + httpx + a2a-sdk
-- **MCP Server**: mcp + httpx + httpx-sse
 - **WebUI**: Vite + React 19 + TypeScript + Tailwind CSS 4
 
 ## Project Structure
@@ -323,10 +268,6 @@ hikyaku/
     src/hikyaku_client/
     tests/
     pyproject.toml
-  mcp-server/             # hikyaku-mcp MCP server package
-    src/hikyaku_mcp/
-    tests/
-    pyproject.toml
   admin/                  # WebUI SPA (Vite + React + TypeScript + Tailwind CSS)
   docs/
     spec/                 # API and data model specifications
@@ -334,7 +275,6 @@ hikyaku/
       a2a-operations.md
       data-model.md
       webui-api.md
-      streaming-subscribe.md
       cli-options.md
   ARCHITECTURE.md         # System architecture and design decisions
 ```
@@ -357,9 +297,6 @@ mise //registry:test
 
 # Run client tests
 mise //client:test
-
-# Run MCP server tests
-mise //mcp-server:test
 ```
 
 ## License
