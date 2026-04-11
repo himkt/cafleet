@@ -7,19 +7,29 @@ The design doc (Testing Strategy → "Trade-off") explains why this file exists:
    migration would slip through this fixture stack. To catch that, a
    separate session-level Alembic smoke test runs against a real tempfile DB."
 
-This file contains exactly one test. It runs `alembic upgrade head` against
-a freshly-created tempfile SQLite DB (NOT in-memory — Alembic + aiosqlite
-do not play well with `:memory:` because each connection sees its own
-empty database) and asserts that the four expected tables exist:
-api_keys, agents, tasks, alembic_version.
+The migration is run exactly once per pytest session via a session-scoped
+fixture. Each test below is a read-only assertion against the resulting
+DB file, so amortizing the upgrade across the session keeps the suite fast.
 
-If db/models.py grows a column without a matching migration, this smoke
-test will pass (since `alembic_version` and the four tables still exist)
-but other schema-shape tests in test_db_models.py will diverge from the
-migration output, surfacing the drift.
+Why a tempfile DB and the sync ``sqlite://`` driver:
+  * Alembic's migration runner is synchronous; the async ``aiosqlite``
+    driver does not buy anything for migrations and complicates the
+    connection lifecycle.
+  * SQLite ``:memory:`` databases are per-connection. Alembic opens
+    multiple connections during ``upgrade head``; each would see its own
+    empty DB, so the migration would silently no-op.
+
+Why ``cfg.set_main_option("sqlalchemy.url", ...)`` instead of monkeypatching
+``settings.database_url``:
+  * The Alembic ``Config`` object is the canonical place to override the
+    DB URL for a one-off migration run. env.py is expected to read
+    ``config.get_main_option("sqlalchemy.url")`` and fall back to
+    ``settings.database_url`` only when the cfg main option is unset.
+  * This keeps the test independent of the user's ``HIKYAKU_DATABASE_URL``
+    environment variable and the cached ``config.settings`` singleton.
 """
 
-from importlib.resources import files
+import importlib.resources
 
 import pytest
 from alembic import command
@@ -27,59 +37,61 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
 
-def test_alembic_upgrade_head_creates_expected_schema(tmp_path):
-    """`alembic upgrade head` against a fresh tempfile DB produces the four expected tables.
+@pytest.fixture(scope="session")
+def alembic_upgraded_db(tmp_path_factory):
+    """Run ``alembic upgrade head`` once per session against a tempfile DB.
 
-    Verifies the design doc bullet (Step 3): "Add test_alembic_smoke.py
-    that runs `command.upgrade(cfg, 'head')` against a tempfile DB and
-    asserts the four expected tables exist".
+    Returns the path to the migrated SQLite file. Two design choices
+    matter here and are worth being explicit about:
 
-    The override flow:
-      1. Build a tempfile path inside pytest's per-test ``tmp_path``.
-      2. Monkeypatch ``settings.database_url`` so env.py picks up the
-         tempfile URL when Alembic loads it. env.py is the sole consumer
-         of ``settings.database_url`` during a migration run; it does
-         ``make_url(settings.database_url).set(drivername='sqlite')`` at
-         env.py module load time, and Alembic loads env.py freshly on
-         every ``command.upgrade`` invocation, so the monkeypatch is
-         visible to the migration even though env.py is module-level code.
-      3. Build an Alembic ``Config`` from the bundled ``alembic.ini`` via
-         ``importlib.resources`` so the test works whether the package is
-         imported from a source checkout or from an installed wheel.
-      4. Run ``command.upgrade(cfg, 'head')``.
-      5. Open a fresh sync engine to the tempfile and assert that
-         ``inspect(engine).get_table_names()`` is a superset of the four
-         expected tables.
-      6. Assert ``alembic_version`` contains exactly one row — that's the
-         only way to distinguish "env.py wired but no migration applied"
-         from "migration successfully applied".
+    1. The bundled ``alembic.ini`` is located via ``importlib.resources``
+       (NOT via a hard-coded path relative to the test file), so this
+       fixture works whether ``hikyaku_registry`` is imported from a
+       source checkout or from an installed wheel. The
+       ``importlib.resources.as_file`` context manager guarantees a
+       real filesystem path even when the package data lives inside a
+       zipped wheel.
+
+    2. The DB URL is injected via ``cfg.set_main_option("sqlalchemy.url",
+       ...)`` rather than by monkeypatching ``config.settings``. This is
+       the design-doc-prescribed pattern (Step 3): env.py reads the cfg
+       main option first and only falls back to ``settings.database_url``
+       when the option is unset. Routing the override through cfg keeps
+       the migration's URL resolution local to this fixture and immune to
+       Settings-singleton caching surprises.
     """
-    db_file = tmp_path / "smoke.db"
+    tmp_db_path = tmp_path_factory.mktemp("alembic_smoke") / "smoke.db"
 
-    # env.py reads settings.database_url at module load time. Patch the
-    # attribute on the existing singleton (not rebind config.settings)
-    # so that env.py's `from hikyaku_registry.config import settings`
-    # binding sees the new value via attribute lookup.
-    with pytest.MonkeyPatch.context() as mp:
-        from hikyaku_registry import config
-
-        mp.setattr(
-            config.settings,
-            "database_url",
-            f"sqlite+aiosqlite:///{db_file}",
-        )
-
-        # Locate the bundled alembic.ini via importlib.resources so the
-        # test works in both editable-install and built-wheel layouts.
-        ini_path = files("hikyaku_registry") / "alembic.ini"
+    with importlib.resources.as_file(
+        importlib.resources.files("hikyaku_registry") / "alembic.ini"
+    ) as ini_path:
         cfg = Config(str(ini_path))
-
+        cfg.set_main_option("sqlalchemy.url", f"sqlite:///{tmp_db_path}")
         command.upgrade(cfg, "head")
 
-    # Inspect the resulting DB file with a fresh sync engine. Use the
-    # plain `sqlite://` driver (not `sqlite+aiosqlite://`) so the inspector
-    # runs synchronously without needing an event loop.
-    engine = create_engine(f"sqlite:///{db_file}")
+    return tmp_db_path
+
+
+def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
+    """``alembic upgrade head`` produces the four expected tables.
+
+    The expected set is:
+
+      - ``api_keys``         — tenant root, PK = ``api_key_hash``
+      - ``agents``           — FK ``tenant_id`` -> ``api_keys.api_key_hash``
+      - ``tasks``            — FK ``context_id`` -> ``agents.agent_id``
+      - ``alembic_version``  — Alembic's own bookkeeping table
+
+    This is a superset assertion (``expected <= tables``), not equality:
+    if a future migration introduces an additional table, this test
+    should not fail spuriously.
+
+    Schema *shape* drift between ``db/models.py`` and the migration is
+    NOT caught here — that's the job of the in-memory model tests in
+    ``test_db_models.py``. This test only catches the coarser failure
+    mode of "the migration script forgot to create a whole table".
+    """
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         insp = inspect(engine)
         tables = set(insp.get_table_names())
@@ -90,9 +102,20 @@ def test_alembic_upgrade_head_creates_expected_schema(tmp_path):
             f"alembic upgrade head did not create the expected tables. "
             f"missing: {sorted(missing)}, found: {sorted(tables)}"
         )
+    finally:
+        engine.dispose()
 
-        # An empty alembic_version table would indicate that env.py was
-        # configured but no migration script actually executed.
+
+def test_alembic_version_table_records_applied_revision(alembic_upgraded_db):
+    """``alembic_version`` contains exactly one row after ``upgrade head``.
+
+    Distinguishes "env.py was wired but no migration script actually
+    executed" (zero rows) from "migration successfully applied" (one
+    row). Without this assertion, the table-existence check above would
+    happily pass even if the migration script were an empty no-op.
+    """
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
+    try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version"))
             rows = result.fetchall()
