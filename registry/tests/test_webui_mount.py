@@ -223,3 +223,18 @@ class TestDefaultWebuiDistDir:
         expected = Path(hikyaku_registry.__file__).resolve().parent / "webui"
         assert isinstance(result, Path)
         assert result == expected
+
+    async def test_default_mount_serves_spa(self, db_sessionmaker):
+        """create_app() with no webui_dist_dir mounts the package-bundled SPA at /ui/."""
+        package_dir = Path(hikyaku_registry.__file__).resolve().parent
+        if not (package_dir / "webui" / "index.html").exists():
+            pytest.skip("webui/ not built; run `mise //admin:build` first")
+
+        app = create_app(sessionmaker=db_sessionmaker)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/ui/")
+
+        assert resp.status_code == 200
+        assert resp.headers.get("content-type", "").startswith("text/html")
+        assert resp.text.lstrip().lower().startswith("<!doctype html>")
