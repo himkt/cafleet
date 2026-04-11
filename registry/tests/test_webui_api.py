@@ -6,15 +6,19 @@ Tests message formatting, response structure, broadcast filtering,
 ordering, cross-tenant isolation, and deregistered agent access.
 
 Auth mechanism tests are in test_webui_auth_migration.py.
+
+The Redis-backed predecessor used a ``webui_env`` fixture that built its
+own fakeredis client, RegistryStore, RedisTaskStore, and executor. The
+SQL rewrite swaps that for the module-scoped ``store`` / ``task_store``
+fixtures from conftest.py (in-memory aiosqlite). Tests seed data via
+``store.create_api_key`` / ``store.create_agent`` / ``task_store.save``
+rather than fakeredis primitives.
 """
 
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-import fakeredis.aioredis
-from httpx import AsyncClient, ASGITransport
-from fastapi import FastAPI
 from a2a.types import (
     Artifact,
     Part,
@@ -23,17 +27,19 @@ from a2a.types import (
     TaskStatus,
     TextPart,
 )
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
+from hikyaku_registry.auth import get_user_id, verify_auth0_user
+from hikyaku_registry.executor import BrokerExecutor
+from hikyaku_registry.registry_store import RegistryStore
+from hikyaku_registry.task_store import TaskStore
 from hikyaku_registry.webui_api import (
-    webui_router,
+    get_webui_executor,
     get_webui_store,
     get_webui_task_store,
-    get_webui_executor,
+    webui_router,
 )
-from hikyaku_registry.auth import verify_auth0_user, get_user_id
-from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import RedisTaskStore
-from hikyaku_registry.executor import BrokerExecutor
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +71,7 @@ async def _setup_agent(
 ) -> dict:
     """Create an agent, optionally deregister it. Returns create_agent result."""
     result = await store.create_agent(
-        name=name, description=f"Test agent {name}", api_key=api_key
+        name=name, description=f"Test agent {name}", skills=None, api_key=api_key
     )
     if deregister:
         await store.deregister_agent(result["agent_id"])
@@ -73,7 +79,7 @@ async def _setup_agent(
 
 
 async def _create_task(
-    task_store: RedisTaskStore,
+    task_store: TaskStore,
     from_agent_id: str,
     to_agent_id: str,
     text: str = "Hello",
@@ -81,7 +87,13 @@ async def _create_task(
     state: TaskState = TaskState.input_required,
     created_at: str | None = None,
 ) -> Task:
-    """Create and save a task in Redis. Returns the saved Task."""
+    """Create and save a task. Returns the saved Task.
+
+    ``created_at`` is forwarded to ``TaskStatus.timestamp``, which TaskStore
+    persists as ``status_timestamp`` — the ordering key used by ``list`` and
+    ``list_by_sender``. TaskStore assigns its own creation wallclock to the
+    ``created_at`` column, so ordering-sensitive tests must set this.
+    """
     if created_at is None:
         created_at = datetime.now(UTC).isoformat()
 
@@ -111,22 +123,18 @@ async def _create_task(
 
 
 @pytest.fixture
-async def webui_env():
+async def webui_env(store: RegistryStore, task_store: TaskStore):
     """Set up test FastAPI app with JWT auth and two tenants.
 
     Yields a dict with:
       - client: httpx.AsyncClient for making requests
-      - store: RegistryStore backed by fakeredis
-      - task_store: RedisTaskStore backed by fakeredis
+      - store: RegistryStore backed by in-memory aiosqlite
+      - task_store: TaskStore backed by in-memory aiosqlite
       - executor: BrokerExecutor wired to the stores
-      - redis: raw fakeredis client
       - app: the FastAPI app
       - api_key / tenant_id: primary tenant
       - other_api_key / other_tenant_id: secondary tenant (cross-tenant tests)
     """
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    store = RegistryStore(redis)
-    task_store = RedisTaskStore(redis)
     executor = BrokerExecutor(registry_store=store, task_store=task_store)
 
     app = FastAPI()
@@ -136,7 +144,6 @@ async def webui_env():
     app.dependency_overrides[get_webui_task_store] = lambda: task_store
     app.dependency_overrides[get_webui_executor] = lambda: executor
 
-    # JWT auth overrides
     async def _mock_verify(request=None, cred=None):
         if request is not None:
             request.scope["auth0"] = {"sub": _TEST_SUB}
@@ -146,7 +153,6 @@ async def webui_env():
     app.dependency_overrides[verify_auth0_user] = _mock_verify
     app.dependency_overrides[get_user_id] = lambda: _TEST_SUB
 
-    # Create two tenants for the test user
     api_key, tenant_id, _ = await store.create_api_key(_TEST_SUB)
     other_api_key, other_tenant_id, _ = await store.create_api_key(_TEST_SUB)
 
@@ -157,15 +163,12 @@ async def webui_env():
             "store": store,
             "task_store": task_store,
             "executor": executor,
-            "redis": redis,
             "app": app,
             "api_key": api_key,
             "tenant_id": tenant_id,
             "other_api_key": other_api_key,
             "other_tenant_id": other_tenant_id,
         }
-
-    await redis.aclose()
 
 
 # ===========================================================================
@@ -176,7 +179,6 @@ async def webui_env():
 class TestAgentsList:
     """Tests for GET /ui/api/agents — agent list behavior."""
 
-    @pytest.mark.asyncio
     async def test_returns_active_agents(self, webui_env):
         """GET /agents returns active agents in the tenant."""
         store, client = webui_env["store"], webui_env["client"]
@@ -190,7 +192,6 @@ class TestAgentsList:
         ids = {a["agent_id"] for a in resp.json()["agents"]}
         assert agent["agent_id"] in ids
 
-    @pytest.mark.asyncio
     async def test_includes_deregistered_with_messages(self, webui_env):
         """GET /agents includes deregistered agents that still have messages."""
         store, task_store, client = (
@@ -200,15 +201,17 @@ class TestAgentsList:
         )
         api_key, tenant_id = webui_env["api_key"], webui_env["tenant_id"]
 
+        sender = await _setup_agent(store, "Sender", api_key=api_key)
         active = await _setup_agent(store, "Active", api_key=api_key)
         dereg = await _setup_agent(
-            store, "Deregistered", api_key=api_key, deregister=True
+            store, "Deregistered", api_key=api_key, deregister=False
         )
         await _create_task(
             task_store,
-            from_agent_id="sender",
+            from_agent_id=sender["agent_id"],
             to_agent_id=dereg["agent_id"],
         )
+        await store.deregister_agent(dereg["agent_id"])
 
         resp = await client.get("/ui/api/agents", headers=_auth_header(tenant_id))
         assert resp.status_code == 200
@@ -217,7 +220,6 @@ class TestAgentsList:
         assert active["agent_id"] in ids
         assert dereg["agent_id"] in ids
 
-    @pytest.mark.asyncio
     async def test_excludes_other_tenant_agents(self, webui_env):
         """GET /agents does not include agents from other tenants."""
         store, client = webui_env["store"], webui_env["client"]
@@ -241,7 +243,6 @@ class TestAgentsList:
 class TestInbox:
     """Tests for GET /ui/api/agents/{agent_id}/inbox — message formatting."""
 
-    @pytest.mark.asyncio
     async def test_returns_received_messages(self, webui_env):
         """Inbox returns messages where the agent is the recipient."""
         store, task_store, client = (
@@ -275,7 +276,6 @@ class TestInbox:
         assert msg["to_agent_id"] == recipient["agent_id"]
         assert msg["body"] == "Hello, Recipient!"
 
-    @pytest.mark.asyncio
     async def test_resolves_agent_names(self, webui_env):
         """Inbox messages include from_agent_name and to_agent_name."""
         store, task_store, client = (
@@ -303,7 +303,6 @@ class TestInbox:
         assert msg["from_agent_name"] == "Alice"
         assert msg["to_agent_name"] == "Bob"
 
-    @pytest.mark.asyncio
     async def test_filters_broadcast_summary(self, webui_env):
         """Inbox excludes broadcast_summary type tasks."""
         store, task_store, client = (
@@ -338,7 +337,6 @@ class TestInbox:
         assert len(data["messages"]) == 1
         assert data["messages"][0]["body"] == "Regular message"
 
-    @pytest.mark.asyncio
     async def test_newest_first_order(self, webui_env):
         """Inbox returns messages in newest-first (descending) order."""
         store, task_store, client = (
@@ -379,7 +377,6 @@ class TestInbox:
         assert msgs[0]["body"] == "Newer message"
         assert msgs[1]["body"] == "Older message"
 
-    @pytest.mark.asyncio
     async def test_empty_inbox_returns_empty_array(self, webui_env):
         """Agent with no inbox messages returns 200 with empty messages array."""
         store, client = webui_env["store"], webui_env["client"]
@@ -394,7 +391,6 @@ class TestInbox:
         assert resp.status_code == 200
         assert resp.json()["messages"] == []
 
-    @pytest.mark.asyncio
     async def test_body_empty_when_no_text_part(self, webui_env):
         """Body is empty string when task has no text part in artifacts."""
         store, task_store, client = (
@@ -427,7 +423,6 @@ class TestInbox:
         )
         assert resp.json()["messages"][0]["body"] == ""
 
-    @pytest.mark.asyncio
     async def test_message_has_required_fields(self, webui_env):
         """Each message in inbox has all required fields per spec."""
         store, task_store, client = (
@@ -466,7 +461,6 @@ class TestInbox:
         for field in required_fields:
             assert field in msg, f"Missing field: {field}"
 
-    @pytest.mark.asyncio
     async def test_status_input_required(self, webui_env):
         """Task with input_required state has status='input_required'."""
         store, task_store, client = (
@@ -492,7 +486,6 @@ class TestInbox:
         )
         assert resp.json()["messages"][0]["status"] == "input_required"
 
-    @pytest.mark.asyncio
     async def test_status_completed(self, webui_env):
         """Task with completed state has status='completed'."""
         store, task_store, client = (
@@ -518,7 +511,6 @@ class TestInbox:
         )
         assert resp.json()["messages"][0]["status"] == "completed"
 
-    @pytest.mark.asyncio
     async def test_status_canceled(self, webui_env):
         """Task with canceled state has status='canceled'."""
         store, task_store, client = (
@@ -544,7 +536,6 @@ class TestInbox:
         )
         assert resp.json()["messages"][0]["status"] == "canceled"
 
-    @pytest.mark.asyncio
     async def test_message_type_field(self, webui_env):
         """Message type field reflects the task metadata type."""
         store, task_store, client = (
@@ -579,7 +570,6 @@ class TestInbox:
 class TestSent:
     """Tests for GET /ui/api/agents/{agent_id}/sent — message formatting."""
 
-    @pytest.mark.asyncio
     async def test_returns_sent_messages(self, webui_env):
         """Sent returns messages where the agent is the sender."""
         store, task_store, client = (
@@ -613,7 +603,6 @@ class TestSent:
         assert msg["to_agent_id"] == recipient["agent_id"]
         assert msg["body"] == "Outgoing message"
 
-    @pytest.mark.asyncio
     async def test_resolves_agent_names(self, webui_env):
         """Sent messages include from_agent_name and to_agent_name."""
         store, task_store, client = (
@@ -641,7 +630,6 @@ class TestSent:
         assert msg["from_agent_name"] == "Alice"
         assert msg["to_agent_name"] == "Bob"
 
-    @pytest.mark.asyncio
     async def test_filters_broadcast_summary(self, webui_env):
         """Sent excludes broadcast_summary type tasks."""
         store, task_store, client = (
@@ -676,7 +664,6 @@ class TestSent:
         assert len(data["messages"]) == 1
         assert data["messages"][0]["body"] == "Regular sent"
 
-    @pytest.mark.asyncio
     async def test_newest_first_order(self, webui_env):
         """Sent returns messages sorted by date descending (newest first)."""
         store, task_store, client = (
@@ -717,7 +704,6 @@ class TestSent:
         assert msgs[0]["body"] == "Newer"
         assert msgs[1]["body"] == "Older"
 
-    @pytest.mark.asyncio
     async def test_empty_sent_returns_empty_array(self, webui_env):
         """Agent with no sent messages returns 200 with empty messages array."""
         store, client = webui_env["store"], webui_env["client"]
@@ -732,7 +718,6 @@ class TestSent:
         assert resp.status_code == 200
         assert resp.json()["messages"] == []
 
-    @pytest.mark.asyncio
     async def test_same_response_format_as_inbox(self, webui_env):
         """Sent messages have the same fields as inbox messages."""
         store, task_store, client = (
@@ -780,7 +765,6 @@ class TestSent:
 class TestSendMessage:
     """Tests for POST /ui/api/messages/send — send behavior and validation."""
 
-    @pytest.mark.asyncio
     async def test_successful_unicast(self, webui_env):
         """Successful send returns 200 with task_id and status."""
         store, client = webui_env["store"], webui_env["client"]
@@ -804,7 +788,6 @@ class TestSendMessage:
         assert "task_id" in data
         assert data["status"] == "input_required"
 
-    @pytest.mark.asyncio
     async def test_cross_tenant_recipient_returns_404(self, webui_env):
         """Sending to an agent in a different tenant returns 404."""
         store, client = webui_env["store"], webui_env["client"]
@@ -825,7 +808,6 @@ class TestSendMessage:
         )
         assert resp.status_code == 404
 
-    @pytest.mark.asyncio
     async def test_send_to_deregistered_returns_400(self, webui_env):
         """Sending to a deregistered agent returns 400."""
         store, client = webui_env["store"], webui_env["client"]
@@ -847,7 +829,6 @@ class TestSendMessage:
         )
         assert resp.status_code == 400
 
-    @pytest.mark.asyncio
     async def test_nonexistent_recipient_returns_404(self, webui_env):
         """Sending to a nonexistent agent returns 404."""
         store, client = webui_env["store"], webui_env["client"]
@@ -866,7 +847,6 @@ class TestSendMessage:
         )
         assert resp.status_code == 404
 
-    @pytest.mark.asyncio
     async def test_missing_to_agent_id_returns_error(self, webui_env):
         """Missing to_agent_id in request body returns 400 or 422."""
         store, client = webui_env["store"], webui_env["client"]
@@ -881,7 +861,6 @@ class TestSendMessage:
         )
         assert resp.status_code in (400, 422)
 
-    @pytest.mark.asyncio
     async def test_missing_text_returns_error(self, webui_env):
         """Missing text in request body returns 400 or 422."""
         store, client = webui_env["store"], webui_env["client"]
@@ -896,7 +875,6 @@ class TestSendMessage:
         )
         assert resp.status_code in (400, 422)
 
-    @pytest.mark.asyncio
     async def test_missing_from_agent_id_returns_error(self, webui_env):
         """Missing from_agent_id in request body returns 400 or 422."""
         store, client = webui_env["store"], webui_env["client"]
@@ -911,7 +889,6 @@ class TestSendMessage:
         )
         assert resp.status_code in (400, 422)
 
-    @pytest.mark.asyncio
     async def test_from_agent_not_in_tenant_rejected(self, webui_env):
         """Sending from an agent not in the caller's tenant is rejected."""
         store, client = webui_env["store"], webui_env["client"]
@@ -933,7 +910,6 @@ class TestSendMessage:
         )
         assert resp.status_code in (400, 403, 404)
 
-    @pytest.mark.asyncio
     async def test_message_appears_in_recipient_inbox(self, webui_env):
         """After sending, the message appears in the recipient's inbox."""
         store, client = webui_env["store"], webui_env["client"]
@@ -962,7 +938,6 @@ class TestSendMessage:
         assert msgs[0]["body"] == "Test delivery"
         assert msgs[0]["from_agent_id"] == sender["agent_id"]
 
-    @pytest.mark.asyncio
     async def test_message_appears_in_sender_sent(self, webui_env):
         """After sending, the message appears in the sender's sent list."""
         store, client = webui_env["store"], webui_env["client"]
@@ -1000,7 +975,6 @@ class TestSendMessage:
 class TestCrossTenantIsolation:
     """Tests for cross-tenant rejection on inbox and sent endpoints."""
 
-    @pytest.mark.asyncio
     async def test_inbox_cross_tenant_agent_rejected(self, webui_env):
         """Accessing inbox of an agent in another tenant is rejected."""
         store, client = webui_env["store"], webui_env["client"]
@@ -1016,7 +990,6 @@ class TestCrossTenantIsolation:
         )
         assert resp.status_code in (403, 404)
 
-    @pytest.mark.asyncio
     async def test_sent_cross_tenant_agent_rejected(self, webui_env):
         """Accessing sent of an agent in another tenant is rejected."""
         store, client = webui_env["store"], webui_env["client"]
@@ -1041,7 +1014,6 @@ class TestCrossTenantIsolation:
 class TestDeregisteredAgentAccess:
     """Tests that deregistered agents with messages can still be viewed."""
 
-    @pytest.mark.asyncio
     async def test_deregistered_agent_inbox_accessible(self, webui_env):
         """Inbox of a deregistered agent (with messages) is still accessible."""
         store, task_store, client = (
@@ -1053,7 +1025,7 @@ class TestDeregisteredAgentAccess:
 
         active = await _setup_agent(store, "Active Agent", api_key=api_key)
         dereg = await _setup_agent(
-            store, "Deregistered Agent", api_key=api_key, deregister=True
+            store, "Deregistered Agent", api_key=api_key, deregister=False
         )
 
         await _create_task(
@@ -1062,6 +1034,7 @@ class TestDeregisteredAgentAccess:
             to_agent_id=dereg["agent_id"],
             text="Message to deregistered",
         )
+        await store.deregister_agent(dereg["agent_id"])
 
         resp = await client.get(
             f"/ui/api/agents/{dereg['agent_id']}/inbox",
@@ -1073,7 +1046,6 @@ class TestDeregisteredAgentAccess:
         assert len(msgs) == 1
         assert msgs[0]["body"] == "Message to deregistered"
 
-    @pytest.mark.asyncio
     async def test_deregistered_agent_sent_accessible(self, webui_env):
         """Sent messages of a deregistered agent are still accessible."""
         store, task_store, client = (
@@ -1085,7 +1057,7 @@ class TestDeregisteredAgentAccess:
 
         active = await _setup_agent(store, "Active Agent", api_key=api_key)
         dereg = await _setup_agent(
-            store, "Deregistered Agent", api_key=api_key, deregister=True
+            store, "Deregistered Agent", api_key=api_key, deregister=False
         )
 
         await _create_task(
@@ -1094,6 +1066,7 @@ class TestDeregisteredAgentAccess:
             to_agent_id=active["agent_id"],
             text="Sent before deregistration",
         )
+        await store.deregister_agent(dereg["agent_id"])
 
         resp = await client.get(
             f"/ui/api/agents/{dereg['agent_id']}/sent",
@@ -1114,7 +1087,6 @@ class TestDeregisteredAgentAccess:
 class TestSendFromDeregistered:
     """Tests that deregistered agents cannot send messages."""
 
-    @pytest.mark.asyncio
     async def test_send_from_deregistered_agent_rejected(self, webui_env):
         """Sending from a deregistered agent is rejected."""
         store, client = webui_env["store"], webui_env["client"]
