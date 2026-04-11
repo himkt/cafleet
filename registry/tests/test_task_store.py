@@ -1,16 +1,55 @@
-"""Tests for task_store.py — RedisTaskStore (A2A SDK TaskStore for Redis).
+"""Tests for the SQL-backed TaskStore.
 
-Covers: save, get, delete, list.
-Verifies Redis key schema: task:{task_id}, tasks:ctx:{context_id} sorted set,
-tasks:sender:{agent_id} set.
-Verifies sorted set scoring by status timestamp and re-scoring on state change.
+Covers the seven public methods of ``TaskStore`` listed in the design
+doc (design-docs/0000010-sqlite-store-migration/design-doc.md §"Store
+ownership of sessions", Operation Mapping for the ``tasks`` table, and
+the Step 6 checklist in Implementation Steps):
+
+  | Method             | Responsibility                                     |
+  |--------------------|----------------------------------------------------|
+  | ``save``           | UPSERT. Preserves ``created_at`` on re-save.       |
+  | ``get``            | SELECT task_json, parse with ``Task.model_validate_json``. |
+  | ``delete``         | DELETE FROM tasks WHERE task_id=?.                 |
+  | ``list``           | SELECT by ``context_id`` ordered by                |
+  |                    | ``status_timestamp DESC``.                         |
+  | ``list_by_sender`` | SELECT by ``from_agent_id`` ordered by             |
+  |                    | ``status_timestamp DESC``. NEW.                    |
+  | ``get_endpoints``  | SELECT ``(from_agent_id, to_agent_id)`` by id. NEW.|
+  | ``get_created_at`` | SELECT ``created_at`` by id. NEW.                  |
+
+Foreign key setup
+-----------------
+
+The ``tasks.context_id`` column has a ``REFERENCES agents(agent_id)``
+constraint with ``ON DELETE RESTRICT`` (see ``db/models.py`` Task). Any
+test that wants to save a task must first create a real agent row so
+the FK is satisfied. Tests that only need one tenant use the
+``_seed_agent`` helper; tests that need tenant isolation (e.g.,
+``list`` filters by context_id) use ``_seed_two_agents``. Both helpers
+go through the conftest ``store`` fixture (``RegistryStore``) rather
+than issuing raw INSERTs, so the setup mirrors the production path
+exactly — if ``create_agent`` ever stops adding a required column, these
+tests break loudly at seed time instead of at FK resolution.
+
+Fixture layout
+--------------
+
+* ``store`` — from conftest, a ``RegistryStore`` bound to the shared
+  function-scoped ``db_sessionmaker``. Used exclusively for seeding
+  tenants + agents in test setup.
+* ``task_store`` — the subject under test. The Programmer adds this to
+  ``conftest.py`` in Step 6 Phase B as
+  ``TaskStore(db_sessionmaker)`` bound to the same sessionmaker as
+  ``store``, so both stores share one in-memory SQLite DB per test.
+
+Until Phase B lands the ``task_store`` fixture, this file will fail to
+collect — that's the standard TDD-red state we've been running in all
+of Step 3-5.
 """
 
-import json
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
-import pytest
 from a2a.types import (
     Artifact,
     Part,
@@ -22,32 +61,47 @@ from a2a.types import (
 
 
 # ---------------------------------------------------------------------------
-# Test helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 
 def _ts(dt: datetime) -> str:
-    """Convert datetime to ISO 8601 string for TaskStatus.timestamp."""
+    """ISO 8601 timestamp string for ``TaskStatus.timestamp``."""
     return dt.isoformat()
 
 
 def _make_task(
+    *,
     task_id: str | None = None,
-    context_id: str | None = None,
+    context_id: str,
+    from_agent_id: str = "sender-default",
+    to_agent_id: str = "recipient-default",
+    msg_type: str = "unicast",
     state: TaskState = TaskState.input_required,
     timestamp: str | None = None,
-    from_agent_id: str = "sender-0000",
-    to_agent_id: str = "recipient-0000",
-    msg_type: str = "unicast",
-    text: str = "Hello",
+    text: str = "hello",
+    extra_metadata: dict | None = None,
 ) -> Task:
-    """Create a Task object with routing metadata for testing."""
+    """Construct an A2A ``Task`` with Hikyaku routing metadata.
+
+    Mirrors the production path in ``executor.py``: routing fields
+    (``fromAgentId``, ``toAgentId``, ``type``) live in ``task.metadata``
+    and drive what the store writes to the indexed columns. The
+    ``context_id`` keyword is required because every test in this file
+    needs to scope tasks to a specific agent (FK requirement).
+    """
     if task_id is None:
         task_id = str(uuid.uuid4())
-    if context_id is None:
-        context_id = to_agent_id
     if timestamp is None:
-        timestamp = _ts(datetime.now(timezone.utc))
+        timestamp = _ts(datetime.now(UTC))
+
+    metadata = {
+        "fromAgentId": from_agent_id,
+        "toAgentId": to_agent_id,
+        "type": msg_type,
+    }
+    if extra_metadata:
+        metadata.update(extra_metadata)
 
     return Task(
         id=task_id,
@@ -58,248 +112,135 @@ def _make_task(
                 artifact_id=str(uuid.uuid4()),
                 name="message",
                 parts=[Part(root=TextPart(text=text))],
-                metadata={
-                    "fromAgentId": from_agent_id,
-                    "fromAgentName": "Test Sender",
-                    "type": msg_type,
-                },
             )
         ],
-        metadata={
-            "fromAgentId": from_agent_id,
-            "toAgentId": to_agent_id,
-            "type": msg_type,
-        },
+        metadata=metadata,
     )
 
 
+async def _seed_agent(store, *, owner_sub: str | None = None) -> str:
+    """Create a tenant + one agent, return the agent_id.
+
+    Used as the ``context_id`` for tasks. Goes through the public
+    ``RegistryStore`` API so the FK target row is created exactly the
+    way production code creates it.
+    """
+    if owner_sub is None:
+        owner_sub = f"auth0|task-test-{uuid.uuid4().hex[:12]}"
+    api_key, _api_key_hash, _ = await store.create_api_key(owner_sub)
+    result = await store.create_agent(
+        "Test Agent",
+        "agent for task_store tests",
+        skills=None,
+        api_key=api_key,
+    )
+    return result["agent_id"]
+
+
+async def _seed_two_agents(store) -> tuple[str, str]:
+    """Create two tenants, one agent per tenant, return both agent_ids.
+
+    Two SEPARATE owners + api_keys → two SEPARATE agents. Tests that
+    care about tenant/context isolation (e.g., ``list`` filtering by
+    ``context_id``) use this.
+    """
+    a = await _seed_agent(store)
+    b = await _seed_agent(store)
+    return a, b
+
+
 # ---------------------------------------------------------------------------
-# save
+# save + get
 # ---------------------------------------------------------------------------
 
 
-class TestSave:
-    """Tests for RedisTaskStore.save — stores Task + builds indexes."""
+class TestSaveAndGet:
+    """save / get happy paths, UPSERT semantics, created_at preservation."""
 
-    @pytest.mark.asyncio
-    async def test_stores_task_hash_in_redis(self, task_store, redis_client):
-        """save creates a task:{task_id} hash in Redis."""
-        task = _make_task(task_id="task-001")
-        await task_store.save(task)
-
-        exists = await redis_client.exists("task:task-001")
-        assert exists
-
-    @pytest.mark.asyncio
-    async def test_stores_task_json_field(self, task_store, redis_client):
-        """task:{task_id} hash contains a task_json field with valid JSON."""
-        task = _make_task(task_id="task-001")
-        await task_store.save(task)
-
-        task_json = await redis_client.hget("task:task-001", "task_json")
-        assert task_json is not None
-        parsed = json.loads(task_json)
-        assert isinstance(parsed, dict)
-
-    @pytest.mark.asyncio
-    async def test_stores_routing_metadata(self, task_store, redis_client):
-        """task:{task_id} hash contains from_agent_id, to_agent_id, type fields."""
+    async def test_save_new_task(self, task_store, store):
+        """A fresh ``save`` is retrievable via ``get`` with identical content."""
+        agent_id = await _seed_agent(store)
         task = _make_task(
             task_id="task-001",
-            from_agent_id="sender-aaa",
-            to_agent_id="recipient-bbb",
-            msg_type="unicast",
+            context_id=agent_id,
+            text="hello world",
         )
-        await task_store.save(task)
 
-        from_id = await redis_client.hget("task:task-001", "from_agent_id")
-        to_id = await redis_client.hget("task:task-001", "to_agent_id")
-        msg_type = await redis_client.hget("task:task-001", "type")
-
-        assert from_id == "sender-aaa"
-        assert to_id == "recipient-bbb"
-        assert msg_type == "unicast"
-
-    @pytest.mark.asyncio
-    async def test_stores_created_at(self, task_store, redis_client):
-        """task:{task_id} hash contains a created_at ISO 8601 timestamp."""
-        task = _make_task(task_id="task-001")
-        await task_store.save(task)
-
-        created_at = await redis_client.hget("task:task-001", "created_at")
-        assert created_at is not None
-        dt = datetime.fromisoformat(created_at)
-        assert isinstance(dt, datetime)
-
-    @pytest.mark.asyncio
-    async def test_adds_to_context_sorted_set(self, task_store, redis_client):
-        """save adds task_id to tasks:ctx:{context_id} sorted set."""
-        task = _make_task(task_id="task-001", context_id="ctx-abc")
-        await task_store.save(task)
-
-        score = await redis_client.zscore("tasks:ctx:ctx-abc", "task-001")
-        assert score is not None
-
-    @pytest.mark.asyncio
-    async def test_adds_to_sender_set(self, task_store, redis_client):
-        """save adds task_id to tasks:sender:{from_agent_id} set."""
-        task = _make_task(task_id="task-001", from_agent_id="sender-xyz")
-        await task_store.save(task)
-
-        is_member = await redis_client.sismember("tasks:sender:sender-xyz", "task-001")
-        assert is_member
-
-    @pytest.mark.asyncio
-    async def test_sorted_set_score_is_status_timestamp(self, task_store, redis_client):
-        """Sorted set score corresponds to the task's status timestamp."""
-        ts = datetime(2026, 3, 28, 12, 0, 0, tzinfo=timezone.utc)
-        task = _make_task(task_id="task-001", context_id="ctx-1", timestamp=_ts(ts))
-        await task_store.save(task)
-
-        score = await redis_client.zscore("tasks:ctx:ctx-1", "task-001")
-        assert score == pytest.approx(ts.timestamp(), abs=1)
-
-    @pytest.mark.asyncio
-    async def test_idempotent_save_updates_record(self, task_store, redis_client):
-        """Re-saving a task updates the stored record."""
-        task = _make_task(task_id="task-001", text="Original")
-        await task_store.save(task)
-
-        # Modify and re-save
-        task.artifacts[0].parts[0].root.text = "Updated"
-        await task_store.save(task)
-
-        task_json = await redis_client.hget("task:task-001", "task_json")
-        assert "Updated" in task_json
-
-    @pytest.mark.asyncio
-    async def test_resave_with_new_status_updates_sorted_set_score(
-        self, task_store, redis_client
-    ):
-        """Re-saving with a new status timestamp re-scores the sorted set entry."""
-        ts1 = datetime(2026, 3, 28, 12, 0, 0, tzinfo=timezone.utc)
-        ts2 = datetime(2026, 3, 28, 13, 0, 0, tzinfo=timezone.utc)
-
-        task = _make_task(task_id="task-001", context_id="ctx-1", timestamp=_ts(ts1))
-        await task_store.save(task)
-
-        score_before = await redis_client.zscore("tasks:ctx:ctx-1", "task-001")
-
-        # Update status timestamp and re-save
-        task.status = TaskStatus(state=TaskState.completed, timestamp=_ts(ts2))
-        await task_store.save(task)
-
-        score_after = await redis_client.zscore("tasks:ctx:ctx-1", "task-001")
-        assert score_after > score_before
-        assert score_after == pytest.approx(ts2.timestamp(), abs=1)
-
-    @pytest.mark.asyncio
-    async def test_multiple_tasks_same_context(self, task_store, redis_client):
-        """Multiple tasks with the same context_id are all in the sorted set."""
-        for i in range(3):
-            task = _make_task(task_id=f"task-{i}", context_id="ctx-shared")
-            await task_store.save(task)
-
-        count = await redis_client.zcard("tasks:ctx:ctx-shared")
-        assert count == 3
-
-    @pytest.mark.asyncio
-    async def test_multiple_tasks_same_sender(self, task_store, redis_client):
-        """Multiple tasks from the same sender are all in the sender set."""
-        for i in range(3):
-            task = _make_task(task_id=f"task-{i}", from_agent_id="sender-multi")
-            await task_store.save(task)
-
-        count = await redis_client.scard("tasks:sender:sender-multi")
-        assert count == 3
-
-    @pytest.mark.asyncio
-    async def test_broadcast_type_stored(self, task_store, redis_client):
-        """Broadcast tasks store type='broadcast' in routing metadata."""
-        task = _make_task(task_id="task-bc", msg_type="broadcast")
-        await task_store.save(task)
-
-        stored_type = await redis_client.hget("task:task-bc", "type")
-        assert stored_type == "broadcast"
-
-
-# ---------------------------------------------------------------------------
-# get
-# ---------------------------------------------------------------------------
-
-
-class TestGet:
-    """Tests for RedisTaskStore.get — retrieves Task by ID."""
-
-    @pytest.mark.asyncio
-    async def test_returns_saved_task(self, task_store):
-        """get returns the Task that was previously saved."""
-        task = _make_task(task_id="task-001", text="Test message")
         await task_store.save(task)
 
         retrieved = await task_store.get("task-001")
-        assert retrieved is not None
+        assert retrieved is not None, "get should return the just-saved task"
         assert retrieved.id == "task-001"
-
-    @pytest.mark.asyncio
-    async def test_returns_none_for_nonexistent(self, task_store):
-        """get returns None for a task_id that does not exist."""
-        result = await task_store.get("nonexistent-task-id")
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_preserves_task_fields(self, task_store):
-        """get returns a Task with all original fields preserved."""
-        task = _make_task(
-            task_id="task-001",
-            context_id="ctx-123",
-            state=TaskState.input_required,
-            from_agent_id="sender-aaa",
-            to_agent_id="recipient-bbb",
-            text="Important message",
-        )
-        await task_store.save(task)
-
-        retrieved = await task_store.get("task-001")
-        assert retrieved.context_id == "ctx-123"
+        assert retrieved.context_id == agent_id
         assert retrieved.status.state == TaskState.input_required
-        assert retrieved.metadata["fromAgentId"] == "sender-aaa"
-        assert retrieved.metadata["toAgentId"] == "recipient-bbb"
+        assert isinstance(retrieved, Task)
 
-    @pytest.mark.asyncio
-    async def test_preserves_artifacts(self, task_store):
-        """get returns a Task with artifacts intact."""
-        task = _make_task(task_id="task-001", text="Check artifacts")
-        await task_store.save(task)
-
-        retrieved = await task_store.get("task-001")
-        assert retrieved.artifacts is not None
-        assert len(retrieved.artifacts) == 1
-        assert retrieved.artifacts[0].name == "message"
-
-    @pytest.mark.asyncio
-    async def test_returns_updated_task_after_resave(self, task_store):
-        """get returns the latest version after a task is re-saved."""
-        task = _make_task(task_id="task-001", state=TaskState.input_required)
+    async def test_save_updates_existing_task(self, task_store, store):
+        """Re-saving the same task_id updates status_state and task_json (UPSERT)."""
+        agent_id = await _seed_agent(store)
+        task = _make_task(
+            task_id="task-upsert",
+            context_id=agent_id,
+            state=TaskState.input_required,
+            text="original",
+        )
         await task_store.save(task)
 
         task.status = TaskStatus(
             state=TaskState.completed,
-            timestamp=_ts(datetime.now(timezone.utc)),
+            timestamp=_ts(datetime.now(UTC)),
+        )
+        task.artifacts[0].parts[0].root.text = "updated"
+        await task_store.save(task)
+
+        retrieved = await task_store.get("task-upsert")
+        assert retrieved is not None
+        assert retrieved.status.state == TaskState.completed, (
+            "UPSERT must overwrite status_state with the new value"
+        )
+        assert retrieved.artifacts[0].parts[0].root.text == "updated", (
+            "UPSERT must overwrite task_json (artifact text changed)"
+        )
+
+    async def test_save_preserves_created_at_across_updates(
+        self, task_store, store
+    ):
+        """UPSERT must NOT touch ``created_at`` — it's set once at first save.
+
+        This is the core invariant of the Redis → SQL migration: the
+        Redis implementation used ``hget`` + conditional set to preserve
+        created_at. The SQL version uses ``INSERT ... ON CONFLICT DO
+        UPDATE`` with ``created_at`` deliberately ABSENT from the update
+        clause. If this test fails, ``created_at`` is probably in the
+        SET clause by accident.
+        """
+        agent_id = await _seed_agent(store)
+        task = _make_task(
+            task_id="task-preserve",
+            context_id=agent_id,
+            state=TaskState.input_required,
         )
         await task_store.save(task)
 
-        retrieved = await task_store.get("task-001")
-        assert retrieved.status.state == TaskState.completed
+        created_at_first = await task_store.get_created_at("task-preserve")
+        assert created_at_first is not None
 
-    @pytest.mark.asyncio
-    async def test_returns_task_type(self, task_store):
-        """Retrieved task is an instance of a2a.types.Task."""
-        task = _make_task(task_id="task-001")
+        task.status = TaskStatus(
+            state=TaskState.completed,
+            timestamp=_ts(datetime.now(UTC) + timedelta(hours=1)),
+        )
         await task_store.save(task)
 
-        retrieved = await task_store.get("task-001")
-        assert isinstance(retrieved, Task)
+        created_at_second = await task_store.get_created_at("task-preserve")
+        assert created_at_second == created_at_first, (
+            f"created_at must be preserved across save() calls; "
+            f"expected {created_at_first!r}, got {created_at_second!r}"
+        )
+
+    async def test_get_returns_none_for_missing_task(self, task_store):
+        """``get`` on an unknown task_id returns ``None``, not an exception."""
+        result = await task_store.get("definitely-not-a-real-task-id")
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -308,261 +249,263 @@ class TestGet:
 
 
 class TestDelete:
-    """Tests for RedisTaskStore.delete — removes Task and cleans up indexes."""
+    """delete happy path + noop on missing rows."""
 
-    @pytest.mark.asyncio
-    async def test_removes_task_hash(self, task_store, redis_client):
-        """delete removes the task:{task_id} hash from Redis."""
-        task = _make_task(task_id="task-001")
+    async def test_delete_removes_task(self, task_store, store):
+        """After ``delete``, ``get`` returns ``None`` for the same id."""
+        agent_id = await _seed_agent(store)
+        task = _make_task(task_id="task-del", context_id=agent_id)
         await task_store.save(task)
 
-        await task_store.delete("task-001")
+        assert await task_store.get("task-del") is not None
 
-        exists = await redis_client.exists("task:task-001")
-        assert not exists
+        await task_store.delete("task-del")
 
-    @pytest.mark.asyncio
-    async def test_removes_from_context_sorted_set(self, task_store, redis_client):
-        """delete removes the task_id from tasks:ctx:{context_id} sorted set."""
-        task = _make_task(task_id="task-001", context_id="ctx-del")
-        await task_store.save(task)
-
-        await task_store.delete("task-001")
-
-        score = await redis_client.zscore("tasks:ctx:ctx-del", "task-001")
-        assert score is None
-
-    @pytest.mark.asyncio
-    async def test_removes_from_sender_set(self, task_store, redis_client):
-        """delete removes the task_id from tasks:sender:{agent_id} set."""
-        task = _make_task(task_id="task-001", from_agent_id="sender-del")
-        await task_store.save(task)
-
-        await task_store.delete("task-001")
-
-        is_member = await redis_client.sismember("tasks:sender:sender-del", "task-001")
-        assert not is_member
-
-    @pytest.mark.asyncio
-    async def test_get_returns_none_after_delete(self, task_store):
-        """get returns None after a task is deleted."""
-        task = _make_task(task_id="task-001")
-        await task_store.save(task)
-        await task_store.delete("task-001")
-
-        result = await task_store.get("task-001")
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_delete_nonexistent_is_graceful(self, task_store):
-        """Deleting a non-existent task does not raise an error."""
-        await task_store.delete("nonexistent-task-id")
-        # No exception = pass
-
-    @pytest.mark.asyncio
-    async def test_delete_does_not_affect_other_tasks(self, task_store, redis_client):
-        """Deleting one task does not affect other tasks in the same context."""
-        task1 = _make_task(task_id="task-001", context_id="ctx-shared")
-        task2 = _make_task(task_id="task-002", context_id="ctx-shared")
-        await task_store.save(task1)
-        await task_store.save(task2)
-
-        await task_store.delete("task-001")
-
-        # task-002 still exists
-        result = await task_store.get("task-002")
-        assert result is not None
-        score = await redis_client.zscore("tasks:ctx:ctx-shared", "task-002")
-        assert score is not None
-
-
-# ---------------------------------------------------------------------------
-# Sorted set indexing (tasks:ctx:{context_id})
-# ---------------------------------------------------------------------------
-
-
-class TestContextSortedSetIndexing:
-    """Tests for tasks:ctx:{context_id} sorted set behavior."""
-
-    @pytest.mark.asyncio
-    async def test_descending_timestamp_order(self, task_store, redis_client):
-        """Tasks are retrievable in descending status timestamp order."""
-        base = datetime(2026, 3, 28, 10, 0, 0, tzinfo=timezone.utc)
-
-        for i in range(5):
-            ts = base + timedelta(minutes=i)
-            task = _make_task(
-                task_id=f"task-{i:03d}",
-                context_id="ctx-order",
-                timestamp=_ts(ts),
-            )
-            await task_store.save(task)
-
-        # ZREVRANGE returns highest scores first (descending)
-        members = await redis_client.zrevrange("tasks:ctx:ctx-order", 0, -1)
-        assert members == ["task-004", "task-003", "task-002", "task-001", "task-000"]
-
-    @pytest.mark.asyncio
-    async def test_score_updates_on_state_change(self, task_store, redis_client):
-        """Score is updated when the task state changes (re-save)."""
-        ts_initial = datetime(2026, 3, 28, 10, 0, 0, tzinfo=timezone.utc)
-        ts_completed = datetime(2026, 3, 28, 11, 30, 0, tzinfo=timezone.utc)
-
-        task = _make_task(
-            task_id="task-001",
-            context_id="ctx-rescore",
-            state=TaskState.input_required,
-            timestamp=_ts(ts_initial),
+        assert await task_store.get("task-del") is None, (
+            "get should return None after delete"
         )
-        await task_store.save(task)
 
-        task.status = TaskStatus(state=TaskState.completed, timestamp=_ts(ts_completed))
-        await task_store.save(task)
-
-        score = await redis_client.zscore("tasks:ctx:ctx-rescore", "task-001")
-        assert score == pytest.approx(ts_completed.timestamp(), abs=1)
-
-    @pytest.mark.asyncio
-    async def test_different_contexts_are_independent(self, task_store, redis_client):
-        """Tasks in different contexts use separate sorted sets."""
-        task_a = _make_task(task_id="task-a", context_id="ctx-alpha")
-        task_b = _make_task(task_id="task-b", context_id="ctx-beta")
-        await task_store.save(task_a)
-        await task_store.save(task_b)
-
-        count_alpha = await redis_client.zcard("tasks:ctx:ctx-alpha")
-        count_beta = await redis_client.zcard("tasks:ctx:ctx-beta")
-        assert count_alpha == 1
-        assert count_beta == 1
+    async def test_delete_nonexistent_is_noop(self, task_store):
+        """``delete`` on a missing task_id must not raise."""
+        await task_store.delete("never-existed")
 
 
 # ---------------------------------------------------------------------------
-# Sender set indexing (tasks:sender:{agent_id})
-# ---------------------------------------------------------------------------
-
-
-class TestSenderSetIndexing:
-    """Tests for tasks:sender:{agent_id} set behavior."""
-
-    @pytest.mark.asyncio
-    async def test_sender_set_tracks_all_tasks(self, task_store, redis_client):
-        """All tasks from a sender are tracked in tasks:sender:{agent_id}."""
-        for i in range(4):
-            task = _make_task(
-                task_id=f"task-{i}",
-                from_agent_id="sender-track",
-                to_agent_id=f"recipient-{i}",
-            )
-            await task_store.save(task)
-
-        members = await redis_client.smembers("tasks:sender:sender-track")
-        assert len(members) == 4
-        for i in range(4):
-            assert f"task-{i}" in members
-
-    @pytest.mark.asyncio
-    async def test_different_senders_are_independent(self, task_store, redis_client):
-        """Each sender has their own independent set."""
-        task1 = _make_task(task_id="task-1", from_agent_id="sender-one")
-        task2 = _make_task(task_id="task-2", from_agent_id="sender-two")
-        await task_store.save(task1)
-        await task_store.save(task2)
-
-        set_one = await redis_client.smembers("tasks:sender:sender-one")
-        set_two = await redis_client.smembers("tasks:sender:sender-two")
-        assert set_one == {"task-1"}
-        assert set_two == {"task-2"}
-
-
-# ---------------------------------------------------------------------------
-# list (custom method for ListTasks queries)
+# list (by context_id)
 # ---------------------------------------------------------------------------
 
 
 class TestList:
-    """Tests for RedisTaskStore.list — query tasks by context_id."""
+    """list(context_id) ordering, filtering, empty cases."""
 
-    @pytest.mark.asyncio
-    async def test_returns_tasks_for_context(self, task_store):
-        """list returns all tasks matching the given context_id."""
+    async def test_list_returns_tasks_in_desc_status_timestamp_order(
+        self, task_store, store
+    ):
+        """Tasks come back in descending ``status_timestamp`` order."""
+        agent_id = await _seed_agent(store)
+        base = datetime(2026, 4, 1, 10, 0, 0, tzinfo=UTC)
         for i in range(3):
-            task = _make_task(task_id=f"task-{i}", context_id="ctx-list")
-            await task_store.save(task)
+            await task_store.save(
+                _make_task(
+                    task_id=f"task-order-{i}",
+                    context_id=agent_id,
+                    timestamp=_ts(base + timedelta(minutes=i)),
+                )
+            )
 
-        # Also save a task with different context
-        other = _make_task(task_id="task-other", context_id="ctx-other")
-        await task_store.save(other)
+        tasks = await task_store.list(agent_id)
+        ids = [t.id for t in tasks]
+        assert ids == ["task-order-2", "task-order-1", "task-order-0"], (
+            f"list must return tasks DESC by status_timestamp; got {ids}"
+        )
 
-        tasks = await task_store.list(context_id="ctx-list")
-        assert len(tasks) == 3
-        task_ids = {t.id for t in tasks}
-        assert task_ids == {"task-0", "task-1", "task-2"}
+    async def test_list_filters_by_context_id(self, task_store, store):
+        """Tasks under a different context_id must not appear in the result."""
+        agent_a, agent_b = await _seed_two_agents(store)
+        for i in range(2):
+            await task_store.save(
+                _make_task(task_id=f"a-{i}", context_id=agent_a)
+            )
+            await task_store.save(
+                _make_task(task_id=f"b-{i}", context_id=agent_b)
+            )
 
-    @pytest.mark.asyncio
-    async def test_returns_empty_for_nonexistent_context(self, task_store):
-        """list returns empty list for a context_id with no tasks."""
-        tasks = await task_store.list(context_id="nonexistent-ctx")
+        a_tasks = await task_store.list(agent_a)
+        b_tasks = await task_store.list(agent_b)
+
+        assert {t.id for t in a_tasks} == {"a-0", "a-1"}
+        assert {t.id for t in b_tasks} == {"b-0", "b-1"}
+
+    async def test_list_empty_returns_empty_list(self, task_store, store):
+        """An agent with no tasks yields an empty list (not ``None``)."""
+        agent_id = await _seed_agent(store)
+        tasks = await task_store.list(agent_id)
         assert tasks == []
 
-    @pytest.mark.asyncio
-    async def test_descending_timestamp_order(self, task_store):
-        """list returns tasks in descending status timestamp order."""
-        base = datetime(2026, 3, 28, 10, 0, 0, tzinfo=timezone.utc)
 
-        for i in range(5):
-            ts = base + timedelta(minutes=i)
-            task = _make_task(
-                task_id=f"task-{i:03d}",
-                context_id="ctx-ordered",
-                timestamp=_ts(ts),
+# ---------------------------------------------------------------------------
+# list_by_sender
+# ---------------------------------------------------------------------------
+
+
+class TestListBySender:
+    """list_by_sender ordering + sender isolation."""
+
+    async def test_list_by_sender_returns_tasks_in_desc_order(
+        self, task_store, store
+    ):
+        """``list_by_sender`` is DESC by status_timestamp, same as ``list``."""
+        agent_id = await _seed_agent(store)
+        base = datetime(2026, 4, 1, 12, 0, 0, tzinfo=UTC)
+        for i in range(3):
+            await task_store.save(
+                _make_task(
+                    task_id=f"s-{i}",
+                    context_id=agent_id,
+                    from_agent_id="sender-desc",
+                    timestamp=_ts(base + timedelta(minutes=i)),
+                )
             )
-            await task_store.save(task)
 
-        tasks = await task_store.list(context_id="ctx-ordered")
-        task_ids = [t.id for t in tasks]
-        # Most recent first
-        assert task_ids == [
-            "task-004",
-            "task-003",
-            "task-002",
-            "task-001",
-            "task-000",
-        ]
+        tasks = await task_store.list_by_sender("sender-desc")
+        ids = [t.id for t in tasks]
+        assert ids == ["s-2", "s-1", "s-0"], (
+            f"list_by_sender must return tasks DESC by status_timestamp; "
+            f"got {ids}"
+        )
 
-    @pytest.mark.asyncio
-    async def test_returns_full_task_objects(self, task_store):
-        """Each item returned by list is a fully deserialized Task."""
+    async def test_list_by_sender_filters_by_sender(self, task_store, store):
+        """Tasks from a different sender are excluded from the result."""
+        agent_id = await _seed_agent(store)
+        await task_store.save(
+            _make_task(
+                task_id="from-alpha",
+                context_id=agent_id,
+                from_agent_id="sender-alpha",
+            )
+        )
+        await task_store.save(
+            _make_task(
+                task_id="from-beta",
+                context_id=agent_id,
+                from_agent_id="sender-beta",
+            )
+        )
+
+        alpha_tasks = await task_store.list_by_sender("sender-alpha")
+        beta_tasks = await task_store.list_by_sender("sender-beta")
+
+        assert {t.id for t in alpha_tasks} == {"from-alpha"}
+        assert {t.id for t in beta_tasks} == {"from-beta"}
+
+
+# ---------------------------------------------------------------------------
+# get_endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestGetEndpoints:
+    """get_endpoints returns the ``(from_agent_id, to_agent_id)`` pair.
+
+    Used by ``main.py::_handle_get_task`` to resolve the authorization
+    check (is the caller either end of the conversation?) without
+    parsing the task_json blob.
+    """
+
+    async def test_get_endpoints_returns_from_and_to(self, task_store, store):
+        """Happy path: returns the tuple written at save time."""
+        agent_id = await _seed_agent(store)
+        await task_store.save(
+            _make_task(
+                task_id="task-ep",
+                context_id=agent_id,
+                from_agent_id="alice",
+                to_agent_id="bob",
+            )
+        )
+
+        endpoints = await task_store.get_endpoints("task-ep")
+        assert endpoints == ("alice", "bob"), (
+            f"get_endpoints should return (from_agent_id, to_agent_id); "
+            f"got {endpoints!r}"
+        )
+
+    async def test_get_endpoints_returns_none_for_missing(self, task_store):
+        """Missing task_id returns ``None`` (callers branch on that)."""
+        endpoints = await task_store.get_endpoints("not-a-task")
+        assert endpoints is None
+
+
+# ---------------------------------------------------------------------------
+# get_created_at
+# ---------------------------------------------------------------------------
+
+
+class TestGetCreatedAt:
+    """get_created_at returns the ISO 8601 timestamp string.
+
+    Used by ``webui_api.py::_format_message`` to label messages with
+    their creation time without deserializing the whole task_json.
+    """
+
+    async def test_get_created_at_returns_iso_string(self, task_store, store):
+        """Returns an ISO 8601 string that round-trips through ``fromisoformat``."""
+        agent_id = await _seed_agent(store)
+        await task_store.save(
+            _make_task(task_id="task-ca", context_id=agent_id)
+        )
+
+        created_at = await task_store.get_created_at("task-ca")
+        assert created_at is not None
+        parsed = datetime.fromisoformat(created_at)
+        assert isinstance(parsed, datetime), (
+            f"get_created_at should return an ISO 8601 parseable string; "
+            f"got {created_at!r}"
+        )
+
+    async def test_get_created_at_returns_none_for_missing(self, task_store):
+        """Missing task_id returns ``None``."""
+        result = await task_store.get_created_at("missing-task")
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Task JSON roundtrip — structural integrity of artifacts + metadata
+# ---------------------------------------------------------------------------
+
+
+class TestTaskJsonRoundtrip:
+    """Deep fields (artifacts, metadata) survive save → get unchanged.
+
+    The store only promotes a handful of fields to columns; everything
+    else lives in the ``task_json`` TEXT blob. These tests guard the
+    invariant that nothing gets silently dropped during serialization.
+    """
+
+    async def test_task_json_preserves_artifacts(self, task_store, store):
+        """Artifact list (name + parts) comes back intact through save/get."""
+        agent_id = await _seed_agent(store)
         task = _make_task(
-            task_id="task-full",
-            context_id="ctx-full",
-            text="Full task test",
+            task_id="task-art",
+            context_id=agent_id,
+            text="keep these parts",
         )
         await task_store.save(task)
 
-        tasks = await task_store.list(context_id="ctx-full")
-        assert len(tasks) == 1
-        t = tasks[0]
-        assert isinstance(t, Task)
-        assert t.id == "task-full"
-        assert t.context_id == "ctx-full"
-        assert t.artifacts is not None
+        retrieved = await task_store.get("task-art")
+        assert retrieved is not None
+        assert retrieved.artifacts is not None
+        assert len(retrieved.artifacts) == 1
+        art = retrieved.artifacts[0]
+        assert art.name == "message"
+        assert len(art.parts) == 1
+        assert art.parts[0].root.text == "keep these parts"
 
-    @pytest.mark.asyncio
-    async def test_reflects_state_changes(self, task_store):
-        """list returns tasks with their latest state after updates."""
+    async def test_task_json_preserves_metadata(self, task_store, store):
+        """Arbitrary metadata keys survive the JSON roundtrip.
+
+        Hikyaku's routing keys (``fromAgentId``, ``toAgentId``, ``type``)
+        are already asserted by ``test_get_endpoints_returns_from_and_to``.
+        This test adds an UNRELATED key (``traceId``) to prove the store
+        preserves the whole metadata dict, not just the three routing
+        keys it promotes to columns.
+        """
+        agent_id = await _seed_agent(store)
         task = _make_task(
-            task_id="task-update",
-            context_id="ctx-state",
-            state=TaskState.input_required,
+            task_id="task-meta",
+            context_id=agent_id,
+            from_agent_id="alice",
+            to_agent_id="bob",
+            extra_metadata={"traceId": "trace-xyz-123"},
         )
         await task_store.save(task)
 
-        task.status = TaskStatus(
-            state=TaskState.completed,
-            timestamp=_ts(datetime.now(timezone.utc)),
+        retrieved = await task_store.get("task-meta")
+        assert retrieved is not None
+        assert retrieved.metadata is not None
+        assert retrieved.metadata["fromAgentId"] == "alice"
+        assert retrieved.metadata["toAgentId"] == "bob"
+        assert retrieved.metadata["type"] == "unicast"
+        assert retrieved.metadata["traceId"] == "trace-xyz-123", (
+            "non-routing metadata keys must survive the task_json roundtrip"
         )
-        await task_store.save(task)
-
-        tasks = await task_store.list(context_id="ctx-state")
-        assert len(tasks) == 1
-        assert tasks[0].status.state == TaskState.completed
