@@ -1394,6 +1394,146 @@ class TestTimeline:
         for t in tasks:
             assert t.id in task_ids
 
+    async def test_200_row_cap(self, webui_env):
+        """Timeline returns at most 200 rows even when more tasks exist."""
+        store, task_store, client = (
+            webui_env["store"],
+            webui_env["task_store"],
+            webui_env["client"],
+        )
+        api_key, tenant_id = webui_env["api_key"], webui_env["tenant_id"]
+
+        sender = await _setup_agent(store, "Sender", api_key=api_key)
+        recipient = await _setup_agent(store, "Recipient", api_key=api_key)
+
+        now = datetime.now(UTC)
+        for i in range(205):
+            ts = (now - timedelta(seconds=205 - i)).isoformat()
+            await _create_task(
+                task_store,
+                from_agent_id=sender["agent_id"],
+                to_agent_id=recipient["agent_id"],
+                text=f"Message {i}",
+                created_at=ts,
+            )
+
+        resp = await client.get(
+            "/ui/api/timeline", headers=_auth_header(tenant_id)
+        )
+        assert resp.status_code == 200
+        assert len(resp.json()["messages"]) == 200
+
+
+# ===========================================================================
+# Existing endpoints: new fields from _format_messages
+# ===========================================================================
+
+
+class TestFormatMessagesNewFields:
+    """Verify inbox/sent endpoints now include origin_task_id and status_timestamp."""
+
+    async def test_inbox_has_origin_task_id_field(self, webui_env):
+        """Inbox messages include ``origin_task_id`` field."""
+        store, task_store, client = (
+            webui_env["store"],
+            webui_env["task_store"],
+            webui_env["client"],
+        )
+        api_key, tenant_id = webui_env["api_key"], webui_env["tenant_id"]
+
+        sender = await _setup_agent(store, "Sender", api_key=api_key)
+        recipient = await _setup_agent(store, "Recipient", api_key=api_key)
+
+        await _create_task(
+            task_store,
+            from_agent_id=sender["agent_id"],
+            to_agent_id=recipient["agent_id"],
+        )
+
+        resp = await client.get(
+            f"/ui/api/agents/{recipient['agent_id']}/inbox",
+            headers=_auth_header(tenant_id),
+        )
+        msg = resp.json()["messages"][0]
+        assert "origin_task_id" in msg
+
+    async def test_inbox_has_status_timestamp_field(self, webui_env):
+        """Inbox messages include ``status_timestamp`` field."""
+        store, task_store, client = (
+            webui_env["store"],
+            webui_env["task_store"],
+            webui_env["client"],
+        )
+        api_key, tenant_id = webui_env["api_key"], webui_env["tenant_id"]
+
+        sender = await _setup_agent(store, "Sender", api_key=api_key)
+        recipient = await _setup_agent(store, "Recipient", api_key=api_key)
+
+        await _create_task(
+            task_store,
+            from_agent_id=sender["agent_id"],
+            to_agent_id=recipient["agent_id"],
+        )
+
+        resp = await client.get(
+            f"/ui/api/agents/{recipient['agent_id']}/inbox",
+            headers=_auth_header(tenant_id),
+        )
+        msg = resp.json()["messages"][0]
+        assert "status_timestamp" in msg
+        assert msg["status_timestamp"] != ""
+
+    async def test_sent_has_origin_task_id_field(self, webui_env):
+        """Sent messages include ``origin_task_id`` field."""
+        store, task_store, client = (
+            webui_env["store"],
+            webui_env["task_store"],
+            webui_env["client"],
+        )
+        api_key, tenant_id = webui_env["api_key"], webui_env["tenant_id"]
+
+        sender = await _setup_agent(store, "Sender", api_key=api_key)
+        recipient = await _setup_agent(store, "Recipient", api_key=api_key)
+
+        await _create_task(
+            task_store,
+            from_agent_id=sender["agent_id"],
+            to_agent_id=recipient["agent_id"],
+        )
+
+        resp = await client.get(
+            f"/ui/api/agents/{sender['agent_id']}/sent",
+            headers=_auth_header(tenant_id),
+        )
+        msg = resp.json()["messages"][0]
+        assert "origin_task_id" in msg
+
+    async def test_sent_has_status_timestamp_field(self, webui_env):
+        """Sent messages include ``status_timestamp`` field."""
+        store, task_store, client = (
+            webui_env["store"],
+            webui_env["task_store"],
+            webui_env["client"],
+        )
+        api_key, tenant_id = webui_env["api_key"], webui_env["tenant_id"]
+
+        sender = await _setup_agent(store, "Sender", api_key=api_key)
+        recipient = await _setup_agent(store, "Recipient", api_key=api_key)
+
+        await _create_task(
+            task_store,
+            from_agent_id=sender["agent_id"],
+            to_agent_id=recipient["agent_id"],
+        )
+
+        resp = await client.get(
+            f"/ui/api/agents/{sender['agent_id']}/sent",
+            headers=_auth_header(tenant_id),
+        )
+        msg = resp.json()["messages"][0]
+        assert "status_timestamp" in msg
+        assert msg["status_timestamp"] != ""
+
 
 # ===========================================================================
 # POST /ui/api/messages/send — broadcast (to_agent_id="*")
