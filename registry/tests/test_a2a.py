@@ -5,12 +5,6 @@ Tests end-to-end flows through the ASGI app (FastAPI + JSON-RPC):
 - Unicast flow: send → list → get → ACK → verify COMPLETED
 - Broadcast flow: send → each recipient lists → ACK → verify all COMPLETED
 - CancelTask retraction
-
-The Redis-backed predecessor seeded an active ``apikey:`` hash into
-fakeredis under a hard-coded constant. The SQL rewrite cannot hard-code
-keys because ``create_api_key`` generates them randomly, so the fixture
-calls ``store.create_api_key`` at setup and yields the generated key
-alongside the httpx client.
 """
 
 import uuid

@@ -1,12 +1,9 @@
 """SQL-backed RegistryStore.
 
-Replaces the Redis implementation with one that owns an
-``async_sessionmaker[AsyncSession]`` and opens a fresh session per call.
-Multi-statement operations wrap their bodies in ``async with session.begin():``
-so they commit (or roll back) as a single transaction.
-
-The public API surface mirrors the legacy class so the executor and route
-handlers do not need to branch on the storage backend.
+Owns an ``async_sessionmaker[AsyncSession]`` and opens a fresh session per
+call. Multi-statement operations wrap their bodies in
+``async with session.begin():`` so they commit (or roll back) as a single
+transaction.
 """
 
 import hashlib

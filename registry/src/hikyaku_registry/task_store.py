@@ -1,11 +1,9 @@
 """SQL-backed TaskStore.
 
-Replaces the Redis-backed RedisTaskStore with one that owns an
-``async_sessionmaker[AsyncSession]`` and uses SQLite's
+Owns an ``async_sessionmaker[AsyncSession]`` and uses SQLite's
 ``INSERT ... ON CONFLICT DO UPDATE`` for the save-path UPSERT.
 
-The design doc's guarantee (see §"Operation Mapping — TaskStore") is
-that ``created_at`` is preserved across re-saves: it is only assigned on
+``created_at`` is preserved across re-saves: it is assigned only on
 the initial INSERT and deliberately omitted from the ``set_=`` clause
 so the original value survives subsequent updates. The A2A Task's
 deeper fields (artifacts, metadata, history) live verbatim in the

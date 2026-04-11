@@ -1,7 +1,6 @@
 """Tests for the in-process ``PubSubManager``.
 
-Replaces the fakeredis-based test suite with one that targets the new
-``asyncio.Queue``-backed fan-out described in design doc
+Targets the ``asyncio.Queue``-backed fan-out described in design doc
 §"In-Process Pub/Sub Design"
 (design-docs/0000010-sqlite-store-migration/design-doc.md).
 
@@ -87,8 +86,7 @@ async def _next_msg(subscription, timeout: float = 1.0) -> str:
 def test_manager_no_args_constructor():
     """``PubSubManager()`` accepts zero arguments.
 
-    The Redis-backed predecessor took ``PubSubManager(redis)``; the
-    new in-process version owns its state and needs nothing from the
+    The in-process version owns its state and needs nothing from the
     caller. This test guards against an accidental re-introduction of
     a required parameter.
     """
@@ -100,9 +98,8 @@ def test_constructor_signature_has_no_required_params():
     """``__init__`` signature has no required params beyond ``self``.
 
     Stronger than the call-site check above: introspects the signature
-    so that even an optional-but-renamed parameter (e.g. ``def __init__
-    (self, redis=None)``) would pass the no-args call but still be
-    visible here as a design drift.
+    so even an optional-but-renamed parameter would pass the no-args
+    call but still be visible here as a design drift.
     """
     sig = inspect.signature(PubSubManager.__init__)
     required = [
@@ -150,10 +147,9 @@ def test_multiple_managers_are_independent():
 async def test_publish_without_subscribers_is_noop(manager):
     """Publishing on a channel with zero subscribers is a silent no-op.
 
-    Matches Redis ``PUBLISH`` semantics (returns 0, no exception). The
-    SSE endpoint's finally-block cleanup ordering means the server can
-    publish after the last subscriber has already unsubscribed; that
-    must not raise or the error log will fill up with benign races.
+    The SSE endpoint's finally-block cleanup ordering means the server
+    can publish after the last subscriber has already unsubscribed;
+    that must not raise or the error log will fill up with benign races.
     """
     await manager.publish("inbox:nobody-home", "task-drop")
 

@@ -4,13 +4,6 @@ Covers: POST /api/v1/agents, GET /api/v1/agents, GET /api/v1/agents/{id},
 DELETE /api/v1/agents/{id}. Tests authentication requirements, ownership
 checks, and error responses, plus tenant-scoped registration/list/get
 (access-control feature).
-
-The Redis-backed predecessor hand-seeded ``apikey:{hash}`` hashes and
-``account:{sub}:keys`` sets via a fakeredis client before wiring up the
-FastAPI app. The SQL rewrite swaps that for the conftest ``store``
-fixture and creates API keys via ``store.create_api_key(owner_sub)``
-(which generates a random ``hky_<hex32>`` and writes the matching
-api_keys row — required by the FK on agents.tenant_id).
 """
 
 import pytest

@@ -6,13 +6,6 @@ Tests message formatting, response structure, broadcast filtering,
 ordering, cross-tenant isolation, and deregistered agent access.
 
 Auth mechanism tests are in test_webui_auth_migration.py.
-
-The Redis-backed predecessor used a ``webui_env`` fixture that built its
-own fakeredis client, RegistryStore, RedisTaskStore, and executor. The
-SQL rewrite swaps that for the module-scoped ``store`` / ``task_store``
-fixtures from conftest.py (in-memory aiosqlite). Tests seed data via
-``store.create_api_key`` / ``store.create_agent`` / ``task_store.save``
-rather than fakeredis primitives.
 """
 
 import uuid

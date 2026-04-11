@@ -6,10 +6,6 @@ under /ui/api/* must take precedence over the static file catch-all.
 
 These tests verify integration/mounting behavior, not endpoint logic
 (which is covered by test_webui_api.py).
-
-The Redis-backed predecessor constructed ``create_app(redis=fakeredis)`` —
-the SQL rewrite swaps that for ``create_app(sessionmaker=db_sessionmaker)``
-using the in-memory aiosqlite fixture from conftest.py.
 """
 
 import pytest

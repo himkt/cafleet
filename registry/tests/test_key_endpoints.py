@@ -3,12 +3,6 @@
 Covers: GET /ui/api/auth/config, POST /ui/api/keys, GET /ui/api/keys,
 DELETE /ui/api/keys/{tenant_id}.
 Verifies Auth0 JWT auth, key CRUD operations, and ownership enforcement.
-
-The Redis-backed predecessor wired fakeredis into a local FastAPI app and
-used ``redis.hget`` / ``sismember`` to assert stored state. The SQL rewrite
-uses the shared ``store`` fixture from conftest.py (in-memory aiosqlite)
-and checks persisted state via ``store.get_api_key_status`` /
-``store.list_api_keys`` / ``store.get_agent``.
 """
 
 import hashlib

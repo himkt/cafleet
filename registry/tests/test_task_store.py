@@ -205,12 +205,9 @@ class TestSaveAndGet:
     async def test_save_preserves_created_at_across_updates(self, task_store, store):
         """UPSERT must NOT touch ``created_at`` — it's set once at first save.
 
-        This is the core invariant of the Redis → SQL migration: the
-        Redis implementation used ``hget`` + conditional set to preserve
-        created_at. The SQL version uses ``INSERT ... ON CONFLICT DO
-        UPDATE`` with ``created_at`` deliberately ABSENT from the update
-        clause. If this test fails, ``created_at`` is probably in the
-        SET clause by accident.
+        ``INSERT ... ON CONFLICT DO UPDATE`` deliberately omits
+        ``created_at`` from the update clause. If this test fails,
+        ``created_at`` is probably in the SET clause by accident.
         """
         agent_id = await _seed_agent(store)
         task = _make_task(

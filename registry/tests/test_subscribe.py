@@ -6,11 +6,6 @@ event generator logic (message streaming, keepalive, disconnect cleanup).
 Endpoint: GET /api/v1/subscribe
 Auth: Authorization: Bearer <api_key> + X-Agent-Id: <agent_id>
 Response: text/event-stream
-
-The Redis-backed predecessor used a fakeredis-based PubSub and task store,
-and asserted post-cleanup state via ``redis.pubsub_numsub``. The SQL
-rewrite uses the in-process ``PubSubManager`` (no Redis dependency) with
-the conftest SQL fixtures and inspects ``pubsub._subscribers`` directly.
 """
 
 import asyncio

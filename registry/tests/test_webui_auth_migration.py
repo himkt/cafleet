@@ -3,12 +3,6 @@
 Covers: get_webui_tenant dependency, modified endpoints (agents, inbox, sent,
 messages/send) with JWT + X-Tenant-Id auth, removal of POST /ui/api/login,
 and removal of _authenticate_tenant helper.
-
-The Redis-backed predecessor built fakeredis-backed stores and tracked
-sender tasks with ``redis.sadd``. The SQL rewrite uses the shared conftest
-``store``/``task_store`` fixtures (in-memory aiosqlite); sender tracking
-is implicit in ``TaskStore.save`` via the ``from_agent_id`` column, so
-the old ``sadd`` call is no longer needed.
 """
 
 import uuid

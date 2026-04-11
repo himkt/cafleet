@@ -1,9 +1,6 @@
 """Tests for RegistryStore — SQL-backed agent + API key store.
 
-Replaces the previous fakeredis-based test_registry_store.py. Uses
-the conftest.py ``store`` and ``db_engine`` fixtures (populated by
-Step 5 Phase B per design-docs/0000010-sqlite-store-migration/
-design-doc.md §"Fixture stack").
+Uses the conftest.py ``store`` and ``db_engine`` fixtures.
 
 ## Test isolation strategy
 
@@ -416,11 +413,9 @@ class TestListApiKeys:
           "Snapshot the SQL emitted by list_api_keys and assert it is
            exactly one query"
 
-        Background: the legacy Redis implementation was N+1 — one
-        ``SMEMBERS`` followed by ``HGETALL + SCARD`` per key. With 3
-        keys that's 1 + 3*2 = 7 round trips. The new SQL impl MUST
-        collapse this into a single ``SELECT`` with ``LEFT JOIN`` +
-        ``GROUP BY``.
+        A correct implementation collapses the fetch into a single
+        ``SELECT`` with ``LEFT JOIN`` + ``GROUP BY`` rather than issuing
+        one query per key.
 
         Mechanism: install a ``before_cursor_execute`` listener that
         captures every statement during the call, then filter to
@@ -671,9 +666,6 @@ class TestListDeregisteredAgentsWithTasks:
        WHERE a.tenant_id = ?
          AND a.status = 'deregistered'
          AND EXISTS (SELECT 1 FROM tasks t WHERE t.context_id = a.agent_id LIMIT 1)
-
-    Replaces the legacy ``_redis.scan(match='agent:*') + HGETALL filter``
-    pattern in ``webui_api.py``.
     """
 
     async def test_excludes_active_agents(self, store, db_engine):

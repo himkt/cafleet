@@ -1,4 +1,4 @@
-"""In-process Pub/Sub fan-out, replacing the old Redis Pub/Sub manager.
+"""In-process Pub/Sub fan-out.
 
 Design: per-channel subscriber sets, each subscriber is an
 ``asyncio.Queue``. ``publish()`` iterates the subscriber set and calls
