@@ -19,6 +19,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from hikyaku_registry.db.models import Agent as AgentModel
 from hikyaku_registry.db.models import Task as TaskModel
 
 # Alias the ``list`` builtin because the ``list()`` method defined on
@@ -42,6 +43,7 @@ class TaskStore:
         from_agent_id = metadata.get("fromAgentId", "")
         to_agent_id = metadata.get("toAgentId", "")
         msg_type = metadata.get("type", "")
+        origin_task_id = metadata.get("originTaskId")
 
         assert task.status.timestamp is not None
         status_timestamp = task.status.timestamp
@@ -57,6 +59,7 @@ class TaskStore:
             created_at=_now_iso(),
             status_state=status_state,
             status_timestamp=status_timestamp,
+            origin_task_id=origin_task_id,
             task_json=task_json,
         )
         stmt = stmt.on_conflict_do_update(
@@ -64,6 +67,7 @@ class TaskStore:
             set_={
                 "status_state": stmt.excluded.status_state,
                 "status_timestamp": stmt.excluded.status_timestamp,
+                "origin_task_id": stmt.excluded.origin_task_id,
                 "task_json": stmt.excluded.task_json,
                 # created_at is deliberately omitted so the original
                 # INSERT value survives subsequent saves.
@@ -132,6 +136,28 @@ class TaskStore:
             )
             row = result.first()
         return row[0] if row else None
+
+    async def list_timeline(
+        self, tenant_id: str, limit: int = 200
+    ) -> _TaskList[tuple[Task, str | None, str]]:
+        stmt = (
+            select(
+                TaskModel.task_json,
+                TaskModel.origin_task_id,
+                TaskModel.created_at,
+            )
+            .join(AgentModel, AgentModel.agent_id == TaskModel.context_id)
+            .where(AgentModel.tenant_id == tenant_id)
+            .where(TaskModel.type != "broadcast_summary")
+            .order_by(TaskModel.status_timestamp.desc())
+            .limit(limit)
+        )
+        async with self._sessionmaker() as session:
+            result = await session.execute(stmt)
+            rows = result.all()
+        return [
+            (Task.model_validate_json(row[0]), row[1], row[2]) for row in rows
+        ]
 
     async def get_created_ats(self, task_ids: _TaskList[str]) -> dict[str, str]:
         """Batch lookup for ``created_at`` timestamps.

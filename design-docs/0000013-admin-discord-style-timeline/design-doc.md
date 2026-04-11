@@ -1,7 +1,7 @@
 # Admin Discord-style Timeline
 
 **Status**: Approved
-**Progress**: 5/38 tasks complete
+**Progress**: 11/38 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -362,12 +362,12 @@ Per `.claude/rules/design-doc-numbering.md`, documentation is updated first.
 
 ### Step 2: Registry schema + migration
 
-- [ ] Edit `registry/src/hikyaku_registry/db/models.py`: add `origin_task_id: Mapped[str | None] = mapped_column(String, nullable=True)` to the `Task` class. Do not add a new index — the column is selected alongside the existing ordering index, not filtered on. <!-- completed: -->
-- [ ] Create `registry/src/hikyaku_registry/alembic/versions/0002_add_origin_task_id.py` with `revision="0002"`, `down_revision="0001"`. `upgrade()` uses `op.batch_alter_table("tasks", schema=None)` to add `sa.Column("origin_task_id", sa.String(), nullable=True)`. `downgrade()` drops the column symmetrically via `batch_alter_table`. <!-- completed: -->
-- [ ] Update `registry/src/hikyaku_registry/task_store.py` `save()`: read `metadata.get("originTaskId")` (defaulting to None), add it to the `sqlite_insert(TaskModel).values(...)` call, and include `"origin_task_id": stmt.excluded.origin_task_id` in the `set_={...}` clause so idempotent re-saves preserve the populated value. <!-- completed: -->
-- [ ] Add a new `list_timeline(tenant_id: str, limit: int = 200)` method on `TaskStore`. Runs the JOIN query documented in Specification and returns `list[tuple[Task, str | None, str]]` where each tuple is `(Task, origin_task_id, created_at)`. <!-- completed: -->
-- [ ] Add a round-trip test to `registry/tests/test_db_models.py` (or the closest existing TaskStore test file) asserting: save with `originTaskId=None` → read → None; save with `originTaskId=<uuid>` → read → same uuid; re-save the latter with an unrelated status change → the `origin_task_id` is unchanged. <!-- completed: -->
-- [ ] Run `mise //registry:test` and confirm the existing suite still passes alongside the new tests. <!-- completed: -->
+- [x] Edit `registry/src/hikyaku_registry/db/models.py`: add `origin_task_id: Mapped[str | None] = mapped_column(String, nullable=True)` to the `Task` class. Do not add a new index — the column is selected alongside the existing ordering index, not filtered on. <!-- completed: 2026-04-12T10:30 -->
+- [x] Create `registry/src/hikyaku_registry/alembic/versions/0002_add_origin_task_id.py` with `revision="0002"`, `down_revision="0001"`. `upgrade()` uses `op.batch_alter_table("tasks", schema=None)` to add `sa.Column("origin_task_id", sa.String(), nullable=True)`. `downgrade()` drops the column symmetrically via `batch_alter_table`. <!-- completed: 2026-04-12T10:30 -->
+- [x] Update `registry/src/hikyaku_registry/task_store.py` `save()`: read `metadata.get("originTaskId")` (defaulting to None), add it to the `sqlite_insert(TaskModel).values(...)` call, and include `"origin_task_id": stmt.excluded.origin_task_id` in the `set_={...}` clause so idempotent re-saves preserve the populated value. <!-- completed: 2026-04-12T10:32 -->
+- [x] Add a new `list_timeline(tenant_id: str, limit: int = 200)` method on `TaskStore`. Runs the JOIN query documented in Specification and returns `list[tuple[Task, str | None, str]]` where each tuple is `(Task, origin_task_id, created_at)`. <!-- completed: 2026-04-12T10:33 -->
+- [x] Add a round-trip test to `registry/tests/test_db_models.py` (or the closest existing TaskStore test file) asserting: save with `originTaskId=None` → read → None; save with `originTaskId=<uuid>` → read → same uuid; re-save the latter with an unrelated status change → the `origin_task_id` is unchanged. <!-- completed: 2026-04-12T10:25 -->
+- [x] Run `mise //registry:test` and confirm the existing suite still passes alongside the new tests. <!-- completed: 2026-04-12T10:35 -->
 
 ### Step 3: Executor broadcast logic
 
