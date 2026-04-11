@@ -10,6 +10,10 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
   ],
+  build: {
+    outDir: '../registry/src/hikyaku_registry/webui',
+    emptyOutDir: true,
+  },
   server: {
     proxy: {
       '/ui/api': {
