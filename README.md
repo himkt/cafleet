@@ -317,6 +317,22 @@ If step 1 is skipped, the server still starts and the JSON-RPC and Registry REST
 
 **Migration note for existing checkouts**: Existing checkouts pulled from before this change may have a stale `admin/dist/` directory; run `rm -rf admin/dist` once after pulling. The directory is no longer produced by `mise //admin:build`.
 
+### Running the Vite dev server with Auth0
+
+`mise //admin:dev` serves the SPA at `http://localhost:5173/ui/` with HMR. The SPA's Auth0 `redirect_uri` is computed at runtime as follows:
+
+1. If `VITE_AUTH0_REDIRECT_URI` is set (non-empty), use that.
+2. Otherwise fall back to `window.location.origin + "/ui/"`.
+
+For local dev, create `admin/.mise/config.toml` (gitignored, per-developer override) and set the redirect URI explicitly so dev and prod-like runs don't step on each other:
+
+```toml
+[env]
+VITE_AUTH0_REDIRECT_URI = "http://localhost:5173/ui/"
+```
+
+The matching URL MUST also be in your Auth0 application's **Allowed Callback URLs** list. `mise //admin:build` explicitly unsets this variable so the built SPA always uses the dynamic `window.location.origin` fallback and never bakes in a dev URL.
+
 ## License
 
 MIT

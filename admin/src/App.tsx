@@ -109,7 +109,9 @@ function App() {
       domain={authConfig.domain}
       clientId={authConfig.client_id}
       authorizationParams={{
-        redirect_uri: window.location.origin + "/ui/",
+        redirect_uri:
+          import.meta.env.VITE_AUTH0_REDIRECT_URI ||
+          window.location.origin + "/ui/",
         audience: authConfig.audience,
       }}
     >

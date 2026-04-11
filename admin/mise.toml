@@ -6,3 +6,4 @@ run = "bun dev"
 
 [tasks.build]
 run = "bun run build"
+env = { VITE_AUTH0_REDIRECT_URI = "" }
