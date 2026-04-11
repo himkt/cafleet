@@ -5,18 +5,16 @@ description = "A2A-native message broker and agent registry for coding agents"
 requires-python = ">=3.12"
 
 [tool.uv.workspace]
-members = ["registry", "client", "mcp-server"]
+members = ["registry", "client"]
 
 [tool.uv.sources]
 hikyaku-registry = { workspace = true }
 hikyaku-client = { workspace = true }
-hikyaku-mcp = { workspace = true }
 
 [dependency-groups]
 dev = [
     "hikyaku-registry",
     "hikyaku-client",
-    "hikyaku-mcp",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "ruff>=0.11.0",
@@ -37,13 +35,11 @@ include = ["registry/src", "client/src"]
 allowed-unresolved-imports = [
     "a2a.*",
     "pydantic_settings.*",
-    "sse_starlette.*",
     "starlette.*",
     "fastapi.*",
     "uvicorn",
     "click.*",
     "httpx.*",
-    "httpx_sse.*",
 ]
 
 [tool.ruff]

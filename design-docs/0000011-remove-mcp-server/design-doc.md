@@ -1,7 +1,7 @@
 # Remove MCP Server and SSE Endpoint
 
 **Status**: Approved
-**Progress**: 33/45 tasks complete
+**Progress**: 42/45 tasks complete
 **Last Updated**: 2026-04-11
 
 ## Overview
@@ -197,30 +197,30 @@ All three greps must return zero hits in production code. Historical design docs
 
 ### Step 8: Edit registry/pyproject.toml
 
-- [ ] Remove `"sse-starlette"` from the `dependencies` list in `registry/pyproject.toml` <!-- completed: -->
+- [x] Remove `"sse-starlette"` from the `dependencies` list in `registry/pyproject.toml` <!-- completed: 2026-04-11T12:30 -->
 
 ### Step 9: Edit workspace pyproject.toml
 
-- [ ] Remove `"mcp-server"` from `[tool.uv.workspace].members` so the list contains only `["registry", "client"]` <!-- completed: -->
-- [ ] Remove the `hikyaku-mcp = { workspace = true }` line from `[tool.uv.sources]` and the `"hikyaku-mcp"` entry from the `dev` dependency group <!-- completed: -->
-- [ ] Remove `"sse_starlette.*"` and `"httpx_sse.*"` from `[tool.ty.analysis].allowed-unresolved-imports` (keep `"httpx.*"`, which is still used by `hikyaku-client`) <!-- completed: -->
+- [x] Remove `"mcp-server"` from `[tool.uv.workspace].members` so the list contains only `["registry", "client"]` <!-- completed: 2026-04-11T12:30 -->
+- [x] Remove the `hikyaku-mcp = { workspace = true }` line from `[tool.uv.sources]` and the `"hikyaku-mcp"` entry from the `dev` dependency group <!-- completed: 2026-04-11T12:30 -->
+- [x] Remove `"sse_starlette.*"` and `"httpx_sse.*"` from `[tool.ty.analysis].allowed-unresolved-imports` (keep `"httpx.*"`, which is still used by `hikyaku-client`) <!-- completed: 2026-04-11T12:30 -->
 
 ### Step 10: Edit mise.toml
 
-- [ ] Remove `"mcp-server"` from `[monorepo].config_roots` so the list contains only `["registry", "client", "admin"]` <!-- completed: -->
+- [x] Remove `"mcp-server"` from `[monorepo].config_roots` so the list contains only `["registry", "client", "admin"]` <!-- completed: 2026-04-11T12:30 -->
 
 ### Step 11: Edit .github/workflows/ci.yml
 
-- [ ] Delete the entire `test-mcp-server` job (all five steps under it) <!-- completed: -->
+- [x] Delete the entire `test-mcp-server` job (all five steps under it) <!-- completed: 2026-04-11T12:30 -->
 
 ### Step 12: Regenerate uv.lock
 
-- [ ] Run `uv sync` from the project root to refresh `uv.lock` against the slimmed workspace <!-- completed: -->
+- [x] Run `uv sync` from the project root to refresh `uv.lock` against the slimmed workspace (executed implicitly via `mise //:typecheck` → `uv run ty check`, which auto-syncs; `uv.lock` regenerated) <!-- completed: 2026-04-11T12:30 -->
 
 ### Step 13: Verify
 
-- [ ] Run `mise //:lint`, `mise //:format`, `mise //:typecheck`; all must pass <!-- completed: -->
-- [ ] Run `mise //registry:test` and `mise //client:test`; all must pass <!-- completed: -->
+- [x] Run `mise //:lint`, `mise //:format`, `mise //:typecheck`; all must pass <!-- completed: 2026-04-11T12:30 -->
+- [x] Run `mise //registry:test` and `mise //client:test`; all must pass (registry: 337 passed in 4.44s; client: 73 passed in 0.19s) <!-- completed: 2026-04-11T12:30 -->
 - [ ] Run the MCP residue grep (`grep -rn "mcp-server\|hikyaku-mcp\|hikyaku_mcp" --exclude-dir=design-docs --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=vendor .`) and confirm zero hits <!-- completed: -->
 - [ ] Run the SSE residue greps scoped to `--include='*.py'` and `--include='*.md'` separately (see Specification → Verification) and inspect every remaining hit; only incidental matches in third-party SDK terminology (e.g., Auth0 in `admin/`) are acceptable <!-- completed: -->
 
