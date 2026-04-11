@@ -156,17 +156,22 @@ async def _handle_get_task(
     if task is None:
         raise ValueError(f"Task {task_id} not found")
 
-    endpoints = await task_store.get_endpoints(task_id)
-    if endpoints is None:
-        raise ValueError(f"Task {task_id} not found")
-    from_agent, to_agent = endpoints
+    # Read sender/recipient from the Task metadata blob rather than issuing
+    # a second SELECT for the endpoints columns — BrokerExecutor writes
+    # both fields on every save (executor.py _handle_unicast / _handle_broadcast).
+    metadata = task.metadata or {}
+    from_agent = metadata.get("fromAgentId", "")
+    to_agent = metadata.get("toAgentId", "")
 
     from_ok = from_agent and await registry_store.verify_agent_tenant(
         from_agent, tenant_id
     )
-    to_ok = to_agent and await registry_store.verify_agent_tenant(to_agent, tenant_id)
-    if not from_ok and not to_ok:
-        raise ValueError(f"Task {task_id} not found")
+    if not from_ok:
+        to_ok = to_agent and await registry_store.verify_agent_tenant(
+            to_agent, tenant_id
+        )
+        if not to_ok:
+            raise ValueError(f"Task {task_id} not found")
 
     return {"task": _task_to_dict(task)}
 
@@ -353,6 +358,12 @@ app = create_app()
 
 
 if __name__ == "__main__":
+    # ``reload=True`` is a developer convenience and must NOT be used in
+    # production: uvicorn's reloader spawns worker subprocesses, which breaks
+    # PubSubManager's single-process fan-out (a publish in the reloader's
+    # worker cannot reach subscribers in a sibling worker). The canonical
+    # dev command is ``mise //registry:dev``; the entry below is only used
+    # for ``python -m hikyaku_registry.main`` ad-hoc runs.
     uvicorn.run(
         "hikyaku_registry.main:app",
         host=settings.broker_host,

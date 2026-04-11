@@ -21,6 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hikyaku_registry.db.models import Task as TaskModel
 
+# Alias the ``list`` builtin because the ``list()`` method defined on
+# ``TaskStore`` below shadows it inside the class body, breaking
+# annotations like ``list[Task]``. ty (and other PEP 563 checkers) read
+# these annotations before Python's name resolution kicks in, so the
+# alias is required even with ``from __future__ import annotations``.
 _TaskList = list
 
 

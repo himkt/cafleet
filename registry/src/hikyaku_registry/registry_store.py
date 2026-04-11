@@ -144,6 +144,10 @@ class RegistryStore:
     async def deregister_agent(self, agent_id: str) -> bool:
         async with self._sessionmaker() as session:
             async with session.begin():
+                # ``session.execute`` on a Core DML statement returns a
+                # ``CursorResult`` at runtime but is typed as the more
+                # general ``Result[Any]`` in the SQLAlchemy stubs, which
+                # doesn't expose ``rowcount``. Cast to narrow.
                 result = cast(
                     CursorResult,
                     await session.execute(
@@ -229,8 +233,24 @@ class RegistryStore:
         ]
 
     async def revoke_api_key(self, tenant_id: str, owner_sub: str) -> bool:
+        """Flip the key to ``revoked`` and bulk-deregister every active agent.
+
+        Both UPDATEs run inside a single ``session.begin()`` block so the
+        cascade is atomic — a failure during the agents update rolls back
+        the api_keys flip too.
+
+        Returns ``True`` when the key ends the call in ``'revoked'`` state,
+        including the idempotent case of a second call on an already-
+        revoked key (the UPDATE still matches one row). Returns ``False``
+        only for authorization failures: the key does not exist OR the
+        caller is not its owner.
+        """
         async with self._sessionmaker() as session:
             async with session.begin():
+                # ``session.execute`` on a Core DML statement returns a
+                # ``CursorResult`` at runtime but is typed as the more
+                # general ``Result[Any]`` in the SQLAlchemy stubs, which
+                # doesn't expose ``rowcount``. Cast to narrow.
                 result = cast(
                     CursorResult,
                     await session.execute(

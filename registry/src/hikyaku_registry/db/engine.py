@@ -3,9 +3,13 @@
 The module-level ``event.listens_for(Engine, "connect")`` callback registers
 globally on import. Every engine constructed in this process — including
 ad-hoc ones built by tests — will issue ``PRAGMA foreign_keys=ON`` on every
-new raw DBAPI connection. SQLite silently ignores foreign-key declarations
-unless this PRAGMA is set on the connection that performs the write.
+new raw ``sqlite3`` DBAPI connection. SQLite silently ignores foreign-key
+declarations unless this PRAGMA is set on the connection that performs the
+write. The listener short-circuits for non-SQLite DBAPIs so unrelated
+engines (e.g. in third-party libraries) are not perturbed.
 """
+
+import sqlite3
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
@@ -24,6 +28,8 @@ _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 @event.listens_for(Engine, "connect")
 def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()

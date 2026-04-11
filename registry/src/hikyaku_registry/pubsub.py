@@ -17,16 +17,22 @@ from collections.abc import AsyncIterator
 
 
 class _Subscription:
-    """Async iterator wrapping a single subscriber's queue."""
+    """Async iterator wrapping a single subscriber's queue.
+
+    The ``queue`` attribute is package-private (used by ``PubSubManager.
+    unsubscribe`` to locate the underlying queue in the channel's
+    subscriber set) but is not prefixed with ``_`` so the manager does
+    not have to reach through a double-underscore private attribute.
+    """
 
     def __init__(self, queue: asyncio.Queue[str]) -> None:
-        self._queue = queue
+        self.queue = queue
 
     def __aiter__(self) -> AsyncIterator[str]:
         return self
 
     async def __anext__(self) -> str:
-        return await self._queue.get()
+        return await self.queue.get()
 
 
 class PubSubManager:
@@ -51,6 +57,6 @@ class PubSubManager:
         subscribers = self._subscribers.get(channel)
         if subscribers is None:
             return
-        subscribers.discard(subscription._queue)
+        subscribers.discard(subscription.queue)
         if not subscribers:
             del self._subscribers[channel]
