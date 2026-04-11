@@ -33,3 +33,7 @@ include = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Collection-error tolerance is a transitional measure for the SQLite migration
+# (design-docs/0000010). Revisit after Step 12 once all Redis-importing tests
+# are rewritten.
+addopts = "--continue-on-collection-errors"

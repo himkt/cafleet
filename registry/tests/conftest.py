@@ -1,27 +1,10 @@
-"""Shared test fixtures for hikyaku-registry tests."""
+"""Shared test fixtures for hikyaku-registry tests.
 
-import pytest
-import fakeredis.aioredis
+The Redis-based fixtures (redis_client, store, task_store) were removed in the
+SQLite migration (Step 1) because fakeredis is no longer in the dependency
+group. The full SQLAlchemy-based fixture stack lands in Step 12.
 
-from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import RedisTaskStore
-
-
-@pytest.fixture
-async def redis_client():
-    """Provide a fake async Redis client for testing."""
-    client = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    yield client
-    await client.aclose()
-
-
-@pytest.fixture
-async def store(redis_client):
-    """Provide a RegistryStore instance with fake Redis."""
-    return RegistryStore(redis_client)
-
-
-@pytest.fixture
-async def task_store(redis_client):
-    """Provide a RedisTaskStore instance with fake Redis."""
-    return RedisTaskStore(redis_client)
+Until then, test files that depended on the old fixtures will error on fixture
+resolution at collection time — that brokenness is intentional and gets fixed
+as each store is rewritten in Steps 5/6/7.
+"""
