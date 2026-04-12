@@ -51,16 +51,9 @@ export interface SendMessageResponse {
   status: string;
 }
 
-export interface ApiKey {
-  tenant_id: string;
-  key_prefix: string;
+export interface SessionListItem {
+  session_id: string;
+  label: string | null;
   created_at: string;
-  status: "active" | "revoked";
   agent_count: number;
-}
-
-export interface CreateKeyResponse {
-  api_key: string;
-  tenant_id: string;
-  created_at: string;
 }

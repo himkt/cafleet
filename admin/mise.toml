@@ -3,7 +3,6 @@ run = "bun lint"
 
 [tasks.dev]
 run = "bun dev"
-env = { VITE_AUTH0_REDIRECT_URI = "http://localhost:5173/ui/" }
 
 [tasks.build]
 run = "bun run build"

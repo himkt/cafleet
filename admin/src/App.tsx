@@ -1,45 +1,96 @@
 import { useState, useEffect, useCallback } from "react";
-import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";
 import type { Agent } from "./types";
-import { setGetAccessToken, setTenantId, getAgents, getAuthConfig } from "./api";
-import LoginPage from "./components/LoginPage";
-import KeyManagement from "./components/KeyManagement";
+import { setSessionId, getAgents, listSessions } from "./api";
+import SessionPicker from "./components/SessionPicker";
 import Dashboard from "./components/Dashboard";
 
-function AppContent() {
-  const { isAuthenticated, isLoading, getAccessTokenSilently } = useAuth0();
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+interface Route {
+  kind: "sessions" | "dashboard";
+  sessionId?: string;
+}
+
+function parseHash(): Route {
+  const hash = window.location.hash.replace(/^#\/?/, "");
+  const match = hash.match(/^sessions\/([^/]+)\/agents/);
+  if (match) {
+    return { kind: "dashboard", sessionId: match[1] };
+  }
+  return { kind: "sessions" };
+}
+
+function navigate(hash: string): void {
+  window.location.hash = hash;
+}
+
+export default function App() {
+  const [route, setRoute] = useState<Route>(parseHash);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [tokenReady, setTokenReady] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      setGetAccessToken(() => getAccessTokenSilently());
-      setTokenReady(true);
-    } else {
-      setGetAccessToken(null);
-      setTokenReady(false);
-    }
-  }, [isAuthenticated, getAccessTokenSilently]);
+    const onHashChange = () => setRoute(parseHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
-  const handleSelectTenant = useCallback(async (tenantId: string) => {
-    setTenantId(tenantId);
+  // Validate dashboard session_id against the session list
+  useEffect(() => {
+    if (route.kind !== "dashboard" || !route.sessionId) {
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const sessions = await listSessions();
+        if (cancelled) return;
+
+        const found = sessions.some((s) => s.session_id === route.sessionId);
+        if (!found) {
+          navigate("/sessions");
+          return;
+        }
+
+        setSessionId(route.sessionId!);
+        const data = await getAgents();
+        if (cancelled) return;
+        setAgents(data.agents);
+      } catch {
+        if (!cancelled) {
+          navigate("/sessions");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [route]);
+
+  const handleSelectSession = useCallback(async (sid: string) => {
+    setSessionId(sid);
     try {
       const data = await getAgents();
       setAgents(data.agents);
-      setSelectedTenantId(tenantId);
+      navigate(`/sessions/${sid}/agents`);
     } catch {
-      setTenantId(null);
+      setSessionId(null);
     }
   }, []);
 
-  const handleBackToKeys = useCallback(() => {
-    setSelectedTenantId(null);
-    setTenantId(null);
+  const handleBack = useCallback(() => {
+    setSessionId(null);
     setAgents([]);
+    navigate("/sessions");
   }, []);
 
-  if (isLoading) {
+  if (loading && route.kind === "dashboard") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <p className="text-gray-400">Loading...</p>
@@ -47,77 +98,15 @@ function AppContent() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <LoginPage />;
-  }
-
-  if (!tokenReady) {
+  if (route.kind === "dashboard" && route.sessionId) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-400">Loading...</p>
-      </div>
+      <Dashboard
+        sessionId={route.sessionId}
+        initialAgents={agents}
+        onBack={handleBack}
+      />
     );
   }
 
-  if (!selectedTenantId) {
-    return <KeyManagement onSelectTenant={handleSelectTenant} />;
-  }
-
-  return (
-    <Dashboard
-      tenantId={selectedTenantId}
-      initialAgents={agents}
-      onLogout={handleBackToKeys}
-    />
-  );
+  return <SessionPicker onSelect={handleSelectSession} />;
 }
-
-function App() {
-  const [authConfig, setAuthConfig] = useState<{
-    domain: string;
-    client_id: string;
-    audience: string;
-  } | null>(null);
-  const [configError, setConfigError] = useState<string | null>(null);
-
-  useEffect(() => {
-    getAuthConfig()
-      .then(setAuthConfig)
-      .catch((err) =>
-        setConfigError(err instanceof Error ? err.message : "Failed to load config"),
-      );
-  }, []);
-
-  if (configError) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-red-600">Error: {configError}</p>
-      </div>
-    );
-  }
-
-  if (!authConfig) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-400">Loading...</p>
-      </div>
-    );
-  }
-
-  return (
-    <Auth0Provider
-      domain={authConfig.domain}
-      clientId={authConfig.client_id}
-      authorizationParams={{
-        redirect_uri:
-          import.meta.env.VITE_AUTH0_REDIRECT_URI ||
-          window.location.origin + "/ui/",
-        audience: authConfig.audience,
-      }}
-    >
-      <AppContent />
-    </Auth0Provider>
-  );
-}
-
-export default App;

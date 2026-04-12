@@ -3,23 +3,17 @@ import type {
   MessagesResponse,
   TimelineResponse,
   SendMessageResponse,
-  ApiKey,
-  CreateKeyResponse,
+  SessionListItem,
 } from "./types";
 
-let getAccessToken: (() => Promise<string>) | null = null;
-let tenantId: string | null = null;
+let sessionId: string | null = null;
 
-export function setGetAccessToken(fn: (() => Promise<string>) | null): void {
-  getAccessToken = fn;
+export function setSessionId(id: string | null): void {
+  sessionId = id;
 }
 
-export function setTenantId(id: string | null): void {
-  tenantId = id;
-}
-
-export function getTenantId(): string | null {
-  return tenantId;
+export function getSessionId(): string | null {
+  return sessionId;
 }
 
 async function request<T>(
@@ -30,13 +24,8 @@ async function request<T>(
     ...(options.headers as Record<string, string>),
   };
 
-  if (getAccessToken) {
-    const token = await getAccessToken();
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  if (tenantId) {
-    headers["X-Tenant-Id"] = tenantId;
+  if (sessionId) {
+    headers["X-Session-Id"] = sessionId;
   }
 
   if (options.body && typeof options.body === "string") {
@@ -57,16 +46,12 @@ async function request<T>(
   return resp.json() as Promise<T>;
 }
 
-export async function getAuthConfig(): Promise<{
-  domain: string;
-  client_id: string;
-  audience: string;
-}> {
-  const resp = await fetch("/ui/api/auth/config");
+export async function listSessions(): Promise<SessionListItem[]> {
+  const resp = await fetch("/ui/api/sessions");
   if (!resp.ok) {
-    throw new Error("Failed to load auth config");
+    throw new Error(`HTTP ${resp.status}`);
   }
-  return resp.json();
+  return resp.json() as Promise<SessionListItem[]>;
 }
 
 export async function getAgents(): Promise<AgentsResponse> {
@@ -98,16 +83,4 @@ export async function sendMessage(
       text,
     }),
   });
-}
-
-export async function createKey(): Promise<CreateKeyResponse> {
-  return request<CreateKeyResponse>("/keys", { method: "POST" });
-}
-
-export async function listKeys(): Promise<ApiKey[]> {
-  return request<ApiKey[]>("/keys");
-}
-
-export async function revokeKey(keyTenantId: string): Promise<void> {
-  await request<void>(`/keys/${keyTenantId}`, { method: "DELETE" });
 }
