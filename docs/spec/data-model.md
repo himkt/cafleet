@@ -4,7 +4,7 @@ All core data structures — `Task`, `Message`, `Part`, `Artifact`, `AgentCard`,
 
 The model is a **relational + document hybrid**: indexed fields are columns, while A2A protocol payloads are stored as opaque JSON `TEXT`. The columns are queried; the JSON blobs are not.
 
-Schema management is handled by Alembic (`hikyaku/src/hikyaku/alembic/`); the runtime engine is SQLAlchemy 2.x with the `aiosqlite` async driver. Operators apply migrations once via `hikyaku db init` before starting the server.
+Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the runtime engine is SQLAlchemy 2.x with the `aiosqlite` async driver. Operators apply migrations once via `cafleet db init` before starting the server.
 
 ## SQL Schema
 
@@ -83,7 +83,7 @@ Indexes:
 
 Placement rows are hard-deleted (not soft-deleted) when the agent is deregistered through any path. They have no historical value and must not outlive the agent they describe. Deregistration is handled in `RegistryStore.deregister_agent`.
 
-If a user kills a pane manually without going through `hikyaku member delete`, the placement row stays until the next `member delete` resolves it. `send_exit(..., ignore_missing=True)` handles the "pane already gone" case gracefully.
+If a user kills a pane manually without going through `cafleet member delete`, the placement row stays until the next `member delete` resolves it. `send_exit(..., ignore_missing=True)` handles the "pane already gone" case gracefully.
 
 ### Foreign key enforcement
 
@@ -132,11 +132,11 @@ Stores receive an `async_sessionmaker[AsyncSession]` at construction time, **not
 
 ## Session Lifecycle
 
-Sessions are created via `hikyaku session create` (direct SQLite write, no HTTP). The `sessions` row is the source of truth for session existence. Agents join a session by registering with the `session_id`.
+Sessions are created via `cafleet session create` (direct SQLite write, no HTTP). The `sessions` row is the source of truth for session existence. Agents join a session by registering with the `session_id`.
 
 When all agents in a session deregister, the session remains valid — new agents can still register using the session_id.
 
-Deleting a session (via `hikyaku session delete <id>`) is rejected while any agents (active or deregistered) still reference it (FK `RESTRICT`). There is no cascade delete and no soft-delete for sessions.
+Deleting a session (via `cafleet session delete <id>`) is rejected while any agents (active or deregistered) still reference it (FK `RESTRICT`). There is no cascade delete and no soft-delete for sessions.
 
 ## Task Visibility Rules
 
@@ -172,4 +172,4 @@ The timeline UI renders a per-recipient ACK time in each broadcast's hover toolt
 
 Deregistration is a soft-delete only. There is no background cleanup loop and no physical removal of agent or task rows. Deregistered agents continue to exist as rows with `status='deregistered'` indefinitely; their inbox tasks remain readable by the WebUI (the only consumer that surfaces deregistered agents). Active query paths filter `status='active'` so dead rows are invisible to normal A2A traffic.
 
-If physical cleanup becomes necessary in the future, it can be reintroduced as an opt-in admin command (e.g., `hikyaku db purge --older-than 30d`) without disturbing the runtime. The previous `DEREGISTERED_TASK_TTL_DAYS` and `CLEANUP_INTERVAL_SECONDS` settings have been removed.
+If physical cleanup becomes necessary in the future, it can be reintroduced as an opt-in admin command (e.g., `cafleet db purge --older-than 30d`) without disturbing the runtime. The previous `DEREGISTERED_TASK_TTL_DAYS` and `CLEANUP_INTERVAL_SECONDS` settings have been removed.

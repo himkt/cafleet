@@ -2,7 +2,7 @@ experimental_monorepo_root = true
 
 [monorepo]
 config_roots = [
-  "hikyaku",
+  "cafleet",
   "admin",
 ]
 
@@ -19,4 +19,4 @@ run = "uv run ty check"
 description = "Run ty type checker"
 
 [env]
-HIKYAKU_URL = "http://localhost:8000"
+CAFLEET_URL = "http://localhost:8000"

@@ -1,7 +1,7 @@
 # Project Rename: hikyaku → cafleet
 
 **Status**: Approved
-**Progress**: 0/36 tasks complete
+**Progress**: 36/36 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -10,14 +10,14 @@ Rename the project from "hikyaku" to "cafleet" across the entire codebase. This 
 
 ## Success Criteria
 
-- [ ] Python package installs as `cafleet` and CLI command is `cafleet`
-- [ ] All imports use `from cafleet` / `import cafleet`
-- [ ] Environment variables use `CAFLEET_*` prefix
-- [ ] Default database path is `~/.local/share/cafleet/registry.db`
-- [ ] All documentation references use "CAFleet" (title case) or "cafleet" (code)
-- [ ] `mise //cafleet:test` passes, `mise //cafleet:dev` starts the server
-- [ ] CI/CD pipeline passes on the renamed codebase
-- [ ] Skills and plugin definitions reference "cafleet"
+- [x] Python package installs as `cafleet` and CLI command is `cafleet`
+- [x] All imports use `from cafleet` / `import cafleet`
+- [x] Environment variables use `CAFLEET_*` prefix
+- [x] Default database path is `~/.local/share/cafleet/registry.db`
+- [x] All documentation references use "CAFleet" (title case) or "cafleet" (code)
+- [x] `mise //cafleet:test` passes, `mise //cafleet:dev` starts the server
+- [x] CI/CD pipeline passes on the renamed codebase
+- [x] Skills and plugin definitions reference "cafleet"
 
 ---
 
@@ -267,69 +267,69 @@ The `plugin.json` field `"repository"` currently points to `https://github.com/h
 
 Per project rules, documentation is updated before code.
 
-- [ ] Update `ARCHITECTURE.md`: replace "Hikyaku" → "CAFleet", `hikyaku` → `cafleet` in paths/commands <!-- completed: -->
-- [ ] Update `README.md`: replace "Hikyaku" → "CAFleet", `hikyaku` → `cafleet` in paths/commands/examples <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md`: CLI command, env vars, paths <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md`: any "hikyaku" references <!-- completed: -->
-- [ ] Update `docs/spec/registry-api.md`: any "hikyaku" references <!-- completed: -->
-- [ ] Verify `docs/spec/a2a-operations.md` and `docs/spec/webui-api.md` contain no "hikyaku" references (no-op) <!-- completed: -->
-- [ ] Update `CLAUDE.md` (root): project name, package, CLI, skill names <!-- completed: -->
-- [ ] Update `.claude/CLAUDE.md`: project name, package, CLI, skill names <!-- completed: -->
-- [ ] Update `.claude/rules/commands.md`: `mise //hikyaku:*` → `mise //cafleet:*` <!-- completed: -->
+- [x] Update `ARCHITECTURE.md`: replace "Hikyaku" → "CAFleet", `hikyaku` → `cafleet` in paths/commands <!-- completed: 2026-04-12T10:00 -->
+- [x] Update `README.md`: replace "Hikyaku" → "CAFleet", `hikyaku` → `cafleet` in paths/commands/examples <!-- completed: 2026-04-12T10:01 -->
+- [x] Update `docs/spec/cli-options.md`: CLI command, env vars, paths <!-- completed: 2026-04-12T10:01 -->
+- [x] Update `docs/spec/data-model.md`: any "hikyaku" references <!-- completed: 2026-04-12T10:01 -->
+- [x] Update `docs/spec/registry-api.md`: any "hikyaku" references <!-- completed: 2026-04-12T10:01 -->
+- [x] Verify `docs/spec/a2a-operations.md` and `docs/spec/webui-api.md` contain no "hikyaku" references (no-op) <!-- completed: 2026-04-12T10:02 -->
+- [x] Update `CLAUDE.md` (root): project name, package, CLI, skill names <!-- completed: 2026-04-12T10:02 -->
+- [x] Update `.claude/CLAUDE.md`: project name, package, CLI, skill names <!-- completed: 2026-04-12T10:02 -->
+- [x] Update `.claude/rules/commands.md`: `mise //hikyaku:*` → `mise //cafleet:*` <!-- completed: 2026-04-12T10:02 -->
 
 ### Step 2: Skills & Plugin Files
 
-- [ ] Rename `.claude/skills/hikyaku/` → `.claude/skills/cafleet/` via `git mv` <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet/SKILL.md`: all CLI commands, env vars, paths <!-- completed: -->
-- [ ] Rename `.claude/skills/hikyaku-monitoring/` → `.claude/skills/cafleet-monitoring/` via `git mv` <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet-monitoring/SKILL.md`: all CLI references <!-- completed: -->
-- [ ] Update `.claude/skills/update-readme/SKILL.md`: project name, CLI command, mise task, pip install <!-- completed: -->
-- [ ] Update `.claude-plugin/plugin.json`: name, skill path (repository URL left unchanged — updated with separate GitHub rename) <!-- completed: -->
-- [ ] Update `.claude-plugin/marketplace.json`: name, description <!-- completed: -->
+- [x] Rename `.claude/skills/hikyaku/` → `.claude/skills/cafleet/` via `git mv` <!-- completed: 2026-04-12T10:10 -->
+- [x] Update `.claude/skills/cafleet/SKILL.md`: all CLI commands, env vars, paths <!-- completed: 2026-04-12T10:11 -->
+- [x] Rename `.claude/skills/hikyaku-monitoring/` → `.claude/skills/cafleet-monitoring/` via `git mv` <!-- completed: 2026-04-12T10:10 -->
+- [x] Update `.claude/skills/cafleet-monitoring/SKILL.md`: all CLI references <!-- completed: 2026-04-12T10:11 -->
+- [x] Update `.claude/skills/update-readme/SKILL.md`: project name, CLI command, mise task, pip install <!-- completed: 2026-04-12T10:11 -->
+- [x] Update `.claude-plugin/plugin.json`: name, skill path (repository URL left unchanged — updated with separate GitHub rename) <!-- completed: 2026-04-12T10:12 -->
+- [x] Update `.claude-plugin/marketplace.json`: name, description <!-- completed: 2026-04-12T10:12 -->
 
 ### Step 3: Package Directory Rename
 
-- [ ] `git mv hikyaku/src/hikyaku hikyaku/src/cafleet` (inner Python package) <!-- completed: -->
-- [ ] `git mv hikyaku cafleet` (outer workspace member directory) <!-- completed: -->
+- [x] `git mv hikyaku/src/hikyaku hikyaku/src/cafleet` (inner Python package) <!-- completed: 2026-04-12T10:20 -->
+- [x] `git mv hikyaku cafleet` (outer workspace member directory) <!-- completed: 2026-04-12T10:20 -->
 
 ### Step 4: Package Configuration
 
-- [ ] Update root `pyproject.toml`: workspace members, sources, dev deps, ty.src include <!-- completed: -->
-- [ ] Update `cafleet/pyproject.toml`: package name, console script, hatch build paths <!-- completed: -->
-- [ ] Update root `mise.toml`: monorepo config_roots, `HIKYAKU_URL` → `CAFLEET_URL` <!-- completed: -->
-- [ ] Update `cafleet/mise.toml`: dev task server path <!-- completed: -->
+- [x] Update root `pyproject.toml`: workspace members, sources, dev deps, ty.src include <!-- completed: 2026-04-12T10:25 -->
+- [x] Update `cafleet/pyproject.toml`: package name, console script, hatch build paths <!-- completed: 2026-04-12T10:25 -->
+- [x] Update root `mise.toml`: monorepo config_roots, `HIKYAKU_URL` → `CAFLEET_URL` <!-- completed: 2026-04-12T10:25 -->
+- [x] Update `cafleet/mise.toml`: dev task server path <!-- completed: 2026-04-12T10:25 -->
 
 ### Step 5: Python Source Code
 
-- [ ] Update all `from hikyaku` / `import hikyaku` to `from cafleet` / `import cafleet` across all 14 source files with references (includes `alembic/env.py`) <!-- completed: -->
-- [ ] Update `config.py`: database path `~/.local/share/hikyaku/` → `~/.local/share/cafleet/`, env var `HIKYAKU_DATABASE_URL` → `CAFLEET_DATABASE_URL` <!-- completed: -->
+- [x] Update all `from hikyaku` / `import hikyaku` to `from cafleet` / `import cafleet` across all 14 source files with references (includes `alembic/env.py`) <!-- completed: 2026-04-12 -->
+- [x] Update `config.py`: database path `~/.local/share/hikyaku/` → `~/.local/share/cafleet/`, env var `HIKYAKU_DATABASE_URL` → `CAFLEET_DATABASE_URL` <!-- completed: 2026-04-12 -->
 
 ### Step 6: Test Files
 
-- [ ] Update all `from hikyaku` / `import hikyaku` to `from cafleet` / `import cafleet` across all 22 test files with references <!-- completed: -->
-- [ ] Update any hardcoded database paths, CLI command names, and env var names in tests <!-- completed: -->
+- [x] Update all `from hikyaku` / `import hikyaku` to `from cafleet` / `import cafleet` across all 22 test files with references <!-- completed: 2026-04-12 -->
+- [x] Update any hardcoded database paths, CLI command names, and env var names in tests <!-- completed: 2026-04-12 -->
 
 ### Step 7: Frontend Build Configuration & Source Code
 
-- [ ] Update `admin/vite.config.ts`: `outDir` path `../hikyaku/src/hikyaku/webui` → `../cafleet/src/cafleet/webui` <!-- completed: -->
-- [ ] Update `admin/src/components/Dashboard.tsx`: localStorage key `hikyaku.sender.*` → `cafleet.sender.*`, heading "Hikyaku" → "CAFleet", CLI text `hikyaku register` → `cafleet register` <!-- completed: -->
-- [ ] Update `admin/src/components/SenderSelector.tsx`: localStorage key `hikyaku.sender.*` → `cafleet.sender.*` <!-- completed: -->
-- [ ] Update `admin/src/components/SessionPicker.tsx`: heading "Hikyaku" → "CAFleet", CLI text `hikyaku-registry session create` → `cafleet session create` <!-- completed: -->
-- [ ] Update `admin/src/components/Sidebar.tsx`: CLI text `hikyaku register` → `cafleet register` <!-- completed: -->
+- [x] Update `admin/vite.config.ts`: `outDir` path `../hikyaku/src/hikyaku/webui` → `../cafleet/src/cafleet/webui` <!-- completed: 2026-04-12 -->
+- [x] Update `admin/src/components/Dashboard.tsx`: localStorage key `hikyaku.sender.*` → `cafleet.sender.*`, heading "Hikyaku" → "CAFleet", CLI text `hikyaku register` → `cafleet register` <!-- completed: 2026-04-12 -->
+- [x] Update `admin/src/components/SenderSelector.tsx`: localStorage key `hikyaku.sender.*` → `cafleet.sender.*` <!-- completed: 2026-04-12 -->
+- [x] Update `admin/src/components/SessionPicker.tsx`: heading "Hikyaku" → "CAFleet", CLI text `hikyaku-registry session create` → `cafleet session create` <!-- completed: 2026-04-12 -->
+- [x] Update `admin/src/components/Sidebar.tsx`: CLI text `hikyaku register` → `cafleet register` <!-- completed: 2026-04-12 -->
 
 ### Step 8: CI/CD
 
-- [ ] Update `.github/workflows/ci.yml`: `working-directory: hikyaku` → `cafleet` <!-- completed: -->
+- [x] Update `.github/workflows/ci.yml`: `working-directory: hikyaku` → `cafleet` <!-- completed: 2026-04-12 -->
 
 ### Step 9: Settings & Permissions
 
-- [ ] Update `.claude/settings.json`: replace `hikyaku` with `cafleet` in all allow/deny patterns <!-- completed: -->
+- [x] Update `.claude/settings.json`: replace `hikyaku` with `cafleet` in all allow/deny patterns <!-- completed: 2026-04-12 -->
 
 ### Step 10: Lock File & Verification
 
-- [ ] Run `uv sync` to regenerate `uv.lock` with new package name <!-- completed: -->
-- [ ] Run `mise //cafleet:test` to verify all tests pass <!-- completed: -->
-- [ ] Run `mise //:lint` and `mise //:typecheck` to verify no lint/type errors <!-- completed: -->
+- [x] Run `uv sync` to regenerate `uv.lock` with new package name <!-- completed: 2026-04-12 -->
+- [x] Run `mise //cafleet:test` to verify all tests pass <!-- completed: 2026-04-12 -->
+- [x] Run `mise //:lint` and `mise //:typecheck` to verify no lint/type errors <!-- completed: 2026-04-12 -->
 
 ---
 

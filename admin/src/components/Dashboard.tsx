@@ -13,7 +13,7 @@ interface DashboardProps {
 }
 
 function getStoredSender(sessionId: string, agents: Agent[]): string | null {
-  const stored = localStorage.getItem(`hikyaku.sender.${sessionId}`);
+  const stored = localStorage.getItem(`cafleet.sender.${sessionId}`);
   if (stored && agents.some((a) => a.agent_id === stored && a.status === "active")) {
     return stored;
   }
@@ -47,7 +47,7 @@ export default function Dashboard({
     <div className="h-screen flex flex-col bg-gray-50">
       <header className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between shrink-0">
         <h1 className="text-lg font-semibold text-gray-900">
-          Hikyaku —{" "}
+          CAFleet —{" "}
           <span className="font-mono text-sm text-gray-500">
             {sessionId.slice(0, 8)}
           </span>
@@ -80,7 +80,7 @@ export default function Dashboard({
             <div className="flex-1 flex items-center justify-center">
               <p className="text-gray-400 text-sm">
                 No agents registered in this session. Use the{" "}
-                <code className="text-gray-500">hikyaku register</code> CLI to
+                <code className="text-gray-500">cafleet register</code> CLI to
                 add one.
               </p>
             </div>

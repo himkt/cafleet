@@ -8,13 +8,13 @@
       "Bash(mise //:typecheck)",
       "Bash(mise //:typecheck *)",
       "Bash(mise //admin*)",
-      "Bash(mise //hikyaku*)",
+      "Bash(mise //cafleet*)",
       "Bash(mise tasks)",
       "Bash(mise tasks --all)",
       "Skill(update-readme)",
-      "Bash(hikyaku *)",
+      "Bash(cafleet *)",
       "Bash(git mv *)",
-      "Bash(uv run hikyaku *)"
+      "Bash(uv run cafleet *)"
     ],
     "deny": [
       "Bash(uv run pytest *)",
