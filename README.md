@@ -14,6 +14,7 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 - **Message Lifecycle** -- Acknowledge, cancel (retract), and track message status
 - **Two-Header Auth** -- API key (tenant) + Agent-Id (identity) required on all authenticated requests
 - **WebUI** -- Browser-based dashboard with Auth0 login; users manage API keys, select a tenant, and interact through a Discord-style unified timeline (sidebar of active/deregistered agents, message timeline with broadcasts collapsed to one entry + per-recipient ACK reactions on hover, and an `@<agent>` / `@all` input)
+- **Member Lifecycle** -- `hikyaku member create/delete/list/capture` commands wrap tmux pane spawning + agent registration into atomic operations; the `agent_placements` table persists the agent-to-pane mapping in the registry
 - **CLI Tool** -- Full-featured command-line client for all broker operations
 - **SQLite Storage** -- Single-file database; no daemon required. Schema managed by Alembic via `hikyaku-registry db init`
 
@@ -32,11 +33,12 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
     | +-------------+         |           |  +--------------------+    |
       |  Agent B     | ListTasks          |  | SQLite (SQLAlchemy)|    |
     | | (recipient)  |<-------------------+  | +----------------+ |    |
-      +-------------+         |           |  | | api_keys       | |    |
-    |                                     |  | | agents         | |    |
-     - - - - - - - - - - - - -            |  | | tasks          | |    |
-                                          |  | | alembic_version| |    |
-     Tenant Y (different API key)         |  | +----------------+ |    |
+      +-------------+         |           |  | | api_keys         | |    |
+    |                                     |  | | agents           | |    |
+     - - - - - - - - - - - - -            |  | | tasks            | |    |
+                                          |  | | agent_placements | |    |
+                                          |  | | alembic_version  | |    |
+     Tenant Y (different API key)         |  | +------------------+ |    |
     + - - - - - - - - - - - - +           |  +--------------------+    |
       +-------------+                     +----------------------------+
     | |  Agent C     | (isolated) |
@@ -150,6 +152,10 @@ The `--agent-id` option is a per-subcommand option required by most commands. Th
 | `hikyaku get-task` | Required | Get details of a specific task/message |
 | `hikyaku agents` | Required | List agents in the tenant or get detail for a specific agent |
 | `hikyaku deregister` | Required | Deregister this agent from the broker |
+| `hikyaku member create` | Required | Register a member agent and spawn its tmux pane (Director only) |
+| `hikyaku member delete` | Required | Deregister a member and close its pane (Director only) |
+| `hikyaku member list` | Required | List members spawned by this Director |
+| `hikyaku member capture` | Required | Capture the last N lines of a member's pane (Director only) |
 
 ### Server CLI (`hikyaku-registry`)
 
@@ -185,7 +191,8 @@ Base path: `/api/v1`
 | POST | `/api/v1/agents` | Bearer | Register a new agent; API key (created via WebUI) is always required. `X-Agent-Id` is not needed for registration |
 | GET | `/api/v1/agents` | Bearer + Agent-Id | List agents in the caller's tenant |
 | GET | `/api/v1/agents/{id}` | Bearer + Agent-Id | Get full A2A AgentCard JSON (404 if not in same tenant) |
-| DELETE | `/api/v1/agents/{id}` | Bearer + Agent-Id | Deregister an agent (self only); soft-delete, row is not physically removed |
+| DELETE | `/api/v1/agents/{id}` | Bearer + Agent-Id | Deregister an agent (self or Director); soft-delete, row is not physically removed |
+| PATCH | `/api/v1/agents/{id}/placement` | Bearer + Agent-Id | Update placement pane ID (Director only) |
 | GET | `/.well-known/agent-card.json` | None | Broker's own A2A Agent Card |
 
 Registry API errors use a consistent JSON envelope:
@@ -267,6 +274,7 @@ hikyaku/
     pyproject.toml
   client/                 # hikyaku-client CLI package
     src/hikyaku_client/
+      tmux.py             # tmux subprocess helper (member lifecycle)
     tests/
     pyproject.toml
   admin/                  # WebUI SPA (Vite + React + TypeScript + Tailwind CSS)

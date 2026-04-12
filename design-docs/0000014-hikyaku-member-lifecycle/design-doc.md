@@ -1,7 +1,7 @@
 # Hikyaku Member Lifecycle
 
 **Status**: Approved
-**Progress**: 0/44 tasks complete
+**Progress**: 6/44 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -1191,12 +1191,12 @@ All tmux interaction is mocked via `monkeypatch.setattr(hikyaku_client.tmux, "_r
 
 Per `.claude/rules/design-doc-numbering.md`, documentation is updated before any code. Every affected doc file must reflect the new CLI surface at the end of this step.
 
-- [ ] Update `ARCHITECTURE.md` — add an `agent_placements` table entry to the schema overview; add a "Member lifecycle" paragraph describing the atomic register + split-window + placement flow <!-- completed: -->
-- [ ] Update `docs/` — add or extend `docs/cli/hikyaku-member.md` with the full `create`/`delete`/`list`/`capture` reference, including the rollback semantics and the `TMUX_PANE` detection rule <!-- completed: -->
-- [ ] Update `README.md` via `/update-readme` skill to pick up the new CLI surface and the simplified `.claude/settings.json` footprint <!-- completed: -->
-- [ ] Rewrite `.claude/skills/hikyaku/SKILL.md` — add Member Create/Delete/List/Capture subsections under Command Reference, replace Multi-Session Coordination spawn/shutdown recipes (and any raw `tmux list-panes`/`tmux capture-pane` invocations) with the new CLI, remove the printenv literal-paste block, and add the external `agent-team-supervision` skill limitation note <!-- completed: -->
-- [ ] Mirror the SKILL.md changes into every `plugins/*/skills/hikyaku/SKILL.md` copy that exists in this repo <!-- completed: -->
-- [ ] Update `.claude/rules/commands.md` if any new mise task is introduced (expected: none) <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` — add an `agent_placements` table entry to the schema overview; add a "Member lifecycle" paragraph describing the atomic register + split-window + placement flow <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `docs/` — add or extend `docs/cli/hikyaku-member.md` with the full `create`/`delete`/`list`/`capture` reference, including the rollback semantics and the `TMUX_PANE` detection rule <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `README.md` via `/update-readme` skill to pick up the new CLI surface and the simplified `.claude/settings.json` footprint <!-- completed: 2026-04-12T12:00 -->
+- [x] Rewrite `.claude/skills/hikyaku/SKILL.md` — add Member Create/Delete/List/Capture subsections under Command Reference, replace Multi-Session Coordination spawn/shutdown recipes (and any raw `tmux list-panes`/`tmux capture-pane` invocations) with the new CLI, remove the printenv literal-paste block, and add the external `agent-team-supervision` skill limitation note <!-- completed: 2026-04-12T12:00 -->
+- [x] Mirror the SKILL.md changes into every `plugins/*/skills/hikyaku/SKILL.md` copy that exists in this repo <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `.claude/rules/commands.md` if any new mise task is introduced (expected: none) <!-- completed: 2026-04-12T12:00 -->
 
 ### Step 2: Database schema
 

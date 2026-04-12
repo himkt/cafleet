@@ -71,6 +71,27 @@ Indexes:
 
 `status_state` and `status_timestamp` are promoted to columns so filtering and ordering execute on the database, not in Python after fetching every blob. The two task indexes serve the inbox listing query (`WHERE context_id = ? ORDER BY status_timestamp DESC`) and the WebUI sender outbox query (`WHERE from_agent_id = ? ORDER BY status_timestamp DESC`) directly from the index.
 
+### `agent_placements`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `agent_id` | `TEXT` | `PRIMARY KEY`, `REFERENCES agents(agent_id) ON DELETE CASCADE` | The member agent. CASCADE ensures hard-delete of an agent (if any future path adds one) also removes the placement. |
+| `director_agent_id` | `TEXT` | `NOT NULL`, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The Director that spawned this member. RESTRICT prevents hard-deleting a Director with live placements. |
+| `tmux_session` | `TEXT` | `NOT NULL` | e.g. `'main'`, from `tmux display-message '#{session_name}'`. |
+| `tmux_window_id` | `TEXT` | `NOT NULL` | e.g. `'@3'`, from `#{window_id}`. |
+| `tmux_pane_id` | `TEXT` | nullable | e.g. `'%7'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set via `PATCH /api/v1/agents/{id}/placement` after `tmux split-window` succeeds. |
+| `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp, set server-side to match `agents.registered_at`. |
+
+Indexes:
+
+| Name | Columns | Purpose |
+|---|---|---|
+| `idx_placements_director` | `(director_agent_id)` | List all members spawned by a specific Director. |
+
+Placement rows are hard-deleted (not soft-deleted) when the agent is deregistered through any path. They have no historical value and must not outlive the agent they describe. Deregistration is handled in `RegistryStore.deregister_agent`.
+
+If a user kills a pane manually without going through `hikyaku member delete`, the placement row stays until the next `member delete` resolves it. `send_exit(..., ignore_missing=True)` handles the "pane already gone" case gracefully.
+
 ### Foreign key enforcement
 
 SQLite ignores foreign key declarations unless `PRAGMA foreign_keys=ON` is issued on every connection. The registry installs a SQLAlchemy engine `connect` event listener that runs the PRAGMA on every new DBAPI connection. A regression test verifies the PRAGMA is active on a fresh connection.
@@ -95,6 +116,10 @@ Every storage operation is implemented as a single SQL statement (or, where atom
 | `is_key_owner` | `SELECT 1 FROM api_keys WHERE api_key_hash = ? AND owner_sub = ?`. |
 | `get_agent_name` | `SELECT name FROM agents WHERE agent_id = ?` (returns `''` if absent). |
 | `list_deregistered_agents_with_tasks(tenant_id)` | `SELECT a.agent_id, a.name, a.description, a.registered_at FROM agents a WHERE a.tenant_id = ? AND a.status = 'deregistered' AND EXISTS (SELECT 1 FROM tasks t WHERE t.context_id = a.agent_id LIMIT 1)`. |
+| `create_agent_with_placement(…, placement)` | Single transaction: `INSERT INTO agents (…)` + optional `INSERT INTO agent_placements (…)`. Superset of `create_agent` (which delegates with `placement=None`). |
+| `get_placement(agent_id)` | `SELECT * FROM agent_placements WHERE agent_id = ?`. |
+| `update_placement_pane_id(agent_id, pane_id)` | `UPDATE agent_placements SET tmux_pane_id = ? WHERE agent_id = ?`. |
+| `list_placements_for_director(tenant_id, director_agent_id)` | `SELECT a.*, p.* FROM agents a JOIN agent_placements p ON a.agent_id = p.agent_id WHERE a.tenant_id = ? AND p.director_agent_id = ? AND a.status = 'active'`. |
 
 ### `RegistryStore` (API keys)
 
