@@ -79,6 +79,7 @@ def format_member(data: dict) -> str:
         "Member registered and spawned.",
         f"  agent_id:  {data.get('agent_id', '?')}",
         f"  name:      {data.get('name', '?')}",
+        f"  backend:   {placement.get('coding_agent', 'claude')}",
         f"  pane_id:   {placement.get('tmux_pane_id', '?')}",
         f"  window_id: {placement.get('tmux_window_id', '?')}",
     ]
@@ -91,10 +92,10 @@ def format_member_list(members: list) -> str:
         return "0 members."
     lines = [f"{count} member{'s' if count != 1 else ''}:"]
     header = (
-        "  agent_id        name      status  session  window_id  pane_id  created_at"
+        "  agent_id        name      status  backend  session  window_id  pane_id  created_at"
     )
     sep = (
-        "  --------------  --------  ------  -------  ---------  -------  "
+        "  --------------  --------  ------  -------  -------  ---------  -------  "
         "--------------------"
     )
     lines.append(header)
@@ -109,6 +110,7 @@ def format_member_list(members: list) -> str:
         lines.append(
             f"  {agent_id:<14}  {m.get('name', '?'):<8}  "
             f"{m.get('status', 'active'):<6}  "
+            f"{placement.get('coding_agent', 'claude'):<7}  "
             f"{placement.get('tmux_session', '?'):<7}  "
             f"{placement.get('tmux_window_id', '?'):<9}  "
             f"{pane_display:<7}  "

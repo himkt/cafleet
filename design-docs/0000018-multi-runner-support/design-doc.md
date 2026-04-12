@@ -1,7 +1,7 @@
 # Multi-Runner Support (Codex Integration)
 
 **Status**: Approved
-**Progress**: 12/18 tasks complete
+**Progress**: 16/18 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -237,13 +237,13 @@ In `client/src/hikyaku_client/output.py`:
 
 ### Step 6: CLI Changes
 
-- [ ] Add `--coding-agent` option to `member_create()` in `client/src/hikyaku_client/cli.py` <!-- completed: -->
-- [ ] Update `_resolve_prompt()` to accept `CodingAgentConfig` and use its `default_prompt_template` <!-- completed: -->
-- [ ] Update `member_create()` to call `coding_agent_config.ensure_available()`, pass `coding_agent` in placement, and use `build_command()` for `split_window()` <!-- completed: -->
+- [x] Add `--coding-agent` option to `member_create()` in `client/src/hikyaku_client/cli.py` <!-- completed: 2026-04-12T19:15 -->
+- [x] Update `_resolve_prompt()` to accept `CodingAgentConfig` and use its `default_prompt_template` <!-- completed: 2026-04-12T19:15 -->
+- [x] Update `member_create()` to call `coding_agent_config.ensure_available()`, pass `coding_agent` in placement, and use `build_command()` for `split_window()` <!-- completed: 2026-04-12T19:15 -->
 
 ### Step 7: Output Formatting
 
-- [ ] Update `format_member()` and `format_member_list()` in `client/src/hikyaku_client/output.py` to display `coding_agent` <!-- completed: -->
+- [x] Update `format_member()` and `format_member_list()` in `client/src/hikyaku_client/output.py` to display `coding_agent` <!-- completed: 2026-04-12T19:15 -->
 
 ### Step 8: Tests
 
