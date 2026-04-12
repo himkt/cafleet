@@ -2,82 +2,40 @@
 
 Base path: `/ui/api`
 
-## Authentication
+## Request Headers
 
-The WebUI uses two authentication mechanisms:
+The WebUI does not require authentication. Session-scoped endpoints require an `X-Session-Id` header:
 
-- **Auth0 JWT**: `Authorization: Bearer <auth0_jwt>` — required on all endpoints except `GET /ui/api/auth/config`. Validated server-side via Auth0 JWKS.
-- **Tenant selection**: `X-Tenant-Id: <api_key_hash>` — required on tenant-scoped endpoints (agents, inbox, sent, send). The backend verifies that the `X-Tenant-Id` belongs to the authenticated Auth0 user by calling `RegistryStore.is_key_owner(api_key_hash, owner_sub)` (single `SELECT` against the `api_keys` table).
+| Header | Purpose |
+|---|---|
+| `X-Session-Id: <session_id>` | Required on session-scoped endpoints (agents, inbox, sent, timeline, send). The backend verifies the session exists in the `sessions` table. |
 
-No server-side session. The Auth0 SPA SDK manages tokens in the browser.
+No server-side session. No Auth0. The SPA manages the active session_id client-side via hash-based routing.
 
 ## Endpoints
 
-### GET /ui/api/auth/config — Auth0 Client Config
+### GET /ui/api/sessions — List Sessions
 
-Returns Auth0 domain, client ID, and audience for SPA initialization. No authentication required.
-
-**Response** (200 OK):
-
-```json
-{
-  "domain": "myapp.auth0.com",
-  "client_id": "abc123...",
-  "audience": "hikyaku"
-}
-```
-
-### POST /ui/api/keys — Create API Key
-
-Creates a new API key owned by the authenticated Auth0 user. The raw key is shown only once.
-
-**Request**: `Authorization: Bearer <auth0_jwt>` header only (no body).
-
-**Response** (201 Created):
-
-```json
-{
-  "api_key": "hky_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
-  "tenant_id": "sha256hex...",
-  "created_at": "2026-03-29T10:00:00+00:00"
-}
-```
-
-### GET /ui/api/keys — List API Keys
-
-Lists all API keys owned by the authenticated Auth0 user. Does NOT return raw keys.
-
-**Request**: `Authorization: Bearer <auth0_jwt>` header.
+Returns all sessions with agent counts. No headers required.
 
 **Response** (200 OK):
 
 ```json
 [
   {
-    "tenant_id": "sha256hex...",
-    "key_prefix": "hky_a1b2",
-    "created_at": "2026-03-29T10:00:00+00:00",
-    "status": "active",
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "label": "PR-42 review",
+    "created_at": "2026-04-12T10:00:00+00:00",
     "agent_count": 3
   }
 ]
 ```
 
-### DELETE /ui/api/keys/{tenant_id} — Revoke API Key
-
-Revokes an API key and deregisters all agents under the tenant. The authenticated user must own the key.
-
-**Request**: `Authorization: Bearer <auth0_jwt>` header.
-
-**Response**: 204 No Content.
-
-**Error**: 404 if `tenant_id` is not owned by the authenticated user.
-
 ### GET /ui/api/agents — List Agents
 
-Returns agents belonging to the selected tenant.
+Returns agents belonging to the selected session.
 
-**Request**: `Authorization: Bearer <auth0_jwt>` + `X-Tenant-Id: <api_key_hash>` headers.
+**Request**: Query parameter `?session_id=<uuid>`.
 
 **Response** (200 OK):
 
@@ -91,7 +49,7 @@ Returns agents belonging to the selected tenant.
 
 Returns messages received by the agent (`context_id = agent_id`), excluding `broadcast_summary` type tasks. Ordered newest first.
 
-**Request**: `Authorization: Bearer <auth0_jwt>` + `X-Tenant-Id: <api_key_hash>` headers.
+**Request**: `X-Session-Id: <session_id>` header.
 
 **Response** (200 OK):
 
@@ -121,17 +79,17 @@ The `body` field is extracted from the task's first artifact's first text part. 
 
 Returns messages sent by the agent (single SQL query against `tasks` filtered by `from_agent_id` and ordered by `status_timestamp DESC`, served by `idx_tasks_from_agent_status_ts`), excluding `broadcast_summary` type tasks. Ordered newest first.
 
-**Request**: `Authorization: Bearer <auth0_jwt>` + `X-Tenant-Id: <api_key_hash>` headers.
+**Request**: `X-Session-Id: <session_id>` header.
 
 Same response format as inbox.
 
-### GET /ui/api/timeline — Unified Tenant Timeline
+### GET /ui/api/timeline — Unified Session Timeline
 
-Returns up to 200 most-recent non-`broadcast_summary` tasks for the selected tenant, newest first. Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_task_id` into a single broadcast entry client-side.
+Returns up to 200 most-recent non-`broadcast_summary` tasks for the selected session, newest first. Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_task_id` into a single broadcast entry client-side.
 
-**Request**: `Authorization: Bearer <auth0_jwt>` + `X-Tenant-Id: <api_key_hash>` headers.
+**Request**: `X-Session-Id: <session_id>` header.
 
-Tenant scoping is reached through the `tasks.context_id → agents.agent_id → agents.tenant_id` join. Only tasks whose recipient belongs to the header tenant are returned; cross-tenant tasks are invisible.
+Session scoping is reached through the `tasks.context_id → agents.agent_id → agents.session_id` join. Only tasks whose recipient belongs to the header session are returned; cross-session tasks are invisible.
 
 **Response** (200 OK):
 
@@ -175,13 +133,12 @@ The client groups rows by `origin_task_id` (non-null rows sharing a value form o
 
 ### POST /ui/api/messages/send — Send Message
 
-Sends a message from a same-tenant active agent. Supports both unicast (`to_agent_id=<uuid>`) and broadcast (`to_agent_id="*"`).
+Sends a message from a same-session active agent. Supports both unicast (`to_agent_id=<uuid>`) and broadcast (`to_agent_id="*"`).
 
 **Request**:
 
 ```
-Authorization: Bearer <auth0_jwt>
-X-Tenant-Id: <api_key_hash>
+X-Session-Id: <session_id>
 ```
 
 ```json
@@ -192,9 +149,9 @@ X-Tenant-Id: <api_key_hash>
 }
 ```
 
-**Unicast** (`to_agent_id` is a UUID): the server verifies both the sender and the destination belong to the caller's tenant and that the destination is active.
+**Unicast** (`to_agent_id` is a UUID): the server verifies both the sender and the destination belong to the caller's session and that the destination is active.
 
-**Broadcast** (`to_agent_id == "*"`): the server skips destination validation (no specific recipient to verify) and hands the message to `BrokerExecutor._handle_broadcast`, which fans out to every active agent in the tenant as individual delivery tasks plus a summary task. The sender is still required to be active and in the caller's tenant. The response's `task_id` is the summary task's id.
+**Broadcast** (`to_agent_id == "*"`): the server skips destination validation (no specific recipient to verify) and hands the message to `BrokerExecutor._handle_broadcast`, which fans out to every active agent in the session as individual delivery tasks plus a summary task. The sender is still required to be active and in the caller's session. The response's `task_id` is the summary task's id.
 
 **Response** (200 OK):
 
@@ -206,9 +163,8 @@ X-Tenant-Id: <api_key_hash>
 ```
 
 **Errors**:
-- 401: Invalid API key
-- 400: Missing fields, `from_agent` not in tenant, destination is deregistered
-- 404: Agent not found or cross-tenant
+- 400: Missing fields, `from_agent` not in session, destination is deregistered
+- 404: Agent not found or cross-session
 
 ## Error Format
 

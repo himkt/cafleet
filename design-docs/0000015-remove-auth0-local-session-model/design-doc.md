@@ -1,7 +1,7 @@
 # Remove Auth0: Local-Only Session Model
 
 **Status**: Approved
-**Progress**: 0/80 tasks complete
+**Progress**: 7/80 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -480,13 +480,13 @@ Implementation order is **documentation-first** per project rule `.claude/rules/
 
 ### Step 1: Documentation — user-facing
 
-- [ ] Update `README.md` — replace Auth0 references with session_id flow; rewrite feature bullet (line 16 "Two-Header Auth" → session-based), ASCII architecture diagram (22-46, drop `api_keys`, add `sessions`), design decisions (48-57), quickstart (call `hikyaku-registry session create` instead of Auth0 login), CLI table (135-153), WebUI API table (233-245), and delete "Running Vite dev server with Auth0" section (321-336); add bold "local-only tool, do not expose 0.0.0.0 on a shared network" warning <!-- completed: -->
-- [ ] Update `ARCHITECTURE.md` — redraw data model (drop `api_keys`, add `sessions`), rewrite "Tenant Isolation" section (33-55) to "Session Isolation" (no auth, `X-Session-Id` header, no Auth0), update component-layout table (`auth.py` description changes from "Auth0 JWT validation" to "session + agent-id resolution"), remove Auth0 from component diagram <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md` — delete `ApiKey` entity and its Operation mapping section, add `Session` entity, rename `agents.tenant_id` → `agents.session_id`, mark `owner_sub` deleted, update Tenant Lifecycle to Session Lifecycle <!-- completed: -->
-- [ ] Update `docs/spec/registry-api.md` — remove bearer auth from all endpoints; add `session_id` body/query/header contract; add `SESSION_REQUIRED`/`SESSION_NOT_FOUND`/`AGENT_ID_REQUIRED` error codes; remove 401/403 from error table <!-- completed: -->
-- [ ] Update `docs/spec/webui-api.md` — delete Auth0 section, delete `/ui/api/auth/config` + `/ui/api/keys*` sections, add `GET /ui/api/sessions`, add `X-Session-Id` header to remaining endpoints; rewrite `/ui/api/timeline` section (lines 128-175) to use `X-Session-Id` instead of `X-Tenant-Id` (the endpoint is spec-only for blocked 0000013 but must stay consistent with the new model) <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md` — rename `HIKYAKU_API_KEY` to `HIKYAKU_SESSION_ID` globally; document `HIKYAKU_URL` 127.0.0.1 fallback; add `hikyaku-registry session` subcommands <!-- completed: -->
-- [ ] Update `docs/spec/a2a-operations.md` — update the JSON-RPC bearer header section to `X-Session-Id` + `X-Agent-Id` only; replace 401 errors with 400/404; change session-mismatch code from `-32001` to `-32003` <!-- completed: -->
+- [x] Update `README.md` — replace Auth0 references with session_id flow; rewrite feature bullet (line 16 "Two-Header Auth" → session-based), ASCII architecture diagram (22-46, drop `api_keys`, add `sessions`), design decisions (48-57), quickstart (call `hikyaku-registry session create` instead of Auth0 login), CLI table (135-153), WebUI API table (233-245), and delete "Running Vite dev server with Auth0" section (321-336); add bold "local-only tool, do not expose 0.0.0.0 on a shared network" warning <!-- completed: 2026-04-12T02:30 -->
+- [x] Update `ARCHITECTURE.md` — redraw data model (drop `api_keys`, add `sessions`), rewrite "Tenant Isolation" section (33-55) to "Session Isolation" (no auth, `X-Session-Id` header, no Auth0), update component-layout table (`auth.py` description changes from "Auth0 JWT validation" to "session + agent-id resolution"), remove Auth0 from component diagram <!-- completed: 2026-04-12T02:30 -->
+- [x] Update `docs/spec/data-model.md` — delete `ApiKey` entity and its Operation mapping section, add `Session` entity, rename `agents.tenant_id` → `agents.session_id`, mark `owner_sub` deleted, update Tenant Lifecycle to Session Lifecycle <!-- completed: 2026-04-12T02:30 -->
+- [x] Update `docs/spec/registry-api.md` — remove bearer auth from all endpoints; add `session_id` body/query/header contract; add `SESSION_REQUIRED`/`SESSION_NOT_FOUND`/`AGENT_ID_REQUIRED` error codes; remove 401/403 from error table <!-- completed: 2026-04-12T02:30 -->
+- [x] Update `docs/spec/webui-api.md` — delete Auth0 section, delete `/ui/api/auth/config` + `/ui/api/keys*` sections, add `GET /ui/api/sessions`, add `X-Session-Id` header to remaining endpoints; rewrite `/ui/api/timeline` section (lines 128-175) to use `X-Session-Id` instead of `X-Tenant-Id` (the endpoint is spec-only for blocked 0000013 but must stay consistent with the new model) <!-- completed: 2026-04-12T02:30 -->
+- [x] Update `docs/spec/cli-options.md` — rename `HIKYAKU_API_KEY` to `HIKYAKU_SESSION_ID` globally; document `HIKYAKU_URL` 127.0.0.1 fallback; add `hikyaku-registry session` subcommands <!-- completed: 2026-04-12T02:30 -->
+- [x] Update `docs/spec/a2a-operations.md` — update the JSON-RPC bearer header section to `X-Session-Id` + `X-Agent-Id` only; replace 401 errors with 400/404; change session-mismatch code from `-32001` to `-32003` <!-- completed: 2026-04-12T02:30 -->
 
 ### Step 2: Documentation — skills & settings
 

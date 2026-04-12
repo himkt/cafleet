@@ -8,30 +8,22 @@ Schema management is handled by Alembic (`registry/src/hikyaku_registry/alembic/
 
 ## SQL Schema
 
-### `api_keys`
+### `sessions`
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `api_key_hash` | `TEXT` | `PRIMARY KEY` | `SHA-256(raw_api_key)`. Doubles as `tenant_id`. |
-| `owner_sub` | `TEXT` | `NOT NULL` | Auth0 `sub` claim of the user who created the key. |
-| `key_prefix` | `TEXT` | `NOT NULL` | First 8 characters of the raw API key, for display in the WebUI. |
-| `status` | `TEXT` | `NOT NULL` | `'active'` or `'revoked'`. |
+| `session_id` | `TEXT` | `PRIMARY KEY` | Opaque string. New sessions receive a UUIDv4; migrated sessions reuse the original `api_key_hash` value (64-char hex). |
+| `label` | `TEXT` | nullable | Optional free-form text for human bookkeeping (e.g. `"PR-42 review"`). |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
 
-Indexes:
-
-| Name | Columns | Purpose |
-|---|---|---|
-| `idx_api_keys_owner` | `(owner_sub)` | List API keys for a logged-in Auth0 user. |
-
-The `api_keys` row is the source of truth for tenant existence and validity. Every authenticated request (agent and WebUI) checks `status='active'`. Revoking a key flips it to `'revoked'` and bulk-deregisters every agent in the tenant in the same transaction.
+No `status` column. No soft-revoke. Deletion is the only removal path and is rejected while agents still reference the session (FK `ondelete="RESTRICT"`).
 
 ### `agents`
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `agent_id` | `TEXT` | `PRIMARY KEY` | UUID v4. |
-| `tenant_id` | `TEXT` | `NOT NULL`, `REFERENCES api_keys(api_key_hash) ON DELETE RESTRICT` | The owning tenant. SQLite enforces the FK once `PRAGMA foreign_keys=ON` is set. |
+| `session_id` | `TEXT` | `NOT NULL`, `REFERENCES sessions(session_id) ON DELETE RESTRICT` | The owning session. SQLite enforces the FK once `PRAGMA foreign_keys=ON` is set. |
 | `name` | `TEXT` | `NOT NULL` | |
 | `description` | `TEXT` | `NOT NULL` | |
 | `status` | `TEXT` | `NOT NULL` | `'active'` or `'deregistered'`. |
@@ -43,7 +35,7 @@ Indexes:
 
 | Name | Columns | Purpose |
 |---|---|---|
-| `idx_agents_tenant_status` | `(tenant_id, status)` | List active agents in a tenant; covers the `WHERE tenant_id = ? AND status = 'active'` predicate. |
+| `idx_agents_session_status` | `(session_id, status)` | List active agents in a session; covers the `WHERE session_id = ? AND status = 'active'` predicate. |
 
 Deregistration is a soft-delete: `status='deregistered'` plus `deregistered_at` is set in a single statement. There is no row delete and no background cleanup loop. Active query paths filter `status='active'` so dead rows are invisible to normal traffic.
 
@@ -96,39 +88,30 @@ If a user kills a pane manually without going through `hikyaku member delete`, t
 
 SQLite ignores foreign key declarations unless `PRAGMA foreign_keys=ON` is issued on every connection. The registry installs a SQLAlchemy engine `connect` event listener that runs the PRAGMA on every new DBAPI connection. A regression test verifies the PRAGMA is active on a fresh connection.
 
-The two foreign keys (`agents.tenant_id → api_keys.api_key_hash`, `tasks.context_id → agents.agent_id`) both use `ON DELETE RESTRICT`. There is no path in v1 that physically deletes an agent or an API key — revoke is a soft-status flip — so RESTRICT is the safest default.
+The two foreign keys (`agents.session_id → sessions.session_id`, `tasks.context_id → agents.agent_id`) both use `ON DELETE RESTRICT`. There is no path in v1 that physically deletes an agent — deregistration is a soft-status flip — so RESTRICT is the safest default. Session deletion is rejected while agents still reference the session.
 
 ## Operation mapping
 
 Every storage operation is implemented as a single SQL statement (or, where atomicity matters, a single transaction). The following tables enumerate the public store methods and the SQL they execute.
 
-### `RegistryStore` (agents + tenants)
+### `RegistryStore` (agents + sessions)
 
 | Method | SQL operation |
 |---|---|
-| `create_agent` | `INSERT INTO agents (...)` (single statement; `tenant_id` FK enforces the API key exists). |
+| `create_agent` | `INSERT INTO agents (...)` (single statement; `session_id` FK enforces the session exists). |
 | `get_agent` | `SELECT … FROM agents WHERE agent_id = ?`. |
-| `list_active_agents(tenant_id)` | `SELECT agent_id, name, description, registered_at, agent_card_json FROM agents WHERE tenant_id = ? AND status = 'active'` (uses `idx_agents_tenant_status`). |
+| `list_active_agents(session_id)` | `SELECT agent_id, name, description, registered_at, agent_card_json FROM agents WHERE session_id = ? AND status = 'active'` (uses `idx_agents_session_status`). |
 | `list_active_agents(None)` | `SELECT … FROM agents WHERE status = 'active'` (rare; only used by tests). |
 | `deregister_agent` | `UPDATE agents SET status='deregistered', deregistered_at=? WHERE agent_id=? AND status='active'` (single statement; returns affected row count). |
-| `verify_agent_tenant` | `SELECT 1 FROM agents WHERE agent_id = ? AND tenant_id = ?`. |
-| `is_api_key_active` | `SELECT 1 FROM api_keys WHERE api_key_hash = ? AND status = 'active'`. |
-| `is_key_owner` | `SELECT 1 FROM api_keys WHERE api_key_hash = ? AND owner_sub = ?`. |
+| `verify_agent_session` | `SELECT 1 FROM agents WHERE agent_id = ? AND session_id = ?`. |
 | `get_agent_name` | `SELECT name FROM agents WHERE agent_id = ?` (returns `''` if absent). |
-| `list_deregistered_agents_with_tasks(tenant_id)` | `SELECT a.agent_id, a.name, a.description, a.registered_at FROM agents a WHERE a.tenant_id = ? AND a.status = 'deregistered' AND EXISTS (SELECT 1 FROM tasks t WHERE t.context_id = a.agent_id LIMIT 1)`. |
+| `list_deregistered_agents_with_tasks(session_id)` | `SELECT a.agent_id, a.name, a.description, a.registered_at FROM agents a WHERE a.session_id = ? AND a.status = 'deregistered' AND EXISTS (SELECT 1 FROM tasks t WHERE t.context_id = a.agent_id LIMIT 1)`. |
+| `list_sessions` | `SELECT s.session_id, s.label, s.created_at, COUNT(a.agent_id) FROM sessions s LEFT JOIN agents a ON ... GROUP BY s.session_id`. |
+| `get_session` | `SELECT * FROM sessions WHERE session_id = ?`. |
 | `create_agent_with_placement(…, placement)` | Single transaction: `INSERT INTO agents (…)` + optional `INSERT INTO agent_placements (…)`. Superset of `create_agent` (which delegates with `placement=None`). |
 | `get_placement(agent_id)` | `SELECT * FROM agent_placements WHERE agent_id = ?`. |
 | `update_placement_pane_id(agent_id, pane_id)` | `UPDATE agent_placements SET tmux_pane_id = ? WHERE agent_id = ?`. |
-| `list_placements_for_director(tenant_id, director_agent_id)` | `SELECT a.*, p.* FROM agents a JOIN agent_placements p ON a.agent_id = p.agent_id WHERE a.tenant_id = ? AND p.director_agent_id = ? AND a.status = 'active'`. |
-
-### `RegistryStore` (API keys)
-
-| Method | SQL operation |
-|---|---|
-| `create_api_key` | `INSERT INTO api_keys (...)`. |
-| `list_api_keys` | Single query: `SELECT k.api_key_hash, k.key_prefix, k.created_at, k.status, COUNT(a.agent_id) AS agent_count FROM api_keys k LEFT JOIN agents a ON a.tenant_id = k.api_key_hash AND a.status = 'active' WHERE k.owner_sub = ? GROUP BY k.api_key_hash`. Replaces the previous N+1 (`SMEMBERS` + per-key `HGETALL` + `SCARD`). |
-| `revoke_api_key` | Single transaction: `UPDATE api_keys SET status='revoked' WHERE api_key_hash=? AND owner_sub=?` then `UPDATE agents SET status='deregistered', deregistered_at=? WHERE tenant_id=? AND status='active'`. Both statements run inside `async with session.begin():` so the API key flip and the per-tenant cascade are atomic. |
-| `get_api_key_status` | `SELECT status FROM api_keys WHERE api_key_hash = ?`. |
+| `list_placements_for_director(session_id, director_agent_id)` | `SELECT a.*, p.* FROM agents a JOIN agent_placements p ON a.agent_id = p.agent_id WHERE a.session_id = ? AND p.director_agent_id = ? AND a.status = 'active'`. |
 
 ### `TaskStore`
 
@@ -146,22 +129,22 @@ Every storage operation is implemented as a single SQL statement (or, where atom
 
 Stores receive an `async_sessionmaker[AsyncSession]` at construction time, **not** a per-call session. Each store method opens its own session via `async with self._sessionmaker() as session:` and any multi-statement operation wraps its body in `async with session.begin():`. Route handlers and the `BrokerExecutor` only ever see the store; they never construct or close a session.
 
-## Tenant Lifecycle
+## Session Lifecycle
 
-Tenants are created when a user creates an API key via the WebUI. The `api_keys` row is the source of truth for tenant existence. Agents join the tenant by registering with the API key.
+Sessions are created via `hikyaku-registry session create` (direct SQLite write, no HTTP). The `sessions` row is the source of truth for session existence. Agents join a session by registering with the `session_id`.
 
-When all agents in a tenant deregister, the tenant remains valid — new agents can still register using the API key as long as its `status` is `'active'`.
+When all agents in a session deregister, the session remains valid — new agents can still register using the session_id.
 
-Revoking a key (via `DELETE /ui/api/keys/{tenant_id}`) flips its `status` to `'revoked'` and bulk-deregisters every active agent in the tenant in a single transaction. A revoked key cannot be used for agent registration or authentication.
+Deleting a session (via `hikyaku-registry session delete <id>`) is rejected while any agents (active or deregistered) still reference it (FK `RESTRICT`). There is no cascade delete and no soft-delete for sessions.
 
 ## Task Visibility Rules
 
 | Caller | Can Access |
 |---|---|
-| Recipient (same-tenant agent matching `to_agent_id`) | `ListTasks` by contextId (= their agent_id), `GetTask`, `SendMessage` (ACK) |
-| Sender (same-tenant agent matching `from_agent_id`) | `GetTask` by known taskId, `CancelTask` |
+| Recipient (same-session agent matching `to_agent_id`) | `ListTasks` by contextId (= their agent_id), `GetTask`, `SendMessage` (ACK) |
+| Sender (same-session agent matching `from_agent_id`) | `GetTask` by known taskId, `CancelTask` |
 
-`ListTasks` enforces that `contextId` must equal the caller's `agent_id`. If a different `contextId` is provided, the Broker returns an error. This prevents inbox snooping — even within the same tenant. `GetTask` verifies that the task's `from_agent_id` or `to_agent_id` belongs to the caller's tenant; cross-tenant lookups return "not found".
+`ListTasks` enforces that `contextId` must equal the caller's `agent_id`. If a different `contextId` is provided, the Broker returns an error. This prevents inbox snooping — even within the same session. `GetTask` verifies that the task's `from_agent_id` or `to_agent_id` belongs to the caller's session; cross-session lookups return "not found".
 
 ## Broadcast Grouping
 

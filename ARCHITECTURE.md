@@ -1,28 +1,28 @@
 # Hikyaku — Architecture
 
-An A2A-native message broker and agent registry for coding agents. Enables ephemeral agents (Claude Code, CI/CD runners, etc.) to communicate via unicast and broadcast messaging using standard A2A protocol operations. Agents are organized into **tenants** via shared API keys — agents sharing the same key form a tenant and can discover and message each other; agents in different tenants are invisible to one another.
+An A2A-native message broker and agent registry for coding agents. Enables ephemeral agents (Claude Code, CI/CD runners, etc.) to communicate via unicast and broadcast messaging using standard A2A protocol operations. Agents are organized into **sessions** — a non-secret namespace created via `hikyaku-registry session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
 
 ## Architecture Diagram
 
 ```
-         Tenant X (shared API key)              ┌──────────────────────────┐
+         Session X (shared session_id)          ┌──────────────────────────┐
         ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐             │         Broker           │
                                                 │                          │
         │ ┌─────────────┐         │             │  ┌────────────────────┐  │
           │   Agent A    │ SendMessage          │  │ A2A Server         │  │
-        │ │  (sender)    │─────────────────────→│  │ (tenant-scoped)    │  │
-          └─────────────┘ Authorization:        │  └────────┬───────────┘  │
-        │                  Bearer <api_key>     │           │              │
-                           X-Agent-Id: <id>     │           ▼              │
+        │ │  (sender)    │─────────────────────→│  │ (session-scoped)   │  │
+          └─────────────┘ X-Agent-Id: <id>      │  └────────┬───────────┘  │
+        │                                       │           │              │
+                                                │           ▼              │
         │ ┌─────────────┐         │             │  ┌────────────────────┐  │
           │   Agent B    │ ListTasks            │  │ SQLite (SQLAlchemy)│  │
         │ │ (recipient)  │←─────────────────────│  │ ┌────────────────┐ │  │
-          └─────────────┘         │             │  │ │ api_keys         │ │  │
+          └─────────────┘         │             │  │ │ sessions         │ │  │
         │                                       │  │ │ agents           │ │  │
          ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─              │  │ │ tasks            │ │  │
                                                 │  │ │ agent_placements │ │  │
                                                 │  │ │ alembic_version  │ │  │
-         Tenant Y (different API key)           │  │ └──────────────────┘ │  │
+         Session Y (different session_id)       │  │ └──────────────────┘ │  │
         ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐             │  └────────────────────┘  │
           ┌─────────────┐                       └──────────────────────────┘
         │ │   Agent C    │ (isolated) │
@@ -31,29 +31,22 @@ An A2A-native message broker and agent registry for coding agents. Enables ephem
          ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 ```
 
-## Tenant Isolation
+## Session Isolation
 
-The API key serves as the tenant boundary. All agents sharing the same API key form a tenant. The `SHA-256(api_key)` hash is stored as `api_key_hash` in agent records and used as the `tenant_id`.
+The `session_id` serves as the namespace boundary. Sessions are created via `hikyaku-registry session create` (direct SQLite write, no HTTP). All agents registered with the same `session_id` form one namespace. The broker does not perform authentication — it performs namespace routing only.
 
-**Two authentication surfaces**:
-
-| Surface | Mechanism | Purpose |
-|---|---|---|
-| Agent-to-broker | `Authorization: Bearer <api_key>` + `X-Agent-Id: <agent_id>` | Tenant auth + agent identity for all A2A and Registry API requests |
-| WebUI | `Authorization: Bearer <auth0_jwt>` (+ `X-Tenant-Id` on tenant-scoped endpoints) | Auth0 user identity for key management and dashboard |
-
-**Agent authentication** requires two headers on all requests:
+**Request headers**:
 
 | Header | Purpose |
 |---|---|
-| `Authorization: Bearer <api_key>` | Authenticates the tenant (`SHA-256(api_key)` = `tenant_id`) |
-| `X-Agent-Id: <agent_id>` | Identifies the specific agent within the tenant |
+| `X-Session-Id: <session_id>` | Selects the session namespace (passed via header, body, or query depending on endpoint) |
+| `X-Agent-Id: <agent_id>` | Identifies the specific agent within the session |
 
-Additionally, the API key must have a row in the `api_keys` table with `status='active'`. Revoking a key via the WebUI immediately invalidates all agent requests using that key.
+No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret namespace identifier. Sessions are namespaces for tidiness, not security boundaries.
 
-**Registration** always requires a valid API key (`Authorization: Bearer <api_key>`). API keys are created through the WebUI key management interface, not during registration. The previous "create new tenant without auth" flow has been removed.
+**Registration** requires a valid `session_id` (passed in the POST body). Sessions are created via `hikyaku-registry session create` before agents can register.
 
-**Isolation rules**: Every operation that reads or writes agent/task data enforces tenant boundaries. Cross-tenant requests always produce "not found" errors indistinguishable from the resource not existing.
+**Isolation rules**: Every operation that reads or writes agent/task data enforces session boundaries. Cross-session requests always produce "not found" errors indistinguishable from the resource not existing. Cross-session JSON-RPC sends are rejected with error code `-32003` ("Session mismatch").
 
 ## Three API Surfaces
 
@@ -67,10 +60,10 @@ Additionally, the API key must have a row in the `api_keys` table with `status='
 |---|---|---|
 | `main.py` | `registry/src/hikyaku_registry/` | ASGI app: mount A2A + FastAPI |
 | `config.py` | `registry/src/hikyaku_registry/` | Settings via pydantic-settings; owns `~` expansion of `database_url` |
-| `auth.py` | `registry/src/hikyaku_registry/` | API key + X-Agent-Id auth (agents), Auth0 JWT validation (WebUI), tenant membership verification (shared by REST + A2A) |
-| `cli.py` | `registry/src/hikyaku_registry/` | `hikyaku-registry` console script: click group with `db init` (Alembic schema management) |
+| `auth.py` | `registry/src/hikyaku_registry/` | Session + agent-id resolution: `get_session_from_header` (X-Session-Id lookup), `get_session_from_agent_id` (X-Agent-Id → session_id lookup) |
+| `cli.py` | `registry/src/hikyaku_registry/` | `hikyaku-registry` console script: click group with `db init` (Alembic schema management) and `session` (session namespace CRUD) |
 | `db/__init__.py` | `registry/src/hikyaku_registry/db/` | DB sub-package marker |
-| `db/models.py` | `registry/src/hikyaku_registry/db/` | SQLAlchemy declarative models: `Base`, `ApiKey`, `Agent`, `Task`; column indexes |
+| `db/models.py` | `registry/src/hikyaku_registry/db/` | SQLAlchemy declarative models: `Base`, `Session`, `Agent`, `Task`; column indexes |
 | `db/engine.py` | `registry/src/hikyaku_registry/db/` | `get_engine()`, `get_sessionmaker()`, `dispose_engine()`, FK PRAGMA listener |
 | `alembic.ini` | `registry/src/hikyaku_registry/` | Alembic config (bundled into the wheel) |
 | `alembic/env.py` | `registry/src/hikyaku_registry/alembic/` | Alembic environment; swaps async URL to sync `pysqlite` driver |
@@ -79,9 +72,9 @@ Additionally, the API key must have a row in the `api_keys` table with `status='
 | `executor.py` | `registry/src/hikyaku_registry/` | BrokerExecutor (A2A AgentExecutor) |
 | `task_store.py` | `registry/src/hikyaku_registry/` | `TaskStore` (A2A TaskStore backed by SQLite via SQLAlchemy) |
 | `agent_card.py` | `registry/src/hikyaku_registry/` | Broker's own Agent Card definition |
-| `registry_store.py` | `registry/src/hikyaku_registry/` | Agent + API key CRUD on SQLite (tenant-scoped) |
+| `registry_store.py` | `registry/src/hikyaku_registry/` | Agent + session CRUD on SQLite (session-scoped) |
 | `api/registry.py` | `registry/src/hikyaku_registry/api/` | Registry API router |
-| `webui_api.py` | `registry/src/hikyaku_registry/` | WebUI API router (`/ui/api/*`) — auth config, key management, agents, inbox, sent, send |
+| `webui_api.py` | `registry/src/hikyaku_registry/` | WebUI API router (`/ui/api/*`) — session list, agents, inbox, sent, send |
 | `admin/` | Project root | WebUI SPA (Vite + React + TypeScript + Tailwind CSS) |
 | `cli.py` | `client/src/hikyaku_client/` | click group (--json only) + subcommands (most require --agent-id); includes `member` subgroup for Director lifecycle commands |
 | `api.py` | `client/src/hikyaku_client/` | Helper functions (httpx / a2a-sdk) |
@@ -117,15 +110,14 @@ Indexed fields are columns; A2A protocol payloads (`AgentCard`, `Task`) are stor
 
 | Table | Indexed columns | JSON blob |
 |---|---|---|
-| `api_keys` | `api_key_hash` (PK), `owner_sub` | — |
-| `agents` | `agent_id` (PK), `tenant_id` (FK → `api_keys`), `status` | `agent_card_json` |
+| `sessions` | `session_id` (PK) | — |
+| `agents` | `agent_id` (PK), `session_id` (FK → `sessions`), `status` | `agent_card_json` |
 | `tasks` | `task_id` (PK), `context_id` (FK → `agents`), `from_agent_id`, `to_agent_id`, `status_state`, `status_timestamp` | `task_json` |
 | `agent_placements` | `agent_id` (PK, FK → `agents` CASCADE), `director_agent_id` (FK → `agents` RESTRICT), `tmux_session`, `tmux_window_id`, `tmux_pane_id` (nullable) | — |
 
 Four indexes serve the hot read paths:
 
-- `idx_api_keys_owner (owner_sub)` — list keys for an Auth0 user
-- `idx_agents_tenant_status (tenant_id, status)` — list active agents in a tenant
+- `idx_agents_session_status (session_id, status)` — list active agents in a session
 - `idx_tasks_context_status_ts (context_id, status_timestamp DESC)` — inbox listing
 - `idx_tasks_from_agent_status_ts (from_agent_id, status_timestamp DESC)` — sender outbox in the WebUI
 - `idx_placements_director (director_agent_id)` — list members spawned by a Director
@@ -134,7 +126,7 @@ Four indexes serve the hot read paths:
 
 ### Session ownership
 
-Stores receive an `async_sessionmaker[AsyncSession]` at construction, not a per-call session. Each store method opens its own session via `async with self._sessionmaker() as session:`, and any multi-statement operation wraps its body in `async with session.begin():`. Route handlers and the `BrokerExecutor` hold long-lived store references and never see a session — `revoke_api_key`, for example, is a single transaction that flips the API key status and bulk-deregisters every agent in the tenant atomically.
+Stores receive an `async_sessionmaker[AsyncSession]` at construction, not a per-call session. Each store method opens its own session via `async with self._sessionmaker() as session:`, and any multi-statement operation wraps its body in `async with session.begin():`. Route handlers and the `BrokerExecutor` hold long-lived store references and never see a session.
 
 ### Schema management
 
@@ -212,39 +204,27 @@ Each CLI parameter has exactly one input source:
 
 | Parameter | CLI (`client/`) |
 |---|---|
-| API Key | `HIKYAKU_API_KEY` env var |
-| Broker URL | `HIKYAKU_URL` env var (default: `http://localhost:8000`) |
+| Session ID | `HIKYAKU_SESSION_ID` env var |
+| Broker URL | `HIKYAKU_URL` env var (default: `http://127.0.0.1:8000`) |
 | Agent ID | `--agent-id` subcommand option |
 | JSON output | `--json` global flag |
 
-API keys and broker URL use environment variables only to prevent secrets from appearing in shell history. Agent ID is a CLI argument because it's an operational parameter that changes per invocation.
-
-## Auth0 Integration
-
-Auth0 provides user identity for the WebUI only. Agent-to-broker communication continues to use API keys.
-
-- **WebUI login**: Auth0 SPA SDK (PKCE flow) → Auth0 JWT
-- **WebUI API auth**: `Authorization: Bearer <auth0_jwt>` validated via `PyJWKClient` + Auth0 JWKS endpoint
-- **User identity**: Auth0 `sub` claim (stable, unique per user)
-- **Server-side validation**: `Auth0Verifier` class in `auth.py` uses `jwt.PyJWKClient` with 24-hour key cache. The `verify_auth0_user` FastAPI dependency validates JWTs and stores the decoded token in `request.scope["auth0"]`.
-
-**Configuration**: AUTH0_DOMAIN (tenant domain), AUTH0_CLIENT_ID (SPA client ID for the WebUI), and AUTH0_AUDIENCE (API audience for JWT validation).
+Session ID and broker URL use environment variables for convenience in tmux multi-pane workflows. Agent ID is a CLI argument because it's an operational parameter that changes per invocation.
 
 ## WebUI
 
-A browser-based dashboard served as a SPA at `/ui/`. Users log in via Auth0 (OIDC), manage API keys, select a tenant, and then interact with the tenant through a Discord-style unified timeline — a sidebar listing every active (top) and deregistered (muted) agent in the tenant, a center timeline rendering unicast and broadcast messages ordered newest-at-bottom with auto-scroll, reactions-as-ACKs chips that reveal per-recipient ACK time on CSS hover, and a bottom input that parses `@<agent> text` for unicast and `@all text` for broadcast. The admin itself is Auth0-authenticated but is NOT a Hikyaku agent; a header dropdown (sender selector) picks which real in-tenant active agent is used as `from_agent_id` on every send, persisted per-tenant in `localStorage` under `hikyaku.sender.<tenant_id>`.
+A browser-based dashboard served as a SPA at `/ui/`. No login is required. The first-load lands on a session picker at `/ui/#/sessions`; selecting a session navigates to a Discord-style unified timeline for that session — a sidebar listing every active (top) and deregistered (muted) agent in the session, a center timeline rendering unicast and broadcast messages ordered newest-at-bottom with auto-scroll, reactions-as-ACKs chips that reveal per-recipient ACK time on CSS hover, and a bottom input that parses `@<agent> text` for unicast and `@all text` for broadcast. The admin is NOT a Hikyaku agent; a header dropdown (sender selector) picks which real in-session active agent is used as `from_agent_id` on every send, persisted per-session in `localStorage` under `hikyaku.sender.<session_id>`.
 
-- **Frontend**: `admin/` — Vite + React 19 + TypeScript + Tailwind CSS 4 + `@auth0/auth0-react`
-- **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — auth config, key management, agent list, inbox, sent, timeline (`GET /ui/api/timeline`), send (accepts `to_agent_id="*"` for broadcast)
-- **Auth**: Auth0 JWT in `Authorization` header. Tenant-scoped endpoints require `X-Tenant-Id` header (validated against `api_keys.owner_sub` ownership).
-- **Key management**: Users create, list, and revoke API keys through `/ui/api/keys` endpoints. Each key corresponds to a tenant. Revoking a key flips its status and bulk-deregisters every agent under that tenant in a single SQL transaction.
+- **Frontend**: `admin/` — Vite + React 19 + TypeScript + Tailwind CSS 4
+- **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — session list, agent list, inbox, sent, timeline (`GET /ui/api/timeline`), send (accepts `to_agent_id="*"` for broadcast)
+- **Session scoping**: Session-scoped endpoints require `X-Session-Id` header. No authentication.
 - **Static serving**: `StaticFiles` mount at `/ui` serves the SPA bundled inside the registry package at `registry/src/hikyaku_registry/webui/` (production build). `mise //admin:build` must be run before `mise //registry:dev` for `/ui/` to be populated; without it the server starts cleanly and `/ui/` simply 404s.
 
 ## Monorepo Structure
 
 A uv workspace monorepo with two packages and a frontend app:
 
-- **`registry/`** — `hikyaku-registry`: FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk (server). Also ships the `hikyaku-registry` console script for `db init`.
+- **`registry/`** — `hikyaku-registry`: FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk (server). Also ships the `hikyaku-registry` console script for `db init` and `session` management.
 - **`client/`** — `hikyaku-client`: click + httpx + a2a-sdk (CLI tool)
 - **`admin/`** — WebUI SPA: Vite + React + TypeScript + Tailwind CSS
 
