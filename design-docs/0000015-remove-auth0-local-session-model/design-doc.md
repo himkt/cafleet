@@ -1,7 +1,7 @@
 # Remove Auth0: Local-Only Session Model
 
-**Status**: Approved
-**Progress**: 54/80 tasks complete
+**Status**: Complete
+**Progress**: 80/80 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -10,26 +10,26 @@ Collapse Hikyaku's multi-tenant access-control model into a single local-only na
 
 ## Success Criteria
 
-- [ ] `@auth0/auth0-react`, `PyJWT` JWKS flow, `Auth0Verifier`, `verify_auth0_user`, `get_user_id`, and every `VITE_AUTH0_*` / `AUTH0_*` env var are fully deleted from the codebase
-- [ ] `api_keys` table, `owner_sub` column, `ApiKey` model, `is_key_owner`, `create_api_key`, `list_api_keys`, `revoke_api_key`, and `is_api_key_active` are fully deleted
-- [ ] New `sessions` table exists with schema `(session_id TEXT PK, label TEXT NULL, created_at TEXT NOT NULL)`, declared in `db/models.py` and created by Alembic migration `0002_local_simplification`
-- [ ] `agents.tenant_id` column is renamed to `session_id` in the same migration; FK retargets `sessions.session_id`; index `idx_agents_tenant_status` is renamed to `idx_agents_session_status`
-- [ ] `hikyaku-registry session create [--label <text>]` mints a session by writing a row directly to SQLite (no HTTP) and prints the `session_id` in both human and `--json` modes
-- [ ] `hikyaku-registry session list | show <id> | delete <id>` are implemented alongside `create`
-- [ ] `hikyaku` client CLI reads `HIKYAKU_SESSION_ID` (not `HIKYAKU_API_KEY`) and forwards it to the broker via `X-Session-Id` header
-- [ ] `HIKYAKU_URL` falls back to `http://127.0.0.1:8000` in the `hikyaku` client CLI when unset
-- [ ] `client/` workspace has **no** SQLAlchemy dependency (admin ops live in `hikyaku-registry` only)
-- [ ] Broker `POST /` JSON-RPC, `POST/GET/DELETE /api/v1/agents*`, and every `/ui/api/*` endpoint use `X-Session-Id` and do not require a bearer token
-- [ ] Cross-session sends are rejected with JSON-RPC error `-32003` (`SESSION_MISMATCH`); cross-session reads return HTTP 404
-- [ ] `GET /ui/api/auth/config`, `POST /ui/api/keys`, `GET /ui/api/keys`, `DELETE /ui/api/keys/{tenant_id}` are deleted
-- [ ] WebUI has no login screen; first-load lands on a session picker at `/ui/#/sessions`; selecting a session navigates to `/ui/#/sessions/<uuid>/agents`
-- [ ] `GET /ui/api/sessions` exists and returns all rows from the `sessions` table
-- [ ] `registry/tests/test_auth0.py` is deleted
-- [ ] `registry/tests/test_key_endpoints.py` is deleted
-- [ ] Documentation updates ship **before** any code changes: `README.md`, `ARCHITECTURE.md`, `docs/spec/data-model.md`, `docs/spec/registry-api.md`, `docs/spec/webui-api.md`, `docs/spec/cli-options.md`, `docs/spec/a2a-operations.md`, `.claude/skills/hikyaku/SKILL.md`
-- [ ] `.claude/settings.json` replaces `Bash(printenv HIKYAKU_URL HIKYAKU_API_KEY)` with `Bash(printenv HIKYAKU_URL HIKYAKU_SESSION_ID)` and adds `Bash(hikyaku-registry session *)`
-- [ ] `admin/mise.toml` `VITE_AUTH0_REDIRECT_URI` entry is removed
-- [ ] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //registry:test`, `mise //client:test`, `mise //admin:lint`, and `mise //admin:build` all pass
+- [x] `@auth0/auth0-react`, `PyJWT` JWKS flow, `Auth0Verifier`, `verify_auth0_user`, `get_user_id`, and every `VITE_AUTH0_*` / `AUTH0_*` env var are fully deleted from the codebase
+- [x] `api_keys` table, `owner_sub` column, `ApiKey` model, `is_key_owner`, `create_api_key`, `list_api_keys`, `revoke_api_key`, and `is_api_key_active` are fully deleted
+- [x] New `sessions` table exists with schema `(session_id TEXT PK, label TEXT NULL, created_at TEXT NOT NULL)`, declared in `db/models.py` and created by Alembic migration `0002_local_simplification`
+- [x] `agents.tenant_id` column is renamed to `session_id` in the same migration; FK retargets `sessions.session_id`; index `idx_agents_tenant_status` is renamed to `idx_agents_session_status`
+- [x] `hikyaku-registry session create [--label <text>]` mints a session by writing a row directly to SQLite (no HTTP) and prints the `session_id` in both human and `--json` modes
+- [x] `hikyaku-registry session list | show <id> | delete <id>` are implemented alongside `create`
+- [x] `hikyaku` client CLI reads `HIKYAKU_SESSION_ID` (not `HIKYAKU_API_KEY`) and forwards it to the broker via `X-Session-Id` header
+- [x] `HIKYAKU_URL` falls back to `http://127.0.0.1:8000` in the `hikyaku` client CLI when unset
+- [x] `client/` workspace has **no** SQLAlchemy dependency (admin ops live in `hikyaku-registry` only)
+- [x] Broker `POST /` JSON-RPC, `POST/GET/DELETE /api/v1/agents*`, and every `/ui/api/*` endpoint use `X-Session-Id` and do not require a bearer token
+- [x] Cross-session sends are rejected with JSON-RPC error `-32003` (`SESSION_MISMATCH`); cross-session reads return HTTP 404
+- [x] `GET /ui/api/auth/config`, `POST /ui/api/keys`, `GET /ui/api/keys`, `DELETE /ui/api/keys/{tenant_id}` are deleted
+- [x] WebUI has no login screen; first-load lands on a session picker at `/ui/#/sessions`; selecting a session navigates to `/ui/#/sessions/<uuid>/agents`
+- [x] `GET /ui/api/sessions` exists and returns all rows from the `sessions` table
+- [x] `registry/tests/test_auth0.py` is deleted
+- [x] `registry/tests/test_key_endpoints.py` is deleted
+- [x] Documentation updates ship **before** any code changes: `README.md`, `ARCHITECTURE.md`, `docs/spec/data-model.md`, `docs/spec/registry-api.md`, `docs/spec/webui-api.md`, `docs/spec/cli-options.md`, `docs/spec/a2a-operations.md`, `.claude/skills/hikyaku/SKILL.md`
+- [x] `.claude/settings.json` replaces `Bash(printenv HIKYAKU_URL HIKYAKU_API_KEY)` with `Bash(printenv HIKYAKU_URL HIKYAKU_SESSION_ID)` and adds `Bash(hikyaku-registry session *)`
+- [x] `admin/mise.toml` `VITE_AUTH0_REDIRECT_URI` entry is removed
+- [x] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //registry:test`, `mise //client:test`, `mise //admin:lint`, and `mise //admin:build` all pass
 
 ---
 
@@ -638,3 +638,4 @@ Implementation order is **documentation-first** per project rule `.claude/rules/
 | 2026-04-12 | Initial draft |
 | 2026-04-12 | R1 revision: fix session_id format (opaque string, not UUIDv4-only); fix migration seeding (all api_keys, not just active); remove FK drop_constraint (batch mode handles it); fix -32001 → -32003 collision; remove 401 from error taxonomy; split auth dependencies (get_session_from_agent_id / get_session_from_header); fix 0000014 status (Approved, not Draft) + settings.json overlap ownership; fix SKILL.md line ranges; remove phantom access-control.md task; move /ui/api/sessions handler to webui_api.py; add cross-session HTTP isolation tests; clarify sync CLI vs async runtime session APIs; add empty SessionPicker UX hint; explicit README/ARCHITECTURE scope; misc wording fixes |
 | 2026-04-12 | R1 addendum (C7+C8): add SessionMismatchError exception class in executor.py + main.py catch wiring for -32003; fix §3 table residual -32001→-32003; clarify X-Tenant-Id removal scope in §3 table, §5.1, Step 9 (admin sends both Authorization AND X-Tenant-Id — both replaced by X-Session-Id); split Step 6 executor.py + main.py tasks; 0/79→0/80 |
+| 2026-04-12 | Implementation complete. All 20 success criteria verified. 320 registry tests + 101 client tests passing, admin lint + build passing. Status → Complete |
