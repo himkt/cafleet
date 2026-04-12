@@ -42,7 +42,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from hikyaku_registry.db.models import Session
+from hikyaku.db.models import Session
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +196,7 @@ class TestCreateAgentWithPlacement:
 
     async def test_create_agent_with_placement(self, store, db_sessionmaker):
         """Both the agent row and the placement row are created atomically."""
-        from hikyaku_registry.models import PlacementCreate
+        from hikyaku.models import PlacementCreate
 
         session_id = await _create_test_session(db_sessionmaker)
         director = await store.create_agent(
@@ -248,7 +248,7 @@ class TestCreateAgentWithPlacement:
 
     async def test_placement_with_pane_id(self, store, db_sessionmaker):
         """When ``tmux_pane_id`` is provided, it is stored correctly."""
-        from hikyaku_registry.models import PlacementCreate
+        from hikyaku.models import PlacementCreate
 
         session_id = await _create_test_session(db_sessionmaker)
         director = await store.create_agent("Dir", "d", None, session_id=session_id)
@@ -389,7 +389,7 @@ class TestDeregisterAgent:
 
     async def test_deregister_cascades_placement(self, store, db_sessionmaker):
         """Deregistering an agent also hard-deletes its placement row."""
-        from hikyaku_registry.models import PlacementCreate
+        from hikyaku.models import PlacementCreate
 
         session_id = await _create_test_session(db_sessionmaker)
         director = await store.create_agent("Dir", "d", None, session_id=session_id)
@@ -645,7 +645,7 @@ class TestListPlacementsForDirector:
     ):
         """Only agents in the specified session whose
         ``placement.director_agent_id`` matches are returned."""
-        from hikyaku_registry.models import PlacementCreate
+        from hikyaku.models import PlacementCreate
 
         session_id = await _create_test_session(db_sessionmaker)
         dir_a = await store.create_agent("Dir-A", "d", None, session_id=session_id)
@@ -703,7 +703,7 @@ class TestListPlacementsForDirector:
 
     async def test_cross_session_isolation(self, store, db_sessionmaker):
         """Members in session B are not visible when querying session A."""
-        from hikyaku_registry.models import PlacementCreate
+        from hikyaku.models import PlacementCreate
 
         session_a = await _create_test_session(db_sessionmaker)
         session_b = await _create_test_session(db_sessionmaker)
@@ -759,7 +759,7 @@ class TestListPlacementsForDirector:
 
     async def test_excludes_deregistered_members(self, store, db_sessionmaker):
         """Deregistered members do not appear in the list."""
-        from hikyaku_registry.models import PlacementCreate
+        from hikyaku.models import PlacementCreate
 
         session_id = await _create_test_session(db_sessionmaker)
         director = await store.create_agent("Dir", "d", None, session_id=session_id)

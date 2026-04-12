@@ -26,7 +26,7 @@ import uuid
 
 from click.testing import CliRunner
 
-from hikyaku_registry import config
+from hikyaku import config
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ from hikyaku_registry import config
 
 def _init_db(runner: CliRunner, main) -> None:
     """Run ``db init`` to set up the schema in the temp DB."""
-    result = runner.invoke(main, ["db", "init"])
+    result = runner.invoke(cli, ["db", "init"])
     assert result.exit_code == 0, (
         f"db init failed during test setup.\n"
         f"output: {result.output}\nexception: {result.exception}"
@@ -109,12 +109,12 @@ class TestSessionCreate:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
 
-        result = runner.invoke(main, ["session", "create"])
+        result = runner.invoke(cli, ["session", "create"])
 
         assert result.exit_code == 0, (
             f"session create failed.\noutput: {result.output}\n"
@@ -151,12 +151,12 @@ class TestSessionCreate:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
 
-        result = runner.invoke(main, ["session", "create", "--label", "PR-42 review"])
+        result = runner.invoke(cli, ["session", "create", "--label", "PR-42 review"])
 
         assert result.exit_code == 0, (
             f"session create --label failed.\noutput: {result.output}\n"
@@ -177,12 +177,12 @@ class TestSessionCreate:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
 
-        result = runner.invoke(main, ["session", "create"])
+        result = runner.invoke(cli, ["session", "create"])
         assert result.exit_code == 0
 
         rows = _session_rows(db_file)
@@ -199,12 +199,12 @@ class TestSessionCreate:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
 
-        result = runner.invoke(main, ["session", "create", "--label", "test", "--json"])
+        result = runner.invoke(cli, ["session", "create", "--label", "test", "--json"])
 
         assert result.exit_code == 0, (
             f"session create --json failed.\noutput: {result.output}\n"
@@ -226,13 +226,13 @@ class TestSessionCreate:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
 
-        r1 = runner.invoke(main, ["session", "create", "--json"])
-        r2 = runner.invoke(main, ["session", "create", "--json"])
+        r1 = runner.invoke(cli, ["session", "create", "--json"])
+        r2 = runner.invoke(cli, ["session", "create", "--json"])
 
         assert r1.exit_code == 0
         assert r2.exit_code == 0
@@ -261,12 +261,12 @@ class TestSessionList:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
 
-        result = runner.invoke(main, ["session", "list"])
+        result = runner.invoke(cli, ["session", "list"])
 
         assert result.exit_code == 0, (
             f"session list failed.\noutput: {result.output}\n"
@@ -281,7 +281,7 @@ class TestSessionList:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
@@ -293,7 +293,7 @@ class TestSessionList:
         # Deregistered agent should NOT be counted
         _seed_agent(db_file, str(uuid.uuid4()), sid, status="deregistered")
 
-        result = runner.invoke(main, ["session", "list"])
+        result = runner.invoke(cli, ["session", "list"])
 
         assert result.exit_code == 0
         # The output should contain the session_id and the label
@@ -312,7 +312,7 @@ class TestSessionList:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
@@ -321,7 +321,7 @@ class TestSessionList:
         _seed_session(db_file, sid, label="json-test")
         _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
 
-        result = runner.invoke(main, ["session", "list", "--json"])
+        result = runner.invoke(cli, ["session", "list", "--json"])
 
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -342,7 +342,7 @@ class TestSessionList:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
@@ -352,7 +352,7 @@ class TestSessionList:
         _seed_session(db_file, sid_a, label="session-a")
         _seed_session(db_file, sid_b, label="session-b")
 
-        result = runner.invoke(main, ["session", "list", "--json"])
+        result = runner.invoke(cli, ["session", "list", "--json"])
 
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -369,7 +369,7 @@ class TestSessionList:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
@@ -380,7 +380,7 @@ class TestSessionList:
         _seed_agent(db_file, str(uuid.uuid4()), sid, status="deregistered")
         _seed_agent(db_file, str(uuid.uuid4()), sid, status="deregistered")
 
-        result = runner.invoke(main, ["session", "list", "--json"])
+        result = runner.invoke(cli, ["session", "list", "--json"])
 
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -405,7 +405,7 @@ class TestSessionShow:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
@@ -413,7 +413,7 @@ class TestSessionShow:
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid, label="show-test")
 
-        result = runner.invoke(main, ["session", "show", sid])
+        result = runner.invoke(cli, ["session", "show", sid])
 
         assert result.exit_code == 0, (
             f"session show failed.\noutput: {result.output}\n"
@@ -434,7 +434,7 @@ class TestSessionShow:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
@@ -442,7 +442,7 @@ class TestSessionShow:
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid, label="json-show")
 
-        result = runner.invoke(main, ["session", "show", sid, "--json"])
+        result = runner.invoke(cli, ["session", "show", sid, "--json"])
 
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -458,13 +458,13 @@ class TestSessionShow:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
 
         fake_id = str(uuid.uuid4())
-        result = runner.invoke(main, ["session", "show", fake_id])
+        result = runner.invoke(cli, ["session", "show", fake_id])
 
         assert result.exit_code != 0, (
             f"session show should exit non-zero for missing session. "
@@ -493,7 +493,7 @@ class TestSessionDelete:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
@@ -501,7 +501,7 @@ class TestSessionDelete:
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid)
 
-        result = runner.invoke(main, ["session", "delete", sid])
+        result = runner.invoke(cli, ["session", "delete", sid])
 
         assert result.exit_code == 0, (
             f"session delete failed.\noutput: {result.output}\n"
@@ -526,13 +526,13 @@ class TestSessionDelete:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
 
         fake_id = str(uuid.uuid4())
-        result = runner.invoke(main, ["session", "delete", fake_id])
+        result = runner.invoke(cli, ["session", "delete", fake_id])
 
         # Either exit non-zero or print an error — design doc says
         # "Deleted session <id>" on success, implying no output on
@@ -557,7 +557,7 @@ class TestSessionDelete:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
@@ -567,7 +567,7 @@ class TestSessionDelete:
         _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
         _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
 
-        result = runner.invoke(main, ["session", "delete", sid])
+        result = runner.invoke(cli, ["session", "delete", sid])
 
         assert result.exit_code != 0, (
             f"session delete should fail when agents reference the session. "
@@ -591,7 +591,7 @@ class TestSessionDelete:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
@@ -600,7 +600,7 @@ class TestSessionDelete:
         _seed_session(db_file, sid)
         _seed_agent(db_file, str(uuid.uuid4()), sid, status="deregistered")
 
-        result = runner.invoke(main, ["session", "delete", sid])
+        result = runner.invoke(cli, ["session", "delete", sid])
 
         assert result.exit_code != 0, (
             f"session delete should fail even with deregistered agents "
@@ -620,7 +620,7 @@ class TestSessionDelete:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
@@ -629,7 +629,7 @@ class TestSessionDelete:
         _seed_session(db_file, sid)
         _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
 
-        result = runner.invoke(main, ["session", "delete", sid])
+        result = runner.invoke(cli, ["session", "delete", sid])
 
         assert result.exit_code != 0
         # The error message should be user-friendly, not a raw traceback
@@ -664,7 +664,7 @@ class TestDbInitNoAutoSession:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
         _init_db(runner, main)
@@ -691,10 +691,10 @@ class TestSessionGroupStructure:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
-        result = runner.invoke(main, ["session", "--help"])
+        result = runner.invoke(cli, ["session", "--help"])
 
         assert result.exit_code == 0, (
             f"session group should exist.\noutput: {result.output}\n"
@@ -715,10 +715,10 @@ class TestSessionGroupStructure:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku_registry.cli import main
+        from hikyaku.cli import cli
 
         runner = CliRunner()
-        result = runner.invoke(main, ["db", "session", "create"])
+        result = runner.invoke(cli, ["db", "session", "create"])
 
         # Should fail — "session" is not a subcommand of "db"
         assert result.exit_code != 0, "session should be a sibling of db, not a child"

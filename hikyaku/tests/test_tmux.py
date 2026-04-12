@@ -1,4 +1,4 @@
-"""Tests for hikyaku_client.tmux module.
+"""Tests for hikyaku.tmux module.
 
 All tmux interaction is mocked via monkeypatch.setattr — no test requires
 a real tmux server.
@@ -6,7 +6,7 @@ a real tmux server.
 
 import pytest
 
-from hikyaku_client import tmux
+from hikyaku import tmux
 
 
 # ---------------------------------------------------------------------------

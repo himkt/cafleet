@@ -26,8 +26,8 @@ from fastapi import HTTPException
 from unittest.mock import MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku_registry.auth import get_session_from_agent_id, get_session_from_header
-from hikyaku_registry.db.models import Session
+from hikyaku.auth import get_session_from_agent_id, get_session_from_header
+from hikyaku.db.models import Session
 
 
 # ---------------------------------------------------------------------------
@@ -210,31 +210,31 @@ class TestDeletedAuthFunctions:
 
     def test_auth0_verifier_removed(self):
         """Auth0Verifier class must not exist in auth module."""
-        from hikyaku_registry import auth
+        from hikyaku import auth
 
         assert not hasattr(auth, "Auth0Verifier")
 
     def test_verify_auth0_user_removed(self):
         """verify_auth0_user must not exist in auth module."""
-        from hikyaku_registry import auth
+        from hikyaku import auth
 
         assert not hasattr(auth, "verify_auth0_user")
 
     def test_get_user_id_removed(self):
         """get_user_id must not exist in auth module."""
-        from hikyaku_registry import auth
+        from hikyaku import auth
 
         assert not hasattr(auth, "get_user_id")
 
     def test_get_authenticated_agent_removed(self):
         """get_authenticated_agent (bearer-based) must not exist."""
-        from hikyaku_registry import auth
+        from hikyaku import auth
 
         assert not hasattr(auth, "get_authenticated_agent")
 
     def test_get_registration_tenant_removed(self):
         """get_registration_tenant must not exist."""
-        from hikyaku_registry import auth
+        from hikyaku import auth
 
         assert not hasattr(auth, "get_registration_tenant")
 
@@ -247,17 +247,17 @@ class TestDeletedConfigFields:
     """
 
     def test_auth0_domain_removed(self):
-        from hikyaku_registry.config import Settings
+        from hikyaku.config import Settings
 
         assert "auth0_domain" not in Settings.model_fields
 
     def test_auth0_client_id_removed(self):
-        from hikyaku_registry.config import Settings
+        from hikyaku.config import Settings
 
         assert "auth0_client_id" not in Settings.model_fields
 
     def test_auth0_audience_removed(self):
-        from hikyaku_registry.config import Settings
+        from hikyaku.config import Settings
 
         assert "auth0_audience" not in Settings.model_fields
 
@@ -274,14 +274,14 @@ class TestPyJWTRemoved:
         import importlib
 
         # Force reimport to catch top-level imports
-        auth = importlib.import_module("hikyaku_registry.auth")
+        auth = importlib.import_module("hikyaku.auth")
         assert not hasattr(auth, "jwt"), (
             "auth.py still imports 'jwt' — PyJWT should be removed"
         )
 
     def test_auth_module_does_not_import_httpbearer(self):
         """The auth module should not import HTTPBearer (used only for Auth0)."""
-        from hikyaku_registry import auth
+        from hikyaku import auth
 
         assert not hasattr(auth, "HTTPBearer")
         assert not hasattr(auth, "HTTPAuthorizationCredentials")

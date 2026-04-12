@@ -32,7 +32,7 @@ Test isolation strategy:
   Why ``monkeypatch.setattr(config.settings, "database_url", ...)``
   rather than ``monkeypatch.setenv("HIKYAKU_DATABASE_URL", ...)``:
   ``config.settings`` is a module-level singleton constructed at
-  ``hikyaku_registry.config`` import time. By the time any test
+  ``hikyaku.config`` import time. By the time any test
   runs, the singleton has already been built — env-var changes
   after that point would be ignored. Patching the attribute on the
   existing singleton is the only reliable override.
@@ -47,7 +47,7 @@ import sqlite3
 
 from click.testing import CliRunner
 
-from hikyaku_registry import config
+from hikyaku import config
 
 
 def _table_names(db_path) -> set[str]:
@@ -91,10 +91,10 @@ def test_db_init_creates_schema(tmp_path, monkeypatch):
         "fixture sanity: data/ subdir should not pre-exist"
     )
 
-    from hikyaku_registry.cli import main
+    from hikyaku.cli import cli
 
     runner = CliRunner()
-    result = runner.invoke(main, ["db", "init"])
+    result = runner.invoke(cli, ["db", "init"])
 
     assert result.exit_code == 0, (
         f"db init failed.\noutput: {result.output}\nexception: {result.exception}"
@@ -147,11 +147,11 @@ def test_db_init_idempotent(tmp_path, monkeypatch):
         f"sqlite+aiosqlite:///{db_file}",
     )
 
-    from hikyaku_registry.cli import main
+    from hikyaku.cli import cli
 
     runner = CliRunner()
 
-    first = runner.invoke(main, ["db", "init"])
+    first = runner.invoke(cli, ["db", "init"])
     assert first.exit_code == 0, (
         f"first db init failed.\noutput: {first.output}\nexception: {first.exception}"
     )
@@ -171,7 +171,7 @@ def test_db_init_idempotent(tmp_path, monkeypatch):
     finally:
         conn.close()
 
-    second = runner.invoke(main, ["db", "init"])
+    second = runner.invoke(cli, ["db", "init"])
     assert second.exit_code == 0, (
         f"second db init failed.\n"
         f"output: {second.output}\n"
@@ -236,10 +236,10 @@ def test_db_init_legacy_errors(tmp_path, monkeypatch):
     finally:
         conn.close()
 
-    from hikyaku_registry.cli import main
+    from hikyaku.cli import cli
 
     runner = CliRunner()
-    result = runner.invoke(main, ["db", "init"])
+    result = runner.invoke(cli, ["db", "init"])
 
     assert result.exit_code != 0, (
         f"db init should error on a legacy schema (tables but no "
@@ -305,10 +305,10 @@ def test_db_init_ahead_errors(tmp_path, monkeypatch):
     finally:
         conn.close()
 
-    from hikyaku_registry.cli import main
+    from hikyaku.cli import cli
 
     runner = CliRunner()
-    result = runner.invoke(main, ["db", "init"])
+    result = runner.invoke(cli, ["db", "init"])
 
     assert result.exit_code != 0, (
         f"db init should refuse an ahead-of-head DB, "

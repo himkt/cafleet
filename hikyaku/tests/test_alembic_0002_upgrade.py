@@ -39,7 +39,7 @@ from sqlalchemy import create_engine, inspect, text
 def _make_alembic_cfg(db_path) -> Config:
     """Create an Alembic Config pointing at the given SQLite DB file."""
     with importlib.resources.as_file(
-        importlib.resources.files("hikyaku_registry") / "alembic.ini"
+        importlib.resources.files("hikyaku") / "alembic.ini"
     ) as ini_path:
         cfg = Config(str(ini_path))
         cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")

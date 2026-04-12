@@ -19,9 +19,9 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku_registry.api.registry import get_registry_store, registry_router
-from hikyaku_registry.db.models import Session
-from hikyaku_registry.registry_store import RegistryStore
+from hikyaku.api.registry import get_registry_store, registry_router
+from hikyaku.db.models import Session
+from hikyaku.registry_store import RegistryStore
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +397,7 @@ class TestDeregisterAgent:
 
     async def test_director_can_deregister_member(self, api_env):
         """Director can deregister a member agent under its placement."""
-        from hikyaku_registry.models import PlacementCreate
+        from hikyaku.models import PlacementCreate
 
         client, store, session_id = (
             api_env["client"],
@@ -480,12 +480,12 @@ class TestDeletedAuthPatterns:
 
     def test_get_authenticated_agent_not_imported(self):
         """registry.py should not import get_authenticated_agent."""
-        from hikyaku_registry.api import registry
+        from hikyaku.api import registry
 
         assert not hasattr(registry, "get_authenticated_agent")
 
     def test_get_registration_tenant_not_imported(self):
         """registry.py should not import get_registration_tenant."""
-        from hikyaku_registry.api import registry
+        from hikyaku.api import registry
 
         assert not hasattr(registry, "get_registration_tenant")

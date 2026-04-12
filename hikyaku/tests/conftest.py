@@ -21,9 +21,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from hikyaku_registry.db.models import Base
-from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import TaskStore
+from hikyaku.db.models import Base
+from hikyaku.registry_store import RegistryStore
+from hikyaku.task_store import TaskStore
 
 
 @event.listens_for(Engine, "connect")

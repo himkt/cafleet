@@ -46,7 +46,7 @@ def alembic_upgraded_db(tmp_path_factory):
 
     1. The bundled ``alembic.ini`` is located via ``importlib.resources``
        (NOT via a hard-coded path relative to the test file), so this
-       fixture works whether ``hikyaku_registry`` is imported from a
+       fixture works whether ``hikyaku`` is imported from a
        source checkout or from an installed wheel. The
        ``importlib.resources.as_file`` context manager guarantees a
        real filesystem path even when the package data lives inside a
@@ -63,7 +63,7 @@ def alembic_upgraded_db(tmp_path_factory):
     tmp_db_path = tmp_path_factory.mktemp("alembic_smoke") / "smoke.db"
 
     with importlib.resources.as_file(
-        importlib.resources.files("hikyaku_registry") / "alembic.ini"
+        importlib.resources.files("hikyaku") / "alembic.ini"
     ) as ini_path:
         cfg = Config(str(ini_path))
         cfg.set_main_option("sqlalchemy.url", f"sqlite:///{tmp_db_path}")

@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-import hikyaku_registry
-from hikyaku_registry.main import create_app
+import hikyaku
+from hikyaku.server import create_app
 
 
 # ---------------------------------------------------------------------------
@@ -212,15 +212,15 @@ class TestDefaultWebuiDistDir:
 
     This protects against future package-layout refactors silently breaking
     the install-time path: when a wheel is installed, the helper must resolve
-    to ``site-packages/hikyaku_registry/webui``, not a sibling repo directory.
+    to ``site-packages/hikyaku/webui``, not a sibling repo directory.
     """
 
     def test_default_points_inside_package(self):
         """_default_webui_dist_dir() returns <package>/webui as a Path."""
-        from hikyaku_registry.main import _default_webui_dist_dir
+        from hikyaku.server import _default_webui_dist_dir
 
         result = _default_webui_dist_dir()
-        expected = Path(hikyaku_registry.__file__).resolve().parent / "webui"
+        expected = Path(hikyaku.__file__).resolve().parent / "webui"
         assert isinstance(result, Path)
         assert result == expected
 
@@ -231,7 +231,7 @@ class TestDefaultWebuiDistDir:
         ``/ui/`` prefix (Vite ``base`` config). Absolute-root asset paths
         (``/assets/...``) would 404 because StaticFiles is mounted at ``/ui``.
         """
-        package_dir = Path(hikyaku_registry.__file__).resolve().parent
+        package_dir = Path(hikyaku.__file__).resolve().parent
         if not (package_dir / "webui" / "index.html").exists():
             pytest.skip("webui/ not built; run `mise //admin:build` first")
 
@@ -261,7 +261,7 @@ class TestDefaultWebuiDistDir:
         """Assets referenced by index.html are actually fetchable under /ui/assets/."""
         import re
 
-        package_dir = Path(hikyaku_registry.__file__).resolve().parent
+        package_dir = Path(hikyaku.__file__).resolve().parent
         if not (package_dir / "webui" / "index.html").exists():
             pytest.skip("webui/ not built; run `mise //admin:build` first")
 

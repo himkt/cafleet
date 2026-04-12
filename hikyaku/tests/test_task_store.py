@@ -62,8 +62,8 @@ from a2a.types import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku_registry.db.models import Session as SessionModel, Task as TaskModel
-from hikyaku_registry.task_store import TaskStore
+from hikyaku.db.models import Session as SessionModel, Task as TaskModel
+from hikyaku.task_store import TaskStore
 
 
 # ---------------------------------------------------------------------------

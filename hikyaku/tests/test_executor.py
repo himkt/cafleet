@@ -28,10 +28,10 @@ from a2a.types import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku_registry.db.models import Session
-from hikyaku_registry.executor import BrokerExecutor, SessionMismatchError
-from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import TaskStore
+from hikyaku.db.models import Session
+from hikyaku.executor import BrokerExecutor, SessionMismatchError
+from hikyaku.registry_store import RegistryStore
+from hikyaku.task_store import TaskStore
 
 
 # ---------------------------------------------------------------------------

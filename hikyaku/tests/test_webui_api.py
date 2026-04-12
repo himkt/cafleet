@@ -27,11 +27,11 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku_registry.db.models import Session
-from hikyaku_registry.executor import BrokerExecutor
-from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import TaskStore
-from hikyaku_registry.webui_api import (
+from hikyaku.db.models import Session
+from hikyaku.executor import BrokerExecutor
+from hikyaku.registry_store import RegistryStore
+from hikyaku.task_store import TaskStore
+from hikyaku.webui_api import (
     get_webui_executor,
     get_webui_store,
     get_webui_task_store,
@@ -654,30 +654,30 @@ class TestDeletedDependencies:
 
     def test_get_webui_tenant_removed(self):
         """get_webui_tenant should not exist in webui_api module."""
-        from hikyaku_registry import webui_api
+        from hikyaku import webui_api
 
         assert not hasattr(webui_api, "get_webui_tenant")
 
     def test_verify_auth0_user_not_imported(self):
         """webui_api should not import verify_auth0_user."""
-        from hikyaku_registry import webui_api
+        from hikyaku import webui_api
 
         assert not hasattr(webui_api, "verify_auth0_user")
 
     def test_get_user_id_not_imported(self):
         """webui_api should not import get_user_id."""
-        from hikyaku_registry import webui_api
+        from hikyaku import webui_api
 
         assert not hasattr(webui_api, "get_user_id")
 
     def test_extract_bearer_removed(self):
         """_extract_bearer should not exist in webui_api module."""
-        from hikyaku_registry import webui_api
+        from hikyaku import webui_api
 
         assert not hasattr(webui_api, "_extract_bearer")
 
     def test_get_tenant_agents_renamed(self):
         """_get_tenant_agents should not exist (renamed to _get_session_agents)."""
-        from hikyaku_registry import webui_api
+        from hikyaku import webui_api
 
         assert not hasattr(webui_api, "_get_tenant_agents")

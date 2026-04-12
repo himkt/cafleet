@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from click.testing import CliRunner
 
-from hikyaku_client.cli import cli
+from hikyaku.cli import cli
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +60,7 @@ class TestRegisterUsesSessionId:
     def test_session_id_passed_to_register(self, runner):
         """Register with HIKYAKU_SESSION_ID env var passes it to api.register_agent."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku_client.cli.api.register_agent", mock):
+        with patch("hikyaku.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
@@ -85,7 +85,7 @@ class TestRegisterUsesSessionId:
     def test_session_id_via_env_var(self, runner):
         """Register uses HIKYAKU_SESSION_ID env var for session scoping."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku_client.cli.api.register_agent", mock):
+        with patch("hikyaku.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 ["register", "--name", "test-agent", "--description", "test"],
@@ -100,7 +100,7 @@ class TestRegisterUsesSessionId:
     def test_register_success_with_session_id(self, runner):
         """Register succeeds and shows output when HIKYAKU_SESSION_ID is set."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku_client.cli.api.register_agent", mock):
+        with patch("hikyaku.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
@@ -119,7 +119,7 @@ class TestRegisterUsesSessionId:
     def test_register_json_output_with_session_id(self, runner):
         """Register with --json outputs valid JSON when HIKYAKU_SESSION_ID is set."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku_client.cli.api.register_agent", mock):
+        with patch("hikyaku.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
@@ -210,7 +210,7 @@ class TestRegisterMissingSessionId:
     def test_missing_session_id_does_not_call_api(self, runner):
         """Register without HIKYAKU_SESSION_ID does not make any API call."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku_client.cli.api.register_agent", mock):
+        with patch("hikyaku.cli.api.register_agent", mock):
             runner.invoke(
                 cli,
                 [
@@ -241,9 +241,9 @@ class TestApiRegisterAgentSessionHeader:
     @pytest.mark.asyncio
     async def test_sends_x_session_id_header(self):
         """register_agent sends X-Session-Id header (not Authorization: Bearer)."""
-        from hikyaku_client.api import register_agent
+        from hikyaku.broker_client import register_agent
 
-        with patch("hikyaku_client.api.httpx.AsyncClient") as mock_client_cls:
+        with patch("hikyaku.broker_client.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_response = AsyncMock()
             mock_response.json.return_value = SAMPLE_AGENT
@@ -274,9 +274,9 @@ class TestApiRegisterAgentSessionHeader:
         Design doc: api.register_agent adds session_id to the POST body
         (matching the new POST /api/v1/agents contract).
         """
-        from hikyaku_client.api import register_agent
+        from hikyaku.broker_client import register_agent
 
-        with patch("hikyaku_client.api.httpx.AsyncClient") as mock_client_cls:
+        with patch("hikyaku.broker_client.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_response = AsyncMock()
             mock_response.json.return_value = SAMPLE_AGENT
@@ -299,7 +299,7 @@ class TestApiRegisterAgentSessionHeader:
     @pytest.mark.asyncio
     async def test_session_id_is_required_parameter(self):
         """register_agent requires session_id (not optional)."""
-        from hikyaku_client.api import register_agent
+        from hikyaku.broker_client import register_agent
 
         with pytest.raises(TypeError):
             await register_agent(BROKER_URL, "test-agent", "A test agent")
@@ -320,7 +320,7 @@ class TestDeletedApiKeyPatterns:
     def test_no_authorization_bearer_in_api(self):
         """api.py should not contain 'Authorization: Bearer' strings."""
         import inspect
-        from hikyaku_client import api as api_module
+        from hikyaku import broker_client as api_module
 
         source = inspect.getsource(api_module)
         assert "Authorization" not in source, (
@@ -335,7 +335,7 @@ class TestDeletedApiKeyPatterns:
     def test_no_api_key_parameter_in_api(self):
         """api.py functions should not have api_key parameter."""
         import inspect
-        from hikyaku_client import api as api_module
+        from hikyaku import broker_client as api_module
 
         source = inspect.getsource(api_module)
         # api_key should be renamed to session_id
@@ -361,12 +361,12 @@ class TestNoSQLAlchemyDependency:
         """Client modules should not import sqlalchemy."""
         import sys
 
-        # Ensure hikyaku_client is loaded
-        import hikyaku_client.cli  # noqa: F401
-        import hikyaku_client.api  # noqa: F401
+        # Ensure hikyaku is loaded
+        import hikyaku.cli  # noqa: F401
+        import hikyaku.broker_client  # noqa: F401
 
         client_modules = [
-            name for name in sys.modules if name.startswith("hikyaku_client")
+            name for name in sys.modules if name.startswith("hikyaku")
         ]
         for mod_name in client_modules:
             mod = sys.modules[mod_name]

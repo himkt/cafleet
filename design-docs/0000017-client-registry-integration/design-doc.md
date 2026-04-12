@@ -1,7 +1,7 @@
 # Merge Client and Registry into a Single Package
 
 **Status**: Approved
-**Progress**: 21/32 tasks complete
+**Progress**: 26/32 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -393,14 +393,14 @@ client/                    # entire directory
 
 ### Step 10: Merge Tests
 
-- [ ] Move `registry/tests/*.py` to `hikyaku/tests/` <!-- completed: -->
-- [ ] Move `client/tests/*.py` to `hikyaku/tests/`, resolving any filename conflicts <!-- completed: -->
-- [ ] Update all test imports from `hikyaku_registry`/`hikyaku_client` to `hikyaku` <!-- completed: -->
+- [x] Move `registry/tests/*.py` to `hikyaku/tests/` <!-- completed: 2026-04-12T09:33 -->
+- [x] Move `client/tests/*.py` to `hikyaku/tests/`, resolving any filename conflicts <!-- completed: 2026-04-12T09:33 -->
+- [x] Update all test imports from `hikyaku_registry`/`hikyaku_client` to `hikyaku` <!-- completed: 2026-04-12T09:35 -->
 
 ### Step 11: Remove Old Directories
 
-- [ ] Delete `registry/` directory <!-- completed: -->
-- [ ] Delete `client/` directory <!-- completed: -->
+- [x] Delete `registry/` directory <!-- completed: 2026-04-12T09:37 -->
+- [x] Delete `client/` directory <!-- completed: 2026-04-12T09:37 -->
 
 ### Step 12: Verify
 
