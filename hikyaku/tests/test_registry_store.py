@@ -271,6 +271,59 @@ class TestCreateAgentWithPlacement:
         assert p is not None
         assert p["tmux_pane_id"] == "%12"
 
+    async def test_placement_stores_coding_agent_codex(self, store, db_sessionmaker):
+        """coding_agent='codex' is stored in the placement row."""
+        from hikyaku.models import PlacementCreate
+
+        session_id = await _create_test_session(db_sessionmaker)
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
+
+        placement = PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="main",
+            tmux_window_id="@3",
+            tmux_pane_id="%7",
+            coding_agent="codex",
+        )
+        result = await store.create_agent_with_placement(
+            name="Codex-Member",
+            description="Codex member",
+            skills=None,
+            session_id=session_id,
+            placement=placement,
+        )
+
+        p = await store.get_placement(agent_id=result["agent_id"])
+        assert p is not None
+        assert p["coding_agent"] == "codex"
+
+    async def test_placement_defaults_coding_agent_to_claude(
+        self, store, db_sessionmaker
+    ):
+        """When coding_agent is not specified, it defaults to 'claude'."""
+        from hikyaku.models import PlacementCreate
+
+        session_id = await _create_test_session(db_sessionmaker)
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
+
+        placement = PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="main",
+            tmux_window_id="@3",
+            tmux_pane_id="%7",
+        )
+        result = await store.create_agent_with_placement(
+            name="Default-Member",
+            description="Default coding agent",
+            skills=None,
+            session_id=session_id,
+            placement=placement,
+        )
+
+        p = await store.get_placement(agent_id=result["agent_id"])
+        assert p is not None
+        assert p["coding_agent"] == "claude"
+
 
 # ---------------------------------------------------------------------------
 # get_agent
@@ -796,6 +849,47 @@ class TestListPlacementsForDirector:
         )
         assert len(result) == 1
         assert result[0]["name"] == "Active"
+
+    async def test_includes_coding_agent_in_placement(self, store, db_sessionmaker):
+        """Returned placement dicts include coding_agent field."""
+        from hikyaku.models import PlacementCreate
+
+        session_id = await _create_test_session(db_sessionmaker)
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
+
+        await store.create_agent_with_placement(
+            name="Claude-Member",
+            description="d",
+            skills=None,
+            session_id=session_id,
+            placement=PlacementCreate(
+                director_agent_id=director["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@1",
+                tmux_pane_id="%1",
+                coding_agent="claude",
+            ),
+        )
+        await store.create_agent_with_placement(
+            name="Codex-Member",
+            description="d",
+            skills=None,
+            session_id=session_id,
+            placement=PlacementCreate(
+                director_agent_id=director["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@1",
+                tmux_pane_id="%2",
+                coding_agent="codex",
+            ),
+        )
+
+        result = await store.list_placements_for_director(
+            session_id=session_id, director_agent_id=director["agent_id"]
+        )
+        by_name = {m["name"]: m for m in result}
+        assert by_name["Claude-Member"]["placement"]["coding_agent"] == "claude"
+        assert by_name["Codex-Member"]["placement"]["coding_agent"] == "codex"
 
 
 # ---------------------------------------------------------------------------
