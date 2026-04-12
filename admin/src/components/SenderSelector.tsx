@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { Agent } from "../types";
 
 interface SenderSelectorProps {
@@ -30,6 +30,10 @@ export default function SenderSelector({
     () => resolveStored(tenantId, activeAgents),
     [tenantId, activeAgents],
   );
+
+  useEffect(() => {
+    onSelect(selectedId);
+  }, [selectedId, onSelect]);
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value || null;

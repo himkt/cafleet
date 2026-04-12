@@ -135,6 +135,7 @@ async def _format_messages(
     tasks: list[Task],
     store: RegistryStore,
     task_store: TaskStore,
+    created_ats_override: dict[str, str] | None = None,
 ) -> list[dict]:
     """Format a batch of Tasks into WebUI message dicts.
 
@@ -151,7 +152,7 @@ async def _format_messages(
         return []
 
     task_ids = [task.id for task in tasks]
-    created_ats = await task_store.get_created_ats(task_ids)
+    created_ats = created_ats_override or await task_store.get_created_ats(task_ids)
 
     agent_ids: set[str] = set()
     for task in tasks:
@@ -305,10 +306,12 @@ async def get_timeline(
 ):
     results = await task_store.list_timeline(tenant_id, limit=200)
     tasks = [task for task, _origin, _created in results]
-    messages = await _format_messages(tasks, store, task_store)
-    for msg, (_task, origin, created_at) in zip(messages, results):
+    precomputed = {task.id: created for task, _origin, created in results}
+    messages = await _format_messages(
+        tasks, store, task_store, created_ats_override=precomputed
+    )
+    for msg, (_task, origin, _created) in zip(messages, results):
         msg["origin_task_id"] = origin
-        msg["created_at"] = created_at
     return {"messages": messages}
 
 
