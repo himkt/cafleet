@@ -73,14 +73,18 @@ def alembic_upgraded_db(tmp_path_factory):
 
 
 def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
-    """``alembic upgrade head`` produces the four expected tables.
+    """``alembic upgrade head`` produces the expected tables.
 
     The expected set is:
 
-      - ``api_keys``         — tenant root, PK = ``api_key_hash``
-      - ``agents``           — FK ``tenant_id`` -> ``api_keys.api_key_hash``
-      - ``tasks``            — FK ``context_id`` -> ``agents.agent_id``
-      - ``alembic_version``  — Alembic's own bookkeeping table
+      - ``sessions``           — session namespace, PK = ``session_id``
+      - ``agents``             — FK ``session_id`` -> ``sessions.session_id``
+      - ``tasks``              — FK ``context_id`` -> ``agents.agent_id``
+      - ``agent_placements``   — FK ``agent_id`` -> ``agents.agent_id``
+      - ``alembic_version``    — Alembic's own bookkeeping table
+
+    ``api_keys`` must NOT be present — it is dropped by migration
+    ``0002_local_simplification``.
 
     This is a superset assertion (``expected <= tables``), not equality:
     if a future migration introduces an additional table, this test
@@ -96,11 +100,21 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         insp = inspect(engine)
         tables = set(insp.get_table_names())
 
-        expected = {"api_keys", "agents", "tasks", "alembic_version"}
+        expected = {
+            "sessions",
+            "agents",
+            "tasks",
+            "agent_placements",
+            "alembic_version",
+        }
         missing = expected - tables
         assert not missing, (
             f"alembic upgrade head did not create the expected tables. "
             f"missing: {sorted(missing)}, found: {sorted(tables)}"
+        )
+        assert "api_keys" not in tables, (
+            "api_keys table still exists after upgrade head — "
+            "migration 0002_local_simplification should have dropped it"
         )
     finally:
         engine.dispose()

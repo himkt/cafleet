@@ -1,7 +1,7 @@
 """add origin_task_id column to tasks
 
-Revision ID: 0002
-Revises: 0001
+Revision ID: 0003
+Revises: 0002_local_simplification
 Create Date: 2026-04-12 10:00:00.000000
 
 """
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "0002"
-down_revision: Union[str, None] = "0001"
+revision: str = "0003"
+down_revision: Union[str, None] = "0002_local_simplification"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

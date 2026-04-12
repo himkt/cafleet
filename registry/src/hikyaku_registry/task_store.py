@@ -138,7 +138,7 @@ class TaskStore:
         return row[0] if row else None
 
     async def list_timeline(
-        self, tenant_id: str, limit: int = 200
+        self, session_id: str, limit: int = 200
     ) -> _TaskList[tuple[Task, str | None, str]]:
         stmt = (
             select(
@@ -147,7 +147,7 @@ class TaskStore:
                 TaskModel.created_at,
             )
             .join(AgentModel, AgentModel.agent_id == TaskModel.context_id)
-            .where(AgentModel.tenant_id == tenant_id)
+            .where(AgentModel.session_id == session_id)
             .where(TaskModel.type != "broadcast_summary")
             .order_by(TaskModel.status_timestamp.desc())
             .limit(limit)
@@ -155,9 +155,7 @@ class TaskStore:
         async with self._sessionmaker() as session:
             result = await session.execute(stmt)
             rows = result.all()
-        return [
-            (Task.model_validate_json(row[0]), row[1], row[2]) for row in rows
-        ]
+        return [(Task.model_validate_json(row[0]), row[1], row[2]) for row in rows]
 
     async def get_created_ats(self, task_ids: _TaskList[str]) -> dict[str, str]:
         """Batch lookup for ``created_at`` timestamps.

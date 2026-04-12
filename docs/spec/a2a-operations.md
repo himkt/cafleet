@@ -2,16 +2,15 @@
 
 The Broker exposes standard A2A endpoints using the `a2a-sdk` Python library. All operations use JSON-RPC 2.0 over HTTP.
 
-## Authentication
+## Request Headers
 
-All A2A operations require two headers:
+All A2A operations require the `X-Agent-Id` header to identify the calling agent. The broker resolves the caller's session via `SELECT session_id FROM agents WHERE agent_id = ?`.
 
 | Header | Purpose |
 |---|---|
-| `Authorization: Bearer <api_key>` | Authenticates the tenant (`SHA-256(api_key)` = `tenant_id`) |
-| `X-Agent-Id: <agent_id>` | Identifies the specific agent within the tenant |
+| `X-Agent-Id: <agent_id>` | Identifies the specific agent; the broker derives `session_id` from the agent record |
 
-The server verifies that the agent record's `api_key_hash` matches `SHA-256(api_key)`. Missing or invalid credentials return HTTP 401 before JSON-RPC processing.
+No bearer token or API key is required. The broker does not perform authentication.
 
 ## SendMessage — Send a Message
 
@@ -22,17 +21,17 @@ The sender specifies routing in `Message.metadata`:
 | `destination` | `"<agent-uuid>"` | Unicast: create delivery Task for target agent |
 | `destination` | `"*"` | Broadcast: create delivery Tasks for all active agents (except sender) |
 
-### Tenant Isolation
+### Session Isolation
 
-All SendMessage operations enforce tenant isolation:
+All SendMessage operations enforce session isolation:
 
-- **Unicast**: The Broker verifies the destination agent's `api_key_hash` matches the sender's tenant. If the destination is in a different tenant, the Broker returns an "agent not found" JSON-RPC error (indistinguishable from the agent not existing).
-- **Broadcast (`*`)**: The Broker queries only the sender's tenant via `RegistryStore.list_active_agents(tenant_id)` (a single SQL `SELECT` against the `agents` table filtered by `tenant_id` and `status='active'`). Agents in other tenants never receive the broadcast.
+- **Unicast**: The Broker verifies the destination agent's `session_id` matches the sender's session. If the destination is in a different session, the Broker returns a JSON-RPC error `-32003` ("Session mismatch").
+- **Broadcast (`*`)**: The Broker queries only the sender's session via `RegistryStore.list_active_agents(session_id)` (a single SQL query against `agents` filtered by `session_id` and `status='active'`). Agents in other sessions never receive the broadcast.
 
 ### Unicast — Send
 
 1. Agent A calls `SendMessage` with `metadata.destination = "agentB-uuid"`
-2. Broker verifies Agent B belongs to the same tenant as Agent A
+2. Broker verifies Agent B belongs to the same session as Agent A
 3. Broker creates Task: `contextId=agentB-uuid`, state=`INPUT_REQUIRED`, message content in Artifact
 4. Broker returns the Task to Agent A (Agent A now has the `taskId` for tracking)
 
@@ -97,8 +96,8 @@ All SendMessage operations enforce tenant isolation:
 ### Broadcast — Send
 
 1. Agent A calls `SendMessage` with `metadata.destination = "*"`
-2. Broker calls `RegistryStore.list_active_agents(tenant_id)` (single SQL query against `agents` filtered by `tenant_id` and `status='active'`) to enumerate same-tenant recipients (excluding sender)
-3. Broker creates N delivery Tasks (one per same-tenant active agent, excluding sender), each with `contextId = recipient_agent_id`
+2. Broker calls `RegistryStore.list_active_agents(session_id)` (single SQL query against `agents` filtered by `session_id` and `status='active'`) to enumerate same-session recipients (excluding sender)
+3. Broker creates N delivery Tasks (one per same-session active agent, excluding sender), each with `contextId = recipient_agent_id`
 4. Broker returns a summary Task to Agent A (state=`COMPLETED`) with Artifact listing `recipientCount` and `deliveryTaskIds`
 
 **Response** (summary Task returned):
@@ -189,7 +188,7 @@ Recipients discover unread messages by calling `ListTasks` with their `agent_id`
 
 **Response**: Standard A2A `ListTasksResponse` with Tasks containing message Artifacts.
 
-**Authorization**: The `contextId` parameter **must** equal the caller's `agent_id`. If a different `contextId` is provided, the Broker returns an error. This prevents agents from snooping on other agents' inboxes — even within the same tenant.
+**Authorization**: The `contextId` parameter **must** equal the caller's `agent_id`. If a different `contextId` is provided, the Broker returns an error. This prevents agents from snooping on other agents' inboxes — even within the same session.
 
 The `statusTimestampAfter` parameter can be used for efficient delta polling — only fetch tasks updated since the last poll.
 
@@ -208,7 +207,7 @@ Either sender or recipient can read a specific Task by ID:
 }
 ```
 
-**Visibility**: The Broker verifies that the task's `from_agent_id` or `to_agent_id` belongs to the caller's tenant. If neither matches, returns "not found" (indistinguishable from the task not existing). This enforces cross-tenant isolation for task access.
+**Visibility**: The Broker verifies that the task's `from_agent_id` or `to_agent_id` belongs to the caller's session. If neither matches, returns "not found" (indistinguishable from the task not existing). This enforces cross-session isolation for task access.
 
 ## CancelTask — Retract Message
 
@@ -256,17 +255,17 @@ Sender can retract an unread message:
 
 ## Error Cases
 
-| Condition | JSON-RPC Error | Code |
+| Condition | Error | Code |
 |---|---|---|
-| Missing `Authorization` header | HTTP 401 before JSON-RPC processing | N/A |
-| Missing `X-Agent-Id` header | HTTP 401 before JSON-RPC processing | N/A |
-| Invalid API key or agent-tenant mismatch | HTTP 401 before JSON-RPC processing | N/A |
+| Missing `X-Agent-Id` header | HTTP 400 `{"error": "X-Agent-Id header required"}` | N/A |
+| `X-Agent-Id` present but agent does not exist | HTTP 404 `{"error": "Agent not found"}` | N/A |
 | Missing `metadata.destination` | `InvalidParams`: "metadata.destination is required" | `-32602` |
 | `destination` is not a valid UUID or `"*"` | `InvalidParams`: "invalid destination format" | `-32602` |
-| Destination agent not found or in different tenant | `InvalidParams`: "destination agent not found" | `-32602` |
+| Destination agent not found (same session) | `InvalidParams`: "destination agent not found" | `-32602` |
 | Destination agent is deregistered | `InvalidParams`: "destination agent is deregistered" | `-32602` |
+| Cross-session send (destination in different session) | `SessionMismatchError`: "Session mismatch" | `-32003` |
 | `ListTasks` with `contextId` != caller's `agent_id` | `InvalidParams`: "contextId must match caller's agent_id" | `-32602` |
-| `GetTask` for task in different tenant | `TaskNotFoundError` | `-32001` |
+| `GetTask` for task in different session | `TaskNotFoundError` | `-32001` |
 | ACK on task not owned by caller | `TaskNotFoundError` | `-32001` |
 | ACK on task in terminal state (completed/canceled) | `UnsupportedOperationError`: "task is in terminal state" | `-32004` |
 | GetTask/CancelTask on unknown or unauthorized task | `TaskNotFoundError` | `-32001` |

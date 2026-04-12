@@ -15,10 +15,14 @@ def _run(coro: Coroutine) -> Any:
     return asyncio.run(coro)
 
 
-def _require_api_key(ctx: click.Context) -> None:
-    """Validate that HIKYAKU_API_KEY is set."""
-    if not ctx.obj.get("api_key"):
-        click.echo("Error: HIKYAKU_API_KEY environment variable is required", err=True)
+def _require_session_id(ctx: click.Context) -> None:
+    """Validate that HIKYAKU_SESSION_ID is set."""
+    if not ctx.obj.get("session_id"):
+        click.echo(
+            "Error: HIKYAKU_SESSION_ID environment variable is required. "
+            "Create a session with 'hikyaku-registry session create'.",
+            err=True,
+        )
         ctx.exit(1)
 
 
@@ -30,11 +34,20 @@ def _require_api_key(ctx: click.Context) -> None:
 def cli(ctx, json_output):
     """Hikyaku — CLI for the A2A message broker."""
     ctx.ensure_object(dict)
-    url = os.environ.get("HIKYAKU_URL", "http://localhost:8000")
-    api_key = os.environ.get("HIKYAKU_API_KEY")
+    url = os.environ.get("HIKYAKU_URL") or "http://127.0.0.1:8000"
+    session_id = os.environ.get("HIKYAKU_SESSION_ID")
     ctx.obj["url"] = url
-    ctx.obj["api_key"] = api_key
+    ctx.obj["session_id"] = session_id
     ctx.obj["json_output"] = json_output
+
+
+@cli.command()
+@click.pass_context
+def env(ctx):
+    """Print HIKYAKU_URL and HIKYAKU_SESSION_ID from the environment."""
+    click.echo(f"HIKYAKU_URL={ctx.obj['url']}")
+    session_id = ctx.obj["session_id"] or ""
+    click.echo(f"HIKYAKU_SESSION_ID={session_id}")
 
 
 @cli.command()
@@ -44,15 +57,8 @@ def cli(ctx, json_output):
 @click.pass_context
 def register(ctx, name, description, skills):
     """Register a new agent with the broker."""
-    api_key = ctx.obj.get("api_key")
-    if not api_key:
-        click.echo(
-            "Error: HIKYAKU_API_KEY environment variable is required. "
-            "Create an API key at the Hikyaku WebUI.",
-            err=True,
-        )
-        ctx.exit(1)
-        return
+    _require_session_id(ctx)
+    session_id = ctx.obj["session_id"]
 
     try:
         parsed_skills = None
@@ -70,13 +76,12 @@ def register(ctx, name, description, skills):
                 name,
                 description,
                 skills=parsed_skills,
-                api_key=api_key,
+                session_id=session_id,
             )
         )
 
         if ctx.obj["json_output"]:
-            sanitized = {k: v for k, v in result.items() if k != "api_key"}
-            click.echo(output.format_json(sanitized))
+            click.echo(output.format_json(result))
         else:
             click.echo(output.format_register(result))
     except Exception as e:
@@ -91,12 +96,12 @@ def register(ctx, name, description, skills):
 @click.pass_context
 def send(ctx, agent_id, to, text):
     """Send a unicast message to another agent."""
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     try:
         result = _run(
             api.send_message(
                 ctx.obj["url"],
-                ctx.obj["api_key"],
+                ctx.obj["session_id"],
                 agent_id,
                 to,
                 text,
@@ -119,12 +124,12 @@ def send(ctx, agent_id, to, text):
 @click.pass_context
 def broadcast(ctx, agent_id, text):
     """Broadcast a message to all agents."""
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     try:
         result = _run(
             api.broadcast_message(
                 ctx.obj["url"],
-                ctx.obj["api_key"],
+                ctx.obj["session_id"],
                 agent_id,
                 text,
             )
@@ -147,12 +152,12 @@ def broadcast(ctx, agent_id, text):
 @click.pass_context
 def poll(ctx, agent_id, since, page_size):
     """Poll inbox for messages."""
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     try:
         result = _run(
             api.poll_tasks(
                 ctx.obj["url"],
-                ctx.obj["api_key"],
+                ctx.obj["session_id"],
                 agent_id,
                 since=since,
                 page_size=page_size,
@@ -174,12 +179,12 @@ def poll(ctx, agent_id, since, page_size):
 @click.pass_context
 def ack(ctx, agent_id, task_id):
     """Acknowledge receipt of a message."""
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     try:
         result = _run(
             api.ack_task(
                 ctx.obj["url"],
-                ctx.obj["api_key"],
+                ctx.obj["session_id"],
                 agent_id,
                 task_id,
             )
@@ -201,12 +206,12 @@ def ack(ctx, agent_id, task_id):
 @click.pass_context
 def cancel(ctx, agent_id, task_id):
     """Cancel (retract) a sent message."""
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     try:
         result = _run(
             api.cancel_task(
                 ctx.obj["url"],
-                ctx.obj["api_key"],
+                ctx.obj["session_id"],
                 agent_id,
                 task_id,
             )
@@ -228,12 +233,12 @@ def cancel(ctx, agent_id, task_id):
 @click.pass_context
 def get_task(ctx, agent_id, task_id):
     """Get details of a specific task."""
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     try:
         result = _run(
             api.get_task(
                 ctx.obj["url"],
-                ctx.obj["api_key"],
+                ctx.obj["session_id"],
                 agent_id,
                 task_id,
             )
@@ -254,12 +259,12 @@ def get_task(ctx, agent_id, task_id):
 @click.pass_context
 def agents(ctx, agent_id, detail_id):
     """List registered agents or get agent detail."""
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     try:
         result = _run(
             api.list_agents(
                 ctx.obj["url"],
-                ctx.obj["api_key"],
+                ctx.obj["session_id"],
                 caller_id=agent_id,
                 agent_id=detail_id,
             )
@@ -282,12 +287,12 @@ def agents(ctx, agent_id, detail_id):
 @click.pass_context
 def deregister(ctx, agent_id):
     """Deregister this agent from the broker."""
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     try:
         _run(
             api.deregister_agent(
                 ctx.obj["url"],
-                ctx.obj["api_key"],
+                ctx.obj["session_id"],
                 agent_id,
             )
         )
@@ -319,7 +324,7 @@ def _resolve_prompt(
     director = _run(
         api.list_agents(
             ctx.obj["url"],
-            ctx.obj["api_key"],
+            ctx.obj["session_id"],
             caller_id=director_agent_id,
             agent_id=director_agent_id,
         )
@@ -332,7 +337,7 @@ def _resolve_prompt(
     )
 
 
-def _rollback_register(broker_url, api_key, director_id, new_agent_id, *, reason):
+def _rollback_register(broker_url, session_id, director_id, new_agent_id, *, reason):
     """Best-effort rollback: deregister the just-created agent as the Director."""
     click.echo(
         f"Error: {reason}. Rolling back registration of {new_agent_id}.",
@@ -341,7 +346,7 @@ def _rollback_register(broker_url, api_key, director_id, new_agent_id, *, reason
     try:
         _run(
             api.deregister_agent(
-                broker_url, api_key, new_agent_id, caller_id=director_id
+                broker_url, session_id, new_agent_id, caller_id=director_id
             )
         )
     except Exception as drop_exc:
@@ -363,9 +368,9 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
     """Register a new member and spawn its claude pane in the Director's window."""
     from hikyaku_client import tmux
 
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     broker_url = ctx.obj["url"]
-    api_key = ctx.obj["api_key"]
+    session_id = ctx.obj["session_id"]
 
     # Pre-flight: must be running inside a tmux session.
     try:
@@ -385,7 +390,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
                 broker_url,
                 name,
                 description,
-                api_key=api_key,
+                session_id=session_id,
                 director_agent_id=agent_id,
                 placement={
                     "director_agent_id": agent_id,
@@ -407,7 +412,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
             target_window_id=director_ctx.window_id,
             env={
                 "HIKYAKU_URL": broker_url,
-                "HIKYAKU_API_KEY": api_key,
+                "HIKYAKU_SESSION_ID": session_id,
                 "HIKYAKU_AGENT_ID": new_agent_id,
             },
             claude_prompt=prompt,
@@ -415,7 +420,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
     except tmux.TmuxError as exc:
         _rollback_register(
             broker_url,
-            api_key,
+            session_id,
             agent_id,
             new_agent_id,
             reason=f"tmux split-window failed: {exc}",
@@ -428,7 +433,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
         placement_view = _run(
             api.patch_placement(
                 broker_url,
-                api_key,
+                session_id,
                 director_agent_id=agent_id,
                 member_agent_id=new_agent_id,
                 pane_id=pane_id,
@@ -442,7 +447,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
             pass
         _rollback_register(
             broker_url,
-            api_key,
+            session_id,
             agent_id,
             new_agent_id,
             reason=f"placement PATCH failed: {exc}",
@@ -458,7 +463,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
 
     result["placement"] = placement_view
     if ctx.obj["json_output"]:
-        sanitized = {k: v for k, v in result.items() if k != "api_key"}
+        sanitized = {k: v for k, v in result.items() if k != "session_id"}
         click.echo(output.format_json(sanitized))
     else:
         click.echo(output.format_member(result))
@@ -472,9 +477,9 @@ def member_delete(ctx, agent_id, member_id):
     """Deregister a member agent and close its tmux pane."""
     from hikyaku_client import tmux
 
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     broker_url = ctx.obj["url"]
-    api_key = ctx.obj["api_key"]
+    session_id = ctx.obj["session_id"]
 
     try:
         tmux.ensure_tmux_available()
@@ -489,7 +494,7 @@ def member_delete(ctx, agent_id, member_id):
         target = _run(
             api.list_agents(
                 broker_url,
-                api_key,
+                session_id,
                 caller_id=agent_id,
                 agent_id=member_id,
             )
@@ -512,7 +517,9 @@ def member_delete(ctx, agent_id, member_id):
 
     # Step 2 — deregister the member (BEFORE closing pane).
     try:
-        _run(api.deregister_agent(broker_url, api_key, member_id, caller_id=agent_id))
+        _run(
+            api.deregister_agent(broker_url, session_id, member_id, caller_id=agent_id)
+        )
     except Exception as exc:
         click.echo(f"Error: deregister failed: {exc}", err=True)
         ctx.exit(1)
@@ -558,12 +565,12 @@ def member_delete(ctx, agent_id, member_id):
 @click.pass_context
 def member_list(ctx, agent_id):
     """List member agents managed by this Director."""
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     try:
         members = _run(
             api.list_members(
                 ctx.obj["url"],
-                ctx.obj["api_key"],
+                ctx.obj["session_id"],
                 agent_id,
             )
         )
@@ -592,9 +599,9 @@ def member_capture(ctx, agent_id, member_id, lines):
     """Capture the last N lines of a member pane's terminal buffer."""
     from hikyaku_client import tmux
 
-    _require_api_key(ctx)
+    _require_session_id(ctx)
     broker_url = ctx.obj["url"]
-    api_key = ctx.obj["api_key"]
+    session_id = ctx.obj["session_id"]
 
     try:
         tmux.ensure_tmux_available()
@@ -608,7 +615,7 @@ def member_capture(ctx, agent_id, member_id, lines):
         target = _run(
             api.list_agents(
                 broker_url,
-                api_key,
+                session_id,
                 caller_id=agent_id,
                 agent_id=member_id,
             )

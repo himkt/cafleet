@@ -14,25 +14,21 @@ class Base(DeclarativeBase):
     pass
 
 
-class ApiKey(Base):
-    __tablename__ = "api_keys"
+class Session(Base):
+    __tablename__ = "sessions"
 
-    api_key_hash: Mapped[str] = mapped_column(String, primary_key=True)
-    owner_sub: Mapped[str] = mapped_column(String, nullable=False)
-    key_prefix: Mapped[str] = mapped_column(String, nullable=False)
-    status: Mapped[str] = mapped_column(String, nullable=False)
+    session_id: Mapped[str] = mapped_column(String, primary_key=True)
+    label: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
-
-    __table_args__ = (Index("idx_api_keys_owner", "owner_sub"),)
 
 
 class Agent(Base):
     __tablename__ = "agents"
 
     agent_id: Mapped[str] = mapped_column(String, primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(
+    session_id: Mapped[str] = mapped_column(
         String,
-        ForeignKey("api_keys.api_key_hash", ondelete="RESTRICT"),
+        ForeignKey("sessions.session_id", ondelete="RESTRICT"),
         nullable=False,
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -42,7 +38,7 @@ class Agent(Base):
     deregistered_at: Mapped[str | None] = mapped_column(String, nullable=True)
     agent_card_json: Mapped[str] = mapped_column(String, nullable=False)
 
-    __table_args__ = (Index("idx_agents_tenant_status", "tenant_id", "status"),)
+    __table_args__ = (Index("idx_agents_session_status", "session_id", "status"),)
 
 
 class AgentPlacement(Base):

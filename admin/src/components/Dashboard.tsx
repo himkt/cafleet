@@ -7,13 +7,13 @@ import MessageInput from "./MessageInput";
 import SenderSelector from "./SenderSelector";
 
 interface DashboardProps {
-  tenantId: string;
+  sessionId: string;
   initialAgents: Agent[];
-  onLogout: () => void;
+  onBack: () => void;
 }
 
-function getStoredSender(tenantId: string, agents: Agent[]): string | null {
-  const stored = localStorage.getItem(`hikyaku.sender.${tenantId}`);
+function getStoredSender(sessionId: string, agents: Agent[]): string | null {
+  const stored = localStorage.getItem(`hikyaku.sender.${sessionId}`);
   if (stored && agents.some((a) => a.agent_id === stored && a.status === "active")) {
     return stored;
   }
@@ -21,13 +21,13 @@ function getStoredSender(tenantId: string, agents: Agent[]): string | null {
 }
 
 export default function Dashboard({
-  tenantId,
+  sessionId,
   initialAgents,
-  onLogout: onBack,
+  onBack,
 }: DashboardProps) {
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
   const [senderId, setSenderId] = useState<string | null>(() =>
-    getStoredSender(tenantId, initialAgents),
+    getStoredSender(sessionId, initialAgents),
   );
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -49,13 +49,13 @@ export default function Dashboard({
         <h1 className="text-lg font-semibold text-gray-900">
           Hikyaku —{" "}
           <span className="font-mono text-sm text-gray-500">
-            {tenantId.slice(0, 8)}
+            {sessionId.slice(0, 8)}
           </span>
         </h1>
         <div className="flex items-center gap-3">
           <SenderSelector
             agents={agents}
-            tenantId={tenantId}
+            sessionId={sessionId}
             onSelect={setSenderId}
           />
           <button
@@ -68,7 +68,7 @@ export default function Dashboard({
             onClick={onBack}
             className="text-sm text-gray-500 hover:text-gray-700"
           >
-            Back to Keys
+            Back to Sessions
           </button>
         </div>
       </header>
@@ -79,7 +79,7 @@ export default function Dashboard({
           {noAgents ? (
             <div className="flex-1 flex items-center justify-center">
               <p className="text-gray-400 text-sm">
-                No agents registered in this tenant. Use the{" "}
+                No agents registered in this session. Use the{" "}
                 <code className="text-gray-500">hikyaku register</code> CLI to
                 add one.
               </p>

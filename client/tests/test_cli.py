@@ -4,7 +4,9 @@ Covers: All CLI subcommands (register, send, broadcast, poll, ack, cancel,
 get-task, agents, deregister), global options, --json flag, environment
 variable fallback, and error handling.
 
-Uses click.testing.CliRunner with mocked api.* functions.
+Design doc 0000015 Step 8: HIKYAKU_API_KEY → HIKYAKU_SESSION_ID,
+Authorization: Bearer → X-Session-Id header, URL fallback → 127.0.0.1,
+register gains _require_session_id check.
 """
 
 import json
@@ -31,13 +33,12 @@ def runner():
 # Helpers
 # ---------------------------------------------------------------------------
 
-BROKER_URL = "http://localhost:8000"
-API_KEY = "hky_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+BROKER_URL = "http://127.0.0.1:8000"
+SESSION_ID = "550e8400-e29b-41d4-a716-446655440001"
 AGENT_ID = "550e8400-e29b-41d4-a716-446655440000"
 
 SAMPLE_AGENT = {
     "agent_id": AGENT_ID,
-    "api_key": API_KEY,
     "name": "test-agent",
     "description": "A test agent",
     "status": "active",
@@ -74,8 +75,8 @@ SAMPLE_COMPLETED_TASK = {
 
 
 def _auth_env():
-    """Environment variables for authentication."""
-    return {"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY}
+    """Environment variables for authentication — session-based."""
+    return {"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID}
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +88,7 @@ class TestRegisterCommand:
     """Tests for `hikyaku register`."""
 
     def test_register_success(self, runner):
-        """Register prints agent_id and name but not api_key."""
+        """Register prints agent_id and name."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -102,15 +103,14 @@ class TestRegisterCommand:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
         assert AGENT_ID in result.output
-        assert API_KEY not in result.output
 
-    def test_register_prints_export_statements(self, runner):
-        """Register output prints the agent_id and never leaks credentials."""
+    def test_register_prints_agent_info(self, runner):
+        """Register output prints the agent_id."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -125,17 +125,15 @@ class TestRegisterCommand:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
         assert "agent_id:" in result.output
         assert AGENT_ID in result.output
-        assert "export HIKYAKU_API_KEY=" not in result.output
-        assert "export HIKYAKU_URL=" not in result.output
 
     def test_register_json_output(self, runner):
-        """Register with --json outputs valid JSON without api_key."""
+        """Register with --json outputs valid JSON."""
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -151,13 +149,12 @@ class TestRegisterCommand:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["agent_id"] == AGENT_ID
-        assert "api_key" not in data
 
     def test_register_output_shows_name(self, runner):
         """Register output includes the agent name."""
@@ -175,14 +172,18 @@ class TestRegisterCommand:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
         assert "test-agent" in result.output
 
-    def test_register_requires_api_key(self, runner):
-        """Register requires HIKYAKU_API_KEY environment variable."""
+    def test_register_requires_session_id(self, runner):
+        """Register requires HIKYAKU_SESSION_ID environment variable.
+
+        Design doc: register gains _require_session_id check (it was the
+        only command without a key-requirement check before).
+        """
         with patch(
             "hikyaku_client.cli.api.register_agent",
             new_callable=AsyncMock,
@@ -211,7 +212,7 @@ class TestRegisterCommand:
                 "--description",
                 "A test agent",
             ],
-            env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
@@ -241,7 +242,7 @@ class TestRegisterCommand:
                     "--skills",
                     skills_json,
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+                env=_auth_env(),
             )
 
         assert result.exit_code == 0
@@ -265,7 +266,7 @@ class TestRegisterCommand:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+                env=_auth_env(),
             )
 
         assert result.exit_code != 0
@@ -344,8 +345,8 @@ class TestSendCommand:
 
         assert result.exit_code != 0
 
-    def test_send_requires_auth(self, runner):
-        """Send fails without HIKYAKU_API_KEY."""
+    def test_send_requires_session_id(self, runner):
+        """Send fails without HIKYAKU_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["send", "--agent-id", AGENT_ID, "--to", "target-001", "--text", "Hello"],
@@ -417,8 +418,8 @@ class TestBroadcastCommand:
 
         assert result.exit_code != 0
 
-    def test_broadcast_requires_auth(self, runner):
-        """Broadcast fails without HIKYAKU_API_KEY."""
+    def test_broadcast_requires_session_id(self, runner):
+        """Broadcast fails without HIKYAKU_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["broadcast", "--agent-id", AGENT_ID, "--text", "Hello"],
@@ -510,8 +511,8 @@ class TestPollCommand:
 
         assert result.exit_code == 0
 
-    def test_poll_requires_auth(self, runner):
-        """Poll fails without HIKYAKU_API_KEY."""
+    def test_poll_requires_session_id(self, runner):
+        """Poll fails without HIKYAKU_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["poll", "--agent-id", AGENT_ID],
@@ -576,8 +577,8 @@ class TestAckCommand:
 
         assert result.exit_code != 0
 
-    def test_ack_requires_auth(self, runner):
-        """Ack fails without HIKYAKU_API_KEY."""
+    def test_ack_requires_session_id(self, runner):
+        """Ack fails without HIKYAKU_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["ack", "--agent-id", AGENT_ID, "--task-id", "task-001"],
@@ -650,8 +651,8 @@ class TestCancelCommand:
 
         assert result.exit_code != 0
 
-    def test_cancel_requires_auth(self, runner):
-        """Cancel fails without HIKYAKU_API_KEY."""
+    def test_cancel_requires_session_id(self, runner):
+        """Cancel fails without HIKYAKU_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["cancel", "--agent-id", AGENT_ID, "--task-id", "task-001"],
@@ -716,8 +717,8 @@ class TestGetTaskCommand:
 
         assert result.exit_code != 0
 
-    def test_get_task_requires_auth(self, runner):
-        """Get-task fails without HIKYAKU_API_KEY."""
+    def test_get_task_requires_session_id(self, runner):
+        """Get-task fails without HIKYAKU_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["get-task", "--agent-id", AGENT_ID, "--task-id", "task-001"],
@@ -800,8 +801,8 @@ class TestAgentsCommand:
         data = json.loads(result.output)
         assert data["agent_id"] == AGENT_ID
 
-    def test_agents_requires_auth(self, runner):
-        """Agents fails without HIKYAKU_API_KEY."""
+    def test_agents_requires_session_id(self, runner):
+        """Agents fails without HIKYAKU_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["agents", "--agent-id", AGENT_ID],
@@ -854,8 +855,8 @@ class TestDeregisterCommand:
 
         assert result.exit_code == 0
 
-    def test_deregister_requires_auth(self, runner):
-        """Deregister fails without HIKYAKU_API_KEY."""
+    def test_deregister_requires_session_id(self, runner):
+        """Deregister fails without HIKYAKU_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["deregister", "--agent-id", AGENT_ID],
@@ -880,6 +881,41 @@ class TestDeregisterCommand:
 # ---------------------------------------------------------------------------
 
 
+class TestEnvCommand:
+    """Tests for ``hikyaku env`` subcommand."""
+
+    def test_prints_url_and_session_id(self, runner):
+        """env command prints both HIKYAKU_URL and HIKYAKU_SESSION_ID."""
+        result = runner.invoke(
+            cli,
+            ["env"],
+            env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
+        )
+        assert result.exit_code == 0
+        assert f"HIKYAKU_URL={BROKER_URL}" in result.output
+        assert f"HIKYAKU_SESSION_ID={SESSION_ID}" in result.output
+
+    def test_default_url_when_unset(self, runner):
+        """env command shows default URL when HIKYAKU_URL is not set."""
+        result = runner.invoke(
+            cli,
+            ["env"],
+            env={"HIKYAKU_SESSION_ID": SESSION_ID, "HIKYAKU_URL": ""},
+        )
+        assert result.exit_code == 0
+        assert "HIKYAKU_URL=http://127.0.0.1:8000" in result.output
+
+    def test_empty_session_id_when_unset(self, runner):
+        """env command shows empty HIKYAKU_SESSION_ID when not set."""
+        result = runner.invoke(
+            cli,
+            ["env"],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+        assert result.exit_code == 0
+        assert "HIKYAKU_SESSION_ID=" in result.output
+
+
 class TestGlobalOptions:
     """Tests for global CLI options and environment variables."""
 
@@ -890,25 +926,28 @@ class TestGlobalOptions:
             result = runner.invoke(
                 cli,
                 ["register", "--name", "test-agent", "--description", "test"],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
 
-    def test_api_key_from_env(self, runner):
-        """API key is read from HIKYAKU_API_KEY env var."""
+    def test_session_id_from_env(self, runner):
+        """Session ID is read from HIKYAKU_SESSION_ID env var."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 ["register", "--name", "test-agent", "--description", "test"],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
 
-    def test_default_url(self, runner):
-        """Default URL is http://localhost:8000 when HIKYAKU_URL is not set."""
+    def test_default_url_is_loopback(self, runner):
+        """Default URL is http://127.0.0.1:8000 when HIKYAKU_URL is not set.
+
+        Design doc: URL fallback changes from localhost to 127.0.0.1.
+        """
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
@@ -920,13 +959,18 @@ class TestGlobalOptions:
                     "--description",
                     "test",
                 ],
-                env={"HIKYAKU_API_KEY": API_KEY},
+                env={"HIKYAKU_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
 
-    def test_missing_api_key_env_var_error(self, runner):
-        """Missing HIKYAKU_API_KEY shows error referencing the env var."""
+    def test_missing_session_id_env_var_error(self, runner):
+        """Missing HIKYAKU_SESSION_ID shows error referencing the env var.
+
+        Design doc: error message is "Error: HIKYAKU_SESSION_ID environment
+        variable is required. Create a session with 'hikyaku-registry
+        session create'."
+        """
         result = runner.invoke(
             cli,
             [
@@ -941,7 +985,68 @@ class TestGlobalOptions:
 
         assert result.exit_code != 0
         output = result.output + (result.stderr or "")
-        assert "HIKYAKU_API_KEY" in output
+        assert "HIKYAKU_SESSION_ID" in output
+
+    def test_missing_session_id_mentions_session_create(self, runner):
+        """Error message mentions 'hikyaku-registry session create'.
+
+        Design doc: error message ends with "Create a session with
+        'hikyaku-registry session create'."
+        """
+        result = runner.invoke(
+            cli,
+            [
+                "register",
+                "--name",
+                "test-agent",
+                "--description",
+                "test",
+            ],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+
+        output = result.output + (result.stderr or "")
+        assert "hikyaku-registry session create" in output
+
+
+# ---------------------------------------------------------------------------
+# Deleted patterns — verify no HIKYAKU_API_KEY references
+# ---------------------------------------------------------------------------
+
+
+class TestDeletedApiKeyPatterns:
+    """Verify that HIKYAKU_API_KEY is no longer used in the CLI.
+
+    Design doc 0000015 Step 8: every reference to HIKYAKU_API_KEY is
+    renamed to HIKYAKU_SESSION_ID.
+    """
+
+    def test_no_api_key_env_var(self):
+        """CLI source should not reference HIKYAKU_API_KEY."""
+        import inspect
+        from hikyaku_client import cli as cli_module
+
+        source = inspect.getsource(cli_module)
+        assert "HIKYAKU_API_KEY" not in source, (
+            "cli.py should not reference HIKYAKU_API_KEY — "
+            "all references should be HIKYAKU_SESSION_ID"
+        )
+
+    def test_no_require_api_key_function(self):
+        """_require_api_key should be renamed to _require_session_id."""
+        from hikyaku_client import cli as cli_module
+
+        assert not hasattr(cli_module, "_require_api_key"), (
+            "_require_api_key should be renamed to _require_session_id"
+        )
+
+    def test_has_require_session_id_function(self):
+        """_require_session_id should exist in the CLI module."""
+        from hikyaku_client import cli as cli_module
+
+        assert hasattr(cli_module, "_require_session_id"), (
+            "_require_session_id should exist in cli.py"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1003,7 +1108,7 @@ class TestErrorHandling:
                 "--skills",
                 "not-valid-json",
             ],
-            env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+            env=_auth_env(),
         )
 
         assert result.exit_code != 0
@@ -1014,101 +1119,5 @@ class TestErrorHandling:
             cli,
             ["nonexistent-command"],
         )
-
-        assert result.exit_code != 0
-
-
-# ===========================================================================
-# Multi-tenant CLI tests (access-control feature)
-# ===========================================================================
-
-
-class TestRegisterWithEnvApiKey:
-    """Tests for register using HIKYAKU_API_KEY env var.
-
-    The register command reads api_key from ctx.obj['api_key'],
-    which is populated from the HIKYAKU_API_KEY environment variable.
-    """
-
-    def test_register_env_api_key_passes_key(self, runner):
-        """Register with HIKYAKU_API_KEY env var passes api_key to api.register_agent."""
-        mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku_client.cli.api.register_agent", mock):
-            result = runner.invoke(
-                cli,
-                [
-                    "register",
-                    "--name",
-                    "Joiner",
-                    "--description",
-                    "Join tenant",
-                ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
-            )
-
-        assert result.exit_code == 0
-        call_kwargs = mock.call_args
-        assert call_kwargs is not None
-        all_args = list(call_kwargs.args) + list(call_kwargs.kwargs.values())
-        assert API_KEY in all_args or call_kwargs.kwargs.get("api_key") == API_KEY
-
-    def test_register_shows_output(self, runner):
-        """Register with env var shows agent_id."""
-        mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku_client.cli.api.register_agent", mock):
-            result = runner.invoke(
-                cli,
-                [
-                    "register",
-                    "--name",
-                    "Joiner",
-                    "--description",
-                    "Join",
-                ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
-            )
-
-        assert result.exit_code == 0
-        assert AGENT_ID in result.output
-
-    def test_register_json_output(self, runner):
-        """Register with env var and --json outputs valid JSON."""
-        mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku_client.cli.api.register_agent", mock):
-            result = runner.invoke(
-                cli,
-                [
-                    "--json",
-                    "register",
-                    "--name",
-                    "Joiner",
-                    "--description",
-                    "Join",
-                ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
-            )
-
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data["agent_id"] == AGENT_ID
-
-    def test_register_api_error(self, runner):
-        """Register with invalid API key shows error."""
-        mock = AsyncMock(side_effect=Exception("401: Invalid API key"))
-        with patch("hikyaku_client.cli.api.register_agent", mock):
-            result = runner.invoke(
-                cli,
-                [
-                    "register",
-                    "--name",
-                    "Joiner",
-                    "--description",
-                    "Join",
-                ],
-                env={
-                    "HIKYAKU_URL": BROKER_URL,
-                    "HIKYAKU_API_KEY": "hky_invalid000000000000000000000000",
-                },
-            )
 
         assert result.exit_code != 0

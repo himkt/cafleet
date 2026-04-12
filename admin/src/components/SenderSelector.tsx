@@ -3,16 +3,16 @@ import type { Agent } from "../types";
 
 interface SenderSelectorProps {
   agents: Agent[];
-  tenantId: string;
+  sessionId: string;
   onSelect: (agentId: string | null) => void;
 }
 
-function storageKey(tenantId: string): string {
-  return `hikyaku.sender.${tenantId}`;
+function storageKey(sessionId: string): string {
+  return `hikyaku.sender.${sessionId}`;
 }
 
-function resolveStored(tenantId: string, activeAgents: Agent[]): string | null {
-  const stored = localStorage.getItem(storageKey(tenantId));
+function resolveStored(sessionId: string, activeAgents: Agent[]): string | null {
+  const stored = localStorage.getItem(storageKey(sessionId));
   if (stored && activeAgents.some((a) => a.agent_id === stored)) {
     return stored;
   }
@@ -21,14 +21,14 @@ function resolveStored(tenantId: string, activeAgents: Agent[]): string | null {
 
 export default function SenderSelector({
   agents,
-  tenantId,
+  sessionId,
   onSelect,
 }: SenderSelectorProps) {
   const activeAgents = agents.filter((a) => a.status === "active");
 
   const selectedId = useMemo(
-    () => resolveStored(tenantId, activeAgents),
-    [tenantId, activeAgents],
+    () => resolveStored(sessionId, activeAgents),
+    [sessionId, activeAgents],
   );
 
   useEffect(() => {
@@ -38,9 +38,9 @@ export default function SenderSelector({
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value || null;
     if (value) {
-      localStorage.setItem(storageKey(tenantId), value);
+      localStorage.setItem(storageKey(sessionId), value);
     } else {
-      localStorage.removeItem(storageKey(tenantId));
+      localStorage.removeItem(storageKey(sessionId));
     }
     onSelect(value);
   };

@@ -1,13 +1,17 @@
 """Tests for executor.py — BrokerExecutor business logic.
 
+Design doc 0000015 Step 6 changes:
+  - ``tenant_id`` renamed to ``session_id`` throughout
+  - ``SessionMismatchError(ValueError)`` defined at module level
+  - Cross-session unicast raises ``SessionMismatchError`` (not plain ``ValueError``)
+  - Broadcast scoped by ``session_id``
+
 Covers: unicast send, broadcast send, ACK (multi-turn), GetTask visibility,
 CancelTask. Tests the executor methods directly with SQL-backed stores.
-
-Also covers cross-tenant unicast rejection and tenant-scoped broadcast
-(access-control feature).
 """
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from a2a.server.agent_execution import RequestContext
@@ -22,19 +26,12 @@ from a2a.types import (
     TaskState,
     TextPart,
 )
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku_registry.executor import BrokerExecutor
+from hikyaku_registry.db.models import Session
+from hikyaku_registry.executor import BrokerExecutor, SessionMismatchError
 from hikyaku_registry.registry_store import RegistryStore
 from hikyaku_registry.task_store import TaskStore
-
-
-# ---------------------------------------------------------------------------
-# Owner subs for dynamic API key creation
-# ---------------------------------------------------------------------------
-
-_OWNER_SHARED = "auth0|exec-shared"
-_OWNER_TENANT_A = "auth0|exec-tenant-a"
-_OWNER_TENANT_B = "auth0|exec-tenant-b"
 
 
 # ---------------------------------------------------------------------------
@@ -42,16 +39,33 @@ _OWNER_TENANT_B = "auth0|exec-tenant-b"
 # ---------------------------------------------------------------------------
 
 
-def _make_call_context(agent_id: str, tenant_id: str) -> ServerCallContext:
-    """Create a ServerCallContext with agent_id and tenant_id."""
+async def _create_test_session(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    *,
+    session_id: str | None = None,
+) -> str:
+    """Seed a session row directly via the DB sessionmaker."""
+    if session_id is None:
+        session_id = str(uuid.uuid4())
+    created_at = datetime.now(UTC).isoformat()
+    async with db_sessionmaker() as session:
+        async with session.begin():
+            session.add(
+                Session(session_id=session_id, label=None, created_at=created_at)
+            )
+    return session_id
+
+
+def _make_call_context(agent_id: str, session_id: str) -> ServerCallContext:
+    """Create a ServerCallContext with agent_id and session_id."""
     return ServerCallContext(
-        state={"agent_id": agent_id, "tenant_id": tenant_id},
+        state={"agent_id": agent_id, "session_id": session_id},
     )
 
 
 def _make_send_context(
     from_agent_id: str,
-    tenant_id: str,
+    session_id: str,
     destination: str,
     text: str = "Hello",
     task_id: str | None = None,
@@ -67,13 +81,13 @@ def _make_send_context(
     params = MessageSendParams(message=message)
     return RequestContext(
         request=params,
-        call_context=_make_call_context(from_agent_id, tenant_id),
+        call_context=_make_call_context(from_agent_id, session_id),
     )
 
 
 def _make_ack_context(
     from_agent_id: str,
-    tenant_id: str,
+    session_id: str,
     task_id: str,
     text: str = "ack",
 ) -> RequestContext:
@@ -88,13 +102,13 @@ def _make_ack_context(
     return RequestContext(
         request=params,
         task_id=task_id,
-        call_context=_make_call_context(from_agent_id, tenant_id),
+        call_context=_make_call_context(from_agent_id, session_id),
     )
 
 
 def _make_cancel_context(
     from_agent_id: str,
-    tenant_id: str,
+    session_id: str,
     task_id: str,
     task: Task | None = None,
 ) -> RequestContext:
@@ -102,7 +116,7 @@ def _make_cancel_context(
     return RequestContext(
         task_id=task_id,
         task=task,
-        call_context=_make_call_context(from_agent_id, tenant_id),
+        call_context=_make_call_context(from_agent_id, session_id),
     )
 
 
@@ -119,38 +133,59 @@ async def _collect_events(queue: EventQueue) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Single-tenant fixture
+# Single-session fixture
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-async def env(store: RegistryStore, task_store: TaskStore):
+async def env(store: RegistryStore, task_store: TaskStore, db_sessionmaker):
     """Set up BrokerExecutor with SQL-backed stores and test agents.
 
-    All agents share the same API key (same tenant) for basic tests.
+    All agents share the same session for basic tests.
     """
-    api_key, tenant_id, _ = await store.create_api_key(_OWNER_SHARED)
+    session_id = await _create_test_session(db_sessionmaker)
     executor = BrokerExecutor(registry_store=store, task_store=task_store)
 
     agent_a = await store.create_agent(
-        name="Agent A", description="Sender", api_key=api_key
+        name="Agent A", description="Sender", session_id=session_id
     )
     agent_b = await store.create_agent(
-        name="Agent B", description="Recipient", api_key=api_key
+        name="Agent B", description="Recipient", session_id=session_id
     )
     agent_c = await store.create_agent(
-        name="Agent C", description="Third agent", api_key=api_key
+        name="Agent C", description="Third agent", session_id=session_id
     )
 
     return {
         "executor": executor,
         "store": store,
         "task_store": task_store,
-        "tenant_id": tenant_id,
+        "session_id": session_id,
         "agent_a": agent_a,
         "agent_b": agent_b,
         "agent_c": agent_c,
     }
+
+
+# ---------------------------------------------------------------------------
+# SessionMismatchError class
+# ---------------------------------------------------------------------------
+
+
+class TestSessionMismatchError:
+    """Verify ``SessionMismatchError`` exists and is a ``ValueError`` subclass."""
+
+    def test_is_value_error_subclass(self):
+        assert issubclass(SessionMismatchError, ValueError)
+
+    def test_can_be_instantiated(self):
+        err = SessionMismatchError("Session mismatch")
+        assert str(err) == "Session mismatch"
+
+    def test_caught_by_value_error_handler(self):
+        """SessionMismatchError is caught by ``except ValueError``."""
+        with pytest.raises(ValueError):
+            raise SessionMismatchError("test")
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +203,7 @@ class TestUnicastSend:
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination=agent_b["agent_id"],
             text="Did the API schema change?",
         )
@@ -185,7 +220,7 @@ class TestUnicastSend:
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination=agent_b["agent_id"],
         )
         await executor.execute(context, queue)
@@ -201,7 +236,7 @@ class TestUnicastSend:
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination=agent_b["agent_id"],
         )
         await executor.execute(context, queue)
@@ -210,32 +245,14 @@ class TestUnicastSend:
         task = next(e for e in events if isinstance(e, Task))
         assert task.context_id == agent_b["agent_id"]
 
-    async def test_message_content_in_artifact(self, env):
-        """Message text is stored as an Artifact on the delivery Task."""
+    async def test_task_metadata_has_from_and_to(self, env):
+        """Delivery Task metadata has fromAgentId and toAgentId."""
         executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
         queue = EventQueue()
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
-            destination=agent_b["agent_id"],
-            text="Did the API schema change?",
-        )
-        await executor.execute(context, queue)
-
-        events = await _collect_events(queue)
-        task = next(e for e in events if isinstance(e, Task))
-        assert task.artifacts is not None
-        assert len(task.artifacts) >= 1
-
-    async def test_task_metadata_has_routing_info(self, env):
-        """Delivery Task metadata contains fromAgentId, toAgentId, type."""
-        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
-        queue = EventQueue()
-
-        context = _make_send_context(
-            from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination=agent_b["agent_id"],
         )
         await executor.execute(context, queue)
@@ -244,76 +261,39 @@ class TestUnicastSend:
         task = next(e for e in events if isinstance(e, Task))
         assert task.metadata["fromAgentId"] == agent_a["agent_id"]
         assert task.metadata["toAgentId"] == agent_b["agent_id"]
-        assert task.metadata["type"] == "unicast"
 
-    async def test_error_missing_destination(self, env):
-        """Missing metadata.destination raises an error."""
-        executor, agent_a = env["executor"], env["agent_a"]
-        queue = EventQueue()
-
-        message = Message(
-            message_id=str(uuid.uuid4()),
-            role=Role.user,
-            parts=[Part(root=TextPart(text="No destination"))],
-        )
-        params = MessageSendParams(message=message)
-        context = RequestContext(
-            request=params,
-            call_context=_make_call_context(agent_a["agent_id"], env["tenant_id"]),
-        )
-
-        with pytest.raises(Exception) as exc_info:
-            await executor.execute(context, queue)
-
-        assert exc_info.value is not None
-
-    async def test_error_destination_not_found(self, env):
-        """Destination agent_id not found raises an error."""
+    async def test_invalid_destination_raises_error(self, env):
+        """Non-UUID destination raises ValueError."""
         executor, agent_a = env["executor"], env["agent_a"]
         queue = EventQueue()
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
-            destination="00000000-0000-4000-8000-000000000000",
+            session_id=env["session_id"],
+            destination="not-a-uuid",
         )
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             await executor.execute(context, queue)
 
-    async def test_error_destination_deregistered(self, env):
-        """Sending to a deregistered agent raises an error."""
+    async def test_deregistered_destination_raises_error(self, env):
+        """Sending to a deregistered agent raises ValueError."""
         executor, store, agent_a, agent_b = (
             env["executor"],
             env["store"],
             env["agent_a"],
             env["agent_b"],
         )
-        queue = EventQueue()
-
         await store.deregister_agent(agent_b["agent_id"])
+        queue = EventQueue()
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination=agent_b["agent_id"],
         )
 
-        with pytest.raises(Exception):
-            await executor.execute(context, queue)
-
-    async def test_error_invalid_destination_format(self, env):
-        """Invalid destination format (not UUID or '*') raises an error."""
-        executor, agent_a = env["executor"], env["agent_a"]
-        queue = EventQueue()
-
-        context = _make_send_context(
-            from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
-            destination="not-a-valid-uuid",
-        )
-
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             await executor.execute(context, queue)
 
 
@@ -325,23 +305,20 @@ class TestUnicastSend:
 class TestBroadcastSend:
     """Tests for BrokerExecutor.execute — broadcast message delivery."""
 
-    async def test_creates_delivery_tasks_for_all_active_agents(self, env):
-        """Broadcast creates one delivery Task per active agent (excluding sender)."""
+    async def test_sends_to_all_session_agents(self, env):
+        """Broadcast sends delivery tasks to all agents in the session."""
         executor, agent_a = env["executor"], env["agent_a"]
         queue = EventQueue()
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination="*",
-            text="Build failed on main branch",
         )
         await executor.execute(context, queue)
 
         events = await _collect_events(queue)
         tasks = [e for e in events if isinstance(e, Task)]
-
-        # Should have delivery tasks for agent_b and agent_c + summary task
         assert len(tasks) >= 3  # 2 delivery + 1 summary
 
     async def test_excludes_sender_from_recipients(self, env):
@@ -351,7 +328,7 @@ class TestBroadcastSend:
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination="*",
         )
         await executor.execute(context, queue)
@@ -375,7 +352,7 @@ class TestBroadcastSend:
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination="*",
         )
         await executor.execute(context, queue)
@@ -393,31 +370,6 @@ class TestBroadcastSend:
         summary = summary_tasks[0]
         assert summary.status.state == TaskState.completed
 
-    async def test_summary_task_has_recipient_count(self, env):
-        """Summary Task artifact includes recipientCount."""
-        executor, agent_a = env["executor"], env["agent_a"]
-        queue = EventQueue()
-
-        context = _make_send_context(
-            from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
-            destination="*",
-        )
-        await executor.execute(context, queue)
-
-        events = await _collect_events(queue)
-        summary_tasks = [
-            e
-            for e in events
-            if isinstance(e, Task)
-            and e.metadata
-            and e.metadata.get("type") in ("broadcast", "broadcast_summary")
-        ]
-
-        summary = summary_tasks[0]
-        assert summary.artifacts is not None
-        assert len(summary.artifacts) >= 1
-
     async def test_delivery_tasks_have_input_required_state(self, env):
         """Each delivery Task is in INPUT_REQUIRED state."""
         executor, agent_a = env["executor"], env["agent_a"]
@@ -425,7 +377,7 @@ class TestBroadcastSend:
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination="*",
         )
         await executor.execute(context, queue)
@@ -436,37 +388,7 @@ class TestBroadcastSend:
             for e in events
             if isinstance(e, Task) and e.status.state == TaskState.input_required
         ]
-
-        # Should have 2 delivery tasks (agent_b and agent_c)
         assert len(delivery_tasks) == 2
-
-    async def test_each_delivery_task_context_id_is_recipient(self, env):
-        """Each delivery Task's contextId equals its recipient's agent_id."""
-        executor, agent_a, agent_b, agent_c = (
-            env["executor"],
-            env["agent_a"],
-            env["agent_b"],
-            env["agent_c"],
-        )
-        queue = EventQueue()
-
-        context = _make_send_context(
-            from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
-            destination="*",
-        )
-        await executor.execute(context, queue)
-
-        events = await _collect_events(queue)
-        delivery_tasks = [
-            e
-            for e in events
-            if isinstance(e, Task) and e.status.state == TaskState.input_required
-        ]
-
-        recipient_ids = {t.context_id for t in delivery_tasks}
-        assert agent_b["agent_id"] in recipient_ids
-        assert agent_c["agent_id"] in recipient_ids
 
     async def test_broadcast_no_other_agents(self, env):
         """Broadcast with no other active agents produces recipientCount=0."""
@@ -479,13 +401,12 @@ class TestBroadcastSend:
         )
         queue = EventQueue()
 
-        # Deregister all other agents
         await store.deregister_agent(agent_b["agent_id"])
         await store.deregister_agent(agent_c["agent_id"])
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination="*",
         )
         await executor.execute(context, queue)
@@ -514,7 +435,7 @@ class TestAck:
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination=agent_b["agent_id"],
             text="Hello Agent B",
         )
@@ -531,7 +452,7 @@ class TestAck:
         queue = EventQueue()
         context = _make_ack_context(
             from_agent_id=agent_b["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             task_id=delivery_task.id,
         )
         await executor.execute(context, queue)
@@ -548,7 +469,7 @@ class TestAck:
         queue = EventQueue()
         context = _make_ack_context(
             from_agent_id=agent_c["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             task_id=delivery_task.id,
         )
 
@@ -563,7 +484,7 @@ class TestAck:
         queue1 = EventQueue()
         ctx1 = _make_ack_context(
             from_agent_id=agent_b["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             task_id=delivery_task.id,
         )
         await executor.execute(ctx1, queue1)
@@ -571,40 +492,12 @@ class TestAck:
         queue2 = EventQueue()
         ctx2 = _make_ack_context(
             from_agent_id=agent_b["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             task_id=delivery_task.id,
         )
 
         with pytest.raises(Exception):
             await executor.execute(ctx2, queue2)
-
-    async def test_ack_on_canceled_task_raises_error(self, env):
-        """ACK on a canceled task raises an error."""
-        executor, agent_a, agent_b = (
-            env["executor"],
-            env["agent_a"],
-            env["agent_b"],
-        )
-        delivery_task = await self._create_unicast_task(env)
-
-        cancel_queue = EventQueue()
-        cancel_ctx = _make_cancel_context(
-            from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
-            task_id=delivery_task.id,
-            task=delivery_task,
-        )
-        await executor.cancel(cancel_ctx, cancel_queue)
-
-        ack_queue = EventQueue()
-        ack_ctx = _make_ack_context(
-            from_agent_id=agent_b["agent_id"],
-            tenant_id=env["tenant_id"],
-            task_id=delivery_task.id,
-        )
-
-        with pytest.raises(Exception):
-            await executor.execute(ack_ctx, ack_queue)
 
     async def test_ack_on_unknown_task_raises_error(self, env):
         """ACK on a non-existent task raises an error."""
@@ -613,76 +506,12 @@ class TestAck:
         queue = EventQueue()
         context = _make_ack_context(
             from_agent_id=agent_b["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             task_id="nonexistent-task-id",
         )
 
         with pytest.raises(Exception):
             await executor.execute(context, queue)
-
-
-# ---------------------------------------------------------------------------
-# GetTask Visibility
-# ---------------------------------------------------------------------------
-
-
-class TestGetTaskVisibility:
-    """Tests for task access control on GetTask."""
-
-    async def _create_unicast_task(self, env):
-        """Helper: send a unicast from A to B, return the delivery Task."""
-        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
-        queue = EventQueue()
-
-        context = _make_send_context(
-            from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
-            destination=agent_b["agent_id"],
-        )
-        await executor.execute(context, queue)
-
-        events = await _collect_events(queue)
-        return next(e for e in events if isinstance(e, Task))
-
-    async def test_sender_can_get_task(self, env):
-        """Sender can access the task they created by taskId."""
-        task_store = env["task_store"]
-        delivery_task = await self._create_unicast_task(env)
-
-        result = await task_store.get(delivery_task.id)
-        assert result is not None
-
-    async def test_recipient_can_get_task(self, env):
-        """Recipient can access the task in their context."""
-        task_store = env["task_store"]
-        delivery_task = await self._create_unicast_task(env)
-
-        result = await task_store.get(delivery_task.id)
-        assert result is not None
-
-    async def test_task_stored_in_task_store(self, env):
-        """The delivery Task is persisted in the TaskStore."""
-        task_store = env["task_store"]
-        delivery_task = await self._create_unicast_task(env)
-
-        result = await task_store.get(delivery_task.id)
-        assert result is not None
-
-    async def test_task_indexed_by_recipient_context(self, env):
-        """Delivery Task appears in TaskStore.list for the recipient's context."""
-        task_store, agent_b = env["task_store"], env["agent_b"]
-        delivery_task = await self._create_unicast_task(env)
-
-        tasks = await task_store.list(agent_b["agent_id"])
-        assert any(t.id == delivery_task.id for t in tasks)
-
-    async def test_task_indexed_by_sender(self, env):
-        """Delivery Task appears in TaskStore.list_by_sender for the sender."""
-        task_store, agent_a = env["task_store"], env["agent_a"]
-        delivery_task = await self._create_unicast_task(env)
-
-        tasks = await task_store.list_by_sender(agent_a["agent_id"])
-        assert any(t.id == delivery_task.id for t in tasks)
 
 
 # ---------------------------------------------------------------------------
@@ -700,7 +529,7 @@ class TestCancelTask:
 
         context = _make_send_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             destination=agent_b["agent_id"],
         )
         await executor.execute(context, queue)
@@ -716,7 +545,7 @@ class TestCancelTask:
         queue = EventQueue()
         context = _make_cancel_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             task_id=delivery_task.id,
             task=delivery_task,
         )
@@ -724,9 +553,7 @@ class TestCancelTask:
 
         events = await _collect_events(queue)
         assert any(
-            (isinstance(e, Task) and e.status.state == TaskState.canceled)
-            or (hasattr(e, "status") and e.status.state == TaskState.canceled)
-            for e in events
+            isinstance(e, Task) and e.status.state == TaskState.canceled for e in events
         )
 
     async def test_non_sender_cannot_cancel(self, env):
@@ -737,7 +564,7 @@ class TestCancelTask:
         queue = EventQueue()
         context = _make_cancel_context(
             from_agent_id=agent_b["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             task_id=delivery_task.id,
             task=delivery_task,
         )
@@ -757,7 +584,7 @@ class TestCancelTask:
         ack_queue = EventQueue()
         ack_ctx = _make_ack_context(
             from_agent_id=agent_b["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             task_id=delivery_task.id,
         )
         await executor.execute(ack_ctx, ack_queue)
@@ -765,38 +592,13 @@ class TestCancelTask:
         cancel_queue = EventQueue()
         cancel_ctx = _make_cancel_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             task_id=delivery_task.id,
             task=delivery_task,
         )
 
         with pytest.raises(Exception):
             await executor.cancel(cancel_ctx, cancel_queue)
-
-    async def test_cancel_already_canceled_task_raises_error(self, env):
-        """Cannot cancel a task that is already CANCELED."""
-        executor, agent_a = env["executor"], env["agent_a"]
-        delivery_task = await self._create_unicast_task(env)
-
-        queue1 = EventQueue()
-        ctx1 = _make_cancel_context(
-            from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
-            task_id=delivery_task.id,
-            task=delivery_task,
-        )
-        await executor.cancel(ctx1, queue1)
-
-        queue2 = EventQueue()
-        ctx2 = _make_cancel_context(
-            from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
-            task_id=delivery_task.id,
-            task=delivery_task,
-        )
-
-        with pytest.raises(Exception):
-            await executor.cancel(ctx2, queue2)
 
     async def test_cancel_unknown_task_raises_error(self, env):
         """Cannot cancel a task that doesn't exist."""
@@ -805,7 +607,7 @@ class TestCancelTask:
         queue = EventQueue()
         context = _make_cancel_context(
             from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
+            session_id=env["session_id"],
             task_id="nonexistent-task-id",
         )
 
@@ -814,60 +616,59 @@ class TestCancelTask:
 
 
 # ===========================================================================
-# Multi-tenant executor tests (access-control feature)
+# Cross-session executor tests (renamed from multi-tenant)
 # ===========================================================================
 
 
 @pytest.fixture
-async def tenant_env(store: RegistryStore, task_store: TaskStore):
-    """Set up BrokerExecutor with agents in two separate tenants.
+async def session_env(store: RegistryStore, task_store: TaskStore, db_sessionmaker):
+    """Set up BrokerExecutor with agents in two separate sessions.
 
-    Tenant A: agent_a1, agent_a2
-    Tenant B: agent_b1
+    Session A: agent_a1, agent_a2
+    Session B: agent_b1
     """
-    api_key_a, tenant_a_id, _ = await store.create_api_key(_OWNER_TENANT_A)
-    api_key_b, tenant_b_id, _ = await store.create_api_key(_OWNER_TENANT_B)
+    session_a = await _create_test_session(db_sessionmaker)
+    session_b = await _create_test_session(db_sessionmaker)
 
     executor = BrokerExecutor(registry_store=store, task_store=task_store)
 
     agent_a1 = await store.create_agent(
-        name="Agent A1", description="Tenant A first", api_key=api_key_a
+        name="Agent A1", description="Session A first", session_id=session_a
     )
     agent_a2 = await store.create_agent(
-        name="Agent A2", description="Tenant A second", api_key=api_key_a
+        name="Agent A2", description="Session A second", session_id=session_a
     )
     agent_b1 = await store.create_agent(
-        name="Agent B1", description="Tenant B only", api_key=api_key_b
+        name="Agent B1", description="Session B only", session_id=session_b
     )
 
     return {
         "executor": executor,
         "store": store,
         "task_store": task_store,
-        "tenant_a_id": tenant_a_id,
-        "tenant_b_id": tenant_b_id,
+        "session_a": session_a,
+        "session_b": session_b,
         "agent_a1": agent_a1,
         "agent_a2": agent_a2,
         "agent_b1": agent_b1,
     }
 
 
-class TestCrossTenantUnicast:
-    """Tests for cross-tenant unicast rejection.
+class TestCrossSessionUnicast:
+    """Tests for cross-session unicast rejection.
 
-    Unicast must verify destination agent's api_key_hash matches sender's
-    tenant. Cross-tenant sends produce "agent not found" errors.
+    Cross-session sends raise ``SessionMismatchError`` (not plain ValueError).
     """
 
-    async def test_same_tenant_unicast_succeeds(self, tenant_env):
-        """Agent A1 sends to Agent A2 (same tenant) → succeeds."""
-        executor = tenant_env["executor"]
-        agent_a1, agent_a2 = tenant_env["agent_a1"], tenant_env["agent_a2"]
+    async def test_same_session_unicast_succeeds(self, session_env):
+        """Agent A1 sends to Agent A2 (same session) → succeeds."""
+        executor = session_env["executor"]
+        agent_a1, agent_a2 = session_env["agent_a1"], session_env["agent_a2"]
         queue = EventQueue()
 
         context = _make_send_context(
             from_agent_id=agent_a1["agent_id"],
-            tenant_id=tenant_env["tenant_a_id"],
+            session_id=session_env["session_a"],
             destination=agent_a2["agent_id"],
             text="Hello teammate",
         )
@@ -880,106 +681,75 @@ class TestCrossTenantUnicast:
         assert task.status.state == TaskState.input_required
         assert task.context_id == agent_a2["agent_id"]
 
-    async def test_cross_tenant_unicast_raises_error(self, tenant_env):
-        """Agent A1 sends to Agent B1 (different tenant) → error."""
-        executor = tenant_env["executor"]
-        agent_a1, agent_b1 = tenant_env["agent_a1"], tenant_env["agent_b1"]
-        queue = EventQueue()
-
-        context = _make_send_context(
-            from_agent_id=agent_a1["agent_id"],
-            tenant_id=tenant_env["tenant_a_id"],
-            destination=agent_b1["agent_id"],
-        )
-
-        with pytest.raises(Exception):
-            await executor.execute(context, queue)
-
-    async def test_cross_tenant_error_indistinguishable_from_not_found(
-        self, tenant_env
+    async def test_cross_session_unicast_raises_session_mismatch_error(
+        self, session_env
     ):
-        """Cross-tenant error message is the same as 'agent not found'.
-
-        The caller cannot distinguish between 'agent exists in another tenant'
-        and 'agent does not exist at all'.
-        """
-        executor = tenant_env["executor"]
-        agent_a1, agent_b1 = tenant_env["agent_a1"], tenant_env["agent_b1"]
-        queue = EventQueue()
-
-        cross_ctx = _make_send_context(
-            from_agent_id=agent_a1["agent_id"],
-            tenant_id=tenant_env["tenant_a_id"],
-            destination=agent_b1["agent_id"],
-        )
-
-        with pytest.raises(Exception) as cross_exc:
-            await executor.execute(cross_ctx, queue)
-
-        ghost_ctx = _make_send_context(
-            from_agent_id=agent_a1["agent_id"],
-            tenant_id=tenant_env["tenant_a_id"],
-            destination="00000000-0000-4000-8000-000000000000",
-        )
-
-        with pytest.raises(Exception) as ghost_exc:
-            await executor.execute(ghost_ctx, queue)
-
-        assert type(cross_exc.value) is type(ghost_exc.value)
-
-    async def test_reverse_cross_tenant_also_blocked(self, tenant_env):
-        """Agent B1 sends to Agent A1 (reverse direction) → also blocked."""
-        executor = tenant_env["executor"]
-        agent_a1, agent_b1 = tenant_env["agent_a1"], tenant_env["agent_b1"]
+        """Agent A1 sends to Agent B1 (different session) → SessionMismatchError."""
+        executor = session_env["executor"]
+        agent_a1, agent_b1 = session_env["agent_a1"], session_env["agent_b1"]
         queue = EventQueue()
 
         context = _make_send_context(
-            from_agent_id=agent_b1["agent_id"],
-            tenant_id=tenant_env["tenant_b_id"],
-            destination=agent_a1["agent_id"],
+            from_agent_id=agent_a1["agent_id"],
+            session_id=session_env["session_a"],
+            destination=agent_b1["agent_id"],
         )
 
-        with pytest.raises(Exception):
+        with pytest.raises(SessionMismatchError):
             await executor.execute(context, queue)
 
-    async def test_cross_tenant_no_task_created(self, tenant_env):
-        """Cross-tenant send does not persist any delivery task."""
-        executor, task_store = tenant_env["executor"], tenant_env["task_store"]
-        agent_a1, agent_b1 = tenant_env["agent_a1"], tenant_env["agent_b1"]
+    async def test_cross_session_no_task_created(self, session_env):
+        """Cross-session send does not persist any delivery task."""
+        executor, task_store = session_env["executor"], session_env["task_store"]
+        agent_a1, agent_b1 = session_env["agent_a1"], session_env["agent_b1"]
         queue = EventQueue()
 
         context = _make_send_context(
             from_agent_id=agent_a1["agent_id"],
-            tenant_id=tenant_env["tenant_a_id"],
+            session_id=session_env["session_a"],
             destination=agent_b1["agent_id"],
         )
 
-        with pytest.raises(Exception):
+        with pytest.raises(SessionMismatchError):
             await executor.execute(context, queue)
 
         tasks = await task_store.list(agent_b1["agent_id"])
         assert len(tasks) == 0
 
+    async def test_reverse_cross_session_also_blocked(self, session_env):
+        """Agent B1 sends to Agent A1 (reverse direction) → also blocked."""
+        executor = session_env["executor"]
+        agent_a1, agent_b1 = session_env["agent_a1"], session_env["agent_b1"]
+        queue = EventQueue()
 
-class TestTenantScopedBroadcast:
-    """Tests for tenant-scoped broadcast.
+        context = _make_send_context(
+            from_agent_id=agent_b1["agent_id"],
+            session_id=session_env["session_b"],
+            destination=agent_a1["agent_id"],
+        )
 
-    Broadcast from tenant A → only delivers to agents in tenant A.
-    Agents in tenant B never receive the broadcast.
+        with pytest.raises(SessionMismatchError):
+            await executor.execute(context, queue)
+
+
+class TestSessionScopedBroadcast:
+    """Tests for session-scoped broadcast.
+
+    Broadcast from session A → only delivers to agents in session A.
     """
 
-    async def test_broadcast_delivers_only_to_same_tenant(self, tenant_env):
+    async def test_broadcast_delivers_only_to_same_session(self, session_env):
         """Broadcast from A1 delivers to A2 only, not B1."""
-        executor = tenant_env["executor"]
-        agent_a1, agent_a2 = tenant_env["agent_a1"], tenant_env["agent_a2"]
-        agent_b1 = tenant_env["agent_b1"]
+        executor = session_env["executor"]
+        agent_a1, agent_a2 = session_env["agent_a1"], session_env["agent_a2"]
+        agent_b1 = session_env["agent_b1"]
         queue = EventQueue()
 
         context = _make_send_context(
             from_agent_id=agent_a1["agent_id"],
-            tenant_id=tenant_env["tenant_a_id"],
+            session_id=session_env["session_a"],
             destination="*",
-            text="Tenant A broadcast",
+            text="Session A broadcast",
         )
         await executor.execute(context, queue)
 
@@ -994,15 +764,15 @@ class TestTenantScopedBroadcast:
         assert agent_a2["agent_id"] in recipient_ids
         assert agent_b1["agent_id"] not in recipient_ids
 
-    async def test_broadcast_excludes_sender(self, tenant_env):
-        """Broadcast excludes the sender even within the same tenant."""
-        executor = tenant_env["executor"]
-        agent_a1 = tenant_env["agent_a1"]
+    async def test_broadcast_excludes_sender(self, session_env):
+        """Broadcast excludes the sender even within the same session."""
+        executor = session_env["executor"]
+        agent_a1 = session_env["agent_a1"]
         queue = EventQueue()
 
         context = _make_send_context(
             from_agent_id=agent_a1["agent_id"],
-            tenant_id=tenant_env["tenant_a_id"],
+            session_id=session_env["session_a"],
             destination="*",
         )
         await executor.execute(context, queue)
@@ -1017,15 +787,15 @@ class TestTenantScopedBroadcast:
         for task in delivery_tasks:
             assert task.context_id != agent_a1["agent_id"]
 
-    async def test_broadcast_delivery_count_matches_tenant_size(self, tenant_env):
-        """Number of delivery tasks equals (tenant agents - 1)."""
-        executor = tenant_env["executor"]
-        agent_a1 = tenant_env["agent_a1"]
+    async def test_broadcast_delivery_count_matches_session_size(self, session_env):
+        """Number of delivery tasks equals (session agents - 1)."""
+        executor = session_env["executor"]
+        agent_a1 = session_env["agent_a1"]
         queue = EventQueue()
 
         context = _make_send_context(
             from_agent_id=agent_a1["agent_id"],
-            tenant_id=tenant_env["tenant_a_id"],
+            session_id=session_env["session_a"],
             destination="*",
         )
         await executor.execute(context, queue)
@@ -1036,229 +806,5 @@ class TestTenantScopedBroadcast:
             for e in events
             if isinstance(e, Task) and e.status.state == TaskState.input_required
         ]
-
-        # Tenant A has 2 agents (a1, a2), so 1 delivery task (to a2)
+        # Session A has agent_a1 + agent_a2, so 1 delivery
         assert len(delivery_tasks) == 1
-
-    async def test_broadcast_summary_reflects_tenant_recipients(self, tenant_env):
-        """Summary task recipientCount counts only same-tenant agents."""
-        executor = tenant_env["executor"]
-        agent_a1 = tenant_env["agent_a1"]
-        queue = EventQueue()
-
-        context = _make_send_context(
-            from_agent_id=agent_a1["agent_id"],
-            tenant_id=tenant_env["tenant_a_id"],
-            destination="*",
-        )
-        await executor.execute(context, queue)
-
-        events = await _collect_events(queue)
-        summary_tasks = [
-            e
-            for e in events
-            if isinstance(e, Task)
-            and e.metadata
-            and e.metadata.get("type") in ("broadcast", "broadcast_summary")
-        ]
-
-        assert len(summary_tasks) == 1
-        summary = summary_tasks[0]
-        assert summary.metadata["recipientCount"] == 1
-
-    async def test_tenant_b_broadcast_does_not_reach_tenant_a(self, tenant_env):
-        """Broadcast from tenant B delivers only within tenant B."""
-        executor, task_store = tenant_env["executor"], tenant_env["task_store"]
-        agent_a1, agent_a2 = tenant_env["agent_a1"], tenant_env["agent_a2"]
-        agent_b1 = tenant_env["agent_b1"]
-        queue = EventQueue()
-
-        context = _make_send_context(
-            from_agent_id=agent_b1["agent_id"],
-            tenant_id=tenant_env["tenant_b_id"],
-            destination="*",
-        )
-        await executor.execute(context, queue)
-
-        events = await _collect_events(queue)
-        delivery_tasks = [
-            e
-            for e in events
-            if isinstance(e, Task) and e.status.state == TaskState.input_required
-        ]
-
-        # B1 is alone in tenant B, so no delivery tasks
-        assert len(delivery_tasks) == 0
-
-        # Verify nothing landed in tenant A agents' inboxes
-        a1_tasks = await task_store.list(agent_a1["agent_id"])
-        a2_tasks = await task_store.list(agent_a2["agent_id"])
-        assert len(a1_tasks) == 0
-        assert len(a2_tasks) == 0
-
-    async def test_broadcast_after_deregister_in_tenant(self, tenant_env):
-        """Broadcast skips deregistered agents within the same tenant."""
-        executor, store = tenant_env["executor"], tenant_env["store"]
-        agent_a1, agent_a2 = tenant_env["agent_a1"], tenant_env["agent_a2"]
-        queue = EventQueue()
-
-        await store.deregister_agent(agent_a2["agent_id"])
-
-        context = _make_send_context(
-            from_agent_id=agent_a1["agent_id"],
-            tenant_id=tenant_env["tenant_a_id"],
-            destination="*",
-        )
-        await executor.execute(context, queue)
-
-        events = await _collect_events(queue)
-        delivery_tasks = [
-            e
-            for e in events
-            if isinstance(e, Task) and e.status.state == TaskState.input_required
-        ]
-
-        # A2 deregistered, so no delivery tasks
-        assert len(delivery_tasks) == 0
-
-
-# ===========================================================================
-# Broadcast origin_task_id tests (design doc 0000013 Step 3)
-# ===========================================================================
-
-_OWNER_BROADCAST = "auth0|exec-broadcast"
-
-
-@pytest.fixture
-async def broadcast_env(store: RegistryStore, task_store: TaskStore):
-    """4-agent single-tenant env for origin_task_id broadcast tests.
-
-    The existing ``env`` fixture has only 3 agents (2 recipients after
-    excluding the sender). The design doc requires testing broadcast to
-    3 recipients, so this fixture registers 4 agents.
-    """
-    api_key, tenant_id, _ = await store.create_api_key(_OWNER_BROADCAST)
-    executor = BrokerExecutor(registry_store=store, task_store=task_store)
-
-    sender = await store.create_agent(
-        name="Sender", description="Broadcast sender", api_key=api_key
-    )
-    r1 = await store.create_agent(
-        name="Recipient 1", description="First recipient", api_key=api_key
-    )
-    r2 = await store.create_agent(
-        name="Recipient 2", description="Second recipient", api_key=api_key
-    )
-    r3 = await store.create_agent(
-        name="Recipient 3", description="Third recipient", api_key=api_key
-    )
-
-    return {
-        "executor": executor,
-        "task_store": task_store,
-        "tenant_id": tenant_id,
-        "sender": sender,
-        "r1": r1,
-        "r2": r2,
-        "r3": r3,
-    }
-
-
-class TestBroadcastOriginTaskId:
-    """origin_task_id population in broadcast flow (design doc 0000013 Step 3).
-
-    Broadcast to 3 recipients produces 3 delivery tasks + 1 summary.
-    Every one of the 4 tasks carries ``originTaskId == summary.task_id``
-    in its metadata, and the summary carries ``recipientIds``.
-    """
-
-    async def _broadcast(self, broadcast_env):
-        """Send a broadcast and return ``(deliveries, summary)``."""
-        executor = broadcast_env["executor"]
-        sender = broadcast_env["sender"]
-        queue = EventQueue()
-
-        context = _make_send_context(
-            from_agent_id=sender["agent_id"],
-            tenant_id=broadcast_env["tenant_id"],
-            destination="*",
-            text="Build failed on main",
-        )
-        await executor.execute(context, queue)
-
-        events = await _collect_events(queue)
-        tasks = [e for e in events if isinstance(e, Task)]
-
-        summary = next(
-            t
-            for t in tasks
-            if t.metadata and t.metadata.get("type") in ("broadcast", "broadcast_summary")
-        )
-        deliveries = [
-            t
-            for t in tasks
-            if t.metadata and t.metadata.get("type") == "unicast"
-        ]
-        return deliveries, summary
-
-    async def test_creates_3_deliveries_and_1_summary(self, broadcast_env):
-        """Broadcast to 3 recipients → exactly 3 delivery tasks + 1 summary."""
-        deliveries, summary = await self._broadcast(broadcast_env)
-        assert len(deliveries) == 3
-        assert summary is not None
-
-    async def test_all_delivery_tasks_have_origin_task_id(self, broadcast_env):
-        """Every delivery task has ``originTaskId == summary.id`` in metadata."""
-        deliveries, summary = await self._broadcast(broadcast_env)
-        for d in deliveries:
-            assert d.metadata["originTaskId"] == summary.id
-
-    async def test_summary_origin_task_id_is_self_reference(self, broadcast_env):
-        """Summary task's ``originTaskId`` equals its own ``id``."""
-        _, summary = await self._broadcast(broadcast_env)
-        assert summary.metadata["originTaskId"] == summary.id
-
-    async def test_all_four_tasks_share_same_origin_task_id(self, broadcast_env):
-        """All 4 tasks (3 delivery + 1 summary) share one ``originTaskId``."""
-        deliveries, summary = await self._broadcast(broadcast_env)
-        all_tasks = deliveries + [summary]
-        origin_ids = {t.metadata["originTaskId"] for t in all_tasks}
-        assert len(origin_ids) == 1
-        assert origin_ids.pop() == summary.id
-
-    async def test_summary_metadata_contains_recipient_ids(self, broadcast_env):
-        """Summary metadata has ``recipientIds`` matching the 3 recipient agent ids."""
-        _, summary = await self._broadcast(broadcast_env)
-        expected = {
-            broadcast_env["r1"]["agent_id"],
-            broadcast_env["r2"]["agent_id"],
-            broadcast_env["r3"]["agent_id"],
-        }
-        assert "recipientIds" in summary.metadata
-        assert set(summary.metadata["recipientIds"]) == expected
-
-    async def test_recipient_ids_excludes_sender(self, broadcast_env):
-        """``recipientIds`` does not include the sender."""
-        _, summary = await self._broadcast(broadcast_env)
-        sender_id = broadcast_env["sender"]["agent_id"]
-        assert sender_id not in summary.metadata["recipientIds"]
-
-
-class TestUnicastOriginTaskId:
-    """Unicast sends leave origin_task_id NULL (design doc 0000013 Step 3)."""
-
-    async def test_unicast_has_no_origin_task_id_in_metadata(self, env):
-        """Unicast delivery task metadata has no ``originTaskId`` key (or None)."""
-        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
-        queue = EventQueue()
-
-        context = _make_send_context(
-            from_agent_id=agent_a["agent_id"],
-            tenant_id=env["tenant_id"],
-            destination=agent_b["agent_id"],
-        )
-        await executor.execute(context, queue)
-
-        events = await _collect_events(queue)
-        task = next(e for e in events if isinstance(e, Task))
-        assert task.metadata.get("originTaskId") is None

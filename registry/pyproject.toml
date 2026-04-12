@@ -13,7 +13,6 @@ dependencies = [
     "click",
     "pydantic",
     "pydantic-settings",
-    "PyJWT[crypto]",
 ]
 
 [project.scripts]

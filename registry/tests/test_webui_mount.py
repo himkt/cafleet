@@ -56,22 +56,22 @@ class TestWebuiRouterMounted:
     """Verify webui_router is included in the main app.
 
     Each WebUI API route should respond with a non-404 status, proving
-    the router is mounted. Without auth, endpoints return 401.
+    the router is mounted. Without session_id, endpoints return 400.
     """
 
-    async def test_auth_config_route_accessible(self, mounted_app):
-        """GET /ui/api/auth/config is reachable (returns 200)."""
+    async def test_sessions_route_accessible(self, mounted_app):
+        """GET /ui/api/sessions is reachable (returns 200)."""
         client = mounted_app["client"]
 
-        resp = await client.get("/ui/api/auth/config")
+        resp = await client.get("/ui/api/sessions")
         assert resp.status_code == 200
 
     async def test_agents_route_accessible(self, mounted_app):
-        """GET /ui/api/agents is reachable (returns 401 without auth, not 404)."""
+        """GET /ui/api/agents is reachable (returns 400 without session_id, not 404)."""
         client = mounted_app["client"]
 
         resp = await client.get("/ui/api/agents")
-        assert resp.status_code == 401
+        assert resp.status_code == 400
 
     async def test_inbox_route_accessible(self, mounted_app):
         """GET /ui/api/agents/{id}/inbox is reachable (not 404)."""
@@ -146,11 +146,11 @@ class TestRoutePrecedence:
     /ui/api/* requests hit the API handler, not the static file handler.
     """
 
-    async def test_auth_config_returns_json_not_html(self, mounted_app):
-        """GET /ui/api/auth/config returns JSON (API), not HTML (static fallback)."""
+    async def test_sessions_returns_json_not_html(self, mounted_app):
+        """GET /ui/api/sessions returns JSON (API), not HTML (static fallback)."""
         client = mounted_app["client"]
 
-        resp = await client.get("/ui/api/auth/config")
+        resp = await client.get("/ui/api/sessions")
         assert resp.status_code == 200
 
         content_type = resp.headers.get("content-type", "")
@@ -161,7 +161,7 @@ class TestRoutePrecedence:
         client = mounted_app["client"]
 
         resp = await client.get("/ui/api/agents")
-        assert resp.status_code == 401
+        assert resp.status_code == 400
 
         content_type = resp.headers.get("content-type", "")
         assert "application/json" in content_type
@@ -253,9 +253,8 @@ class TestDefaultWebuiDistDir:
             "index.html references /assets/ at the root; "
             "set base: '/ui/' in admin/vite.config.ts"
         )
-        assert '/ui/assets/' in body, (
-            "index.html does not reference /ui/assets/; "
-            "check Vite base config"
+        assert "/ui/assets/" in body, (
+            "index.html does not reference /ui/assets/; check Vite base config"
         )
 
     async def test_default_mount_serves_asset_files(self, db_sessionmaker):

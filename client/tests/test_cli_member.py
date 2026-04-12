@@ -2,6 +2,10 @@
 
 Covers: member create, member delete, member list, member capture.
 All tmux interaction is mocked — no real tmux server required.
+
+Design doc 0000015 Step 10: replace ``HIKYAKU_API_KEY`` env fixtures
+with ``HIKYAKU_SESSION_ID``; update ``BROKER_URL`` to ``127.0.0.1``;
+remove ``api_key`` from ``SAMPLE_REGISTER_RESULT``.
 """
 
 import json
@@ -16,14 +20,13 @@ from hikyaku_client.cli import cli
 # Fixtures & constants
 # ---------------------------------------------------------------------------
 
-BROKER_URL = "http://localhost:8000"
-API_KEY = "hky_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+BROKER_URL = "http://127.0.0.1:8000"
+SESSION_ID = "550e8400-e29b-41d4-a716-446655440001"
 DIRECTOR_ID = "director-0000-0000-0000-000000000001"
 MEMBER_ID = "member-0000-0000-0000-000000000002"
 
 SAMPLE_REGISTER_RESULT = {
     "agent_id": MEMBER_ID,
-    "api_key": API_KEY,
     "name": "Claude-B",
     "registered_at": "2026-04-12T10:15:00Z",
 }
@@ -59,7 +62,7 @@ def runner():
 
 
 def _auth_env():
-    return {"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY}
+    return {"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID}
 
 
 def _mock_tmux(monkeypatch):

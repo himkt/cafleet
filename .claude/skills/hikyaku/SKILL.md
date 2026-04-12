@@ -20,10 +20,10 @@ Use the `hikyaku` CLI to register as an agent, send and receive messages, and di
 
 ## Environment Variables
 
-The CLI reads both variables from the environment — they are the **only** way to configure the CLI. There are no `--url` / `--api-key` flags.
+The CLI reads both variables from the environment — they are the **only** way to configure the CLI. There are no `--url` / `--session-id` flags.
 
-- `HIKYAKU_URL` — Broker URL, must include the `http://` / `https://` scheme (e.g. `http://localhost:8000`). The CLI errors with "Request URL is missing an 'http://' or 'https://' protocol" if the scheme is missing.
-- `HIKYAKU_API_KEY` — API key created via the Hikyaku WebUI key-management page (format: `hky_` + 32 hex chars). Keys are shown only once at creation. The CLI exits with an error if this is not set.
+- `HIKYAKU_URL` — Broker URL, must include the `http://` / `https://` scheme (default: `http://127.0.0.1:8000`). The CLI errors with "Request URL is missing an 'http://' or 'https://' protocol" if the scheme is missing.
+- `HIKYAKU_SESSION_ID` — Session namespace ID created via `hikyaku-registry session create`. The CLI exits with `Error: HIKYAKU_SESSION_ID environment variable is required. Create a session with 'hikyaku-registry session create'.` if this is not set.
 
 ## Agent ID
 
@@ -42,9 +42,19 @@ hikyaku --json agents --agent-id <agent-id>
 
 ## Command Reference
 
+### Env
+
+Print the current `HIKYAKU_URL` and `HIKYAKU_SESSION_ID` values from the environment. Useful for verifying configuration before running other commands.
+
+```bash
+hikyaku env
+# HIKYAKU_URL=http://127.0.0.1:8000
+# HIKYAKU_SESSION_ID=550e8400-e29b-41d4-a716-446655440000
+```
+
 ### Register
 
-Register a new agent with the broker. `HIKYAKU_API_KEY` must be set.
+Register a new agent with the broker. `HIKYAKU_SESSION_ID` must be set.
 
 ```bash
 hikyaku register --name "My Agent" --description "What this agent does"
@@ -283,33 +293,40 @@ Output (`--json`):
 
 ## Typical Workflow
 
-1. **Register** with the broker (`HIKYAKU_API_KEY` must already be set; create the key in the Hikyaku WebUI first):
+1. **Create a session** (if one does not already exist):
+   ```bash
+   hikyaku-registry session create --label "my-project"
+   # → prints the session_id; export it
+   export HIKYAKU_SESSION_ID=<session_id>
+   ```
+
+2. **Register** with the broker (`HIKYAKU_SESSION_ID` must already be set):
    ```bash
    hikyaku register --name "Code Review Agent" --description "Reviews pull requests"
    # → record the returned agent_id as $MY_ID
    ```
 
-2. **Discover** other agents:
+3. **Discover** other agents:
    ```bash
    hikyaku agents --agent-id $MY_ID
    ```
 
-3. **Send** a message to another agent:
+4. **Send** a message to another agent:
    ```bash
    hikyaku send --agent-id $MY_ID --to <target-agent-id> --text "Please review PR #42"
    ```
 
-4. **Poll** for incoming messages:
+5. **Poll** for incoming messages:
    ```bash
    hikyaku poll --agent-id $MY_ID
    ```
 
-5. **Acknowledge** received messages:
+6. **Acknowledge** received messages:
    ```bash
    hikyaku ack --agent-id $MY_ID --task-id <task-id>
    ```
 
-6. **Repeat** steps 3-5 as needed. Use `hikyaku --json <cmd>` when parsing output programmatically.
+7. **Repeat** steps 4-6 as needed. Use `hikyaku --json <cmd>` when parsing output programmatically.
 
 ## Multi-Session Coordination
 
@@ -343,7 +360,7 @@ hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
   --description "Reviewer for PR #42"
 ```
 
-The command handles everything atomically: registering the agent, forwarding `HIKYAKU_URL`, `HIKYAKU_API_KEY`, and `HIKYAKU_AGENT_ID` to the new pane via `-e` flags, spawning `claude` with the prompt, and rebalancing the layout. No `printenv` step is needed.
+The command handles everything atomically: registering the agent, forwarding `HIKYAKU_URL`, `HIKYAKU_SESSION_ID`, and `HIKYAKU_AGENT_ID` to the new pane via `-e` flags, spawning `claude` with the prompt, and rebalancing the layout. No `printenv` step is needed.
 
 ### Shut down a member
 
@@ -368,7 +385,7 @@ Messages are modeled as A2A Tasks with this lifecycle:
 
 ## Error Handling
 
-- Missing `HIKYAKU_API_KEY` env var or missing `--agent-id` on authenticated commands exits with non-zero code
+- Missing `HIKYAKU_SESSION_ID` env var or missing `--agent-id` on commands exits with non-zero code
 - `HIKYAKU_URL` without an `http://` / `https://` scheme causes `Request URL is missing an 'http://' or 'https://' protocol`
 - Network errors and API errors are printed to stderr and exit with non-zero code
 - Use `hikyaku --json <cmd>` for machine-parseable output (including errors)

@@ -1,10 +1,12 @@
-"""Tests for CLI register command changes — HIKYAKU_API_KEY env var required.
+"""Tests for CLI register command — HIKYAKU_SESSION_ID env var required.
 
-Covers: removal of --api-key CLI option, register uses HIKYAKU_API_KEY
-env var, error message when missing, and api.register_agent always sending
-Authorization header.
+Design doc 0000015 Step 8: HIKYAKU_API_KEY → HIKYAKU_SESSION_ID,
+register gains _require_session_id entry check, session_id sent in
+POST body and X-Session-Id header (same code path as every other command).
 
-Design doc reference: Step 2 — Refactor CLI Global Options.
+Covers: register uses HIKYAKU_SESSION_ID env var, error message when
+missing (mentioning 'hikyaku-registry session create'), session_id
+passed to api.register_agent, X-Session-Id header on outgoing requests.
 """
 
 import json
@@ -31,13 +33,12 @@ def runner():
 # Constants
 # ---------------------------------------------------------------------------
 
-BROKER_URL = "http://localhost:8000"
-API_KEY = "hky_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+BROKER_URL = "http://127.0.0.1:8000"
+SESSION_ID = "550e8400-e29b-41d4-a716-446655440001"
 AGENT_ID = "550e8400-e29b-41d4-a716-446655440000"
 
 SAMPLE_AGENT = {
     "agent_id": AGENT_ID,
-    "api_key": API_KEY,
     "name": "test-agent",
     "description": "A test agent",
     "status": "active",
@@ -45,19 +46,19 @@ SAMPLE_AGENT = {
 
 
 # ===========================================================================
-# Register uses HIKYAKU_API_KEY env var
+# Register uses HIKYAKU_SESSION_ID env var
 # ===========================================================================
 
 
-class TestRegisterUsesEnvApiKey:
-    """Tests for register command using HIKYAKU_API_KEY env var.
+class TestRegisterUsesSessionId:
+    """Tests for register command using HIKYAKU_SESSION_ID env var.
 
-    The register command reads api_key from ctx.obj['api_key'],
-    which is populated from the HIKYAKU_API_KEY environment variable.
+    The register command reads session_id from ctx.obj['session_id'],
+    which is populated from the HIKYAKU_SESSION_ID environment variable.
     """
 
-    def test_env_api_key_passed_to_register(self, runner):
-        """Register with HIKYAKU_API_KEY env var passes it to api.register_agent."""
+    def test_session_id_passed_to_register(self, runner):
+        """Register with HIKYAKU_SESSION_ID env var passes it to api.register_agent."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
@@ -69,18 +70,20 @@ class TestRegisterUsesEnvApiKey:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
         call_kwargs = mock.call_args
         assert call_kwargs is not None
-        # api_key should be passed to register_agent
+        # session_id should be passed to register_agent
         all_args = list(call_kwargs.args) + list(call_kwargs.kwargs.values())
-        assert API_KEY in all_args or call_kwargs.kwargs.get("api_key") == API_KEY
+        assert (
+            SESSION_ID in all_args or call_kwargs.kwargs.get("session_id") == SESSION_ID
+        )
 
-    def test_api_key_via_env_var(self, runner):
-        """Register uses HIKYAKU_API_KEY env var for authentication."""
+    def test_session_id_via_env_var(self, runner):
+        """Register uses HIKYAKU_SESSION_ID env var for session scoping."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
@@ -88,14 +91,14 @@ class TestRegisterUsesEnvApiKey:
                 ["register", "--name", "test-agent", "--description", "test"],
                 env={
                     "HIKYAKU_URL": BROKER_URL,
-                    "HIKYAKU_API_KEY": API_KEY,
+                    "HIKYAKU_SESSION_ID": SESSION_ID,
                 },
             )
 
         assert result.exit_code == 0
 
-    def test_register_success_with_env_key(self, runner):
-        """Register succeeds and shows output when HIKYAKU_API_KEY is set."""
+    def test_register_success_with_session_id(self, runner):
+        """Register succeeds and shows output when HIKYAKU_SESSION_ID is set."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
@@ -107,14 +110,14 @@ class TestRegisterUsesEnvApiKey:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
         assert AGENT_ID in result.output
 
-    def test_register_json_output_with_env_key(self, runner):
-        """Register with --json outputs valid JSON when HIKYAKU_API_KEY is set."""
+    def test_register_json_output_with_session_id(self, runner):
+        """Register with --json outputs valid JSON when HIKYAKU_SESSION_ID is set."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             result = runner.invoke(
@@ -127,7 +130,7 @@ class TestRegisterUsesEnvApiKey:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_API_KEY": API_KEY},
+                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
@@ -136,19 +139,21 @@ class TestRegisterUsesEnvApiKey:
 
 
 # ===========================================================================
-# Missing HIKYAKU_API_KEY env var error
+# Missing HIKYAKU_SESSION_ID env var error
 # ===========================================================================
 
 
-class TestRegisterMissingApiKey:
-    """Tests for register command when HIKYAKU_API_KEY is missing.
+class TestRegisterMissingSessionId:
+    """Tests for register command when HIKYAKU_SESSION_ID is missing.
 
-    Register must validate that HIKYAKU_API_KEY env var is set and show
-    a specific error message if not.
+    Register must validate that HIKYAKU_SESSION_ID env var is set and show
+    a specific error message if not. Design doc specifies the exact message:
+    "Error: HIKYAKU_SESSION_ID environment variable is required. Create a
+    session with 'hikyaku-registry session create'."
     """
 
-    def test_missing_api_key_shows_error(self, runner):
-        """Register without HIKYAKU_API_KEY prints error and exits non-zero."""
+    def test_missing_session_id_shows_error(self, runner):
+        """Register without HIKYAKU_SESSION_ID prints error and exits non-zero."""
         result = runner.invoke(
             cli,
             [
@@ -163,8 +168,8 @@ class TestRegisterMissingApiKey:
 
         assert result.exit_code != 0
 
-    def test_missing_api_key_error_message(self, runner):
-        """Error message mentions HIKYAKU_API_KEY environment variable."""
+    def test_missing_session_id_error_message(self, runner):
+        """Error message mentions HIKYAKU_SESSION_ID environment variable."""
         result = runner.invoke(
             cli,
             [
@@ -178,10 +183,15 @@ class TestRegisterMissingApiKey:
         )
 
         output = result.output + (result.stderr or "")
-        assert "HIKYAKU_API_KEY" in output
+        assert "HIKYAKU_SESSION_ID" in output
 
-    def test_missing_api_key_mentions_webui(self, runner):
-        """Error message mentions creating API key at the WebUI."""
+    def test_missing_session_id_mentions_session_create(self, runner):
+        """Error message mentions 'hikyaku-registry session create'.
+
+        Design doc: error message should say "Create a session with
+        'hikyaku-registry session create'." (replaces old "Create an
+        API key at the Hikyaku WebUI.")
+        """
         result = runner.invoke(
             cli,
             [
@@ -195,10 +205,10 @@ class TestRegisterMissingApiKey:
         )
 
         output = result.output + (result.stderr or "")
-        assert "WebUI" in output or "webui" in output.lower()
+        assert "hikyaku-registry session create" in output
 
-    def test_missing_api_key_does_not_call_api(self, runner):
-        """Register without HIKYAKU_API_KEY does not make any API call."""
+    def test_missing_session_id_does_not_call_api(self, runner):
+        """Register without HIKYAKU_SESSION_ID does not make any API call."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
         with patch("hikyaku_client.cli.api.register_agent", mock):
             runner.invoke(
@@ -217,20 +227,20 @@ class TestRegisterMissingApiKey:
 
 
 # ===========================================================================
-# api.register_agent always sends Authorization header
+# api.register_agent sends X-Session-Id header (not Authorization: Bearer)
 # ===========================================================================
 
 
-class TestApiRegisterAgentAuth:
-    """Tests for api.register_agent always sending Authorization header.
+class TestApiRegisterAgentSessionHeader:
+    """Tests for api.register_agent sending X-Session-Id header.
 
-    The api_key parameter is required, and Authorization: Bearer <key>
-    is always included in the request.
+    Design doc: api.py sends X-Session-Id: <value> instead of
+    Authorization: Bearer <value>.
     """
 
     @pytest.mark.asyncio
-    async def test_always_sends_authorization_header(self):
-        """register_agent always includes Authorization: Bearer header."""
+    async def test_sends_x_session_id_header(self):
+        """register_agent sends X-Session-Id header (not Authorization: Bearer)."""
         from hikyaku_client.api import register_agent
 
         with patch("hikyaku_client.api.httpx.AsyncClient") as mock_client_cls:
@@ -244,18 +254,123 @@ class TestApiRegisterAgentAuth:
             mock_client_cls.return_value = mock_client
 
             await register_agent(
-                BROKER_URL, "test-agent", "A test agent", api_key=API_KEY
+                BROKER_URL, "test-agent", "A test agent", session_id=SESSION_ID
             )
 
             call_kwargs = mock_client.post.call_args
             headers = call_kwargs.kwargs.get("headers", {})
-            assert "Authorization" in headers
-            assert headers["Authorization"] == f"Bearer {API_KEY}"
+            assert "X-Session-Id" in headers, (
+                "register_agent should send X-Session-Id header"
+            )
+            assert headers["X-Session-Id"] == SESSION_ID
+            assert "Authorization" not in headers, (
+                "register_agent should NOT send Authorization: Bearer header"
+            )
 
     @pytest.mark.asyncio
-    async def test_api_key_is_required_parameter(self):
-        """register_agent requires api_key (not optional)."""
+    async def test_session_id_in_post_body(self):
+        """register_agent includes session_id in the POST body.
+
+        Design doc: api.register_agent adds session_id to the POST body
+        (matching the new POST /api/v1/agents contract).
+        """
+        from hikyaku_client.api import register_agent
+
+        with patch("hikyaku_client.api.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_response = AsyncMock()
+            mock_response.json.return_value = SAMPLE_AGENT
+            mock_response.raise_for_status = AsyncMock()
+            mock_client.post.return_value = mock_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            await register_agent(
+                BROKER_URL, "test-agent", "A test agent", session_id=SESSION_ID
+            )
+
+            call_kwargs = mock_client.post.call_args
+            body = call_kwargs.kwargs.get("json", {})
+            assert body.get("session_id") == SESSION_ID, (
+                "register_agent POST body should include session_id"
+            )
+
+    @pytest.mark.asyncio
+    async def test_session_id_is_required_parameter(self):
+        """register_agent requires session_id (not optional)."""
         from hikyaku_client.api import register_agent
 
         with pytest.raises(TypeError):
             await register_agent(BROKER_URL, "test-agent", "A test agent")
+
+
+# ===========================================================================
+# Deleted patterns — verify no api_key / Authorization: Bearer references
+# ===========================================================================
+
+
+class TestDeletedApiKeyPatterns:
+    """Verify that api_key and Authorization: Bearer are removed from api.py.
+
+    Design doc 0000015 Step 8: api_key parameters renamed to session_id,
+    Authorization: Bearer replaced with X-Session-Id.
+    """
+
+    def test_no_authorization_bearer_in_api(self):
+        """api.py should not contain 'Authorization: Bearer' strings."""
+        import inspect
+        from hikyaku_client import api as api_module
+
+        source = inspect.getsource(api_module)
+        assert "Authorization" not in source, (
+            "api.py should not reference 'Authorization' — "
+            "all requests should use X-Session-Id header"
+        )
+        assert "Bearer" not in source, (
+            "api.py should not reference 'Bearer' — "
+            "all requests should use X-Session-Id header"
+        )
+
+    def test_no_api_key_parameter_in_api(self):
+        """api.py functions should not have api_key parameter."""
+        import inspect
+        from hikyaku_client import api as api_module
+
+        source = inspect.getsource(api_module)
+        # api_key should be renamed to session_id
+        assert "api_key" not in source, (
+            "api.py should not have api_key parameters — "
+            "they should be renamed to session_id"
+        )
+
+
+# ===========================================================================
+# No SQLAlchemy dependency in client
+# ===========================================================================
+
+
+class TestNoSQLAlchemyDependency:
+    """Verify client has no SQLAlchemy dependency.
+
+    Design doc: client/ remains HTTP-only. SQLAlchemy/aiosqlite stay
+    in registry/ only.
+    """
+
+    def test_no_sqlalchemy_import(self):
+        """Client modules should not import sqlalchemy."""
+        import sys
+
+        # Ensure hikyaku_client is loaded
+        import hikyaku_client.cli  # noqa: F401
+        import hikyaku_client.api  # noqa: F401
+
+        client_modules = [
+            name for name in sys.modules if name.startswith("hikyaku_client")
+        ]
+        for mod_name in client_modules:
+            mod = sys.modules[mod_name]
+            if mod is not None:
+                assert not hasattr(mod, "sqlalchemy"), (
+                    f"{mod_name} should not import sqlalchemy"
+                )

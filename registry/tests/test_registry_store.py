@@ -1,95 +1,100 @@
-"""Tests for RegistryStore — SQL-backed agent + API key store.
+"""Tests for RegistryStore — SQL-backed agent + session store.
 
-Uses the conftest.py ``store`` and ``db_engine`` fixtures.
+Uses the conftest.py ``store``, ``db_engine``, and ``db_sessionmaker`` fixtures.
 
 ## Test isolation strategy
 
-The conftest fixture stack uses a session-scoped in-memory aiosqlite
+The conftest fixture stack uses a function-scoped in-memory aiosqlite
 engine that persists across tests within a single pytest session. To
 prevent cross-test contamination without per-test cleanup, every
-test generates a fresh ``owner_sub`` via ``_unique_owner()`` (UUID-
-based) and queries data scoped to that owner. Two tests can never
-see each other's api_keys, agents, or tasks because their scoping
-identifiers are disjoint.
-
-This is the **only** isolation mechanism in this file. Tests must
-NEVER call ``list_active_agents(tenant_id=None)`` (the unfiltered
-form) — that would return ALL active agents from ALL tests in the
-session. The unfiltered form is documented in the design doc
-Operation Mapping as "rare path; only used by tests" and is not
-exercised here.
+test generates a fresh session_id via ``_create_test_session()``
+(UUID-based) and queries data scoped to that session. Two tests can
+never see each other's sessions, agents, or tasks because their
+scoping identifiers are disjoint.
 
 ## Coverage map
 
   | Method                              | Test class                       |
   |-------------------------------------|----------------------------------|
-  | create_api_key                      | TestCreateApiKey                 |
   | create_agent                        | TestCreateAgent                  |
   | create_agent_with_placement         | TestCreateAgentWithPlacement     |
   | get_agent                           | TestGetAgent                     |
   | list_active_agents                  | TestListActiveAgents             |
   | deregister_agent                    | TestDeregisterAgent              |
-  | verify_agent_tenant                 | TestVerifyAgentTenant            |
-  | list_api_keys                       | TestListApiKeys                  |
-  | revoke_api_key                      | TestRevokeApiKey                 |
-  | get_api_key_status                  | TestGetApiKeyStatus              |
-  | is_api_key_active                   | TestIsApiKeyActive               |
-  | is_key_owner                        | TestIsKeyOwner                   |
+  | verify_agent_session                | TestVerifyAgentSession           |
+  | list_sessions                       | TestListSessions                 |
+  | get_session                         | TestGetSession                   |
   | get_agent_name                      | TestGetAgentName                 |
   | list_deregistered_agents_with_tasks | TestListDeregisteredAgentsWithTasks |
   | list_placements_for_director        | TestListPlacementsForDirector    |
 
-## Design-doc-named tests
-
-  - ``TestCreateAgent::test_rejects_unknown_tenant`` — verifies the FK
-    enforcement on ``agents.tenant_id -> api_keys.api_key_hash``.
-  - ``TestRevokeApiKey::test_atomic`` (happy path) and
-    ``TestRevokeApiKey::test_atomic_failure_rolls_back`` (failure half)
-    — together verify the multi-statement transaction atomicity.
-  - ``TestListApiKeys::test_no_n_plus_one`` — verifies the
-    LEFT JOIN + GROUP BY collapses N+1 into a single query.
+Deleted methods (no tests):
+  - create_api_key, list_api_keys, revoke_api_key, get_api_key_status,
+    is_api_key_active, is_key_owner — removed per design doc 0000015
 """
 
-import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import event, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+
+from hikyaku_registry.db.models import Session
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 #
-# All test data is scoped to a unique owner_sub per call so that tests
+# All test data is scoped to a unique session_id per call so that tests
 # sharing the session-scoped in-memory engine cannot contaminate each
-# other. The helpers below are intentionally minimal: they only do the
-# work that every test needs and avoid hiding meaningful setup behind
-# layers of indirection.
+# other.
 # ---------------------------------------------------------------------------
 
 
-def _unique_owner() -> str:
-    """Generate a unique ``owner_sub`` for test isolation."""
-    return f"auth0|test-{uuid.uuid4().hex[:12]}"
+async def _create_test_session(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    *,
+    session_id: str | None = None,
+    label: str | None = None,
+) -> str:
+    """Seed a session row directly via the DB sessionmaker.
+
+    Returns the ``session_id``. Session creation in production goes
+    through the CLI (sync), not through RegistryStore, so tests seed
+    sessions directly.
+    """
+    if session_id is None:
+        session_id = str(uuid.uuid4())
+    created_at = datetime.now(UTC).isoformat()
+
+    async with db_sessionmaker() as session:
+        async with session.begin():
+            session.add(
+                Session(
+                    session_id=session_id,
+                    label=label,
+                    created_at=created_at,
+                )
+            )
+
+    return session_id
 
 
-async def _make_owner_with_key(store) -> tuple[str, str, str]:
-    """Create a fresh owner + api_key. Returns ``(api_key, api_key_hash, owner_sub)``."""
-    owner = _unique_owner()
-    api_key, api_key_hash, _created_at = await store.create_api_key(owner)
-    return api_key, api_key_hash, owner
+async def _make_session_with_id(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+) -> str:
+    """Create a session with a unique UUID and return the session_id."""
+    return await _create_test_session(db_sessionmaker)
 
 
 async def _seed_task_for_agent(db_engine, *, agent_id: str) -> None:
     """Insert one task into ``tasks`` with ``context_id = agent_id``.
 
     Used by ``TestListDeregisteredAgentsWithTasks`` to set up the
-    "agent has at least one task" precondition. Goes through raw
-    SQL rather than ``TaskStore`` because ``TaskStore`` is rewritten
-    in Step 6 and is not yet in scope.
+    "agent has at least one task" precondition.
     """
     now = datetime.now(UTC).isoformat()
     async with db_engine.begin() as conn:
@@ -112,72 +117,40 @@ async def _seed_task_for_agent(db_engine, *, agent_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# create_api_key
-# ---------------------------------------------------------------------------
-
-
-class TestCreateApiKey:
-    """Tests for ``RegistryStore.create_api_key(owner_sub)``."""
-
-    async def test_returns_three_tuple(self, store):
-        """Returns ``(api_key, api_key_hash, created_at)``."""
-        owner = _unique_owner()
-        result = await store.create_api_key(owner)
-        assert isinstance(result, tuple)
-        assert len(result) == 3
-        api_key, api_key_hash, created_at = result
-        assert isinstance(api_key, str)
-        assert isinstance(api_key_hash, str)
-        assert isinstance(created_at, str)
-        # created_at must be ISO-8601 parseable
-        datetime.fromisoformat(created_at)
-
-    async def test_each_call_returns_unique_key_and_hash(self, store):
-        """Successive calls return distinct api_keys with matching hashes."""
-        owner = _unique_owner()
-        a_key, a_hash, _ = await store.create_api_key(owner)
-        b_key, b_hash, _ = await store.create_api_key(owner)
-        assert a_key != b_key
-        assert a_hash != b_hash
-        assert a_hash == hashlib.sha256(a_key.encode()).hexdigest()
-        assert b_hash == hashlib.sha256(b_key.encode()).hexdigest()
-
-    async def test_persists_and_listable(self, store):
-        """A newly created key is visible via ``list_api_keys``."""
-        owner = _unique_owner()
-        _, api_key_hash, _ = await store.create_api_key(owner)
-        keys = await store.list_api_keys(owner)
-        assert len(keys) == 1
-        assert keys[0]["tenant_id"] == api_key_hash
-        assert keys[0]["status"] == "active"
-
-
-# ---------------------------------------------------------------------------
 # create_agent
 # ---------------------------------------------------------------------------
 
 
 class TestCreateAgent:
-    """Tests for ``RegistryStore.create_agent``."""
+    """Tests for ``RegistryStore.create_agent(session_id=...)``.
 
-    async def test_returns_required_fields(self, store):
-        """Result contains ``agent_id``, ``api_key``, ``name``, ``registered_at``."""
-        api_key, _, _ = await _make_owner_with_key(store)
+    Design doc 0000015 Step 4: ``create_agent`` takes ``session_id``
+    directly (no ``api_key``, no SHA-256 derivation).
+    """
+
+    async def test_returns_required_fields(self, store, db_sessionmaker):
+        """Result contains ``agent_id``, ``name``, ``registered_at``."""
+        session_id = await _create_test_session(db_sessionmaker)
         result = await store.create_agent(
-            "Test Agent", "A test agent", None, api_key=api_key
+            "Test Agent", "A test agent", None, session_id=session_id
         )
         assert "agent_id" in result
-        assert "api_key" in result
         assert "name" in result
         assert "registered_at" in result
-        assert result["api_key"] == api_key
         assert result["name"] == "Test Agent"
-        # registered_at must be ISO-8601 parseable
         datetime.fromisoformat(result["registered_at"])
 
-    async def test_with_skills_persists_in_agent_card(self, store):
+    async def test_no_api_key_in_result(self, store, db_sessionmaker):
+        """Result does NOT contain ``api_key`` — key concept is removed."""
+        session_id = await _create_test_session(db_sessionmaker)
+        result = await store.create_agent(
+            "Test Agent", "A test agent", None, session_id=session_id
+        )
+        assert "api_key" not in result
+
+    async def test_with_skills_persists_in_agent_card(self, store, db_sessionmaker):
         """Skills passed to create_agent appear in ``agent_card_json``."""
-        api_key, _, _ = await _make_owner_with_key(store)
+        session_id = await _create_test_session(db_sessionmaker)
         skills = [
             {
                 "id": "py",
@@ -186,35 +159,31 @@ class TestCreateAgent:
                 "tags": ["lang"],
             }
         ]
-        result = await store.create_agent("Skilled", "desc", skills, api_key=api_key)
+        result = await store.create_agent(
+            "Skilled", "desc", skills, session_id=session_id
+        )
         agent = await store.get_agent(result["agent_id"])
         assert agent is not None
         card = json.loads(agent["agent_card_json"])
         assert card.get("skills") and card["skills"][0]["id"] == "py"
 
-    async def test_unique_agent_ids(self, store):
-        """Multiple agents under the same key get distinct ``agent_id``s."""
-        api_key, _, _ = await _make_owner_with_key(store)
-        a = await store.create_agent("a", "d", None, api_key=api_key)
-        b = await store.create_agent("b", "d", None, api_key=api_key)
+    async def test_unique_agent_ids(self, store, db_sessionmaker):
+        """Multiple agents under the same session get distinct ``agent_id``s."""
+        session_id = await _create_test_session(db_sessionmaker)
+        a = await store.create_agent("a", "d", None, session_id=session_id)
+        b = await store.create_agent("b", "d", None, session_id=session_id)
         assert a["agent_id"] != b["agent_id"]
 
-    async def test_rejects_unknown_tenant(self, store):
-        """Creating an agent with an api_key whose hash is not in api_keys raises ``IntegrityError``.
+    async def test_rejects_unknown_session(self, store):
+        """Creating an agent with a session_id not in sessions raises ``IntegrityError``.
 
-        DESIGN-DOC-NAMED test: verifies the FK constraint
-        ``agents.tenant_id -> api_keys.api_key_hash`` enforces
-        tenant existence at INSERT time. Without the FK + PRAGMA
-        ``foreign_keys=ON``, an orphan agent could be inserted with
-        no parent api_key row, breaking referential integrity.
-
-        The test uses a fabricated api_key (``hky_`` + 32 ``f``s) whose
-        SHA-256 hash is statistically guaranteed not to collide with
-        any real api_key in the test session.
+        Verifies the FK constraint ``agents.session_id -> sessions.session_id``
+        enforces session existence at INSERT time.
         """
-        fake_api_key = "hky_" + "f" * 32
         with pytest.raises(IntegrityError):
-            await store.create_agent("Orphan", "desc", None, api_key=fake_api_key)
+            await store.create_agent(
+                "Orphan", "desc", None, session_id="nonexistent-session-id"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -223,25 +192,15 @@ class TestCreateAgent:
 
 
 class TestCreateAgentWithPlacement:
-    """Tests for ``RegistryStore.create_agent_with_placement``.
+    """Tests for ``RegistryStore.create_agent_with_placement``."""
 
-    ``create_agent_with_placement`` is a superset of ``create_agent`` that
-    optionally writes an ``agent_placements`` row in the same transaction.
-    The old ``create_agent`` delegates to this method with
-    ``placement=None`` so there is one code path for both flows.
-    """
-
-    async def test_create_agent_with_placement(self, store):
-        """Both the agent row and the ``agent_placements`` row are created
-        atomically. The placement row has the correct fields.
-
-        DESIGN-DOC-NAMED test (Tests § registry/tests/).
-        """
+    async def test_create_agent_with_placement(self, store, db_sessionmaker):
+        """Both the agent row and the placement row are created atomically."""
         from hikyaku_registry.models import PlacementCreate
 
-        api_key, _, _ = await _make_owner_with_key(store)
+        session_id = await _create_test_session(db_sessionmaker)
         director = await store.create_agent(
-            "Director", "Lead agent", None, api_key=api_key
+            "Director", "Lead agent", None, session_id=session_id
         )
 
         placement = PlacementCreate(
@@ -254,7 +213,7 @@ class TestCreateAgentWithPlacement:
             name="Member-A",
             description="Test member",
             skills=None,
-            api_key=api_key,
+            session_id=session_id,
             placement=placement,
         )
 
@@ -262,44 +221,37 @@ class TestCreateAgentWithPlacement:
         assert result["name"] == "Member-A"
         assert "registered_at" in result
 
-        # Verify agent was created and is active
         agent = await store.get_agent(result["agent_id"])
         assert agent is not None
         assert agent["status"] == "active"
 
-        # Verify placement was created with correct fields
         p = await store.get_placement(agent_id=result["agent_id"])
         assert p is not None
         assert p["director_agent_id"] == director["agent_id"]
         assert p["tmux_session"] == "main"
         assert p["tmux_window_id"] == "@3"
-        assert p["tmux_pane_id"] is None, "pending placement has NULL pane_id"
-        assert "created_at" in p
+        assert p["tmux_pane_id"] is None
 
-    async def test_without_placement_creates_agent_only(self, store):
-        """Calling with ``placement=None`` behaves like plain ``create_agent`` —
-        no ``agent_placements`` row is written."""
-        api_key, _, _ = await _make_owner_with_key(store)
+    async def test_without_placement_creates_agent_only(self, store, db_sessionmaker):
+        """Calling with ``placement=None`` creates agent but no placement row."""
+        session_id = await _create_test_session(db_sessionmaker)
         result = await store.create_agent_with_placement(
             name="Plain Agent",
             description="No placement",
             skills=None,
-            api_key=api_key,
+            session_id=session_id,
             placement=None,
         )
         assert "agent_id" in result
-        assert result["name"] == "Plain Agent"
-
         p = await store.get_placement(agent_id=result["agent_id"])
         assert p is None
 
-    async def test_placement_with_pane_id(self, store):
-        """When ``tmux_pane_id`` is provided (non-NULL), it is stored
-        correctly on the placement row."""
+    async def test_placement_with_pane_id(self, store, db_sessionmaker):
+        """When ``tmux_pane_id`` is provided, it is stored correctly."""
         from hikyaku_registry.models import PlacementCreate
 
-        api_key, _, _ = await _make_owner_with_key(store)
-        director = await store.create_agent("Dir", "d", None, api_key=api_key)
+        session_id = await _create_test_session(db_sessionmaker)
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
 
         placement = PlacementCreate(
             director_agent_id=director["agent_id"],
@@ -311,14 +263,12 @@ class TestCreateAgentWithPlacement:
             name="Member-B",
             description="Has pane",
             skills=None,
-            api_key=api_key,
+            session_id=session_id,
             placement=placement,
         )
 
         p = await store.get_placement(agent_id=result["agent_id"])
         assert p is not None
-        assert p["tmux_session"] == "work"
-        assert p["tmux_window_id"] == "@5"
         assert p["tmux_pane_id"] == "%12"
 
 
@@ -330,10 +280,10 @@ class TestCreateAgentWithPlacement:
 class TestGetAgent:
     """Tests for ``RegistryStore.get_agent``."""
 
-    async def test_returns_existing_agent(self, store):
-        api_key, _, _ = await _make_owner_with_key(store)
+    async def test_returns_existing_agent(self, store, db_sessionmaker):
+        session_id = await _create_test_session(db_sessionmaker)
         created = await store.create_agent(
-            "Test Agent", "A test agent", None, api_key=api_key
+            "Test Agent", "A test agent", None, session_id=session_id
         )
         agent = await store.get_agent(created["agent_id"])
         assert agent is not None
@@ -346,10 +296,10 @@ class TestGetAgent:
         agent = await store.get_agent("00000000-0000-4000-8000-000000000000")
         assert agent is None
 
-    async def test_returns_record_for_deregistered_agent(self, store):
+    async def test_returns_record_for_deregistered_agent(self, store, db_sessionmaker):
         """Deregistered agents still have a get_agent record (soft delete)."""
-        api_key, _, _ = await _make_owner_with_key(store)
-        created = await store.create_agent("a", "d", None, api_key=api_key)
+        session_id = await _create_test_session(db_sessionmaker)
+        created = await store.create_agent("a", "d", None, session_id=session_id)
         await store.deregister_agent(created["agent_id"])
         agent = await store.get_agent(created["agent_id"])
         assert agent is not None
@@ -362,44 +312,45 @@ class TestGetAgent:
 
 
 class TestListActiveAgents:
-    """Tests for ``RegistryStore.list_active_agents(tenant_id=...)``.
+    """Tests for ``RegistryStore.list_active_agents(session_id=...)``.
 
-    Always passes ``tenant_id`` so that tests are scoped to their own
-    api_key and immune to cross-test contamination from the shared
-    in-memory DB.
+    Always passes ``session_id`` so that tests are scoped to their own
+    session and immune to cross-test contamination.
     """
 
-    async def test_empty_for_new_tenant(self, store):
-        _, hash_a, _ = await _make_owner_with_key(store)
-        agents = await store.list_active_agents(tenant_id=hash_a)
+    async def test_empty_for_new_session(self, store, db_sessionmaker):
+        session_id = await _create_test_session(db_sessionmaker)
+        agents = await store.list_active_agents(session_id=session_id)
         assert agents == []
 
-    async def test_returns_all_active_for_tenant(self, store):
-        api_key, hash_a, _ = await _make_owner_with_key(store)
-        await store.create_agent("a1", "d", None, api_key=api_key)
-        await store.create_agent("a2", "d", None, api_key=api_key)
-        agents = await store.list_active_agents(tenant_id=hash_a)
+    async def test_returns_all_active_for_session(self, store, db_sessionmaker):
+        session_id = await _create_test_session(db_sessionmaker)
+        await store.create_agent("a1", "d", None, session_id=session_id)
+        await store.create_agent("a2", "d", None, session_id=session_id)
+        agents = await store.list_active_agents(session_id=session_id)
         assert len(agents) == 2
         assert {a["name"] for a in agents} == {"a1", "a2"}
 
-    async def test_excludes_deregistered_agents(self, store):
-        api_key, hash_a, _ = await _make_owner_with_key(store)
-        a = await store.create_agent("a", "d", None, api_key=api_key)
-        b = await store.create_agent("b", "d", None, api_key=api_key)
+    async def test_excludes_deregistered_agents(self, store, db_sessionmaker):
+        session_id = await _create_test_session(db_sessionmaker)
+        a = await store.create_agent("a", "d", None, session_id=session_id)
+        b = await store.create_agent("b", "d", None, session_id=session_id)
         await store.deregister_agent(a["agent_id"])
-        agents = await store.list_active_agents(tenant_id=hash_a)
+        agents = await store.list_active_agents(session_id=session_id)
         assert len(agents) == 1
         assert agents[0]["agent_id"] == b["agent_id"]
 
-    async def test_filters_by_tenant_id_isolates_tenants(self, store):
-        """Cross-tenant isolation: agents in tenant A do not appear in tenant B."""
-        api_key_a, hash_a, _ = await _make_owner_with_key(store)
-        api_key_b, hash_b, _ = await _make_owner_with_key(store)
-        await store.create_agent("a", "d", None, api_key=api_key_a)
-        await store.create_agent("b", "d", None, api_key=api_key_b)
+    async def test_filters_by_session_id_isolates_sessions(
+        self, store, db_sessionmaker
+    ):
+        """Cross-session isolation: agents in session A do not appear in session B."""
+        session_a = await _create_test_session(db_sessionmaker)
+        session_b = await _create_test_session(db_sessionmaker)
+        await store.create_agent("a", "d", None, session_id=session_a)
+        await store.create_agent("b", "d", None, session_id=session_b)
 
-        a_list = await store.list_active_agents(tenant_id=hash_a)
-        b_list = await store.list_active_agents(tenant_id=hash_b)
+        a_list = await store.list_active_agents(session_id=session_a)
+        b_list = await store.list_active_agents(session_id=session_b)
         assert {x["name"] for x in a_list} == {"a"}
         assert {x["name"] for x in b_list} == {"b"}
 
@@ -412,27 +363,21 @@ class TestListActiveAgents:
 class TestDeregisterAgent:
     """Tests for ``RegistryStore.deregister_agent``."""
 
-    async def test_sets_status_and_timestamp(self, store):
-        api_key, _, _ = await _make_owner_with_key(store)
-        created = await store.create_agent("a", "d", None, api_key=api_key)
+    async def test_sets_status_and_timestamp(self, store, db_sessionmaker):
+        session_id = await _create_test_session(db_sessionmaker)
+        created = await store.create_agent("a", "d", None, session_id=session_id)
         result = await store.deregister_agent(created["agent_id"])
         assert result is True
 
         agent = await store.get_agent(created["agent_id"])
         assert agent["status"] == "deregistered"
         assert agent.get("deregistered_at"), "deregistered_at must be set"
-        datetime.fromisoformat(agent["deregistered_at"])  # parses
+        datetime.fromisoformat(agent["deregistered_at"])
 
-    async def test_returns_false_for_already_deregistered(self, store):
-        """Idempotency: a second deregister call returns False (no-op).
-
-        The new SQL implementation uses ``UPDATE ... WHERE status='active'``,
-        so the second call's rowcount is zero and the method returns False.
-        This matches the design doc's `single-statement update returning
-        affected row count` semantics.
-        """
-        api_key, _, _ = await _make_owner_with_key(store)
-        created = await store.create_agent("a", "d", None, api_key=api_key)
+    async def test_returns_false_for_already_deregistered(self, store, db_sessionmaker):
+        """Idempotency: a second deregister call returns False (no-op)."""
+        session_id = await _create_test_session(db_sessionmaker)
+        created = await store.create_agent("a", "d", None, session_id=session_id)
         first = await store.deregister_agent(created["agent_id"])
         second = await store.deregister_agent(created["agent_id"])
         assert first is True
@@ -442,22 +387,12 @@ class TestDeregisterAgent:
         result = await store.deregister_agent("00000000-0000-4000-8000-000000000000")
         assert result is False
 
-    async def test_deregister_cascades_placement(self, store):
-        """Deregistering an agent also hard-deletes its ``agent_placements`` row.
-
-        DESIGN-DOC-NAMED test (Tests § registry/tests/):
-
-          "placement row removed on soft-deregister"
-
-        The placement row has no historical value and must not outlive
-        the agent it describes. ``deregister_agent`` extends the existing
-        soft-delete with an explicit ``DELETE FROM agent_placements
-        WHERE agent_id = ?`` in the same session transaction.
-        """
+    async def test_deregister_cascades_placement(self, store, db_sessionmaker):
+        """Deregistering an agent also hard-deletes its placement row."""
         from hikyaku_registry.models import PlacementCreate
 
-        api_key, _, _ = await _make_owner_with_key(store)
-        director = await store.create_agent("Dir", "d", None, api_key=api_key)
+        session_id = await _create_test_session(db_sessionmaker)
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
 
         placement = PlacementCreate(
             director_agent_id=director["agent_id"],
@@ -469,311 +404,162 @@ class TestDeregisterAgent:
             name="Member",
             description="Will be deregistered",
             skills=None,
-            api_key=api_key,
+            session_id=session_id,
             placement=placement,
         )
 
-        # Pre-condition: placement exists
         assert await store.get_placement(agent_id=member["agent_id"]) is not None
-
-        # Deregister
         result = await store.deregister_agent(member["agent_id"])
         assert result is True
 
-        # Agent is soft-deleted
         agent = await store.get_agent(member["agent_id"])
         assert agent["status"] == "deregistered"
-
-        # Placement row is hard-deleted
         assert await store.get_placement(agent_id=member["agent_id"]) is None
 
 
 # ---------------------------------------------------------------------------
-# verify_agent_tenant
+# verify_agent_session (renamed from verify_agent_tenant)
 # ---------------------------------------------------------------------------
 
 
-class TestVerifyAgentTenant:
-    """Tests for ``RegistryStore.verify_agent_tenant``."""
+class TestVerifyAgentSession:
+    """Tests for ``RegistryStore.verify_agent_session``.
 
-    async def test_matching_tenant_returns_true(self, store):
-        api_key, hash_a, _ = await _make_owner_with_key(store)
-        agent = await store.create_agent("a", "d", None, api_key=api_key)
-        assert await store.verify_agent_tenant(agent["agent_id"], hash_a) is True
+    Renamed from ``verify_agent_tenant`` per design doc 0000015 Step 4.
+    """
 
-    async def test_wrong_tenant_returns_false(self, store):
-        api_key_a, _, _ = await _make_owner_with_key(store)
-        _, hash_b, _ = await _make_owner_with_key(store)
-        agent = await store.create_agent("a", "d", None, api_key=api_key_a)
-        assert await store.verify_agent_tenant(agent["agent_id"], hash_b) is False
+    async def test_matching_session_returns_true(self, store, db_sessionmaker):
+        session_id = await _create_test_session(db_sessionmaker)
+        agent = await store.create_agent("a", "d", None, session_id=session_id)
+        assert await store.verify_agent_session(agent["agent_id"], session_id) is True
 
-    async def test_nonexistent_agent_returns_false(self, store):
-        _, hash_a, _ = await _make_owner_with_key(store)
+    async def test_wrong_session_returns_false(self, store, db_sessionmaker):
+        session_a = await _create_test_session(db_sessionmaker)
+        session_b = await _create_test_session(db_sessionmaker)
+        agent = await store.create_agent("a", "d", None, session_id=session_a)
+        assert await store.verify_agent_session(agent["agent_id"], session_b) is False
+
+    async def test_nonexistent_agent_returns_false(self, store, db_sessionmaker):
+        session_id = await _create_test_session(db_sessionmaker)
         assert (
-            await store.verify_agent_tenant(
-                "00000000-0000-4000-8000-000000000000", hash_a
+            await store.verify_agent_session(
+                "00000000-0000-4000-8000-000000000000", session_id
             )
             is False
         )
 
-    async def test_deregistered_agent_still_verifiable(self, store):
-        """A deregistered agent's row still has tenant_id; verify must still work."""
-        api_key, hash_a, _ = await _make_owner_with_key(store)
-        agent = await store.create_agent("a", "d", None, api_key=api_key)
+    async def test_deregistered_agent_still_verifiable(self, store, db_sessionmaker):
+        """A deregistered agent's row still has session_id; verify must still work."""
+        session_id = await _create_test_session(db_sessionmaker)
+        agent = await store.create_agent("a", "d", None, session_id=session_id)
         await store.deregister_agent(agent["agent_id"])
-        assert await store.verify_agent_tenant(agent["agent_id"], hash_a) is True
+        assert await store.verify_agent_session(agent["agent_id"], session_id) is True
 
 
 # ---------------------------------------------------------------------------
-# list_api_keys
+# list_sessions (new — async, read-only)
 # ---------------------------------------------------------------------------
 
 
-class TestListApiKeys:
-    """Tests for ``RegistryStore.list_api_keys(owner_sub)``."""
+class TestListSessions:
+    """Tests for ``RegistryStore.list_sessions``.
 
-    async def test_returns_empty_for_new_owner(self, store):
-        owner = _unique_owner()
-        keys = await store.list_api_keys(owner)
-        assert keys == []
+    Design doc 0000015 Step 4: async method returning all sessions
+    with agent_count for the WebUI ``GET /ui/api/sessions`` endpoint.
+    """
 
-    async def test_returns_zero_count_when_no_agents(self, store):
-        owner = _unique_owner()
-        await store.create_api_key(owner)
-        keys = await store.list_api_keys(owner)
-        assert len(keys) == 1
-        assert keys[0]["agent_count"] == 0
+    async def test_returns_empty_when_no_sessions(self, store):
+        """No sessions in the DB returns an empty list."""
+        sessions = await store.list_sessions()
+        # May not be strictly empty if other tests seeded sessions,
+        # but a fresh fixture should be empty.
+        assert isinstance(sessions, list)
 
-    async def test_excludes_deregistered_agents_from_count(self, store):
-        """``agent_count`` only counts agents with status='active'."""
-        api_key, _, owner = await _make_owner_with_key(store)
-        a = await store.create_agent("a", "d", None, api_key=api_key)
-        await store.create_agent("b", "d", None, api_key=api_key)
+    async def test_returns_seeded_session(self, store, db_sessionmaker):
+        """A seeded session appears in the list."""
+        session_id = await _create_test_session(db_sessionmaker, label="test-session")
+        sessions = await store.list_sessions()
+        match = [s for s in sessions if s["session_id"] == session_id]
+        assert len(match) == 1
+        assert match[0]["label"] == "test-session"
+        assert "created_at" in match[0]
+        assert "agent_count" in match[0]
+
+    async def test_agent_count_reflects_active_agents(self, store, db_sessionmaker):
+        """agent_count counts only active agents in the session."""
+        session_id = await _create_test_session(db_sessionmaker)
+        a = await store.create_agent("a", "d", None, session_id=session_id)
+        await store.create_agent("b", "d", None, session_id=session_id)
         await store.deregister_agent(a["agent_id"])
 
-        keys = await store.list_api_keys(owner)
-        assert len(keys) == 1
-        assert keys[0]["agent_count"] == 1, (
-            f"only the still-active agent should be counted, got {keys}"
+        sessions = await store.list_sessions()
+        match = [s for s in sessions if s["session_id"] == session_id]
+        assert len(match) == 1
+        assert match[0]["agent_count"] == 1, (
+            "agent_count should only count active agents"
         )
 
-    async def test_no_n_plus_one(self, store, db_engine):
-        """``list_api_keys`` emits exactly one SELECT against ``api_keys``.
+    async def test_agent_count_zero_when_no_agents(self, store, db_sessionmaker):
+        """A session with no agents has agent_count=0."""
+        session_id = await _create_test_session(db_sessionmaker)
+        sessions = await store.list_sessions()
+        match = [s for s in sessions if s["session_id"] == session_id]
+        assert len(match) == 1
+        assert match[0]["agent_count"] == 0
 
-        DESIGN-DOC-NAMED test (Testing Strategy):
+    async def test_multiple_sessions_each_with_own_count(self, store, db_sessionmaker):
+        """Multiple sessions have independent agent counts."""
+        session_a = await _create_test_session(db_sessionmaker, label="A")
+        session_b = await _create_test_session(db_sessionmaker, label="B")
+        await store.create_agent("a1", "d", None, session_id=session_a)
+        await store.create_agent("a2", "d", None, session_id=session_a)
+        await store.create_agent("b1", "d", None, session_id=session_b)
 
-          "Snapshot the SQL emitted by list_api_keys and assert it is
-           exactly one query"
+        sessions = await store.list_sessions()
+        a = [s for s in sessions if s["session_id"] == session_a][0]
+        b = [s for s in sessions if s["session_id"] == session_b][0]
+        assert a["agent_count"] == 2
+        assert b["agent_count"] == 1
 
-        A correct implementation collapses the fetch into a single
-        ``SELECT`` with ``LEFT JOIN`` + ``GROUP BY`` rather than issuing
-        one query per key.
-
-        Mechanism: install a ``before_cursor_execute`` listener that
-        captures every statement during the call, then filter to
-        ``SELECT ... api_keys ...`` (case-insensitive substring).
-        The substring filter excludes any internal SQLAlchemy
-        bookkeeping statements like ``SELECT sqlite_version()`` that
-        fire on first connection.
-        """
-        owner = _unique_owner()
-        for i in range(3):
-            api_key, _, _ = await store.create_api_key(owner)
-            for j in range(5):
-                await store.create_agent(f"a{i}-{j}", "d", None, api_key=api_key)
-
-        captured: list[str] = []
-
-        @event.listens_for(db_engine.sync_engine, "before_cursor_execute")
-        def _capture(conn, cursor, statement, parameters, context, executemany):
-            captured.append(statement)
-
-        try:
-            result = await store.list_api_keys(owner)
-        finally:
-            event.remove(db_engine.sync_engine, "before_cursor_execute", _capture)
-
-        api_key_selects = [
-            s
-            for s in captured
-            if s.lstrip().upper().startswith("SELECT") and "api_keys" in s.lower()
-        ]
-        assert len(api_key_selects) == 1, (
-            f"list_api_keys must emit exactly ONE SELECT against api_keys "
-            f"(no N+1), got {len(api_key_selects)}. all captured "
-            f"statements:\n"
-            + "\n".join(f"  {i + 1}: {s}" for i, s in enumerate(captured))
-        )
-
-        assert len(result) == 3, (
-            f"list_api_keys should return 3 entries, got {len(result)}"
-        )
-        total = sum(item["agent_count"] for item in result)
-        assert total == 15, (
-            f"total agent_count across all keys should be 15 "
-            f"(3 keys × 5 agents), got {total}"
-        )
+    async def test_session_with_null_label(self, store, db_sessionmaker):
+        """A session with no label returns label=None."""
+        session_id = await _create_test_session(db_sessionmaker, label=None)
+        sessions = await store.list_sessions()
+        match = [s for s in sessions if s["session_id"] == session_id]
+        assert len(match) == 1
+        assert match[0]["label"] is None
 
 
 # ---------------------------------------------------------------------------
-# revoke_api_key
+# get_session (new — async, read-only)
 # ---------------------------------------------------------------------------
 
 
-class TestRevokeApiKey:
-    """Tests for ``RegistryStore.revoke_api_key``."""
+class TestGetSession:
+    """Tests for ``RegistryStore.get_session``.
 
-    async def test_atomic(self, store):
-        """Revoking with N agents commits all updates atomically.
+    Design doc 0000015 Step 4: async method returning a single session
+    by session_id, or None if not found.
+    """
 
-        DESIGN-DOC-NAMED test (Testing Strategy):
-
-          "Revoking a key with N agents results in all N agents
-           status='deregistered' after a single transaction"
-
-        Happy-path half of the atomicity claim. See
-        ``test_atomic_failure_rolls_back`` below for the rollback half.
-        """
-        api_key, api_key_hash, owner = await _make_owner_with_key(store)
-        for i in range(3):
-            await store.create_agent(f"a{i}", "d", None, api_key=api_key)
-
-        result = await store.revoke_api_key(api_key_hash, owner)
-        assert result is True
-
-        assert await store.get_api_key_status(api_key_hash) == "revoked"
-        active = await store.list_active_agents(tenant_id=api_key_hash)
-        assert active == [], (
-            f"all agents under the revoked tenant should be deregistered, got {active}"
-        )
-
-    async def test_atomic_failure_rolls_back(self, store, db_engine):
-        """A failure during ``UPDATE agents`` rolls back ``UPDATE api_keys`` too.
-
-        Verifies the second half of the atomicity claim:
-
-          "injecting a failure mid-loop rolls back the API key flip too"
-
-        Mechanism: install a one-shot SQLAlchemy
-        ``before_cursor_execute`` listener that raises ``RuntimeError``
-        on any ``UPDATE agents`` statement. Per the design doc
-        pseudocode in §"Store ownership of sessions",
-        ``revoke_api_key`` issues ``UPDATE api_keys`` first and
-        ``UPDATE agents`` second; the listener fires AFTER the
-        api_keys flip is queued but BEFORE the transaction commits.
-        The injected error must cause the entire ``session.begin()``
-        block to roll back, leaving the api_keys flip uncommitted.
-
-        If this test fails with ``api_key.status == 'revoked'`` after
-        the failed call, the implementation has an atomicity bug —
-        the two UPDATE statements are NOT inside the same transaction.
-        """
-        api_key, api_key_hash, owner = await _make_owner_with_key(store)
-        for i in range(3):
-            await store.create_agent(f"a{i}", "d", None, api_key=api_key)
-
-        sentinel = "INJECTED ROLLBACK FAILURE"
-
-        @event.listens_for(db_engine.sync_engine, "before_cursor_execute")
-        def _intercept(conn, cursor, statement, parameters, context, executemany):
-            normalized = " ".join(statement.split()).upper()
-            if normalized.startswith("UPDATE AGENTS"):
-                raise RuntimeError(sentinel)
-
-        try:
-            with pytest.raises(Exception, match=sentinel):
-                await store.revoke_api_key(api_key_hash, owner)
-        finally:
-            event.remove(db_engine.sync_engine, "before_cursor_execute", _intercept)
-
-        post_status = await store.get_api_key_status(api_key_hash)
-        assert post_status == "active", (
-            f"api_key flip must have been rolled back when the agent "
-            f"UPDATE failed; expected 'active', got {post_status!r}. "
-            f"This indicates the UPDATE api_keys statement was not "
-            f"inside the same transaction as the UPDATE agents "
-            f"statement (atomicity bug)."
-        )
-        active = await store.list_active_agents(tenant_id=api_key_hash)
-        assert len(active) == 3, (
-            f"agents must not have been deregistered when the "
-            f"transaction failed; expected 3 active, got {len(active)}"
-        )
-
-    async def test_returns_false_for_non_owner(self, store):
-        """A non-owner cannot revoke another owner's key."""
-        _, api_key_hash, _ = await _make_owner_with_key(store)
-        other_owner = _unique_owner()
-        result = await store.revoke_api_key(api_key_hash, other_owner)
-        assert result is False
-        assert await store.get_api_key_status(api_key_hash) == "active"
-
-    async def test_idempotent_on_already_revoked(self, store):
-        """A second revoke call on an already-revoked key still returns True.
-
-        revoke_api_key returns True iff the key ends the call in revoked
-        state (whether or not it was already revoked). False is reserved
-        for owner-mismatch / missing-key, which are authorization
-        failures, not state-change failures.
-        """
-        _, api_key_hash, owner = await _make_owner_with_key(store)
-        first = await store.revoke_api_key(api_key_hash, owner)
-        second = await store.revoke_api_key(api_key_hash, owner)
-        assert first is True
-        assert second is True
-
-
-# ---------------------------------------------------------------------------
-# get_api_key_status
-# ---------------------------------------------------------------------------
-
-
-class TestGetApiKeyStatus:
-    """Tests for ``RegistryStore.get_api_key_status``."""
-
-    async def test_returns_active_then_revoked(self, store):
-        _, api_key_hash, owner = await _make_owner_with_key(store)
-        assert await store.get_api_key_status(api_key_hash) == "active"
-        await store.revoke_api_key(api_key_hash, owner)
-        assert await store.get_api_key_status(api_key_hash) == "revoked"
+    async def test_returns_existing_session(self, store, db_sessionmaker):
+        session_id = await _create_test_session(db_sessionmaker, label="my-session")
+        result = await store.get_session(session_id)
+        assert result is not None
+        assert result["session_id"] == session_id
+        assert result["label"] == "my-session"
+        assert "created_at" in result
 
     async def test_returns_none_for_missing(self, store):
-        assert await store.get_api_key_status("missing-hash-xyz") is None
+        result = await store.get_session("nonexistent-session-id")
+        assert result is None
 
-
-# ---------------------------------------------------------------------------
-# is_api_key_active
-# ---------------------------------------------------------------------------
-
-
-class TestIsApiKeyActive:
-    """Tests for ``RegistryStore.is_api_key_active`` (new leak-fixing method)."""
-
-    async def test_true_for_active_false_after_revoke(self, store):
-        _, api_key_hash, owner = await _make_owner_with_key(store)
-        assert await store.is_api_key_active(api_key_hash) is True
-        await store.revoke_api_key(api_key_hash, owner)
-        assert await store.is_api_key_active(api_key_hash) is False
-
-    async def test_false_for_missing(self, store):
-        assert await store.is_api_key_active("missing-hash-xyz") is False
-
-
-# ---------------------------------------------------------------------------
-# is_key_owner
-# ---------------------------------------------------------------------------
-
-
-class TestIsKeyOwner:
-    """Tests for ``RegistryStore.is_key_owner`` (new leak-fixing method)."""
-
-    async def test_true_for_owner_false_for_non_owner(self, store):
-        _, api_key_hash, owner = await _make_owner_with_key(store)
-        assert await store.is_key_owner(api_key_hash, owner) is True
-        assert await store.is_key_owner(api_key_hash, _unique_owner()) is False
-
-    async def test_false_for_missing_key(self, store):
-        assert await store.is_key_owner("missing-hash", _unique_owner()) is False
+    async def test_session_without_label(self, store, db_sessionmaker):
+        """A session with no label returns label=None."""
+        session_id = await _create_test_session(db_sessionmaker, label=None)
+        result = await store.get_session(session_id)
+        assert result is not None
+        assert result["label"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -782,24 +568,18 @@ class TestIsKeyOwner:
 
 
 class TestGetAgentName:
-    """Tests for ``RegistryStore.get_agent_name`` (new leak-fixing method)."""
+    """Tests for ``RegistryStore.get_agent_name``."""
 
-    async def test_returns_name_for_existing(self, store):
-        api_key, _, _ = await _make_owner_with_key(store)
-        agent = await store.create_agent("My Name", "d", None, api_key=api_key)
+    async def test_returns_name_for_existing(self, store, db_sessionmaker):
+        session_id = await _create_test_session(db_sessionmaker)
+        agent = await store.create_agent("My Name", "d", None, session_id=session_id)
         assert await store.get_agent_name(agent["agent_id"]) == "My Name"
 
     async def test_returns_empty_string_for_missing(self, store):
-        """Per the design doc contract: returns ``''`` (NOT ``None``) for missing.
-
-        The contract matches today's ``or ""`` fallback in
-        ``webui_api.py`` so call sites can drop the fallback once they
-        switch to this method.
-        """
+        """Per the design doc contract: returns ``''`` (NOT ``None``) for missing."""
         result = await store.get_agent_name("00000000-0000-4000-8000-000000000000")
         assert result == "", (
-            f"get_agent_name must return '' for missing agents (not None), "
-            f"got {result!r}"
+            f"get_agent_name must return '' for missing agents, got {result!r}"
         )
 
 
@@ -809,85 +589,73 @@ class TestGetAgentName:
 
 
 class TestListDeregisteredAgentsWithTasks:
-    """Tests for ``RegistryStore.list_deregistered_agents_with_tasks``.
+    """Tests for ``RegistryStore.list_deregistered_agents_with_tasks(session_id)``.
 
-    Per the design doc Operation Mapping table:
-
-      SELECT a.agent_id, a.name, a.description, a.registered_at
-        FROM agents a
-       WHERE a.tenant_id = ?
-         AND a.status = 'deregistered'
-         AND EXISTS (SELECT 1 FROM tasks t WHERE t.context_id = a.agent_id LIMIT 1)
+    Renamed parameter from ``tenant_id`` to ``session_id`` per design
+    doc 0000015 Step 4.
     """
 
-    async def test_excludes_active_agents(self, store, db_engine):
+    async def test_excludes_active_agents(self, store, db_engine, db_sessionmaker):
         """Active agents (with or without tasks) are excluded from the result."""
-        api_key, api_key_hash, _ = await _make_owner_with_key(store)
-        active = await store.create_agent("active", "d", None, api_key=api_key)
+        session_id = await _create_test_session(db_sessionmaker)
+        active = await store.create_agent("active", "d", None, session_id=session_id)
         await _seed_task_for_agent(db_engine, agent_id=active["agent_id"])
 
-        result = await store.list_deregistered_agents_with_tasks(api_key_hash)
+        result = await store.list_deregistered_agents_with_tasks(session_id)
         result_ids = {r["agent_id"] for r in result}
         assert active["agent_id"] not in result_ids
 
-    async def test_excludes_deregistered_without_tasks(self, store):
-        """Deregistered agents with no tasks are excluded (the ``EXISTS`` filter)."""
-        api_key, api_key_hash, _ = await _make_owner_with_key(store)
-        agent = await store.create_agent("a", "d", None, api_key=api_key)
+    async def test_excludes_deregistered_without_tasks(self, store, db_sessionmaker):
+        """Deregistered agents with no tasks are excluded."""
+        session_id = await _create_test_session(db_sessionmaker)
+        agent = await store.create_agent("a", "d", None, session_id=session_id)
         await store.deregister_agent(agent["agent_id"])
 
-        result = await store.list_deregistered_agents_with_tasks(api_key_hash)
+        result = await store.list_deregistered_agents_with_tasks(session_id)
         assert result == []
 
-    async def test_includes_deregistered_with_tasks(self, store, db_engine):
+    async def test_includes_deregistered_with_tasks(
+        self, store, db_engine, db_sessionmaker
+    ):
         """The matching case: deregistered AND has at least one task."""
-        api_key, api_key_hash, _ = await _make_owner_with_key(store)
-        agent = await store.create_agent("a", "d", None, api_key=api_key)
+        session_id = await _create_test_session(db_sessionmaker)
+        agent = await store.create_agent("a", "d", None, session_id=session_id)
         await _seed_task_for_agent(db_engine, agent_id=agent["agent_id"])
         await store.deregister_agent(agent["agent_id"])
 
-        result = await store.list_deregistered_agents_with_tasks(api_key_hash)
+        result = await store.list_deregistered_agents_with_tasks(session_id)
         assert len(result) == 1
         assert result[0]["agent_id"] == agent["agent_id"]
         assert result[0]["name"] == "a"
 
 
 # ---------------------------------------------------------------------------
-# list_placements_for_director (tenant-scoped)
+# list_placements_for_director (session-scoped)
 # ---------------------------------------------------------------------------
 
 
 class TestListPlacementsForDirector:
     """Tests for ``RegistryStore.list_placements_for_director``.
 
-    DESIGN-DOC-NAMED test (Tests § registry/tests/):
-
-      "cross-tenant isolation"
-
-    The method joins ``agent_placements`` through ``agents`` so the
-    tenant filter flows through. Cross-tenant placement rows are
-    structurally impossible, but the query must still enforce the
-    ``tenant_id`` filter on the join so that a tenant A director
-    cannot see tenant B members even if the director_agent_id happens
-    to be the same string (structurally impossible via UUIDs, but
-    defense-in-depth matters for the query contract).
+    Uses ``session_id`` parameter (renamed from ``tenant_id``).
     """
 
-    async def test_list_placements_for_director_tenant_scoped(self, store):
-        """Only agents in the specified tenant whose
+    async def test_list_placements_for_director_session_scoped(
+        self, store, db_sessionmaker
+    ):
+        """Only agents in the specified session whose
         ``placement.director_agent_id`` matches are returned."""
         from hikyaku_registry.models import PlacementCreate
 
-        api_key, api_key_hash, _ = await _make_owner_with_key(store)
-        dir_a = await store.create_agent("Dir-A", "d", None, api_key=api_key)
-        dir_b = await store.create_agent("Dir-B", "d", None, api_key=api_key)
+        session_id = await _create_test_session(db_sessionmaker)
+        dir_a = await store.create_agent("Dir-A", "d", None, session_id=session_id)
+        dir_b = await store.create_agent("Dir-B", "d", None, session_id=session_id)
 
-        # Two members under dir_a
         await store.create_agent_with_placement(
             name="A-Member-1",
             description="d",
             skills=None,
-            api_key=api_key,
+            session_id=session_id,
             placement=PlacementCreate(
                 director_agent_id=dir_a["agent_id"],
                 tmux_session="main",
@@ -899,7 +667,7 @@ class TestListPlacementsForDirector:
             name="A-Member-2",
             description="d",
             skills=None,
-            api_key=api_key,
+            session_id=session_id,
             placement=PlacementCreate(
                 director_agent_id=dir_a["agent_id"],
                 tmux_session="main",
@@ -908,12 +676,11 @@ class TestListPlacementsForDirector:
             ),
         )
 
-        # One member under dir_b (same tenant)
         await store.create_agent_with_placement(
             name="B-Member-1",
             description="d",
             skills=None,
-            api_key=api_key,
+            session_id=session_id,
             placement=PlacementCreate(
                 director_agent_id=dir_b["agent_id"],
                 tmux_session="main",
@@ -922,36 +689,33 @@ class TestListPlacementsForDirector:
             ),
         )
 
-        # dir_a sees only its two members
         members_a = await store.list_placements_for_director(
-            tenant_id=api_key_hash, director_agent_id=dir_a["agent_id"]
+            session_id=session_id, director_agent_id=dir_a["agent_id"]
         )
         names_a = {m["name"] for m in members_a}
         assert names_a == {"A-Member-1", "A-Member-2"}
 
-        # dir_b sees only its one member
         members_b = await store.list_placements_for_director(
-            tenant_id=api_key_hash, director_agent_id=dir_b["agent_id"]
+            session_id=session_id, director_agent_id=dir_b["agent_id"]
         )
         names_b = {m["name"] for m in members_b}
         assert names_b == {"B-Member-1"}
 
-    async def test_cross_tenant_isolation(self, store):
-        """Members in tenant B are not visible when querying tenant A,
-        even when passing the same ``director_agent_id``."""
+    async def test_cross_session_isolation(self, store, db_sessionmaker):
+        """Members in session B are not visible when querying session A."""
         from hikyaku_registry.models import PlacementCreate
 
-        api_key_a, hash_a, _ = await _make_owner_with_key(store)
-        api_key_b, hash_b, _ = await _make_owner_with_key(store)
+        session_a = await _create_test_session(db_sessionmaker)
+        session_b = await _create_test_session(db_sessionmaker)
 
-        dir_a = await store.create_agent("Dir-A", "d", None, api_key=api_key_a)
-        dir_b = await store.create_agent("Dir-B", "d", None, api_key=api_key_b)
+        dir_a = await store.create_agent("Dir-A", "d", None, session_id=session_a)
+        dir_b = await store.create_agent("Dir-B", "d", None, session_id=session_b)
 
         await store.create_agent_with_placement(
             name="A-Member",
             description="d",
             skills=None,
-            api_key=api_key_a,
+            session_id=session_a,
             placement=PlacementCreate(
                 director_agent_id=dir_a["agent_id"],
                 tmux_session="main",
@@ -963,7 +727,7 @@ class TestListPlacementsForDirector:
             name="B-Member",
             description="d",
             skills=None,
-            api_key=api_key_b,
+            session_id=session_b,
             placement=PlacementCreate(
                 director_agent_id=dir_b["agent_id"],
                 tmux_session="main",
@@ -972,42 +736,39 @@ class TestListPlacementsForDirector:
             ),
         )
 
-        # Querying tenant_a with dir_b (wrong tenant) returns empty
         result = await store.list_placements_for_director(
-            tenant_id=hash_a, director_agent_id=dir_b["agent_id"]
+            session_id=session_a, director_agent_id=dir_b["agent_id"]
         )
         assert result == []
 
-        # Querying tenant_a with dir_a returns only A-Member
         result = await store.list_placements_for_director(
-            tenant_id=hash_a, director_agent_id=dir_a["agent_id"]
+            session_id=session_a, director_agent_id=dir_a["agent_id"]
         )
         assert len(result) == 1
         assert result[0]["name"] == "A-Member"
 
-    async def test_empty_when_no_members(self, store):
+    async def test_empty_when_no_members(self, store, db_sessionmaker):
         """A director with no members returns an empty list."""
-        api_key, api_key_hash, _ = await _make_owner_with_key(store)
-        director = await store.create_agent("Dir", "d", None, api_key=api_key)
+        session_id = await _create_test_session(db_sessionmaker)
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
 
         result = await store.list_placements_for_director(
-            tenant_id=api_key_hash, director_agent_id=director["agent_id"]
+            session_id=session_id, director_agent_id=director["agent_id"]
         )
         assert result == []
 
-    async def test_excludes_deregistered_members(self, store):
-        """Deregistered members (whose placement rows are hard-deleted)
-        do not appear in the list."""
+    async def test_excludes_deregistered_members(self, store, db_sessionmaker):
+        """Deregistered members do not appear in the list."""
         from hikyaku_registry.models import PlacementCreate
 
-        api_key, api_key_hash, _ = await _make_owner_with_key(store)
-        director = await store.create_agent("Dir", "d", None, api_key=api_key)
+        session_id = await _create_test_session(db_sessionmaker)
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
 
         await store.create_agent_with_placement(
             name="Active",
             description="d",
             skills=None,
-            api_key=api_key,
+            session_id=session_id,
             placement=PlacementCreate(
                 director_agent_id=director["agent_id"],
                 tmux_session="main",
@@ -1019,7 +780,7 @@ class TestListPlacementsForDirector:
             name="Gone",
             description="d",
             skills=None,
-            api_key=api_key,
+            session_id=session_id,
             placement=PlacementCreate(
                 director_agent_id=director["agent_id"],
                 tmux_session="main",
@@ -1028,11 +789,44 @@ class TestListPlacementsForDirector:
             ),
         )
 
-        # Deregister m2 — should remove its placement row
         await store.deregister_agent(m2["agent_id"])
 
         result = await store.list_placements_for_director(
-            tenant_id=api_key_hash, director_agent_id=director["agent_id"]
+            session_id=session_id, director_agent_id=director["agent_id"]
         )
         assert len(result) == 1
         assert result[0]["name"] == "Active"
+
+
+# ---------------------------------------------------------------------------
+# Deleted methods — verify they no longer exist
+# ---------------------------------------------------------------------------
+
+
+class TestDeletedApiKeyMethods:
+    """Verify that API key methods are removed from RegistryStore.
+
+    Design doc 0000015 Step 4: these methods are deleted entirely.
+    """
+
+    def test_create_api_key_removed(self, store):
+        assert not hasattr(store, "create_api_key")
+
+    def test_list_api_keys_removed(self, store):
+        assert not hasattr(store, "list_api_keys")
+
+    def test_revoke_api_key_removed(self, store):
+        assert not hasattr(store, "revoke_api_key")
+
+    def test_get_api_key_status_removed(self, store):
+        assert not hasattr(store, "get_api_key_status")
+
+    def test_is_api_key_active_removed(self, store):
+        assert not hasattr(store, "is_api_key_active")
+
+    def test_is_key_owner_removed(self, store):
+        assert not hasattr(store, "is_key_owner")
+
+    def test_verify_agent_tenant_removed(self, store):
+        """Old name verify_agent_tenant must be gone (renamed to verify_agent_session)."""
+        assert not hasattr(store, "verify_agent_tenant")

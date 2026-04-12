@@ -12,34 +12,28 @@ hikyaku-registry db init
 
 This is idempotent — running it on a database that is already at head is a no-op. Without it, the first request fails with `OperationalError: no such table: agents`. See `data-model.md` and `cli-options.md` for details.
 
-## Authentication
+## Request Headers
 
-All endpoints except `POST /api/v1/agents` (registration) and `GET /.well-known/agent-card.json` (Agent Card) require authentication.
-
-- **Mechanism**: Two headers are required on all authenticated requests:
+The broker does not perform authentication. Endpoints use a combination of headers, body fields, and query parameters for session and agent identification:
 
 | Header | Purpose |
 |---|---|
-| `Authorization: Bearer <api_key>` | Authenticates the tenant (`SHA-256(api_key)` = `tenant_id`) |
-| `X-Agent-Id: <agent_id>` | Identifies the specific agent within the tenant |
+| `X-Session-Id: <session_id>` | Selects the session namespace (used by `GET /agents/{id}`) |
+| `X-Agent-Id: <agent_id>` | Identifies the specific agent (used by `DELETE /agents/{id}`, `PATCH /agents/{id}/placement`) |
 
-- **Flow**: Agent registers with a pre-existing API key → receives `agent_id` → Broker stores `SHA-256(api_key)` as `api_key_hash` (= `tenant_id`) on the `agents` row → on each request, Broker hashes the provided key, checks the `api_keys` row has `status='active'`, verifies `agents.tenant_id` matches, and confirms agent-tenant membership.
-- **API key format**: `hky_` prefix + 32 random hex characters (e.g., `hky_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4`)
-- **API key issuance**: Keys are created through the WebUI key management interface (requires Auth0 login). Keys are not generated during agent registration.
-- **API key status check**: Every authenticated request verifies that the API key row has `status='active'`. Revoked keys immediately fail with 401.
-- **Tenant model**: The API key is a shared tenant credential. All agents registered with the same API key belong to the same tenant and can discover and communicate with each other. Agents in different tenants are invisible to one another.
-- **Registration**: `POST /api/v1/agents` requires `Authorization: Bearer <api_key>` (the key must exist and be active). The `X-Agent-Id` header is not required for registration (the agent doesn't exist yet).
+Some endpoints accept `session_id` in the request body (`POST /agents`) or as a query parameter (`GET /agents`).
 
 ## Endpoints
 
 ### POST /api/v1/agents — Register Agent
 
-Registration always requires a valid API key. API keys are created through the WebUI key management interface (requires Auth0 login).
+Registration requires a valid `session_id` in the request body. The session must exist in the `sessions` table.
 
-**Request** (with `Authorization: Bearer <api_key>` header):
+**Request** (no auth headers required):
 
 ```json
 {
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
   "name": "My Coding Agent",
   "description": "A Claude Code agent specializing in Python",
   "skills": [
@@ -53,12 +47,13 @@ Registration always requires a valid API key. API keys are created through the W
 }
 ```
 
-**Request with placement** (with `Authorization: Bearer <api_key>` + `X-Agent-Id: <director_id>` headers):
+**Request with placement** (with `X-Agent-Id: <director_id>` header):
 
 When `placement` is present, the server atomically creates both the agent and its placement row. `X-Agent-Id` must be set and equal `placement.director_agent_id`.
 
 ```json
 {
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
   "name": "Claude-B",
   "description": "Reviewer bot",
   "skills": [],
@@ -76,7 +71,6 @@ When `placement` is present, the server atomically creates both the agent and it
 ```json
 {
   "agent_id": "550e8400-e29b-41d4-a716-446655440000",
-  "api_key": "hky_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
   "name": "My Coding Agent",
   "registered_at": "2026-03-28T12:00:00Z",
   "placement": null
@@ -85,19 +79,18 @@ When `placement` is present, the server atomically creates both the agent and it
 
 When registered with a placement, the `placement` field is populated with the placement view.
 
-The `api_key` in the response is the same key provided in the `Authorization` header (echoed back for convenience). The Broker stores only the SHA-256 hash. The Broker constructs a full A2A `AgentCard` from the registration data, setting `supportedInterfaces` to point back to the Broker itself.
+The Broker constructs a full A2A `AgentCard` from the registration data, setting `supportedInterfaces` to point back to the Broker itself.
 
-**Validation**: The API key must have a row in `api_keys` with `status='active'` (created via WebUI). If no `Authorization` header is provided, or the key is revoked/unknown, the server returns 401 Unauthorized. When `placement` is present, `X-Agent-Id` must be set and equal `placement.director_agent_id`; `director_agent_id` must be a valid active agent in the caller's tenant.
+**Validation**: The `session_id` must exist in the `sessions` table. When `placement` is present, `X-Agent-Id` must be set and equal `placement.director_agent_id`; `director_agent_id` must be a valid active agent in the same session.
 
-**Error**: 401 if `Authorization` header is missing, the key has no row in `api_keys`, or its status is not `'active'`. 403 if placement has a cross-tenant `director_agent_id`.
+**Error**: 404 `SESSION_NOT_FOUND` if session does not exist. 400 `SESSION_REQUIRED` if `session_id` is missing from the body. 400 `INVALID_REQUEST` for other validation failures.
 
 ### GET /api/v1/agents — List Agents
 
-Requires authentication (`Authorization` + `X-Agent-Id` headers).
-
-Returns only agents belonging to the caller's tenant. Agents in other tenants are not visible.
+Requires `session_id` as a query parameter. Returns only agents belonging to the specified session.
 
 **Query parameters**:
+- `session_id` (required): The session namespace to list agents from.
 - `director_agent_id` (optional): Filter to agents whose placement row has this Director. Used by `hikyaku member list`.
 
 **Response** (200 OK):
@@ -120,15 +113,15 @@ Returns only agents belonging to the caller's tenant. Agents in other tenants ar
 
 ### GET /api/v1/agents/{agent_id} — Get Agent Detail
 
-Requires authentication (`Authorization` + `X-Agent-Id` headers).
+Requires `X-Session-Id` header. Returns 404 if the agent does not exist or does not belong to the specified session.
 
 **Response** (200 OK): Full A2A `AgentCard` JSON as stored.
 
-**Error**: 404 if `agent_id` not found, deregistered, or belongs to a different tenant. Cross-tenant lookups always return 404 (indistinguishable from "not found") to prevent information leakage.
+**Error**: 404 if `agent_id` not found, deregistered, or belongs to a different session. Cross-session lookups always return 404 (indistinguishable from "not found") to keep sessions structurally isolated.
 
 ### DELETE /api/v1/agents/{agent_id} — Deregister Agent
 
-Requires authentication. The caller must be either the agent itself OR the Director that spawned the agent (i.e., `caller_id == agent_id` OR `caller_id == placement.director_agent_id`).
+Requires `X-Agent-Id` header. The caller must be either the agent itself OR the Director that spawned the agent (i.e., `caller_id == agent_id` OR `caller_id == placement.director_agent_id`). Session is not re-verified.
 
 **Behavior**:
 
@@ -143,11 +136,11 @@ Requires authentication. The caller must be either the agent itself OR the Direc
 
 ### PATCH /api/v1/agents/{agent_id}/placement — Update Placement Pane ID
 
-Requires authentication. Caller must be the Director of this placement (`X-Agent-Id == placement.director_agent_id`).
+Requires `X-Agent-Id` header. Caller must be the Director of this placement (`X-Agent-Id == placement.director_agent_id`).
 
 Used by the two-pass `member create` flow: after `tmux split-window` captures the new pane ID, the CLI patches the pending placement row.
 
-**Request** (with `Authorization: Bearer <api_key>` + `X-Agent-Id: <director_id>` headers):
+**Request** (with `X-Agent-Id: <director_id>` header):
 
 ```json
 {
@@ -186,7 +179,8 @@ REST API errors use a consistent JSON format:
 
 | Error Code | HTTP Status | Description |
 |---|---|---|
-| `UNAUTHORIZED` | 401 | Missing or invalid API key, missing `X-Agent-Id` header, or agent-tenant membership mismatch |
-| `FORBIDDEN` | 403 | API key does not match the target resource |
-| `AGENT_NOT_FOUND` | 404 | Agent does not exist, is deregistered, or belongs to a different tenant |
+| `SESSION_REQUIRED` | 400 | Missing `session_id` from required header, body, or query parameter |
+| `SESSION_NOT_FOUND` | 404 | `session_id` does not exist in the `sessions` table |
+| `AGENT_ID_REQUIRED` | 400 | Missing `X-Agent-Id` header on an endpoint that requires it |
+| `AGENT_NOT_FOUND` | 404 | Agent does not exist, is deregistered, or belongs to a different session |
 | `INVALID_REQUEST` | 400 | Missing required fields or invalid values |

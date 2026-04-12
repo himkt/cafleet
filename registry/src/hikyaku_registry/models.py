@@ -21,6 +21,7 @@ class PlacementPatch(BaseModel):
 
 
 class RegisterAgentRequest(BaseModel):
+    session_id: str
     name: str
     description: str
     skills: list[dict] | None = None
@@ -29,7 +30,6 @@ class RegisterAgentRequest(BaseModel):
 
 class RegisterAgentResponse(BaseModel):
     agent_id: str
-    api_key: str
     name: str
     registered_at: str
     placement: PlacementView | None = None

@@ -1,20 +1,20 @@
 """Tests for db/models.py — schema, columns, indexes, FK declarations and enforcement.
 
 Verifies that the SQLAlchemy declarative models match the schema in the
-design doc (Specification → Data Model → Schema):
+design doc (design-docs/0000015-remove-auth0-local-session-model/design-doc.md
+Specification → Data Model):
 
-  * Tables: api_keys, agents, tasks
-  * Primary keys: api_keys.api_key_hash, agents.agent_id, tasks.task_id
+  * Tables: sessions, agents, tasks, agent_placements
+  * Primary keys: sessions.session_id, agents.agent_id, tasks.task_id
   * Foreign keys:
-      - agents.tenant_id  -> api_keys.api_key_hash  (ON DELETE RESTRICT)
-      - tasks.context_id  -> agents.agent_id        (ON DELETE RESTRICT)
+      - agents.session_id  -> sessions.session_id    (ON DELETE RESTRICT)
+      - tasks.context_id   -> agents.agent_id         (ON DELETE RESTRICT)
       - tasks.from_agent_id is intentionally NOT a FK
   * Indexes:
-      - idx_api_keys_owner            (owner_sub)
-      - idx_agents_tenant_status      (tenant_id, status)
-      - idx_tasks_context_status_ts   (context_id, status_timestamp DESC)
+      - idx_agents_session_status      (session_id, status)
+      - idx_tasks_context_status_ts    (context_id, status_timestamp DESC)
       - idx_tasks_from_agent_status_ts (from_agent_id, status_timestamp DESC)
-  * deregistered_at is NULLABLE; every other column is NOT NULL.
+  * deregistered_at is NULLABLE; label is NULLABLE; every other column is NOT NULL.
   * FK enforcement at runtime: inserting an orphan agent / orphan task raises
     IntegrityError. This depends on BOTH the FK declarations in models.py AND
     the PRAGMA foreign_keys=ON listener in db/engine.py being correctly wired.
@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import (
 
 # Importing the engine module registers the FK PRAGMA listener globally.
 import hikyaku_registry.db.engine  # noqa: F401
-from hikyaku_registry.db.models import Agent, AgentPlacement, ApiKey, Base, Task
+from hikyaku_registry.db.models import Agent, AgentPlacement, Base, Session, Task
 
 
 # ---------------------------------------------------------------------------
@@ -63,12 +63,10 @@ async def session(engine: AsyncEngine) -> AsyncSession:
         yield s
 
 
-def _make_api_key(api_key_hash: str = "tenant-hash-1") -> ApiKey:
-    return ApiKey(
-        api_key_hash=api_key_hash,
-        owner_sub="auth0|user1",
-        key_prefix="hky_aaaa",
-        status="active",
+def _make_session(session_id: str = "session-1", label: str | None = None) -> Session:
+    return Session(
+        session_id=session_id,
+        label=label,
         created_at=_now(),
     )
 
@@ -76,11 +74,11 @@ def _make_api_key(api_key_hash: str = "tenant-hash-1") -> ApiKey:
 def _make_agent(
     *,
     agent_id: str = "agent-1",
-    tenant_id: str = "tenant-hash-1",
+    session_id: str = "session-1",
 ) -> Agent:
     return Agent(
         agent_id=agent_id,
-        tenant_id=tenant_id,
+        session_id=session_id,
         name="Test Agent",
         description="A test agent",
         status="active",
@@ -136,13 +134,13 @@ def _make_placement(
 
 
 class TestTablesExist:
-    """``Base.metadata.create_all`` produces the four expected tables."""
+    """``Base.metadata.create_all`` produces the expected tables."""
 
     @pytest.mark.asyncio
-    async def test_api_keys_table_exists(self, engine):
+    async def test_sessions_table_exists(self, engine):
         async with engine.connect() as conn:
             tables = await conn.run_sync(lambda c: inspect(c).get_table_names())
-        assert "api_keys" in tables
+        assert "sessions" in tables
 
     @pytest.mark.asyncio
     async def test_agents_table_exists(self, engine):
@@ -162,48 +160,70 @@ class TestTablesExist:
             tables = await conn.run_sync(lambda c: inspect(c).get_table_names())
         assert "agent_placements" in tables
 
+    @pytest.mark.asyncio
+    async def test_api_keys_table_does_not_exist(self, engine):
+        """api_keys table must be removed — replaced by sessions."""
+        async with engine.connect() as conn:
+            tables = await conn.run_sync(lambda c: inspect(c).get_table_names())
+        assert "api_keys" not in tables
+
 
 # ---------------------------------------------------------------------------
-# api_keys table — columns + primary key
+# sessions table — columns + primary key
 # ---------------------------------------------------------------------------
 
 
-class TestApiKeysSchema:
+class TestSessionsSchema:
+    """Schema tests for the ``sessions`` table (replaces ``api_keys``).
+
+    Design doc 0000015 (Specification §1.1):
+
+      sessions
+        session_id   TEXT PRIMARY KEY   -- opaque string (UUID or legacy hash)
+        label        TEXT               -- NULLABLE, free-form human label
+        created_at   TEXT NOT NULL      -- ISO 8601 UTC
+    """
+
     @pytest.mark.asyncio
     async def test_has_expected_columns(self, engine):
         async with engine.connect() as conn:
             cols = await conn.run_sync(
-                lambda c: {col["name"] for col in inspect(c).get_columns("api_keys")}
+                lambda c: {col["name"] for col in inspect(c).get_columns("sessions")}
             )
-        expected = {
-            "api_key_hash",
-            "owner_sub",
-            "key_prefix",
-            "status",
-            "created_at",
-        }
+        expected = {"session_id", "label", "created_at"}
         assert expected <= cols, f"missing columns: {expected - cols}"
 
     @pytest.mark.asyncio
-    async def test_api_key_hash_is_primary_key(self, engine):
+    async def test_session_id_is_primary_key(self, engine):
         async with engine.connect() as conn:
             pk = await conn.run_sync(
-                lambda c: inspect(c).get_pk_constraint("api_keys")[
+                lambda c: inspect(c).get_pk_constraint("sessions")[
                     "constrained_columns"
                 ]
             )
-        assert pk == ["api_key_hash"]
+        assert pk == ["session_id"]
 
     @pytest.mark.asyncio
-    async def test_required_columns_are_not_null(self, engine):
-        """All api_keys columns are NOT NULL per the design doc schema."""
+    async def test_label_is_nullable(self, engine):
+        """label is optional free-form text — NULLABLE."""
         async with engine.connect() as conn:
             cols = await conn.run_sync(
                 lambda c: {
-                    col["name"]: col for col in inspect(c).get_columns("api_keys")
+                    col["name"]: col for col in inspect(c).get_columns("sessions")
                 }
             )
-        for name in ("api_key_hash", "owner_sub", "key_prefix", "status", "created_at"):
+        assert cols["label"]["nullable"] is True
+
+    @pytest.mark.asyncio
+    async def test_required_columns_are_not_null(self, engine):
+        """session_id and created_at are NOT NULL."""
+        async with engine.connect() as conn:
+            cols = await conn.run_sync(
+                lambda c: {
+                    col["name"]: col for col in inspect(c).get_columns("sessions")
+                }
+            )
+        for name in ("session_id", "created_at"):
             assert cols[name]["nullable"] is False, f"{name} should be NOT NULL"
 
 
@@ -221,7 +241,7 @@ class TestAgentsSchema:
             )
         expected = {
             "agent_id",
-            "tenant_id",
+            "session_id",
             "name",
             "description",
             "status",
@@ -230,6 +250,17 @@ class TestAgentsSchema:
             "agent_card_json",
         }
         assert expected <= cols, f"missing columns: {expected - cols}"
+
+    @pytest.mark.asyncio
+    async def test_no_tenant_id_column(self, engine):
+        """agents.tenant_id must be renamed to session_id — no tenant_id column."""
+        async with engine.connect() as conn:
+            cols = await conn.run_sync(
+                lambda c: {col["name"] for col in inspect(c).get_columns("agents")}
+            )
+        assert "tenant_id" not in cols, (
+            "agents table still has tenant_id column — it must be renamed to session_id"
+        )
 
     @pytest.mark.asyncio
     async def test_agent_id_is_primary_key(self, engine):
@@ -256,7 +287,7 @@ class TestAgentsSchema:
             )
         for name in (
             "agent_id",
-            "tenant_id",
+            "session_id",
             "name",
             "description",
             "status",
@@ -266,18 +297,18 @@ class TestAgentsSchema:
             assert cols[name]["nullable"] is False, f"{name} should be NOT NULL"
 
     @pytest.mark.asyncio
-    async def test_tenant_id_foreign_key_to_api_keys(self, engine):
-        """agents.tenant_id REFERENCES api_keys(api_key_hash)."""
+    async def test_session_id_foreign_key_to_sessions(self, engine):
+        """agents.session_id REFERENCES sessions(session_id)."""
         async with engine.connect() as conn:
             fks = await conn.run_sync(lambda c: inspect(c).get_foreign_keys("agents"))
         match = [
             fk
             for fk in fks
-            if fk["constrained_columns"] == ["tenant_id"]
-            and fk["referred_table"] == "api_keys"
-            and fk["referred_columns"] == ["api_key_hash"]
+            if fk["constrained_columns"] == ["session_id"]
+            and fk["referred_table"] == "sessions"
+            and fk["referred_columns"] == ["session_id"]
         ]
-        assert len(match) == 1, f"expected one tenant_id FK to api_keys, got: {fks}"
+        assert len(match) == 1, f"expected one session_id FK to sessions, got: {fks}"
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +352,6 @@ class TestTasksSchema:
         ``origin_task_id`` is intentionally excluded — it is the single
         nullable column on ``tasks``, populated only on broadcast rows
         (delivery + summary) and left NULL for unicast and historical rows.
-        See design doc 0000013 Data model change.
         """
         async with engine.connect() as conn:
             cols = await conn.run_sync(
@@ -342,13 +372,7 @@ class TestTasksSchema:
 
     @pytest.mark.asyncio
     async def test_origin_task_id_is_nullable(self, engine):
-        """``tasks.origin_task_id`` is a nullable TEXT column.
-
-        Unicast deliveries and historical rows from before migration 0002
-        write NULL here; broadcast delivery rows AND the broadcast summary
-        row itself share a single self-referencing UUID (see design doc
-        0000013 Specification → Data model change).
-        """
+        """``tasks.origin_task_id`` is a nullable TEXT column."""
         async with engine.connect() as conn:
             cols = await conn.run_sync(
                 lambda c: {col["name"]: col for col in inspect(c).get_columns("tasks")}
@@ -380,7 +404,7 @@ class TestTasksSchema:
     @pytest.mark.asyncio
     async def test_from_agent_id_is_not_foreign_key(self, engine):
         """from_agent_id intentionally has NO FK so historical tasks survive
-        deregistration of the original sender (design doc Data Model section)."""
+        deregistration of the original sender."""
         async with engine.connect() as conn:
             fks = await conn.run_sync(lambda c: inspect(c).get_foreign_keys("tasks"))
         from_agent_fks = [
@@ -493,9 +517,7 @@ class TestAgentPlacementsSchema:
             and fk["referred_table"] == "agents"
             and fk["referred_columns"] == ["agent_id"]
         ]
-        assert len(match) == 1, (
-            f"expected one agent_id FK to agents, got: {fks}"
-        )
+        assert len(match) == 1, f"expected one agent_id FK to agents, got: {fks}"
 
     @pytest.mark.asyncio
     async def test_director_agent_id_fk_to_agents(self, engine):
@@ -523,8 +545,7 @@ class TestAgentPlacementsSchema:
             )
         match = [idx for idx in indexes if idx["name"] == "idx_placements_director"]
         assert len(match) == 1, (
-            f"expected idx_placements_director, "
-            f"got: {[i['name'] for i in indexes]}"
+            f"expected idx_placements_director, got: {[i['name'] for i in indexes]}"
         )
         assert match[0]["column_names"] == ["director_agent_id"]
 
@@ -536,24 +557,28 @@ class TestAgentPlacementsSchema:
 
 class TestIndexes:
     @pytest.mark.asyncio
-    async def test_idx_api_keys_owner(self, engine):
-        async with engine.connect() as conn:
-            indexes = await conn.run_sync(lambda c: inspect(c).get_indexes("api_keys"))
-        match = [idx for idx in indexes if idx["name"] == "idx_api_keys_owner"]
-        assert len(match) == 1, (
-            f"expected idx_api_keys_owner, got: {[i['name'] for i in indexes]}"
-        )
-        assert match[0]["column_names"] == ["owner_sub"]
-
-    @pytest.mark.asyncio
-    async def test_idx_agents_tenant_status(self, engine):
+    async def test_idx_agents_session_status(self, engine):
+        """Index renamed from idx_agents_tenant_status to idx_agents_session_status."""
         async with engine.connect() as conn:
             indexes = await conn.run_sync(lambda c: inspect(c).get_indexes("agents"))
-        match = [idx for idx in indexes if idx["name"] == "idx_agents_tenant_status"]
+        match = [idx for idx in indexes if idx["name"] == "idx_agents_session_status"]
         assert len(match) == 1, (
-            f"expected idx_agents_tenant_status, got: {[i['name'] for i in indexes]}"
+            f"expected idx_agents_session_status, got: {[i['name'] for i in indexes]}"
         )
-        assert match[0]["column_names"] == ["tenant_id", "status"]
+        assert match[0]["column_names"] == ["session_id", "status"]
+
+    @pytest.mark.asyncio
+    async def test_no_idx_agents_tenant_status(self, engine):
+        """Old index idx_agents_tenant_status must not exist."""
+        async with engine.connect() as conn:
+            indexes = await conn.run_sync(lambda c: inspect(c).get_indexes("agents"))
+        old_match = [
+            idx for idx in indexes if idx["name"] == "idx_agents_tenant_status"
+        ]
+        assert len(old_match) == 0, (
+            "idx_agents_tenant_status still exists — must be renamed to "
+            "idx_agents_session_status"
+        )
 
     @pytest.mark.asyncio
     async def test_idx_tasks_context_status_ts(self, engine):
@@ -563,7 +588,6 @@ class TestIndexes:
         assert len(match) == 1, (
             f"expected idx_tasks_context_status_ts, got: {[i['name'] for i in indexes]}"
         )
-        # Order matters for the index — context_id is the leading column.
         assert match[0]["column_names"][0] == "context_id"
         assert "status_timestamp" in match[0]["column_names"]
 
@@ -593,27 +617,27 @@ class TestIndexes:
 
 class TestForeignKeyEnforcement:
     @pytest.mark.asyncio
-    async def test_inserting_agent_with_unknown_tenant_raises(self, session):
-        """An orphan agent (tenant_id not in api_keys) cannot be inserted."""
-        agent = _make_agent(tenant_id="nonexistent-tenant")
+    async def test_inserting_agent_with_unknown_session_raises(self, session):
+        """An orphan agent (session_id not in sessions) cannot be inserted."""
+        agent = _make_agent(session_id="nonexistent-session")
         session.add(agent)
         with pytest.raises(IntegrityError):
             await session.commit()
 
     @pytest.mark.asyncio
-    async def test_inserting_agent_with_existing_tenant_succeeds(self, session):
-        """An agent referencing an existing api_key is accepted."""
-        session.add(_make_api_key(api_key_hash="tenant-ok"))
+    async def test_inserting_agent_with_existing_session_succeeds(self, session):
+        """An agent referencing an existing session is accepted."""
+        session.add(_make_session(session_id="session-ok"))
         await session.flush()
 
-        session.add(_make_agent(agent_id="agent-ok", tenant_id="tenant-ok"))
+        session.add(_make_agent(agent_id="agent-ok", session_id="session-ok"))
         await session.commit()  # must not raise
 
         result = await session.execute(
             select(Agent).where(Agent.agent_id == "agent-ok")
         )
         row = result.scalar_one()
-        assert row.tenant_id == "tenant-ok"
+        assert row.session_id == "session-ok"
 
     @pytest.mark.asyncio
     async def test_inserting_task_with_unknown_context_raises(self, session):
@@ -626,9 +650,9 @@ class TestForeignKeyEnforcement:
     @pytest.mark.asyncio
     async def test_inserting_task_with_existing_context_succeeds(self, session):
         """A task whose context_id refers to a real agent is accepted."""
-        session.add(_make_api_key(api_key_hash="tenant-x"))
+        session.add(_make_session(session_id="session-x"))
         await session.flush()
-        session.add(_make_agent(agent_id="agent-x", tenant_id="tenant-x"))
+        session.add(_make_agent(agent_id="agent-x", session_id="session-x"))
         await session.flush()
 
         session.add(
@@ -647,15 +671,10 @@ class TestForeignKeyEnforcement:
 
     @pytest.mark.asyncio
     async def test_task_from_agent_id_unconstrained(self, session):
-        """from_agent_id is intentionally not a FK; arbitrary values are allowed.
-
-        A task may be inserted with a from_agent_id that does NOT correspond to
-        any row in the agents table — historical tasks must survive sender
-        deregistration.
-        """
-        session.add(_make_api_key(api_key_hash="tenant-y"))
+        """from_agent_id is intentionally not a FK; arbitrary values are allowed."""
+        session.add(_make_session(session_id="session-y"))
         await session.flush()
-        session.add(_make_agent(agent_id="agent-y", tenant_id="tenant-y"))
+        session.add(_make_agent(agent_id="agent-y", session_id="session-y"))
         await session.flush()
 
         session.add(
@@ -669,36 +688,24 @@ class TestForeignKeyEnforcement:
         await session.commit()  # must not raise — from_agent_id is unconstrained
 
     @pytest.mark.asyncio
-    async def test_deleting_api_key_with_referencing_agent_restricted(self, session):
-        """ON DELETE RESTRICT: cannot delete an api_key that has agents pointing at it.
-
-        ``session.execute(delete(...))`` issues the DELETE statement
-        immediately (it is not deferred to commit-time flush like
-        ``session.delete(instance)`` would be), so the FK violation surfaces
-        from ``execute()`` itself — that is what ``pytest.raises`` must wrap.
-        """
-        session.add(_make_api_key(api_key_hash="tenant-r"))
+    async def test_deleting_session_with_referencing_agent_restricted(self, session):
+        """ON DELETE RESTRICT: cannot delete a session that has agents pointing at it."""
+        session.add(_make_session(session_id="session-r"))
         await session.flush()
-        session.add(_make_agent(agent_id="agent-r", tenant_id="tenant-r"))
+        session.add(_make_agent(agent_id="agent-r", session_id="session-r"))
         await session.commit()
 
         with pytest.raises(IntegrityError):
             await session.execute(
-                delete(ApiKey).where(ApiKey.api_key_hash == "tenant-r")
+                delete(Session).where(Session.session_id == "session-r")
             )
 
     @pytest.mark.asyncio
     async def test_deleting_agent_with_referencing_task_restricted(self, session):
-        """ON DELETE RESTRICT: cannot delete an agent whose agent_id is a task context_id.
-
-        ``session.execute(delete(...))`` issues the DELETE statement
-        immediately (Core-level execution, not deferred to commit-time flush),
-        so the FK violation surfaces from ``execute()`` itself — that is
-        what ``pytest.raises`` must wrap.
-        """
-        session.add(_make_api_key(api_key_hash="tenant-s"))
+        """ON DELETE RESTRICT: cannot delete an agent whose agent_id is a task context_id."""
+        session.add(_make_session(session_id="session-s"))
         await session.flush()
-        session.add(_make_agent(agent_id="agent-s", tenant_id="tenant-s"))
+        session.add(_make_agent(agent_id="agent-s", session_id="session-s"))
         await session.flush()
         session.add(
             _make_task(
@@ -715,22 +722,11 @@ class TestForeignKeyEnforcement:
 
     @pytest.mark.asyncio
     async def test_cascade_delete_agent_removes_placement(self, session):
-        """ON DELETE CASCADE: hard-deleting an agent cascades to its placement row.
-
-        FK regression test: verifies ``PRAGMA foreign_keys=ON`` is active and
-        the CASCADE FK on ``agent_placements.agent_id`` fires correctly. Without
-        the PRAGMA, the DELETE silently leaves an orphan placement row.
-
-        The member agent is hard-deleted (not soft-deleted via status update) to
-        exercise the FK cascade. The soft-delete path in ``deregister_agent``
-        never triggers this cascade — it does an explicit placement DELETE
-        instead — but the CASCADE declaration protects against accidental
-        hard-delete paths added later.
-        """
-        session.add(_make_api_key(api_key_hash="tenant-cascade"))
+        """ON DELETE CASCADE: hard-deleting an agent cascades to its placement row."""
+        session.add(_make_session(session_id="session-cascade"))
         await session.flush()
-        session.add(_make_agent(agent_id="director-c", tenant_id="tenant-cascade"))
-        session.add(_make_agent(agent_id="member-c", tenant_id="tenant-cascade"))
+        session.add(_make_agent(agent_id="director-c", session_id="session-cascade"))
+        session.add(_make_agent(agent_id="member-c", session_id="session-cascade"))
         await session.flush()
         session.add(
             _make_placement(
@@ -747,9 +743,7 @@ class TestForeignKeyEnforcement:
         assert result.scalar_one_or_none() is not None
 
         # Hard-delete the member agent — CASCADE should remove the placement
-        await session.execute(
-            delete(Agent).where(Agent.agent_id == "member-c")
-        )
+        await session.execute(delete(Agent).where(Agent.agent_id == "member-c"))
         await session.commit()
 
         # Placement must be gone via CASCADE
@@ -765,20 +759,11 @@ class TestForeignKeyEnforcement:
     @pytest.mark.asyncio
     async def test_restrict_delete_director_with_live_placements(self, session):
         """ON DELETE RESTRICT: cannot hard-delete a director that still has
-        placement rows referencing its ``agent_id`` via ``director_agent_id``.
-
-        This is a sanity guard — the current code uses soft-delete for
-        deregistration, but the constraint documents the invariant that a
-        Director cannot be removed while it still owns live placement rows.
-        """
-        session.add(_make_api_key(api_key_hash="tenant-restrict"))
+        placement rows referencing its ``agent_id`` via ``director_agent_id``."""
+        session.add(_make_session(session_id="session-restrict"))
         await session.flush()
-        session.add(
-            _make_agent(agent_id="director-r2", tenant_id="tenant-restrict")
-        )
-        session.add(
-            _make_agent(agent_id="member-r2", tenant_id="tenant-restrict")
-        )
+        session.add(_make_agent(agent_id="director-r2", session_id="session-restrict"))
+        session.add(_make_agent(agent_id="member-r2", session_id="session-restrict"))
         await session.flush()
         session.add(
             _make_placement(
@@ -788,19 +773,16 @@ class TestForeignKeyEnforcement:
         )
         await session.commit()
 
-        # Attempt to hard-delete the director — RESTRICT should block it
         with pytest.raises(IntegrityError):
-            await session.execute(
-                delete(Agent).where(Agent.agent_id == "director-r2")
-            )
+            await session.execute(delete(Agent).where(Agent.agent_id == "director-r2"))
 
     @pytest.mark.asyncio
     async def test_inserting_placement_with_unknown_agent_raises(self, session):
         """An orphan placement (agent_id not in agents) cannot be inserted."""
-        session.add(_make_api_key(api_key_hash="tenant-orphan-p"))
+        session.add(_make_session(session_id="session-orphan-p"))
         await session.flush()
         session.add(
-            _make_agent(agent_id="director-orphan", tenant_id="tenant-orphan-p")
+            _make_agent(agent_id="director-orphan", session_id="session-orphan-p")
         )
         await session.flush()
 
@@ -816,10 +798,10 @@ class TestForeignKeyEnforcement:
     @pytest.mark.asyncio
     async def test_inserting_placement_with_unknown_director_raises(self, session):
         """An orphan placement (director_agent_id not in agents) cannot be inserted."""
-        session.add(_make_api_key(api_key_hash="tenant-orphan-d"))
+        session.add(_make_session(session_id="session-orphan-d"))
         await session.flush()
         session.add(
-            _make_agent(agent_id="member-orphan", tenant_id="tenant-orphan-d")
+            _make_agent(agent_id="member-orphan", session_id="session-orphan-d")
         )
         await session.flush()
 
@@ -840,25 +822,38 @@ class TestForeignKeyEnforcement:
 
 class TestRoundtrip:
     @pytest.mark.asyncio
-    async def test_api_key_roundtrip(self, session):
-        session.add(_make_api_key(api_key_hash="rt-1"))
+    async def test_session_roundtrip(self, session):
+        """Session insert + select round-trip preserves all fields."""
+        session.add(_make_session(session_id="rt-sess", label="PR-42 review"))
         await session.commit()
 
         result = await session.execute(
-            select(ApiKey).where(ApiKey.api_key_hash == "rt-1")
+            select(Session).where(Session.session_id == "rt-sess")
         )
         row = result.scalar_one()
-        assert row.owner_sub == "auth0|user1"
-        assert row.status == "active"
+        assert row.label == "PR-42 review"
+        assert row.created_at is not None
+
+    @pytest.mark.asyncio
+    async def test_session_roundtrip_null_label(self, session):
+        """Session with label=None round-trips correctly."""
+        session.add(_make_session(session_id="rt-sess-null", label=None))
+        await session.commit()
+
+        result = await session.execute(
+            select(Session).where(Session.session_id == "rt-sess-null")
+        )
+        row = result.scalar_one()
+        assert row.label is None
 
     @pytest.mark.asyncio
     async def test_agent_roundtrip_preserves_json_blob(self, session):
         import json
 
         card = {"name": "Test", "skills": [{"id": "s1"}]}
-        session.add(_make_api_key(api_key_hash="rt-2"))
+        session.add(_make_session(session_id="rt-2"))
         await session.flush()
-        agent = _make_agent(agent_id="rt-agent", tenant_id="rt-2")
+        agent = _make_agent(agent_id="rt-agent", session_id="rt-2")
         agent.agent_card_json = json.dumps(card)
         session.add(agent)
         await session.commit()
@@ -874,9 +869,9 @@ class TestRoundtrip:
         import json
 
         payload = {"id": "t-1", "status": {"state": "submitted"}}
-        session.add(_make_api_key(api_key_hash="rt-3"))
+        session.add(_make_session(session_id="rt-3"))
         await session.flush()
-        session.add(_make_agent(agent_id="rt-agent-3", tenant_id="rt-3"))
+        session.add(_make_agent(agent_id="rt-agent-3", session_id="rt-3"))
         await session.flush()
 
         task = _make_task(
@@ -894,11 +889,11 @@ class TestRoundtrip:
         assert json.loads(row.task_json) == payload
 
     @pytest.mark.asyncio
-    async def test_task_roundtrip_origin_task_id_null(self, session):  # noqa: D401
+    async def test_task_roundtrip_origin_task_id_null(self, session):
         """Saving a task without origin_task_id reads back as None."""
-        session.add(_make_api_key(api_key_hash="rt-null"))
+        session.add(_make_session(session_id="rt-null"))
         await session.flush()
-        session.add(_make_agent(agent_id="rt-agent-null", tenant_id="rt-null"))
+        session.add(_make_agent(agent_id="rt-agent-null", session_id="rt-null"))
         await session.flush()
 
         session.add(
@@ -919,11 +914,11 @@ class TestRoundtrip:
         assert row.origin_task_id is None
 
     @pytest.mark.asyncio
-    async def test_task_roundtrip_origin_task_id_populated(self, session):  # noqa: D401
+    async def test_task_roundtrip_origin_task_id_populated(self, session):
         """Saving a task with a concrete origin_task_id reads back unchanged."""
-        session.add(_make_api_key(api_key_hash="rt-origin"))
+        session.add(_make_session(session_id="rt-origin"))
         await session.flush()
-        session.add(_make_agent(agent_id="rt-agent-origin", tenant_id="rt-origin"))
+        session.add(_make_agent(agent_id="rt-agent-origin", session_id="rt-origin"))
         await session.flush()
 
         origin = "11111111-2222-4333-8444-555555555555"
@@ -946,11 +941,11 @@ class TestRoundtrip:
 
     @pytest.mark.asyncio
     async def test_placement_roundtrip_null_pane_id(self, session):
-        """Saving a placement with ``tmux_pane_id=None`` (pending) reads back as None."""
-        session.add(_make_api_key(api_key_hash="rt-pend"))
+        """Saving a placement with ``tmux_pane_id=None`` reads back as None."""
+        session.add(_make_session(session_id="rt-pend"))
         await session.flush()
-        session.add(_make_agent(agent_id="rt-dir-pend", tenant_id="rt-pend"))
-        session.add(_make_agent(agent_id="rt-mem-pend", tenant_id="rt-pend"))
+        session.add(_make_agent(agent_id="rt-dir-pend", session_id="rt-pend"))
+        session.add(_make_agent(agent_id="rt-mem-pend", session_id="rt-pend"))
         await session.flush()
 
         session.add(
@@ -963,9 +958,7 @@ class TestRoundtrip:
         await session.commit()
 
         result = await session.execute(
-            select(AgentPlacement).where(
-                AgentPlacement.agent_id == "rt-mem-pend"
-            )
+            select(AgentPlacement).where(AgentPlacement.agent_id == "rt-mem-pend")
         )
         row = result.scalar_one()
         assert row.tmux_pane_id is None
@@ -976,10 +969,10 @@ class TestRoundtrip:
     @pytest.mark.asyncio
     async def test_placement_roundtrip_with_pane_id(self, session):
         """Saving a placement with a concrete ``tmux_pane_id`` reads back unchanged."""
-        session.add(_make_api_key(api_key_hash="rt-pane"))
+        session.add(_make_session(session_id="rt-pane"))
         await session.flush()
-        session.add(_make_agent(agent_id="rt-dir-pane", tenant_id="rt-pane"))
-        session.add(_make_agent(agent_id="rt-mem-pane", tenant_id="rt-pane"))
+        session.add(_make_agent(agent_id="rt-dir-pane", session_id="rt-pane"))
+        session.add(_make_agent(agent_id="rt-mem-pane", session_id="rt-pane"))
         await session.flush()
 
         session.add(
@@ -992,9 +985,7 @@ class TestRoundtrip:
         await session.commit()
 
         result = await session.execute(
-            select(AgentPlacement).where(
-                AgentPlacement.agent_id == "rt-mem-pane"
-            )
+            select(AgentPlacement).where(AgentPlacement.agent_id == "rt-mem-pane")
         )
         row = result.scalar_one()
         assert row.tmux_pane_id == "%42"
