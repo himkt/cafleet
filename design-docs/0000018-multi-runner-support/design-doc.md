@@ -1,7 +1,7 @@
 # Multi-Runner Support (Codex Integration)
 
 **Status**: Approved
-**Progress**: 6/18 tasks complete
+**Progress**: 7/18 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -222,7 +222,7 @@ In `client/src/hikyaku_client/output.py`:
 
 ### Step 3: Generalize tmux.split_window()
 
-- [ ] Change `split_window()` parameter from `claude_prompt: str` to `command: list[str]` and replace `args += ["claude", claude_prompt]` with `args += command` <!-- completed: -->
+- [x] Change `split_window()` parameter from `claude_prompt: str` to `command: list[str]` and replace `args += ["claude", claude_prompt]` with `args += command` <!-- completed: 2026-04-12T18:35 -->
 
 ### Step 4: Database Migration and Model
 
