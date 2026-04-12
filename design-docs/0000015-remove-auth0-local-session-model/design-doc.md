@@ -1,7 +1,7 @@
 # Remove Auth0: Local-Only Session Model
 
 **Status**: Approved
-**Progress**: 29/80 tasks complete
+**Progress**: 33/80 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -527,35 +527,35 @@ Implementation order is **documentation-first** per project rule `.claude/rules/
 
 ### Step 6: Backend — HTTP routes
 
-- [ ] Rewrite `registry/src/hikyaku_registry/api/registry.py`:
+- [x] Rewrite `registry/src/hikyaku_registry/api/registry.py`:
   - `POST /agents` accepts `{session_id, name, description, skills}` in the body
   - `GET /agents` reads `?session_id=` query param
   - `GET /agents/{id}` reads `X-Session-Id` header
   - `DELETE /agents/{id}` reads `X-Agent-Id` header only
   - All 401 bearer errors become 400 `SESSION_REQUIRED` / 404 `SESSION_NOT_FOUND`
-  <!-- completed: -->
-- [ ] Rewrite `registry/src/hikyaku_registry/webui_api.py`:
+  <!-- completed: 2026-04-12 -->
+- [x] Rewrite `registry/src/hikyaku_registry/webui_api.py`:
   - Delete `GET /ui/api/auth/config`, `POST /ui/api/keys`, `GET /ui/api/keys`, `DELETE /ui/api/keys/{id}`
   - Delete `get_webui_tenant` dependency; add `get_webui_session` that reads `X-Session-Id` header and verifies existence
   - Add `GET /ui/api/sessions` endpoint (calls async `RegistryStore.list_sessions`, no session header required)
   - Update `/ui/api/agents`, `/ui/api/agents/{id}/inbox`, `/ui/api/agents/{id}/sent`, `/ui/api/messages/send` to use `get_webui_session`
   - All `_get_tenant_agents` helpers renamed `_get_session_agents`
-  <!-- completed: -->
-- [ ] Rewrite `registry/src/hikyaku_registry/main.py`:
+  <!-- completed: 2026-04-12 -->
+- [x] Rewrite `registry/src/hikyaku_registry/main.py`:
   - Delete the bearer extraction + `is_api_key_active` check in the `POST /` JSON-RPC endpoint
   - Replace with `X-Agent-Id` header → agents table lookup → resolve `session_id`
   - Update `_handle_send_message`, `_handle_get_task`, `_handle_cancel_task` to pass `session_id` through `call_context.state` instead of `tenant_id` (`_handle_list_tasks` does not use tenant_id today — no change needed)
-  <!-- completed: -->
-- [ ] Update `registry/src/hikyaku_registry/executor.py`:
+  <!-- completed: 2026-04-12 -->
+- [x] Update `registry/src/hikyaku_registry/executor.py`:
   - Define `class SessionMismatchError(ValueError)` at module level (executor.py is its home module — other exception classes like routing errors already live here)
   - Rename every `tenant_id` local to `session_id`
   - `_handle_unicast` session-mismatch path (currently `raise ValueError(...)` at line 111) raises `SessionMismatchError("Session mismatch")` instead of plain `ValueError`
-  <!-- completed: -->
-- [ ] Update `registry/src/hikyaku_registry/main.py` exception handler:
+  <!-- completed: 2026-04-12 -->
+- [x] Update `registry/src/hikyaku_registry/main.py` exception handler:
   - In `jsonrpc_endpoint`'s `except` block (line 331), add a specific `except SessionMismatchError` catch **before** the existing `except (ValueError, PermissionError)` catch that maps to `-32000`
   - The new catch returns `_jsonrpc_error(-32003, str(e), req_id)` — this is how the `-32003` code reaches the JSON-RPC response
   - Import `SessionMismatchError` from `executor`
-  <!-- completed: -->
+  <!-- completed: 2026-04-12 -->
 
 ### Step 7: Backend — `hikyaku-registry session` CLI
 

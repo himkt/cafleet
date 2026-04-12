@@ -3,7 +3,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 
-from hikyaku_registry.auth import get_authenticated_agent, get_registration_tenant
 from hikyaku_registry.db.engine import get_sessionmaker
 from hikyaku_registry.models import (
     AgentSummary,
@@ -30,16 +29,26 @@ async def register_agent(
     request: Request,
     store: RegistryStore = Depends(get_registry_store),
 ):
-    api_key, _tenant_id = await get_registration_tenant(request, store)
+    session = await store.get_session(body.session_id)
+    if session is None:
+        return JSONResponse(
+            status_code=404,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    code="SESSION_NOT_FOUND",
+                    message=f"Session '{body.session_id}' not found",
+                )
+            ).model_dump(),
+        )
 
     if body.placement is not None:
         caller_id = request.headers.get("x-agent-id")
         if not caller_id or caller_id != body.placement.director_agent_id:
             return JSONResponse(
-                status_code=401,
+                status_code=400,
                 content=ErrorResponse(
                     error=ErrorDetail(
-                        code="UNAUTHORIZED",
+                        code="AGENT_ID_REQUIRED",
                         message="X-Agent-Id must match placement.director_agent_id",
                     )
                 ).model_dump(),
@@ -48,14 +57,14 @@ async def register_agent(
         if (
             director is None
             or director.get("status") != "active"
-            or not await store.verify_agent_tenant(caller_id, _tenant_id)
+            or not await store.verify_agent_session(caller_id, body.session_id)
         ):
             return JSONResponse(
                 status_code=403,
                 content=ErrorResponse(
                     error=ErrorDetail(
                         code="FORBIDDEN",
-                        message="Director agent is not active in the caller's tenant",
+                        message="Director agent is not active in the session",
                     )
                 ).model_dump(),
             )
@@ -64,7 +73,7 @@ async def register_agent(
         name=body.name,
         description=body.description,
         skills=body.skills,
-        api_key=api_key,
+        session_id=body.session_id,
         placement=body.placement,
     )
 
@@ -85,15 +94,24 @@ async def register_agent(
 @registry_router.get("/agents", response_model=ListAgentsResponse)
 async def list_agents(
     request: Request,
+    session_id: str | None = None,
     director_agent_id: str | None = None,
-    auth: tuple = Depends(get_authenticated_agent),
     store: RegistryStore = Depends(get_registry_store),
-) -> dict[str, Any]:
-    _agent_id, tenant_id = auth
+) -> Any:
+    if not session_id:
+        return JSONResponse(
+            status_code=400,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    code="SESSION_REQUIRED",
+                    message="session_id query parameter is required",
+                )
+            ).model_dump(),
+        )
 
     if director_agent_id is not None:
         members = await store.list_placements_for_director(
-            tenant_id=tenant_id, director_agent_id=director_agent_id
+            session_id=session_id, director_agent_id=director_agent_id
         )
         return {
             "agents": [
@@ -111,7 +129,7 @@ async def list_agents(
             ]
         }
 
-    agents = await store.list_active_agents(tenant_id=tenant_id)
+    agents = await store.list_active_agents(session_id=session_id)
     return {
         "agents": [
             AgentSummary(
@@ -129,10 +147,20 @@ async def list_agents(
 @registry_router.get("/agents/{agent_id}")
 async def get_agent_detail(
     agent_id: str,
-    auth: tuple = Depends(get_authenticated_agent),
+    request: Request,
     store: RegistryStore = Depends(get_registry_store),
 ):
-    _caller_id, tenant_id = auth
+    session_id = request.headers.get("x-session-id")
+    if not session_id:
+        return JSONResponse(
+            status_code=400,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    code="SESSION_REQUIRED",
+                    message="X-Session-Id header is required",
+                )
+            ).model_dump(),
+        )
 
     agent = await store.get_agent(agent_id)
     if agent is None or agent.get("status") == "deregistered":
@@ -146,8 +174,8 @@ async def get_agent_detail(
             ).model_dump(),
         )
 
-    is_same_tenant = await store.verify_agent_tenant(agent_id, tenant_id)
-    if not is_same_tenant:
+    is_same_session = await store.verify_agent_session(agent_id, session_id)
+    if not is_same_session:
         return JSONResponse(
             status_code=404,
             content=ErrorResponse(
@@ -176,10 +204,20 @@ async def get_agent_detail(
 @registry_router.delete("/agents/{agent_id}")
 async def deregister_agent(
     agent_id: str,
-    auth: tuple = Depends(get_authenticated_agent),
+    request: Request,
     store: RegistryStore = Depends(get_registry_store),
 ):
-    caller_id, _tenant_id = auth
+    caller_id = request.headers.get("x-agent-id")
+    if not caller_id:
+        return JSONResponse(
+            status_code=400,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    code="AGENT_ID_REQUIRED",
+                    message="X-Agent-Id header is required",
+                )
+            ).model_dump(),
+        )
 
     agent = await store.get_agent(agent_id)
     if agent is None or agent.get("status") == "deregistered":
@@ -207,7 +245,7 @@ async def deregister_agent(
             content=ErrorResponse(
                 error=ErrorDetail(
                     code="FORBIDDEN",
-                    message="API key does not match the target resource",
+                    message="Caller is not authorized to deregister this agent",
                 )
             ).model_dump(),
         )
@@ -220,10 +258,20 @@ async def deregister_agent(
 async def patch_placement(
     agent_id: str,
     body: PlacementPatch,
-    auth: tuple = Depends(get_authenticated_agent),
+    request: Request,
     store: RegistryStore = Depends(get_registry_store),
 ):
-    caller_id, _tenant_id = auth
+    caller_id = request.headers.get("x-agent-id")
+    if not caller_id:
+        return JSONResponse(
+            status_code=400,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    code="AGENT_ID_REQUIRED",
+                    message="X-Agent-Id header is required",
+                )
+            ).model_dump(),
+        )
 
     placement = await store.get_placement(agent_id)
     if placement is None:

@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -8,6 +7,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from a2a.server.agent_execution import RequestContext
@@ -27,10 +27,10 @@ from hikyaku_registry.api.registry import (
     get_registry_store,
     registry_router,
 )
-from hikyaku_registry.auth import get_authenticated_agent
 from hikyaku_registry.config import settings
 from hikyaku_registry.db.engine import dispose_engine, get_sessionmaker
-from hikyaku_registry.executor import BrokerExecutor
+from hikyaku_registry.db.models import Agent
+from hikyaku_registry.executor import BrokerExecutor, SessionMismatchError
 from hikyaku_registry.registry_store import RegistryStore
 from hikyaku_registry.task_store import TaskStore
 from hikyaku_registry.webui_api import (
@@ -85,7 +85,7 @@ def _jsonrpc_error(
 
 
 async def _handle_send_message(
-    executor: BrokerExecutor, agent_id: str, tenant_id: str, params: dict
+    executor: BrokerExecutor, agent_id: str, session_id: str, params: dict
 ) -> dict:
     """Handle SendMessage JSON-RPC method."""
     message_data = params["message"]
@@ -104,7 +104,7 @@ async def _handle_send_message(
     )
 
     call_context = ServerCallContext(
-        state={"agent_id": agent_id, "tenant_id": tenant_id}
+        state={"agent_id": agent_id, "session_id": session_id}
     )
     send_params = MessageSendParams(message=msg)
 
@@ -141,7 +141,7 @@ async def _handle_send_message(
 
 async def _handle_get_task(
     task_store: TaskStore,
-    tenant_id: str,
+    session_id: str,
     registry_store: RegistryStore,
     params: dict,
 ) -> dict:
@@ -154,19 +154,16 @@ async def _handle_get_task(
     if task is None:
         raise ValueError(f"Task {task_id} not found")
 
-    # Read sender/recipient from the Task metadata blob rather than issuing
-    # a second SELECT for the endpoints columns — BrokerExecutor writes
-    # both fields on every save (executor.py _handle_unicast / _handle_broadcast).
     metadata = task.metadata or {}
     from_agent = metadata.get("fromAgentId", "")
     to_agent = metadata.get("toAgentId", "")
 
-    from_ok = from_agent and await registry_store.verify_agent_tenant(
-        from_agent, tenant_id
+    from_ok = from_agent and await registry_store.verify_agent_session(
+        from_agent, session_id
     )
     if not from_ok:
-        to_ok = to_agent and await registry_store.verify_agent_tenant(
-            to_agent, tenant_id
+        to_ok = to_agent and await registry_store.verify_agent_session(
+            to_agent, session_id
         )
         if not to_ok:
             raise ValueError(f"Task {task_id} not found")
@@ -175,7 +172,7 @@ async def _handle_get_task(
 
 
 async def _handle_cancel_task(
-    executor: BrokerExecutor, agent_id: str, tenant_id: str, params: dict
+    executor: BrokerExecutor, agent_id: str, session_id: str, params: dict
 ) -> dict:
     """Handle CancelTask JSON-RPC method."""
     task_id = params.get("id")
@@ -183,7 +180,7 @@ async def _handle_cancel_task(
         raise ValueError("Missing task id")
 
     call_context = ServerCallContext(
-        state={"agent_id": agent_id, "tenant_id": tenant_id}
+        state={"agent_id": agent_id, "session_id": session_id}
     )
     context = RequestContext(
         task_id=task_id,
@@ -261,11 +258,7 @@ def create_app(
     async def _get_store() -> RegistryStore:
         return registry_store
 
-    async def _get_auth(request: Request) -> tuple[str, str]:
-        return await get_authenticated_agent(request, store=registry_store)
-
     app.dependency_overrides[get_registry_store] = _get_store
-    app.dependency_overrides[get_authenticated_agent] = _get_auth
 
     # WebUI router (must be included BEFORE StaticFiles mount)
     app.include_router(webui_router)
@@ -283,24 +276,21 @@ def create_app(
     # JSON-RPC endpoint for A2A operations
     @app.post("/")
     async def jsonrpc_endpoint(request: Request):
-        # Authenticate: extract Bearer token and X-Agent-Id header
-        auth_header = request.headers.get("authorization", "")
-        parts = auth_header.split(" ", 1)
-        token = parts[1].strip() if len(parts) == 2 and parts[0] == "Bearer" else ""
-        if not token:
-            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
-
-        tenant_id = hashlib.sha256(token.encode()).hexdigest()
-
-        if not await registry_store.is_api_key_active(tenant_id):
-            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
-
+        # Authenticate: read X-Agent-Id header, look up agent's session_id
         agent_id = request.headers.get("x-agent-id")
         if not agent_id:
-            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+            return JSONResponse(status_code=400, content={"error": "X-Agent-Id header required"})
 
-        if not await registry_store.verify_agent_tenant(agent_id, tenant_id):
-            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+        async with registry_store._sessionmaker() as session:
+            result = await session.execute(
+                select(Agent.session_id).where(Agent.agent_id == agent_id)
+            )
+            row = result.first()
+
+        if row is None:
+            return JSONResponse(status_code=404, content={"error": "Agent not found"})
+
+        session_id = row[0]
 
         # Parse JSON-RPC request
         body = await request.json()
@@ -312,15 +302,15 @@ def create_app(
         try:
             if method == "SendMessage":
                 result = await _handle_send_message(
-                    executor, agent_id, tenant_id, params
+                    executor, agent_id, session_id, params
                 )
             elif method == "GetTask":
                 result = await _handle_get_task(
-                    task_store, tenant_id, registry_store, params
+                    task_store, session_id, registry_store, params
                 )
             elif method == "CancelTask":
                 result = await _handle_cancel_task(
-                    executor, agent_id, tenant_id, params
+                    executor, agent_id, session_id, params
                 )
             elif method == "ListTasks":
                 result = await _handle_list_tasks(task_store, agent_id, params)
@@ -328,6 +318,8 @@ def create_app(
                 return _jsonrpc_error(-32601, "Method not found", req_id)
 
             return _jsonrpc_success(result, req_id)
+        except SessionMismatchError as e:
+            return _jsonrpc_error(-32003, str(e), req_id)
         except (ValueError, PermissionError) as e:
             return _jsonrpc_error(-32000, str(e), req_id)
 
