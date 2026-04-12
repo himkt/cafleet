@@ -1,7 +1,7 @@
 # Merge Client and Registry into a Single Package
 
 **Status**: Approved
-**Progress**: 5/32 tasks complete
+**Progress**: 12/32 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -353,19 +353,19 @@ client/                    # entire directory
 
 ### Step 2: Create Package Directory and Config
 
-- [ ] Create `hikyaku/` directory with `pyproject.toml` (merged dependencies, single console script) <!-- completed: -->
-- [ ] Create `hikyaku/mise.toml` (merged lint, format, dev, test tasks) <!-- completed: -->
-- [ ] Create `hikyaku/src/hikyaku/__init__.py` <!-- completed: -->
+- [x] Create `hikyaku/` directory with `pyproject.toml` (merged dependencies, single console script) <!-- completed: 2026-04-12T09:17 -->
+- [x] Create `hikyaku/mise.toml` (merged lint, format, dev, test tasks) <!-- completed: 2026-04-12T09:17 -->
+- [x] Create `hikyaku/src/hikyaku/__init__.py` <!-- completed: 2026-04-12T09:17 -->
 
 ### Step 3: Move Registry Source Files
 
-- [ ] Move all files from `registry/src/hikyaku_registry/` to `hikyaku/src/hikyaku/`, renaming `main.py` to `server.py` <!-- completed: -->
-- [ ] Move `db/`, `api/`, `alembic/`, `alembic.ini`, `webui/` subdirectories <!-- completed: -->
+- [x] Move all files from `registry/src/hikyaku_registry/` to `hikyaku/src/hikyaku/`, renaming `main.py` to `server.py` <!-- completed: 2026-04-12T09:20 -->
+- [x] Move `db/`, `api/`, `alembic/`, `alembic.ini`, `webui/` subdirectories <!-- completed: 2026-04-12T09:20 -->
 
 ### Step 4: Move Client Source Files
 
-- [ ] Move `client/src/hikyaku_client/api.py` to `hikyaku/src/hikyaku/broker_client.py` <!-- completed: -->
-- [ ] Move `output.py` and `tmux.py` to `hikyaku/src/hikyaku/` <!-- completed: -->
+- [x] Move `client/src/hikyaku_client/api.py` to `hikyaku/src/hikyaku/broker_client.py` <!-- completed: 2026-04-12T09:21 -->
+- [x] Move `output.py` and `tmux.py` to `hikyaku/src/hikyaku/` <!-- completed: 2026-04-12T09:21 -->
 
 ### Step 5: Merge CLIs
 
