@@ -1,7 +1,7 @@
 # Remove Auth0: Local-Only Session Model
 
 **Status**: Approved
-**Progress**: 17/80 tasks complete
+**Progress**: 24/80 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -506,13 +506,13 @@ Implementation order is **documentation-first** per project rule `.claude/rules/
 
 ### Step 4: Backend — registry store & session store
 
-- [ ] Delete `RegistryStore.create_api_key`, `list_api_keys`, `revoke_api_key`, `get_api_key_status`, `is_api_key_active`, `is_key_owner` methods <!-- completed: -->
-- [ ] Rename `RegistryStore.verify_agent_tenant` → `verify_agent_session` and update the query + all call sites <!-- completed: -->
-- [ ] Update `RegistryStore.list_active_agents(tenant_id=...)` → `list_active_agents(session_id=...)` <!-- completed: -->
-- [ ] Update `RegistryStore.create_agent` signature: drop `api_key` param, add `session_id` param; delete the sha256 derivation <!-- completed: -->
-- [ ] Add async `RegistryStore.list_sessions` and `RegistryStore.get_session` methods for the WebUI runtime (`GET /ui/api/sessions`). CLI session management (create/list/show/delete) uses sync helpers in `cli.py` via `create_engine(sync_url)` — see Step 7 <!-- completed: -->
-- [ ] Update `RegistryStore.list_deregistered_agents_with_tasks(tenant_id)` signature to `session_id` <!-- completed: -->
-- [ ] Update `RegistryStore.get_agent_names` (no signature change; implementation unaffected) — audit only <!-- completed: -->
+- [x] Delete `RegistryStore.create_api_key`, `list_api_keys`, `revoke_api_key`, `get_api_key_status`, `is_api_key_active`, `is_key_owner` methods <!-- completed: 2026-04-12 -->
+- [x] Rename `RegistryStore.verify_agent_tenant` → `verify_agent_session` and update the query + all call sites <!-- completed: 2026-04-12 -->
+- [x] Update `RegistryStore.list_active_agents(tenant_id=...)` → `list_active_agents(session_id=...)` <!-- completed: 2026-04-12 -->
+- [x] Update `RegistryStore.create_agent` signature: drop `api_key` param, add `session_id` param; delete the sha256 derivation <!-- completed: 2026-04-12 -->
+- [x] Add async `RegistryStore.list_sessions` and `RegistryStore.get_session` methods for the WebUI runtime (`GET /ui/api/sessions`). CLI session management (create/list/show/delete) uses sync helpers in `cli.py` via `create_engine(sync_url)` — see Step 7 <!-- completed: 2026-04-12 -->
+- [x] Update `RegistryStore.list_deregistered_agents_with_tasks(tenant_id)` signature to `session_id` <!-- completed: 2026-04-12 -->
+- [x] Update `RegistryStore.get_agent_names` (no signature change; implementation unaffected) — audit only <!-- completed: 2026-04-12 -->
 
 ### Step 5: Backend — auth & middleware removal
 
