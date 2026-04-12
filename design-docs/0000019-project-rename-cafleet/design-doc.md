@@ -1,7 +1,7 @@
 # Project Rename: hikyaku → cafleet
 
 **Status**: Approved
-**Progress**: 33/36 tasks complete
+**Progress**: 36/36 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -10,14 +10,14 @@ Rename the project from "hikyaku" to "cafleet" across the entire codebase. This 
 
 ## Success Criteria
 
-- [ ] Python package installs as `cafleet` and CLI command is `cafleet`
-- [ ] All imports use `from cafleet` / `import cafleet`
-- [ ] Environment variables use `CAFLEET_*` prefix
-- [ ] Default database path is `~/.local/share/cafleet/registry.db`
-- [ ] All documentation references use "CAFleet" (title case) or "cafleet" (code)
-- [ ] `mise //cafleet:test` passes, `mise //cafleet:dev` starts the server
-- [ ] CI/CD pipeline passes on the renamed codebase
-- [ ] Skills and plugin definitions reference "cafleet"
+- [x] Python package installs as `cafleet` and CLI command is `cafleet`
+- [x] All imports use `from cafleet` / `import cafleet`
+- [x] Environment variables use `CAFLEET_*` prefix
+- [x] Default database path is `~/.local/share/cafleet/registry.db`
+- [x] All documentation references use "CAFleet" (title case) or "cafleet" (code)
+- [x] `mise //cafleet:test` passes, `mise //cafleet:dev` starts the server
+- [x] CI/CD pipeline passes on the renamed codebase
+- [x] Skills and plugin definitions reference "cafleet"
 
 ---
 
@@ -327,9 +327,9 @@ Per project rules, documentation is updated before code.
 
 ### Step 10: Lock File & Verification
 
-- [ ] Run `uv sync` to regenerate `uv.lock` with new package name <!-- completed: -->
-- [ ] Run `mise //cafleet:test` to verify all tests pass <!-- completed: -->
-- [ ] Run `mise //:lint` and `mise //:typecheck` to verify no lint/type errors <!-- completed: -->
+- [x] Run `uv sync` to regenerate `uv.lock` with new package name <!-- completed: 2026-04-12 -->
+- [x] Run `mise //cafleet:test` to verify all tests pass <!-- completed: 2026-04-12 -->
+- [x] Run `mise //:lint` and `mise //:typecheck` to verify no lint/type errors <!-- completed: 2026-04-12 -->
 
 ---
 
