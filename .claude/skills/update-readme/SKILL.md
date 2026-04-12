@@ -20,7 +20,7 @@ Use the Agent tool to spawn an agent with the following parameters:
 Use the following as the agent prompt:
 
 ~~~
-You are a documentation writer for the Hikyaku project. Your job is to update README.md based on the current content of ARCHITECTURE.md and docs/.
+You are a documentation writer for the CAFleet project. Your job is to update README.md based on the current content of ARCHITECTURE.md and docs/.
 
 ## Workflow
 
@@ -50,8 +50,8 @@ The README must include these sections in order:
 - Do not use emojis
 - Keep it concise and developer-friendly
 - Preserve any manual additions in README.md that are not covered by the source materials
-- CLI command is `hikyaku` (unified CLI for both server admin and agent operations)
-- Server start: `mise //hikyaku:dev` (from the project root)
-- Install: `pip install hikyaku` (single package)
+- CLI command is `cafleet` (unified CLI for both server admin and agent operations)
+- Server start: `mise //cafleet:dev` (from the project root)
+- Install: `pip install cafleet` (single package)
 - If a section has no changes from the source materials, keep it as-is
 ~~~

@@ -1,10 +1,10 @@
 ---
-description: Interact with the Hikyaku A2A message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
+description: Interact with the CAFleet A2A message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
 ---
 
-# Hikyaku — A2A Message Broker CLI
+# CAFleet — A2A Message Broker CLI
 
-Use the `hikyaku` CLI to register as an agent, send and receive messages, and discover other agents on the Hikyaku A2A message broker.
+Use the `cafleet` CLI to register as an agent, send and receive messages, and discover other agents on the CAFleet A2A message broker.
 
 ## When to Use
 
@@ -22,8 +22,8 @@ Use the `hikyaku` CLI to register as an agent, send and receive messages, and di
 
 The CLI reads both variables from the environment — they are the **only** way to configure the CLI. There are no `--url` / `--session-id` flags.
 
-- `HIKYAKU_URL` — Broker URL, must include the `http://` / `https://` scheme (default: `http://127.0.0.1:8000`). The CLI errors with "Request URL is missing an 'http://' or 'https://' protocol" if the scheme is missing.
-- `HIKYAKU_SESSION_ID` — Session namespace ID created via `hikyaku session create`. The CLI exits with `Error: HIKYAKU_SESSION_ID environment variable is required. Create a session with 'hikyaku session create'.` if this is not set.
+- `CAFLEET_URL` — Broker URL, must include the `http://` / `https://` scheme (default: `http://127.0.0.1:8000`). The CLI errors with "Request URL is missing an 'http://' or 'https://' protocol" if the scheme is missing.
+- `CAFLEET_SESSION_ID` — Session namespace ID created via `cafleet session create`. The CLI exits with `Error: CAFLEET_SESSION_ID environment variable is required. Create a session with 'cafleet session create'.` if this is not set.
 
 ## Agent ID
 
@@ -34,31 +34,31 @@ Every command **except `register`** requires `--agent-id <id>`. `register` retur
 Only `--json` exists, and it must be placed **before** the subcommand:
 
 ```bash
-hikyaku --json register --name "My Agent" --description "..."
-hikyaku --json agents --agent-id <agent-id>
+cafleet --json register --name "My Agent" --description "..."
+cafleet --json agents --agent-id <agent-id>
 ```
 
-`hikyaku agents --json` will fail with `No such option: --json`.
+`cafleet agents --json` will fail with `No such option: --json`.
 
 ## Command Reference
 
 ### Env
 
-Print the current `HIKYAKU_URL` and `HIKYAKU_SESSION_ID` values from the environment. Useful for verifying configuration before running other commands.
+Print the current `CAFLEET_URL` and `CAFLEET_SESSION_ID` values from the environment. Useful for verifying configuration before running other commands.
 
 ```bash
-hikyaku env
-# HIKYAKU_URL=http://127.0.0.1:8000
-# HIKYAKU_SESSION_ID=550e8400-e29b-41d4-a716-446655440000
+cafleet env
+# CAFLEET_URL=http://127.0.0.1:8000
+# CAFLEET_SESSION_ID=550e8400-e29b-41d4-a716-446655440000
 ```
 
 ### Register
 
-Register a new agent with the broker. `HIKYAKU_SESSION_ID` must be set.
+Register a new agent with the broker. `CAFLEET_SESSION_ID` must be set.
 
 ```bash
-hikyaku register --name "My Agent" --description "What this agent does"
-hikyaku register --name "My Agent" --description "Frontend dev" --skills '[{"id":"react","name":"React Dev","description":"React/TS"}]'
+cafleet register --name "My Agent" --description "What this agent does"
+cafleet register --name "My Agent" --description "Frontend dev" --skills '[{"id":"react","name":"React Dev","description":"React/TS"}]'
 ```
 
 Returns the newly created `agent_id`. Record it; every other command needs it via `--agent-id`.
@@ -68,7 +68,7 @@ Returns the newly created `agent_id`. Record it; every other command needs it vi
 Use `--json` so the output is machine-parseable, and capture `agent_id` for every subsequent call:
 
 ```bash
-hikyaku --json register \
+cafleet --json register \
   --name "<short-label>" \
   --description "<one-sentence purpose>"
 ```
@@ -89,15 +89,15 @@ Rules:
 - **Description**: one sentence stating who the agent is and what it is for.
 - **Capture `agent_id` immediately.** It is required for every subsequent call; losing it forces re-registration.
 - Non-`--json` output prints `Agent registered successfully!` followed by `  agent_id:  <uuid>` and `  name:      <name>`. Parse the `agent_id:` line if `--json` is not an option.
-- Call `hikyaku deregister --agent-id <id>` at end of session so stale registrations do not accumulate.
+- Call `cafleet deregister --agent-id <id>` at end of session so stale registrations do not accumulate.
 
 ### List Agents
 
 List all registered agents, or get detail for a specific agent.
 
 ```bash
-hikyaku agents --agent-id <self-agent-id>
-hikyaku agents --agent-id <self-agent-id> --id <target-agent-id>
+cafleet agents --agent-id <self-agent-id>
+cafleet agents --agent-id <self-agent-id> --id <target-agent-id>
 ```
 
 ### Send (Unicast)
@@ -105,7 +105,7 @@ hikyaku agents --agent-id <self-agent-id> --id <target-agent-id>
 Send a message to a specific agent by ID.
 
 ```bash
-hikyaku send --agent-id <self-agent-id> --to <target-agent-id> --text "Did the API schema change?"
+cafleet send --agent-id <self-agent-id> --to <target-agent-id> --text "Did the API schema change?"
 ```
 
 ### Broadcast
@@ -113,7 +113,7 @@ hikyaku send --agent-id <self-agent-id> --to <target-agent-id> --text "Did the A
 Send a message to all registered agents (except self).
 
 ```bash
-hikyaku broadcast --agent-id <self-agent-id> --text "Build failed on main branch"
+cafleet broadcast --agent-id <self-agent-id> --text "Build failed on main branch"
 ```
 
 ### Poll (Check Inbox)
@@ -121,9 +121,9 @@ hikyaku broadcast --agent-id <self-agent-id> --text "Build failed on main branch
 Poll for incoming messages. Returns tasks addressed to this agent.
 
 ```bash
-hikyaku poll --agent-id <self-agent-id>
-hikyaku poll --agent-id <self-agent-id> --since "2026-03-28T12:00:00Z"
-hikyaku poll --agent-id <self-agent-id> --page-size 10
+cafleet poll --agent-id <self-agent-id>
+cafleet poll --agent-id <self-agent-id> --since "2026-03-28T12:00:00Z"
+cafleet poll --agent-id <self-agent-id> --page-size 10
 ```
 
 ### Acknowledge (ACK)
@@ -131,7 +131,7 @@ hikyaku poll --agent-id <self-agent-id> --page-size 10
 Acknowledge receipt of a message. Moves the task from INPUT_REQUIRED to COMPLETED.
 
 ```bash
-hikyaku ack --agent-id <self-agent-id> --task-id <task-id>
+cafleet ack --agent-id <self-agent-id> --task-id <task-id>
 ```
 
 ### Cancel (Retract)
@@ -139,7 +139,7 @@ hikyaku ack --agent-id <self-agent-id> --task-id <task-id>
 Cancel a sent message that hasn't been acknowledged yet. Only the sender can cancel.
 
 ```bash
-hikyaku cancel --agent-id <self-agent-id> --task-id <task-id>
+cafleet cancel --agent-id <self-agent-id> --task-id <task-id>
 ```
 
 ### Get Task
@@ -147,7 +147,7 @@ hikyaku cancel --agent-id <self-agent-id> --task-id <task-id>
 Get details of a specific task by ID.
 
 ```bash
-hikyaku get-task --agent-id <self-agent-id> --task-id <task-id>
+cafleet get-task --agent-id <self-agent-id> --task-id <task-id>
 ```
 
 ### Deregister
@@ -155,7 +155,7 @@ hikyaku get-task --agent-id <self-agent-id> --task-id <task-id>
 Remove this agent's registration from the broker.
 
 ```bash
-hikyaku deregister --agent-id <self-agent-id>
+cafleet deregister --agent-id <self-agent-id>
 ```
 
 ### Member Create
@@ -163,13 +163,13 @@ hikyaku deregister --agent-id <self-agent-id>
 Register a new member agent and spawn a coding agent pane in the Director's own tmux window. Must be run inside a tmux session. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
 
 ```bash
-hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
+cafleet member create --agent-id $DIRECTOR_ID --name Claude-B \
   --description "Reviewer for PR #42"
 
-hikyaku member create --agent-id $DIRECTOR_ID --name Codex-B \
+cafleet member create --agent-id $DIRECTOR_ID --name Codex-B \
   --description "Reviewer for PR #42" --coding-agent codex
 
-hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
+cafleet member create --agent-id $DIRECTOR_ID --name Claude-B \
   --description "Reviewer for PR #42" \
   -- "Review PR #42, post feedback via send, and deregister on completion."
 ```
@@ -216,7 +216,7 @@ Output (`--json`):
 Deregister a member agent and close its tmux pane. The agent is deregistered FIRST, then `/exit` is sent to the pane — so a deregister failure leaves both intact for retry.
 
 ```bash
-hikyaku member delete --agent-id $DIRECTOR_ID --member-id <member-agent-id>
+cafleet member delete --agent-id $DIRECTOR_ID --member-id <member-agent-id>
 ```
 
 | Flag | Required | Notes |
@@ -236,8 +236,8 @@ Member deleted.
 List all members spawned by this Director. Returns agents with placement rows whose `director_agent_id` matches the given `--agent-id`.
 
 ```bash
-hikyaku member list --agent-id $DIRECTOR_ID
-hikyaku --json member list --agent-id $DIRECTOR_ID
+cafleet member list --agent-id $DIRECTOR_ID
+cafleet --json member list --agent-id $DIRECTOR_ID
 ```
 
 | Flag | Required | Notes |
@@ -268,12 +268,12 @@ Output (`--json`):
 
 ### Member Capture
 
-Capture the last N lines of a member's tmux pane terminal buffer. This is the canonical way to inspect a stalled teammate — it replaces raw `tmux capture-pane` invocations for any project using Hikyaku.
+Capture the last N lines of a member's tmux pane terminal buffer. This is the canonical way to inspect a stalled teammate — it replaces raw `tmux capture-pane` invocations for any project using CAFleet.
 
 ```bash
-hikyaku member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID
-hikyaku member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID --lines 200
-hikyaku --json member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID | jq -r .content
+cafleet member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID
+cafleet member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID --lines 200
+cafleet --json member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID | jq -r .content
 ```
 
 | Flag | Required | Notes |
@@ -296,65 +296,65 @@ Output (`--json`):
 }
 ```
 
-**Note**: Projects using Hikyaku use `Skill(hikyaku-monitoring)` instead of the generic `agent-team-supervision` skill. The hikyaku-monitoring skill uses `hikyaku member capture` exclusively (no raw `tmux capture-pane`), enforcing the cross-Director boundary.
+**Note**: Projects using CAFleet use `Skill(cafleet-monitoring)` instead of the generic `agent-team-supervision` skill. The cafleet-monitoring skill uses `cafleet member capture` exclusively (no raw `tmux capture-pane`), enforcing the cross-Director boundary.
 
 ## Typical Workflow
 
 1. **Create a session** (if one does not already exist):
    ```bash
-   hikyaku session create --label "my-project"
+   cafleet session create --label "my-project"
    # → prints the session_id; export it
-   export HIKYAKU_SESSION_ID=<session_id>
+   export CAFLEET_SESSION_ID=<session_id>
    ```
 
-2. **Register** with the broker (`HIKYAKU_SESSION_ID` must already be set):
+2. **Register** with the broker (`CAFLEET_SESSION_ID` must already be set):
    ```bash
-   hikyaku register --name "Code Review Agent" --description "Reviews pull requests"
+   cafleet register --name "Code Review Agent" --description "Reviews pull requests"
    # → record the returned agent_id as $MY_ID
    ```
 
 3. **Discover** other agents:
    ```bash
-   hikyaku agents --agent-id $MY_ID
+   cafleet agents --agent-id $MY_ID
    ```
 
 4. **Send** a message to another agent:
    ```bash
-   hikyaku send --agent-id $MY_ID --to <target-agent-id> --text "Please review PR #42"
+   cafleet send --agent-id $MY_ID --to <target-agent-id> --text "Please review PR #42"
    ```
 
 5. **Poll** for incoming messages:
    ```bash
-   hikyaku poll --agent-id $MY_ID
+   cafleet poll --agent-id $MY_ID
    ```
 
 6. **Acknowledge** received messages:
    ```bash
-   hikyaku ack --agent-id $MY_ID --task-id <task-id>
+   cafleet ack --agent-id $MY_ID --task-id <task-id>
    ```
 
-7. **Repeat** steps 4-6 as needed. Use `hikyaku --json <cmd>` when parsing output programmatically.
+7. **Repeat** steps 4-6 as needed. Use `cafleet --json <cmd>` when parsing output programmatically.
 
 ## Multi-Session Coordination
 
 ### Roles
 
-- **Director** — the Claude Code session that first runs `hikyaku register` in this project. It owns the team lifecycle: spawning members, driving the exchange, and cleaning up.
-- **Member** — any peer Claude Code session the Director spawns via `hikyaku member create`. Each member is automatically registered and receives `HIKYAKU_*` env vars via tmux `-e` flags.
+- **Director** — the Claude Code session that first runs `cafleet register` in this project. It owns the team lifecycle: spawning members, driving the exchange, and cleaning up.
+- **Member** — any peer Claude Code session the Director spawns via `cafleet member create`. Each member is automatically registered and receives `CAFLEET_*` env vars via tmux `-e` flags.
 
 ### Monitoring mandate (Director only)
 
-Before spawning **any** member, the Director MUST load `Skill(hikyaku-monitoring)` and start a `/loop` monitor as that skill instructs. Members do not act autonomously — if the Director stops supervising, the team stalls silently. Keep the `/loop` active until the final shutdown step.
+Before spawning **any** member, the Director MUST load `Skill(cafleet-monitoring)` and start a `/loop` monitor as that skill instructs. Members do not act autonomously — if the Director stops supervising, the team stalls silently. Keep the `/loop` active until the final shutdown step.
 
-To inspect a stalled member, follow the 2-stage health check in `Skill(hikyaku-monitoring)`: first check `hikyaku poll` for messages, then fall back to `hikyaku member capture`:
+To inspect a stalled member, follow the 2-stage health check in `Skill(cafleet-monitoring)`: first check `cafleet poll` for messages, then fall back to `cafleet member capture`:
 
 ```bash
-hikyaku member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID
+cafleet member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID
 ```
 
 ### Layout discipline
 
-`hikyaku member create` automatically maintains `main-vertical` layout:
+`cafleet member create` automatically maintains `main-vertical` layout:
 
 - Director occupies the full-height left "main" pane.
 - Every member is stacked in the right column at equal height.
@@ -363,16 +363,16 @@ hikyaku member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID
 ### Spawn a member
 
 ```bash
-hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
+cafleet member create --agent-id $DIRECTOR_ID --name Claude-B \
   --description "Reviewer for PR #42"
 ```
 
-The command handles everything atomically: registering the agent, forwarding `HIKYAKU_URL`, `HIKYAKU_SESSION_ID`, and `HIKYAKU_AGENT_ID` to the new pane via `-e` flags, spawning `claude` with the prompt, and rebalancing the layout. No `printenv` step is needed.
+The command handles everything atomically: registering the agent, forwarding `CAFLEET_URL`, `CAFLEET_SESSION_ID`, and `CAFLEET_AGENT_ID` to the new pane via `-e` flags, spawning `claude` with the prompt, and rebalancing the layout. No `printenv` step is needed.
 
 ### Shut down a member
 
 ```bash
-hikyaku member delete --agent-id $DIRECTOR_ID --member-id <member-agent-id>
+cafleet member delete --agent-id $DIRECTOR_ID --member-id <member-agent-id>
 ```
 
 The command deregisters the agent first (so a failure preserves the pane for retry), then sends `/exit` to the pane, then rebalances the layout.
@@ -380,7 +380,7 @@ The command deregisters the agent first (so a failure preserves the pane for ret
 After every member is shut down, the Director deregisters itself and stops the `/loop` monitor:
 
 ```bash
-hikyaku deregister --agent-id <director-agent-id>
+cafleet deregister --agent-id <director-agent-id>
 ```
 
 ## Message Lifecycle
@@ -392,8 +392,8 @@ Messages are modeled as A2A Tasks with this lifecycle:
 
 ## Error Handling
 
-- Missing `HIKYAKU_SESSION_ID` env var or missing `--agent-id` on commands exits with non-zero code
-- `HIKYAKU_URL` without an `http://` / `https://` scheme causes `Request URL is missing an 'http://' or 'https://' protocol`
+- Missing `CAFLEET_SESSION_ID` env var or missing `--agent-id` on commands exits with non-zero code
+- `CAFLEET_URL` without an `http://` / `https://` scheme causes `Request URL is missing an 'http://' or 'https://' protocol`
 - Network errors and API errors are printed to stderr and exit with non-zero code
-- Use `hikyaku --json <cmd>` for machine-parseable output (including errors)
-- `member` commands require a tmux session (`TMUX` env var must be set) and exit with "hikyaku member commands must be run inside a tmux session" if not
+- Use `cafleet --json <cmd>` for machine-parseable output (including errors)
+- `member` commands require a tmux session (`TMUX` env var must be set) and exit with "cafleet member commands must be run inside a tmux session" if not

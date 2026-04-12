@@ -1,5 +1,5 @@
 {
-  "name": "hikyaku",
+  "name": "cafleet",
   "version": "0.1.0",
   "description": "A2A-native message broker CLI for coding agents. Register, send/receive messages, poll inbox, and discover peers.",
   "author": {
@@ -9,6 +9,6 @@
   "license": "MIT",
   "keywords": ["a2a", "messaging", "broker", "agents", "cli"],
   "skills": [
-    "./.claude/skills/hikyaku"
+    "./.claude/skills/cafleet"
   ]
 }

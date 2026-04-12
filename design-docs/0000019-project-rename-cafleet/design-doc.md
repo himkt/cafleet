@@ -1,7 +1,7 @@
 # Project Rename: hikyaku → cafleet
 
 **Status**: Approved
-**Progress**: 9/36 tasks complete
+**Progress**: 16/36 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -279,13 +279,13 @@ Per project rules, documentation is updated before code.
 
 ### Step 2: Skills & Plugin Files
 
-- [ ] Rename `.claude/skills/hikyaku/` → `.claude/skills/cafleet/` via `git mv` <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet/SKILL.md`: all CLI commands, env vars, paths <!-- completed: -->
-- [ ] Rename `.claude/skills/hikyaku-monitoring/` → `.claude/skills/cafleet-monitoring/` via `git mv` <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet-monitoring/SKILL.md`: all CLI references <!-- completed: -->
-- [ ] Update `.claude/skills/update-readme/SKILL.md`: project name, CLI command, mise task, pip install <!-- completed: -->
-- [ ] Update `.claude-plugin/plugin.json`: name, skill path (repository URL left unchanged — updated with separate GitHub rename) <!-- completed: -->
-- [ ] Update `.claude-plugin/marketplace.json`: name, description <!-- completed: -->
+- [x] Rename `.claude/skills/hikyaku/` → `.claude/skills/cafleet/` via `git mv` <!-- completed: 2026-04-12T10:10 -->
+- [x] Update `.claude/skills/cafleet/SKILL.md`: all CLI commands, env vars, paths <!-- completed: 2026-04-12T10:11 -->
+- [x] Rename `.claude/skills/hikyaku-monitoring/` → `.claude/skills/cafleet-monitoring/` via `git mv` <!-- completed: 2026-04-12T10:10 -->
+- [x] Update `.claude/skills/cafleet-monitoring/SKILL.md`: all CLI references <!-- completed: 2026-04-12T10:11 -->
+- [x] Update `.claude/skills/update-readme/SKILL.md`: project name, CLI command, mise task, pip install <!-- completed: 2026-04-12T10:11 -->
+- [x] Update `.claude-plugin/plugin.json`: name, skill path (repository URL left unchanged — updated with separate GitHub rename) <!-- completed: 2026-04-12T10:12 -->
+- [x] Update `.claude-plugin/marketplace.json`: name, description <!-- completed: 2026-04-12T10:12 -->
 
 ### Step 3: Package Directory Rename
 
