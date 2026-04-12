@@ -27,12 +27,12 @@ class TestCodingAgentConfig:
         with pytest.raises(AttributeError):
             config.name = "changed"
 
-    def test_default_extra_args_is_empty_list(self):
-        """extra_args defaults to an empty list when not provided."""
+    def test_default_extra_args_is_empty_tuple(self):
+        """extra_args defaults to an empty tuple when not provided."""
         from hikyaku.coding_agent import CodingAgentConfig
 
         config = CodingAgentConfig(name="test", binary="test-bin")
-        assert config.extra_args == []
+        assert config.extra_args == ()
 
     def test_default_prompt_template_is_empty_string(self):
         """default_prompt_template defaults to empty string when not provided."""
@@ -48,21 +48,20 @@ class TestCodingAgentConfig:
         config = CodingAgentConfig(
             name="custom",
             binary="custom-bin",
-            extra_args=["--flag", "value"],
+            extra_args=("--flag", "value"),
             default_prompt_template="Hello {director_name}",
         )
         assert config.name == "custom"
         assert config.binary == "custom-bin"
-        assert config.extra_args == ["--flag", "value"]
+        assert config.extra_args == ("--flag", "value")
         assert config.default_prompt_template == "Hello {director_name}"
 
-    def test_extra_args_default_factory_isolation(self):
-        """Each instance gets its own default list (field(default_factory=list))."""
+    def test_extra_args_is_immutable_tuple(self):
+        """extra_args is a tuple, ensuring true immutability of config."""
         from hikyaku.coding_agent import CodingAgentConfig
 
-        a = CodingAgentConfig(name="a", binary="a")
-        b = CodingAgentConfig(name="b", binary="b")
-        assert a.extra_args is not b.extra_args
+        config = CodingAgentConfig(name="test", binary="test-bin")
+        assert isinstance(config.extra_args, tuple)
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +198,7 @@ class TestClaudeConfig:
     def test_extra_args_empty(self):
         from hikyaku.coding_agent import CLAUDE
 
-        assert CLAUDE.extra_args == []
+        assert CLAUDE.extra_args == ()
 
     def test_prompt_template_contains_skill_reference(self):
         """Claude prompt template includes 'Load Skill(hikyaku)' for skill loading."""
@@ -243,7 +242,7 @@ class TestCodexConfig:
         """Codex config includes --approval-mode auto-edit flags."""
         from hikyaku.coding_agent import CODEX
 
-        assert CODEX.extra_args == ["--approval-mode", "auto-edit"]
+        assert CODEX.extra_args == ("--approval-mode", "auto-edit")
 
     def test_prompt_template_no_skill_reference(self):
         """Codex prompt template does NOT include 'Skill(' — Codex has no skill mechanism."""

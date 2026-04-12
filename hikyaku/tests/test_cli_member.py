@@ -108,6 +108,12 @@ def _mock_tmux(monkeypatch, *, split_window_captures=None):
         "select_layout",
         lambda **kw: None,
     )
+    # Mock shutil.which so ensure_available() succeeds even when
+    # claude/codex binaries are not on PATH (e.g. CI environments)
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name: f"/usr/bin/{name}",
+    )
     monkeypatch.setattr(
         tmux_mod,
         "send_exit",

@@ -4,7 +4,7 @@ Encapsulates agent-specific details — binary name, extra args, default prompt
 template — so that tmux pane spawning is parameterized by agent type.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import shutil
 
 
@@ -14,7 +14,7 @@ class CodingAgentConfig:
 
     name: str
     binary: str
-    extra_args: list[str] = field(default_factory=list)
+    extra_args: tuple[str, ...] = ()
     default_prompt_template: str = ""
 
     def build_command(self, prompt: str) -> list[str]:
@@ -28,7 +28,7 @@ class CodingAgentConfig:
 CLAUDE = CodingAgentConfig(
     name="claude",
     binary="claude",
-    extra_args=[],
+    extra_args=(),
     default_prompt_template=(
         "Load Skill(hikyaku). Your agent_id is $HIKYAKU_AGENT_ID.\n"
         "You are a member of the team led by {director_name} ({director_agent_id}).\n"
@@ -39,7 +39,7 @@ CLAUDE = CodingAgentConfig(
 CODEX = CodingAgentConfig(
     name="codex",
     binary="codex",
-    extra_args=["--approval-mode", "auto-edit"],
+    extra_args=("--approval-mode", "auto-edit"),
     default_prompt_template=(
         "Your agent_id is $HIKYAKU_AGENT_ID.\n"
         "You are a member of the team led by {director_name} ({director_agent_id}).\n"
