@@ -1,6 +1,6 @@
 # Multi-Runner Support (Codex Integration)
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 18/18 tasks complete
 **Last Updated**: 2026-04-12
 
@@ -10,12 +10,12 @@ Add support for OpenAI Codex CLI as an alternative coding agent backend alongsid
 
 ## Success Criteria
 
-- [ ] `hikyaku member create --coding-agent codex` spawns a Codex process in a tmux pane with `--approval-mode auto-edit`
-- [ ] `hikyaku member create` without `--coding-agent` behaves identically to the current implementation (spawns Claude)
-- [ ] `hikyaku member list` displays which coding agent is running in each pane
-- [ ] `hikyaku member capture` and `hikyaku member delete` work unchanged for both agent types
-- [ ] `agent_placements` table tracks the coding agent type via a `coding_agent` column
-- [ ] All existing tests pass without modification (backward compatibility)
+- [x] `hikyaku member create --coding-agent codex` spawns a Codex process in a tmux pane with `--approval-mode auto-edit`
+- [x] `hikyaku member create` without `--coding-agent` behaves identically to the current implementation (spawns Claude)
+- [x] `hikyaku member list` displays which coding agent is running in each pane
+- [x] `hikyaku member capture` and `hikyaku member delete` work unchanged for both agent types
+- [x] `agent_placements` table tracks the coding agent type via a `coding_agent` column
+- [x] All existing tests pass without modification (backward compatibility)
 
 ---
 
@@ -257,3 +257,4 @@ In `client/src/hikyaku_client/output.py`:
 | Date | Changes |
 |------|---------|
 | 2026-04-12 | Initial draft |
+| 2026-04-12 | Implementation complete. All 18/18 tasks done. All 6 success criteria verified. 504 tests passing. Status → Complete |
