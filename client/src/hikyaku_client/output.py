@@ -112,6 +112,6 @@ def format_member_list(members: list) -> str:
             f"{placement.get('tmux_session', '?'):<7}  "
             f"{placement.get('tmux_window_id', '?'):<9}  "
             f"{pane_display:<7}  "
-            f"{m.get('registered_at', '?')}"
+            f"{placement.get('created_at', m.get('registered_at', '?'))}"
         )
     return "\n".join(lines)

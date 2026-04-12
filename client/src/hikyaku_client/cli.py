@@ -537,7 +537,9 @@ def member_delete(ctx, agent_id, member_id):
     # Step 4 — rebalance layout (skip if pending placement).
     if pane_id is not None:
         try:
-            tmux.select_layout(target_window_id=director_ctx.window_id)
+            tmux.select_layout(
+                target_window_id=placement.get("tmux_window_id", director_ctx.window_id)
+            )
         except tmux.TmuxError as exc:
             click.echo(f"Warning: select-layout failed: {exc}", err=True)
 

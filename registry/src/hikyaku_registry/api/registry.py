@@ -44,14 +44,18 @@ async def register_agent(
                     )
                 ).model_dump(),
             )
-        director_in_tenant = await store.verify_agent_tenant(caller_id, _tenant_id)
-        if not director_in_tenant:
+        director = await store.get_agent(caller_id)
+        if (
+            director is None
+            or director.get("status") != "active"
+            or not await store.verify_agent_tenant(caller_id, _tenant_id)
+        ):
             return JSONResponse(
                 status_code=403,
                 content=ErrorResponse(
                     error=ErrorDetail(
                         code="FORBIDDEN",
-                        message="Director agent is not in the caller's tenant",
+                        message="Director agent is not active in the caller's tenant",
                     )
                 ).model_dump(),
             )
