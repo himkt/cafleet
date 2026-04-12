@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["hikyaku", "admin"]
+members = ["hikyaku"]
 
 [tool.uv.sources]
 hikyaku = { workspace = true }
