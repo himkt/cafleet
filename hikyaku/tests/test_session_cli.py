@@ -27,6 +27,7 @@ import uuid
 from click.testing import CliRunner
 
 from hikyaku import config
+from hikyaku.cli import cli
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +35,7 @@ from hikyaku import config
 # ---------------------------------------------------------------------------
 
 
-def _init_db(runner: CliRunner, main) -> None:
+def _init_db(runner: CliRunner) -> None:
     """Run ``db init`` to set up the schema in the temp DB."""
     result = runner.invoke(cli, ["db", "init"])
     assert result.exit_code == 0, (
@@ -109,10 +110,8 @@ class TestSessionCreate:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         result = runner.invoke(cli, ["session", "create"])
 
@@ -151,10 +150,8 @@ class TestSessionCreate:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         result = runner.invoke(cli, ["session", "create", "--label", "PR-42 review"])
 
@@ -177,10 +174,8 @@ class TestSessionCreate:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         result = runner.invoke(cli, ["session", "create"])
         assert result.exit_code == 0
@@ -199,10 +194,8 @@ class TestSessionCreate:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         result = runner.invoke(cli, ["session", "create", "--label", "test", "--json"])
 
@@ -226,10 +219,8 @@ class TestSessionCreate:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         r1 = runner.invoke(cli, ["session", "create", "--json"])
         r2 = runner.invoke(cli, ["session", "create", "--json"])
@@ -261,10 +252,8 @@ class TestSessionList:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         result = runner.invoke(cli, ["session", "list"])
 
@@ -281,10 +270,8 @@ class TestSessionList:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid, label="test-session")
@@ -312,10 +299,8 @@ class TestSessionList:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid, label="json-test")
@@ -342,10 +327,8 @@ class TestSessionList:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         sid_a = str(uuid.uuid4())
         sid_b = str(uuid.uuid4())
@@ -369,10 +352,8 @@ class TestSessionList:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid)
@@ -405,10 +386,8 @@ class TestSessionShow:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid, label="show-test")
@@ -434,10 +413,8 @@ class TestSessionShow:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid, label="json-show")
@@ -458,10 +435,8 @@ class TestSessionShow:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         fake_id = str(uuid.uuid4())
         result = runner.invoke(cli, ["session", "show", fake_id])
@@ -493,10 +468,8 @@ class TestSessionDelete:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid)
@@ -526,10 +499,8 @@ class TestSessionDelete:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         fake_id = str(uuid.uuid4())
         result = runner.invoke(cli, ["session", "delete", fake_id])
@@ -557,10 +528,8 @@ class TestSessionDelete:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid)
@@ -591,10 +560,8 @@ class TestSessionDelete:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid)
@@ -620,10 +587,8 @@ class TestSessionDelete:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         sid = str(uuid.uuid4())
         _seed_session(db_file, sid)
@@ -664,10 +629,8 @@ class TestDbInitNoAutoSession:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
-        _init_db(runner, main)
+        _init_db(runner)
 
         rows = _session_rows(db_file)
         assert len(rows) == 0, (
@@ -691,8 +654,6 @@ class TestSessionGroupStructure:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
         result = runner.invoke(cli, ["session", "--help"])
 
@@ -715,8 +676,6 @@ class TestSessionGroupStructure:
             "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
-        from hikyaku.cli import cli
-
         runner = CliRunner()
         result = runner.invoke(cli, ["db", "session", "create"])
 

@@ -5,7 +5,7 @@ register gains _require_session_id entry check, session_id sent in
 POST body and X-Session-Id header (same code path as every other command).
 
 Covers: register uses HIKYAKU_SESSION_ID env var, error message when
-missing (mentioning 'hikyaku-registry session create'), session_id
+missing (mentioning 'hikyaku session create'), session_id
 passed to api.register_agent, X-Session-Id header on outgoing requests.
 """
 
@@ -149,7 +149,7 @@ class TestRegisterMissingSessionId:
     Register must validate that HIKYAKU_SESSION_ID env var is set and show
     a specific error message if not. Design doc specifies the exact message:
     "Error: HIKYAKU_SESSION_ID environment variable is required. Create a
-    session with 'hikyaku-registry session create'."
+    session with 'hikyaku session create'."
     """
 
     def test_missing_session_id_shows_error(self, runner):
@@ -186,10 +186,10 @@ class TestRegisterMissingSessionId:
         assert "HIKYAKU_SESSION_ID" in output
 
     def test_missing_session_id_mentions_session_create(self, runner):
-        """Error message mentions 'hikyaku-registry session create'.
+        """Error message mentions 'hikyaku session create'.
 
         Design doc: error message should say "Create a session with
-        'hikyaku-registry session create'." (replaces old "Create an
+        'hikyaku session create'." (replaces old "Create an
         API key at the Hikyaku WebUI.")
         """
         result = runner.invoke(
@@ -205,7 +205,7 @@ class TestRegisterMissingSessionId:
         )
 
         output = result.output + (result.stderr or "")
-        assert "hikyaku-registry session create" in output
+        assert "hikyaku session create" in output
 
     def test_missing_session_id_does_not_call_api(self, runner):
         """Register without HIKYAKU_SESSION_ID does not make any API call."""
@@ -365,9 +365,7 @@ class TestNoSQLAlchemyDependency:
         import hikyaku.cli  # noqa: F401
         import hikyaku.broker_client  # noqa: F401
 
-        client_modules = [
-            name for name in sys.modules if name.startswith("hikyaku")
-        ]
+        client_modules = [name for name in sys.modules if name.startswith("hikyaku")]
         for mod_name in client_modules:
             mod = sys.modules[mod_name]
             if mod is not None:

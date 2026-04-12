@@ -988,10 +988,10 @@ class TestGlobalOptions:
         assert "HIKYAKU_SESSION_ID" in output
 
     def test_missing_session_id_mentions_session_create(self, runner):
-        """Error message mentions 'hikyaku-registry session create'.
+        """Error message mentions 'hikyaku session create'.
 
         Design doc: error message ends with "Create a session with
-        'hikyaku-registry session create'."
+        'hikyaku session create'."
         """
         result = runner.invoke(
             cli,
@@ -1006,7 +1006,7 @@ class TestGlobalOptions:
         )
 
         output = result.output + (result.stderr or "")
-        assert "hikyaku-registry session create" in output
+        assert "hikyaku session create" in output
 
 
 # ---------------------------------------------------------------------------
