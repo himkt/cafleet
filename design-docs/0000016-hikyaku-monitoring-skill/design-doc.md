@@ -1,7 +1,7 @@
 # Hikyaku Monitoring Skill
 
 **Status**: Approved
-**Progress**: 4/8 tasks complete
+**Progress**: 5/8 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -243,7 +243,7 @@ The updated hikyaku SKILL.md Monitoring mandate section makes the replacement ex
 
 ### Step 2: Create the monitoring skill
 
-- [ ] Create `.claude/skills/hikyaku-monitoring/SKILL.md` with full content (frontmatter, Core Principle, Monitoring Mandate, Spawn Protocol, Stall Response with 2-stage health check, `/loop` prompt template) <!-- completed: -->
+- [x] Create `.claude/skills/hikyaku-monitoring/SKILL.md` with full content (frontmatter, Core Principle, Monitoring Mandate, Spawn Protocol, Stall Response with 2-stage health check, `/loop` prompt template) <!-- completed: 2026-04-12T08:48 -->
 
 ### Step 3: Update hikyaku skill references
 
