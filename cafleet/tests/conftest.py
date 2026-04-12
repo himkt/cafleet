@@ -1,4 +1,4 @@
-"""Shared test fixtures for hikyaku-registry tests.
+"""Shared test fixtures for cafleet-registry tests.
 
 A function-scoped in-memory aiosqlite engine + SQLAlchemy
 ``Base.metadata.create_all`` is the canonical fast-path described in
@@ -21,9 +21,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from hikyaku.db.models import Base
-from hikyaku.registry_store import RegistryStore
-from hikyaku.task_store import TaskStore
+from cafleet.db.models import Base
+from cafleet.registry_store import RegistryStore
+from cafleet.task_store import TaskStore
 
 
 @event.listens_for(Engine, "connect")

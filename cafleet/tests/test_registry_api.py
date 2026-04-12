@@ -19,9 +19,9 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku.api.registry import get_registry_store, registry_router
-from hikyaku.db.models import Session
-from hikyaku.registry_store import RegistryStore
+from cafleet.api.registry import get_registry_store, registry_router
+from cafleet.db.models import Session
+from cafleet.registry_store import RegistryStore
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +341,7 @@ class TestListAgents:
 
     async def test_list_with_director_includes_coding_agent(self, api_env):
         """GET /agents?director_agent_id=... returns coding_agent in placement."""
-        from hikyaku.models import PlacementCreate
+        from cafleet.models import PlacementCreate
 
         client, store, session_id = (
             api_env["client"],
@@ -473,7 +473,7 @@ class TestGetAgentDetail:
 
     async def test_detail_includes_coding_agent_in_placement(self, api_env):
         """GET /agents/{id} returns coding_agent in placement."""
-        from hikyaku.models import PlacementCreate
+        from cafleet.models import PlacementCreate
 
         client, store, session_id = (
             api_env["client"],
@@ -532,7 +532,7 @@ class TestDeregisterAgent:
 
     async def test_director_can_deregister_member(self, api_env):
         """Director can deregister a member agent under its placement."""
-        from hikyaku.models import PlacementCreate
+        from cafleet.models import PlacementCreate
 
         client, store, session_id = (
             api_env["client"],
@@ -619,7 +619,7 @@ class TestPatchPlacement:
 
     async def test_patch_response_includes_coding_agent(self, api_env):
         """PATCH placement response includes coding_agent from the stored row."""
-        from hikyaku.models import PlacementCreate
+        from cafleet.models import PlacementCreate
 
         client, store, session_id = (
             api_env["client"],
@@ -662,12 +662,12 @@ class TestDeletedAuthPatterns:
 
     def test_get_authenticated_agent_not_imported(self):
         """registry.py should not import get_authenticated_agent."""
-        from hikyaku.api import registry
+        from cafleet.api import registry
 
         assert not hasattr(registry, "get_authenticated_agent")
 
     def test_get_registration_tenant_not_imported(self):
         """registry.py should not import get_registration_tenant."""
-        from hikyaku.api import registry
+        from cafleet.api import registry
 
         assert not hasattr(registry, "get_registration_tenant")

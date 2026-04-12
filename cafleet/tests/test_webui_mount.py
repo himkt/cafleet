@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-import hikyaku
-from hikyaku.server import create_app
+import cafleet
+from cafleet.server import create_app
 
 
 # ---------------------------------------------------------------------------
@@ -33,7 +33,7 @@ async def mounted_app(tmp_path, db_sessionmaker):
     dist_dir = tmp_path / "dist"
     dist_dir.mkdir()
     (dist_dir / "index.html").write_text(
-        "<!DOCTYPE html><html><body>Hikyaku WebUI</body></html>"
+        "<!DOCTYPE html><html><body>CAFleet WebUI</body></html>"
     )
 
     app = create_app(sessionmaker=db_sessionmaker, webui_dist_dir=str(dist_dir))
@@ -112,14 +112,14 @@ class TestStaticFilesMounted:
 
         resp = await client.get("/ui/")
         assert resp.status_code == 200
-        assert "Hikyaku WebUI" in resp.text
+        assert "CAFleet WebUI" in resp.text
 
     async def test_static_file_served(self, mounted_app):
         """Static files in dist directory are accessible at /ui/."""
         dist_dir = mounted_app["dist_dir"]
         client = mounted_app["client"]
 
-        (dist_dir / "app.js").write_text("console.log('hikyaku');")
+        (dist_dir / "app.js").write_text("console.log('cafleet');")
 
         resp = await client.get("/ui/app.js")
         assert resp.status_code == 200
@@ -131,7 +131,7 @@ class TestStaticFilesMounted:
 
         resp = await client.get("/ui/dashboard")
         assert resp.status_code == 200
-        assert "Hikyaku WebUI" in resp.text
+        assert "CAFleet WebUI" in resp.text
 
 
 # ===========================================================================
@@ -212,15 +212,15 @@ class TestDefaultWebuiDistDir:
 
     This protects against future package-layout refactors silently breaking
     the install-time path: when a wheel is installed, the helper must resolve
-    to ``site-packages/hikyaku/webui``, not a sibling repo directory.
+    to ``site-packages/cafleet/webui``, not a sibling repo directory.
     """
 
     def test_default_points_inside_package(self):
         """_default_webui_dist_dir() returns <package>/webui as a Path."""
-        from hikyaku.server import _default_webui_dist_dir
+        from cafleet.server import _default_webui_dist_dir
 
         result = _default_webui_dist_dir()
-        expected = Path(hikyaku.__file__).resolve().parent / "webui"
+        expected = Path(cafleet.__file__).resolve().parent / "webui"
         assert isinstance(result, Path)
         assert result == expected
 
@@ -231,7 +231,7 @@ class TestDefaultWebuiDistDir:
         ``/ui/`` prefix (Vite ``base`` config). Absolute-root asset paths
         (``/assets/...``) would 404 because StaticFiles is mounted at ``/ui``.
         """
-        package_dir = Path(hikyaku.__file__).resolve().parent
+        package_dir = Path(cafleet.__file__).resolve().parent
         if not (package_dir / "webui" / "index.html").exists():
             pytest.skip("webui/ not built; run `mise //admin:build` first")
 
@@ -261,7 +261,7 @@ class TestDefaultWebuiDistDir:
         """Assets referenced by index.html are actually fetchable under /ui/assets/."""
         import re
 
-        package_dir = Path(hikyaku.__file__).resolve().parent
+        package_dir = Path(cafleet.__file__).resolve().parent
         if not (package_dir / "webui" / "index.html").exists():
             pytest.skip("webui/ not built; run `mise //admin:build` first")
 

@@ -1,4 +1,4 @@
-"""Tests for ``hikyaku-registry session`` CLI subcommands.
+"""Tests for ``cafleet-registry session`` CLI subcommands.
 
 Design doc 0000015 Step 7 adds a ``session`` click group as a sibling of
 the existing ``db`` group, with four commands:
@@ -26,8 +26,8 @@ import uuid
 
 from click.testing import CliRunner
 
-from hikyaku import config
-from hikyaku.cli import cli
+from cafleet import config
+from cafleet.cli import cli
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ def _session_rows(db_path) -> list[tuple]:
 
 
 class TestSessionCreate:
-    """``hikyaku-registry session create`` mints a UUID session."""
+    """``cafleet-registry session create`` mints a UUID session."""
 
     def test_creates_session_with_uuid(self, tmp_path, monkeypatch):
         """Creates a session and prints a valid UUID to stdout."""
@@ -242,7 +242,7 @@ class TestSessionCreate:
 
 
 class TestSessionList:
-    """``hikyaku-registry session list`` shows all sessions."""
+    """``cafleet-registry session list`` shows all sessions."""
 
     def test_lists_empty(self, tmp_path, monkeypatch):
         """No sessions: table output with no data rows."""
@@ -376,7 +376,7 @@ class TestSessionList:
 
 
 class TestSessionShow:
-    """``hikyaku-registry session show <id>`` displays a single session."""
+    """``cafleet-registry session show <id>`` displays a single session."""
 
     def test_shows_existing_session(self, tmp_path, monkeypatch):
         """Shows the session row when it exists."""
@@ -458,7 +458,7 @@ class TestSessionShow:
 
 
 class TestSessionDelete:
-    """``hikyaku-registry session delete <id>`` removes a session."""
+    """``cafleet-registry session delete <id>`` removes a session."""
 
     def test_deletes_session(self, tmp_path, monkeypatch):
         """Deletes an empty session and prints success message."""
@@ -550,7 +550,7 @@ class TestSessionDelete:
     def test_delete_session_with_deregistered_agents_fails(self, tmp_path, monkeypatch):
         """Deregistered agents still reference the session via FK.
 
-        Design doc edge case: "hikyaku-registry session delete on a
+        Design doc edge case: "cafleet-registry session delete on a
         session with deregistered (but not purged) agents rows hits
         the ondelete='RESTRICT' — friendly error needed."
         """
@@ -617,7 +617,7 @@ class TestSessionDelete:
 class TestDbInitNoAutoSession:
     """``db init`` must NOT auto-create a default session.
 
-    Design doc: "hikyaku-registry db init remains schema-only.
+    Design doc: "cafleet-registry db init remains schema-only.
     It does NOT auto-create a default session."
     """
 
@@ -647,7 +647,7 @@ class TestSessionGroupStructure:
     """Verify the session group is a sibling of db, not a child."""
 
     def test_session_group_exists(self, tmp_path, monkeypatch):
-        """``hikyaku-registry session`` is a recognized command group."""
+        """``cafleet-registry session`` is a recognized command group."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
             config.settings,
@@ -669,7 +669,7 @@ class TestSessionGroupStructure:
         assert "delete" in output_lower, "session --help should list 'delete'"
 
     def test_session_is_not_under_db(self, tmp_path, monkeypatch):
-        """``hikyaku-registry db session`` should NOT work."""
+        """``cafleet-registry db session`` should NOT work."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
             config.settings,

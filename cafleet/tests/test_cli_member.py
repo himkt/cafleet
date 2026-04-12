@@ -1,10 +1,10 @@
-"""Tests for hikyaku CLI member subgroup.
+"""Tests for cafleet CLI member subgroup.
 
 Covers: member create, member delete, member list, member capture.
 All tmux interaction is mocked — no real tmux server required.
 
-Design doc 0000015 Step 10: replace ``HIKYAKU_API_KEY`` env fixtures
-with ``HIKYAKU_SESSION_ID``; update ``BROKER_URL`` to ``127.0.0.1``;
+Design doc 0000015 Step 10: replace ``CAFLEET_API_KEY`` env fixtures
+with ``CAFLEET_SESSION_ID``; update ``BROKER_URL`` to ``127.0.0.1``;
 remove ``api_key`` from ``SAMPLE_REGISTER_RESULT``.
 
 Design doc 0000018 Step 6: ``--coding-agent`` option on ``member create``;
@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from click.testing import CliRunner
 
-from hikyaku.cli import cli
+from cafleet.cli import cli
 
 # ---------------------------------------------------------------------------
 # Fixtures & constants
@@ -67,7 +67,7 @@ def runner():
 
 
 def _auth_env():
-    return {"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID}
+    return {"CAFLEET_URL": BROKER_URL, "CAFLEET_SESSION_ID": SESSION_ID}
 
 
 def _mock_tmux(monkeypatch, *, split_window_captures=None):
@@ -80,7 +80,7 @@ def _mock_tmux(monkeypatch, *, split_window_captures=None):
     monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
     monkeypatch.setenv("TMUX_PANE", "%0")
 
-    import hikyaku.tmux as tmux_mod
+    import cafleet.tmux as tmux_mod
 
     monkeypatch.setattr(
         tmux_mod,
@@ -143,9 +143,9 @@ class TestMemberCreate:
         list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
 
         with (
-            patch("hikyaku.cli.api.register_agent", register_mock),
-            patch("hikyaku.cli.api.patch_placement", patch_mock),
-            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+            patch("cafleet.cli.api.register_agent", register_mock),
+            patch("cafleet.cli.api.patch_placement", patch_mock),
+            patch("cafleet.cli.api.list_agents", list_agents_mock),
         ):
             result = runner.invoke(
                 cli,
@@ -169,7 +169,7 @@ class TestMemberCreate:
 
     def test_rolls_back_on_split_failure(self, runner, monkeypatch):
         """If tmux split-window fails, registration is rolled back."""
-        import hikyaku.tmux as tmux_mod
+        import cafleet.tmux as tmux_mod
 
         _mock_tmux(monkeypatch)
 
@@ -185,9 +185,9 @@ class TestMemberCreate:
         list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
 
         with (
-            patch("hikyaku.cli.api.register_agent", register_mock),
-            patch("hikyaku.cli.api.deregister_agent", deregister_mock),
-            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+            patch("cafleet.cli.api.register_agent", register_mock),
+            patch("cafleet.cli.api.deregister_agent", deregister_mock),
+            patch("cafleet.cli.api.list_agents", list_agents_mock),
         ):
             result = runner.invoke(
                 cli,
@@ -217,9 +217,9 @@ class TestMemberCreate:
         list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
 
         with (
-            patch("hikyaku.cli.api.register_agent", register_mock),
-            patch("hikyaku.cli.api.patch_placement", patch_mock),
-            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+            patch("cafleet.cli.api.register_agent", register_mock),
+            patch("cafleet.cli.api.patch_placement", patch_mock),
+            patch("cafleet.cli.api.list_agents", list_agents_mock),
         ):
             result = runner.invoke(
                 cli,
@@ -249,9 +249,9 @@ class TestMemberCreate:
         list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
 
         with (
-            patch("hikyaku.cli.api.register_agent", register_mock),
-            patch("hikyaku.cli.api.patch_placement", patch_mock),
-            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+            patch("cafleet.cli.api.register_agent", register_mock),
+            patch("cafleet.cli.api.patch_placement", patch_mock),
+            patch("cafleet.cli.api.list_agents", list_agents_mock),
         ):
             result = runner.invoke(
                 cli,
@@ -284,9 +284,9 @@ class TestMemberCreate:
         list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
 
         with (
-            patch("hikyaku.cli.api.register_agent", register_mock),
-            patch("hikyaku.cli.api.patch_placement", patch_mock),
-            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+            patch("cafleet.cli.api.register_agent", register_mock),
+            patch("cafleet.cli.api.patch_placement", patch_mock),
+            patch("cafleet.cli.api.list_agents", list_agents_mock),
         ):
             result = runner.invoke(
                 cli,
@@ -323,9 +323,9 @@ class TestMemberCreate:
         list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
 
         with (
-            patch("hikyaku.cli.api.register_agent", register_mock),
-            patch("hikyaku.cli.api.patch_placement", patch_mock),
-            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+            patch("cafleet.cli.api.register_agent", register_mock),
+            patch("cafleet.cli.api.patch_placement", patch_mock),
+            patch("cafleet.cli.api.list_agents", list_agents_mock),
         ):
             result = runner.invoke(
                 cli,
@@ -386,9 +386,9 @@ class TestMemberCreate:
         list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
 
         with (
-            patch("hikyaku.cli.api.register_agent", register_mock),
-            patch("hikyaku.cli.api.patch_placement", patch_mock),
-            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+            patch("cafleet.cli.api.register_agent", register_mock),
+            patch("cafleet.cli.api.patch_placement", patch_mock),
+            patch("cafleet.cli.api.list_agents", list_agents_mock),
         ):
             result = runner.invoke(
                 cli,
@@ -457,9 +457,9 @@ class TestMemberCreate:
         list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
 
         with (
-            patch("hikyaku.cli.api.register_agent", register_mock),
-            patch("hikyaku.cli.api.patch_placement", patch_mock),
-            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+            patch("cafleet.cli.api.register_agent", register_mock),
+            patch("cafleet.cli.api.patch_placement", patch_mock),
+            patch("cafleet.cli.api.list_agents", list_agents_mock),
         ):
             result = runner.invoke(
                 cli,
@@ -492,7 +492,7 @@ class TestMemberCreate:
 class TestMemberDelete:
     def test_idempotent_on_dead_pane(self, runner, monkeypatch):
         """Delete succeeds even when pane is already gone (ignore_missing=True)."""
-        import hikyaku.tmux as tmux_mod
+        import cafleet.tmux as tmux_mod
 
         _mock_tmux(monkeypatch)
 
@@ -503,8 +503,8 @@ class TestMemberDelete:
         deregister_mock = AsyncMock(return_value=None)
 
         with (
-            patch("hikyaku.cli.api.list_agents", list_agents_mock),
-            patch("hikyaku.cli.api.deregister_agent", deregister_mock),
+            patch("cafleet.cli.api.list_agents", list_agents_mock),
+            patch("cafleet.cli.api.deregister_agent", deregister_mock),
         ):
             result = runner.invoke(
                 cli,
@@ -531,8 +531,8 @@ class TestMemberDelete:
         deregister_mock = AsyncMock(side_effect=Exception("403 Forbidden"))
 
         with (
-            patch("hikyaku.cli.api.list_agents", list_agents_mock),
-            patch("hikyaku.cli.api.deregister_agent", deregister_mock),
+            patch("cafleet.cli.api.list_agents", list_agents_mock),
+            patch("cafleet.cli.api.deregister_agent", deregister_mock),
         ):
             result = runner.invoke(
                 cli,
@@ -570,7 +570,7 @@ class TestMemberList:
         ]
         list_members_mock = AsyncMock(return_value=members)
 
-        with patch("hikyaku.cli.api.list_members", list_members_mock):
+        with patch("cafleet.cli.api.list_members", list_members_mock):
             result = runner.invoke(
                 cli,
                 ["--json", "member", "list", "--agent-id", DIRECTOR_ID],
@@ -609,7 +609,7 @@ class TestMemberList:
         list_members_mock = AsyncMock(return_value=members)
 
         # Text mode: (pending)
-        with patch("hikyaku.cli.api.list_members", list_members_mock):
+        with patch("cafleet.cli.api.list_members", list_members_mock):
             result = runner.invoke(
                 cli,
                 ["member", "list", "--agent-id", DIRECTOR_ID],
@@ -619,7 +619,7 @@ class TestMemberList:
         assert "(pending)" in result.output
 
         # JSON mode: null
-        with patch("hikyaku.cli.api.list_members", list_members_mock):
+        with patch("cafleet.cli.api.list_members", list_members_mock):
             result = runner.invoke(
                 cli,
                 ["--json", "member", "list", "--agent-id", DIRECTOR_ID],
@@ -642,7 +642,7 @@ class TestMemberCapture:
 
         list_agents_mock = AsyncMock(return_value=SAMPLE_MEMBER_INFO)
 
-        with patch("hikyaku.cli.api.list_agents", list_agents_mock):
+        with patch("cafleet.cli.api.list_agents", list_agents_mock):
             result = runner.invoke(
                 cli,
                 [
@@ -670,7 +670,7 @@ class TestMemberCapture:
         target = {**SAMPLE_MEMBER_INFO, "placement": other_director_placement}
         list_agents_mock = AsyncMock(return_value=target)
 
-        with patch("hikyaku.cli.api.list_agents", list_agents_mock):
+        with patch("cafleet.cli.api.list_agents", list_agents_mock):
             result = runner.invoke(
                 cli,
                 [
@@ -695,7 +695,7 @@ class TestMemberCapture:
         target = {**SAMPLE_MEMBER_INFO, "placement": pending_placement}
         list_agents_mock = AsyncMock(return_value=target)
 
-        with patch("hikyaku.cli.api.list_agents", list_agents_mock):
+        with patch("cafleet.cli.api.list_agents", list_agents_mock):
             result = runner.invoke(
                 cli,
                 [
@@ -719,7 +719,7 @@ class TestMemberCapture:
         target = {**SAMPLE_MEMBER_INFO, "placement": None}
         list_agents_mock = AsyncMock(return_value=target)
 
-        with patch("hikyaku.cli.api.list_agents", list_agents_mock):
+        with patch("cafleet.cli.api.list_agents", list_agents_mock):
             result = runner.invoke(
                 cli,
                 [
@@ -742,7 +742,7 @@ class TestMemberCapture:
 
         list_agents_mock = AsyncMock(return_value=SAMPLE_MEMBER_INFO)
 
-        with patch("hikyaku.cli.api.list_agents", list_agents_mock):
+        with patch("cafleet.cli.api.list_agents", list_agents_mock):
             result = runner.invoke(
                 cli,
                 [

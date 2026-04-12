@@ -62,8 +62,8 @@ from a2a.types import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku.db.models import Session as SessionModel, Task as TaskModel
-from hikyaku.task_store import TaskStore
+from cafleet.db.models import Session as SessionModel, Task as TaskModel
+from cafleet.task_store import TaskStore
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ def _make_task(
     extra_metadata: dict | None = None,
     origin_task_id: str | None = None,
 ) -> Task:
-    """Construct an A2A ``Task`` with Hikyaku routing metadata.
+    """Construct an A2A ``Task`` with CAFleet routing metadata.
 
     Mirrors the production path in ``executor.py``: routing fields
     (``fromAgentId``, ``toAgentId``, ``type``) live in ``task.metadata``
@@ -564,7 +564,7 @@ class TestTaskJsonRoundtrip:
     ):
         """Arbitrary metadata keys survive the JSON roundtrip.
 
-        Hikyaku's routing keys (``fromAgentId``, ``toAgentId``, ``type``)
+        CAFleet's routing keys (``fromAgentId``, ``toAgentId``, ``type``)
         are already asserted by ``test_get_endpoints_returns_from_and_to``.
         This test adds an UNRELATED key (``traceId``) to prove the store
         preserves the whole metadata dict, not just the three routing

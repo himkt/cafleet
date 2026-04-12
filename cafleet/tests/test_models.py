@@ -1,10 +1,10 @@
-"""Tests for hikyaku.models — Pydantic model changes for multi-runner support.
+"""Tests for cafleet.models — Pydantic model changes for multi-runner support.
 
 Design doc 0000018 Step 5: PlacementCreate gains coding_agent with default
 "claude"; PlacementView gains coding_agent field; PlacementPatch is unchanged.
 """
 
-from hikyaku.models import PlacementCreate, PlacementPatch, PlacementView
+from cafleet.models import PlacementCreate, PlacementPatch, PlacementView
 
 
 # ---------------------------------------------------------------------------

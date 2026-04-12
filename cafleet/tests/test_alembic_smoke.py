@@ -25,7 +25,7 @@ Why ``cfg.set_main_option("sqlalchemy.url", ...)`` instead of monkeypatching
     DB URL for a one-off migration run. env.py is expected to read
     ``config.get_main_option("sqlalchemy.url")`` and fall back to
     ``settings.database_url`` only when the cfg main option is unset.
-  * This keeps the test independent of the user's ``HIKYAKU_DATABASE_URL``
+  * This keeps the test independent of the user's ``CAFLEET_DATABASE_URL``
     environment variable and the cached ``config.settings`` singleton.
 """
 
@@ -46,7 +46,7 @@ def alembic_upgraded_db(tmp_path_factory):
 
     1. The bundled ``alembic.ini`` is located via ``importlib.resources``
        (NOT via a hard-coded path relative to the test file), so this
-       fixture works whether ``hikyaku`` is imported from a
+       fixture works whether ``cafleet`` is imported from a
        source checkout or from an installed wheel. The
        ``importlib.resources.as_file`` context manager guarantees a
        real filesystem path even when the package data lives inside a
@@ -63,7 +63,7 @@ def alembic_upgraded_db(tmp_path_factory):
     tmp_db_path = tmp_path_factory.mktemp("alembic_smoke") / "smoke.db"
 
     with importlib.resources.as_file(
-        importlib.resources.files("hikyaku") / "alembic.ini"
+        importlib.resources.files("cafleet") / "alembic.ini"
     ) as ini_path:
         cfg = Config(str(ini_path))
         cfg.set_main_option("sqlalchemy.url", f"sqlite:///{tmp_db_path}")

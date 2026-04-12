@@ -33,8 +33,8 @@ from sqlalchemy.ext.asyncio import (
 )
 
 # Importing the engine module registers the FK PRAGMA listener globally.
-import hikyaku.db.engine  # noqa: F401
-from hikyaku.db.models import Agent, AgentPlacement, Base, Session, Task
+import cafleet.db.engine  # noqa: F401
+from cafleet.db.models import Agent, AgentPlacement, Base, Session, Task
 
 
 # ---------------------------------------------------------------------------

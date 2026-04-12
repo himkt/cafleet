@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import (
 # Importing the engine module is what registers the global FK PRAGMA listener
 # (`event.listens_for(Engine, "connect")`). All subsequent engines created in
 # this process — including ones created inline by tests — will have FK enabled.
-import hikyaku.db.engine  # noqa: F401
-from hikyaku.db.engine import (
+import cafleet.db.engine  # noqa: F401
+from cafleet.db.engine import (
     dispose_engine,
     get_engine,
     get_sessionmaker,
@@ -41,10 +41,10 @@ async def _isolate_engine_singleton(monkeypatch):
     """Override settings.database_url + reset the singleton between tests.
 
     Without the override, ``get_engine()`` would construct an engine pointing at
-    the user's real ``~/.local/share/hikyaku/registry.db`` and create that file
+    the user's real ``~/.local/share/cafleet/registry.db`` and create that file
     on disk. With it, every test runs against a fresh in-memory SQLite DB.
     """
-    from hikyaku import config
+    from cafleet import config
 
     monkeypatch.setattr(
         config.settings,
@@ -135,7 +135,7 @@ class TestGetEngine:
     @pytest.mark.asyncio
     async def test_uses_settings_database_url(self, monkeypatch):
         """The engine is constructed from ``settings.database_url`` at first call."""
-        from hikyaku import config
+        from cafleet import config
 
         monkeypatch.setattr(
             config.settings,

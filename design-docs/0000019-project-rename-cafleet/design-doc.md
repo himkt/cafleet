@@ -1,7 +1,7 @@
 # Project Rename: hikyaku → cafleet
 
 **Status**: Approved
-**Progress**: 24/36 tasks complete
+**Progress**: 31/36 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -306,16 +306,16 @@ Per project rules, documentation is updated before code.
 
 ### Step 6: Test Files
 
-- [ ] Update all `from hikyaku` / `import hikyaku` to `from cafleet` / `import cafleet` across all 22 test files with references <!-- completed: -->
-- [ ] Update any hardcoded database paths, CLI command names, and env var names in tests <!-- completed: -->
+- [x] Update all `from hikyaku` / `import hikyaku` to `from cafleet` / `import cafleet` across all 22 test files with references <!-- completed: 2026-04-12 -->
+- [x] Update any hardcoded database paths, CLI command names, and env var names in tests <!-- completed: 2026-04-12 -->
 
 ### Step 7: Frontend Build Configuration & Source Code
 
-- [ ] Update `admin/vite.config.ts`: `outDir` path `../hikyaku/src/hikyaku/webui` → `../cafleet/src/cafleet/webui` <!-- completed: -->
-- [ ] Update `admin/src/components/Dashboard.tsx`: localStorage key `hikyaku.sender.*` → `cafleet.sender.*`, heading "Hikyaku" → "CAFleet", CLI text `hikyaku register` → `cafleet register` <!-- completed: -->
-- [ ] Update `admin/src/components/SenderSelector.tsx`: localStorage key `hikyaku.sender.*` → `cafleet.sender.*` <!-- completed: -->
-- [ ] Update `admin/src/components/SessionPicker.tsx`: heading "Hikyaku" → "CAFleet", CLI text `hikyaku-registry session create` → `cafleet session create` <!-- completed: -->
-- [ ] Update `admin/src/components/Sidebar.tsx`: CLI text `hikyaku register` → `cafleet register` <!-- completed: -->
+- [x] Update `admin/vite.config.ts`: `outDir` path `../hikyaku/src/hikyaku/webui` → `../cafleet/src/cafleet/webui` <!-- completed: 2026-04-12 -->
+- [x] Update `admin/src/components/Dashboard.tsx`: localStorage key `hikyaku.sender.*` → `cafleet.sender.*`, heading "Hikyaku" → "CAFleet", CLI text `hikyaku register` → `cafleet register` <!-- completed: 2026-04-12 -->
+- [x] Update `admin/src/components/SenderSelector.tsx`: localStorage key `hikyaku.sender.*` → `cafleet.sender.*` <!-- completed: 2026-04-12 -->
+- [x] Update `admin/src/components/SessionPicker.tsx`: heading "Hikyaku" → "CAFleet", CLI text `hikyaku-registry session create` → `cafleet session create` <!-- completed: 2026-04-12 -->
+- [x] Update `admin/src/components/Sidebar.tsx`: CLI text `hikyaku register` → `cafleet register` <!-- completed: 2026-04-12 -->
 
 ### Step 8: CI/CD
 

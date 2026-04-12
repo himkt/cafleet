@@ -1,4 +1,4 @@
-"""Tests for hikyaku.tmux module.
+"""Tests for cafleet.tmux module.
 
 All tmux interaction is mocked via monkeypatch.setattr — no test requires
 a real tmux server.
@@ -6,7 +6,7 @@ a real tmux server.
 
 import pytest
 
-from hikyaku import tmux
+from cafleet import tmux
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +87,8 @@ class TestSplitWindow:
         pane_id = tmux.split_window(
             target_window_id="@3",
             env={
-                "HIKYAKU_URL": "http://localhost:8000",
-                "HIKYAKU_SESSION_ID": "key123",
+                "CAFLEET_URL": "http://localhost:8000",
+                "CAFLEET_SESSION_ID": "key123",
             },
             command=["claude", "Hello world"],
         )
@@ -125,11 +125,11 @@ class TestSplitWindow:
             env={},
             command=[
                 "claude",
-                "Load Skill(hikyaku). Your agent_id is $HIKYAKU_AGENT_ID.",
+                "Load Skill(cafleet). Your agent_id is $CAFLEET_AGENT_ID.",
             ],
         )
         assert captured_args[-2] == "claude"
-        assert "Load Skill(hikyaku)" in captured_args[-1]
+        assert "Load Skill(cafleet)" in captured_args[-1]
 
     def test_codex_style_command(self, monkeypatch):
         """Codex-style command: [\"codex\", \"--approval-mode\", \"auto-edit\", \"prompt\"]."""
@@ -164,9 +164,9 @@ class TestSplitWindow:
         tmux.split_window(
             target_window_id="@3",
             env={
-                "HIKYAKU_URL": "http://localhost:8000",
-                "HIKYAKU_SESSION_ID": "sess-001",
-                "HIKYAKU_AGENT_ID": "agent-001",
+                "CAFLEET_URL": "http://localhost:8000",
+                "CAFLEET_SESSION_ID": "sess-001",
+                "CAFLEET_AGENT_ID": "agent-001",
             },
             command=["claude", "prompt"],
         )
@@ -176,9 +176,9 @@ class TestSplitWindow:
         for i, a in enumerate(captured_args):
             if a == "-e" and i + 1 < len(captured_args):
                 env_pairs.append(captured_args[i + 1])
-        assert "HIKYAKU_URL=http://localhost:8000" in env_pairs
-        assert "HIKYAKU_SESSION_ID=sess-001" in env_pairs
-        assert "HIKYAKU_AGENT_ID=agent-001" in env_pairs
+        assert "CAFLEET_URL=http://localhost:8000" in env_pairs
+        assert "CAFLEET_SESSION_ID=sess-001" in env_pairs
+        assert "CAFLEET_AGENT_ID=agent-001" in env_pairs
 
 
 # ---------------------------------------------------------------------------

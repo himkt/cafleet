@@ -18,8 +18,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku.db.models import Session as SessionModel
-from hikyaku.server import create_app
+from cafleet.db.models import Session as SessionModel
+from cafleet.server import create_app
 
 
 # ---------------------------------------------------------------------------

@@ -1,11 +1,11 @@
-"""Tests for CLI register command — HIKYAKU_SESSION_ID env var required.
+"""Tests for CLI register command — CAFLEET_SESSION_ID env var required.
 
-Design doc 0000015 Step 8: HIKYAKU_API_KEY → HIKYAKU_SESSION_ID,
+Design doc 0000015 Step 8: CAFLEET_API_KEY → CAFLEET_SESSION_ID,
 register gains _require_session_id entry check, session_id sent in
 POST body and X-Session-Id header (same code path as every other command).
 
-Covers: register uses HIKYAKU_SESSION_ID env var, error message when
-missing (mentioning 'hikyaku session create'), session_id
+Covers: register uses CAFLEET_SESSION_ID env var, error message when
+missing (mentioning 'cafleet session create'), session_id
 passed to api.register_agent, X-Session-Id header on outgoing requests.
 """
 
@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from click.testing import CliRunner
 
-from hikyaku.cli import cli
+from cafleet.cli import cli
 
 
 # ---------------------------------------------------------------------------
@@ -46,21 +46,21 @@ SAMPLE_AGENT = {
 
 
 # ===========================================================================
-# Register uses HIKYAKU_SESSION_ID env var
+# Register uses CAFLEET_SESSION_ID env var
 # ===========================================================================
 
 
 class TestRegisterUsesSessionId:
-    """Tests for register command using HIKYAKU_SESSION_ID env var.
+    """Tests for register command using CAFLEET_SESSION_ID env var.
 
     The register command reads session_id from ctx.obj['session_id'],
-    which is populated from the HIKYAKU_SESSION_ID environment variable.
+    which is populated from the CAFLEET_SESSION_ID environment variable.
     """
 
     def test_session_id_passed_to_register(self, runner):
-        """Register with HIKYAKU_SESSION_ID env var passes it to api.register_agent."""
+        """Register with CAFLEET_SESSION_ID env var passes it to api.register_agent."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku.cli.api.register_agent", mock):
+        with patch("cafleet.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
@@ -70,7 +70,7 @@ class TestRegisterUsesSessionId:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
+                env={"CAFLEET_URL": BROKER_URL, "CAFLEET_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
@@ -83,24 +83,24 @@ class TestRegisterUsesSessionId:
         )
 
     def test_session_id_via_env_var(self, runner):
-        """Register uses HIKYAKU_SESSION_ID env var for session scoping."""
+        """Register uses CAFLEET_SESSION_ID env var for session scoping."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku.cli.api.register_agent", mock):
+        with patch("cafleet.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 ["register", "--name", "test-agent", "--description", "test"],
                 env={
-                    "HIKYAKU_URL": BROKER_URL,
-                    "HIKYAKU_SESSION_ID": SESSION_ID,
+                    "CAFLEET_URL": BROKER_URL,
+                    "CAFLEET_SESSION_ID": SESSION_ID,
                 },
             )
 
         assert result.exit_code == 0
 
     def test_register_success_with_session_id(self, runner):
-        """Register succeeds and shows output when HIKYAKU_SESSION_ID is set."""
+        """Register succeeds and shows output when CAFLEET_SESSION_ID is set."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku.cli.api.register_agent", mock):
+        with patch("cafleet.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
@@ -110,16 +110,16 @@ class TestRegisterUsesSessionId:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
+                env={"CAFLEET_URL": BROKER_URL, "CAFLEET_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
         assert AGENT_ID in result.output
 
     def test_register_json_output_with_session_id(self, runner):
-        """Register with --json outputs valid JSON when HIKYAKU_SESSION_ID is set."""
+        """Register with --json outputs valid JSON when CAFLEET_SESSION_ID is set."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku.cli.api.register_agent", mock):
+        with patch("cafleet.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
@@ -130,7 +130,7 @@ class TestRegisterUsesSessionId:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
+                env={"CAFLEET_URL": BROKER_URL, "CAFLEET_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
@@ -139,21 +139,21 @@ class TestRegisterUsesSessionId:
 
 
 # ===========================================================================
-# Missing HIKYAKU_SESSION_ID env var error
+# Missing CAFLEET_SESSION_ID env var error
 # ===========================================================================
 
 
 class TestRegisterMissingSessionId:
-    """Tests for register command when HIKYAKU_SESSION_ID is missing.
+    """Tests for register command when CAFLEET_SESSION_ID is missing.
 
-    Register must validate that HIKYAKU_SESSION_ID env var is set and show
+    Register must validate that CAFLEET_SESSION_ID env var is set and show
     a specific error message if not. Design doc specifies the exact message:
-    "Error: HIKYAKU_SESSION_ID environment variable is required. Create a
-    session with 'hikyaku session create'."
+    "Error: CAFLEET_SESSION_ID environment variable is required. Create a
+    session with 'cafleet session create'."
     """
 
     def test_missing_session_id_shows_error(self, runner):
-        """Register without HIKYAKU_SESSION_ID prints error and exits non-zero."""
+        """Register without CAFLEET_SESSION_ID prints error and exits non-zero."""
         result = runner.invoke(
             cli,
             [
@@ -163,13 +163,13 @@ class TestRegisterMissingSessionId:
                 "--description",
                 "A test agent",
             ],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         assert result.exit_code != 0
 
     def test_missing_session_id_error_message(self, runner):
-        """Error message mentions HIKYAKU_SESSION_ID environment variable."""
+        """Error message mentions CAFLEET_SESSION_ID environment variable."""
         result = runner.invoke(
             cli,
             [
@@ -179,18 +179,18 @@ class TestRegisterMissingSessionId:
                 "--description",
                 "A test agent",
             ],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         output = result.output + (result.stderr or "")
-        assert "HIKYAKU_SESSION_ID" in output
+        assert "CAFLEET_SESSION_ID" in output
 
     def test_missing_session_id_mentions_session_create(self, runner):
-        """Error message mentions 'hikyaku session create'.
+        """Error message mentions 'cafleet session create'.
 
         Design doc: error message should say "Create a session with
-        'hikyaku session create'." (replaces old "Create an
-        API key at the Hikyaku WebUI.")
+        'cafleet session create'." (replaces old "Create an
+        API key at the CAFleet WebUI.")
         """
         result = runner.invoke(
             cli,
@@ -201,16 +201,16 @@ class TestRegisterMissingSessionId:
                 "--description",
                 "A test agent",
             ],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         output = result.output + (result.stderr or "")
-        assert "hikyaku session create" in output
+        assert "cafleet session create" in output
 
     def test_missing_session_id_does_not_call_api(self, runner):
-        """Register without HIKYAKU_SESSION_ID does not make any API call."""
+        """Register without CAFLEET_SESSION_ID does not make any API call."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku.cli.api.register_agent", mock):
+        with patch("cafleet.cli.api.register_agent", mock):
             runner.invoke(
                 cli,
                 [
@@ -220,7 +220,7 @@ class TestRegisterMissingSessionId:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL},
+                env={"CAFLEET_URL": BROKER_URL},
             )
 
         mock.assert_not_called()
@@ -241,9 +241,9 @@ class TestApiRegisterAgentSessionHeader:
     @pytest.mark.asyncio
     async def test_sends_x_session_id_header(self):
         """register_agent sends X-Session-Id header (not Authorization: Bearer)."""
-        from hikyaku.broker_client import register_agent
+        from cafleet.broker_client import register_agent
 
-        with patch("hikyaku.broker_client.httpx.AsyncClient") as mock_client_cls:
+        with patch("cafleet.broker_client.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_response = AsyncMock()
             mock_response.json.return_value = SAMPLE_AGENT
@@ -274,9 +274,9 @@ class TestApiRegisterAgentSessionHeader:
         Design doc: api.register_agent adds session_id to the POST body
         (matching the new POST /api/v1/agents contract).
         """
-        from hikyaku.broker_client import register_agent
+        from cafleet.broker_client import register_agent
 
-        with patch("hikyaku.broker_client.httpx.AsyncClient") as mock_client_cls:
+        with patch("cafleet.broker_client.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_response = AsyncMock()
             mock_response.json.return_value = SAMPLE_AGENT
@@ -299,7 +299,7 @@ class TestApiRegisterAgentSessionHeader:
     @pytest.mark.asyncio
     async def test_session_id_is_required_parameter(self):
         """register_agent requires session_id (not optional)."""
-        from hikyaku.broker_client import register_agent
+        from cafleet.broker_client import register_agent
 
         with pytest.raises(TypeError):
             await register_agent(BROKER_URL, "test-agent", "A test agent")
@@ -320,7 +320,7 @@ class TestDeletedApiKeyPatterns:
     def test_no_authorization_bearer_in_api(self):
         """api.py should not contain 'Authorization: Bearer' strings."""
         import inspect
-        from hikyaku import broker_client as api_module
+        from cafleet import broker_client as api_module
 
         source = inspect.getsource(api_module)
         assert "Authorization" not in source, (
@@ -335,7 +335,7 @@ class TestDeletedApiKeyPatterns:
     def test_no_api_key_parameter_in_api(self):
         """api.py functions should not have api_key parameter."""
         import inspect
-        from hikyaku import broker_client as api_module
+        from cafleet import broker_client as api_module
 
         source = inspect.getsource(api_module)
         # api_key should be renamed to session_id
@@ -361,11 +361,11 @@ class TestNoSQLAlchemyDependency:
         """Client modules should not import sqlalchemy."""
         import sys
 
-        # Ensure hikyaku is loaded
-        import hikyaku.cli  # noqa: F401
-        import hikyaku.broker_client  # noqa: F401
+        # Ensure cafleet is loaded
+        import cafleet.cli  # noqa: F401
+        import cafleet.broker_client  # noqa: F401
 
-        client_modules = [name for name in sys.modules if name.startswith("hikyaku")]
+        client_modules = [name for name in sys.modules if name.startswith("cafleet")]
         for mod_name in client_modules:
             mod = sys.modules[mod_name]
             if mod is not None:

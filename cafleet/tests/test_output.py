@@ -1,10 +1,10 @@
-"""Tests for hikyaku.output — output formatting functions.
+"""Tests for cafleet.output — output formatting functions.
 
 Design doc 0000018 Step 7: format_member() and format_member_list()
 include coding_agent (displayed as 'backend').
 """
 
-from hikyaku.output import format_member, format_member_list
+from cafleet.output import format_member, format_member_list
 
 
 # ---------------------------------------------------------------------------

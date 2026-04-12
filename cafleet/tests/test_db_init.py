@@ -1,4 +1,4 @@
-"""Tests for the ``hikyaku-registry db init`` CLI command.
+"""Tests for the ``cafleet-registry db init`` CLI command.
 
 Covers four states from the design doc's CLI Specification behavior
 matrix (design-docs/0000010-sqlite-store-migration/design-doc.md
@@ -27,12 +27,12 @@ Test isolation strategy:
   ``config.settings.database_url`` to point at that path BEFORE
   importing the CLI. The CLI is imported INSIDE each test body so
   any module-level reads of the database URL during ``cli`` import
-  see the patched value, not the user's real ``HIKYAKU_DATABASE_URL``.
+  see the patched value, not the user's real ``CAFLEET_DATABASE_URL``.
 
   Why ``monkeypatch.setattr(config.settings, "database_url", ...)``
-  rather than ``monkeypatch.setenv("HIKYAKU_DATABASE_URL", ...)``:
+  rather than ``monkeypatch.setenv("CAFLEET_DATABASE_URL", ...)``:
   ``config.settings`` is a module-level singleton constructed at
-  ``hikyaku.config`` import time. By the time any test
+  ``cafleet.config`` import time. By the time any test
   runs, the singleton has already been built — env-var changes
   after that point would be ignored. Patching the attribute on the
   existing singleton is the only reliable override.
@@ -47,7 +47,7 @@ import sqlite3
 
 from click.testing import CliRunner
 
-from hikyaku import config
+from cafleet import config
 
 
 def _table_names(db_path) -> set[str]:
@@ -91,7 +91,7 @@ def test_db_init_creates_schema(tmp_path, monkeypatch):
         "fixture sanity: data/ subdir should not pre-exist"
     )
 
-    from hikyaku.cli import cli
+    from cafleet.cli import cli
 
     runner = CliRunner()
     result = runner.invoke(cli, ["db", "init"])
@@ -147,7 +147,7 @@ def test_db_init_idempotent(tmp_path, monkeypatch):
         f"sqlite+aiosqlite:///{db_file}",
     )
 
-    from hikyaku.cli import cli
+    from cafleet.cli import cli
 
     runner = CliRunner()
 
@@ -236,7 +236,7 @@ def test_db_init_legacy_errors(tmp_path, monkeypatch):
     finally:
         conn.close()
 
-    from hikyaku.cli import cli
+    from cafleet.cli import cli
 
     runner = CliRunner()
     result = runner.invoke(cli, ["db", "init"])
@@ -269,7 +269,7 @@ def test_db_init_ahead_errors(tmp_path, monkeypatch):
       "Current revision exists but is not in the local script
        directory's history (or is downstream of head). Print 'ERROR: DB
        schema is at revision {current_rev} which is unknown to this
-       version of hikyaku-registry. Refusing to downgrade automatically.'
+       version of cafleet-registry. Refusing to downgrade automatically.'
        to stderr. Exit 1."
 
     The fictional revision id ``9999_future_revision`` is chosen to be
@@ -305,7 +305,7 @@ def test_db_init_ahead_errors(tmp_path, monkeypatch):
     finally:
         conn.close()
 
-    from hikyaku.cli import cli
+    from cafleet.cli import cli
 
     runner = CliRunner()
     result = runner.invoke(cli, ["db", "init"])

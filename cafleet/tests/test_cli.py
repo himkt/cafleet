@@ -1,10 +1,10 @@
-"""Tests for hikyaku CLI tool.
+"""Tests for cafleet CLI tool.
 
 Covers: All CLI subcommands (register, send, broadcast, poll, ack, cancel,
 get-task, agents, deregister), global options, --json flag, environment
 variable fallback, and error handling.
 
-Design doc 0000015 Step 8: HIKYAKU_API_KEY → HIKYAKU_SESSION_ID,
+Design doc 0000015 Step 8: CAFLEET_API_KEY → CAFLEET_SESSION_ID,
 Authorization: Bearer → X-Session-Id header, URL fallback → 127.0.0.1,
 register gains _require_session_id check.
 """
@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from click.testing import CliRunner
 
-from hikyaku.cli import cli
+from cafleet.cli import cli
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ SAMPLE_COMPLETED_TASK = {
 
 def _auth_env():
     """Environment variables for authentication — session-based."""
-    return {"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID}
+    return {"CAFLEET_URL": BROKER_URL, "CAFLEET_SESSION_ID": SESSION_ID}
 
 
 # ---------------------------------------------------------------------------
@@ -85,12 +85,12 @@ def _auth_env():
 
 
 class TestRegisterCommand:
-    """Tests for `hikyaku register`."""
+    """Tests for `cafleet register`."""
 
     def test_register_success(self, runner):
         """Register prints agent_id and name."""
         with patch(
-            "hikyaku.cli.api.register_agent",
+            "cafleet.cli.api.register_agent",
             new_callable=AsyncMock,
             return_value=SAMPLE_AGENT,
         ):
@@ -112,7 +112,7 @@ class TestRegisterCommand:
     def test_register_prints_agent_info(self, runner):
         """Register output prints the agent_id."""
         with patch(
-            "hikyaku.cli.api.register_agent",
+            "cafleet.cli.api.register_agent",
             new_callable=AsyncMock,
             return_value=SAMPLE_AGENT,
         ):
@@ -135,7 +135,7 @@ class TestRegisterCommand:
     def test_register_json_output(self, runner):
         """Register with --json outputs valid JSON."""
         with patch(
-            "hikyaku.cli.api.register_agent",
+            "cafleet.cli.api.register_agent",
             new_callable=AsyncMock,
             return_value=SAMPLE_AGENT,
         ):
@@ -159,7 +159,7 @@ class TestRegisterCommand:
     def test_register_output_shows_name(self, runner):
         """Register output includes the agent name."""
         with patch(
-            "hikyaku.cli.api.register_agent",
+            "cafleet.cli.api.register_agent",
             new_callable=AsyncMock,
             return_value=SAMPLE_AGENT,
         ):
@@ -179,13 +179,13 @@ class TestRegisterCommand:
         assert "test-agent" in result.output
 
     def test_register_requires_session_id(self, runner):
-        """Register requires HIKYAKU_SESSION_ID environment variable.
+        """Register requires CAFLEET_SESSION_ID environment variable.
 
         Design doc: register gains _require_session_id check (it was the
         only command without a key-requirement check before).
         """
         with patch(
-            "hikyaku.cli.api.register_agent",
+            "cafleet.cli.api.register_agent",
             new_callable=AsyncMock,
             return_value=SAMPLE_AGENT,
         ):
@@ -198,7 +198,7 @@ class TestRegisterCommand:
                     "--description",
                     "A test agent",
                 ],
-                env={"HIKYAKU_URL": BROKER_URL},
+                env={"CAFLEET_URL": BROKER_URL},
             )
 
         assert result.exit_code != 0
@@ -230,7 +230,7 @@ class TestRegisterCommand:
             ]
         )
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku.cli.api.register_agent", mock):
+        with patch("cafleet.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
@@ -253,7 +253,7 @@ class TestRegisterCommand:
     def test_register_api_error(self, runner):
         """Register shows error on API failure."""
         with patch(
-            "hikyaku.cli.api.register_agent",
+            "cafleet.cli.api.register_agent",
             new_callable=AsyncMock,
             side_effect=Exception("Connection refused"),
         ):
@@ -278,13 +278,13 @@ class TestRegisterCommand:
 
 
 class TestSendCommand:
-    """Tests for `hikyaku send`."""
+    """Tests for `cafleet send`."""
 
     def test_send_success(self, runner):
         """Send unicast message succeeds."""
         target_id = "target-agent-001"
         mock = AsyncMock(return_value=SAMPLE_TASK)
-        with patch("hikyaku.cli.api.send_message", mock):
+        with patch("cafleet.cli.api.send_message", mock):
             result = runner.invoke(
                 cli,
                 [
@@ -305,7 +305,7 @@ class TestSendCommand:
     def test_send_json_output(self, runner):
         """Send with --json outputs task JSON."""
         mock = AsyncMock(return_value=SAMPLE_TASK)
-        with patch("hikyaku.cli.api.send_message", mock):
+        with patch("cafleet.cli.api.send_message", mock):
             result = runner.invoke(
                 cli,
                 [
@@ -346,11 +346,11 @@ class TestSendCommand:
         assert result.exit_code != 0
 
     def test_send_requires_session_id(self, runner):
-        """Send fails without HIKYAKU_SESSION_ID."""
+        """Send fails without CAFLEET_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["send", "--agent-id", AGENT_ID, "--to", "target-001", "--text", "Hello"],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         assert result.exit_code != 0
@@ -372,12 +372,12 @@ class TestSendCommand:
 
 
 class TestBroadcastCommand:
-    """Tests for `hikyaku broadcast`."""
+    """Tests for `cafleet broadcast`."""
 
     def test_broadcast_success(self, runner):
         """Broadcast message succeeds."""
         mock = AsyncMock(return_value=[SAMPLE_TASK])
-        with patch("hikyaku.cli.api.broadcast_message", mock):
+        with patch("cafleet.cli.api.broadcast_message", mock):
             result = runner.invoke(
                 cli,
                 ["broadcast", "--agent-id", AGENT_ID, "--text", "Build failed on main"],
@@ -390,7 +390,7 @@ class TestBroadcastCommand:
     def test_broadcast_json_output(self, runner):
         """Broadcast with --json outputs JSON."""
         mock = AsyncMock(return_value=[SAMPLE_TASK])
-        with patch("hikyaku.cli.api.broadcast_message", mock):
+        with patch("cafleet.cli.api.broadcast_message", mock):
             result = runner.invoke(
                 cli,
                 [
@@ -419,11 +419,11 @@ class TestBroadcastCommand:
         assert result.exit_code != 0
 
     def test_broadcast_requires_session_id(self, runner):
-        """Broadcast fails without HIKYAKU_SESSION_ID."""
+        """Broadcast fails without CAFLEET_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["broadcast", "--agent-id", AGENT_ID, "--text", "Hello"],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         assert result.exit_code != 0
@@ -445,12 +445,12 @@ class TestBroadcastCommand:
 
 
 class TestPollCommand:
-    """Tests for `hikyaku poll`."""
+    """Tests for `cafleet poll`."""
 
     def test_poll_success(self, runner):
         """Poll returns inbox messages."""
         mock = AsyncMock(return_value=[SAMPLE_TASK])
-        with patch("hikyaku.cli.api.poll_tasks", mock):
+        with patch("cafleet.cli.api.poll_tasks", mock):
             result = runner.invoke(
                 cli,
                 ["poll", "--agent-id", AGENT_ID],
@@ -463,7 +463,7 @@ class TestPollCommand:
     def test_poll_empty_inbox(self, runner):
         """Poll with empty inbox shows appropriate message."""
         mock = AsyncMock(return_value=[])
-        with patch("hikyaku.cli.api.poll_tasks", mock):
+        with patch("cafleet.cli.api.poll_tasks", mock):
             result = runner.invoke(
                 cli,
                 ["poll", "--agent-id", AGENT_ID],
@@ -475,7 +475,7 @@ class TestPollCommand:
     def test_poll_json_output(self, runner):
         """Poll with --json outputs JSON array."""
         mock = AsyncMock(return_value=[SAMPLE_TASK])
-        with patch("hikyaku.cli.api.poll_tasks", mock):
+        with patch("cafleet.cli.api.poll_tasks", mock):
             result = runner.invoke(
                 cli,
                 ["--json", "poll", "--agent-id", AGENT_ID],
@@ -490,7 +490,7 @@ class TestPollCommand:
     def test_poll_with_since(self, runner):
         """Poll passes --since parameter to api."""
         mock = AsyncMock(return_value=[])
-        with patch("hikyaku.cli.api.poll_tasks", mock):
+        with patch("cafleet.cli.api.poll_tasks", mock):
             result = runner.invoke(
                 cli,
                 ["poll", "--agent-id", AGENT_ID, "--since", "2026-03-28T12:00:00Z"],
@@ -502,7 +502,7 @@ class TestPollCommand:
     def test_poll_with_page_size(self, runner):
         """Poll passes --page-size parameter to api."""
         mock = AsyncMock(return_value=[])
-        with patch("hikyaku.cli.api.poll_tasks", mock):
+        with patch("cafleet.cli.api.poll_tasks", mock):
             result = runner.invoke(
                 cli,
                 ["poll", "--agent-id", AGENT_ID, "--page-size", "50"],
@@ -512,11 +512,11 @@ class TestPollCommand:
         assert result.exit_code == 0
 
     def test_poll_requires_session_id(self, runner):
-        """Poll fails without HIKYAKU_SESSION_ID."""
+        """Poll fails without CAFLEET_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["poll", "--agent-id", AGENT_ID],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         assert result.exit_code != 0
@@ -538,12 +538,12 @@ class TestPollCommand:
 
 
 class TestAckCommand:
-    """Tests for `hikyaku ack`."""
+    """Tests for `cafleet ack`."""
 
     def test_ack_success(self, runner):
         """Ack a message succeeds."""
         mock = AsyncMock(return_value=SAMPLE_COMPLETED_TASK)
-        with patch("hikyaku.cli.api.ack_task", mock):
+        with patch("cafleet.cli.api.ack_task", mock):
             result = runner.invoke(
                 cli,
                 ["ack", "--agent-id", AGENT_ID, "--task-id", "task-001"],
@@ -556,7 +556,7 @@ class TestAckCommand:
     def test_ack_json_output(self, runner):
         """Ack with --json outputs task JSON."""
         mock = AsyncMock(return_value=SAMPLE_COMPLETED_TASK)
-        with patch("hikyaku.cli.api.ack_task", mock):
+        with patch("cafleet.cli.api.ack_task", mock):
             result = runner.invoke(
                 cli,
                 ["--json", "ack", "--agent-id", AGENT_ID, "--task-id", "task-001"],
@@ -578,11 +578,11 @@ class TestAckCommand:
         assert result.exit_code != 0
 
     def test_ack_requires_session_id(self, runner):
-        """Ack fails without HIKYAKU_SESSION_ID."""
+        """Ack fails without CAFLEET_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["ack", "--agent-id", AGENT_ID, "--task-id", "task-001"],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         assert result.exit_code != 0
@@ -604,7 +604,7 @@ class TestAckCommand:
 
 
 class TestCancelCommand:
-    """Tests for `hikyaku cancel`."""
+    """Tests for `cafleet cancel`."""
 
     def test_cancel_success(self, runner):
         """Cancel a task succeeds."""
@@ -613,7 +613,7 @@ class TestCancelCommand:
             "status": {"state": "canceled", "timestamp": "2026-03-28T12:01:00Z"},
         }
         mock = AsyncMock(return_value=canceled_task)
-        with patch("hikyaku.cli.api.cancel_task", mock):
+        with patch("cafleet.cli.api.cancel_task", mock):
             result = runner.invoke(
                 cli,
                 ["cancel", "--agent-id", AGENT_ID, "--task-id", "task-001"],
@@ -630,7 +630,7 @@ class TestCancelCommand:
             "status": {"state": "canceled", "timestamp": "2026-03-28T12:01:00Z"},
         }
         mock = AsyncMock(return_value=canceled_task)
-        with patch("hikyaku.cli.api.cancel_task", mock):
+        with patch("cafleet.cli.api.cancel_task", mock):
             result = runner.invoke(
                 cli,
                 ["--json", "cancel", "--agent-id", AGENT_ID, "--task-id", "task-001"],
@@ -652,11 +652,11 @@ class TestCancelCommand:
         assert result.exit_code != 0
 
     def test_cancel_requires_session_id(self, runner):
-        """Cancel fails without HIKYAKU_SESSION_ID."""
+        """Cancel fails without CAFLEET_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["cancel", "--agent-id", AGENT_ID, "--task-id", "task-001"],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         assert result.exit_code != 0
@@ -678,12 +678,12 @@ class TestCancelCommand:
 
 
 class TestGetTaskCommand:
-    """Tests for `hikyaku get-task`."""
+    """Tests for `cafleet get-task`."""
 
     def test_get_task_success(self, runner):
         """Get-task returns task details."""
         mock = AsyncMock(return_value=SAMPLE_TASK)
-        with patch("hikyaku.cli.api.get_task", mock):
+        with patch("cafleet.cli.api.get_task", mock):
             result = runner.invoke(
                 cli,
                 ["get-task", "--agent-id", AGENT_ID, "--task-id", "task-001"],
@@ -696,7 +696,7 @@ class TestGetTaskCommand:
     def test_get_task_json_output(self, runner):
         """Get-task with --json outputs task JSON."""
         mock = AsyncMock(return_value=SAMPLE_TASK)
-        with patch("hikyaku.cli.api.get_task", mock):
+        with patch("cafleet.cli.api.get_task", mock):
             result = runner.invoke(
                 cli,
                 ["--json", "get-task", "--agent-id", AGENT_ID, "--task-id", "task-001"],
@@ -718,11 +718,11 @@ class TestGetTaskCommand:
         assert result.exit_code != 0
 
     def test_get_task_requires_session_id(self, runner):
-        """Get-task fails without HIKYAKU_SESSION_ID."""
+        """Get-task fails without CAFLEET_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["get-task", "--agent-id", AGENT_ID, "--task-id", "task-001"],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         assert result.exit_code != 0
@@ -744,12 +744,12 @@ class TestGetTaskCommand:
 
 
 class TestAgentsCommand:
-    """Tests for `hikyaku agents`."""
+    """Tests for `cafleet agents`."""
 
     def test_list_agents_success(self, runner):
         """Agents lists all registered agents."""
         mock = AsyncMock(return_value=[SAMPLE_AGENT_INFO])
-        with patch("hikyaku.cli.api.list_agents", mock):
+        with patch("cafleet.cli.api.list_agents", mock):
             result = runner.invoke(
                 cli,
                 ["agents", "--agent-id", AGENT_ID],
@@ -762,7 +762,7 @@ class TestAgentsCommand:
     def test_list_agents_json_output(self, runner):
         """Agents with --json outputs JSON array."""
         mock = AsyncMock(return_value=[SAMPLE_AGENT_INFO])
-        with patch("hikyaku.cli.api.list_agents", mock):
+        with patch("cafleet.cli.api.list_agents", mock):
             result = runner.invoke(
                 cli,
                 ["--json", "agents", "--agent-id", AGENT_ID],
@@ -778,7 +778,7 @@ class TestAgentsCommand:
     def test_get_agent_detail(self, runner):
         """Agents with --id returns single agent detail."""
         mock = AsyncMock(return_value=SAMPLE_AGENT_INFO)
-        with patch("hikyaku.cli.api.list_agents", mock):
+        with patch("cafleet.cli.api.list_agents", mock):
             result = runner.invoke(
                 cli,
                 ["agents", "--agent-id", AGENT_ID, "--id", AGENT_ID],
@@ -790,7 +790,7 @@ class TestAgentsCommand:
     def test_get_agent_detail_json(self, runner):
         """Agents with --id and --json returns single agent JSON."""
         mock = AsyncMock(return_value=SAMPLE_AGENT_INFO)
-        with patch("hikyaku.cli.api.list_agents", mock):
+        with patch("cafleet.cli.api.list_agents", mock):
             result = runner.invoke(
                 cli,
                 ["--json", "agents", "--agent-id", AGENT_ID, "--id", AGENT_ID],
@@ -802,11 +802,11 @@ class TestAgentsCommand:
         assert data["agent_id"] == AGENT_ID
 
     def test_agents_requires_session_id(self, runner):
-        """Agents fails without HIKYAKU_SESSION_ID."""
+        """Agents fails without CAFLEET_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["agents", "--agent-id", AGENT_ID],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         assert result.exit_code != 0
@@ -828,12 +828,12 @@ class TestAgentsCommand:
 
 
 class TestDeregisterCommand:
-    """Tests for `hikyaku deregister`."""
+    """Tests for `cafleet deregister`."""
 
     def test_deregister_success(self, runner):
         """Deregister removes own registration."""
         mock = AsyncMock(return_value=None)
-        with patch("hikyaku.cli.api.deregister_agent", mock):
+        with patch("cafleet.cli.api.deregister_agent", mock):
             result = runner.invoke(
                 cli,
                 ["deregister", "--agent-id", AGENT_ID],
@@ -846,7 +846,7 @@ class TestDeregisterCommand:
     def test_deregister_json_output(self, runner):
         """Deregister with --json outputs JSON confirmation."""
         mock = AsyncMock(return_value=None)
-        with patch("hikyaku.cli.api.deregister_agent", mock):
+        with patch("cafleet.cli.api.deregister_agent", mock):
             result = runner.invoke(
                 cli,
                 ["--json", "deregister", "--agent-id", AGENT_ID],
@@ -856,11 +856,11 @@ class TestDeregisterCommand:
         assert result.exit_code == 0
 
     def test_deregister_requires_session_id(self, runner):
-        """Deregister fails without HIKYAKU_SESSION_ID."""
+        """Deregister fails without CAFLEET_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["deregister", "--agent-id", AGENT_ID],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         assert result.exit_code != 0
@@ -882,74 +882,74 @@ class TestDeregisterCommand:
 
 
 class TestEnvCommand:
-    """Tests for ``hikyaku env`` subcommand."""
+    """Tests for ``cafleet env`` subcommand."""
 
     def test_prints_url_and_session_id(self, runner):
-        """env command prints both HIKYAKU_URL and HIKYAKU_SESSION_ID."""
+        """env command prints both CAFLEET_URL and CAFLEET_SESSION_ID."""
         result = runner.invoke(
             cli,
             ["env"],
-            env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
+            env={"CAFLEET_URL": BROKER_URL, "CAFLEET_SESSION_ID": SESSION_ID},
         )
         assert result.exit_code == 0
-        assert f"HIKYAKU_URL={BROKER_URL}" in result.output
-        assert f"HIKYAKU_SESSION_ID={SESSION_ID}" in result.output
+        assert f"CAFLEET_URL={BROKER_URL}" in result.output
+        assert f"CAFLEET_SESSION_ID={SESSION_ID}" in result.output
 
     def test_default_url_when_unset(self, runner):
-        """env command shows default URL when HIKYAKU_URL is not set."""
+        """env command shows default URL when CAFLEET_URL is not set."""
         result = runner.invoke(
             cli,
             ["env"],
-            env={"HIKYAKU_SESSION_ID": SESSION_ID, "HIKYAKU_URL": ""},
+            env={"CAFLEET_SESSION_ID": SESSION_ID, "CAFLEET_URL": ""},
         )
         assert result.exit_code == 0
-        assert "HIKYAKU_URL=http://127.0.0.1:8000" in result.output
+        assert "CAFLEET_URL=http://127.0.0.1:8000" in result.output
 
     def test_empty_session_id_when_unset(self, runner):
-        """env command shows empty HIKYAKU_SESSION_ID when not set."""
+        """env command shows empty CAFLEET_SESSION_ID when not set."""
         result = runner.invoke(
             cli,
             ["env"],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
         assert result.exit_code == 0
-        assert "HIKYAKU_SESSION_ID=" in result.output
+        assert "CAFLEET_SESSION_ID=" in result.output
 
 
 class TestGlobalOptions:
     """Tests for global CLI options and environment variables."""
 
     def test_url_from_env(self, runner):
-        """Broker URL is read from HIKYAKU_URL env var."""
+        """Broker URL is read from CAFLEET_URL env var."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku.cli.api.register_agent", mock):
+        with patch("cafleet.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 ["register", "--name", "test-agent", "--description", "test"],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
+                env={"CAFLEET_URL": BROKER_URL, "CAFLEET_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
 
     def test_session_id_from_env(self, runner):
-        """Session ID is read from HIKYAKU_SESSION_ID env var."""
+        """Session ID is read from CAFLEET_SESSION_ID env var."""
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku.cli.api.register_agent", mock):
+        with patch("cafleet.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 ["register", "--name", "test-agent", "--description", "test"],
-                env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
+                env={"CAFLEET_URL": BROKER_URL, "CAFLEET_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
 
     def test_default_url_is_loopback(self, runner):
-        """Default URL is http://127.0.0.1:8000 when HIKYAKU_URL is not set.
+        """Default URL is http://127.0.0.1:8000 when CAFLEET_URL is not set.
 
         Design doc: URL fallback changes from localhost to 127.0.0.1.
         """
         mock = AsyncMock(return_value=SAMPLE_AGENT)
-        with patch("hikyaku.cli.api.register_agent", mock):
+        with patch("cafleet.cli.api.register_agent", mock):
             result = runner.invoke(
                 cli,
                 [
@@ -959,16 +959,16 @@ class TestGlobalOptions:
                     "--description",
                     "test",
                 ],
-                env={"HIKYAKU_SESSION_ID": SESSION_ID},
+                env={"CAFLEET_SESSION_ID": SESSION_ID},
             )
 
         assert result.exit_code == 0
 
     def test_missing_session_id_env_var_error(self, runner):
-        """Missing HIKYAKU_SESSION_ID shows error referencing the env var.
+        """Missing CAFLEET_SESSION_ID shows error referencing the env var.
 
-        Design doc: error message is "Error: HIKYAKU_SESSION_ID environment
-        variable is required. Create a session with 'hikyaku-registry
+        Design doc: error message is "Error: CAFLEET_SESSION_ID environment
+        variable is required. Create a session with 'cafleet-registry
         session create'."
         """
         result = runner.invoke(
@@ -980,18 +980,18 @@ class TestGlobalOptions:
                 "--description",
                 "test",
             ],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         assert result.exit_code != 0
         output = result.output + (result.stderr or "")
-        assert "HIKYAKU_SESSION_ID" in output
+        assert "CAFLEET_SESSION_ID" in output
 
     def test_missing_session_id_mentions_session_create(self, runner):
-        """Error message mentions 'hikyaku session create'.
+        """Error message mentions 'cafleet session create'.
 
         Design doc: error message ends with "Create a session with
-        'hikyaku session create'."
+        'cafleet session create'."
         """
         result = runner.invoke(
             cli,
@@ -1002,39 +1002,39 @@ class TestGlobalOptions:
                 "--description",
                 "test",
             ],
-            env={"HIKYAKU_URL": BROKER_URL},
+            env={"CAFLEET_URL": BROKER_URL},
         )
 
         output = result.output + (result.stderr or "")
-        assert "hikyaku session create" in output
+        assert "cafleet session create" in output
 
 
 # ---------------------------------------------------------------------------
-# Deleted patterns — verify no HIKYAKU_API_KEY references
+# Deleted patterns — verify no CAFLEET_API_KEY references
 # ---------------------------------------------------------------------------
 
 
 class TestDeletedApiKeyPatterns:
-    """Verify that HIKYAKU_API_KEY is no longer used in the CLI.
+    """Verify that CAFLEET_API_KEY is no longer used in the CLI.
 
-    Design doc 0000015 Step 8: every reference to HIKYAKU_API_KEY is
-    renamed to HIKYAKU_SESSION_ID.
+    Design doc 0000015 Step 8: every reference to CAFLEET_API_KEY is
+    renamed to CAFLEET_SESSION_ID.
     """
 
     def test_no_api_key_env_var(self):
-        """CLI source should not reference HIKYAKU_API_KEY."""
+        """CLI source should not reference CAFLEET_API_KEY."""
         import inspect
-        from hikyaku import cli as cli_module
+        from cafleet import cli as cli_module
 
         source = inspect.getsource(cli_module)
-        assert "HIKYAKU_API_KEY" not in source, (
-            "cli.py should not reference HIKYAKU_API_KEY — "
-            "all references should be HIKYAKU_SESSION_ID"
+        assert "CAFLEET_API_KEY" not in source, (
+            "cli.py should not reference CAFLEET_API_KEY — "
+            "all references should be CAFLEET_SESSION_ID"
         )
 
     def test_no_require_api_key_function(self):
         """_require_api_key should be renamed to _require_session_id."""
-        from hikyaku import cli as cli_module
+        from cafleet import cli as cli_module
 
         assert not hasattr(cli_module, "_require_api_key"), (
             "_require_api_key should be renamed to _require_session_id"
@@ -1042,7 +1042,7 @@ class TestDeletedApiKeyPatterns:
 
     def test_has_require_session_id_function(self):
         """_require_session_id should exist in the CLI module."""
-        from hikyaku import cli as cli_module
+        from cafleet import cli as cli_module
 
         assert hasattr(cli_module, "_require_session_id"), (
             "_require_session_id should exist in cli.py"
@@ -1060,7 +1060,7 @@ class TestErrorHandling:
     def test_connection_error(self, runner):
         """Connection errors are reported gracefully."""
         with patch(
-            "hikyaku.cli.api.poll_tasks",
+            "cafleet.cli.api.poll_tasks",
             new_callable=AsyncMock,
             side_effect=ConnectionError("Connection refused"),
         ):
@@ -1075,7 +1075,7 @@ class TestErrorHandling:
     def test_api_error_response(self, runner):
         """API error responses are reported gracefully."""
         with patch(
-            "hikyaku.cli.api.send_message",
+            "cafleet.cli.api.send_message",
             new_callable=AsyncMock,
             side_effect=Exception("404: Agent not found"),
         ):
