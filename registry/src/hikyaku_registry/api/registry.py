@@ -15,7 +15,7 @@ from hikyaku_registry.models import (
     RegisterAgentRequest,
     RegisterAgentResponse,
 )
-from hikyaku_registry.registry_store import CreateAgentResult, RegistryStore
+from hikyaku_registry.registry_store import RegistryStore
 
 registry_router = APIRouter()
 
@@ -29,7 +29,7 @@ async def register_agent(
     body: RegisterAgentRequest,
     request: Request,
     store: RegistryStore = Depends(get_registry_store),
-) -> dict[str, Any]:
+):
     api_key, _tenant_id = await get_registration_tenant(request, store)
 
     if body.placement is not None:
@@ -64,7 +64,7 @@ async def register_agent(
         placement=body.placement,
     )
 
-    response: dict[str, Any] = dict(result)
+    response: dict[str, Any] = {**result}
     if body.placement is not None:
         placement = await store.get_placement(result["agent_id"])
         if placement:

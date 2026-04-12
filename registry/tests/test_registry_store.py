@@ -1003,7 +1003,7 @@ class TestListPlacementsForDirector:
         api_key, api_key_hash, _ = await _make_owner_with_key(store)
         director = await store.create_agent("Dir", "d", None, api_key=api_key)
 
-        m1 = await store.create_agent_with_placement(
+        await store.create_agent_with_placement(
             name="Active",
             description="d",
             skills=None,
