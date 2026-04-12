@@ -881,6 +881,41 @@ class TestDeregisterCommand:
 # ---------------------------------------------------------------------------
 
 
+class TestEnvCommand:
+    """Tests for ``hikyaku env`` subcommand."""
+
+    def test_prints_url_and_session_id(self, runner):
+        """env command prints both HIKYAKU_URL and HIKYAKU_SESSION_ID."""
+        result = runner.invoke(
+            cli,
+            ["env"],
+            env={"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID},
+        )
+        assert result.exit_code == 0
+        assert f"HIKYAKU_URL={BROKER_URL}" in result.output
+        assert f"HIKYAKU_SESSION_ID={SESSION_ID}" in result.output
+
+    def test_default_url_when_unset(self, runner):
+        """env command shows default URL when HIKYAKU_URL is not set."""
+        result = runner.invoke(
+            cli,
+            ["env"],
+            env={"HIKYAKU_SESSION_ID": SESSION_ID, "HIKYAKU_URL": ""},
+        )
+        assert result.exit_code == 0
+        assert "HIKYAKU_URL=http://127.0.0.1:8000" in result.output
+
+    def test_empty_session_id_when_unset(self, runner):
+        """env command shows empty HIKYAKU_SESSION_ID when not set."""
+        result = runner.invoke(
+            cli,
+            ["env"],
+            env={"HIKYAKU_URL": BROKER_URL},
+        )
+        assert result.exit_code == 0
+        assert "HIKYAKU_SESSION_ID=" in result.output
+
+
 class TestGlobalOptions:
     """Tests for global CLI options and environment variables."""
 

@@ -13,7 +13,6 @@
       "Bash(mise tasks)",
       "Bash(mise tasks --all)",
       "Skill(update-readme)",
-      "Bash(printenv HIKYAKU_URL HIKYAKU_SESSION_ID)",
       "Bash(hikyaku *)",
       "Bash(hikyaku-registry session *)"
     ],

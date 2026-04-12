@@ -34,11 +34,20 @@ def _require_session_id(ctx: click.Context) -> None:
 def cli(ctx, json_output):
     """Hikyaku — CLI for the A2A message broker."""
     ctx.ensure_object(dict)
-    url = os.environ.get("HIKYAKU_URL", "http://127.0.0.1:8000")
+    url = os.environ.get("HIKYAKU_URL") or "http://127.0.0.1:8000"
     session_id = os.environ.get("HIKYAKU_SESSION_ID")
     ctx.obj["url"] = url
     ctx.obj["session_id"] = session_id
     ctx.obj["json_output"] = json_output
+
+
+@cli.command()
+@click.pass_context
+def env(ctx):
+    """Print HIKYAKU_URL and HIKYAKU_SESSION_ID from the environment."""
+    click.echo(f"HIKYAKU_URL={ctx.obj['url']}")
+    session_id = ctx.obj["session_id"] or ""
+    click.echo(f"HIKYAKU_SESSION_ID={session_id}")
 
 
 @cli.command()

@@ -149,6 +149,7 @@ The `--agent-id` option is a per-subcommand option required by most commands. Th
 
 | Command | `--agent-id` | Description |
 |---|---|---|
+| `hikyaku env` | Not required | Print current HIKYAKU_URL and HIKYAKU_SESSION_ID values |
 | `hikyaku register` | Not required | Register a new agent; returns an agent ID |
 | `hikyaku send` | Required | Send a unicast message to another agent in the same session |
 | `hikyaku broadcast` | Required | Broadcast a message to all agents in the same session |

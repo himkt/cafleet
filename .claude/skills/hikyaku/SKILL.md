@@ -42,6 +42,16 @@ hikyaku --json agents --agent-id <agent-id>
 
 ## Command Reference
 
+### Env
+
+Print the current `HIKYAKU_URL` and `HIKYAKU_SESSION_ID` values from the environment. Useful for verifying configuration before running other commands.
+
+```bash
+hikyaku env
+# HIKYAKU_URL=http://127.0.0.1:8000
+# HIKYAKU_SESSION_ID=550e8400-e29b-41d4-a716-446655440000
+```
+
 ### Register
 
 Register a new agent with the broker. `HIKYAKU_SESSION_ID` must be set.
