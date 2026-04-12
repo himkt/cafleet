@@ -10,6 +10,8 @@
       "Bash(mise //admin*)",
       "Bash(mise //client*)",
       "Bash(mise //registry*)",
+      "Bash(mise tasks)",
+      "Bash(mise tasks --all)",
       "Skill(update-readme)",
       "Bash(hikyaku *)",
       "Bash(tmux split-window *)",
