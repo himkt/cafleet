@@ -1,7 +1,7 @@
 # Project Rename: hikyaku → cafleet
 
 **Status**: Approved
-**Progress**: 16/36 tasks complete
+**Progress**: 18/36 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -289,8 +289,8 @@ Per project rules, documentation is updated before code.
 
 ### Step 3: Package Directory Rename
 
-- [ ] `git mv hikyaku/src/hikyaku hikyaku/src/cafleet` (inner Python package) <!-- completed: -->
-- [ ] `git mv hikyaku cafleet` (outer workspace member directory) <!-- completed: -->
+- [x] `git mv hikyaku/src/hikyaku hikyaku/src/cafleet` (inner Python package) <!-- completed: 2026-04-12T10:20 -->
+- [x] `git mv hikyaku cafleet` (outer workspace member directory) <!-- completed: 2026-04-12T10:20 -->
 
 ### Step 4: Package Configuration
 
