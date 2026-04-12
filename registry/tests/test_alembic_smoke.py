@@ -77,10 +77,11 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
 
     The expected set is:
 
-      - ``sessions``         — session namespace, PK = ``session_id``
-      - ``agents``           — FK ``session_id`` -> ``sessions.session_id``
-      - ``tasks``            — FK ``context_id`` -> ``agents.agent_id``
-      - ``alembic_version``  — Alembic's own bookkeeping table
+      - ``sessions``           — session namespace, PK = ``session_id``
+      - ``agents``             — FK ``session_id`` -> ``sessions.session_id``
+      - ``tasks``              — FK ``context_id`` -> ``agents.agent_id``
+      - ``agent_placements``   — FK ``agent_id`` -> ``agents.agent_id``
+      - ``alembic_version``    — Alembic's own bookkeeping table
 
     ``api_keys`` must NOT be present — it is dropped by migration
     ``0002_local_simplification``.
@@ -99,7 +100,7 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         insp = inspect(engine)
         tables = set(insp.get_table_names())
 
-        expected = {"sessions", "agents", "tasks", "alembic_version"}
+        expected = {"sessions", "agents", "tasks", "agent_placements", "alembic_version"}
         missing = expected - tables
         assert not missing, (
             f"alembic upgrade head did not create the expected tables. "

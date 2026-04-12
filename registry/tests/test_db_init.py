@@ -106,7 +106,7 @@ def test_db_init_creates_schema(tmp_path, monkeypatch):
     assert db_file.exists(), f"db init should have created the DB file at {db_file}"
 
     tables = _table_names(db_file)
-    expected = {"sessions", "agents", "tasks", "alembic_version"}
+    expected = {"sessions", "agents", "tasks", "agent_placements", "alembic_version"}
     missing = expected - tables
     assert not missing, (
         f"db init did not create all expected tables. "
@@ -157,7 +157,7 @@ def test_db_init_idempotent(tmp_path, monkeypatch):
     )
 
     tables_after_first = _table_names(db_file)
-    expected = {"sessions", "agents", "tasks", "alembic_version"}
+    expected = {"sessions", "agents", "tasks", "agent_placements", "alembic_version"}
     assert expected <= tables_after_first, (
         f"first db init should have produced all expected tables; "
         f"missing: {sorted(expected - tables_after_first)}"
