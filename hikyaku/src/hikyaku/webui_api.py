@@ -17,10 +17,10 @@ from a2a.types import (
     TextPart,
 )
 
-from hikyaku_registry.db.engine import get_sessionmaker
-from hikyaku_registry.executor import BrokerExecutor
-from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import TaskStore
+from hikyaku.db.engine import get_sessionmaker
+from hikyaku.executor import BrokerExecutor
+from hikyaku.registry_store import RegistryStore
+from hikyaku.task_store import TaskStore
 
 
 webui_router = APIRouter(prefix="/ui/api")

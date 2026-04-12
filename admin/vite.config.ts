@@ -12,7 +12,7 @@ export default defineConfig({
     tailwindcss(),
   ],
   build: {
-    outDir: '../registry/src/hikyaku_registry/webui',
+    outDir: '../hikyaku/src/hikyaku/webui',
     emptyOutDir: true,
   },
   server: {

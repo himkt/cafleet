@@ -3,8 +3,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 
-from hikyaku_registry.db.engine import get_sessionmaker
-from hikyaku_registry.models import (
+from hikyaku.db.engine import get_sessionmaker
+from hikyaku.models import (
     AgentSummary,
     ErrorDetail,
     ErrorResponse,
@@ -14,7 +14,7 @@ from hikyaku_registry.models import (
     RegisterAgentRequest,
     RegisterAgentResponse,
 )
-from hikyaku_registry.registry_store import RegistryStore
+from hikyaku.registry_store import RegistryStore
 
 registry_router = APIRouter()
 

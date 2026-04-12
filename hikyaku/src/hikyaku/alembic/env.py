@@ -15,8 +15,8 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine.url import make_url
 
-from hikyaku_registry.config import settings
-from hikyaku_registry.db.models import Base
+from hikyaku.config import settings
+from hikyaku.db.models import Base
 
 config = context.config
 

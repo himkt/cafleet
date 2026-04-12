@@ -1,6 +1,6 @@
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
-from hikyaku_registry.config import settings
+from hikyaku.config import settings
 
 
 def build_agent_card() -> AgentCard:

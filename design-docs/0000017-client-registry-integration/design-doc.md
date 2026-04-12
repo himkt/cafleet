@@ -1,7 +1,7 @@
 # Merge Client and Registry into a Single Package
 
 **Status**: Approved
-**Progress**: 13/32 tasks complete
+**Progress**: 21/32 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -373,23 +373,23 @@ client/                    # entire directory
 
 ### Step 6: Rewrite All Internal Imports
 
-- [ ] Replace `from hikyaku_registry` with `from hikyaku` in all source files <!-- completed: -->
-- [ ] Replace `from hikyaku_client` with `from hikyaku` in all source files, changing `api` references to `broker_client` <!-- completed: -->
-- [ ] Update `importlib.resources.files("hikyaku_registry")` to `importlib.resources.files("hikyaku")` <!-- completed: -->
+- [x] Replace `from hikyaku_registry` with `from hikyaku` in all source files <!-- completed: 2026-04-12T09:27 -->
+- [x] Replace `from hikyaku_client` with `from hikyaku` in all source files, changing `api` references to `broker_client` <!-- completed: 2026-04-12T09:27 -->
+- [x] Update `importlib.resources.files("hikyaku_registry")` to `importlib.resources.files("hikyaku")` <!-- completed: 2026-04-12T09:27 -->
 
 ### Step 7: Update Alembic Configuration
 
-- [ ] Update `alembic/env.py` imports to use `hikyaku.*` namespace <!-- completed: -->
-- [ ] Verify `alembic.ini` `script_location` still resolves correctly within the new package <!-- completed: -->
+- [x] Update `alembic/env.py` imports to use `hikyaku.*` namespace <!-- completed: 2026-04-12T09:27 -->
+- [x] Verify `alembic.ini` `script_location` still resolves correctly within the new package <!-- completed: 2026-04-12T09:29 -->
 
 ### Step 8: Update Root Workspace Config
 
-- [ ] Update root `pyproject.toml`: remove `[project]` table (virtual workspace root), update workspace members, uv sources, dev dependencies, ty src paths <!-- completed: -->
-- [ ] Update root `mise.toml`: monorepo config_roots <!-- completed: -->
+- [x] Update root `pyproject.toml`: remove `[project]` table (virtual workspace root), update workspace members, uv sources, dev dependencies, ty src paths <!-- completed: 2026-04-12T09:30 -->
+- [x] Update root `mise.toml`: monorepo config_roots <!-- completed: 2026-04-12T09:30 -->
 
 ### Step 9: Update Admin Build Path
 
-- [ ] Change `outDir` in `admin/vite.config.ts` from `'../registry/src/hikyaku_registry/webui'` to `'../hikyaku/src/hikyaku/webui'` <!-- completed: -->
+- [x] Change `outDir` in `admin/vite.config.ts` from `'../registry/src/hikyaku_registry/webui'` to `'../hikyaku/src/hikyaku/webui'` <!-- completed: 2026-04-12T09:30 -->
 
 ### Step 10: Merge Tests
 

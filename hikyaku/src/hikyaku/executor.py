@@ -13,8 +13,8 @@ from a2a.types import (
     TextPart,
 )
 
-from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import TaskStore
+from hikyaku.registry_store import RegistryStore
+from hikyaku.task_store import TaskStore
 
 
 class SessionMismatchError(ValueError):

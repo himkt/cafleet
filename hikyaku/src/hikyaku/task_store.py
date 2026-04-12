@@ -19,8 +19,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku_registry.db.models import Agent as AgentModel
-from hikyaku_registry.db.models import Task as TaskModel
+from hikyaku.db.models import Agent as AgentModel
+from hikyaku.db.models import Task as TaskModel
 
 # Alias the ``list`` builtin because the ``list()`` method defined on
 # ``TaskStore`` below shadows it inside the class body, breaking

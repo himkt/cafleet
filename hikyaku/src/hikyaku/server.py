@@ -21,17 +21,17 @@ from a2a.types import (
     TextPart,
 )
 
-from hikyaku_registry.agent_card import build_agent_card
-from hikyaku_registry.api.registry import (
+from hikyaku.agent_card import build_agent_card
+from hikyaku.api.registry import (
     get_registry_store,
     registry_router,
 )
-from hikyaku_registry.config import settings
-from hikyaku_registry.db.engine import dispose_engine, get_sessionmaker
-from hikyaku_registry.executor import BrokerExecutor, SessionMismatchError
-from hikyaku_registry.registry_store import RegistryStore
-from hikyaku_registry.task_store import TaskStore
-from hikyaku_registry.webui_api import (
+from hikyaku.config import settings
+from hikyaku.db.engine import dispose_engine, get_sessionmaker
+from hikyaku.executor import BrokerExecutor, SessionMismatchError
+from hikyaku.registry_store import RegistryStore
+from hikyaku.task_store import TaskStore
+from hikyaku.webui_api import (
     webui_router,
     get_webui_store,
     get_webui_task_store,
@@ -336,7 +336,7 @@ app = create_app()
 if __name__ == "__main__":
     # ``reload=True`` is a developer convenience for ad-hoc runs only.
     uvicorn.run(
-        "hikyaku_registry.main:app",
+        "hikyaku.server:app",
         host=settings.broker_host,
         port=settings.broker_port,
         reload=True,
