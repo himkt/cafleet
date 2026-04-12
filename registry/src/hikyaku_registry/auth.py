@@ -14,9 +14,7 @@ from sqlalchemy import select
 from hikyaku_registry.db.models import Agent
 
 
-async def get_session_from_agent_id(
-    request: Request, store
-) -> tuple[str, str]:
+async def get_session_from_agent_id(request: Request, store) -> tuple[str, str]:
     """Resolve ``X-Agent-Id`` header to ``(agent_id, session_id)``.
 
     Raises:
@@ -39,9 +37,7 @@ async def get_session_from_agent_id(
     return (agent_id, row[0])
 
 
-async def get_session_from_header(
-    request: Request, store
-) -> str:
+async def get_session_from_header(request: Request, store) -> str:
     """Resolve ``X-Session-Id`` header to ``session_id``.
 
     Raises:

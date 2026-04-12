@@ -454,7 +454,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
 
     result["placement"] = placement_view
     if ctx.obj["json_output"]:
-        sanitized = {k: v for k, v in result.items() if k != "session_id"}  # noqa: keep filter
+        sanitized = {k: v for k, v in result.items() if k != "session_id"}
         click.echo(output.format_json(sanitized))
     else:
         click.echo(output.format_member(result))
@@ -508,7 +508,9 @@ def member_delete(ctx, agent_id, member_id):
 
     # Step 2 — deregister the member (BEFORE closing pane).
     try:
-        _run(api.deregister_agent(broker_url, session_id, member_id, caller_id=agent_id))
+        _run(
+            api.deregister_agent(broker_url, session_id, member_id, caller_id=agent_id)
+        )
     except Exception as exc:
         click.echo(f"Error: deregister failed: {exc}", err=True)
         ctx.exit(1)

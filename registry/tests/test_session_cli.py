@@ -56,7 +56,9 @@ def _seed_session(db_path, session_id: str, label: str | None = None) -> None:
         conn.close()
 
 
-def _seed_agent(db_path, agent_id: str, session_id: str, *, status: str = "active") -> None:
+def _seed_agent(
+    db_path, agent_id: str, session_id: str, *, status: str = "active"
+) -> None:
     """Insert an agent row directly for test setup (bypasses CLI)."""
     conn = sqlite3.connect(str(db_path))
     try:
@@ -103,7 +105,8 @@ class TestSessionCreate:
         """Creates a session and prints a valid UUID to stdout."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -144,7 +147,8 @@ class TestSessionCreate:
         """``--label`` stores the label in the sessions row."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -169,7 +173,8 @@ class TestSessionCreate:
         """Without ``--label``, label is NULL."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -190,7 +195,8 @@ class TestSessionCreate:
         """``--json`` flag produces machine-parseable JSON output."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -216,7 +222,8 @@ class TestSessionCreate:
         """Each invocation mints a fresh UUID — no idempotency."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -250,7 +257,8 @@ class TestSessionList:
         """No sessions: table output with no data rows."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -269,7 +277,8 @@ class TestSessionList:
         """Lists sessions with their active agent counts."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -299,7 +308,8 @@ class TestSessionList:
         """``--json`` flag produces machine-parseable JSON array."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -328,7 +338,8 @@ class TestSessionList:
         """Multiple sessions are all listed."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -354,7 +365,8 @@ class TestSessionList:
         """Agent count in list uses LEFT JOIN WHERE status='active'."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -373,8 +385,7 @@ class TestSessionList:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data[0]["agent_count"] == 1, (
-            f"only active agents should be counted; "
-            f"got {data[0].get('agent_count')}"
+            f"only active agents should be counted; got {data[0].get('agent_count')}"
         )
 
 
@@ -390,7 +401,8 @@ class TestSessionShow:
         """Shows the session row when it exists."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -418,7 +430,8 @@ class TestSessionShow:
         """``--json`` flag produces machine-parseable JSON object."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -441,7 +454,8 @@ class TestSessionShow:
         """Non-existent session_id exits with code 1 and error message."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -475,7 +489,8 @@ class TestSessionDelete:
         """Deletes an empty session and prints success message."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -500,15 +515,15 @@ class TestSessionDelete:
         )
         # Output should mention "Deleted"
         assert "deleted" in result.output.lower(), (
-            f"delete success output should mention 'Deleted'. "
-            f"got: {result.output!r}"
+            f"delete success output should mention 'Deleted'. got: {result.output!r}"
         )
 
     def test_delete_nonexistent_session(self, tmp_path, monkeypatch):
         """Deleting a non-existent session exits non-zero or with error."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -538,7 +553,8 @@ class TestSessionDelete:
         """
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -560,9 +576,7 @@ class TestSessionDelete:
         # Verify the session still exists (delete was rolled back)
         rows = _session_rows(db_file)
         session_ids = [r[0] for r in rows]
-        assert sid in session_ids, (
-            "session should still exist after failed delete"
-        )
+        assert sid in session_ids, "session should still exist after failed delete"
 
     def test_delete_session_with_deregistered_agents_fails(self, tmp_path, monkeypatch):
         """Deregistered agents still reference the session via FK.
@@ -573,7 +587,8 @@ class TestSessionDelete:
         """
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -601,7 +616,8 @@ class TestSessionDelete:
         """FK violation produces a friendly error, not a raw IntegrityError."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -644,7 +660,8 @@ class TestDbInitNoAutoSession:
         """After db init, the sessions table exists but is empty."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -654,8 +671,7 @@ class TestDbInitNoAutoSession:
 
         rows = _session_rows(db_file)
         assert len(rows) == 0, (
-            f"db init should not auto-create any session rows. "
-            f"found: {rows}"
+            f"db init should not auto-create any session rows. found: {rows}"
         )
 
 
@@ -671,7 +687,8 @@ class TestSessionGroupStructure:
         """``hikyaku-registry session`` is a recognized command group."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -694,7 +711,8 @@ class TestSessionGroupStructure:
         """``hikyaku-registry db session`` should NOT work."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
-            config.settings, "database_url",
+            config.settings,
+            "database_url",
             f"sqlite+aiosqlite:///{db_file}",
         )
         from hikyaku_registry.cli import main
@@ -703,6 +721,4 @@ class TestSessionGroupStructure:
         result = runner.invoke(main, ["db", "session", "create"])
 
         # Should fail — "session" is not a subcommand of "db"
-        assert result.exit_code != 0, (
-            "session should be a sibling of db, not a child"
-        )
+        assert result.exit_code != 0, "session should be a sibling of db, not a child"

@@ -155,9 +155,7 @@ class TaskStore:
         async with self._sessionmaker() as session:
             result = await session.execute(stmt)
             rows = result.all()
-        return [
-            (Task.model_validate_json(row[0]), row[1], row[2]) for row in rows
-        ]
+        return [(Task.model_validate_json(row[0]), row[1], row[2]) for row in rows]
 
     async def get_created_ats(self, task_ids: _TaskList[str]) -> dict[str, str]:
         """Batch lookup for ``created_at`` timestamps.

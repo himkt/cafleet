@@ -517,9 +517,7 @@ class TestAgentPlacementsSchema:
             and fk["referred_table"] == "agents"
             and fk["referred_columns"] == ["agent_id"]
         ]
-        assert len(match) == 1, (
-            f"expected one agent_id FK to agents, got: {fks}"
-        )
+        assert len(match) == 1, f"expected one agent_id FK to agents, got: {fks}"
 
     @pytest.mark.asyncio
     async def test_director_agent_id_fk_to_agents(self, engine):
@@ -547,8 +545,7 @@ class TestAgentPlacementsSchema:
             )
         match = [idx for idx in indexes if idx["name"] == "idx_placements_director"]
         assert len(match) == 1, (
-            f"expected idx_placements_director, "
-            f"got: {[i['name'] for i in indexes]}"
+            f"expected idx_placements_director, got: {[i['name'] for i in indexes]}"
         )
         assert match[0]["column_names"] == ["director_agent_id"]
 
@@ -575,7 +572,9 @@ class TestIndexes:
         """Old index idx_agents_tenant_status must not exist."""
         async with engine.connect() as conn:
             indexes = await conn.run_sync(lambda c: inspect(c).get_indexes("agents"))
-        old_match = [idx for idx in indexes if idx["name"] == "idx_agents_tenant_status"]
+        old_match = [
+            idx for idx in indexes if idx["name"] == "idx_agents_tenant_status"
+        ]
         assert len(old_match) == 0, (
             "idx_agents_tenant_status still exists — must be renamed to "
             "idx_agents_session_status"
@@ -744,9 +743,7 @@ class TestForeignKeyEnforcement:
         assert result.scalar_one_or_none() is not None
 
         # Hard-delete the member agent — CASCADE should remove the placement
-        await session.execute(
-            delete(Agent).where(Agent.agent_id == "member-c")
-        )
+        await session.execute(delete(Agent).where(Agent.agent_id == "member-c"))
         await session.commit()
 
         # Placement must be gone via CASCADE
@@ -765,12 +762,8 @@ class TestForeignKeyEnforcement:
         placement rows referencing its ``agent_id`` via ``director_agent_id``."""
         session.add(_make_session(session_id="session-restrict"))
         await session.flush()
-        session.add(
-            _make_agent(agent_id="director-r2", session_id="session-restrict")
-        )
-        session.add(
-            _make_agent(agent_id="member-r2", session_id="session-restrict")
-        )
+        session.add(_make_agent(agent_id="director-r2", session_id="session-restrict"))
+        session.add(_make_agent(agent_id="member-r2", session_id="session-restrict"))
         await session.flush()
         session.add(
             _make_placement(
@@ -781,9 +774,7 @@ class TestForeignKeyEnforcement:
         await session.commit()
 
         with pytest.raises(IntegrityError):
-            await session.execute(
-                delete(Agent).where(Agent.agent_id == "director-r2")
-            )
+            await session.execute(delete(Agent).where(Agent.agent_id == "director-r2"))
 
     @pytest.mark.asyncio
     async def test_inserting_placement_with_unknown_agent_raises(self, session):
@@ -967,9 +958,7 @@ class TestRoundtrip:
         await session.commit()
 
         result = await session.execute(
-            select(AgentPlacement).where(
-                AgentPlacement.agent_id == "rt-mem-pend"
-            )
+            select(AgentPlacement).where(AgentPlacement.agent_id == "rt-mem-pend")
         )
         row = result.scalar_one()
         assert row.tmux_pane_id is None
@@ -996,9 +985,7 @@ class TestRoundtrip:
         await session.commit()
 
         result = await session.execute(
-            select(AgentPlacement).where(
-                AgentPlacement.agent_id == "rt-mem-pane"
-            )
+            select(AgentPlacement).where(AgentPlacement.agent_id == "rt-mem-pane")
         )
         row = result.scalar_one()
         assert row.tmux_pane_id == "%42"

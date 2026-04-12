@@ -12,7 +12,7 @@ No Auth0, no JWT, no bearer tokens, no api_keys.
 """
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 from a2a.types import (
@@ -228,9 +228,7 @@ class TestAgentsList:
         )
         agent = await _setup_agent(store, "Active Agent", session_id)
 
-        resp = await client.get(
-            "/ui/api/agents", headers=_session_header(session_id)
-        )
+        resp = await client.get("/ui/api/agents", headers=_session_header(session_id))
         assert resp.status_code == 200
         ids = {a["agent_id"] for a in resp.json()["agents"]}
         assert agent["agent_id"] in ids
@@ -253,9 +251,7 @@ class TestAgentsList:
         )
         await store.deregister_agent(dereg["agent_id"])
 
-        resp = await client.get(
-            "/ui/api/agents", headers=_session_header(session_id)
-        )
+        resp = await client.get("/ui/api/agents", headers=_session_header(session_id))
         assert resp.status_code == 200
         ids = {a["agent_id"] for a in resp.json()["agents"]}
         assert active["agent_id"] in ids
@@ -272,9 +268,7 @@ class TestAgentsList:
         my_agent = await _setup_agent(store, "My Agent", session_id)
         other_agent = await _setup_agent(store, "Other Agent", other)
 
-        resp = await client.get(
-            "/ui/api/agents", headers=_session_header(session_id)
-        )
+        resp = await client.get("/ui/api/agents", headers=_session_header(session_id))
         ids = {a["agent_id"] for a in resp.json()["agents"]}
         assert my_agent["agent_id"] in ids
         assert other_agent["agent_id"] not in ids
@@ -494,7 +488,7 @@ class TestSent:
         sender = await _setup_agent(store, "Sender", session_id)
         recipient = await _setup_agent(store, "Recipient", session_id)
 
-        task = await _create_task(
+        _task = await _create_task(
             task_store,
             from_agent_id=sender["agent_id"],
             to_agent_id=recipient["agent_id"],

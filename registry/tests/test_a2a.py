@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hikyaku_registry.db.models import Session as SessionModel
 from hikyaku_registry.main import create_app
-from hikyaku_registry.registry_store import RegistryStore
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +204,11 @@ class TestRegistryFlow:
         checker = await _register_agent(client, session_id, name="Checker")
 
         # 2. List — should include this agent
-        resp = await client.get("/api/v1/agents", headers=_auth(session_id, agent_id))
+        resp = await client.get(
+            "/api/v1/agents",
+            headers=_auth(session_id, agent_id),
+            params={"session_id": session_id},
+        )
         assert resp.status_code == 200
         agents = resp.json()["agents"]
         agent_ids = {a["agent_id"] for a in agents}
@@ -227,7 +230,9 @@ class TestRegistryFlow:
 
         # 5. Verify removed from list
         resp = await client.get(
-            "/api/v1/agents", headers=_auth(session_id, checker["agent_id"])
+            "/api/v1/agents",
+            headers=_auth(session_id, checker["agent_id"]),
+            params={"session_id": session_id},
         )
         agents = resp.json()["agents"]
         agent_ids = {a["agent_id"] for a in agents}
@@ -245,7 +250,9 @@ class TestRegistryFlow:
             agents.append(a)
 
         resp = await client.get(
-            "/api/v1/agents", headers=_auth(session_id, agents[0]["agent_id"])
+            "/api/v1/agents",
+            headers=_auth(session_id, agents[0]["agent_id"]),
+            params={"session_id": session_id},
         )
         assert resp.status_code == 200
         listed = resp.json()["agents"]

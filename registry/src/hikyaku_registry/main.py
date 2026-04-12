@@ -279,7 +279,9 @@ def create_app(
         # Authenticate: read X-Agent-Id header, look up agent's session_id
         agent_id = request.headers.get("x-agent-id")
         if not agent_id:
-            return JSONResponse(status_code=400, content={"error": "X-Agent-Id header required"})
+            return JSONResponse(
+                status_code=400, content={"error": "X-Agent-Id header required"}
+            )
 
         async with registry_store._sessionmaker() as session:
             result = await session.execute(

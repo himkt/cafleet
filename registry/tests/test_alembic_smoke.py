@@ -100,7 +100,13 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         insp = inspect(engine)
         tables = set(insp.get_table_names())
 
-        expected = {"sessions", "agents", "tasks", "agent_placements", "alembic_version"}
+        expected = {
+            "sessions",
+            "agents",
+            "tasks",
+            "agent_placements",
+            "alembic_version",
+        }
         missing = expected - tables
         assert not missing, (
             f"alembic upgrade head did not create the expected tables. "

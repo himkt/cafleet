@@ -131,17 +131,20 @@ class TestMigration0002Upgrade:
         try:
             # Insert an api_key at the 0001 schema level
             with engine.begin() as conn:
-                conn.execute(text(
-                    "INSERT INTO api_keys "
-                    "(api_key_hash, owner_sub, key_prefix, status, created_at) "
-                    "VALUES (:hash, :owner, :prefix, :status, :created)"
-                ), {
-                    "hash": "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-                    "owner": "auth0|test-owner",
-                    "prefix": "hky_abcd",
-                    "status": "active",
-                    "created": _now_iso(),
-                })
+                conn.execute(
+                    text(
+                        "INSERT INTO api_keys "
+                        "(api_key_hash, owner_sub, key_prefix, status, created_at) "
+                        "VALUES (:hash, :owner, :prefix, :status, :created)"
+                    ),
+                    {
+                        "hash": "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+                        "owner": "auth0|test-owner",
+                        "prefix": "hky_abcd",
+                        "status": "active",
+                        "created": _now_iso(),
+                    },
+                )
         finally:
             engine.dispose()
 
@@ -152,13 +155,16 @@ class TestMigration0002Upgrade:
         engine = create_engine(f"sqlite:///{db_at_0001}")
         try:
             with engine.connect() as conn:
-                rows = conn.execute(text(
-                    "SELECT session_id, label, created_at FROM sessions"
-                )).fetchall()
+                rows = conn.execute(
+                    text("SELECT session_id, label, created_at FROM sessions")
+                ).fetchall()
 
             assert len(rows) == 1
             session_id, label, created_at = rows[0]
-            assert session_id == "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+            assert (
+                session_id
+                == "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+            )
             assert label == "legacy-hky_abcd"
             assert created_at is not None
         finally:
@@ -167,38 +173,46 @@ class TestMigration0002Upgrade:
     def test_agent_fk_valid_after_upgrade(self, db_at_0001):
         """An agent referencing an api_key via tenant_id has a valid
         session_id FK after the migration."""
-        api_key_hash = "beef0000beef0000beef0000beef0000beef0000beef0000beef0000beef0000"
+        api_key_hash = (
+            "beef0000beef0000beef0000beef0000beef0000beef0000beef0000beef0000"
+        )
         agent_id = "agent-migration-test"
         now = _now_iso()
 
         engine = create_engine(f"sqlite:///{db_at_0001}")
         try:
             with engine.begin() as conn:
-                conn.execute(text(
-                    "INSERT INTO api_keys "
-                    "(api_key_hash, owner_sub, key_prefix, status, created_at) "
-                    "VALUES (:hash, :owner, :prefix, :status, :created)"
-                ), {
-                    "hash": api_key_hash,
-                    "owner": "auth0|fk-test",
-                    "prefix": "hky_beef",
-                    "status": "active",
-                    "created": now,
-                })
-                conn.execute(text(
-                    "INSERT INTO agents "
-                    "(agent_id, tenant_id, name, description, status, "
-                    " registered_at, agent_card_json) "
-                    "VALUES (:aid, :tid, :name, :desc, :status, :at, :card)"
-                ), {
-                    "aid": agent_id,
-                    "tid": api_key_hash,
-                    "name": "Test",
-                    "desc": "Test agent",
-                    "status": "active",
-                    "at": now,
-                    "card": "{}",
-                })
+                conn.execute(
+                    text(
+                        "INSERT INTO api_keys "
+                        "(api_key_hash, owner_sub, key_prefix, status, created_at) "
+                        "VALUES (:hash, :owner, :prefix, :status, :created)"
+                    ),
+                    {
+                        "hash": api_key_hash,
+                        "owner": "auth0|fk-test",
+                        "prefix": "hky_beef",
+                        "status": "active",
+                        "created": now,
+                    },
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO agents "
+                        "(agent_id, tenant_id, name, description, status, "
+                        " registered_at, agent_card_json) "
+                        "VALUES (:aid, :tid, :name, :desc, :status, :at, :card)"
+                    ),
+                    {
+                        "aid": agent_id,
+                        "tid": api_key_hash,
+                        "name": "Test",
+                        "desc": "Test agent",
+                        "status": "active",
+                        "at": now,
+                        "card": "{}",
+                    },
+                )
         finally:
             engine.dispose()
 
@@ -209,16 +223,18 @@ class TestMigration0002Upgrade:
         try:
             with engine.connect() as conn:
                 # Verify agent now has session_id = the old api_key_hash
-                row = conn.execute(text(
-                    "SELECT session_id FROM agents WHERE agent_id = :aid"
-                ), {"aid": agent_id}).fetchone()
+                row = conn.execute(
+                    text("SELECT session_id FROM agents WHERE agent_id = :aid"),
+                    {"aid": agent_id},
+                ).fetchone()
                 assert row is not None
                 assert row[0] == api_key_hash
 
                 # Verify the FK is valid: session row exists
-                sess_row = conn.execute(text(
-                    "SELECT session_id FROM sessions WHERE session_id = :sid"
-                ), {"sid": api_key_hash}).fetchone()
+                sess_row = conn.execute(
+                    text("SELECT session_id FROM sessions WHERE session_id = :sid"),
+                    {"sid": api_key_hash},
+                ).fetchone()
                 assert sess_row is not None
         finally:
             engine.dispose()
@@ -236,28 +252,34 @@ class TestMigration0002Upgrade:
         engine = create_engine(f"sqlite:///{db_at_0001}")
         try:
             with engine.begin() as conn:
-                conn.execute(text(
-                    "INSERT INTO api_keys "
-                    "(api_key_hash, owner_sub, key_prefix, status, created_at) "
-                    "VALUES (:hash, :owner, :prefix, :status, :created)"
-                ), {
-                    "hash": active_hash,
-                    "owner": "auth0|owner-active",
-                    "prefix": "hky_aaaa",
-                    "status": "active",
-                    "created": now,
-                })
-                conn.execute(text(
-                    "INSERT INTO api_keys "
-                    "(api_key_hash, owner_sub, key_prefix, status, created_at) "
-                    "VALUES (:hash, :owner, :prefix, :status, :created)"
-                ), {
-                    "hash": revoked_hash,
-                    "owner": "auth0|owner-revoked",
-                    "prefix": "hky_bbbb",
-                    "status": "revoked",
-                    "created": now,
-                })
+                conn.execute(
+                    text(
+                        "INSERT INTO api_keys "
+                        "(api_key_hash, owner_sub, key_prefix, status, created_at) "
+                        "VALUES (:hash, :owner, :prefix, :status, :created)"
+                    ),
+                    {
+                        "hash": active_hash,
+                        "owner": "auth0|owner-active",
+                        "prefix": "hky_aaaa",
+                        "status": "active",
+                        "created": now,
+                    },
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO api_keys "
+                        "(api_key_hash, owner_sub, key_prefix, status, created_at) "
+                        "VALUES (:hash, :owner, :prefix, :status, :created)"
+                    ),
+                    {
+                        "hash": revoked_hash,
+                        "owner": "auth0|owner-revoked",
+                        "prefix": "hky_bbbb",
+                        "status": "revoked",
+                        "created": now,
+                    },
+                )
         finally:
             engine.dispose()
 
@@ -267,9 +289,9 @@ class TestMigration0002Upgrade:
         engine = create_engine(f"sqlite:///{db_at_0001}")
         try:
             with engine.connect() as conn:
-                rows = conn.execute(text(
-                    "SELECT session_id FROM sessions ORDER BY session_id"
-                )).fetchall()
+                rows = conn.execute(
+                    text("SELECT session_id FROM sessions ORDER BY session_id")
+                ).fetchall()
             session_ids = {row[0] for row in rows}
             assert active_hash in session_ids, (
                 "Active api_key was not seeded into sessions"
@@ -290,9 +312,7 @@ class TestMigration0002Upgrade:
         engine = create_engine(f"sqlite:///{db_at_0001}")
         try:
             with engine.connect() as conn:
-                rows = conn.execute(text(
-                    "SELECT COUNT(*) FROM sessions"
-                )).fetchone()
+                rows = conn.execute(text("SELECT COUNT(*) FROM sessions")).fetchone()
             assert rows[0] == 0
         finally:
             engine.dispose()
@@ -307,7 +327,9 @@ class TestMigration0002Upgrade:
         try:
             insp = inspect(engine)
             indexes = insp.get_indexes("agents")
-            match = [idx for idx in indexes if idx["name"] == "idx_agents_session_status"]
+            match = [
+                idx for idx in indexes if idx["name"] == "idx_agents_session_status"
+            ]
             assert len(match) == 1, (
                 f"expected idx_agents_session_status, got: {[i['name'] for i in indexes]}"
             )
@@ -341,9 +363,9 @@ class TestMigration0002Upgrade:
         engine = create_engine(f"sqlite:///{db_at_0001}")
         try:
             with engine.connect() as conn:
-                rows = conn.execute(text(
-                    "SELECT version_num FROM alembic_version"
-                )).fetchall()
+                rows = conn.execute(
+                    text("SELECT version_num FROM alembic_version")
+                ).fetchall()
             assert len(rows) == 1
             assert rows[0][0] == "0002_local_simplification"
         finally:

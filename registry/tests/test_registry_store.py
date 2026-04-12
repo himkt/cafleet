@@ -38,7 +38,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import event, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
@@ -159,7 +159,9 @@ class TestCreateAgent:
                 "tags": ["lang"],
             }
         ]
-        result = await store.create_agent("Skilled", "desc", skills, session_id=session_id)
+        result = await store.create_agent(
+            "Skilled", "desc", skills, session_id=session_id
+        )
         agent = await store.get_agent(result["agent_id"])
         assert agent is not None
         card = json.loads(agent["agent_card_json"])
@@ -338,7 +340,9 @@ class TestListActiveAgents:
         assert len(agents) == 1
         assert agents[0]["agent_id"] == b["agent_id"]
 
-    async def test_filters_by_session_id_isolates_sessions(self, store, db_sessionmaker):
+    async def test_filters_by_session_id_isolates_sessions(
+        self, store, db_sessionmaker
+    ):
         """Cross-session isolation: agents in session A do not appear in session B."""
         session_a = await _create_test_session(db_sessionmaker)
         session_b = await _create_test_session(db_sessionmaker)
@@ -473,9 +477,7 @@ class TestListSessions:
 
     async def test_returns_seeded_session(self, store, db_sessionmaker):
         """A seeded session appears in the list."""
-        session_id = await _create_test_session(
-            db_sessionmaker, label="test-session"
-        )
+        session_id = await _create_test_session(db_sessionmaker, label="test-session")
         sessions = await store.list_sessions()
         match = [s for s in sessions if s["session_id"] == session_id]
         assert len(match) == 1
@@ -541,9 +543,7 @@ class TestGetSession:
     """
 
     async def test_returns_existing_session(self, store, db_sessionmaker):
-        session_id = await _create_test_session(
-            db_sessionmaker, label="my-session"
-        )
+        session_id = await _create_test_session(db_sessionmaker, label="my-session")
         result = await store.get_session(session_id)
         assert result is not None
         assert result["session_id"] == session_id
@@ -614,7 +614,9 @@ class TestListDeregisteredAgentsWithTasks:
         result = await store.list_deregistered_agents_with_tasks(session_id)
         assert result == []
 
-    async def test_includes_deregistered_with_tasks(self, store, db_engine, db_sessionmaker):
+    async def test_includes_deregistered_with_tasks(
+        self, store, db_engine, db_sessionmaker
+    ):
         """The matching case: deregistered AND has at least one task."""
         session_id = await _create_test_session(db_sessionmaker)
         agent = await store.create_agent("a", "d", None, session_id=session_id)
@@ -638,7 +640,9 @@ class TestListPlacementsForDirector:
     Uses ``session_id`` parameter (renamed from ``tenant_id``).
     """
 
-    async def test_list_placements_for_director_session_scoped(self, store, db_sessionmaker):
+    async def test_list_placements_for_director_session_scoped(
+        self, store, db_sessionmaker
+    ):
         """Only agents in the specified session whose
         ``placement.director_agent_id`` matches are returned."""
         from hikyaku_registry.models import PlacementCreate

@@ -266,9 +266,7 @@ def session_delete(session_id: str) -> None:
                 )
             except IntegrityError:
                 count = conn.execute(
-                    text(
-                        "SELECT COUNT(*) FROM agents WHERE session_id = :sid"
-                    ),
+                    text("SELECT COUNT(*) FROM agents WHERE session_id = :sid"),
                     {"sid": session_id},
                 ).scalar()
                 raise click.UsageError(

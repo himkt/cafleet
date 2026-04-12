@@ -78,7 +78,9 @@ class TestRegisterUsesSessionId:
         assert call_kwargs is not None
         # session_id should be passed to register_agent
         all_args = list(call_kwargs.args) + list(call_kwargs.kwargs.values())
-        assert SESSION_ID in all_args or call_kwargs.kwargs.get("session_id") == SESSION_ID
+        assert (
+            SESSION_ID in all_args or call_kwargs.kwargs.get("session_id") == SESSION_ID
+        )
 
     def test_session_id_via_env_var(self, runner):
         """Register uses HIKYAKU_SESSION_ID env var for session scoping."""
@@ -364,8 +366,7 @@ class TestNoSQLAlchemyDependency:
         import hikyaku_client.api  # noqa: F401
 
         client_modules = [
-            name for name in sys.modules
-            if name.startswith("hikyaku_client")
+            name for name in sys.modules if name.startswith("hikyaku_client")
         ]
         for mod_name in client_modules:
             mod = sys.modules[mod_name]

@@ -86,7 +86,7 @@ class TestSplitWindow:
         monkeypatch.setattr(tmux, "_run", mock_run)
         pane_id = tmux.split_window(
             target_window_id="@3",
-            env={"HIKYAKU_URL": "http://localhost:8000", "HIKYAKU_API_KEY": "key123"},
+            env={"HIKYAKU_URL": "http://localhost:8000", "HIKYAKU_SESSION_ID": "key123"},
             claude_prompt="Hello world",
         )
         assert pane_id == "%7"
