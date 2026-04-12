@@ -1,7 +1,7 @@
 # Hikyaku Member Lifecycle
 
-**Status**: Approved
-**Progress**: 19/44 tasks complete
+**Status**: Complete
+**Progress**: 44/44 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -10,19 +10,19 @@ Introduce a `hikyaku member` CLI subcommand group that wraps the two-step "regis
 
 ## Success Criteria
 
-- [ ] `.claude/settings.json` contains zero `Bash(tmux *)` allow entries and zero `Bash(printenv HIKYAKU_URL HIKYAKU_API_KEY)` entry
-- [ ] `hikyaku member create --agent-id <director> --name <n> --description <d> -- "<prompt>"` atomically (a) registers a new agent, (b) writes an `agent_placements` row, and (c) spawns a `claude` pane in the Director's own tmux window
-- [ ] If step (c) fails, step (a) is rolled back via `DELETE /api/v1/agents/{new_id}` before the CLI exits non-zero
-- [ ] The spawned pane is created in the Director's window regardless of which window the user is currently focused on, by resolving `tmux display-message -p -t "$TMUX_PANE" '#{window_id}'` at create time
-- [ ] `hikyaku member delete --agent-id <director> --member-id <target>` reads the placement row, deregisters the agent (which cascade-deletes the placement row), **then** sends `/exit` to the pane — in that order, so a deregister failure leaves both agent and pane intact for safe retry
-- [ ] `hikyaku member list --agent-id <director>` returns all agents currently bound to a placement row whose `director_agent_id` equals `<director>`, tenant-scoped
-- [ ] A new `agent_placements` table exists in the registry schema, declared in `db/models.py` and created by an Alembic migration (`0002_add_agent_placements.py`) that is idempotent under `db init`
-- [ ] The `DELETE /api/v1/agents/{agent_id}` endpoint accepts the request when `X-Agent-Id` equals either the target `agent_id` OR the `director_agent_id` recorded on the target's placement row
-- [ ] Every affected documentation file is updated *before* any code is written: `ARCHITECTURE.md`, `docs/`, `README.md`, `.claude/skills/hikyaku/SKILL.md`, `plugins/*/skills/hikyaku/SKILL.md`, and this design doc itself
-- [ ] `hikyaku member list` output includes `status`, `session`, `window_id`, `pane_id` columns (text) and matching fields (JSON), sourced from `agent_placements` joined into `agents`
-- [ ] `hikyaku member capture --agent-id <director> --member-id <target>` returns the last N lines of the target pane via the same `tmux.py` subprocess helper module, with cross-Director capture rejected at the CLI layer (defense-in-depth check against `placement.director_agent_id`; server-side enforcement is limited to tenant scoping by design)
-- [ ] Raw `tmux capture-pane` and `tmux list-panes` invocations are no longer documented in `.claude/skills/hikyaku/SKILL.md` — the skill points users at `hikyaku member list` / `hikyaku member capture` instead
-- [ ] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //registry:test`, and `mise //client:test` all pass
+- [x] `.claude/settings.json` contains zero `Bash(tmux *)` allow entries and zero `Bash(printenv HIKYAKU_URL HIKYAKU_API_KEY)` entry
+- [x] `hikyaku member create --agent-id <director> --name <n> --description <d> -- "<prompt>"` atomically (a) registers a new agent, (b) writes an `agent_placements` row, and (c) spawns a `claude` pane in the Director's own tmux window
+- [x] If step (c) fails, step (a) is rolled back via `DELETE /api/v1/agents/{new_id}` before the CLI exits non-zero
+- [x] The spawned pane is created in the Director's window regardless of which window the user is currently focused on, by resolving `tmux display-message -p -t "$TMUX_PANE" '#{window_id}'` at create time
+- [x] `hikyaku member delete --agent-id <director> --member-id <target>` reads the placement row, deregisters the agent (which cascade-deletes the placement row), **then** sends `/exit` to the pane — in that order, so a deregister failure leaves both agent and pane intact for safe retry
+- [x] `hikyaku member list --agent-id <director>` returns all agents currently bound to a placement row whose `director_agent_id` equals `<director>`, tenant-scoped
+- [x] A new `agent_placements` table exists in the registry schema, declared in `db/models.py` and created by an Alembic migration (`0003_add_agent_placements.py`) that is idempotent under `db init`
+- [x] The `DELETE /api/v1/agents/{agent_id}` endpoint accepts the request when `X-Agent-Id` equals either the target `agent_id` OR the `director_agent_id` recorded on the target's placement row
+- [x] Every affected documentation file is updated *before* any code is written: `ARCHITECTURE.md`, `docs/`, `README.md`, `.claude/skills/hikyaku/SKILL.md`, `plugins/*/skills/hikyaku/SKILL.md`, and this design doc itself
+- [x] `hikyaku member list` output includes `status`, `session`, `window_id`, `pane_id` columns (text) and matching fields (JSON), sourced from `agent_placements` joined into `agents`
+- [x] `hikyaku member capture --agent-id <director> --member-id <target>` returns the last N lines of the target pane via the same `tmux.py` subprocess helper module, with cross-Director capture rejected at the CLI layer (defense-in-depth check against `placement.director_agent_id`; server-side enforcement is limited to tenant scoping by design)
+- [x] Raw `tmux capture-pane` and `tmux list-panes` invocations are no longer documented in `.claude/skills/hikyaku/SKILL.md` — the skill points users at `hikyaku member list` / `hikyaku member capture` instead
+- [x] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //registry:test`, and `mise //client:test` all pass
 
 ## Non-goals
 
