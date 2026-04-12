@@ -1,7 +1,7 @@
 # Project Rename: hikyaku → cafleet
 
 **Status**: Approved
-**Progress**: 31/36 tasks complete
+**Progress**: 33/36 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -319,11 +319,11 @@ Per project rules, documentation is updated before code.
 
 ### Step 8: CI/CD
 
-- [ ] Update `.github/workflows/ci.yml`: `working-directory: hikyaku` → `cafleet` <!-- completed: -->
+- [x] Update `.github/workflows/ci.yml`: `working-directory: hikyaku` → `cafleet` <!-- completed: 2026-04-12 -->
 
 ### Step 9: Settings & Permissions
 
-- [ ] Update `.claude/settings.json`: replace `hikyaku` with `cafleet` in all allow/deny patterns <!-- completed: -->
+- [x] Update `.claude/settings.json`: replace `hikyaku` with `cafleet` in all allow/deny patterns <!-- completed: 2026-04-12 -->
 
 ### Step 10: Lock File & Verification
 
