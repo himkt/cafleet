@@ -8,7 +8,7 @@ interface SenderSelectorProps {
 }
 
 function storageKey(sessionId: string): string {
-  return `hikyaku.sender.${sessionId}`;
+  return `cafleet.sender.${sessionId}`;
 }
 
 function resolveStored(sessionId: string, activeAgents: Agent[]): string | null {

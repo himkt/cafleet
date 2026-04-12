@@ -24,7 +24,7 @@ export default function SessionPicker({ onSelect }: SessionPickerProps) {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b border-gray-200 px-4 py-3">
         <h1 className="text-lg font-semibold text-gray-900">
-          Hikyaku — Sessions
+          CAFleet — Sessions
         </h1>
       </header>
 
@@ -50,7 +50,7 @@ export default function SessionPicker({ onSelect }: SessionPickerProps) {
               <p className="text-gray-400 text-xs mt-2">
                 Run{" "}
                 <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
-                  hikyaku-registry session create
+                  cafleet-registry session create
                 </code>{" "}
                 to create one.
               </p>
