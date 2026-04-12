@@ -1,7 +1,7 @@
 # Remove Auth0: Local-Only Session Model
 
 **Status**: Approved
-**Progress**: 44/80 tasks complete
+**Progress**: 54/80 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -576,27 +576,27 @@ Implementation order is **documentation-first** per project rule `.claude/rules/
 
 ### Step 9: Admin webUI
 
-- [ ] Delete `admin/src/components/LoginPage.tsx` <!-- completed: -->
-- [ ] Delete `admin/src/components/KeyManagement.tsx` <!-- completed: -->
-- [ ] Remove `@auth0/auth0-react` from `admin/package.json`; run `bun install` to update `bun.lock` <!-- completed: -->
-- [ ] Delete `VITE_AUTH0_REDIRECT_URI` line from `admin/mise.toml` <!-- completed: -->
-- [ ] Rewrite `admin/src/App.tsx`:
+- [x] Delete `admin/src/components/LoginPage.tsx` <!-- completed: 2026-04-12 -->
+- [x] Delete `admin/src/components/KeyManagement.tsx` <!-- completed: 2026-04-12 -->
+- [x] Remove `@auth0/auth0-react` from `admin/package.json`; run `bun install` to update `bun.lock` <!-- completed: 2026-04-12 -->
+- [x] Delete `VITE_AUTH0_REDIRECT_URI` line from `admin/mise.toml` <!-- completed: 2026-04-12 -->
+- [x] Rewrite `admin/src/App.tsx`:
   - Remove `Auth0Provider`, `useAuth0`, `getAuthConfig`, `tokenReady` state
   - Add hash-based routing: parse `window.location.hash`, handle `hashchange`
   - Route `/ui/#/sessions` → `<SessionPicker>`
   - Route `/ui/#/sessions/<uuid>/agents` → `<Dashboard sessionId={...}>`
   - Guard: if URL session_id is not in `listSessions()` response, redirect to picker
-  <!-- completed: -->
-- [ ] Rewrite `admin/src/api.ts`:
+  <!-- completed: 2026-04-12 -->
+- [x] Rewrite `admin/src/api.ts`:
   - Delete `setGetAccessToken`, `getAccessToken` closure, `getAuthConfig`, `createKey`, `listKeys`, `revokeKey`
   - Rename `setTenantId` → `setSessionId`, `getTenantId` → `getSessionId` (these replace both the `getAccessToken` closure at line 9 AND the `tenantId` closure at lines 10/16/20 — two closures become one)
   - Update `request<T>` to emit `X-Session-Id` instead of both `Authorization: Bearer` (line 34) and `X-Tenant-Id` (line 38)
   - Add `listSessions(): Promise<SessionListItem[]>`
-  <!-- completed: -->
-- [ ] Update `admin/src/types.ts`: delete `ApiKey`, `CreateKeyResponse`; add `SessionListItem` <!-- completed: -->
-- [ ] Add `admin/src/components/SessionPicker.tsx` per Specification §5.2 (must include empty-state hint: "Run `hikyaku-registry session create` to create one") <!-- completed: -->
-- [ ] Rename `Dashboard` prop `tenantId` → `sessionId` and propagate through `AgentTabs`, `MessageList`, `SendMessageForm`, `MessageRow` <!-- completed: -->
-- [ ] Run `mise //admin:lint` and `mise //admin:build`; rebuild the bundled webUI into `registry/src/hikyaku_registry/webui/` per 0000012 flow <!-- completed: -->
+  <!-- completed: 2026-04-12 -->
+- [x] Update `admin/src/types.ts`: delete `ApiKey`, `CreateKeyResponse`; add `SessionListItem` <!-- completed: 2026-04-12 -->
+- [x] Add `admin/src/components/SessionPicker.tsx` per Specification §5.2 (must include empty-state hint: "Run `hikyaku-registry session create` to create one") <!-- completed: 2026-04-12 -->
+- [x] Rename `Dashboard` prop `tenantId` → `sessionId` and propagate through `AgentTabs`, `MessageList`, `SendMessageForm`, `MessageRow` <!-- completed: 2026-04-12 -->
+- [x] Run `mise //admin:lint` and `mise //admin:build`; rebuild the bundled webUI into `registry/src/hikyaku_registry/webui/` per 0000012 flow <!-- completed: 2026-04-12 -->
 
 ### Step 10: Tests
 

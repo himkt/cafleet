@@ -23,8 +23,8 @@ Foreign key setup
 The ``tasks.context_id`` column has a ``REFERENCES agents(agent_id)``
 constraint with ``ON DELETE RESTRICT`` (see ``db/models.py`` Task). Any
 test that wants to save a task must first create a real agent row so
-the FK is satisfied. Tests that only need one tenant use the
-``_seed_agent`` helper; tests that need tenant isolation (e.g.,
+the FK is satisfied. Tests that only need one session use the
+``_seed_agent`` helper; tests that need session isolation (e.g.,
 ``list`` filters by context_id) use ``_seed_two_agents``. Both helpers
 go through the conftest ``store`` fixture (``RegistryStore``) rather
 than issuing raw INSERTs, so the setup mirrors the production path
@@ -36,15 +36,16 @@ Fixture layout
 
 * ``store`` — from conftest, a ``RegistryStore`` bound to the shared
   function-scoped ``db_sessionmaker``. Used exclusively for seeding
-  tenants + agents in test setup.
+  sessions + agents in test setup.
 * ``task_store`` — the subject under test. The Programmer adds this to
   ``conftest.py`` in Step 6 Phase B as
   ``TaskStore(db_sessionmaker)`` bound to the same sessionmaker as
   ``store``, so both stores share one in-memory SQLite DB per test.
 
-Until Phase B lands the ``task_store`` fixture, this file will fail to
-collect — that's the standard TDD-red state we've been running in all
-of Step 3-5.
+Design doc 0000015 Step 10: replace ``store.create_api_key(owner_sub)``
+fixture pattern with session creation; update ``create_agent`` calls to
+pass ``session_id`` instead of ``api_key``; rename "two owners → two
+api_keys" docstring language to "two sessions".
 """
 
 import uuid
@@ -59,8 +60,9 @@ from a2a.types import (
     TextPart,
 )
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku_registry.db.models import Task as TaskModel
+from hikyaku_registry.db.models import Session as SessionModel, Task as TaskModel
 from hikyaku_registry.task_store import TaskStore
 
 
@@ -130,58 +132,77 @@ def _make_task(
     )
 
 
-async def _seed_agent(store, *, owner_sub: str | None = None) -> str:
-    """Create a tenant + one agent, return the agent_id.
+async def _create_test_session(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    *,
+    session_id: str | None = None,
+    label: str | None = None,
+) -> str:
+    """Seed a session row directly via the DB sessionmaker."""
+    if session_id is None:
+        session_id = str(uuid.uuid4())
+    created_at = datetime.now(UTC).isoformat()
+
+    async with db_sessionmaker() as session:
+        async with session.begin():
+            session.add(
+                SessionModel(
+                    session_id=session_id,
+                    label=label,
+                    created_at=created_at,
+                )
+            )
+    return session_id
+
+
+async def _seed_agent(store, db_sessionmaker) -> str:
+    """Create a session + one agent, return the agent_id.
 
     Used as the ``context_id`` for tasks. Goes through the public
     ``RegistryStore`` API so the FK target row is created exactly the
     way production code creates it.
     """
-    if owner_sub is None:
-        owner_sub = f"auth0|task-test-{uuid.uuid4().hex[:12]}"
-    api_key, _api_key_hash, _ = await store.create_api_key(owner_sub)
+    session_id = await _create_test_session(db_sessionmaker)
     result = await store.create_agent(
         "Test Agent",
         "agent for task_store tests",
         skills=None,
-        api_key=api_key,
+        session_id=session_id,
     )
     return result["agent_id"]
 
 
-async def _seed_two_agents(store) -> tuple[str, str]:
-    """Create two tenants, one agent per tenant, return both agent_ids.
+async def _seed_two_agents(store, db_sessionmaker) -> tuple[str, str]:
+    """Create two sessions, one agent per session, return both agent_ids.
 
-    Two SEPARATE owners + api_keys → two SEPARATE agents. Tests that
-    care about tenant/context isolation (e.g., ``list`` filtering by
+    Two SEPARATE sessions → two SEPARATE agents. Tests that
+    care about session/context isolation (e.g., ``list`` filtering by
     ``context_id``) use this.
     """
-    a = await _seed_agent(store)
-    b = await _seed_agent(store)
+    a = await _seed_agent(store, db_sessionmaker)
+    b = await _seed_agent(store, db_sessionmaker)
     return a, b
 
 
-async def _seed_tenant_with_agents(store, n: int = 1) -> tuple[str, list[str]]:
-    """Create one tenant with ``n`` agents; return ``(tenant_id, agent_ids)``.
+async def _seed_session_with_agents(store, db_sessionmaker, n: int = 1) -> tuple[str, list[str]]:
+    """Create one session with ``n`` agents; return ``(session_id, agent_ids)``.
 
-    Used by ``list_timeline`` tests, which filter by ``tenant_id`` (the
-    ``api_key_hash``). Seeding via the public ``RegistryStore`` API
-    keeps the fixture path identical to production — if
-    ``create_api_key`` or ``create_agent`` ever adds a required field,
-    these tests break loudly at seed time.
+    Used by ``list_timeline`` tests, which filter by ``session_id``.
+    Seeding via the public ``RegistryStore`` API keeps the fixture path
+    identical to production — if ``create_agent`` ever adds a required
+    field, these tests break loudly at seed time.
     """
-    owner_sub = f"auth0|timeline-test-{uuid.uuid4().hex[:12]}"
-    api_key, tenant_id, _ = await store.create_api_key(owner_sub)
+    session_id = await _create_test_session(db_sessionmaker)
     agent_ids: list[str] = []
     for i in range(n):
         result = await store.create_agent(
             name=f"Timeline Agent {i}",
             description=f"agent {i} for list_timeline tests",
             skills=None,
-            api_key=api_key,
+            session_id=session_id,
         )
         agent_ids.append(result["agent_id"])
-    return tenant_id, agent_ids
+    return session_id, agent_ids
 
 
 async def _read_origin_task_id_column(
@@ -212,9 +233,9 @@ async def _read_origin_task_id_column(
 class TestSaveAndGet:
     """save / get happy paths, UPSERT semantics, created_at preservation."""
 
-    async def test_save_new_task(self, task_store, store):
+    async def test_save_new_task(self, task_store, store, db_sessionmaker):
         """A fresh ``save`` is retrievable via ``get`` with identical content."""
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         task = _make_task(
             task_id="task-001",
             context_id=agent_id,
@@ -230,9 +251,9 @@ class TestSaveAndGet:
         assert retrieved.status.state == TaskState.input_required
         assert isinstance(retrieved, Task)
 
-    async def test_save_updates_existing_task(self, task_store, store):
+    async def test_save_updates_existing_task(self, task_store, store, db_sessionmaker):
         """Re-saving the same task_id updates status_state and task_json (UPSERT)."""
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         task = _make_task(
             task_id="task-upsert",
             context_id=agent_id,
@@ -257,14 +278,14 @@ class TestSaveAndGet:
             "UPSERT must overwrite task_json (artifact text changed)"
         )
 
-    async def test_save_preserves_created_at_across_updates(self, task_store, store):
+    async def test_save_preserves_created_at_across_updates(self, task_store, store, db_sessionmaker):
         """UPSERT must NOT touch ``created_at`` — it's set once at first save.
 
         ``INSERT ... ON CONFLICT DO UPDATE`` deliberately omits
         ``created_at`` from the update clause. If this test fails,
         ``created_at`` is probably in the SET clause by accident.
         """
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         task = _make_task(
             task_id="task-preserve",
             context_id=agent_id,
@@ -301,9 +322,9 @@ class TestSaveAndGet:
 class TestDelete:
     """delete happy path + noop on missing rows."""
 
-    async def test_delete_removes_task(self, task_store, store):
+    async def test_delete_removes_task(self, task_store, store, db_sessionmaker):
         """After ``delete``, ``get`` returns ``None`` for the same id."""
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         task = _make_task(task_id="task-del", context_id=agent_id)
         await task_store.save(task)
 
@@ -329,10 +350,10 @@ class TestList:
     """list(context_id) ordering, filtering, empty cases."""
 
     async def test_list_returns_tasks_in_desc_status_timestamp_order(
-        self, task_store, store
+        self, task_store, store, db_sessionmaker
     ):
         """Tasks come back in descending ``status_timestamp`` order."""
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         base = datetime(2026, 4, 1, 10, 0, 0, tzinfo=UTC)
         for i in range(3):
             await task_store.save(
@@ -349,9 +370,9 @@ class TestList:
             f"list must return tasks DESC by status_timestamp; got {ids}"
         )
 
-    async def test_list_filters_by_context_id(self, task_store, store):
+    async def test_list_filters_by_context_id(self, task_store, store, db_sessionmaker):
         """Tasks under a different context_id must not appear in the result."""
-        agent_a, agent_b = await _seed_two_agents(store)
+        agent_a, agent_b = await _seed_two_agents(store, db_sessionmaker)
         for i in range(2):
             await task_store.save(_make_task(task_id=f"a-{i}", context_id=agent_a))
             await task_store.save(_make_task(task_id=f"b-{i}", context_id=agent_b))
@@ -362,9 +383,9 @@ class TestList:
         assert {t.id for t in a_tasks} == {"a-0", "a-1"}
         assert {t.id for t in b_tasks} == {"b-0", "b-1"}
 
-    async def test_list_empty_returns_empty_list(self, task_store, store):
+    async def test_list_empty_returns_empty_list(self, task_store, store, db_sessionmaker):
         """An agent with no tasks yields an empty list (not ``None``)."""
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         tasks = await task_store.list(agent_id)
         assert tasks == []
 
@@ -377,9 +398,9 @@ class TestList:
 class TestListBySender:
     """list_by_sender ordering + sender isolation."""
 
-    async def test_list_by_sender_returns_tasks_in_desc_order(self, task_store, store):
+    async def test_list_by_sender_returns_tasks_in_desc_order(self, task_store, store, db_sessionmaker):
         """``list_by_sender`` is DESC by status_timestamp, same as ``list``."""
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         base = datetime(2026, 4, 1, 12, 0, 0, tzinfo=UTC)
         for i in range(3):
             await task_store.save(
@@ -397,9 +418,9 @@ class TestListBySender:
             f"list_by_sender must return tasks DESC by status_timestamp; got {ids}"
         )
 
-    async def test_list_by_sender_filters_by_sender(self, task_store, store):
+    async def test_list_by_sender_filters_by_sender(self, task_store, store, db_sessionmaker):
         """Tasks from a different sender are excluded from the result."""
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         await task_store.save(
             _make_task(
                 task_id="from-alpha",
@@ -435,9 +456,9 @@ class TestGetEndpoints:
     parsing the task_json blob.
     """
 
-    async def test_get_endpoints_returns_from_and_to(self, task_store, store):
+    async def test_get_endpoints_returns_from_and_to(self, task_store, store, db_sessionmaker):
         """Happy path: returns the tuple written at save time."""
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         await task_store.save(
             _make_task(
                 task_id="task-ep",
@@ -471,9 +492,9 @@ class TestGetCreatedAt:
     their creation time without deserializing the whole task_json.
     """
 
-    async def test_get_created_at_returns_iso_string(self, task_store, store):
+    async def test_get_created_at_returns_iso_string(self, task_store, store, db_sessionmaker):
         """Returns an ISO 8601 string that round-trips through ``fromisoformat``."""
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         await task_store.save(_make_task(task_id="task-ca", context_id=agent_id))
 
         created_at = await task_store.get_created_at("task-ca")
@@ -503,9 +524,9 @@ class TestTaskJsonRoundtrip:
     invariant that nothing gets silently dropped during serialization.
     """
 
-    async def test_task_json_preserves_artifacts(self, task_store, store):
+    async def test_task_json_preserves_artifacts(self, task_store, store, db_sessionmaker):
         """Artifact list (name + parts) comes back intact through save/get."""
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         task = _make_task(
             task_id="task-art",
             context_id=agent_id,
@@ -522,7 +543,7 @@ class TestTaskJsonRoundtrip:
         assert len(art.parts) == 1
         assert art.parts[0].root.text == "keep these parts"
 
-    async def test_task_json_preserves_metadata(self, task_store, store):
+    async def test_task_json_preserves_metadata(self, task_store, store, db_sessionmaker):
         """Arbitrary metadata keys survive the JSON roundtrip.
 
         Hikyaku's routing keys (``fromAgentId``, ``toAgentId``, ``type``)
@@ -531,7 +552,7 @@ class TestTaskJsonRoundtrip:
         preserves the whole metadata dict, not just the three routing
         keys it promotes to columns.
         """
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         task = _make_task(
             task_id="task-meta",
             context_id=agent_id,
@@ -573,14 +594,14 @@ class TestOriginTaskId:
       link.
     """
 
-    async def test_save_unicast_path_writes_null_column(self, task_store, store):
+    async def test_save_unicast_path_writes_null_column(self, task_store, store, db_sessionmaker):
         """Saving a task with no ``originTaskId`` in metadata leaves the column NULL.
 
         This is the unicast default — ``_handle_unicast`` does not set
         ``originTaskId``, so ``metadata.get("originTaskId")`` returns
         ``None`` and the column is written as NULL.
         """
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         await task_store.save(
             _make_task(task_id="task-uni", context_id=agent_id),
         )
@@ -591,7 +612,7 @@ class TestOriginTaskId:
         )
 
     async def test_save_broadcast_path_writes_populated_column(
-        self, task_store, store
+        self, task_store, store, db_sessionmaker
     ):
         """Saving a task with ``metadata["originTaskId"]`` writes that value.
 
@@ -600,7 +621,7 @@ class TestOriginTaskId:
         summary task id, and ``TaskStore.save`` must promote that value
         from the metadata dict into the dedicated column.
         """
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         origin = str(uuid.uuid4())
         await task_store.save(
             _make_task(
@@ -617,7 +638,7 @@ class TestOriginTaskId:
         )
 
     async def test_save_summary_self_reference_writes_own_id(
-        self, task_store, store
+        self, task_store, store, db_sessionmaker
     ):
         """A broadcast summary row self-references: ``origin_task_id == task_id``.
 
@@ -626,7 +647,7 @@ class TestOriginTaskId:
         AND summary — shares one non-NULL value, making the whole group
         queryable as ``origin_task_id = '<summary-id>'``.
         """
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         summary_id = str(uuid.uuid4())
         await task_store.save(
             _make_task(
@@ -642,7 +663,7 @@ class TestOriginTaskId:
         assert value == summary_id
 
     async def test_re_save_preserves_populated_origin_task_id(
-        self, task_store, store
+        self, task_store, store, db_sessionmaker
     ):
         """Re-saving with the same metadata must not clear ``origin_task_id``.
 
@@ -651,7 +672,7 @@ class TestOriginTaskId:
         unchanged (it still contains ``originTaskId``), and the UPSERT
         must therefore preserve the column value.
         """
-        agent_id = await _seed_agent(store)
+        agent_id = await _seed_agent(store, db_sessionmaker)
         origin = str(uuid.uuid4())
         task = _make_task(
             task_id="task-resave",
@@ -699,9 +720,9 @@ class TestListTimeline:
     is the ``created_at`` wallclock set at initial INSERT.
     """
 
-    async def test_returns_tenant_tasks(self, task_store, store):
+    async def test_returns_tenant_tasks(self, task_store, store, db_sessionmaker):
         """Happy path: tasks in the tenant are returned."""
-        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        session_id, [agent_id] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         await task_store.save(
             _make_task(task_id="tl-1", context_id=agent_id),
         )
@@ -709,12 +730,12 @@ class TestListTimeline:
             _make_task(task_id="tl-2", context_id=agent_id),
         )
 
-        results = await task_store.list_timeline(tenant_id)
+        results = await task_store.list_timeline(session_id)
         task_ids = {t.id for (t, _o, _c) in results}
         assert task_ids == {"tl-1", "tl-2"}
 
     async def test_tuple_shape_is_task_origin_created_at(
-        self, task_store, store
+        self, task_store, store, db_sessionmaker
     ):
         """Each result is a 3-tuple ``(Task, origin_task_id, created_at)``.
 
@@ -722,12 +743,12 @@ class TestListTimeline:
         a str (broadcast group) or None (unicast). The created_at is an
         ISO 8601 string parseable by ``datetime.fromisoformat``.
         """
-        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        session_id, [agent_id] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         await task_store.save(
             _make_task(task_id="tl-shape", context_id=agent_id),
         )
 
-        results = await task_store.list_timeline(tenant_id)
+        results = await task_store.list_timeline(session_id)
         assert len(results) == 1
 
         row = results[0]
@@ -742,10 +763,10 @@ class TestListTimeline:
         datetime.fromisoformat(created_at)  # must parse
 
     async def test_returns_origin_task_id_for_broadcast_row(
-        self, task_store, store
+        self, task_store, store, db_sessionmaker
     ):
         """Broadcast delivery rows surface their ``origin_task_id`` value."""
-        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        session_id, [agent_id] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         origin = str(uuid.uuid4())
         await task_store.save(
             _make_task(
@@ -755,28 +776,28 @@ class TestListTimeline:
             ),
         )
 
-        results = await task_store.list_timeline(tenant_id)
+        results = await task_store.list_timeline(session_id)
         assert len(results) == 1
         _task, origin_val, _created = results[0]
         assert origin_val == origin
 
     async def test_returns_null_origin_task_id_for_unicast_row(
-        self, task_store, store
+        self, task_store, store, db_sessionmaker
     ):
         """Unicast rows surface ``origin_task_id = None``."""
-        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        session_id, [agent_id] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         await task_store.save(
             _make_task(task_id="tl-uni", context_id=agent_id),
         )
 
-        results = await task_store.list_timeline(tenant_id)
+        results = await task_store.list_timeline(session_id)
         assert len(results) == 1
         _task, origin_val, _created = results[0]
         assert origin_val is None
 
-    async def test_orders_by_status_timestamp_desc(self, task_store, store):
+    async def test_orders_by_status_timestamp_desc(self, task_store, store, db_sessionmaker):
         """Results are ordered newest-first by ``status_timestamp``."""
-        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        session_id, [agent_id] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         base = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
         for i in range(3):
             await task_store.save(
@@ -787,13 +808,13 @@ class TestListTimeline:
                 ),
             )
 
-        results = await task_store.list_timeline(tenant_id)
+        results = await task_store.list_timeline(session_id)
         ids = [t.id for (t, _o, _c) in results]
         assert ids == ["tl-order-2", "tl-order-1", "tl-order-0"], (
             f"list_timeline must be DESC by status_timestamp; got {ids}"
         )
 
-    async def test_excludes_broadcast_summary_rows(self, task_store, store):
+    async def test_excludes_broadcast_summary_rows(self, task_store, store, db_sessionmaker):
         """Rows with ``type = 'broadcast_summary'`` are filtered out.
 
         Summary rows never appear in the timeline feed — the frontend
@@ -801,7 +822,7 @@ class TestListTimeline:
         row's metadata (recipientIds, recipientCount) is consulted only
         via the group link, not by surfacing the summary row itself.
         """
-        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        session_id, [agent_id] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         await task_store.save(
             _make_task(
                 task_id="tl-regular",
@@ -818,17 +839,17 @@ class TestListTimeline:
             ),
         )
 
-        results = await task_store.list_timeline(tenant_id)
+        results = await task_store.list_timeline(session_id)
         task_ids = {t.id for (t, _o, _c) in results}
         assert "tl-regular" in task_ids
         assert "tl-summary" not in task_ids, (
             "broadcast_summary rows must be excluded from list_timeline"
         )
 
-    async def test_cross_tenant_isolation(self, task_store, store):
+    async def test_cross_tenant_isolation(self, task_store, store, db_sessionmaker):
         """Tenant A's list must not include tenant B's tasks."""
-        tenant_a, [agent_a] = await _seed_tenant_with_agents(store, n=1)
-        tenant_b, [agent_b] = await _seed_tenant_with_agents(store, n=1)
+        session_a, [agent_a] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
+        tenant_b, [agent_b] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
 
         await task_store.save(
             _make_task(task_id="tl-a", context_id=agent_a),
@@ -847,7 +868,7 @@ class TestListTimeline:
         assert b_ids == {"tl-b"}
 
     async def test_multi_agent_tenant_includes_all_contexts(
-        self, task_store, store
+        self, task_store, store, db_sessionmaker
     ):
         """Within one tenant, tasks on ALL member agents' contexts appear."""
         tenant_id, agent_ids = await _seed_tenant_with_agents(store, n=3)
@@ -856,19 +877,19 @@ class TestListTimeline:
                 _make_task(task_id=f"tl-multi-{i}", context_id=agent_id),
             )
 
-        results = await task_store.list_timeline(tenant_id)
+        results = await task_store.list_timeline(session_id)
         task_ids = {t.id for (t, _o, _c) in results}
         assert task_ids == {"tl-multi-0", "tl-multi-1", "tl-multi-2"}
 
-    async def test_empty_tenant_returns_empty_list(self, task_store, store):
+    async def test_empty_tenant_returns_empty_list(self, task_store, store, db_sessionmaker):
         """A tenant with no tasks yields an empty list (not ``None``)."""
-        tenant_id, _agents = await _seed_tenant_with_agents(store, n=1)
-        results = await task_store.list_timeline(tenant_id)
+        tenant_id, _agents = await _seed_session_with_agents(store, db_sessionmaker, n=1)
+        results = await task_store.list_timeline(session_id)
         assert results == []
 
-    async def test_respects_explicit_limit(self, task_store, store):
+    async def test_respects_explicit_limit(self, task_store, store, db_sessionmaker):
         """``limit=N`` caps the result at N rows."""
-        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        session_id, [agent_id] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         base = datetime(2026, 4, 10, 0, 0, 0, tzinfo=UTC)
         for i in range(10):
             await task_store.save(
@@ -882,7 +903,7 @@ class TestListTimeline:
         results = await task_store.list_timeline(tenant_id, limit=3)
         assert len(results) == 3
 
-    async def test_default_limit_caps_at_200(self, task_store, store):
+    async def test_default_limit_caps_at_200(self, task_store, store, db_sessionmaker):
         """Calling without ``limit`` caps the result at 200 rows.
 
         Design doc 0000013 mandates a 200-row hard cap with no
@@ -890,7 +911,7 @@ class TestListTimeline:
         returns; the cap protects the server from unbounded fetches on
         busy tenants.
         """
-        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        session_id, [agent_id] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         base = datetime(2026, 4, 10, 0, 0, 0, tzinfo=UTC)
         for i in range(205):
             await task_store.save(
@@ -901,14 +922,14 @@ class TestListTimeline:
                 ),
             )
 
-        results = await task_store.list_timeline(tenant_id)
+        results = await task_store.list_timeline(session_id)
         assert len(results) == 200, (
             f"default limit must be 200; got {len(results)}"
         )
 
-    async def test_limit_picks_newest_rows(self, task_store, store):
+    async def test_limit_picks_newest_rows(self, task_store, store, db_sessionmaker):
         """When over-capped, the newest-first ORDER BY keeps the top rows."""
-        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        session_id, [agent_id] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         base = datetime(2026, 4, 10, 0, 0, 0, tzinfo=UTC)
         for i in range(5):
             await task_store.save(
