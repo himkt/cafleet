@@ -1,7 +1,7 @@
 # Multi-Runner Support (Codex Integration)
 
 **Status**: Approved
-**Progress**: 16/18 tasks complete
+**Progress**: 18/18 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -247,8 +247,8 @@ In `client/src/hikyaku_client/output.py`:
 
 ### Step 8: Tests
 
-- [ ] Add unit tests for `CodingAgentConfig` (build_command, ensure_available, get_coding_agent) <!-- completed: -->
-- [ ] Update existing `split_window` and `member_create` tests for the new `command` parameter and `--coding-agent` flag <!-- completed: -->
+- [x] Add unit tests for `CodingAgentConfig` (build_command, ensure_available, get_coding_agent) <!-- completed: 2026-04-12T19:25 -->
+- [x] Update existing `split_window` and `member_create` tests for the new `command` parameter and `--coding-agent` flag <!-- completed: 2026-04-12T19:25 -->
 
 ---
 
