@@ -45,6 +45,27 @@ class Agent(Base):
     __table_args__ = (Index("idx_agents_tenant_status", "tenant_id", "status"),)
 
 
+class AgentPlacement(Base):
+    __tablename__ = "agent_placements"
+
+    agent_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("agents.agent_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    director_agent_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("agents.agent_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    tmux_session: Mapped[str] = mapped_column(String, nullable=False)
+    tmux_window_id: Mapped[str] = mapped_column(String, nullable=False)
+    tmux_pane_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+
+    __table_args__ = (Index("idx_placements_director", "director_agent_id"),)
+
+
 class Task(Base):
     __tablename__ = "tasks"
 

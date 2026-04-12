@@ -127,6 +127,79 @@ def test_alembic_version_table_records_applied_revision(alembic_upgraded_db):
         engine.dispose()
 
 
+def test_agent_placements_table_created_by_migration(alembic_upgraded_db):
+    """Migration 0003 creates the ``agent_placements`` table with expected columns.
+
+    Like the ``origin_task_id`` test below, this is the ONLY test that
+    exercises the real Alembic migration for this table — the fast
+    in-memory fixture in ``conftest.py`` uses ``Base.metadata.create_all``
+    and bypasses Alembic entirely. A ``db/models.py`` update without a
+    matching ``0003_add_agent_placements.py`` (or vice versa) slips past
+    every other test in the suite and is only caught here.
+
+    Verified schema properties:
+
+      - Table exists
+      - All six columns present
+      - ``tmux_pane_id`` is nullable (NULL = pending placement)
+      - ``idx_placements_director`` index exists on ``director_agent_id``
+    """
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
+    try:
+        insp = inspect(engine)
+
+        # Table exists
+        tables = set(insp.get_table_names())
+        assert "agent_placements" in tables, (
+            f"migration 0003_add_agent_placements did not create the "
+            f"agent_placements table. tables found: {sorted(tables)}"
+        )
+
+        # All columns present
+        cols = {col["name"]: col for col in insp.get_columns("agent_placements")}
+        expected_cols = {
+            "agent_id",
+            "director_agent_id",
+            "tmux_session",
+            "tmux_window_id",
+            "tmux_pane_id",
+            "created_at",
+        }
+        missing = expected_cols - set(cols.keys())
+        assert not missing, (
+            f"agent_placements table is missing columns: {sorted(missing)}. "
+            f"columns found: {sorted(cols)}"
+        )
+
+        # tmux_pane_id must be nullable (NULL = pending placement)
+        assert cols["tmux_pane_id"]["nullable"] is True, (
+            "agent_placements.tmux_pane_id must be nullable — NULL signals "
+            "a pending placement before the pane is spawned"
+        )
+
+        # All other columns must be NOT NULL
+        for name in (
+            "agent_id",
+            "director_agent_id",
+            "tmux_session",
+            "tmux_window_id",
+            "created_at",
+        ):
+            assert cols[name]["nullable"] is False, (
+                f"agent_placements.{name} should be NOT NULL"
+            )
+
+        # Director index exists
+        indexes = insp.get_indexes("agent_placements")
+        idx_names = {idx["name"] for idx in indexes}
+        assert "idx_placements_director" in idx_names, (
+            f"expected idx_placements_director index on agent_placements, "
+            f"got: {sorted(idx_names)}"
+        )
+    finally:
+        engine.dispose()
+
+
 def test_tasks_table_has_origin_task_id_column(alembic_upgraded_db):
     """Migration 0002 adds ``origin_task_id`` as a nullable TEXT column on ``tasks``.
 

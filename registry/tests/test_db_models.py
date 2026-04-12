@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import (
 
 # Importing the engine module registers the FK PRAGMA listener globally.
 import hikyaku_registry.db.engine  # noqa: F401
-from hikyaku_registry.db.models import Agent, ApiKey, Base, Task
+from hikyaku_registry.db.models import Agent, AgentPlacement, ApiKey, Base, Task
 
 
 # ---------------------------------------------------------------------------
@@ -112,13 +112,31 @@ def _make_task(
     )
 
 
+def _make_placement(
+    *,
+    agent_id: str = "member-1",
+    director_agent_id: str = "director-1",
+    tmux_session: str = "main",
+    tmux_window_id: str = "@3",
+    tmux_pane_id: str | None = "%7",
+) -> AgentPlacement:
+    return AgentPlacement(
+        agent_id=agent_id,
+        director_agent_id=director_agent_id,
+        tmux_session=tmux_session,
+        tmux_window_id=tmux_window_id,
+        tmux_pane_id=tmux_pane_id,
+        created_at=_now(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Table existence
 # ---------------------------------------------------------------------------
 
 
 class TestTablesExist:
-    """``Base.metadata.create_all`` produces the three expected tables."""
+    """``Base.metadata.create_all`` produces the four expected tables."""
 
     @pytest.mark.asyncio
     async def test_api_keys_table_exists(self, engine):
@@ -137,6 +155,12 @@ class TestTablesExist:
         async with engine.connect() as conn:
             tables = await conn.run_sync(lambda c: inspect(c).get_table_names())
         assert "tasks" in tables
+
+    @pytest.mark.asyncio
+    async def test_agent_placements_table_exists(self, engine):
+        async with engine.connect() as conn:
+            tables = await conn.run_sync(lambda c: inspect(c).get_table_names())
+        assert "agent_placements" in tables
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +400,136 @@ class TestTasksSchema:
 
 
 # ---------------------------------------------------------------------------
+# agent_placements table — columns + PK + FK + nullability
+# ---------------------------------------------------------------------------
+
+
+class TestAgentPlacementsSchema:
+    """Schema tests for the ``agent_placements`` table.
+
+    Design doc 0000014 (Data Model):
+
+      agent_placements
+        agent_id            TEXT PRIMARY KEY  REFERENCES agents(agent_id) ON DELETE CASCADE
+        director_agent_id   TEXT NOT NULL      REFERENCES agents(agent_id) ON DELETE RESTRICT
+        tmux_session        TEXT NOT NULL
+        tmux_window_id      TEXT NOT NULL
+        tmux_pane_id        TEXT              -- NULLABLE. NULL = pending
+        created_at          TEXT NOT NULL
+        INDEX idx_placements_director (director_agent_id)
+    """
+
+    @pytest.mark.asyncio
+    async def test_has_expected_columns(self, engine):
+        async with engine.connect() as conn:
+            cols = await conn.run_sync(
+                lambda c: {
+                    col["name"] for col in inspect(c).get_columns("agent_placements")
+                }
+            )
+        expected = {
+            "agent_id",
+            "director_agent_id",
+            "tmux_session",
+            "tmux_window_id",
+            "tmux_pane_id",
+            "created_at",
+        }
+        assert expected <= cols, f"missing columns: {expected - cols}"
+
+    @pytest.mark.asyncio
+    async def test_agent_id_is_primary_key(self, engine):
+        async with engine.connect() as conn:
+            pk = await conn.run_sync(
+                lambda c: inspect(c).get_pk_constraint("agent_placements")[
+                    "constrained_columns"
+                ]
+            )
+        assert pk == ["agent_id"]
+
+    @pytest.mark.asyncio
+    async def test_tmux_pane_id_is_nullable(self, engine):
+        """``tmux_pane_id`` is nullable — NULL signals a pending placement
+        before the pane is spawned (two-pass write flow)."""
+        async with engine.connect() as conn:
+            cols = await conn.run_sync(
+                lambda c: {
+                    col["name"]: col
+                    for col in inspect(c).get_columns("agent_placements")
+                }
+            )
+        assert cols["tmux_pane_id"]["nullable"] is True
+
+    @pytest.mark.asyncio
+    async def test_required_columns_not_null(self, engine):
+        """Every column except ``tmux_pane_id`` is NOT NULL."""
+        async with engine.connect() as conn:
+            cols = await conn.run_sync(
+                lambda c: {
+                    col["name"]: col
+                    for col in inspect(c).get_columns("agent_placements")
+                }
+            )
+        for name in (
+            "agent_id",
+            "director_agent_id",
+            "tmux_session",
+            "tmux_window_id",
+            "created_at",
+        ):
+            assert cols[name]["nullable"] is False, f"{name} should be NOT NULL"
+
+    @pytest.mark.asyncio
+    async def test_agent_id_fk_to_agents(self, engine):
+        """``agent_placements.agent_id`` REFERENCES ``agents(agent_id)``."""
+        async with engine.connect() as conn:
+            fks = await conn.run_sync(
+                lambda c: inspect(c).get_foreign_keys("agent_placements")
+            )
+        match = [
+            fk
+            for fk in fks
+            if fk["constrained_columns"] == ["agent_id"]
+            and fk["referred_table"] == "agents"
+            and fk["referred_columns"] == ["agent_id"]
+        ]
+        assert len(match) == 1, (
+            f"expected one agent_id FK to agents, got: {fks}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_director_agent_id_fk_to_agents(self, engine):
+        """``agent_placements.director_agent_id`` REFERENCES ``agents(agent_id)``."""
+        async with engine.connect() as conn:
+            fks = await conn.run_sync(
+                lambda c: inspect(c).get_foreign_keys("agent_placements")
+            )
+        match = [
+            fk
+            for fk in fks
+            if fk["constrained_columns"] == ["director_agent_id"]
+            and fk["referred_table"] == "agents"
+            and fk["referred_columns"] == ["agent_id"]
+        ]
+        assert len(match) == 1, (
+            f"expected one director_agent_id FK to agents, got: {fks}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_idx_placements_director_exists(self, engine):
+        async with engine.connect() as conn:
+            indexes = await conn.run_sync(
+                lambda c: inspect(c).get_indexes("agent_placements")
+            )
+        match = [idx for idx in indexes if idx["name"] == "idx_placements_director"]
+        assert len(match) == 1, (
+            f"expected idx_placements_director, "
+            f"got: {[i['name'] for i in indexes]}"
+        )
+        assert match[0]["column_names"] == ["director_agent_id"]
+
+
+# ---------------------------------------------------------------------------
 # Indexes — names and column composition match the design doc
 # ---------------------------------------------------------------------------
 
@@ -559,6 +713,125 @@ class TestForeignKeyEnforcement:
         with pytest.raises(IntegrityError):
             await session.execute(delete(Agent).where(Agent.agent_id == "agent-s"))
 
+    @pytest.mark.asyncio
+    async def test_cascade_delete_agent_removes_placement(self, session):
+        """ON DELETE CASCADE: hard-deleting an agent cascades to its placement row.
+
+        FK regression test: verifies ``PRAGMA foreign_keys=ON`` is active and
+        the CASCADE FK on ``agent_placements.agent_id`` fires correctly. Without
+        the PRAGMA, the DELETE silently leaves an orphan placement row.
+
+        The member agent is hard-deleted (not soft-deleted via status update) to
+        exercise the FK cascade. The soft-delete path in ``deregister_agent``
+        never triggers this cascade — it does an explicit placement DELETE
+        instead — but the CASCADE declaration protects against accidental
+        hard-delete paths added later.
+        """
+        session.add(_make_api_key(api_key_hash="tenant-cascade"))
+        await session.flush()
+        session.add(_make_agent(agent_id="director-c", tenant_id="tenant-cascade"))
+        session.add(_make_agent(agent_id="member-c", tenant_id="tenant-cascade"))
+        await session.flush()
+        session.add(
+            _make_placement(
+                agent_id="member-c",
+                director_agent_id="director-c",
+            )
+        )
+        await session.commit()
+
+        # Pre-condition: placement exists
+        result = await session.execute(
+            select(AgentPlacement).where(AgentPlacement.agent_id == "member-c")
+        )
+        assert result.scalar_one_or_none() is not None
+
+        # Hard-delete the member agent — CASCADE should remove the placement
+        await session.execute(
+            delete(Agent).where(Agent.agent_id == "member-c")
+        )
+        await session.commit()
+
+        # Placement must be gone via CASCADE
+        result = await session.execute(
+            select(AgentPlacement).where(AgentPlacement.agent_id == "member-c")
+        )
+        assert result.scalar_one_or_none() is None, (
+            "CASCADE FK on agent_placements.agent_id did not fire — "
+            "the placement row survives after the agent was hard-deleted. "
+            "Check that PRAGMA foreign_keys=ON is active."
+        )
+
+    @pytest.mark.asyncio
+    async def test_restrict_delete_director_with_live_placements(self, session):
+        """ON DELETE RESTRICT: cannot hard-delete a director that still has
+        placement rows referencing its ``agent_id`` via ``director_agent_id``.
+
+        This is a sanity guard — the current code uses soft-delete for
+        deregistration, but the constraint documents the invariant that a
+        Director cannot be removed while it still owns live placement rows.
+        """
+        session.add(_make_api_key(api_key_hash="tenant-restrict"))
+        await session.flush()
+        session.add(
+            _make_agent(agent_id="director-r2", tenant_id="tenant-restrict")
+        )
+        session.add(
+            _make_agent(agent_id="member-r2", tenant_id="tenant-restrict")
+        )
+        await session.flush()
+        session.add(
+            _make_placement(
+                agent_id="member-r2",
+                director_agent_id="director-r2",
+            )
+        )
+        await session.commit()
+
+        # Attempt to hard-delete the director — RESTRICT should block it
+        with pytest.raises(IntegrityError):
+            await session.execute(
+                delete(Agent).where(Agent.agent_id == "director-r2")
+            )
+
+    @pytest.mark.asyncio
+    async def test_inserting_placement_with_unknown_agent_raises(self, session):
+        """An orphan placement (agent_id not in agents) cannot be inserted."""
+        session.add(_make_api_key(api_key_hash="tenant-orphan-p"))
+        await session.flush()
+        session.add(
+            _make_agent(agent_id="director-orphan", tenant_id="tenant-orphan-p")
+        )
+        await session.flush()
+
+        session.add(
+            _make_placement(
+                agent_id="nonexistent-member",
+                director_agent_id="director-orphan",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.commit()
+
+    @pytest.mark.asyncio
+    async def test_inserting_placement_with_unknown_director_raises(self, session):
+        """An orphan placement (director_agent_id not in agents) cannot be inserted."""
+        session.add(_make_api_key(api_key_hash="tenant-orphan-d"))
+        await session.flush()
+        session.add(
+            _make_agent(agent_id="member-orphan", tenant_id="tenant-orphan-d")
+        )
+        await session.flush()
+
+        session.add(
+            _make_placement(
+                agent_id="member-orphan",
+                director_agent_id="nonexistent-director",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.commit()
+
 
 # ---------------------------------------------------------------------------
 # Insert/select round-trip — sanity check that the JSON blob columns work.
@@ -670,3 +943,58 @@ class TestRoundtrip:
         )
         row = result.scalar_one()
         assert row.origin_task_id == origin
+
+    @pytest.mark.asyncio
+    async def test_placement_roundtrip_null_pane_id(self, session):
+        """Saving a placement with ``tmux_pane_id=None`` (pending) reads back as None."""
+        session.add(_make_api_key(api_key_hash="rt-pend"))
+        await session.flush()
+        session.add(_make_agent(agent_id="rt-dir-pend", tenant_id="rt-pend"))
+        session.add(_make_agent(agent_id="rt-mem-pend", tenant_id="rt-pend"))
+        await session.flush()
+
+        session.add(
+            _make_placement(
+                agent_id="rt-mem-pend",
+                director_agent_id="rt-dir-pend",
+                tmux_pane_id=None,
+            )
+        )
+        await session.commit()
+
+        result = await session.execute(
+            select(AgentPlacement).where(
+                AgentPlacement.agent_id == "rt-mem-pend"
+            )
+        )
+        row = result.scalar_one()
+        assert row.tmux_pane_id is None
+        assert row.tmux_session == "main"
+        assert row.tmux_window_id == "@3"
+        assert row.director_agent_id == "rt-dir-pend"
+
+    @pytest.mark.asyncio
+    async def test_placement_roundtrip_with_pane_id(self, session):
+        """Saving a placement with a concrete ``tmux_pane_id`` reads back unchanged."""
+        session.add(_make_api_key(api_key_hash="rt-pane"))
+        await session.flush()
+        session.add(_make_agent(agent_id="rt-dir-pane", tenant_id="rt-pane"))
+        session.add(_make_agent(agent_id="rt-mem-pane", tenant_id="rt-pane"))
+        await session.flush()
+
+        session.add(
+            _make_placement(
+                agent_id="rt-mem-pane",
+                director_agent_id="rt-dir-pane",
+                tmux_pane_id="%42",
+            )
+        )
+        await session.commit()
+
+        result = await session.execute(
+            select(AgentPlacement).where(
+                AgentPlacement.agent_id == "rt-mem-pane"
+            )
+        )
+        row = result.scalar_one()
+        assert row.tmux_pane_id == "%42"

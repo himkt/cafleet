@@ -13,11 +13,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import TypedDict, cast
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku_registry.db.models import Agent, ApiKey, Task
+from hikyaku_registry.db.models import Agent, AgentPlacement, ApiKey, Task
+from hikyaku_registry.models import PlacementCreate
 
 
 class CreateAgentResult(TypedDict):
@@ -61,6 +62,23 @@ class RegistryStore:
         *,
         api_key: str,
     ) -> CreateAgentResult:
+        return await self.create_agent_with_placement(
+            name=name,
+            description=description,
+            skills=skills,
+            api_key=api_key,
+            placement=None,
+        )
+
+    async def create_agent_with_placement(
+        self,
+        name: str,
+        description: str,
+        skills: list[dict] | None = None,
+        *,
+        api_key: str,
+        placement: PlacementCreate | None = None,
+    ) -> CreateAgentResult:
         agent_id = str(uuid.uuid4())
         tenant_id = hashlib.sha256(api_key.encode()).hexdigest()
         registered_at = _now_iso()
@@ -83,6 +101,17 @@ class RegistryStore:
                         agent_card_json=json.dumps(agent_card),
                     )
                 )
+                if placement is not None:
+                    session.add(
+                        AgentPlacement(
+                            agent_id=agent_id,
+                            director_agent_id=placement.director_agent_id,
+                            tmux_session=placement.tmux_session,
+                            tmux_window_id=placement.tmux_window_id,
+                            tmux_pane_id=placement.tmux_pane_id,
+                            created_at=registered_at,
+                        )
+                    )
 
         return {
             "agent_id": agent_id,
@@ -162,7 +191,91 @@ class RegistryStore:
                         )
                     ),
                 )
+                if result.rowcount > 0:
+                    await session.execute(
+                        delete(AgentPlacement).where(
+                            AgentPlacement.agent_id == agent_id
+                        )
+                    )
             return result.rowcount > 0
+
+    async def get_placement(self, agent_id: str) -> dict | None:
+        async with self._sessionmaker() as session:
+            result = await session.execute(
+                select(AgentPlacement).where(AgentPlacement.agent_id == agent_id)
+            )
+            row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "agent_id": row.agent_id,
+            "director_agent_id": row.director_agent_id,
+            "tmux_session": row.tmux_session,
+            "tmux_window_id": row.tmux_window_id,
+            "tmux_pane_id": row.tmux_pane_id,
+            "created_at": row.created_at,
+        }
+
+    async def update_placement_pane_id(
+        self, agent_id: str, pane_id: str
+    ) -> dict | None:
+        async with self._sessionmaker() as session:
+            async with session.begin():
+                result = cast(
+                    CursorResult,
+                    await session.execute(
+                        update(AgentPlacement)
+                        .where(AgentPlacement.agent_id == agent_id)
+                        .values(tmux_pane_id=pane_id)
+                    ),
+                )
+                if result.rowcount == 0:
+                    return None
+        return await self.get_placement(agent_id)
+
+    async def list_placements_for_director(
+        self, *, tenant_id: str, director_agent_id: str
+    ) -> list[dict]:
+        stmt = (
+            select(
+                Agent.agent_id,
+                Agent.name,
+                Agent.description,
+                Agent.status,
+                Agent.registered_at,
+                AgentPlacement.director_agent_id,
+                AgentPlacement.tmux_session,
+                AgentPlacement.tmux_window_id,
+                AgentPlacement.tmux_pane_id,
+                AgentPlacement.created_at.label("placement_created_at"),
+            )
+            .join(AgentPlacement, Agent.agent_id == AgentPlacement.agent_id)
+            .where(
+                Agent.tenant_id == tenant_id,
+                Agent.status == "active",
+                AgentPlacement.director_agent_id == director_agent_id,
+            )
+        )
+        async with self._sessionmaker() as session:
+            result = await session.execute(stmt)
+            rows = result.all()
+        return [
+            {
+                "agent_id": row.agent_id,
+                "name": row.name,
+                "description": row.description,
+                "status": row.status,
+                "registered_at": row.registered_at,
+                "placement": {
+                    "director_agent_id": row.director_agent_id,
+                    "tmux_session": row.tmux_session,
+                    "tmux_window_id": row.tmux_window_id,
+                    "tmux_pane_id": row.tmux_pane_id,
+                    "created_at": row.placement_created_at,
+                },
+            }
+            for row in rows
+        ]
 
     async def verify_agent_tenant(self, agent_id: str, tenant_id: str) -> bool:
         async with self._sessionmaker() as session:

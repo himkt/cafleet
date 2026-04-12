@@ -15,6 +15,8 @@ Use the `hikyaku` CLI to register as an agent, send and receive messages, and di
 - Discovering other registered agents
 - Canceling (retracting) a sent message
 - Deregistering from the broker
+- Spawning and managing member agents in tmux panes (Director only)
+- Inspecting a stalled member's terminal output (Director only)
 
 ## Environment Variables
 
@@ -146,6 +148,139 @@ Remove this agent's registration from the broker.
 hikyaku deregister --agent-id <self-agent-id>
 ```
 
+### Member Create
+
+Register a new member agent and spawn its `claude` pane in the Director's own tmux window. Must be run inside a tmux session. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
+
+```bash
+hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
+  --description "Reviewer for PR #42"
+
+hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
+  --description "Reviewer for PR #42" \
+  -- "Review PR #42, post feedback via send, and deregister on completion."
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The Director's agent ID (sent as `X-Agent-Id`) |
+| `--name` | yes | Display name of the new member |
+| `--description` | yes | One-sentence purpose |
+| *(positional, after `--`)* | no | Prompt for the spawned `claude` process. If omitted, a default prompt is generated. |
+
+If the tmux `split-window` fails, the registered agent is rolled back. If the placement PATCH fails, the pane is `/exit`'d and the agent rolled back.
+
+Output (text):
+```
+Member registered and spawned.
+  agent_id:  <new-uuid>
+  name:      Claude-B
+  pane_id:   %7
+  window_id: @3
+```
+
+Output (`--json`):
+```json
+{
+  "agent_id": "<uuid>",
+  "name": "Claude-B",
+  "registered_at": "2026-04-12T10:15:00Z",
+  "placement": {
+    "director_agent_id": "<director-uuid>",
+    "tmux_session": "main",
+    "tmux_window_id": "@3",
+    "tmux_pane_id": "%7",
+    "created_at": "2026-04-12T10:15:00Z"
+  }
+}
+```
+
+### Member Delete
+
+Deregister a member agent and close its tmux pane. The agent is deregistered FIRST, then `/exit` is sent to the pane — so a deregister failure leaves both intact for retry.
+
+```bash
+hikyaku member delete --agent-id $DIRECTOR_ID --member-id <member-agent-id>
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The Director's agent ID |
+| `--member-id` | yes | The target member's agent ID |
+
+Output (text):
+```
+Member deleted.
+  agent_id:  <target-uuid>
+  pane_id:   %7 (closed)
+```
+
+### Member List
+
+List all members spawned by this Director. Returns agents with placement rows whose `director_agent_id` matches the given `--agent-id`.
+
+```bash
+hikyaku member list --agent-id $DIRECTOR_ID
+hikyaku --json member list --agent-id $DIRECTOR_ID
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The Director's agent ID |
+
+Output columns: `agent_id`, `name`, `status`, `session`, `window_id`, `pane_id`, `created_at`. A pending placement (pane not yet spawned) shows `(pending)` for `pane_id` in text mode and `null` in JSON.
+
+Output (`--json`):
+```json
+[
+  {
+    "agent_id": "<uuid>",
+    "name": "Claude-B",
+    "status": "active",
+    "registered_at": "2026-04-12T10:15:00Z",
+    "placement": {
+      "director_agent_id": "<director-uuid>",
+      "tmux_session": "main",
+      "tmux_window_id": "@3",
+      "tmux_pane_id": "%7",
+      "created_at": "2026-04-12T10:15:00Z"
+    }
+  }
+]
+```
+
+### Member Capture
+
+Capture the last N lines of a member's tmux pane terminal buffer. This is the canonical way to inspect a stalled teammate — it replaces raw `tmux capture-pane` invocations for any project using Hikyaku.
+
+```bash
+hikyaku member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID
+hikyaku member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID --lines 200
+hikyaku --json member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID | jq -r .content
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The Director's agent ID |
+| `--member-id` | yes | The target member's agent ID |
+| `--lines` | no | Number of trailing lines to capture (default: 80) |
+
+Cross-Director capture is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before making any tmux call.
+
+Output (text): raw captured terminal buffer, printed to stdout with no framing.
+
+Output (`--json`):
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "lines": 80,
+  "content": "...<raw buffer>..."
+}
+```
+
+**Note on external `agent-team-supervision` skill**: The external `agent-team-supervision` skill (user-level, outside this repo) still documents raw `tmux capture-pane`. For projects using Hikyaku, prefer `hikyaku member capture` as it enforces the cross-Director boundary. The external skill alignment is tracked as follow-up work.
+
 ## Typical Workflow
 
 1. **Register** with the broker (`HIKYAKU_API_KEY` must already be set; create the key in the Hikyaku WebUI first):
@@ -181,63 +316,42 @@ hikyaku deregister --agent-id <self-agent-id>
 ### Roles
 
 - **Director** — the Claude Code session that first runs `hikyaku register` in this project. It owns the team lifecycle: spawning members, driving the exchange, and cleaning up.
-- **Member** — any peer Claude Code session the Director spawns in a tmux split-pane. Each member registers itself with `hikyaku`, runs its assigned exchange, and deregisters before exit.
+- **Member** — any peer Claude Code session the Director spawns via `hikyaku member create`. Each member is automatically registered and receives `HIKYAKU_*` env vars via tmux `-e` flags.
 
 ### Monitoring mandate (Director only)
 
 Before spawning **any** member, the Director MUST load `Skill(agent-team-supervision)` and start a `/loop` monitor as that skill instructs. Members do not act autonomously — if the Director stops supervising, the team stalls silently. Keep the `/loop` active until the final shutdown step.
 
+To inspect a stalled member, use `hikyaku member capture`:
+
+```bash
+hikyaku member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID
+```
+
 ### Layout discipline
 
-Only the Director calls `tmux split-window`. The window is kept in `main-vertical` layout at all times:
+`hikyaku member create` automatically maintains `main-vertical` layout:
 
 - Director occupies the full-height left "main" pane.
 - Every member is stacked in the right column at equal height.
-- Every spawn and every shutdown is followed by `tmux select-layout main-vertical`, so the right column is always evenly divided regardless of how many members are currently active.
+- Every `member create` and `member delete` runs `tmux select-layout main-vertical` internally.
 
 ### Spawn a member
 
-Spawning a member is a **two-step** sequence. Shell variable expansion in the `tmux split-window` call (e.g. `-e "HIKYAKU_URL=$HIKYAKU_URL"`) is unreliable under the Bash tool's permission validator, so the Director must first read the literal values with `printenv` and then paste them into the `-e` flags verbatim.
-
-Step 1 — read the literal env values:
-
 ```bash
-printenv HIKYAKU_URL HIKYAKU_API_KEY
+hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
+  --description "Reviewer for PR #42"
 ```
 
-This returns two lines: the URL on the first, the API key on the second. Capture both as plain strings.
-
-Step 2 — spawn `claude` in a new pane with those literal values forwarded via `-e`, then rebalance the window to `main-vertical`:
-
-```bash
-tmux split-window \
-  -e "HIKYAKU_URL=http://localhost:8000" \
-  -e "HIKYAKU_API_KEY=hky_0123456789abcdef0123456789abcdef" \
-  claude "Load Skill(hikyaku), register as Claude-B, send a round-trip ping to <director-agent-id>, poll for a reply, ack, and deregister."
-tmux select-layout main-vertical
-```
-
-Substitute the literal strings from Step 1 for the two placeholders above. Do **not** write `$HIKYAKU_URL` / `$HIKYAKU_API_KEY` in the `tmux split-window` command — always paste the concrete values.
-
-Rules:
-
-- Always run `printenv HIKYAKU_URL HIKYAKU_API_KEY` first and paste the literal output into the `-e` flags. Shell variable expansion inside the `tmux split-window` Bash call is blocked by the validator in some configurations, and even when allowed it fails silently if the variable is unset in the Director's shell.
-- Pass `claude "<prompt>"` as the trailing command of `tmux split-window`. Do **not** use `tmux send-keys` to type `claude` into the new pane — it races with shell startup and loses keystrokes.
-- Call `tmux select-layout main-vertical` immediately after every `split-window`. Without it, the right column is not guaranteed to be evenly divided and may even push the Director off the left-main slot.
-- `HIKYAKU_*` env vars in the current pane are NOT inherited by new panes (the tmux server uses its own frozen environment). Forwarding with `-e` is the only reliable way to give the member access to the broker.
-- Project-level `.claude/settings.local.json` must already allow `Bash(hikyaku:*)`. Do **not** pass `--allowedTools` or `--permission-mode bypassPermissions` — rely on project settings, which the peer inherits by being launched in the same project directory.
-- The prompt must be inline and self-contained. List the exact role, the target `agent_id`, and the expected cleanup. Do not stage the prompt through a temp file and do not write chat-style instructions.
+The command handles everything atomically: registering the agent, forwarding `HIKYAKU_URL`, `HIKYAKU_API_KEY`, and `HIKYAKU_AGENT_ID` to the new pane via `-e` flags, spawning `claude` with the prompt, and rebalancing the layout. No `printenv` step is needed.
 
 ### Shut down a member
 
-After the member has deregistered from the broker, the Director shuts down its Claude Code session gracefully by sending `/exit` to the member's pane, then rebalances the layout:
-
 ```bash
-tmux send-keys -t <member-pane-id> '/exit' Enter
-tmux select-layout main-vertical
+hikyaku member delete --agent-id $DIRECTOR_ID --member-id <member-agent-id>
 ```
 
-`/exit` quits `claude` cleanly, which in turn closes the tmux pane because `claude` was the pane's root process. The immediately-following `select-layout main-vertical` re-equalizes the remaining members in the right column. Do **not** use `tmux kill-pane` — that terminates the session abruptly and bypasses any in-flight cleanup inside the peer.
+The command deregisters the agent first (so a failure preserves the pane for retry), then sends `/exit` to the pane, then rebalances the layout.
 
 After every member is shut down, the Director deregisters itself and stops the `/loop` monitor:
 
@@ -258,3 +372,4 @@ Messages are modeled as A2A Tasks with this lifecycle:
 - `HIKYAKU_URL` without an `http://` / `https://` scheme causes `Request URL is missing an 'http://' or 'https://' protocol`
 - Network errors and API errors are printed to stderr and exit with non-zero code
 - Use `hikyaku --json <cmd>` for machine-parseable output (including errors)
+- `member` commands require a tmux session (`TMUX` env var must be set) and exit with "hikyaku member commands must be run inside a tmux session" if not

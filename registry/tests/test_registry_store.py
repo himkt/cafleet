@@ -25,6 +25,7 @@ exercised here.
   |-------------------------------------|----------------------------------|
   | create_api_key                      | TestCreateApiKey                 |
   | create_agent                        | TestCreateAgent                  |
+  | create_agent_with_placement         | TestCreateAgentWithPlacement     |
   | get_agent                           | TestGetAgent                     |
   | list_active_agents                  | TestListActiveAgents             |
   | deregister_agent                    | TestDeregisterAgent              |
@@ -36,6 +37,7 @@ exercised here.
   | is_key_owner                        | TestIsKeyOwner                   |
   | get_agent_name                      | TestGetAgentName                 |
   | list_deregistered_agents_with_tasks | TestListDeregisteredAgentsWithTasks |
+  | list_placements_for_director        | TestListPlacementsForDirector    |
 
 ## Design-doc-named tests
 
@@ -216,6 +218,111 @@ class TestCreateAgent:
 
 
 # ---------------------------------------------------------------------------
+# create_agent_with_placement
+# ---------------------------------------------------------------------------
+
+
+class TestCreateAgentWithPlacement:
+    """Tests for ``RegistryStore.create_agent_with_placement``.
+
+    ``create_agent_with_placement`` is a superset of ``create_agent`` that
+    optionally writes an ``agent_placements`` row in the same transaction.
+    The old ``create_agent`` delegates to this method with
+    ``placement=None`` so there is one code path for both flows.
+    """
+
+    async def test_create_agent_with_placement(self, store):
+        """Both the agent row and the ``agent_placements`` row are created
+        atomically. The placement row has the correct fields.
+
+        DESIGN-DOC-NAMED test (Tests § registry/tests/).
+        """
+        from hikyaku_registry.models import PlacementCreate
+
+        api_key, _, _ = await _make_owner_with_key(store)
+        director = await store.create_agent(
+            "Director", "Lead agent", None, api_key=api_key
+        )
+
+        placement = PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="main",
+            tmux_window_id="@3",
+            tmux_pane_id=None,
+        )
+        result = await store.create_agent_with_placement(
+            name="Member-A",
+            description="Test member",
+            skills=None,
+            api_key=api_key,
+            placement=placement,
+        )
+
+        assert "agent_id" in result
+        assert result["name"] == "Member-A"
+        assert "registered_at" in result
+
+        # Verify agent was created and is active
+        agent = await store.get_agent(result["agent_id"])
+        assert agent is not None
+        assert agent["status"] == "active"
+
+        # Verify placement was created with correct fields
+        p = await store.get_placement(agent_id=result["agent_id"])
+        assert p is not None
+        assert p["director_agent_id"] == director["agent_id"]
+        assert p["tmux_session"] == "main"
+        assert p["tmux_window_id"] == "@3"
+        assert p["tmux_pane_id"] is None, "pending placement has NULL pane_id"
+        assert "created_at" in p
+
+    async def test_without_placement_creates_agent_only(self, store):
+        """Calling with ``placement=None`` behaves like plain ``create_agent`` —
+        no ``agent_placements`` row is written."""
+        api_key, _, _ = await _make_owner_with_key(store)
+        result = await store.create_agent_with_placement(
+            name="Plain Agent",
+            description="No placement",
+            skills=None,
+            api_key=api_key,
+            placement=None,
+        )
+        assert "agent_id" in result
+        assert result["name"] == "Plain Agent"
+
+        p = await store.get_placement(agent_id=result["agent_id"])
+        assert p is None
+
+    async def test_placement_with_pane_id(self, store):
+        """When ``tmux_pane_id`` is provided (non-NULL), it is stored
+        correctly on the placement row."""
+        from hikyaku_registry.models import PlacementCreate
+
+        api_key, _, _ = await _make_owner_with_key(store)
+        director = await store.create_agent("Dir", "d", None, api_key=api_key)
+
+        placement = PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="work",
+            tmux_window_id="@5",
+            tmux_pane_id="%12",
+        )
+        result = await store.create_agent_with_placement(
+            name="Member-B",
+            description="Has pane",
+            skills=None,
+            api_key=api_key,
+            placement=placement,
+        )
+
+        p = await store.get_placement(agent_id=result["agent_id"])
+        assert p is not None
+        assert p["tmux_session"] == "work"
+        assert p["tmux_window_id"] == "@5"
+        assert p["tmux_pane_id"] == "%12"
+
+
+# ---------------------------------------------------------------------------
 # get_agent
 # ---------------------------------------------------------------------------
 
@@ -334,6 +441,51 @@ class TestDeregisterAgent:
     async def test_returns_false_for_missing_agent(self, store):
         result = await store.deregister_agent("00000000-0000-4000-8000-000000000000")
         assert result is False
+
+    async def test_deregister_cascades_placement(self, store):
+        """Deregistering an agent also hard-deletes its ``agent_placements`` row.
+
+        DESIGN-DOC-NAMED test (Tests § registry/tests/):
+
+          "placement row removed on soft-deregister"
+
+        The placement row has no historical value and must not outlive
+        the agent it describes. ``deregister_agent`` extends the existing
+        soft-delete with an explicit ``DELETE FROM agent_placements
+        WHERE agent_id = ?`` in the same session transaction.
+        """
+        from hikyaku_registry.models import PlacementCreate
+
+        api_key, _, _ = await _make_owner_with_key(store)
+        director = await store.create_agent("Dir", "d", None, api_key=api_key)
+
+        placement = PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="main",
+            tmux_window_id="@3",
+            tmux_pane_id="%7",
+        )
+        member = await store.create_agent_with_placement(
+            name="Member",
+            description="Will be deregistered",
+            skills=None,
+            api_key=api_key,
+            placement=placement,
+        )
+
+        # Pre-condition: placement exists
+        assert await store.get_placement(agent_id=member["agent_id"]) is not None
+
+        # Deregister
+        result = await store.deregister_agent(member["agent_id"])
+        assert result is True
+
+        # Agent is soft-deleted
+        agent = await store.get_agent(member["agent_id"])
+        assert agent["status"] == "deregistered"
+
+        # Placement row is hard-deleted
+        assert await store.get_placement(agent_id=member["agent_id"]) is None
 
 
 # ---------------------------------------------------------------------------
@@ -698,3 +850,189 @@ class TestListDeregisteredAgentsWithTasks:
         assert len(result) == 1
         assert result[0]["agent_id"] == agent["agent_id"]
         assert result[0]["name"] == "a"
+
+
+# ---------------------------------------------------------------------------
+# list_placements_for_director (tenant-scoped)
+# ---------------------------------------------------------------------------
+
+
+class TestListPlacementsForDirector:
+    """Tests for ``RegistryStore.list_placements_for_director``.
+
+    DESIGN-DOC-NAMED test (Tests § registry/tests/):
+
+      "cross-tenant isolation"
+
+    The method joins ``agent_placements`` through ``agents`` so the
+    tenant filter flows through. Cross-tenant placement rows are
+    structurally impossible, but the query must still enforce the
+    ``tenant_id`` filter on the join so that a tenant A director
+    cannot see tenant B members even if the director_agent_id happens
+    to be the same string (structurally impossible via UUIDs, but
+    defense-in-depth matters for the query contract).
+    """
+
+    async def test_list_placements_for_director_tenant_scoped(self, store):
+        """Only agents in the specified tenant whose
+        ``placement.director_agent_id`` matches are returned."""
+        from hikyaku_registry.models import PlacementCreate
+
+        api_key, api_key_hash, _ = await _make_owner_with_key(store)
+        dir_a = await store.create_agent("Dir-A", "d", None, api_key=api_key)
+        dir_b = await store.create_agent("Dir-B", "d", None, api_key=api_key)
+
+        # Two members under dir_a
+        await store.create_agent_with_placement(
+            name="A-Member-1",
+            description="d",
+            skills=None,
+            api_key=api_key,
+            placement=PlacementCreate(
+                director_agent_id=dir_a["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@1",
+                tmux_pane_id="%1",
+            ),
+        )
+        await store.create_agent_with_placement(
+            name="A-Member-2",
+            description="d",
+            skills=None,
+            api_key=api_key,
+            placement=PlacementCreate(
+                director_agent_id=dir_a["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@1",
+                tmux_pane_id="%2",
+            ),
+        )
+
+        # One member under dir_b (same tenant)
+        await store.create_agent_with_placement(
+            name="B-Member-1",
+            description="d",
+            skills=None,
+            api_key=api_key,
+            placement=PlacementCreate(
+                director_agent_id=dir_b["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@2",
+                tmux_pane_id="%3",
+            ),
+        )
+
+        # dir_a sees only its two members
+        members_a = await store.list_placements_for_director(
+            tenant_id=api_key_hash, director_agent_id=dir_a["agent_id"]
+        )
+        names_a = {m["name"] for m in members_a}
+        assert names_a == {"A-Member-1", "A-Member-2"}
+
+        # dir_b sees only its one member
+        members_b = await store.list_placements_for_director(
+            tenant_id=api_key_hash, director_agent_id=dir_b["agent_id"]
+        )
+        names_b = {m["name"] for m in members_b}
+        assert names_b == {"B-Member-1"}
+
+    async def test_cross_tenant_isolation(self, store):
+        """Members in tenant B are not visible when querying tenant A,
+        even when passing the same ``director_agent_id``."""
+        from hikyaku_registry.models import PlacementCreate
+
+        api_key_a, hash_a, _ = await _make_owner_with_key(store)
+        api_key_b, hash_b, _ = await _make_owner_with_key(store)
+
+        dir_a = await store.create_agent("Dir-A", "d", None, api_key=api_key_a)
+        dir_b = await store.create_agent("Dir-B", "d", None, api_key=api_key_b)
+
+        await store.create_agent_with_placement(
+            name="A-Member",
+            description="d",
+            skills=None,
+            api_key=api_key_a,
+            placement=PlacementCreate(
+                director_agent_id=dir_a["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@1",
+                tmux_pane_id="%1",
+            ),
+        )
+        await store.create_agent_with_placement(
+            name="B-Member",
+            description="d",
+            skills=None,
+            api_key=api_key_b,
+            placement=PlacementCreate(
+                director_agent_id=dir_b["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@2",
+                tmux_pane_id="%2",
+            ),
+        )
+
+        # Querying tenant_a with dir_b (wrong tenant) returns empty
+        result = await store.list_placements_for_director(
+            tenant_id=hash_a, director_agent_id=dir_b["agent_id"]
+        )
+        assert result == []
+
+        # Querying tenant_a with dir_a returns only A-Member
+        result = await store.list_placements_for_director(
+            tenant_id=hash_a, director_agent_id=dir_a["agent_id"]
+        )
+        assert len(result) == 1
+        assert result[0]["name"] == "A-Member"
+
+    async def test_empty_when_no_members(self, store):
+        """A director with no members returns an empty list."""
+        api_key, api_key_hash, _ = await _make_owner_with_key(store)
+        director = await store.create_agent("Dir", "d", None, api_key=api_key)
+
+        result = await store.list_placements_for_director(
+            tenant_id=api_key_hash, director_agent_id=director["agent_id"]
+        )
+        assert result == []
+
+    async def test_excludes_deregistered_members(self, store):
+        """Deregistered members (whose placement rows are hard-deleted)
+        do not appear in the list."""
+        from hikyaku_registry.models import PlacementCreate
+
+        api_key, api_key_hash, _ = await _make_owner_with_key(store)
+        director = await store.create_agent("Dir", "d", None, api_key=api_key)
+
+        await store.create_agent_with_placement(
+            name="Active",
+            description="d",
+            skills=None,
+            api_key=api_key,
+            placement=PlacementCreate(
+                director_agent_id=director["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@1",
+                tmux_pane_id="%1",
+            ),
+        )
+        m2 = await store.create_agent_with_placement(
+            name="Gone",
+            description="d",
+            skills=None,
+            api_key=api_key,
+            placement=PlacementCreate(
+                director_agent_id=director["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@1",
+                tmux_pane_id="%2",
+            ),
+        )
+
+        # Deregister m2 — should remove its placement row
+        await store.deregister_agent(m2["agent_id"])
+
+        result = await store.list_placements_for_director(
+            tenant_id=api_key_hash, director_agent_id=director["agent_id"]
+        )
+        assert len(result) == 1
+        assert result[0]["name"] == "Active"

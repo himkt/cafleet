@@ -1,7 +1,7 @@
 # Hikyaku Member Lifecycle
 
-**Status**: Approved
-**Progress**: 0/44 tasks complete
+**Status**: Complete
+**Progress**: 44/44 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -10,19 +10,19 @@ Introduce a `hikyaku member` CLI subcommand group that wraps the two-step "regis
 
 ## Success Criteria
 
-- [ ] `.claude/settings.json` contains zero `Bash(tmux *)` allow entries and zero `Bash(printenv HIKYAKU_URL HIKYAKU_API_KEY)` entry
-- [ ] `hikyaku member create --agent-id <director> --name <n> --description <d> -- "<prompt>"` atomically (a) registers a new agent, (b) writes an `agent_placements` row, and (c) spawns a `claude` pane in the Director's own tmux window
-- [ ] If step (c) fails, step (a) is rolled back via `DELETE /api/v1/agents/{new_id}` before the CLI exits non-zero
-- [ ] The spawned pane is created in the Director's window regardless of which window the user is currently focused on, by resolving `tmux display-message -p -t "$TMUX_PANE" '#{window_id}'` at create time
-- [ ] `hikyaku member delete --agent-id <director> --member-id <target>` reads the placement row, deregisters the agent (which cascade-deletes the placement row), **then** sends `/exit` to the pane — in that order, so a deregister failure leaves both agent and pane intact for safe retry
-- [ ] `hikyaku member list --agent-id <director>` returns all agents currently bound to a placement row whose `director_agent_id` equals `<director>`, tenant-scoped
-- [ ] A new `agent_placements` table exists in the registry schema, declared in `db/models.py` and created by an Alembic migration (`0002_add_agent_placements.py`) that is idempotent under `db init`
-- [ ] The `DELETE /api/v1/agents/{agent_id}` endpoint accepts the request when `X-Agent-Id` equals either the target `agent_id` OR the `director_agent_id` recorded on the target's placement row
-- [ ] Every affected documentation file is updated *before* any code is written: `ARCHITECTURE.md`, `docs/`, `README.md`, `.claude/skills/hikyaku/SKILL.md`, `plugins/*/skills/hikyaku/SKILL.md`, and this design doc itself
-- [ ] `hikyaku member list` output includes `status`, `session`, `window_id`, `pane_id` columns (text) and matching fields (JSON), sourced from `agent_placements` joined into `agents`
-- [ ] `hikyaku member capture --agent-id <director> --member-id <target>` returns the last N lines of the target pane via the same `tmux.py` subprocess helper module, with cross-Director capture rejected at the CLI layer (defense-in-depth check against `placement.director_agent_id`; server-side enforcement is limited to tenant scoping by design)
-- [ ] Raw `tmux capture-pane` and `tmux list-panes` invocations are no longer documented in `.claude/skills/hikyaku/SKILL.md` — the skill points users at `hikyaku member list` / `hikyaku member capture` instead
-- [ ] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //registry:test`, and `mise //client:test` all pass
+- [x] `.claude/settings.json` contains zero `Bash(tmux *)` allow entries and zero `Bash(printenv HIKYAKU_URL HIKYAKU_API_KEY)` entry
+- [x] `hikyaku member create --agent-id <director> --name <n> --description <d> -- "<prompt>"` atomically (a) registers a new agent, (b) writes an `agent_placements` row, and (c) spawns a `claude` pane in the Director's own tmux window
+- [x] If step (c) fails, step (a) is rolled back via `DELETE /api/v1/agents/{new_id}` before the CLI exits non-zero
+- [x] The spawned pane is created in the Director's window regardless of which window the user is currently focused on, by resolving `tmux display-message -p -t "$TMUX_PANE" '#{window_id}'` at create time
+- [x] `hikyaku member delete --agent-id <director> --member-id <target>` reads the placement row, deregisters the agent (which cascade-deletes the placement row), **then** sends `/exit` to the pane — in that order, so a deregister failure leaves both agent and pane intact for safe retry
+- [x] `hikyaku member list --agent-id <director>` returns all agents currently bound to a placement row whose `director_agent_id` equals `<director>`, tenant-scoped
+- [x] A new `agent_placements` table exists in the registry schema, declared in `db/models.py` and created by an Alembic migration (`0003_add_agent_placements.py`) that is idempotent under `db init`
+- [x] The `DELETE /api/v1/agents/{agent_id}` endpoint accepts the request when `X-Agent-Id` equals either the target `agent_id` OR the `director_agent_id` recorded on the target's placement row
+- [x] Every affected documentation file is updated *before* any code is written: `ARCHITECTURE.md`, `docs/`, `README.md`, `.claude/skills/hikyaku/SKILL.md`, `plugins/*/skills/hikyaku/SKILL.md`, and this design doc itself
+- [x] `hikyaku member list` output includes `status`, `session`, `window_id`, `pane_id` columns (text) and matching fields (JSON), sourced from `agent_placements` joined into `agents`
+- [x] `hikyaku member capture --agent-id <director> --member-id <target>` returns the last N lines of the target pane via the same `tmux.py` subprocess helper module, with cross-Director capture rejected at the CLI layer (defense-in-depth check against `placement.director_agent_id`; server-side enforcement is limited to tenant scoping by design)
+- [x] Raw `tmux capture-pane` and `tmux list-panes` invocations are no longer documented in `.claude/skills/hikyaku/SKILL.md` — the skill points users at `hikyaku member list` / `hikyaku member capture` instead
+- [x] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //registry:test`, and `mise //client:test` all pass
 
 ## Non-goals
 
@@ -1191,12 +1191,12 @@ All tmux interaction is mocked via `monkeypatch.setattr(hikyaku_client.tmux, "_r
 
 Per `.claude/rules/design-doc-numbering.md`, documentation is updated before any code. Every affected doc file must reflect the new CLI surface at the end of this step.
 
-- [ ] Update `ARCHITECTURE.md` — add an `agent_placements` table entry to the schema overview; add a "Member lifecycle" paragraph describing the atomic register + split-window + placement flow <!-- completed: -->
-- [ ] Update `docs/` — add or extend `docs/cli/hikyaku-member.md` with the full `create`/`delete`/`list`/`capture` reference, including the rollback semantics and the `TMUX_PANE` detection rule <!-- completed: -->
-- [ ] Update `README.md` via `/update-readme` skill to pick up the new CLI surface and the simplified `.claude/settings.json` footprint <!-- completed: -->
-- [ ] Rewrite `.claude/skills/hikyaku/SKILL.md` — add Member Create/Delete/List/Capture subsections under Command Reference, replace Multi-Session Coordination spawn/shutdown recipes (and any raw `tmux list-panes`/`tmux capture-pane` invocations) with the new CLI, remove the printenv literal-paste block, and add the external `agent-team-supervision` skill limitation note <!-- completed: -->
-- [ ] Mirror the SKILL.md changes into every `plugins/*/skills/hikyaku/SKILL.md` copy that exists in this repo <!-- completed: -->
-- [ ] Update `.claude/rules/commands.md` if any new mise task is introduced (expected: none) <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` — add an `agent_placements` table entry to the schema overview; add a "Member lifecycle" paragraph describing the atomic register + split-window + placement flow <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `docs/` — add or extend `docs/cli/hikyaku-member.md` with the full `create`/`delete`/`list`/`capture` reference, including the rollback semantics and the `TMUX_PANE` detection rule <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `README.md` via `/update-readme` skill to pick up the new CLI surface and the simplified `.claude/settings.json` footprint <!-- completed: 2026-04-12T12:00 -->
+- [x] Rewrite `.claude/skills/hikyaku/SKILL.md` — add Member Create/Delete/List/Capture subsections under Command Reference, replace Multi-Session Coordination spawn/shutdown recipes (and any raw `tmux list-panes`/`tmux capture-pane` invocations) with the new CLI, remove the printenv literal-paste block, and add the external `agent-team-supervision` skill limitation note <!-- completed: 2026-04-12T12:00 -->
+- [x] Mirror the SKILL.md changes into every `plugins/*/skills/hikyaku/SKILL.md` copy that exists in this repo <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `.claude/rules/commands.md` if any new mise task is introduced (expected: none) <!-- completed: 2026-04-12T12:00 -->
 
 ### Step 2: Database schema
 
@@ -1224,25 +1224,25 @@ Per `.claude/rules/design-doc-numbering.md`, documentation is updated before any
 
 ### Step 5: Client — tmux helper
 
-- [ ] Create `client/src/hikyaku_client/tmux.py` as specified in "Client-side changes → tmux.py" above, including `TmuxError`, `DirectorContext`, `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit(target_pane_id, ignore_missing=False)`, `_PANE_GONE_MARKERS`, and `_run`. The `ignore_missing=True` branch matches the captured stderr against `_PANE_GONE_MARKERS` so the CLI can call `send_exit(..., ignore_missing=True)` during `member delete` without caring whether the user already closed the pane manually. <!-- completed: -->
-- [ ] Add `capture_pane(target_pane_id, lines=80)` helper to `client/src/hikyaku_client/tmux.py` that invokes `tmux capture-pane -p -t <pane_id> -S -<lines>` and returns the raw stdout. Guard against `lines <= 0` with a `TmuxError`. Unlike `send_exit`, the helper never swallows "can't find pane" — capture is a read and the caller needs that signal. <!-- completed: -->
+- [x] Create `client/src/hikyaku_client/tmux.py` as specified in "Client-side changes → tmux.py" above, including `TmuxError`, `DirectorContext`, `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit(target_pane_id, ignore_missing=False)`, `_PANE_GONE_MARKERS`, and `_run`. The `ignore_missing=True` branch matches the captured stderr against `_PANE_GONE_MARKERS` so the CLI can call `send_exit(..., ignore_missing=True)` during `member delete` without caring whether the user already closed the pane manually. <!-- completed: 2026-04-12T17:30 -->
+- [x] Add `capture_pane(target_pane_id, lines=80)` helper to `client/src/hikyaku_client/tmux.py` that invokes `tmux capture-pane -p -t <pane_id> -S -<lines>` and returns the raw stdout. Guard against `lines <= 0` with a `TmuxError`. Unlike `send_exit`, the helper never swallows "can't find pane" — capture is a read and the caller needs that signal. <!-- completed: 2026-04-12T17:30 -->
 
 ### Step 6: Client — api.py
 
-- [ ] Extend `register_agent` in `client/src/hikyaku_client/api.py` to accept optional `placement` and `director_agent_id` kwargs as specified. When `director_agent_id` is provided, set the `X-Agent-Id` header. <!-- completed: -->
-- [ ] Add `patch_placement(broker_url, api_key, director_agent_id, member_agent_id, pane_id)` helper that issues `PATCH /api/v1/agents/{member_agent_id}/placement` with `X-Agent-Id: <director>` and body `{"tmux_pane_id": pane_id}` <!-- completed: -->
-- [ ] Add `list_members(broker_url, api_key, director_agent_id)` helper that issues `GET /api/v1/agents?director_agent_id=<id>` with `X-Agent-Id: <director>` and returns `response["agents"]` <!-- completed: -->
-- [ ] Extend `deregister_agent` with an optional `caller_id` kwarg so the Director can deregister a member while sending its own id in `X-Agent-Id`. Default `caller_id=None` preserves the existing self-deregister behavior. Used by both `member delete` and the `member create` rollback path. <!-- completed: -->
+- [x] Extend `register_agent` in `client/src/hikyaku_client/api.py` to accept optional `placement` and `director_agent_id` kwargs as specified. When `director_agent_id` is provided, set the `X-Agent-Id` header. <!-- completed: 2026-04-12T17:35 -->
+- [x] Add `patch_placement(broker_url, api_key, director_agent_id, member_agent_id, pane_id)` helper that issues `PATCH /api/v1/agents/{member_agent_id}/placement` with `X-Agent-Id: <director>` and body `{"tmux_pane_id": pane_id}` <!-- completed: 2026-04-12T17:35 -->
+- [x] Add `list_members(broker_url, api_key, director_agent_id)` helper that issues `GET /api/v1/agents?director_agent_id=<id>` with `X-Agent-Id: <director>` and returns `response["agents"]` <!-- completed: 2026-04-12T17:35 -->
+- [x] Extend `deregister_agent` with an optional `caller_id` kwarg so the Director can deregister a member while sending its own id in `X-Agent-Id`. Default `caller_id=None` preserves the existing self-deregister behavior. Used by both `member delete` and the `member create` rollback path. <!-- completed: 2026-04-12T17:35 -->
 
 ### Step 7: Client — CLI member subgroup
 
-- [ ] Add `@cli.group() def member()` in `client/src/hikyaku_client/cli.py` <!-- completed: -->
-- [ ] Implement `member create` with the 4-step atomicity flow (register → split → patch → rebalance) and the rollback branches from "Atomicity and error handling" <!-- completed: -->
-- [ ] Implement `_resolve_prompt` helper that either joins `prompt_argv` or synthesizes the default prompt via `api.list_agents(broker_url, api_key, caller_id=director_id, agent_id=director_id)` (routes to `GET /api/v1/agents/{director_id}` — no new helper required) <!-- completed: -->
-- [ ] Implement `member delete` with the 4-step ordering (get → delete → /exit → rebalance) and the error matrix rules <!-- completed: -->
-- [ ] Implement `member list` that calls `list_members` and formats output via a new `format_member_list` in `output.py`, rendering `tmux_pane_id IS NULL` as `(pending)` in text mode and `null` in JSON <!-- completed: -->
-- [ ] Implement `member capture` that fetches the placement via `api.list_agents(..., caller_id, agent_id=member_id)`, verifies `placement.director_agent_id == --agent-id` (cross-Director guard), rejects pending placements, then calls `tmux.capture_pane(target_pane_id, lines)`. Text mode prints the raw buffer; `--json` emits `{member_agent_id, pane_id, lines, content}`. <!-- completed: -->
-- [ ] Add `format_member` / `format_member_list` to `client/src/hikyaku_client/output.py` <!-- completed: -->
+- [x] Add `@cli.group() def member()` in `client/src/hikyaku_client/cli.py` <!-- completed: 2026-04-12T17:50 -->
+- [x] Implement `member create` with the 4-step atomicity flow (register → split → patch → rebalance) and the rollback branches from "Atomicity and error handling" <!-- completed: 2026-04-12T17:50 -->
+- [x] Implement `_resolve_prompt` helper that either joins `prompt_argv` or synthesizes the default prompt via `api.list_agents(broker_url, api_key, caller_id=director_id, agent_id=director_id)` (routes to `GET /api/v1/agents/{director_id}` — no new helper required) <!-- completed: 2026-04-12T17:50 -->
+- [x] Implement `member delete` with the 4-step ordering (get → delete → /exit → rebalance) and the error matrix rules <!-- completed: 2026-04-12T17:50 -->
+- [x] Implement `member list` that calls `list_members` and formats output via a new `format_member_list` in `output.py`, rendering `tmux_pane_id IS NULL` as `(pending)` in text mode and `null` in JSON <!-- completed: 2026-04-12T17:50 -->
+- [x] Implement `member capture` that fetches the placement via `api.list_agents(..., caller_id, agent_id=member_id)`, verifies `placement.director_agent_id == --agent-id` (cross-Director guard), rejects pending placements, then calls `tmux.capture_pane(target_pane_id, lines)`. Text mode prints the raw buffer; `--json` emits `{member_agent_id, pane_id, lines, content}`. <!-- completed: 2026-04-12T17:50 -->
+- [x] Add `format_member` / `format_member_list` to `client/src/hikyaku_client/output.py` <!-- completed: 2026-04-12T17:50 -->
 
 ### Step 8: Tests
 

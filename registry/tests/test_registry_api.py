@@ -653,3 +653,354 @@ class TestTenantScopedGetAgent:
         assert cross_resp.status_code == 404
         assert ghost_resp.status_code == 404
         assert cross_resp.json()["error"]["code"] == ghost_resp.json()["error"]["code"]
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/agents with placement — Register Agent with Placement
+# ---------------------------------------------------------------------------
+
+
+class TestRegisterAgentWithPlacement:
+    """Tests for POST /api/v1/agents with the optional ``placement`` body field.
+
+    When ``placement`` is provided, the endpoint requires an ``X-Agent-Id``
+    header matching ``placement.director_agent_id`` and validates that the
+    director belongs to the same tenant as the registration API key.
+    """
+
+    async def test_register_with_placement_sets_tmux_fields(self, api_env):
+        """Registration with placement returns 201 and includes placement in response."""
+        client, api_key = api_env["client"], api_env["api_key"]
+
+        # Register director first (plain registration)
+        director = await _register_agent(client, api_key, name="Director")
+
+        # Register member with placement
+        body = {
+            "name": "Member-A",
+            "description": "Placed member",
+            "placement": {
+                "director_agent_id": director["agent_id"],
+                "tmux_session": "main",
+                "tmux_window_id": "@3",
+                "tmux_pane_id": None,
+            },
+        }
+        headers = {
+            **_auth_header(api_key),
+            "x-agent-id": director["agent_id"],
+        }
+        resp = await client.post("/api/v1/agents", json=body, headers=headers)
+        assert resp.status_code == 201
+
+        data = resp.json()
+        assert "placement" in data
+        assert data["placement"]["director_agent_id"] == director["agent_id"]
+        assert data["placement"]["tmux_session"] == "main"
+        assert data["placement"]["tmux_window_id"] == "@3"
+        assert data["placement"]["tmux_pane_id"] is None
+        assert "created_at" in data["placement"]
+
+    async def test_register_with_placement_requires_x_agent_id(self, api_env):
+        """Registration with placement but no X-Agent-Id header returns 401."""
+        client, api_key = api_env["client"], api_env["api_key"]
+
+        director = await _register_agent(client, api_key, name="Director")
+
+        body = {
+            "name": "Member-B",
+            "description": "Should fail",
+            "placement": {
+                "director_agent_id": director["agent_id"],
+                "tmux_session": "main",
+                "tmux_window_id": "@3",
+            },
+        }
+        # No X-Agent-Id header — only Authorization
+        resp = await client.post(
+            "/api/v1/agents", json=body, headers=_auth_header(api_key)
+        )
+        assert resp.status_code == 401
+
+        data = resp.json()
+        assert data["error"]["code"] == "UNAUTHORIZED"
+
+    async def test_register_with_placement_cross_tenant_director_403(self, api_env):
+        """Placement pointing to a director in a different tenant returns 403."""
+        client, store = api_env["client"], api_env["store"]
+        api_key_a = api_env["api_key"]
+
+        # Register director in tenant A
+        director = await _register_agent(client, api_key_a, name="Director-A")
+
+        # Create a second tenant
+        api_key_b, _tenant_b = await _new_tenant(store, "auth0|owner-b")
+
+        # Try to register member in tenant B with director from tenant A
+        body = {
+            "name": "Member-CrossTenant",
+            "description": "Should fail",
+            "placement": {
+                "director_agent_id": director["agent_id"],
+                "tmux_session": "main",
+                "tmux_window_id": "@3",
+            },
+        }
+        headers = {
+            **_auth_header(api_key_b),
+            "x-agent-id": director["agent_id"],
+        }
+        resp = await client.post("/api/v1/agents", json=body, headers=headers)
+        assert resp.status_code == 403
+
+        data = resp.json()
+        assert data["error"]["code"] == "FORBIDDEN"
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/v1/agents/{agent_id} — Director-allowed deregister
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteAgentAsDirector:
+    """Tests for DELETE /api/v1/agents/{agent_id} with director authorization.
+
+    The design doc relaxes the DELETE caller check: the director of a
+    member's placement is allowed to deregister that member, in addition
+    to the member itself (self-deregister).
+    """
+
+    async def test_delete_agent_as_director_allowed(self, api_env):
+        """Director can deregister a member they placed — returns 204."""
+        client, app, store = api_env["client"], api_env["app"], api_env["store"]
+        api_key, tenant_id = api_env["api_key"], api_env["tenant_id"]
+
+        from hikyaku_registry.models import PlacementCreate
+
+        director = await store.create_agent(
+            name="Director", description="Lead", skills=None, api_key=api_key
+        )
+        placement = PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="main",
+            tmux_window_id="@3",
+            tmux_pane_id=None,
+        )
+        member = await store.create_agent_with_placement(
+            name="Member", description="Worker", skills=None,
+            api_key=api_key, placement=placement,
+        )
+
+        _override_auth_as_tenant(app, director["agent_id"], tenant_id)
+
+        resp = await client.delete(f"/api/v1/agents/{member['agent_id']}")
+        assert resp.status_code == 204
+
+    async def test_delete_agent_as_unrelated_agent_403(self, api_env):
+        """Unrelated agent (neither self nor director) gets 403."""
+        client, app, store = api_env["client"], api_env["app"], api_env["store"]
+        api_key, tenant_id = api_env["api_key"], api_env["tenant_id"]
+
+        from hikyaku_registry.models import PlacementCreate
+
+        director = await store.create_agent(
+            name="Director", description="Lead", skills=None, api_key=api_key
+        )
+        placement = PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="main",
+            tmux_window_id="@3",
+            tmux_pane_id=None,
+        )
+        member = await store.create_agent_with_placement(
+            name="Member", description="Worker", skills=None,
+            api_key=api_key, placement=placement,
+        )
+        bystander = await store.create_agent(
+            name="Bystander", description="Unrelated", skills=None, api_key=api_key
+        )
+
+        # Auth as bystander — not the member, not the director
+        _override_auth_as_tenant(app, bystander["agent_id"], tenant_id)
+
+        resp = await client.delete(f"/api/v1/agents/{member['agent_id']}")
+        assert resp.status_code == 403
+
+        data = resp.json()
+        assert data["error"]["code"] == "FORBIDDEN"
+
+    async def test_delete_agent_removes_placement(self, api_env):
+        """After director deletes member, the placement row is also removed."""
+        client, app, store = api_env["client"], api_env["app"], api_env["store"]
+        api_key, tenant_id = api_env["api_key"], api_env["tenant_id"]
+
+        from hikyaku_registry.models import PlacementCreate
+
+        director = await store.create_agent(
+            name="Director", description="Lead", skills=None, api_key=api_key
+        )
+        placement = PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="main",
+            tmux_window_id="@3",
+            tmux_pane_id=None,
+        )
+        member = await store.create_agent_with_placement(
+            name="Member", description="Worker", skills=None,
+            api_key=api_key, placement=placement,
+        )
+
+        # Verify placement exists before delete
+        p = await store.get_placement(member["agent_id"])
+        assert p is not None
+
+        _override_auth_as_tenant(app, director["agent_id"], tenant_id)
+
+        resp = await client.delete(f"/api/v1/agents/{member['agent_id']}")
+        assert resp.status_code == 204
+
+        # Placement should be gone after deregistration
+        p = await store.get_placement(member["agent_id"])
+        assert p is None
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/v1/agents/{agent_id}/placement — Update Placement
+# ---------------------------------------------------------------------------
+
+
+class TestPatchPlacement:
+    """Tests for PATCH /api/v1/agents/{agent_id}/placement.
+
+    Two-pass write pattern: the director registers a member with
+    ``tmux_pane_id=None`` (pending), then PATCHes the pane_id once the
+    tmux pane is actually spawned.
+    """
+
+    async def test_patch_placement_sets_pane_id(self, api_env):
+        """Director PATCHes pane_id on a pending placement — returns updated view."""
+        client, app, store = api_env["client"], api_env["app"], api_env["store"]
+        api_key, tenant_id = api_env["api_key"], api_env["tenant_id"]
+
+        from hikyaku_registry.models import PlacementCreate
+
+        director = await store.create_agent(
+            name="Director", description="Lead", skills=None, api_key=api_key
+        )
+        placement = PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="main",
+            tmux_window_id="@3",
+            tmux_pane_id=None,
+        )
+        member = await store.create_agent_with_placement(
+            name="Member", description="Worker", skills=None,
+            api_key=api_key, placement=placement,
+        )
+
+        _override_auth_as_tenant(app, director["agent_id"], tenant_id)
+
+        resp = await client.patch(
+            f"/api/v1/agents/{member['agent_id']}/placement",
+            json={"tmux_pane_id": "%42"},
+        )
+        assert resp.status_code == 200
+
+        data = resp.json()
+        assert data["tmux_pane_id"] == "%42"
+        assert data["director_agent_id"] == director["agent_id"]
+        assert data["tmux_session"] == "main"
+        assert data["tmux_window_id"] == "@3"
+
+    async def test_patch_placement_caller_must_be_director(self, api_env):
+        """Non-director caller trying to PATCH placement gets 403."""
+        client, app, store = api_env["client"], api_env["app"], api_env["store"]
+        api_key, tenant_id = api_env["api_key"], api_env["tenant_id"]
+
+        from hikyaku_registry.models import PlacementCreate
+
+        director = await store.create_agent(
+            name="Director", description="Lead", skills=None, api_key=api_key
+        )
+        placement = PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="main",
+            tmux_window_id="@3",
+            tmux_pane_id=None,
+        )
+        member = await store.create_agent_with_placement(
+            name="Member", description="Worker", skills=None,
+            api_key=api_key, placement=placement,
+        )
+
+        # Auth as the member itself — not the director
+        _override_auth_as_tenant(app, member["agent_id"], tenant_id)
+
+        resp = await client.patch(
+            f"/api/v1/agents/{member['agent_id']}/placement",
+            json={"tmux_pane_id": "%42"},
+        )
+        assert resp.status_code == 403
+
+        data = resp.json()
+        assert data["error"]["code"] == "FORBIDDEN"
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/agents?director_agent_id=X — List by Director
+# ---------------------------------------------------------------------------
+
+
+class TestListAgentsFilterByDirector:
+    """Tests for GET /api/v1/agents?director_agent_id=X.
+
+    When the ``director_agent_id`` query param is set, the endpoint returns
+    only active agents placed by that director (via
+    ``store.list_placements_for_director``), each including a ``placement``
+    object.
+    """
+
+    async def test_list_agents_filter_by_director(self, api_env):
+        """Filtering by director returns only members placed by that director."""
+        client, app, store = api_env["client"], api_env["app"], api_env["store"]
+        api_key, tenant_id = api_env["api_key"], api_env["tenant_id"]
+
+        from hikyaku_registry.models import PlacementCreate
+
+        director = await store.create_agent(
+            name="Director", description="Lead", skills=None, api_key=api_key
+        )
+
+        for name in ("Member-1", "Member-2"):
+            placement = PlacementCreate(
+                director_agent_id=director["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@3",
+                tmux_pane_id=None,
+            )
+            await store.create_agent_with_placement(
+                name=name, description="Worker", skills=None,
+                api_key=api_key, placement=placement,
+            )
+
+        # A plain agent with no placement — should not appear in filtered list
+        await store.create_agent(
+            name="Plain-Agent", description="No placement",
+            skills=None, api_key=api_key,
+        )
+
+        _override_auth_as_tenant(app, director["agent_id"], tenant_id)
+
+        resp = await client.get(
+            f"/api/v1/agents?director_agent_id={director['agent_id']}"
+        )
+        assert resp.status_code == 200
+
+        data = resp.json()
+        names = {a["name"] for a in data["agents"]}
+        assert names == {"Member-1", "Member-2"}
+
+        # Each returned agent should carry a placement object
+        for agent in data["agents"]:
+            assert agent["placement"] is not None
+            assert agent["placement"]["director_agent_id"] == director["agent_id"]
