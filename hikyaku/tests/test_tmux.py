@@ -123,7 +123,10 @@ class TestSplitWindow:
         tmux.split_window(
             target_window_id="@3",
             env={},
-            command=["claude", "Load Skill(hikyaku). Your agent_id is $HIKYAKU_AGENT_ID."],
+            command=[
+                "claude",
+                "Load Skill(hikyaku). Your agent_id is $HIKYAKU_AGENT_ID.",
+            ],
         )
         assert captured_args[-2] == "claude"
         assert "Load Skill(hikyaku)" in captured_args[-1]
@@ -143,7 +146,10 @@ class TestSplitWindow:
             command=["codex", "--approval-mode", "auto-edit", "Do the task"],
         )
         assert captured_args[-4:] == [
-            "codex", "--approval-mode", "auto-edit", "Do the task"
+            "codex",
+            "--approval-mode",
+            "auto-edit",
+            "Do the task",
         ]
 
     def test_env_vars_forwarded_as_flags(self, monkeypatch):

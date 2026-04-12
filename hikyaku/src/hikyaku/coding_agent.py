@@ -44,7 +44,7 @@ CODEX = CodingAgentConfig(
         "Your agent_id is $HIKYAKU_AGENT_ID.\n"
         "You are a member of the team led by {director_name} ({director_agent_id}).\n"
         "Check for instructions using `hikyaku poll --agent-id $HIKYAKU_AGENT_ID`.\n"
-        'Use `hikyaku ack --agent-id $HIKYAKU_AGENT_ID --task-id <id>` to acknowledge messages\n'
+        "Use `hikyaku ack --agent-id $HIKYAKU_AGENT_ID --task-id <id>` to acknowledge messages\n"
         'and `hikyaku send --agent-id $HIKYAKU_AGENT_ID --to <id> --text "..."` to reply.'
     ),
 )

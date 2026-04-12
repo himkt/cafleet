@@ -57,7 +57,9 @@ class AgentPlacement(Base):
     tmux_session: Mapped[str] = mapped_column(String, nullable=False)
     tmux_window_id: Mapped[str] = mapped_column(String, nullable=False)
     tmux_pane_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    coding_agent: Mapped[str] = mapped_column(String, nullable=False, server_default="claude")
+    coding_agent: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="claude"
+    )
     created_at: Mapped[str] = mapped_column(String, nullable=False)
 
     __table_args__ = (Index("idx_placements_director", "director_agent_id"),)

@@ -91,9 +91,7 @@ def format_member_list(members: list) -> str:
     if count == 0:
         return "0 members."
     lines = [f"{count} member{'s' if count != 1 else ''}:"]
-    header = (
-        "  agent_id        name      status  backend  session  window_id  pane_id  created_at"
-    )
+    header = "  agent_id        name      status  backend  session  window_id  pane_id  created_at"
     sep = (
         "  --------------  --------  ------  -------  -------  ---------  -------  "
         "--------------------"

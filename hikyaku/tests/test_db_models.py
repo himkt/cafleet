@@ -577,9 +577,7 @@ class TestAgentPlacementsSchema:
             )
         default = cols["coding_agent"].get("default")
         assert default is not None, "coding_agent should have a server default"
-        assert "claude" in default, (
-            f"server default should be 'claude', got: {default}"
-        )
+        assert "claude" in default, f"server default should be 'claude', got: {default}"
 
     @pytest.mark.asyncio
     async def test_coding_agent_defaults_to_claude_on_insert(self, session):
@@ -637,12 +635,8 @@ class TestAgentPlacementsSchema:
         """Explicitly setting coding_agent='claude' is stored correctly."""
         session.add(_make_session(session_id="ca-claude-sess"))
         await session.flush()
-        session.add(
-            _make_agent(agent_id="ca-claude-dir", session_id="ca-claude-sess")
-        )
-        session.add(
-            _make_agent(agent_id="ca-claude-mem", session_id="ca-claude-sess")
-        )
+        session.add(_make_agent(agent_id="ca-claude-dir", session_id="ca-claude-sess"))
+        session.add(_make_agent(agent_id="ca-claude-mem", session_id="ca-claude-sess"))
         await session.flush()
 
         session.add(

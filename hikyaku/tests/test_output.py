@@ -117,7 +117,7 @@ class TestFormatMemberList:
         result = format_member_list(members)
         lines = result.split("\n")
         # Find the data row (not header/separator)
-        data_lines = [l for l in lines if "Codex-B" in l]
+        data_lines = [line for line in lines if "Codex-B" in line]
         assert len(data_lines) == 1
         assert "codex" in data_lines[0]
 
@@ -141,7 +141,7 @@ class TestFormatMemberList:
         ]
         result = format_member_list(members)
         lines = result.split("\n")
-        data_lines = [l for l in lines if "Claude-B" in l]
+        data_lines = [line for line in lines if "Claude-B" in line]
         assert len(data_lines) == 1
         assert "claude" in data_lines[0]
 
@@ -164,7 +164,7 @@ class TestFormatMemberList:
         ]
         result = format_member_list(members)
         lines = result.split("\n")
-        data_lines = [l for l in lines if "Legacy-B" in l]
+        data_lines = [line for line in lines if "Legacy-B" in line]
         assert len(data_lines) == 1
         assert "claude" in data_lines[0]
 
@@ -202,8 +202,8 @@ class TestFormatMemberList:
         ]
         result = format_member_list(members)
         lines = result.split("\n")
-        claude_line = [l for l in lines if "Claude-M" in l][0]
-        codex_line = [l for l in lines if "Codex-M" in l][0]
+        claude_line = [line for line in lines if "Claude-M" in line][0]
+        codex_line = [line for line in lines if "Codex-M" in line][0]
         assert "claude" in claude_line
         assert "codex" in codex_line
 
