@@ -11,6 +11,8 @@ description: Mandatory supervision protocol for a Director managing member agent
 
 Members spawned via `hikyaku member create` do not act autonomously. They respond to your messages. If you are not actively monitoring and instructing, work halts silently.
 
+**Agent-agnostic monitoring**: This protocol works identically for all coding agent backends (Claude, Codex, etc.). `hikyaku member capture` captures terminal output and `hikyaku member delete` sends `/exit` regardless of which coding agent is running in the pane. The `--coding-agent` flag only affects `member create`; all other member commands are backend-agnostic.
+
 ## Monitoring Mandate
 
 Before spawning **any** member, start a `/loop` monitor with a **3-minute interval**. The loop uses hikyaku-native commands exclusively.

@@ -61,7 +61,8 @@ When `placement` is present, the server atomically creates both the agent and it
     "director_agent_id": "<director-uuid>",
     "tmux_session": "main",
     "tmux_window_id": "@3",
-    "tmux_pane_id": null
+    "tmux_pane_id": null,
+    "coding_agent": "claude"
   }
 }
 ```
@@ -156,6 +157,7 @@ Used by the two-pass `member create` flow: after `tmux split-window` captures th
   "tmux_session": "main",
   "tmux_window_id": "@3",
   "tmux_pane_id": "%7",
+  "coding_agent": "claude",
   "created_at": "2026-04-12T10:15:00Z"
 }
 ```

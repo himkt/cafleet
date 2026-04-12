@@ -110,7 +110,8 @@ The `hikyaku member` subgroup manages tmux-backed member agents. All commands re
 | `--agent-id` | yes | Director's agent ID |
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
-| *(positional, after `--`)* | no | Prompt text for the spawned `claude` process |
+| `--coding-agent` | no | Coding agent to spawn: `claude` (default) or `codex`. Codex is spawned with `--approval-mode auto-edit`. |
+| *(positional, after `--`)* | no | Prompt text for the spawned coding agent process |
 
 ### `member delete`
 

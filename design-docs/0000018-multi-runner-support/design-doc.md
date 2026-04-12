@@ -1,7 +1,7 @@
 # Multi-Runner Support (Codex Integration)
 
 **Status**: Approved
-**Progress**: 0/18 tasks complete
+**Progress**: 5/18 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -210,11 +210,11 @@ In `client/src/hikyaku_client/output.py`:
 
 ### Step 1: Documentation Updates
 
-- [ ] Update `ARCHITECTURE.md` with multi-runner support (CodingAgentConfig, --coding-agent flag) <!-- completed: -->
-- [ ] Update `docs/` with coding agent configuration details <!-- completed: -->
-- [ ] Update `README.md` to reflect new `--coding-agent` option <!-- completed: -->
-- [ ] Update `.claude/skills/hikyaku/SKILL.md` — document `--coding-agent` flag, add Codex example, update `member list` output format <!-- completed: -->
-- [ ] Update `.claude/skills/hikyaku-monitoring/SKILL.md` — add note that monitoring is agent-agnostic <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` with multi-runner support (CodingAgentConfig, --coding-agent flag) <!-- completed: 2026-04-12T15:00 -->
+- [x] Update `docs/` with coding agent configuration details <!-- completed: 2026-04-12T15:00 -->
+- [x] Update `README.md` to reflect new `--coding-agent` option <!-- completed: 2026-04-12T15:00 -->
+- [x] Update `.claude/skills/hikyaku/SKILL.md` — document `--coding-agent` flag, add Codex example, update `member list` output format <!-- completed: 2026-04-12T15:00 -->
+- [x] Update `.claude/skills/hikyaku-monitoring/SKILL.md` — add note that monitoring is agent-agnostic <!-- completed: 2026-04-12T15:00 -->
 
 ### Step 2: CodingAgentConfig Module
 
