@@ -71,3 +71,47 @@ def format_agent_list(agents: list) -> str:
         parts.append(f"[{i + 1}]")
         parts.append(format_agent(agent))
     return "\n".join(parts)
+
+
+def format_member(data: dict) -> str:
+    placement = data.get("placement", {}) or {}
+    lines = [
+        "Member registered and spawned.",
+        f"  agent_id:  {data.get('agent_id', '?')}",
+        f"  name:      {data.get('name', '?')}",
+        f"  pane_id:   {placement.get('tmux_pane_id', '?')}",
+        f"  window_id: {placement.get('tmux_window_id', '?')}",
+    ]
+    return "\n".join(lines)
+
+
+def format_member_list(members: list) -> str:
+    count = len(members)
+    if count == 0:
+        return "0 members."
+    lines = [f"{count} member{'s' if count != 1 else ''}:"]
+    header = (
+        "  agent_id        name      status  session  window_id  pane_id  created_at"
+    )
+    sep = (
+        "  --------------  --------  ------  -------  ---------  -------  "
+        "--------------------"
+    )
+    lines.append(header)
+    lines.append(sep)
+    for m in members:
+        placement = m.get("placement", {}) or {}
+        pane_id = placement.get("tmux_pane_id")
+        pane_display = pane_id if pane_id is not None else "(pending)"
+        agent_id = m.get("agent_id", "?")
+        if len(agent_id) > 14:
+            agent_id = agent_id[:12] + "…"
+        lines.append(
+            f"  {agent_id:<14}  {m.get('name', '?'):<8}  "
+            f"{m.get('status', 'active'):<6}  "
+            f"{placement.get('tmux_session', '?'):<7}  "
+            f"{placement.get('tmux_window_id', '?'):<9}  "
+            f"{pane_display:<7}  "
+            f"{m.get('registered_at', '?')}"
+        )
+    return "\n".join(lines)
