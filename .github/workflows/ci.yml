@@ -19,7 +19,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ty check
 
-  test-registry:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -29,16 +29,4 @@ jobs:
       - run: uv python install 3.13
       - run: uv sync
       - run: uv run pytest tests/ -v
-        working-directory: registry
-
-  test-client:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-      - run: uv python install 3.13
-      - run: uv sync
-      - run: uv run pytest tests/ -v
-        working-directory: client
+        working-directory: hikyaku

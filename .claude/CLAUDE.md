@@ -21,14 +21,12 @@ These files are the authoritative reference. Always verify design decisions and 
 
 A2A-native message broker + agent registry for coding agents.
 
-- **Design document**: `design-docs/0000001-a2a-registry-broker/design-doc.md` (Status: Approved)
-- **Design document**: `design-docs/0000002-access-control/design-doc.md` — Tenant isolation via shared API key (Status: Approved)
+- **Design document**: `design-docs/0000001-a2a-registry-broker/design-doc.md` (Status: Complete)
+- **Design document**: `design-docs/0000002-access-control/design-doc.md` — Tenant isolation via shared API key (Status: Complete)
 - **Design document**: `design-docs/0000010-sqlite-store-migration/design-doc.md` — SQLite + SQLAlchemy + Alembic store migration (Status: Complete)
-- **Monorepo structure** (uv workspace):
-  - `registry/` — `hikyaku-registry` (FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk)
-  - `client/` — `hikyaku-client` (click + httpx + a2a-sdk)
-- **Registry CLI command**: `hikyaku-registry` (with `db init` for schema management)
-- **Client CLI command**: `hikyaku`
+- **Single package** (uv workspace):
+  - `hikyaku/` — `hikyaku` (FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk + click + httpx)
+- **Unified CLI command**: `hikyaku` (with `db init` for schema management, `session` for namespace CRUD, and all agent/messaging commands)
 
 ## Tech Stack
 

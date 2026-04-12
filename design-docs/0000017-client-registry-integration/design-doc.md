@@ -1,7 +1,7 @@
 # Merge Client and Registry into a Single Package
 
 **Status**: Approved
-**Progress**: 0/32 tasks complete
+**Progress**: 32/32 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -10,11 +10,11 @@ Consolidate the two Python packages (`hikyaku-registry` and `hikyaku-client`) in
 
 ## Success Criteria
 
-- [ ] Single installable package `hikyaku` ships both server and CLI functionality
-- [ ] Unified `hikyaku` CLI replaces both `hikyaku` (client) and `hikyaku-registry` (admin) commands
-- [ ] All existing tests pass from a single `tests/` directory at the project root
-- [ ] `admin/` remains an independent workspace member building into `hikyaku/src/hikyaku/webui/`
-- [ ] `mise` tasks (`//hikyaku:test`, `//hikyaku:dev`, `//hikyaku:lint`) work correctly
+- [x] Single installable package `hikyaku` ships both server and CLI functionality
+- [x] Unified `hikyaku` CLI replaces both `hikyaku` (client) and `hikyaku-registry` (admin) commands
+- [x] All existing tests pass from a single `tests/` directory at the project root
+- [x] `admin/` remains an independent workspace member building into `hikyaku/src/hikyaku/webui/`
+- [x] `mise` tasks (`//hikyaku:test`, `//hikyaku:dev`, `//hikyaku:lint`) work correctly
 - [ ] CI pipeline passes with updated paths
 
 ---
@@ -345,71 +345,71 @@ client/                    # entire directory
 
 ### Step 1: Update Documentation
 
-- [ ] Update `ARCHITECTURE.md` to reflect single-package structure, new module paths, unified CLI <!-- completed: -->
-- [ ] Update `README.md` with new install/usage instructions <!-- completed: -->
-- [ ] Update `docs/` if any files reference old package names or CLI commands <!-- completed: -->
-- [ ] Update `.claude/CLAUDE.md` and `.claude/rules/commands.md` with new mise task paths <!-- completed: -->
-- [ ] Update affected `SKILL.md` files (hikyaku skill, update-readme skill) with new CLI surface <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` to reflect single-package structure, new module paths, unified CLI <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `README.md` with new install/usage instructions <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `docs/` if any files reference old package names or CLI commands <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `.claude/CLAUDE.md` and `.claude/rules/commands.md` with new mise task paths <!-- completed: 2026-04-12T12:00 -->
+- [x] Update affected `SKILL.md` files (hikyaku skill, update-readme skill) with new CLI surface <!-- completed: 2026-04-12T12:00 -->
 
 ### Step 2: Create Package Directory and Config
 
-- [ ] Create `hikyaku/` directory with `pyproject.toml` (merged dependencies, single console script) <!-- completed: -->
-- [ ] Create `hikyaku/mise.toml` (merged lint, format, dev, test tasks) <!-- completed: -->
-- [ ] Create `hikyaku/src/hikyaku/__init__.py` <!-- completed: -->
+- [x] Create `hikyaku/` directory with `pyproject.toml` (merged dependencies, single console script) <!-- completed: 2026-04-12T09:17 -->
+- [x] Create `hikyaku/mise.toml` (merged lint, format, dev, test tasks) <!-- completed: 2026-04-12T09:17 -->
+- [x] Create `hikyaku/src/hikyaku/__init__.py` <!-- completed: 2026-04-12T09:17 -->
 
 ### Step 3: Move Registry Source Files
 
-- [ ] Move all files from `registry/src/hikyaku_registry/` to `hikyaku/src/hikyaku/`, renaming `main.py` to `server.py` <!-- completed: -->
-- [ ] Move `db/`, `api/`, `alembic/`, `alembic.ini`, `webui/` subdirectories <!-- completed: -->
+- [x] Move all files from `registry/src/hikyaku_registry/` to `hikyaku/src/hikyaku/`, renaming `main.py` to `server.py` <!-- completed: 2026-04-12T09:20 -->
+- [x] Move `db/`, `api/`, `alembic/`, `alembic.ini`, `webui/` subdirectories <!-- completed: 2026-04-12T09:20 -->
 
 ### Step 4: Move Client Source Files
 
-- [ ] Move `client/src/hikyaku_client/api.py` to `hikyaku/src/hikyaku/broker_client.py` <!-- completed: -->
-- [ ] Move `output.py` and `tmux.py` to `hikyaku/src/hikyaku/` <!-- completed: -->
+- [x] Move `client/src/hikyaku_client/api.py` to `hikyaku/src/hikyaku/broker_client.py` <!-- completed: 2026-04-12T09:21 -->
+- [x] Move `output.py` and `tmux.py` to `hikyaku/src/hikyaku/` <!-- completed: 2026-04-12T09:21 -->
 
 ### Step 5: Merge CLIs
 
-- [ ] Merge registry CLI (`db`, `session` subgroups) and client CLI (`env` command, top-level commands, `member` subgroup) into single `hikyaku/src/hikyaku/cli.py` <!-- completed: -->
+- [x] Merge registry CLI (`db`, `session` subgroups) and client CLI (`env` command, top-level commands, `member` subgroup) into single `hikyaku/src/hikyaku/cli.py` <!-- completed: 2026-04-12T09:23 -->
 
 ### Step 6: Rewrite All Internal Imports
 
-- [ ] Replace `from hikyaku_registry` with `from hikyaku` in all source files <!-- completed: -->
-- [ ] Replace `from hikyaku_client` with `from hikyaku` in all source files, changing `api` references to `broker_client` <!-- completed: -->
-- [ ] Update `importlib.resources.files("hikyaku_registry")` to `importlib.resources.files("hikyaku")` <!-- completed: -->
+- [x] Replace `from hikyaku_registry` with `from hikyaku` in all source files <!-- completed: 2026-04-12T09:27 -->
+- [x] Replace `from hikyaku_client` with `from hikyaku` in all source files, changing `api` references to `broker_client` <!-- completed: 2026-04-12T09:27 -->
+- [x] Update `importlib.resources.files("hikyaku_registry")` to `importlib.resources.files("hikyaku")` <!-- completed: 2026-04-12T09:27 -->
 
 ### Step 7: Update Alembic Configuration
 
-- [ ] Update `alembic/env.py` imports to use `hikyaku.*` namespace <!-- completed: -->
-- [ ] Verify `alembic.ini` `script_location` still resolves correctly within the new package <!-- completed: -->
+- [x] Update `alembic/env.py` imports to use `hikyaku.*` namespace <!-- completed: 2026-04-12T09:27 -->
+- [x] Verify `alembic.ini` `script_location` still resolves correctly within the new package <!-- completed: 2026-04-12T09:29 -->
 
 ### Step 8: Update Root Workspace Config
 
-- [ ] Update root `pyproject.toml`: remove `[project]` table (virtual workspace root), update workspace members, uv sources, dev dependencies, ty src paths <!-- completed: -->
-- [ ] Update root `mise.toml`: monorepo config_roots <!-- completed: -->
+- [x] Update root `pyproject.toml`: remove `[project]` table (virtual workspace root), update workspace members, uv sources, dev dependencies, ty src paths <!-- completed: 2026-04-12T09:30 -->
+- [x] Update root `mise.toml`: monorepo config_roots <!-- completed: 2026-04-12T09:30 -->
 
 ### Step 9: Update Admin Build Path
 
-- [ ] Change `outDir` in `admin/vite.config.ts` from `'../registry/src/hikyaku_registry/webui'` to `'../hikyaku/src/hikyaku/webui'` <!-- completed: -->
+- [x] Change `outDir` in `admin/vite.config.ts` from `'../registry/src/hikyaku_registry/webui'` to `'../hikyaku/src/hikyaku/webui'` <!-- completed: 2026-04-12T09:30 -->
 
 ### Step 10: Merge Tests
 
-- [ ] Move `registry/tests/*.py` to `hikyaku/tests/` <!-- completed: -->
-- [ ] Move `client/tests/*.py` to `hikyaku/tests/`, resolving any filename conflicts <!-- completed: -->
-- [ ] Update all test imports from `hikyaku_registry`/`hikyaku_client` to `hikyaku` <!-- completed: -->
+- [x] Move `registry/tests/*.py` to `hikyaku/tests/` <!-- completed: 2026-04-12T09:33 -->
+- [x] Move `client/tests/*.py` to `hikyaku/tests/`, resolving any filename conflicts <!-- completed: 2026-04-12T09:33 -->
+- [x] Update all test imports from `hikyaku_registry`/`hikyaku_client` to `hikyaku` <!-- completed: 2026-04-12T09:35 -->
 
 ### Step 11: Remove Old Directories
 
-- [ ] Delete `registry/` directory <!-- completed: -->
-- [ ] Delete `client/` directory <!-- completed: -->
+- [x] Delete `registry/` directory <!-- completed: 2026-04-12T09:37 -->
+- [x] Delete `client/` directory <!-- completed: 2026-04-12T09:37 -->
 
 ### Step 12: Verify
 
-- [ ] Run `uv sync` from project root <!-- completed: -->
-- [ ] Run `mise //hikyaku:test` — all tests pass <!-- completed: -->
-- [ ] Run `mise //:lint` — no lint errors <!-- completed: -->
-- [ ] Run `mise //:format` — formatting clean <!-- completed: -->
-- [ ] Run `mise //:typecheck` — no type errors <!-- completed: -->
-- [ ] Run `mise //admin:build` — admin builds into new path <!-- completed: -->
+- [x] Run `uv sync` from project root <!-- completed: 2026-04-12T09:45 -->
+- [x] Run `mise //hikyaku:test` — all tests pass <!-- completed: 2026-04-12T09:45 -->
+- [x] Run `mise //:lint` — no lint errors <!-- completed: 2026-04-12T09:45 -->
+- [x] Run `mise //:format` — formatting clean <!-- completed: 2026-04-12T09:45 -->
+- [x] Run `mise //:typecheck` — no type errors <!-- completed: 2026-04-12T09:45 -->
+- [x] Run `mise //admin:build` — admin builds into new path <!-- completed: 2026-04-12T09:45 -->
 
 ---
 

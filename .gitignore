@@ -2,7 +2,7 @@
 !CLAUDE.md
 
 # WebUI SPA build output and dependencies
-registry/src/hikyaku_registry/webui/
+hikyaku/src/hikyaku/webui/
 admin/node_modules/
 .vite
 

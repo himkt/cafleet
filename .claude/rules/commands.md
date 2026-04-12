@@ -2,16 +2,14 @@
 
 **IMPORTANT**: Always use mise full-path tasks. Run from the project root — do NOT `cd` into package directories.
 
-- Run registry tests: `mise //registry:test`
-- Run client tests: `mise //client:test`
+- Run tests: `mise //hikyaku:test`
 - Lint (root): `mise //:lint`
-- Lint (registry): `mise //registry:lint`
-- Lint (client): `mise //client:lint`
+- Lint (hikyaku): `mise //hikyaku:lint`
 - Lint (admin): `mise //admin:lint`
 - Format check (root): `mise //:format`
 - Type check: `mise //:typecheck`
 - Sync workspace: `uv sync` (from project root)
-- Start broker server: `mise //registry:dev` (`//registry:dev` serves `/ui/` only after `//admin:build` has been run)
+- Start broker server: `mise //hikyaku:dev` (`//hikyaku:dev` serves `/ui/` only after `//admin:build` has been run)
 - Start admin dev server: `mise //admin:dev`
 - Build admin: `mise //admin:build`
 

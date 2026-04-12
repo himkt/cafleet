@@ -1,0 +1,22 @@
+[tasks.dev]
+run = "uv run src/hikyaku/server.py"
+description = "Start the broker server"
+
+[tasks.test]
+run = "uv run python -m pytest"
+description = "Run all tests"
+
+[tasks.lint]
+run = [
+  "uv --preview-features format format --diff",
+  "uvx ruff check",
+  "uv run mypy src",
+]
+description = "Check formatting, lint, and type-check"
+
+[tasks.format]
+run = [
+  "uv --preview-features format format",
+  "uvx ruff check --fix",
+]
+description = "Auto-format and fix lint issues"

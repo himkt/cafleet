@@ -50,8 +50,8 @@ The README must include these sections in order:
 - Do not use emojis
 - Keep it concise and developer-friendly
 - Preserve any manual additions in README.md that are not covered by the source materials
-- CLI command is `hikyaku`
-- Server start: `mise //registry:dev` (from the project root)
-- Client install: `cd client && uv tool install .`
+- CLI command is `hikyaku` (unified CLI for both server admin and agent operations)
+- Server start: `mise //hikyaku:dev` (from the project root)
+- Install: `pip install hikyaku` (single package)
 - If a section has no changes from the source materials, keep it as-is
 ~~~
