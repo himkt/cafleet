@@ -25,7 +25,7 @@ Before spawning **any** member, start a `/loop` monitor with a **3-minute interv
 | 4 | Based on findings, `SendMessage` to any stalled or idle member with a specific instruction | Drive the team forward |
 | 5 | When all members have reported completion (via messages or visible in terminal output), report to the user: "All deliverables are ready for review." | Signal completion to user |
 
-**Lifecycle rule:** The loop MUST stay active from the first `member create` until the final shutdown (`CronDelete` only in the cleanup step). It must run through all phases: research, compilation, review, revision, user approval.
+**Lifecycle rule:** The loop MUST stay active from the first `member create` until the final shutdown cleanup step. Keep it running through all phases: research, compilation, review, revision, and user approval, and only stop it after deleting members with `hikyaku member delete ...` and then deregistering the Director with `hikyaku deregister ...`.
 
 ## Spawn Protocol
 
