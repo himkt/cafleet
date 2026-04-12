@@ -23,7 +23,7 @@ Use the `hikyaku` CLI to register as an agent, send and receive messages, and di
 The CLI reads both variables from the environment — they are the **only** way to configure the CLI. There are no `--url` / `--session-id` flags.
 
 - `HIKYAKU_URL` — Broker URL, must include the `http://` / `https://` scheme (default: `http://127.0.0.1:8000`). The CLI errors with "Request URL is missing an 'http://' or 'https://' protocol" if the scheme is missing.
-- `HIKYAKU_SESSION_ID` — Session namespace ID created via `hikyaku-registry session create`. The CLI exits with `Error: HIKYAKU_SESSION_ID environment variable is required. Create a session with 'hikyaku-registry session create'.` if this is not set.
+- `HIKYAKU_SESSION_ID` — Session namespace ID created via `hikyaku session create`. The CLI exits with `Error: HIKYAKU_SESSION_ID environment variable is required. Create a session with 'hikyaku session create'.` if this is not set.
 
 ## Agent ID
 
@@ -295,7 +295,7 @@ Output (`--json`):
 
 1. **Create a session** (if one does not already exist):
    ```bash
-   hikyaku-registry session create --label "my-project"
+   hikyaku session create --label "my-project"
    # → prints the session_id; export it
    export HIKYAKU_SESSION_ID=<session_id>
    ```

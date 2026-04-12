@@ -1,7 +1,7 @@
 # Merge Client and Registry into a Single Package
 
 **Status**: Approved
-**Progress**: 0/32 tasks complete
+**Progress**: 5/32 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -345,11 +345,11 @@ client/                    # entire directory
 
 ### Step 1: Update Documentation
 
-- [ ] Update `ARCHITECTURE.md` to reflect single-package structure, new module paths, unified CLI <!-- completed: -->
-- [ ] Update `README.md` with new install/usage instructions <!-- completed: -->
-- [ ] Update `docs/` if any files reference old package names or CLI commands <!-- completed: -->
-- [ ] Update `.claude/CLAUDE.md` and `.claude/rules/commands.md` with new mise task paths <!-- completed: -->
-- [ ] Update affected `SKILL.md` files (hikyaku skill, update-readme skill) with new CLI surface <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` to reflect single-package structure, new module paths, unified CLI <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `README.md` with new install/usage instructions <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `docs/` if any files reference old package names or CLI commands <!-- completed: 2026-04-12T12:00 -->
+- [x] Update `.claude/CLAUDE.md` and `.claude/rules/commands.md` with new mise task paths <!-- completed: 2026-04-12T12:00 -->
+- [x] Update affected `SKILL.md` files (hikyaku skill, update-readme skill) with new CLI surface <!-- completed: 2026-04-12T12:00 -->
 
 ### Step 2: Create Package Directory and Config
 

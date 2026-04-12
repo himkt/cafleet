@@ -1,6 +1,6 @@
 # Hikyaku — Architecture
 
-An A2A-native message broker and agent registry for coding agents. Enables ephemeral agents (Claude Code, CI/CD runners, etc.) to communicate via unicast and broadcast messaging using standard A2A protocol operations. Agents are organized into **sessions** — a non-secret namespace created via `hikyaku-registry session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
+An A2A-native message broker and agent registry for coding agents. Enables ephemeral agents (Claude Code, CI/CD runners, etc.) to communicate via unicast and broadcast messaging using standard A2A protocol operations. Agents are organized into **sessions** — a non-secret namespace created via `hikyaku session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
 
 ## Architecture Diagram
 
@@ -33,7 +33,7 @@ An A2A-native message broker and agent registry for coding agents. Enables ephem
 
 ## Session Isolation
 
-The `session_id` serves as the namespace boundary. Sessions are created via `hikyaku-registry session create` (direct SQLite write, no HTTP). All agents registered with the same `session_id` form one namespace. The broker does not perform authentication — it performs namespace routing only.
+The `session_id` serves as the namespace boundary. Sessions are created via `hikyaku session create` (direct SQLite write, no HTTP). All agents registered with the same `session_id` form one namespace. The broker does not perform authentication — it performs namespace routing only.
 
 **Request headers**:
 
@@ -44,7 +44,7 @@ The `session_id` serves as the namespace boundary. Sessions are created via `hik
 
 No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret namespace identifier. Sessions are namespaces for tidiness, not security boundaries.
 
-**Registration** requires a valid `session_id` (passed in the POST body). Sessions are created via `hikyaku-registry session create` before agents can register.
+**Registration** requires a valid `session_id` (passed in the POST body). Sessions are created via `hikyaku session create` before agents can register.
 
 **Isolation rules**: Every operation that reads or writes agent/task data enforces session boundaries. Cross-session requests always produce "not found" errors indistinguishable from the resource not existing. Cross-session JSON-RPC sends are rejected with error code `-32003` ("Session mismatch").
 
@@ -58,28 +58,27 @@ No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret namesp
 
 | Component | Location | Description |
 |---|---|---|
-| `main.py` | `registry/src/hikyaku_registry/` | ASGI app: mount A2A + FastAPI |
-| `config.py` | `registry/src/hikyaku_registry/` | Settings via pydantic-settings; owns `~` expansion of `database_url` |
-| `auth.py` | `registry/src/hikyaku_registry/` | Session + agent-id resolution: `get_session_from_header` (X-Session-Id lookup), `get_session_from_agent_id` (X-Agent-Id → session_id lookup) |
-| `cli.py` | `registry/src/hikyaku_registry/` | `hikyaku-registry` console script: click group with `db init` (Alembic schema management) and `session` (session namespace CRUD) |
-| `db/__init__.py` | `registry/src/hikyaku_registry/db/` | DB sub-package marker |
-| `db/models.py` | `registry/src/hikyaku_registry/db/` | SQLAlchemy declarative models: `Base`, `Session`, `Agent`, `Task`; column indexes |
-| `db/engine.py` | `registry/src/hikyaku_registry/db/` | `get_engine()`, `get_sessionmaker()`, `dispose_engine()`, FK PRAGMA listener |
-| `alembic.ini` | `registry/src/hikyaku_registry/` | Alembic config (bundled into the wheel) |
-| `alembic/env.py` | `registry/src/hikyaku_registry/alembic/` | Alembic environment; swaps async URL to sync `pysqlite` driver |
-| `alembic/versions/` | `registry/src/hikyaku_registry/alembic/versions/` | Migration scripts (`0001_initial_schema.py`, …) |
-| `models.py` | `registry/src/hikyaku_registry/` | Pydantic models (Registry API request/response shapes) |
-| `executor.py` | `registry/src/hikyaku_registry/` | BrokerExecutor (A2A AgentExecutor) |
-| `task_store.py` | `registry/src/hikyaku_registry/` | `TaskStore` (A2A TaskStore backed by SQLite via SQLAlchemy) |
-| `agent_card.py` | `registry/src/hikyaku_registry/` | Broker's own Agent Card definition |
-| `registry_store.py` | `registry/src/hikyaku_registry/` | Agent + session CRUD on SQLite (session-scoped) |
-| `api/registry.py` | `registry/src/hikyaku_registry/api/` | Registry API router |
-| `webui_api.py` | `registry/src/hikyaku_registry/` | WebUI API router (`/ui/api/*`) — session list, agents, inbox, sent, send |
+| `server.py` | `hikyaku/src/hikyaku/` | ASGI app: mount A2A + FastAPI |
+| `config.py` | `hikyaku/src/hikyaku/` | Settings via pydantic-settings; owns `~` expansion of `database_url` |
+| `auth.py` | `hikyaku/src/hikyaku/` | Session + agent-id resolution: `get_session_from_header` (X-Session-Id lookup), `get_session_from_agent_id` (X-Agent-Id → session_id lookup) |
+| `cli.py` | `hikyaku/src/hikyaku/` | Unified `hikyaku` console script: click group with `db` (Alembic schema management), `session` (session namespace CRUD), and all agent/messaging commands (`register`, `send`, `poll`, `ack`, etc.) plus `member` subgroup |
+| `db/__init__.py` | `hikyaku/src/hikyaku/db/` | DB sub-package marker |
+| `db/models.py` | `hikyaku/src/hikyaku/db/` | SQLAlchemy declarative models: `Base`, `Session`, `Agent`, `Task`; column indexes |
+| `db/engine.py` | `hikyaku/src/hikyaku/db/` | `get_engine()`, `get_sessionmaker()`, `dispose_engine()`, FK PRAGMA listener |
+| `alembic.ini` | `hikyaku/src/hikyaku/` | Alembic config (bundled into the wheel) |
+| `alembic/env.py` | `hikyaku/src/hikyaku/alembic/` | Alembic environment; swaps async URL to sync `pysqlite` driver |
+| `alembic/versions/` | `hikyaku/src/hikyaku/alembic/versions/` | Migration scripts (`0001_initial_schema.py`, …) |
+| `models.py` | `hikyaku/src/hikyaku/` | Pydantic models (Registry API request/response shapes) |
+| `executor.py` | `hikyaku/src/hikyaku/` | BrokerExecutor (A2A AgentExecutor) |
+| `task_store.py` | `hikyaku/src/hikyaku/` | `TaskStore` (A2A TaskStore backed by SQLite via SQLAlchemy) |
+| `agent_card.py` | `hikyaku/src/hikyaku/` | Broker's own Agent Card definition |
+| `registry_store.py` | `hikyaku/src/hikyaku/` | Agent + session CRUD on SQLite (session-scoped) |
+| `api/registry.py` | `hikyaku/src/hikyaku/api/` | Registry API router |
+| `webui_api.py` | `hikyaku/src/hikyaku/` | WebUI API router (`/ui/api/*`) — session list, agents, inbox, sent, send |
+| `broker_client.py` | `hikyaku/src/hikyaku/` | httpx helpers for CLI agent operations |
+| `output.py` | `hikyaku/src/hikyaku/` | CLI output formatting (tables + JSON) |
+| `tmux.py` | `hikyaku/src/hikyaku/` | tmux subprocess helper: `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit`, `capture_pane` |
 | `admin/` | Project root | WebUI SPA (Vite + React + TypeScript + Tailwind CSS) |
-| `cli.py` | `client/src/hikyaku_client/` | click group (--json only) + subcommands (most require --agent-id); includes `member` subgroup for Director lifecycle commands |
-| `api.py` | `client/src/hikyaku_client/` | Helper functions (httpx / a2a-sdk) |
-| `output.py` | `client/src/hikyaku_client/` | Output formatting (tables + JSON) |
-| `tmux.py` | `client/src/hikyaku_client/` | tmux subprocess helper: `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit`, `capture_pane` |
 
 ## Responsibility Assignment
 
@@ -94,13 +93,13 @@ The Broker acts as the central A2A Server. Individual agents are A2A clients tha
 | Message retrieval | Receiving agent (A2A client) | A2A `ListTasks(contextId=own_id)` to Broker |
 | Message ACK | Receiving agent (A2A client) | A2A `SendMessage(taskId=existing)` multi-turn |
 | Message cancellation | Sending agent (A2A client) | A2A `CancelTask` to Broker |
-| Schema management | Operator | `hikyaku-registry db init` (Alembic `upgrade head`) |
+| Schema management | Operator | `hikyaku db init` (Alembic `upgrade head`) |
 
 ## Storage Layer
 
 ### Backend
 
-The registry persists everything in a single SQLite database accessed through SQLAlchemy 2.x with the `aiosqlite` async driver. Schema changes are managed by Alembic, bundled inside the `hikyaku-registry` wheel and applied via `hikyaku-registry db init`. There is no separate database daemon to operate, monitor, or back up — the database is a single file.
+The registry persists everything in a single SQLite database accessed through SQLAlchemy 2.x with the `aiosqlite` async driver. Schema changes are managed by Alembic, bundled inside the `hikyaku` wheel and applied via `hikyaku db init`. There is no separate database daemon to operate, monitor, or back up — the database is a single file.
 
 The default database path is `~/.local/share/hikyaku/registry.db` (XDG state directory), expanded once at config load time. Override with the `HIKYAKU_DATABASE_URL` environment variable, e.g. `sqlite+aiosqlite:////var/lib/hikyaku/registry.db`.
 
@@ -130,7 +129,7 @@ Stores receive an `async_sessionmaker[AsyncSession]` at construction, not a per-
 
 ### Schema management
 
-Alembic revisions are committed to the repository: `0001_initial_schema.py`, `0002_add_origin_task_id.py`, and `0003_add_agent_placements.py`. Operators run `hikyaku-registry db init` once before starting the server. The command is idempotent across six DB states:
+Alembic revisions are committed to the repository: `0001_initial_schema.py`, `0002_add_origin_task_id.py`, and `0003_add_agent_placements.py`. Operators run `hikyaku db init` once before starting the server. The command is idempotent across six DB states:
 
 | State | Action |
 |---|---|
@@ -164,7 +163,7 @@ If step 2 fails, the registered agent is rolled back via `DELETE /api/v1/agents/
 
 **Delete ordering** (`hikyaku member delete`): Deregister the agent first, THEN `/exit` the pane. This preserves the pane for retry if deregister fails.
 
-**Commands**: `member create`, `member delete`, `member list`, `member capture`. All require `--agent-id` (the Director's ID). The tmux helper module (`client/src/hikyaku_client/tmux.py`) isolates all subprocess interaction with tmux.
+**Commands**: `member create`, `member delete`, `member list`, `member capture`. All require `--agent-id` (the Director's ID). The tmux helper module (`hikyaku/src/hikyaku/tmux.py`) isolates all subprocess interaction with tmux.
 
 **Supervision skill**: The Director's monitoring obligations are defined in `.claude/skills/hikyaku-monitoring/SKILL.md`. This skill must be loaded (`Skill(hikyaku-monitoring)`) before spawning any members. It provides a 2-stage health check protocol (message poll then terminal capture) and a ready-to-use `/loop` prompt template.
 
@@ -204,7 +203,7 @@ fastapi_app.mount("/", a2a_app.build())
 
 Each CLI parameter has exactly one input source:
 
-| Parameter | CLI (`client/`) |
+| Parameter | Source |
 |---|---|
 | Session ID | `HIKYAKU_SESSION_ID` env var |
 | Broker URL | `HIKYAKU_URL` env var (default: `http://127.0.0.1:8000`) |
@@ -220,14 +219,13 @@ A browser-based dashboard served as a SPA at `/ui/`. No login is required. The f
 - **Frontend**: `admin/` — Vite + React 19 + TypeScript + Tailwind CSS 4
 - **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — session list, agent list, inbox, sent, timeline (`GET /ui/api/timeline`), send (accepts `to_agent_id="*"` for broadcast)
 - **Session scoping**: Session-scoped endpoints require `X-Session-Id` header. No authentication.
-- **Static serving**: `StaticFiles` mount at `/ui` serves the SPA bundled inside the registry package at `registry/src/hikyaku_registry/webui/` (production build). `mise //admin:build` must be run before `mise //registry:dev` for `/ui/` to be populated; without it the server starts cleanly and `/ui/` simply 404s.
+- **Static serving**: `StaticFiles` mount at `/ui` serves the SPA bundled inside the package at `hikyaku/src/hikyaku/webui/` (production build). `mise //admin:build` must be run before `mise //hikyaku:dev` for `/ui/` to be populated; without it the server starts cleanly and `/ui/` simply 404s.
 
-## Monorepo Structure
+## Package Structure
 
-A uv workspace monorepo with two packages and a frontend app:
+A uv workspace with a single Python package and a frontend app:
 
-- **`registry/`** — `hikyaku-registry`: FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk (server). Also ships the `hikyaku-registry` console script for `db init` and `session` management.
-- **`client/`** — `hikyaku-client`: click + httpx + a2a-sdk (CLI tool)
+- **`hikyaku/`** — `hikyaku`: FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk + click + httpx (server + CLI). Ships the unified `hikyaku` console script for all operations: `db init`, `session` management, agent registration, messaging, and member lifecycle.
 - **`admin/`** — WebUI SPA: Vite + React + TypeScript + Tailwind CSS
 
-Agents use `pip install hikyaku-client` for the CLI. The Broker server is deployed separately.
+A single `pip install hikyaku` gives users both the broker server and the agent CLI.

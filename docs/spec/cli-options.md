@@ -1,6 +1,6 @@
 # CLI Option Specification
 
-How the Hikyaku CLI (`hikyaku`) and server CLI (`hikyaku-registry`) accept configuration parameters.
+How the unified Hikyaku CLI (`hikyaku`) accepts configuration parameters.
 
 ## Option Source Matrix
 
@@ -25,7 +25,7 @@ export HIKYAKU_SESSION_ID=your-session-id-here  # Required for all operations
 Create a session first if you don't have one:
 
 ```bash
-hikyaku-registry session create --label "my-project"
+hikyaku session create --label "my-project"
 # → prints the session_id
 ```
 
@@ -61,9 +61,9 @@ These options were removed to prevent secrets from appearing in shell history or
 
 - `register` — Register a new agent (returns an agent ID)
 
-## `hikyaku-registry session` — Session Management
+## `hikyaku session` — Session Management
 
-The `hikyaku-registry session` subgroup manages session namespaces. These commands write directly to SQLite — the broker server does not need to be running.
+The `hikyaku session` subgroup manages session namespaces. These commands write directly to SQLite — the broker server does not need to be running.
 
 ### `session create`
 
@@ -137,5 +137,5 @@ The `hikyaku member` subgroup manages tmux-backed member agents. All commands re
 
 | Situation | Error Message |
 |---|---|
-| Missing session ID | `Error: HIKYAKU_SESSION_ID environment variable is required. Create a session with 'hikyaku-registry session create'.` |
+| Missing session ID | `Error: HIKYAKU_SESSION_ID environment variable is required. Create a session with 'hikyaku session create'.` |
 | Missing agent ID | `Error: Missing option '--agent-id'.` (Click built-in) |

@@ -4,7 +4,7 @@ A2A-native message broker and agent registry for coding agents.
 
 > **Hikyaku is a local-only tool.** It is designed to run on a single developer machine and does not perform authentication. Do not expose the broker on a shared network unless you accept that every listener can see and act within every session.
 
-Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners, and other coding agents -- to discover each other and exchange messages using the standard [A2A (Agent-to-Agent) protocol](https://github.com/google/A2A). Agents do not need to host HTTP servers; the broker handles all message routing and storage. Agents are organized into **sessions** -- a non-secret namespace created via `hikyaku-registry session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
+Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners, and other coding agents -- to discover each other and exchange messages using the standard [A2A (Agent-to-Agent) protocol](https://github.com/google/A2A). Agents do not need to host HTTP servers; the broker handles all message routing and storage. Agents are organized into **sessions** -- a non-secret namespace created via `hikyaku session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
 
 ## Features
 
@@ -18,8 +18,8 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 - **WebUI** -- Browser-based dashboard; session picker at `/ui/#/sessions`, then a Discord-style unified timeline per session (sidebar of active/deregistered agents, message timeline with broadcasts collapsed to one entry + per-recipient ACK reactions on hover, and an `@<agent>` / `@all` input)
 - **Member Lifecycle** -- `hikyaku member create/delete/list/capture` commands wrap tmux pane spawning + agent registration into atomic operations; the `agent_placements` table persists the agent-to-pane mapping in the registry
 - **Director Monitoring Skill** -- `.claude/skills/hikyaku-monitoring/SKILL.md` defines mandatory supervision protocol for Directors: 2-stage health check (poll inbox → capture terminal), spawn protocol, stall response, and a `/loop` prompt template
-- **CLI Tool** -- Full-featured command-line client for all broker operations
-- **SQLite Storage** -- Single-file database; no daemon required. Schema managed by Alembic via `hikyaku-registry db init`
+- **Unified CLI** -- Single `hikyaku` command for all operations: server admin (`db init`, `session`), agent messaging (`register`, `send`, `poll`, `ack`), and member lifecycle (`member create/delete/list/capture`)
+- **SQLite Storage** -- Single-file database; no daemon required. Schema managed by Alembic via `hikyaku db init`
 
 ## Architecture
 
@@ -52,11 +52,11 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 
 Key design decisions:
 
-- The `session_id` is the namespace boundary. Sessions are created via `hikyaku-registry session create` and are non-secret identifiers for organizing agents. All agents registered with the same session form one namespace.
+- The `session_id` is the namespace boundary. Sessions are created via `hikyaku session create` and are non-secret identifiers for organizing agents. All agents registered with the same session form one namespace.
 - The `contextId` field is set to the recipient's agent ID on every delivery Task, enabling inbox discovery via `ListTasks(contextId=myAgentId)`.
 - Task states map to message lifecycle: `INPUT_REQUIRED` (unread), `COMPLETED` (acknowledged), `CANCELED` (retracted), `FAILED` (routing error).
 - FastAPI is the ASGI parent; the A2A SDK handler is mounted at the root path. FastAPI routes (`/api/v1/*`) take priority.
-- Sessions are created via `hikyaku-registry session create` (direct SQLite write, no HTTP). Deleting a session is rejected while agents still reference it (FK `RESTRICT`). An empty session (no agents) remains valid indefinitely.
+- Sessions are created via `hikyaku session create` (direct SQLite write, no HTTP). Deleting a session is rejected while agents still reference it (FK `RESTRICT`). An empty session (no agents) remains valid indefinitely.
 - The broker exposes three API surfaces: A2A Server (JSON-RPC 2.0), Registry REST API (`/api/v1/`), and WebUI (`/ui/`).
 - The WebUI requires no login. A session picker at `/ui/#/sessions` lets the user select which session to view.
 - **Storage layer**: All data is persisted in a single SQLite file (`~/.local/share/hikyaku/registry.db` by default). Indexed fields are columns; A2A protocol payloads (`AgentCard`, `Task`) are stored as JSON blobs. No physical cleanup loop -- deregistered agents and tasks persist forever and are invisible to normal traffic via `status='active'` filters.
@@ -74,7 +74,7 @@ Key design decisions:
 Before starting the server for the first time, apply the database schema:
 
 ```bash
-hikyaku-registry db init
+hikyaku db init
 ```
 
 This command is idempotent -- running it on a database that is already at head is a no-op. The database file is created at `~/.local/share/hikyaku/registry.db` by default. Override with `HIKYAKU_DATABASE_URL` (e.g. `sqlite+aiosqlite:////var/lib/hikyaku/registry.db`).
@@ -84,23 +84,17 @@ This command is idempotent -- running it on a database that is already at head i
 Before starting the broker, create at least one session namespace:
 
 ```bash
-hikyaku-registry session create --label "my-project"
+hikyaku session create --label "my-project"
 # → prints: 550e8400-e29b-41d4-a716-446655440000
 ```
 
 ### Start the Broker Server
 
 ```bash
-mise //registry:dev
+mise //hikyaku:dev
 ```
 
 The broker will be available at `http://127.0.0.1:8000`.
-
-### Install the CLI Client
-
-```bash
-cd client && uv tool install .
-```
 
 ### Set Session
 
@@ -137,16 +131,30 @@ hikyaku ack --agent-id <your-agent-id> --task-id <task-id>
 
 ## CLI Usage
 
-### Client CLI (`hikyaku`)
+The unified `hikyaku` CLI handles both server administration and agent operations.
 
 Configuration is set via environment variables:
 
 | Variable | Required | Description |
 |---|---|---|
-| `HIKYAKU_SESSION_ID` | Yes | Session namespace for agent routing |
+| `HIKYAKU_SESSION_ID` | Yes (for agent commands) | Session namespace for agent routing |
 | `HIKYAKU_URL` | No | Broker URL (default: `http://127.0.0.1:8000`) |
 
-The `--agent-id` option is a per-subcommand option required by most commands. The global `--json` flag enables JSON output.
+The `--agent-id` option is a per-subcommand option required by most agent commands. The global `--json` flag enables JSON output.
+
+### Server Administration
+
+| Command | Description |
+|---|---|
+| `hikyaku db init` | Apply Alembic migrations to bring the schema to head (idempotent) |
+| `hikyaku session create [--label TEXT]` | Create a new session namespace; prints the session_id |
+| `hikyaku session list` | List all sessions with agent counts |
+| `hikyaku session show <id>` | Show details of a single session |
+| `hikyaku session delete <id>` | Delete a session (fails if agents still reference it) |
+
+`hikyaku db init` must be run once before the server starts. It handles six database states: missing file (creates it), empty schema, at head (no-op), behind head (upgrades), ahead of head (error), and legacy tables without Alembic version (error with manual instructions).
+
+### Agent Commands
 
 | Command | `--agent-id` | Description |
 |---|---|---|
@@ -164,20 +172,6 @@ The `--agent-id` option is a per-subcommand option required by most commands. Th
 | `hikyaku member delete` | Required | Deregister a member and close its pane (Director only) |
 | `hikyaku member list` | Required | List members spawned by this Director |
 | `hikyaku member capture` | Required | Capture the last N lines of a member's pane (Director only) |
-
-### Server CLI (`hikyaku-registry`)
-
-The `hikyaku-registry` console script manages the broker server's database and sessions.
-
-| Command | Description |
-|---|---|
-| `hikyaku-registry db init` | Apply Alembic migrations to bring the schema to head (idempotent) |
-| `hikyaku-registry session create [--label TEXT]` | Create a new session namespace; prints the session_id |
-| `hikyaku-registry session list` | List all sessions with agent counts |
-| `hikyaku-registry session show <id>` | Show details of a single session |
-| `hikyaku-registry session delete <id>` | Delete a session (fails if agents still reference it) |
-
-`hikyaku-registry db init` must be run once before the server starts. It handles six database states: missing file (creates it), empty schema, at head (no-op), behind head (upgrades), ahead of head (error), and legacy tables without Alembic version (error with manual instructions).
 
 ## API Overview
 
@@ -259,7 +253,7 @@ The WebUI API is consumed by the browser SPA. No authentication is required. Ses
 | GET | `/ui/api/timeline` | `X-Session-Id` | Unified session timeline (up to 200 most-recent non-`broadcast_summary` tasks, newest first, each row carrying `origin_task_id` + `created_at` + `status_timestamp` for client-side broadcast grouping) |
 | POST | `/ui/api/messages/send` | `X-Session-Id` | Send a message from a same-session sender. `to_agent_id=<uuid>` is unicast; `to_agent_id="*"` triggers a broadcast to every active agent in the session |
 
-The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vite + React + TypeScript + Tailwind CSS) and the build output is bundled inside the registry package at `registry/src/hikyaku_registry/webui/`, which ships inside the `hikyaku-registry` wheel — a single `pip install hikyaku-registry` produces a runnable broker that serves `/ui/` without any external file lookup.
+The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vite + React + TypeScript + Tailwind CSS) and the build output is bundled inside the package at `hikyaku/src/hikyaku/webui/`, which ships inside the `hikyaku` wheel -- a single `pip install hikyaku` produces a runnable broker that serves `/ui/` without any external file lookup.
 
 ## Tech Stack
 
@@ -271,29 +265,31 @@ The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vi
 ## Project Structure
 
 ```
-hikyaku/
-  pyproject.toml          # Workspace root (uv workspace)
-  registry/               # hikyaku-registry server package
-    src/hikyaku_registry/
-      db/                 # SQLAlchemy models, engine, Alembic env
-      alembic/            # Alembic migration scripts (versions/)
-      alembic.ini         # Alembic config (bundled into wheel)
+hikyaku/                    # Repository root (uv workspace)
+  pyproject.toml            # Workspace root (virtual, no [project] table)
+  hikyaku/                  # hikyaku package (server + CLI)
+    src/hikyaku/
+      server.py             # ASGI app entry point
+      cli.py                # Unified CLI (db, session, agent, member commands)
+      config.py             # Settings via pydantic-settings
+      broker_client.py      # httpx helpers for CLI agent operations
+      db/                   # SQLAlchemy models, engine, Alembic env
+      alembic/              # Alembic migration scripts (versions/)
+      alembic.ini           # Alembic config (bundled into wheel)
+      api/                  # Registry REST router
+      tmux.py               # tmux subprocess helper (member lifecycle)
     tests/
     pyproject.toml
-  client/                 # hikyaku-client CLI package
-    src/hikyaku_client/
-      tmux.py             # tmux subprocess helper (member lifecycle)
-    tests/
-    pyproject.toml
-  admin/                  # WebUI SPA (Vite + React + TypeScript + Tailwind CSS)
+    mise.toml
+  admin/                    # WebUI SPA (Vite + React + TypeScript + Tailwind CSS)
   docs/
-    spec/                 # API and data model specifications
+    spec/                   # API and data model specifications
       registry-api.md
       a2a-operations.md
       data-model.md
       webui-api.md
       cli-options.md
-  ARCHITECTURE.md         # System architecture and design decisions
+  ARCHITECTURE.md           # System architecture and design decisions
 ```
 
 ## Development
@@ -307,32 +303,27 @@ cd hikyaku
 uv sync
 
 # Initialize the database schema (one-time)
-hikyaku-registry db init
+hikyaku db init
 
-# Run registry tests
-mise //registry:test
-
-# Run client tests
-mise //client:test
+# Run tests
+mise //hikyaku:test
 ```
 
 ### Build the WebUI
 
-The registry serves the SPA at `/ui/`, but the build is a separate manual step so backend-only contributors are not forced to install bun. Run these two commands in order:
+The broker serves the SPA at `/ui/`, but the build is a separate manual step so backend-only contributors are not forced to install bun. Run these two commands in order:
 
 ```bash
-# 1. Build the SPA into registry/src/hikyaku_registry/webui/
+# 1. Build the SPA into hikyaku/src/hikyaku/webui/
 mise //admin:build
 
 # 2. Start the broker — it serves the freshly built SPA at http://localhost:8000/ui/
-mise //registry:dev
+mise //hikyaku:dev
 ```
 
 If step 1 is skipped, the server still starts and the JSON-RPC and Registry REST surfaces remain functional; only `/ui/` 404s until you run `mise //admin:build`.
 
-**Release maintainers**: run `mise //admin:build` before any `uv build`. The wheel only includes whatever is currently sitting in `registry/src/hikyaku_registry/webui/`, so a stale or missing build will produce a wheel without the SPA. After building, verify the wheel contents with `unzip -l dist/hikyaku_registry-*.whl | grep webui/index.html`.
-
-**Migration note for existing checkouts**: Existing checkouts pulled from before this change may have a stale `admin/dist/` directory; run `rm -rf admin/dist` once after pulling. The directory is no longer produced by `mise //admin:build`.
+**Release maintainers**: run `mise //admin:build` before any `uv build`. The wheel only includes whatever is currently sitting in `hikyaku/src/hikyaku/webui/`, so a stale or missing build will produce a wheel without the SPA. After building, verify the wheel contents with `unzip -l dist/hikyaku-*.whl | grep webui/index.html`.
 
 ## License
 
