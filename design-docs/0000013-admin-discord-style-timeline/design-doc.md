@@ -1,7 +1,7 @@
 # Admin Discord-style Timeline
 
 **Status**: Approved
-**Progress**: 19/38 tasks complete
+**Progress**: 30/38 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -385,17 +385,17 @@ Per `.claude/rules/design-doc-numbering.md`, documentation is updated first.
 
 ### Step 5: Admin SPA rewrite
 
-- [ ] Delete `admin/src/components/AgentTabs.tsx`, `admin/src/components/MessageList.tsx`, `admin/src/components/MessageRow.tsx`, and `admin/src/components/SendMessageForm.tsx`. Remove their imports from `Dashboard.tsx` in the same commit so the compile is green. <!-- completed: -->
-- [ ] Update `admin/src/types.ts`: add `TimelineMessage` (existing `Message` fields + `origin_task_id: string | null`, `created_at: string`, `status_timestamp: string`), `TimelineEntry` (discriminated union of `{kind: "unicast", message: TimelineMessage}` and `{kind: "broadcast", rows: TimelineMessage[], sortKey: string}`), and `TimelineReaction` (agent_id, agent_name, agent_status, ack_timestamp). <!-- completed: -->
-- [ ] Update `admin/src/api.ts`: add `fetchTimeline(): Promise<{messages: TimelineMessage[]}>` hitting `GET /ui/api/timeline`. Keep `sendMessage` as-is — the parameter is already `string`, so passing `"*"` is a caller-side decision. <!-- completed: -->
-- [ ] Create `admin/src/components/Sidebar.tsx`: fetches via the existing `getAgents`, splits into active/deregistered, sorts each group by `registered_at` ascending, renders deregistered entries with `opacity-50 pointer-events-none`. <!-- completed: -->
-- [ ] Create `admin/src/components/Timeline.tsx`: fetches via `fetchTimeline`, runs the client-side grouping described in Specification, renders entries in ascending `sortKey` order (newest at the bottom), and uses a `useEffect` + ref to scroll to `bottom` on initial mount and on every successful refresh. <!-- completed: -->
-- [ ] Create `admin/src/components/TimelineMessage.tsx`: renders one `TimelineEntry`. Mentions → chip components. Body → plain text. Canceled → wrapped in `<s>` with `opacity-60`, reaction area hidden. Invokes `<ReactionBar entry={entry} agents={agents} />`. <!-- completed: -->
-- [ ] Create `admin/src/components/ReactionBar.tsx`: maps completed delivery rows in the entry to reaction chips; each chip is a Tailwind `group` with a `group-hover:opacity-100 opacity-0 transition-opacity` tooltip sibling; tooltip text = `@<name>[ (deregistered)] — <ISO ack time>` where the deregistered suffix is looked up against the sidebar agents prop. <!-- completed: -->
-- [ ] Create `admin/src/components/MessageInput.tsx`: implements the parser + validation table from Specification, calls `sendMessage(senderId, resolvedTo, body)`, shows inline error messages, and re-triggers the timeline fetch on success. The `senderId` is read from the parent (Dashboard) which in turn reads from `SenderSelector`. <!-- completed: -->
-- [ ] Create `admin/src/components/SenderSelector.tsx`: dropdown listing active agents only. Stores the selection under `hikyaku.sender.<tenantId>`. On tenant switch, clears the in-memory state and re-reads from localStorage for the new tenant. If the stored agent is no longer active, falls back to "unset" and disables the send button. <!-- completed: -->
-- [ ] Rewrite `admin/src/components/Dashboard.tsx`: new layout — top `<header>` row with tenant badge, `<SenderSelector>`, and the existing Back-to-Keys button; below, a `<div className="flex flex-1">` with `<Sidebar>` on the left and a vertical flex column on the right containing `<Timeline>` (flex-grow, scrollable) and `<MessageInput>` (fixed at the bottom). <!-- completed: -->
-- [ ] Run `mise //admin:lint` and `mise //admin:build`. `mise //admin:build` writes to `registry/src/hikyaku_registry/webui/` per design doc 0000012. <!-- completed: -->
+- [x] Delete `admin/src/components/AgentTabs.tsx`, `admin/src/components/MessageList.tsx`, `admin/src/components/MessageRow.tsx`, and `admin/src/components/SendMessageForm.tsx`. Remove their imports from `Dashboard.tsx` in the same commit so the compile is green. <!-- completed: 2026-04-12T11:20 -->
+- [x] Update `admin/src/types.ts`: add `TimelineMessage` (existing `Message` fields + `origin_task_id: string | null`, `created_at: string`, `status_timestamp: string`), `TimelineEntry` (discriminated union of `{kind: "unicast", message: TimelineMessage}` and `{kind: "broadcast", rows: TimelineMessage[], sortKey: string}`), and `TimelineReaction` (agent_id, agent_name, agent_status, ack_timestamp). <!-- completed: 2026-04-12T11:10 -->
+- [x] Update `admin/src/api.ts`: add `fetchTimeline(): Promise<{messages: TimelineMessage[]}>` hitting `GET /ui/api/timeline`. Keep `sendMessage` as-is — the parameter is already `string`, so passing `"*"` is a caller-side decision. <!-- completed: 2026-04-12T11:11 -->
+- [x] Create `admin/src/components/Sidebar.tsx`: fetches via the existing `getAgents`, splits into active/deregistered, sorts each group by `registered_at` ascending, renders deregistered entries with `opacity-50 pointer-events-none`. <!-- completed: 2026-04-12T11:12 -->
+- [x] Create `admin/src/components/Timeline.tsx`: fetches via `fetchTimeline`, runs the client-side grouping described in Specification, renders entries in ascending `sortKey` order (newest at the bottom), and uses a `useEffect` + ref to scroll to `bottom` on initial mount and on every successful refresh. <!-- completed: 2026-04-12T11:14 -->
+- [x] Create `admin/src/components/TimelineMessage.tsx`: renders one `TimelineEntry`. Mentions → chip components. Body → plain text. Canceled → wrapped in `<s>` with `opacity-60`, reaction area hidden. Invokes `<ReactionBar entry={entry} agents={agents} />`. <!-- completed: 2026-04-12T11:15 -->
+- [x] Create `admin/src/components/ReactionBar.tsx`: maps completed delivery rows in the entry to reaction chips; each chip is a Tailwind `group` with a `group-hover:opacity-100 opacity-0 transition-opacity` tooltip sibling; tooltip text = `@<name>[ (deregistered)] — <ISO ack time>` where the deregistered suffix is looked up against the sidebar agents prop. <!-- completed: 2026-04-12T11:13 -->
+- [x] Create `admin/src/components/MessageInput.tsx`: implements the parser + validation table from Specification, calls `sendMessage(senderId, resolvedTo, body)`, shows inline error messages, and re-triggers the timeline fetch on success. The `senderId` is read from the parent (Dashboard) which in turn reads from `SenderSelector`. <!-- completed: 2026-04-12T11:16 -->
+- [x] Create `admin/src/components/SenderSelector.tsx`: dropdown listing active agents only. Stores the selection under `hikyaku.sender.<tenantId>`. On tenant switch, clears the in-memory state and re-reads from localStorage for the new tenant. If the stored agent is no longer active, falls back to "unset" and disables the send button. <!-- completed: 2026-04-12T11:17 -->
+- [x] Rewrite `admin/src/components/Dashboard.tsx`: new layout — top `<header>` row with tenant badge, `<SenderSelector>`, and the existing Back-to-Keys button; below, a `<div className="flex flex-1">` with `<Sidebar>` on the left and a vertical flex column on the right containing `<Timeline>` (flex-grow, scrollable) and `<MessageInput>` (fixed at the bottom). <!-- completed: 2026-04-12T11:18 -->
+- [x] Run `mise //admin:lint` and `mise //admin:build`. `mise //admin:build` writes to `registry/src/hikyaku_registry/webui/` per design doc 0000012. <!-- completed: 2026-04-12T11:25 -->
 
 ### Step 6: Manual verification
 

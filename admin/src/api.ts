@@ -1,6 +1,7 @@
 import type {
   AgentsResponse,
   MessagesResponse,
+  TimelineResponse,
   SendMessageResponse,
   ApiKey,
   CreateKeyResponse,
@@ -78,6 +79,10 @@ export async function getInbox(agentId: string): Promise<MessagesResponse> {
 
 export async function getSent(agentId: string): Promise<MessagesResponse> {
   return request<MessagesResponse>(`/agents/${agentId}/sent`);
+}
+
+export async function fetchTimeline(): Promise<TimelineResponse> {
+  return request<TimelineResponse>("/timeline");
 }
 
 export async function sendMessage(

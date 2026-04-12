@@ -18,12 +18,32 @@ export interface Message {
   body: string;
 }
 
+export interface TimelineMessage extends Message {
+  origin_task_id: string | null;
+  status_timestamp: string;
+}
+
+export type TimelineEntry =
+  | { kind: "unicast"; message: TimelineMessage }
+  | { kind: "broadcast"; rows: TimelineMessage[]; sortKey: string };
+
+export interface TimelineReaction {
+  agent_id: string;
+  agent_name: string;
+  agent_status: "active" | "deregistered";
+  ack_timestamp: string;
+}
+
 export interface AgentsResponse {
   agents: Agent[];
 }
 
 export interface MessagesResponse {
   messages: Message[];
+}
+
+export interface TimelineResponse {
+  messages: TimelineMessage[];
 }
 
 export interface SendMessageResponse {
