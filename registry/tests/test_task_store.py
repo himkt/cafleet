@@ -696,19 +696,19 @@ class TestOriginTaskId:
 
 
 # ---------------------------------------------------------------------------
-# list_timeline — tenant-scoped JOIN used by GET /ui/api/timeline
+# list_timeline — session-scoped JOIN used by GET /ui/api/timeline
 # ---------------------------------------------------------------------------
 
 
 class TestListTimeline:
-    """Tests for ``TaskStore.list_timeline(tenant_id, limit=200)``.
+    """Tests for ``TaskStore.list_timeline(session_id, limit=200)``.
 
     Design doc 0000013 §"Timeline API" mandates the following query:
 
         SELECT t.task_json, t.origin_task_id, t.created_at
         FROM tasks t
         JOIN agents a ON a.agent_id = t.context_id
-        WHERE a.tenant_id = :tenant_id
+        WHERE a.session_id = :session_id
           AND t.type != 'broadcast_summary'
         ORDER BY t.status_timestamp DESC
         LIMIT :limit
@@ -720,8 +720,8 @@ class TestListTimeline:
     is the ``created_at`` wallclock set at initial INSERT.
     """
 
-    async def test_returns_tenant_tasks(self, task_store, store, db_sessionmaker):
-        """Happy path: tasks in the tenant are returned."""
+    async def test_returns_session_tasks(self, task_store, store, db_sessionmaker):
+        """Happy path: tasks in the session are returned."""
         session_id, [agent_id] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         await task_store.save(
             _make_task(task_id="tl-1", context_id=agent_id),
@@ -846,10 +846,10 @@ class TestListTimeline:
             "broadcast_summary rows must be excluded from list_timeline"
         )
 
-    async def test_cross_tenant_isolation(self, task_store, store, db_sessionmaker):
-        """Tenant A's list must not include tenant B's tasks."""
+    async def test_cross_session_isolation(self, task_store, store, db_sessionmaker):
+        """Session A's list must not include session B's tasks."""
         session_a, [agent_a] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
-        tenant_b, [agent_b] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
+        session_b, [agent_b] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
 
         await task_store.save(
             _make_task(task_id="tl-a", context_id=agent_a),
@@ -858,8 +858,8 @@ class TestListTimeline:
             _make_task(task_id="tl-b", context_id=agent_b),
         )
 
-        a_results = await task_store.list_timeline(tenant_a)
-        b_results = await task_store.list_timeline(tenant_b)
+        a_results = await task_store.list_timeline(session_a)
+        b_results = await task_store.list_timeline(session_b)
 
         a_ids = {t.id for (t, _o, _c) in a_results}
         b_ids = {t.id for (t, _o, _c) in b_results}
@@ -867,11 +867,11 @@ class TestListTimeline:
         assert a_ids == {"tl-a"}
         assert b_ids == {"tl-b"}
 
-    async def test_multi_agent_tenant_includes_all_contexts(
+    async def test_multi_agent_session_includes_all_contexts(
         self, task_store, store, db_sessionmaker
     ):
-        """Within one tenant, tasks on ALL member agents' contexts appear."""
-        tenant_id, agent_ids = await _seed_tenant_with_agents(store, n=3)
+        """Within one session, tasks on ALL member agents' contexts appear."""
+        session_id, agent_ids = await _seed_session_with_agents(store, db_sessionmaker, n=3)
         for i, agent_id in enumerate(agent_ids):
             await task_store.save(
                 _make_task(task_id=f"tl-multi-{i}", context_id=agent_id),
@@ -881,9 +881,9 @@ class TestListTimeline:
         task_ids = {t.id for (t, _o, _c) in results}
         assert task_ids == {"tl-multi-0", "tl-multi-1", "tl-multi-2"}
 
-    async def test_empty_tenant_returns_empty_list(self, task_store, store, db_sessionmaker):
-        """A tenant with no tasks yields an empty list (not ``None``)."""
-        tenant_id, _agents = await _seed_session_with_agents(store, db_sessionmaker, n=1)
+    async def test_empty_session_returns_empty_list(self, task_store, store, db_sessionmaker):
+        """A session with no tasks yields an empty list (not ``None``)."""
+        session_id, _agents = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         results = await task_store.list_timeline(session_id)
         assert results == []
 
@@ -900,7 +900,7 @@ class TestListTimeline:
                 ),
             )
 
-        results = await task_store.list_timeline(tenant_id, limit=3)
+        results = await task_store.list_timeline(session_id, limit=3)
         assert len(results) == 3
 
     async def test_default_limit_caps_at_200(self, task_store, store, db_sessionmaker):
@@ -909,7 +909,7 @@ class TestListTimeline:
         Design doc 0000013 mandates a 200-row hard cap with no
         pagination in v1. The frontend renders whatever the API
         returns; the cap protects the server from unbounded fetches on
-        busy tenants.
+        busy sessions.
         """
         session_id, [agent_id] = await _seed_session_with_agents(store, db_sessionmaker, n=1)
         base = datetime(2026, 4, 10, 0, 0, 0, tzinfo=UTC)
@@ -940,7 +940,7 @@ class TestListTimeline:
                 ),
             )
 
-        results = await task_store.list_timeline(tenant_id, limit=2)
+        results = await task_store.list_timeline(session_id, limit=2)
         ids = [t.id for (t, _o, _c) in results]
         assert ids == ["tl-newest-4", "tl-newest-3"], (
             f"limit must preserve DESC ordering and keep the newest rows; "
