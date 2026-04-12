@@ -418,3 +418,4 @@ client/                    # entire directory
 | Date | Changes |
 |------|---------|
 | 2026-04-12 | Initial draft |
+| 2026-04-12 | Implementation complete — merged into single `hikyaku` package |
