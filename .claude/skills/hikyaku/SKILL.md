@@ -289,7 +289,7 @@ Output (`--json`):
 }
 ```
 
-**Note on external `agent-team-supervision` skill**: The external `agent-team-supervision` skill (user-level, outside this repo) still documents raw `tmux capture-pane`. For projects using Hikyaku, prefer `hikyaku member capture` as it enforces the cross-Director boundary. The external skill alignment is tracked as follow-up work.
+**Note**: Projects using Hikyaku use `Skill(hikyaku-monitoring)` instead of the generic `agent-team-supervision` skill. The hikyaku-monitoring skill uses `hikyaku member capture` exclusively (no raw `tmux capture-pane`), enforcing the cross-Director boundary.
 
 ## Typical Workflow
 
@@ -337,9 +337,9 @@ Output (`--json`):
 
 ### Monitoring mandate (Director only)
 
-Before spawning **any** member, the Director MUST load `Skill(agent-team-supervision)` and start a `/loop` monitor as that skill instructs. Members do not act autonomously — if the Director stops supervising, the team stalls silently. Keep the `/loop` active until the final shutdown step.
+Before spawning **any** member, the Director MUST load `Skill(hikyaku-monitoring)` and start a `/loop` monitor as that skill instructs. Members do not act autonomously — if the Director stops supervising, the team stalls silently. Keep the `/loop` active until the final shutdown step.
 
-To inspect a stalled member, use `hikyaku member capture`:
+To inspect a stalled member, follow the 2-stage health check in `Skill(hikyaku-monitoring)`: first check `hikyaku poll` for messages, then fall back to `hikyaku member capture`:
 
 ```bash
 hikyaku member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID
