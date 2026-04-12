@@ -21,7 +21,7 @@ Before spawning **any** member, start a `/loop` monitor with a **3-minute interv
 |---|---|---|
 | 1 | `hikyaku member list --agent-id $DIRECTOR_ID` | Enumerate all live members and their pane status |
 | 2 | `hikyaku poll --agent-id $DIRECTOR_ID` | Check inbox for progress reports or help requests from members |
-| 3 | For each member with no recent message: `hikyaku member capture --agent-id $DIRECTOR_ID --member-id $MID` | Terminal capture fallback -- inspect what the member is doing when it has not reported in |
+| 3 | For each member with no recent message: `hikyaku member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID` | Terminal capture fallback -- inspect what the member is doing when it has not reported in |
 | 4 | Based on findings, `SendMessage` to any stalled or idle member with a specific instruction | Drive the team forward |
 | 5 | When all members have reported completion (via messages or visible in terminal output), report to the user: "All deliverables are ready for review." | Signal completion to user |
 
