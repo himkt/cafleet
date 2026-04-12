@@ -1,6 +1,6 @@
 # Hikyaku Monitoring Skill
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 8/8 tasks complete
 **Last Updated**: 2026-04-12
 
@@ -10,14 +10,14 @@ Create a hikyaku-native agent team supervision skill (`.claude/skills/hikyaku-mo
 
 ## Success Criteria
 
-- [ ] `.claude/skills/hikyaku-monitoring/SKILL.md` exists and contains a complete behavioral protocol (Core Principle, Monitoring Mandate, Spawn Protocol, Stall Response) plus a `/loop` prompt template
-- [ ] The 2-stage health check is documented: `hikyaku poll` (message-based) → `hikyaku member capture` (terminal capture fallback)
-- [ ] `.claude/skills/hikyaku/SKILL.md` Monitoring mandate section is updated to reference `Skill(hikyaku-monitoring)` instead of `Skill(agent-team-supervision)`
-- [ ] The hikyaku SKILL.md "Monitoring mandate" section references the new skill without duplicating its content
-- [ ] `CLAUDE.md` (both root and `.claude/CLAUDE.md`) list the new skill in their skills sections
-- [ ] `ARCHITECTURE.md` Member Lifecycle section documents the supervision skill
-- [ ] `README.md` mentions the monitoring skill in the relevant features or documentation section
-- [ ] No raw `tmux` commands appear in the new skill — all tmux interaction goes through `hikyaku member` subcommands
+- [x] `.claude/skills/hikyaku-monitoring/SKILL.md` exists and contains a complete behavioral protocol (Core Principle, Monitoring Mandate, Spawn Protocol, Stall Response) plus a `/loop` prompt template
+- [x] The 2-stage health check is documented: `hikyaku poll` (message-based) → `hikyaku member capture` (terminal capture fallback)
+- [x] `.claude/skills/hikyaku/SKILL.md` Monitoring mandate section is updated to reference `Skill(hikyaku-monitoring)` instead of `Skill(agent-team-supervision)`
+- [x] The hikyaku SKILL.md "Monitoring mandate" section references the new skill without duplicating its content
+- [x] `CLAUDE.md` (both root and `.claude/CLAUDE.md`) list the new skill in their skills sections
+- [x] `ARCHITECTURE.md` Member Lifecycle section documents the supervision skill
+- [x] `README.md` mentions the monitoring skill in the relevant features or documentation section
+- [x] No raw `tmux` commands appear in the new skill — all tmux interaction goes through `hikyaku member` subcommands
 
 ---
 
@@ -259,3 +259,4 @@ The updated hikyaku SKILL.md Monitoring mandate section makes the replacement ex
 |------|---------|
 | 2026-04-12 | Initial draft |
 | 2026-04-12 | Rev 1: Add 3-min interval, clarify $DIRECTOR_ID placeholder, fix team-lead ambiguity, add coexistence section, remove line-number refs |
+| 2026-04-12 | Implementation complete. All 8/8 tasks done. All 8 success criteria verified. Status → Complete |
