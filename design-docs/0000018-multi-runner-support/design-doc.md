@@ -1,7 +1,7 @@
 # Multi-Runner Support (Codex Integration)
 
 **Status**: Approved
-**Progress**: 9/18 tasks complete
+**Progress**: 12/18 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -231,9 +231,9 @@ In `client/src/hikyaku_client/output.py`:
 
 ### Step 5: Registry Layer (Models, Store, API)
 
-- [ ] Update `PlacementCreate` and `PlacementView` in `registry/src/hikyaku_registry/models.py` <!-- completed: -->
-- [ ] Update `create_agent_with_placement()`, `get_placement()`, and `list_placements_for_director()` in `registry/src/hikyaku_registry/registry_store.py` <!-- completed: -->
-- [ ] Update `register_agent`, `get_agent_detail`, `list_agents`, and `patch_placement` endpoints in `registry/src/hikyaku_registry/api/registry.py` <!-- completed: -->
+- [x] Update `PlacementCreate` and `PlacementView` in `registry/src/hikyaku_registry/models.py` <!-- completed: 2026-04-12T19:00 -->
+- [x] Update `create_agent_with_placement()`, `get_placement()`, and `list_placements_for_director()` in `registry/src/hikyaku_registry/registry_store.py` <!-- completed: 2026-04-12T19:00 -->
+- [x] Update `register_agent`, `get_agent_detail`, `list_agents`, and `patch_placement` endpoints in `registry/src/hikyaku_registry/api/registry.py` <!-- completed: 2026-04-12T19:00 -->
 
 ### Step 6: CLI Changes
 

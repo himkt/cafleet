@@ -86,6 +86,7 @@ async def register_agent(
                 tmux_session=placement["tmux_session"],
                 tmux_window_id=placement["tmux_window_id"],
                 tmux_pane_id=placement["tmux_pane_id"],
+                coding_agent=placement["coding_agent"],
                 created_at=placement["created_at"],
             ).model_dump()
     return response
@@ -194,6 +195,7 @@ async def get_agent_detail(
             tmux_session=placement["tmux_session"],
             tmux_window_id=placement["tmux_window_id"],
             tmux_pane_id=placement["tmux_pane_id"],
+            coding_agent=placement["coding_agent"],
             created_at=placement["created_at"],
         ).model_dump()
     else:
@@ -313,5 +315,6 @@ async def patch_placement(
         tmux_session=updated["tmux_session"],
         tmux_window_id=updated["tmux_window_id"],
         tmux_pane_id=updated["tmux_pane_id"],
+        coding_agent=updated["coding_agent"],
         created_at=updated["created_at"],
     ).model_dump()

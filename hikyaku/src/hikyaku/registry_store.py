@@ -105,6 +105,7 @@ class RegistryStore:
                             tmux_session=placement.tmux_session,
                             tmux_window_id=placement.tmux_window_id,
                             tmux_pane_id=placement.tmux_pane_id,
+                            coding_agent=placement.coding_agent,
                             created_at=registered_at,
                         )
                     )
@@ -217,6 +218,7 @@ class RegistryStore:
             "tmux_session": row.tmux_session,
             "tmux_window_id": row.tmux_window_id,
             "tmux_pane_id": row.tmux_pane_id,
+            "coding_agent": row.coding_agent,
             "created_at": row.created_at,
         }
 
@@ -251,6 +253,7 @@ class RegistryStore:
                 AgentPlacement.tmux_session,
                 AgentPlacement.tmux_window_id,
                 AgentPlacement.tmux_pane_id,
+                AgentPlacement.coding_agent,
                 AgentPlacement.created_at.label("placement_created_at"),
             )
             .join(AgentPlacement, Agent.agent_id == AgentPlacement.agent_id)
@@ -275,6 +278,7 @@ class RegistryStore:
                     "tmux_session": row.tmux_session,
                     "tmux_window_id": row.tmux_window_id,
                     "tmux_pane_id": row.tmux_pane_id,
+                    "coding_agent": row.coding_agent,
                     "created_at": row.placement_created_at,
                 },
             }
