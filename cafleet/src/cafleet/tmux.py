@@ -20,7 +20,7 @@ def ensure_tmux_available() -> None:
     if shutil.which("tmux") is None:
         raise TmuxError("tmux binary not found on PATH")
     if not os.environ.get("TMUX"):
-        raise TmuxError("hikyaku member commands must be run inside a tmux session")
+        raise TmuxError("cafleet member commands must be run inside a tmux session")
 
 
 def director_context() -> DirectorContext:

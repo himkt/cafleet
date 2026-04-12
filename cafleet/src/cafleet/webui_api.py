@@ -1,4 +1,4 @@
-"""WebUI API endpoints for the Hikyaku message viewer."""
+"""WebUI API endpoints for the CAFleet message viewer."""
 
 import asyncio
 import uuid
@@ -17,10 +17,10 @@ from a2a.types import (
     TextPart,
 )
 
-from hikyaku.db.engine import get_sessionmaker
-from hikyaku.executor import BrokerExecutor
-from hikyaku.registry_store import RegistryStore
-from hikyaku.task_store import TaskStore
+from cafleet.db.engine import get_sessionmaker
+from cafleet.executor import BrokerExecutor
+from cafleet.registry_store import RegistryStore
+from cafleet.task_store import TaskStore
 
 
 webui_router = APIRouter(prefix="/ui/api")

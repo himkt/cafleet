@@ -21,17 +21,17 @@ from a2a.types import (
     TextPart,
 )
 
-from hikyaku.agent_card import build_agent_card
-from hikyaku.api.registry import (
+from cafleet.agent_card import build_agent_card
+from cafleet.api.registry import (
     get_registry_store,
     registry_router,
 )
-from hikyaku.config import settings
-from hikyaku.db.engine import dispose_engine, get_sessionmaker
-from hikyaku.executor import BrokerExecutor, SessionMismatchError
-from hikyaku.registry_store import RegistryStore
-from hikyaku.task_store import TaskStore
-from hikyaku.webui_api import (
+from cafleet.config import settings
+from cafleet.db.engine import dispose_engine, get_sessionmaker
+from cafleet.executor import BrokerExecutor, SessionMismatchError
+from cafleet.registry_store import RegistryStore
+from cafleet.task_store import TaskStore
+from cafleet.webui_api import (
     webui_router,
     get_webui_store,
     get_webui_task_store,
@@ -240,7 +240,7 @@ def create_app(
     sessionmaker: async_sessionmaker[AsyncSession] | None = None,
     webui_dist_dir: str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="Hikyaku Broker", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="CAFleet Broker", version="0.1.0", lifespan=lifespan)
     app.include_router(registry_router, prefix="/api/v1")
 
     if sessionmaker is None:
@@ -336,7 +336,7 @@ app = create_app()
 if __name__ == "__main__":
     # ``reload=True`` is a developer convenience for ad-hoc runs only.
     uvicorn.run(
-        "hikyaku.server:app",
+        "cafleet.server:app",
         host=settings.broker_host,
         port=settings.broker_port,
         reload=True,

@@ -15,8 +15,8 @@ from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hikyaku.db.models import Agent, AgentPlacement, Session, Task
-from hikyaku.models import PlacementCreate
+from cafleet.db.models import Agent, AgentPlacement, Session, Task
+from cafleet.models import PlacementCreate
 
 
 class CreateAgentResult(TypedDict):

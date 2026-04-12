@@ -1,11 +1,11 @@
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
-from hikyaku.config import settings
+from cafleet.config import settings
 
 
 def build_agent_card() -> AgentCard:
     return AgentCard(
-        name="Hikyaku Broker",
+        name="CAFleet Broker",
         description=(
             "A2A-native message broker that enables coding agents "
             "to exchange unicast and broadcast messages."

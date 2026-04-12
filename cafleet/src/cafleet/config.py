@@ -5,14 +5,14 @@ from pydantic_settings import BaseSettings
 
 
 def _default_database_url() -> str:
-    db_path = Path("~/.local/share/hikyaku/registry.db").expanduser()
+    db_path = Path("~/.local/share/cafleet/registry.db").expanduser()
     return f"sqlite+aiosqlite:///{db_path}"
 
 
 class Settings(BaseSettings):
     database_url: str = Field(
         default_factory=_default_database_url,
-        validation_alias="HIKYAKU_DATABASE_URL",
+        validation_alias="CAFLEET_DATABASE_URL",
     )
     broker_host: str = "0.0.0.0"
     broker_port: int = 8000

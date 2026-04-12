@@ -1,4 +1,4 @@
-"""SQLAlchemy declarative models for the hikyaku registry SQLite store.
+"""SQLAlchemy declarative models for the cafleet registry SQLite store.
 
 Schema mirrors `docs/spec/data-model.md` exactly. The hybrid model promotes
 indexed/queried fields to columns and stores opaque A2A payloads

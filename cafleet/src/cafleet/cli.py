@@ -1,4 +1,4 @@
-"""hikyaku CLI — unified command-line interface.
+"""cafleet CLI — unified command-line interface.
 
 Subgroups:
   - ``db``      — Database schema management (init, etc.)
@@ -29,10 +29,10 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import IntegrityError
 
-from hikyaku import broker_client as api
-from hikyaku import output
-from hikyaku.coding_agent import CodingAgentConfig, get_coding_agent
-from hikyaku.config import settings
+from cafleet import broker_client as api
+from cafleet import output
+from cafleet.coding_agent import CodingAgentConfig, get_coding_agent
+from cafleet.config import settings
 
 
 # ---------------------------------------------------------------------------
@@ -46,11 +46,11 @@ def _run(coro: Coroutine) -> Any:
 
 
 def _require_session_id(ctx: click.Context) -> None:
-    """Validate that HIKYAKU_SESSION_ID is set."""
+    """Validate that CAFLEET_SESSION_ID is set."""
     if not ctx.obj.get("session_id"):
         click.echo(
-            "Error: HIKYAKU_SESSION_ID environment variable is required. "
-            "Create a session with 'hikyaku session create'.",
+            "Error: CAFLEET_SESSION_ID environment variable is required. "
+            "Create a session with 'cafleet session create'.",
             err=True,
         )
         ctx.exit(1)
@@ -71,10 +71,10 @@ def _sync_db_url() -> str:
 )
 @click.pass_context
 def cli(ctx, json_output):
-    """Hikyaku — CLI for the A2A message broker."""
+    """CAFleet — CLI for the A2A message broker."""
     ctx.ensure_object(dict)
-    url = os.environ.get("HIKYAKU_URL") or "http://127.0.0.1:8000"
-    session_id = os.environ.get("HIKYAKU_SESSION_ID")
+    url = os.environ.get("CAFLEET_URL") or "http://127.0.0.1:8000"
+    session_id = os.environ.get("CAFLEET_SESSION_ID")
     ctx.obj["url"] = url
     ctx.obj["session_id"] = session_id
     ctx.obj["json_output"] = json_output
@@ -88,10 +88,10 @@ def cli(ctx, json_output):
 @cli.command()
 @click.pass_context
 def env(ctx):
-    """Print HIKYAKU_URL and HIKYAKU_SESSION_ID from the environment."""
-    click.echo(f"HIKYAKU_URL={ctx.obj['url']}")
+    """Print CAFLEET_URL and CAFLEET_SESSION_ID from the environment."""
+    click.echo(f"CAFLEET_URL={ctx.obj['url']}")
     session_id = ctx.obj["session_id"] or ""
-    click.echo(f"HIKYAKU_SESSION_ID={session_id}")
+    click.echo(f"CAFLEET_SESSION_ID={session_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -126,13 +126,13 @@ def init() -> None:
     db_file.parent.mkdir(parents=True, exist_ok=True)
 
     # ``importlib.resources.as_file`` guarantees a real filesystem path
-    # even when ``hikyaku`` is imported from a zipped wheel,
+    # even when ``cafleet`` is imported from a zipped wheel,
     # where ``files(...)`` would otherwise return a virtual ``Traversable``
     # that Alembic cannot open. The context manager is held open for the
     # entire ``command.upgrade`` call so the extracted file is not
     # cleaned up prematurely.
     with importlib.resources.as_file(
-        importlib.resources.files("hikyaku") / "alembic.ini"
+        importlib.resources.files("cafleet") / "alembic.ini"
     ) as ini_path:
         cfg = Config(str(ini_path))
         cfg.set_main_option("sqlalchemy.url", sync_url)
@@ -167,7 +167,7 @@ def init() -> None:
                 if current_rev not in known_revisions:
                     click.echo(
                         f"ERROR: DB schema is at revision {current_rev} which "
-                        f"is unknown to this version of hikyaku. "
+                        f"is unknown to this version of cafleet. "
                         f"Refusing to downgrade automatically.",
                         err=True,
                     )
@@ -348,7 +348,7 @@ def session_delete(session_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Client commands (require HIKYAKU_URL + HIKYAKU_SESSION_ID)
+# Client commands (require CAFLEET_URL + CAFLEET_SESSION_ID)
 # ---------------------------------------------------------------------------
 
 
@@ -655,7 +655,7 @@ def _rollback_register(broker_url, session_id, director_id, new_agent_id, *, rea
     except Exception as drop_exc:
         click.echo(
             f"WARNING: rollback deregister failed — agent {new_agent_id} is "
-            f"orphaned in the registry. Run `hikyaku deregister --agent-id "
+            f"orphaned in the registry. Run `cafleet deregister --agent-id "
             f"{new_agent_id}` manually to clean up. Cause: {drop_exc}",
             err=True,
         )
@@ -676,7 +676,7 @@ def _rollback_register(broker_url, session_id, director_id, new_agent_id, *, rea
 @click.pass_context
 def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
     """Register a new member and spawn its coding agent pane in the Director's window."""
-    from hikyaku import tmux
+    from cafleet import tmux
 
     _require_session_id(ctx)
     broker_url = ctx.obj["url"]
@@ -724,9 +724,9 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         pane_id = tmux.split_window(
             target_window_id=director_ctx.window_id,
             env={
-                "HIKYAKU_URL": broker_url,
-                "HIKYAKU_SESSION_ID": session_id,
-                "HIKYAKU_AGENT_ID": new_agent_id,
+                "CAFLEET_URL": broker_url,
+                "CAFLEET_SESSION_ID": session_id,
+                "CAFLEET_AGENT_ID": new_agent_id,
             },
             command=coding_agent_config.build_command(prompt),
         )
@@ -788,7 +788,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
 @click.pass_context
 def member_delete(ctx, agent_id, member_id):
     """Deregister a member agent and close its tmux pane."""
-    from hikyaku import tmux
+    from cafleet import tmux
 
     _require_session_id(ctx)
     broker_url = ctx.obj["url"]
@@ -820,7 +820,7 @@ def member_delete(ctx, agent_id, member_id):
     placement = target.get("placement")
     if placement is None:
         click.echo(
-            f"Error: agent {member_id} has no placement; use `hikyaku deregister` instead",
+            f"Error: agent {member_id} has no placement; use `cafleet deregister` instead",
             err=True,
         )
         ctx.exit(1)
@@ -910,7 +910,7 @@ def member_list(ctx, agent_id):
 @click.pass_context
 def member_capture(ctx, agent_id, member_id, lines):
     """Capture the last N lines of a member pane's terminal buffer."""
-    from hikyaku import tmux
+    from cafleet import tmux
 
     _require_session_id(ctx)
     broker_url = ctx.obj["url"]
@@ -942,7 +942,7 @@ def member_capture(ctx, agent_id, member_id, lines):
     if placement is None:
         click.echo(
             f"Error: agent {member_id} has no placement row; it was not "
-            f"spawned via `hikyaku member create`.",
+            f"spawned via `cafleet member create`.",
             err=True,
         )
         ctx.exit(1)

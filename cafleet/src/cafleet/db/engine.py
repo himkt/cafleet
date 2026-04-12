@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from hikyaku.config import settings
+from cafleet.config import settings
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None

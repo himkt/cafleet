@@ -1,7 +1,7 @@
 # Project Rename: hikyaku → cafleet
 
 **Status**: Approved
-**Progress**: 22/36 tasks complete
+**Progress**: 24/36 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -301,8 +301,8 @@ Per project rules, documentation is updated before code.
 
 ### Step 5: Python Source Code
 
-- [ ] Update all `from hikyaku` / `import hikyaku` to `from cafleet` / `import cafleet` across all 14 source files with references (includes `alembic/env.py`) <!-- completed: -->
-- [ ] Update `config.py`: database path `~/.local/share/hikyaku/` → `~/.local/share/cafleet/`, env var `HIKYAKU_DATABASE_URL` → `CAFLEET_DATABASE_URL` <!-- completed: -->
+- [x] Update all `from hikyaku` / `import hikyaku` to `from cafleet` / `import cafleet` across all 14 source files with references (includes `alembic/env.py`) <!-- completed: 2026-04-12 -->
+- [x] Update `config.py`: database path `~/.local/share/hikyaku/` → `~/.local/share/cafleet/`, env var `HIKYAKU_DATABASE_URL` → `CAFLEET_DATABASE_URL` <!-- completed: 2026-04-12 -->
 
 ### Step 6: Test Files
 

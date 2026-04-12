@@ -30,9 +30,9 @@ CLAUDE = CodingAgentConfig(
     binary="claude",
     extra_args=(),
     default_prompt_template=(
-        "Load Skill(hikyaku). Your agent_id is $HIKYAKU_AGENT_ID.\n"
+        "Load Skill(cafleet). Your agent_id is $CAFLEET_AGENT_ID.\n"
         "You are a member of the team led by {director_name} ({director_agent_id}).\n"
-        "Wait for instructions via `hikyaku poll --agent-id $HIKYAKU_AGENT_ID`."
+        "Wait for instructions via `cafleet poll --agent-id $CAFLEET_AGENT_ID`."
     ),
 )
 
@@ -41,11 +41,11 @@ CODEX = CodingAgentConfig(
     binary="codex",
     extra_args=("--approval-mode", "auto-edit"),
     default_prompt_template=(
-        "Your agent_id is $HIKYAKU_AGENT_ID.\n"
+        "Your agent_id is $CAFLEET_AGENT_ID.\n"
         "You are a member of the team led by {director_name} ({director_agent_id}).\n"
-        "Check for instructions using `hikyaku poll --agent-id $HIKYAKU_AGENT_ID`.\n"
-        "Use `hikyaku ack --agent-id $HIKYAKU_AGENT_ID --task-id <id>` to acknowledge messages\n"
-        'and `hikyaku send --agent-id $HIKYAKU_AGENT_ID --to <id> --text "..."` to reply.'
+        "Check for instructions using `cafleet poll --agent-id $CAFLEET_AGENT_ID`.\n"
+        "Use `cafleet ack --agent-id $CAFLEET_AGENT_ID --task-id <id>` to acknowledge messages\n"
+        'and `cafleet send --agent-id $CAFLEET_AGENT_ID --to <id> --text "..."` to reply.'
     ),
 )
 
