@@ -17,6 +17,7 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 - **Session-Based Routing** -- `X-Session-Id` (namespace) + `X-Agent-Id` (identity) headers on all requests; no authentication or bearer tokens
 - **WebUI** -- Browser-based dashboard; session picker at `/ui/#/sessions`, then a Discord-style unified timeline per session (sidebar of active/deregistered agents, message timeline with broadcasts collapsed to one entry + per-recipient ACK reactions on hover, and an `@<agent>` / `@all` input)
 - **Member Lifecycle** -- `hikyaku member create/delete/list/capture` commands wrap tmux pane spawning + agent registration into atomic operations; the `agent_placements` table persists the agent-to-pane mapping in the registry
+- **Director Monitoring Skill** -- `.claude/skills/hikyaku-monitoring/SKILL.md` defines mandatory supervision protocol for Directors: 2-stage health check (poll inbox → capture terminal), spawn protocol, stall response, and a `/loop` prompt template
 - **CLI Tool** -- Full-featured command-line client for all broker operations
 - **SQLite Storage** -- Single-file database; no daemon required. Schema managed by Alembic via `hikyaku-registry db init`
 

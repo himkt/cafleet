@@ -166,6 +166,8 @@ If step 2 fails, the registered agent is rolled back via `DELETE /api/v1/agents/
 
 **Commands**: `member create`, `member delete`, `member list`, `member capture`. All require `--agent-id` (the Director's ID). The tmux helper module (`client/src/hikyaku_client/tmux.py`) isolates all subprocess interaction with tmux.
 
+**Supervision skill**: The Director's monitoring obligations are defined in `.claude/skills/hikyaku-monitoring/SKILL.md`. This skill must be loaded (`Skill(hikyaku-monitoring)`) before spawning any members. It provides a 2-stage health check protocol (message poll then terminal capture) and a ready-to-use `/loop` prompt template.
+
 ## Key Design Decisions
 
 ### contextId Convention

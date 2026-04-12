@@ -1,7 +1,7 @@
 # Hikyaku Monitoring Skill
 
 **Status**: Approved
-**Progress**: 0/8 tasks complete
+**Progress**: 4/8 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -236,10 +236,10 @@ The updated hikyaku SKILL.md Monitoring mandate section makes the replacement ex
 
 ### Step 1: Documentation updates
 
-- [ ] Update `ARCHITECTURE.md` — add supervision skill paragraph to Member Lifecycle section <!-- completed: -->
-- [ ] Update `README.md` — add Director Monitoring Skill to Features section <!-- completed: -->
-- [ ] Update `CLAUDE.md` (root) — add `/hikyaku-monitoring` to Skills section <!-- completed: -->
-- [ ] Update `.claude/CLAUDE.md` — add `/hikyaku-monitoring` to Project Skills section <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` — add supervision skill paragraph to Member Lifecycle section <!-- completed: 2026-04-12T08:45 -->
+- [x] Update `README.md` — add Director Monitoring Skill to Features section <!-- completed: 2026-04-12T08:45 -->
+- [x] Update `CLAUDE.md` (root) — add `/hikyaku-monitoring` to Skills section <!-- completed: 2026-04-12T08:45 -->
+- [x] Update `.claude/CLAUDE.md` — add `/hikyaku-monitoring` to Project Skills section <!-- completed: 2026-04-12T08:45 -->
 
 ### Step 2: Create the monitoring skill
 

@@ -45,4 +45,5 @@ See `.claude/rules/commands.md` for the full command reference.
 When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE taking any other action. Pay attention to override instructions (what NOT to do) in each entry.
 
 - `/hikyaku` — Interact with the Hikyaku A2A message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
+- `/hikyaku-monitoring` — Mandatory supervision protocol for a Director managing member agents via Hikyaku. Defines monitoring loop, spawn protocol, and stall response.
 - `/update-readme` — Update README.md based on ARCHITECTURE.md and docs/ directory. Use when documentation sources change and README needs to reflect the latest state.
