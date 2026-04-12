@@ -1,7 +1,7 @@
 # Merge Client and Registry into a Single Package
 
 **Status**: Approved
-**Progress**: 26/32 tasks complete
+**Progress**: 32/32 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -10,11 +10,11 @@ Consolidate the two Python packages (`hikyaku-registry` and `hikyaku-client`) in
 
 ## Success Criteria
 
-- [ ] Single installable package `hikyaku` ships both server and CLI functionality
-- [ ] Unified `hikyaku` CLI replaces both `hikyaku` (client) and `hikyaku-registry` (admin) commands
-- [ ] All existing tests pass from a single `tests/` directory at the project root
-- [ ] `admin/` remains an independent workspace member building into `hikyaku/src/hikyaku/webui/`
-- [ ] `mise` tasks (`//hikyaku:test`, `//hikyaku:dev`, `//hikyaku:lint`) work correctly
+- [x] Single installable package `hikyaku` ships both server and CLI functionality
+- [x] Unified `hikyaku` CLI replaces both `hikyaku` (client) and `hikyaku-registry` (admin) commands
+- [x] All existing tests pass from a single `tests/` directory at the project root
+- [x] `admin/` remains an independent workspace member building into `hikyaku/src/hikyaku/webui/`
+- [x] `mise` tasks (`//hikyaku:test`, `//hikyaku:dev`, `//hikyaku:lint`) work correctly
 - [ ] CI pipeline passes with updated paths
 
 ---
@@ -404,12 +404,12 @@ client/                    # entire directory
 
 ### Step 12: Verify
 
-- [ ] Run `uv sync` from project root <!-- completed: -->
-- [ ] Run `mise //hikyaku:test` — all tests pass <!-- completed: -->
-- [ ] Run `mise //:lint` — no lint errors <!-- completed: -->
-- [ ] Run `mise //:format` — formatting clean <!-- completed: -->
-- [ ] Run `mise //:typecheck` — no type errors <!-- completed: -->
-- [ ] Run `mise //admin:build` — admin builds into new path <!-- completed: -->
+- [x] Run `uv sync` from project root <!-- completed: 2026-04-12T09:45 -->
+- [x] Run `mise //hikyaku:test` — all tests pass <!-- completed: 2026-04-12T09:45 -->
+- [x] Run `mise //:lint` — no lint errors <!-- completed: 2026-04-12T09:45 -->
+- [x] Run `mise //:format` — formatting clean <!-- completed: 2026-04-12T09:45 -->
+- [x] Run `mise //:typecheck` — no type errors <!-- completed: 2026-04-12T09:45 -->
+- [x] Run `mise //admin:build` — admin builds into new path <!-- completed: 2026-04-12T09:45 -->
 
 ---
 
