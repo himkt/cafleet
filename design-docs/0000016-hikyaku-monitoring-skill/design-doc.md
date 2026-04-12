@@ -1,7 +1,7 @@
 # Hikyaku Monitoring Skill
 
 **Status**: Approved
-**Progress**: 5/8 tasks complete
+**Progress**: 8/8 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -247,9 +247,9 @@ The updated hikyaku SKILL.md Monitoring mandate section makes the replacement ex
 
 ### Step 3: Update hikyaku skill references
 
-- [ ] Update `.claude/skills/hikyaku/SKILL.md` — change `Skill(agent-team-supervision)` to `Skill(hikyaku-monitoring)` in Monitoring mandate section <!-- completed: -->
-- [ ] Update `.claude/skills/hikyaku/SKILL.md` — update stall inspection paragraph to reference 2-stage health check <!-- completed: -->
-- [ ] Update `.claude/skills/hikyaku/SKILL.md` — replace the "Note on external `agent-team-supervision` skill" with updated note about `hikyaku-monitoring` <!-- completed: -->
+- [x] Update `.claude/skills/hikyaku/SKILL.md` — change `Skill(agent-team-supervision)` to `Skill(hikyaku-monitoring)` in Monitoring mandate section <!-- completed: 2026-04-12T08:50 -->
+- [x] Update `.claude/skills/hikyaku/SKILL.md` — update stall inspection paragraph to reference 2-stage health check <!-- completed: 2026-04-12T08:50 -->
+- [x] Update `.claude/skills/hikyaku/SKILL.md` — replace the "Note on external `agent-team-supervision` skill" with updated note about `hikyaku-monitoring` <!-- completed: 2026-04-12T08:50 -->
 
 ---
 
