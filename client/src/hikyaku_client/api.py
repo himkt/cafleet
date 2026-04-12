@@ -10,16 +10,20 @@ async def register_agent(
     description: str,
     skills: list[dict] | None = None,
     *,
-    api_key: str,
+    session_id: str,
     placement: dict | None = None,
     director_agent_id: str | None = None,
 ) -> dict:
-    body: dict[str, Any] = {"name": name, "description": description}
+    body: dict[str, Any] = {
+        "name": name,
+        "description": description,
+        "session_id": session_id,
+    }
     if skills is not None:
         body["skills"] = skills
     if placement is not None:
         body["placement"] = placement
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {"X-Session-Id": session_id}
     if director_agent_id is not None:
         headers["X-Agent-Id"] = director_agent_id
     async with httpx.AsyncClient() as client:
@@ -32,7 +36,7 @@ async def register_agent(
 
 async def send_message(
     broker_url: str,
-    api_key: str,
+    session_id: str,
     agent_id: str,
     to: str,
     text: str,
@@ -55,7 +59,7 @@ async def send_message(
             f"{broker_url}/",
             json=payload,
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "X-Session-Id": session_id,
                 "X-Agent-Id": agent_id,
             },
         )
@@ -68,17 +72,17 @@ async def send_message(
 
 async def broadcast_message(
     broker_url: str,
-    api_key: str,
+    session_id: str,
     agent_id: str,
     text: str,
 ) -> list:
-    result = await send_message(broker_url, api_key, agent_id, to="*", text=text)
+    result = await send_message(broker_url, session_id, agent_id, to="*", text=text)
     return [result]
 
 
 async def poll_tasks(
     broker_url: str,
-    api_key: str,
+    session_id: str,
     agent_id: str,
     since: str | None = None,
     page_size: int | None = None,
@@ -102,7 +106,7 @@ async def poll_tasks(
             f"{broker_url}/",
             json=payload,
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "X-Session-Id": session_id,
                 "X-Agent-Id": agent_id,
             },
         )
@@ -118,7 +122,7 @@ async def poll_tasks(
 
 async def ack_task(
     broker_url: str,
-    api_key: str,
+    session_id: str,
     agent_id: str,
     task_id: str,
 ) -> dict:
@@ -140,7 +144,7 @@ async def ack_task(
             f"{broker_url}/",
             json=payload,
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "X-Session-Id": session_id,
                 "X-Agent-Id": agent_id,
             },
         )
@@ -153,7 +157,7 @@ async def ack_task(
 
 async def cancel_task(
     broker_url: str,
-    api_key: str,
+    session_id: str,
     agent_id: str,
     task_id: str,
 ) -> dict:
@@ -168,7 +172,7 @@ async def cancel_task(
             f"{broker_url}/",
             json=payload,
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "X-Session-Id": session_id,
                 "X-Agent-Id": agent_id,
             },
         )
@@ -181,7 +185,7 @@ async def cancel_task(
 
 async def get_task(
     broker_url: str,
-    api_key: str,
+    session_id: str,
     agent_id: str,
     task_id: str,
 ) -> dict:
@@ -196,7 +200,7 @@ async def get_task(
             f"{broker_url}/",
             json=payload,
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "X-Session-Id": session_id,
                 "X-Agent-Id": agent_id,
             },
         )
@@ -209,11 +213,11 @@ async def get_task(
 
 async def list_agents(
     broker_url: str,
-    api_key: str,
+    session_id: str,
     caller_id: str | None = None,
     agent_id: str | None = None,
 ) -> list | dict:
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {"X-Session-Id": session_id}
     if caller_id:
         headers["X-Agent-Id"] = caller_id
     async with httpx.AsyncClient() as client:
@@ -226,6 +230,7 @@ async def list_agents(
             return resp.json()
         resp = await client.get(
             f"{broker_url}/api/v1/agents",
+            params={"session_id": session_id},
             headers=headers,
         )
         resp.raise_for_status()
@@ -235,7 +240,7 @@ async def list_agents(
 
 async def deregister_agent(
     broker_url: str,
-    api_key: str,
+    session_id: str,
     agent_id: str,
     *,
     caller_id: str | None = None,
@@ -244,7 +249,7 @@ async def deregister_agent(
         resp = await client.delete(
             f"{broker_url}/api/v1/agents/{agent_id}",
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "X-Session-Id": session_id,
                 "X-Agent-Id": caller_id if caller_id is not None else agent_id,
             },
         )
@@ -253,7 +258,7 @@ async def deregister_agent(
 
 async def patch_placement(
     broker_url: str,
-    api_key: str,
+    session_id: str,
     *,
     director_agent_id: str,
     member_agent_id: str,
@@ -264,7 +269,7 @@ async def patch_placement(
             f"{broker_url}/api/v1/agents/{member_agent_id}/placement",
             json={"tmux_pane_id": pane_id},
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "X-Session-Id": session_id,
                 "X-Agent-Id": director_agent_id,
             },
         )
@@ -274,15 +279,15 @@ async def patch_placement(
 
 async def list_members(
     broker_url: str,
-    api_key: str,
+    session_id: str,
     director_agent_id: str,
 ) -> list[dict]:
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{broker_url}/api/v1/agents",
-            params={"director_agent_id": director_agent_id},
+            params={"session_id": session_id, "director_agent_id": director_agent_id},
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "X-Session-Id": session_id,
                 "X-Agent-Id": director_agent_id,
             },
         )

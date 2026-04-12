@@ -1,7 +1,7 @@
 # Remove Auth0: Local-Only Session Model
 
 **Status**: Approved
-**Progress**: 39/80 tasks complete
+**Progress**: 44/80 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -568,11 +568,11 @@ Implementation order is **documentation-first** per project rule `.claude/rules/
 
 ### Step 8: Client — CLI & api rename
 
-- [ ] Rename every `HIKYAKU_API_KEY` → `HIKYAKU_SESSION_ID` in `client/src/hikyaku_client/cli.py` (env var read, `_require_api_key` → `_require_session_id`, error message, help text) <!-- completed: -->
-- [ ] Update `client/src/hikyaku_client/api.py`: replace `Authorization: Bearer` header with `X-Session-Id` header on every request; rename `api_key` parameters to `session_id`; add `session_id` to `register_agent` POST body; add `?session_id=` query param to `list_agents` GET request <!-- completed: -->
-- [ ] Change default URL fallback in `cli.py` from `http://localhost:8000` to `http://127.0.0.1:8000` <!-- completed: -->
-- [ ] Update `register` command: add `_require_session_id(ctx)` at the function entry (currently the only command without a key-requirement check — register used to mint the key itself), send `session_id` in the POST body, and set the `X-Session-Id` header (same code path as every other command after the rename) <!-- completed: -->
-- [ ] Verify `client/pyproject.toml` has **no** SQLAlchemy / aiosqlite dependency added <!-- completed: -->
+- [x] Rename every `HIKYAKU_API_KEY` → `HIKYAKU_SESSION_ID` in `client/src/hikyaku_client/cli.py` (env var read, `_require_api_key` → `_require_session_id`, error message, help text) <!-- completed: 2026-04-12 -->
+- [x] Update `client/src/hikyaku_client/api.py`: replace `Authorization: Bearer` header with `X-Session-Id` header on every request; rename `api_key` parameters to `session_id`; add `session_id` to `register_agent` POST body; add `?session_id=` query param to `list_agents` GET request <!-- completed: 2026-04-12 -->
+- [x] Change default URL fallback in `cli.py` from `http://localhost:8000` to `http://127.0.0.1:8000` <!-- completed: 2026-04-12 -->
+- [x] Update `register` command: add `_require_session_id(ctx)` at the function entry (currently the only command without a key-requirement check — register used to mint the key itself), send `session_id` in the POST body, and set the `X-Session-Id` header (same code path as every other command after the rename) <!-- completed: 2026-04-12 -->
+- [x] Verify `client/pyproject.toml` has **no** SQLAlchemy / aiosqlite dependency added <!-- completed: 2026-04-12 -->
 
 ### Step 9: Admin webUI
 
