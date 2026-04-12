@@ -1,6 +1,6 @@
 # Admin Discord-style Timeline
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 30/38 tasks complete
 **Last Updated**: 2026-04-12
 
@@ -10,17 +10,17 @@ Rewrite the admin SPA dashboard into a Discord-inspired layout — left sidebar 
 
 ## Success Criteria
 
-- [ ] `admin/` renders the new Discord-style layout (sidebar + timeline + input + sender selector) and no stale components (`AgentTabs`, `MessageList`, `MessageRow`, `SendMessageForm`) remain
-- [ ] `GET /ui/api/timeline` returns up to 200 most-recent non-`broadcast_summary` tasks for the caller's tenant, newest first, each payload row carrying `origin_task_id` and `created_at`
-- [ ] `POST /ui/api/messages/send` accepts `to_agent_id="*"` and triggers `BrokerExecutor._handle_broadcast`
-- [ ] Alembic migration `0002_add_origin_task_id` adds the nullable column and round-trips through `TaskStore.save` / `TaskStore.get`
-- [ ] `BrokerExecutor._handle_broadcast` populates `origin_task_id` (= the summary task's own id) on every delivery task and the summary task itself, and records `recipientIds` in the summary task's metadata
-- [ ] Unicast sends leave `origin_task_id` NULL
-- [ ] Sidebar lists active agents on top (sorted by `registered_at` ascending), deregistered agents below as disabled/muted entries
-- [ ] A single broadcast appears as ONE timeline entry regardless of recipient count; reaction chips reveal per-recipient `@<name>[ (deregistered)] — <ack time>` on CSS hover
-- [ ] Canceled tasks render with strikethrough body and no reaction area, but remain visible
-- [ ] `ARCHITECTURE.md`, `README.md`, `docs/spec/webui-api.md`, and `docs/spec/data-model.md` reflect the new layout, endpoint, and schema column
-- [ ] `.claude/skills/hikyaku/SKILL.md` explicitly verified unchanged (CLI surface is not touched by this design doc)
+- [x] `admin/` renders the new Discord-style layout (sidebar + timeline + input + sender selector) and no stale components (`AgentTabs`, `MessageList`, `MessageRow`, `SendMessageForm`) remain
+- [x] `GET /ui/api/timeline` returns up to 200 most-recent non-`broadcast_summary` tasks for the caller's tenant, newest first, each payload row carrying `origin_task_id` and `created_at`
+- [x] `POST /ui/api/messages/send` accepts `to_agent_id="*"` and triggers `BrokerExecutor._handle_broadcast`
+- [x] Alembic migration `0002_add_origin_task_id` adds the nullable column and round-trips through `TaskStore.save` / `TaskStore.get`
+- [x] `BrokerExecutor._handle_broadcast` populates `origin_task_id` (= the summary task's own id) on every delivery task and the summary task itself, and records `recipientIds` in the summary task's metadata
+- [x] Unicast sends leave `origin_task_id` NULL
+- [x] Sidebar lists active agents on top (sorted by `registered_at` ascending), deregistered agents below as disabled/muted entries
+- [x] A single broadcast appears as ONE timeline entry regardless of recipient count; reaction chips reveal per-recipient `@<name>[ (deregistered)] — <ack time>` on CSS hover
+- [x] Canceled tasks render with strikethrough body and no reaction area, but remain visible
+- [x] `ARCHITECTURE.md`, `README.md`, `docs/spec/webui-api.md`, and `docs/spec/data-model.md` reflect the new layout, endpoint, and schema column
+- [x] `.claude/skills/hikyaku/SKILL.md` explicitly verified unchanged (CLI surface is not touched by this design doc)
 
 ---
 
@@ -420,3 +420,4 @@ Run on a fresh SQLite file. Each task is an independent scenario so partial prog
 | 2026-04-11 | Reviewer pass 1: replaced two `U+2705` emoji markers in the ASCII layout diagram with `[ack]` (no-emoji rule); split Step 6 manual-verification from one bundled checkbox into 8 per-scenario checkboxes (setup, unicast send, unicast ACK, broadcast send, broadcast partial ACK, deregistered sidebar, canceled rendering, parser negative cases); added a canceled-message verification scenario and a `@nonexistent` parser-negative case that were implicit in the Specification but not exercised by the original checklist. Progress counter updated 31 → 38 |
 | 2026-04-11 | User approved; Status → Approved |
 | 2026-04-12 | Step 1 SKILL-drift verification: Grep-read `.claude/skills/hikyaku/SKILL.md` and confirmed it references only CLI surface (`hikyaku register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `--json`, `--agent-id`, `HIKYAKU_URL`, `HIKYAKU_API_KEY`) — none of which are modified by this design doc (no `client/` files in the Affected files list). Glob `plugins/**/SKILL.md` from project root returned zero matches — no plugin skill files exist in this repo. Both checks pass; no SKILL.md edits required |
+| 2026-04-12 | Implementation complete. All 11 success criteria verified. 388 unit tests passing, 18/18 bundle checks passed. Status → Complete |
