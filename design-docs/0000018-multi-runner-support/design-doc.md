@@ -1,7 +1,7 @@
 # Multi-Runner Support (Codex Integration)
 
 **Status**: Approved
-**Progress**: 5/18 tasks complete
+**Progress**: 6/18 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -218,7 +218,7 @@ In `client/src/hikyaku_client/output.py`:
 
 ### Step 2: CodingAgentConfig Module
 
-- [ ] Create `client/src/hikyaku_client/coding_agent.py` with `CodingAgentConfig` dataclass, `CLAUDE`/`CODEX` constants, `CODING_AGENTS` registry, and `get_coding_agent()` helper <!-- completed: -->
+- [x] Create `client/src/hikyaku_client/coding_agent.py` with `CodingAgentConfig` dataclass, `CLAUDE`/`CODEX` constants, `CODING_AGENTS` registry, and `get_coding_agent()` helper <!-- completed: 2026-04-12T18:30 -->
 
 ### Step 3: Generalize tmux.split_window()
 
