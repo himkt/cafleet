@@ -1,7 +1,7 @@
 # Remove Auth0: Local-Only Session Model
 
 **Status**: Approved
-**Progress**: 11/80 tasks complete
+**Progress**: 17/80 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -497,12 +497,12 @@ Implementation order is **documentation-first** per project rule `.claude/rules/
 
 ### Step 3: Backend — schema & migration
 
-- [ ] Add `Session` model to `registry/src/hikyaku_registry/db/models.py` <!-- completed: -->
-- [ ] Rename `Agent.tenant_id` → `Agent.session_id` in `db/models.py`; update FK target to `sessions.session_id`; rename `idx_agents_tenant_status` → `idx_agents_session_status` <!-- completed: -->
-- [ ] Delete `ApiKey` model class from `db/models.py` <!-- completed: -->
-- [ ] Write `registry/src/hikyaku_registry/alembic/versions/0002_local_simplification.py` per Specification §2 <!-- completed: -->
-- [ ] Run `mise //registry:test` subset for `test_alembic_smoke.py` to verify the migration applies cleanly on a fresh DB <!-- completed: -->
-- [ ] Add `test_alembic_0002_upgrade.py` that creates a 0001-schema DB, inserts an `api_keys` row + an `agents` row referencing it, runs the upgrade, and asserts: (a) `sessions` row exists with `session_id = api_key_hash`, (b) `agents.session_id` FK is valid, (c) `api_keys` table is gone <!-- completed: -->
+- [x] Add `Session` model to `registry/src/hikyaku_registry/db/models.py` <!-- completed: 2026-04-12 -->
+- [x] Rename `Agent.tenant_id` → `Agent.session_id` in `db/models.py`; update FK target to `sessions.session_id`; rename `idx_agents_tenant_status` → `idx_agents_session_status` <!-- completed: 2026-04-12 -->
+- [x] Delete `ApiKey` model class from `db/models.py` <!-- completed: 2026-04-12 -->
+- [x] Write `registry/src/hikyaku_registry/alembic/versions/0002_local_simplification.py` per Specification §2 <!-- completed: 2026-04-12 -->
+- [x] Run `mise //registry:test` subset for `test_alembic_smoke.py` to verify the migration applies cleanly on a fresh DB <!-- completed: 2026-04-12 -->
+- [x] Add `test_alembic_0002_upgrade.py` that creates a 0001-schema DB, inserts an `api_keys` row + an `agents` row referencing it, runs the upgrade, and asserts: (a) `sessions` row exists with `session_id = api_key_hash`, (b) `agents.session_id` FK is valid, (c) `api_keys` table is gone <!-- completed: 2026-04-12 -->
 
 ### Step 4: Backend — registry store & session store
 
