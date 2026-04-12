@@ -1,7 +1,7 @@
 # Multi-Runner Support (Codex Integration)
 
 **Status**: Approved
-**Progress**: 7/18 tasks complete
+**Progress**: 9/18 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -226,8 +226,8 @@ In `client/src/hikyaku_client/output.py`:
 
 ### Step 4: Database Migration and Model
 
-- [ ] Create Alembic migration `0005_add_coding_agent.py` adding `coding_agent TEXT NOT NULL DEFAULT 'claude'` to `agent_placements` <!-- completed: -->
-- [ ] Add `coding_agent` column to `AgentPlacement` model in `registry/src/hikyaku_registry/db/models.py` <!-- completed: -->
+- [x] Create Alembic migration `0005_add_coding_agent.py` adding `coding_agent TEXT NOT NULL DEFAULT 'claude'` to `agent_placements` <!-- completed: 2026-04-12T18:45 -->
+- [x] Add `coding_agent` column to `AgentPlacement` model in `registry/src/hikyaku_registry/db/models.py` <!-- completed: 2026-04-12T18:45 -->
 
 ### Step 5: Registry Layer (Models, Store, API)
 
