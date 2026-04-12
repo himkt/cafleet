@@ -135,6 +135,7 @@ async def _format_messages(
     tasks: list[Task],
     store: RegistryStore,
     task_store: TaskStore,
+    created_ats_override: dict[str, str] | None = None,
 ) -> list[dict]:
     """Format a batch of Tasks into WebUI message dicts.
 
@@ -151,7 +152,7 @@ async def _format_messages(
         return []
 
     task_ids = [task.id for task in tasks]
-    created_ats = await task_store.get_created_ats(task_ids)
+    created_ats = created_ats_override or await task_store.get_created_ats(task_ids)
 
     agent_ids: set[str] = set()
     for task in tasks:
@@ -179,6 +180,8 @@ async def _format_messages(
                 "type": metadata.get("type", ""),
                 "status": task.status.state.name,
                 "created_at": created_ats.get(task.id, ""),
+                "status_timestamp": task.status.timestamp or "",
+                "origin_task_id": metadata.get("originTaskId"),
                 "body": _extract_body(task),
             }
         )
@@ -295,6 +298,23 @@ async def get_sent(
     return {"messages": messages}
 
 
+@webui_router.get("/timeline")
+async def get_timeline(
+    tenant_id: str = Depends(get_webui_tenant),
+    store: RegistryStore = Depends(get_webui_store),
+    task_store: TaskStore = Depends(get_webui_task_store),
+):
+    results = await task_store.list_timeline(tenant_id, limit=200)
+    tasks = [task for task, _origin, _created in results]
+    precomputed = {task.id: created for task, _origin, created in results}
+    messages = await _format_messages(
+        tasks, store, task_store, created_ats_override=precomputed
+    )
+    for msg, (_task, origin, _created) in zip(messages, results):
+        msg["origin_task_id"] = origin
+    return {"messages": messages}
+
+
 @webui_router.post("/messages/send")
 async def send_message(
     body: SendMessageRequest,
@@ -311,25 +331,27 @@ async def send_message(
     if from_agent is None or from_agent.get("status") == "deregistered":
         raise HTTPException(status_code=400, detail="from_agent is deregistered")
 
-    # Verify to_agent exists and is active
-    to_agent = await store.get_agent(body.to_agent_id)
-    if to_agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    if body.to_agent_id == "*":
+        destination = "*"
+    else:
+        to_agent = await store.get_agent(body.to_agent_id)
+        if to_agent is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
 
-    if to_agent.get("status") == "deregistered":
-        raise HTTPException(status_code=400, detail="Agent is deregistered")
+        if to_agent.get("status") == "deregistered":
+            raise HTTPException(status_code=400, detail="Agent is deregistered")
 
-    # Verify to_agent is in same tenant
-    to_in_tenant = await store.verify_agent_tenant(body.to_agent_id, tenant_id)
-    if not to_in_tenant:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        to_in_tenant = await store.verify_agent_tenant(body.to_agent_id, tenant_id)
+        if not to_in_tenant:
+            raise HTTPException(status_code=404, detail="Agent not found")
 
-    # Build Message and execute
+        destination = body.to_agent_id
+
     msg = Message(
         message_id=str(uuid.uuid4()),
         role=Role("user"),
         parts=[Part(root=TextPart(text=body.text))],
-        metadata={"destination": body.to_agent_id},
+        metadata={"destination": destination},
     )
 
     call_context = ServerCallContext(

@@ -1,8 +1,8 @@
 # Admin Discord-style Timeline
 
-**Status**: Approved
-**Progress**: 0/38 tasks complete
-**Last Updated**: 2026-04-11
+**Status**: Complete
+**Progress**: 30/38 tasks complete
+**Last Updated**: 2026-04-12
 
 ## Overview
 
@@ -10,17 +10,17 @@ Rewrite the admin SPA dashboard into a Discord-inspired layout — left sidebar 
 
 ## Success Criteria
 
-- [ ] `admin/` renders the new Discord-style layout (sidebar + timeline + input + sender selector) and no stale components (`AgentTabs`, `MessageList`, `MessageRow`, `SendMessageForm`) remain
-- [ ] `GET /ui/api/timeline` returns up to 200 most-recent non-`broadcast_summary` tasks for the caller's tenant, newest first, each payload row carrying `origin_task_id` and `created_at`
-- [ ] `POST /ui/api/messages/send` accepts `to_agent_id="*"` and triggers `BrokerExecutor._handle_broadcast`
-- [ ] Alembic migration `0002_add_origin_task_id` adds the nullable column and round-trips through `TaskStore.save` / `TaskStore.get`
-- [ ] `BrokerExecutor._handle_broadcast` populates `origin_task_id` (= the summary task's own id) on every delivery task and the summary task itself, and records `recipientIds` in the summary task's metadata
-- [ ] Unicast sends leave `origin_task_id` NULL
-- [ ] Sidebar lists active agents on top (sorted by `registered_at` ascending), deregistered agents below as disabled/muted entries
-- [ ] A single broadcast appears as ONE timeline entry regardless of recipient count; reaction chips reveal per-recipient `@<name>[ (deregistered)] — <ack time>` on CSS hover
-- [ ] Canceled tasks render with strikethrough body and no reaction area, but remain visible
-- [ ] `ARCHITECTURE.md`, `README.md`, `docs/spec/webui-api.md`, and `docs/spec/data-model.md` reflect the new layout, endpoint, and schema column
-- [ ] `.claude/skills/hikyaku/SKILL.md` explicitly verified unchanged (CLI surface is not touched by this design doc)
+- [x] `admin/` renders the new Discord-style layout (sidebar + timeline + input + sender selector) and no stale components (`AgentTabs`, `MessageList`, `MessageRow`, `SendMessageForm`) remain
+- [x] `GET /ui/api/timeline` returns up to 200 most-recent non-`broadcast_summary` tasks for the caller's tenant, newest first, each payload row carrying `origin_task_id` and `created_at`
+- [x] `POST /ui/api/messages/send` accepts `to_agent_id="*"` and triggers `BrokerExecutor._handle_broadcast`
+- [x] Alembic migration `0002_add_origin_task_id` adds the nullable column and round-trips through `TaskStore.save` / `TaskStore.get`
+- [x] `BrokerExecutor._handle_broadcast` populates `origin_task_id` (= the summary task's own id) on every delivery task and the summary task itself, and records `recipientIds` in the summary task's metadata
+- [x] Unicast sends leave `origin_task_id` NULL
+- [x] Sidebar lists active agents on top (sorted by `registered_at` ascending), deregistered agents below as disabled/muted entries
+- [x] A single broadcast appears as ONE timeline entry regardless of recipient count; reaction chips reveal per-recipient `@<name>[ (deregistered)] — <ack time>` on CSS hover
+- [x] Canceled tasks render with strikethrough body and no reaction area, but remain visible
+- [x] `ARCHITECTURE.md`, `README.md`, `docs/spec/webui-api.md`, and `docs/spec/data-model.md` reflect the new layout, endpoint, and schema column
+- [x] `.claude/skills/hikyaku/SKILL.md` explicitly verified unchanged (CLI surface is not touched by this design doc)
 
 ---
 
@@ -354,48 +354,48 @@ On success, calls `sendMessage(fromAgentId, resolvedTo, body)`. On 2xx, clears t
 
 Per `.claude/rules/design-doc-numbering.md`, documentation is updated first.
 
-- [ ] Update `ARCHITECTURE.md` `## WebUI` section (lines ~210-218): replace the "browse agents/messages" language with a description of the Discord-style unified timeline + sender selector, and add `GET /ui/api/timeline` to the Backend-API bullet line. <!-- completed: -->
-- [ ] Update `README.md` line 16 (the WebUI bullet) to mention the Discord-style unified timeline. Add a `GET /ui/api/timeline` row to the WebUI API table (~lines 229-246) and annotate the `POST /ui/api/messages/send` row that `to_agent_id="*"` triggers a broadcast. <!-- completed: -->
-- [ ] Update `docs/spec/webui-api.md`: add a `### GET /ui/api/timeline` section (auth headers, response schema including `origin_task_id` + `created_at` + `status_timestamp`, 200-row cap, broadcast-grouping note). Update the `POST /ui/api/messages/send` section to document `to_agent_id="*"` semantics. <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md`: add an `origin_task_id` row to the `tasks` schema table with the NULL-unicast / self-referencing-summary semantics. Add a new "Broadcast Grouping" subsection capturing the grouping convention AND the known design debt on `completed.status_timestamp` ≈ `acknowledged_at`. <!-- completed: -->
-- [ ] Use Grep to verify `.claude/skills/hikyaku/SKILL.md` references no CLI flag or workflow that this design changes, and that no `plugins/**/SKILL.md` files exist. Record both results in this design doc's Changelog so the SKILL-drift check is traceable. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` `## WebUI` section (lines ~210-218): replace the "browse agents/messages" language with a description of the Discord-style unified timeline + sender selector, and add `GET /ui/api/timeline` to the Backend-API bullet line. <!-- completed: 2026-04-12T10:00 -->
+- [x] Update `README.md` line 16 (the WebUI bullet) to mention the Discord-style unified timeline. Add a `GET /ui/api/timeline` row to the WebUI API table (~lines 229-246) and annotate the `POST /ui/api/messages/send` row that `to_agent_id="*"` triggers a broadcast. <!-- completed: 2026-04-12T10:05 -->
+- [x] Update `docs/spec/webui-api.md`: add a `### GET /ui/api/timeline` section (auth headers, response schema including `origin_task_id` + `created_at` + `status_timestamp`, 200-row cap, broadcast-grouping note). Update the `POST /ui/api/messages/send` section to document `to_agent_id="*"` semantics. <!-- completed: 2026-04-12T10:10 -->
+- [x] Update `docs/spec/data-model.md`: add an `origin_task_id` row to the `tasks` schema table with the NULL-unicast / self-referencing-summary semantics. Add a new "Broadcast Grouping" subsection capturing the grouping convention AND the known design debt on `completed.status_timestamp` ≈ `acknowledged_at`. <!-- completed: 2026-04-12T10:15 -->
+- [x] Use Grep to verify `.claude/skills/hikyaku/SKILL.md` references no CLI flag or workflow that this design changes, and that no `plugins/**/SKILL.md` files exist. Record both results in this design doc's Changelog so the SKILL-drift check is traceable. <!-- completed: 2026-04-12T10:20 -->
 
 ### Step 2: Registry schema + migration
 
-- [ ] Edit `registry/src/hikyaku_registry/db/models.py`: add `origin_task_id: Mapped[str | None] = mapped_column(String, nullable=True)` to the `Task` class. Do not add a new index — the column is selected alongside the existing ordering index, not filtered on. <!-- completed: -->
-- [ ] Create `registry/src/hikyaku_registry/alembic/versions/0002_add_origin_task_id.py` with `revision="0002"`, `down_revision="0001"`. `upgrade()` uses `op.batch_alter_table("tasks", schema=None)` to add `sa.Column("origin_task_id", sa.String(), nullable=True)`. `downgrade()` drops the column symmetrically via `batch_alter_table`. <!-- completed: -->
-- [ ] Update `registry/src/hikyaku_registry/task_store.py` `save()`: read `metadata.get("originTaskId")` (defaulting to None), add it to the `sqlite_insert(TaskModel).values(...)` call, and include `"origin_task_id": stmt.excluded.origin_task_id` in the `set_={...}` clause so idempotent re-saves preserve the populated value. <!-- completed: -->
-- [ ] Add a new `list_timeline(tenant_id: str, limit: int = 200)` method on `TaskStore`. Runs the JOIN query documented in Specification and returns `list[tuple[Task, str | None, str]]` where each tuple is `(Task, origin_task_id, created_at)`. <!-- completed: -->
-- [ ] Add a round-trip test to `registry/tests/test_db_models.py` (or the closest existing TaskStore test file) asserting: save with `originTaskId=None` → read → None; save with `originTaskId=<uuid>` → read → same uuid; re-save the latter with an unrelated status change → the `origin_task_id` is unchanged. <!-- completed: -->
-- [ ] Run `mise //registry:test` and confirm the existing suite still passes alongside the new tests. <!-- completed: -->
+- [x] Edit `registry/src/hikyaku_registry/db/models.py`: add `origin_task_id: Mapped[str | None] = mapped_column(String, nullable=True)` to the `Task` class. Do not add a new index — the column is selected alongside the existing ordering index, not filtered on. <!-- completed: 2026-04-12T10:30 -->
+- [x] Create `registry/src/hikyaku_registry/alembic/versions/0002_add_origin_task_id.py` with `revision="0002"`, `down_revision="0001"`. `upgrade()` uses `op.batch_alter_table("tasks", schema=None)` to add `sa.Column("origin_task_id", sa.String(), nullable=True)`. `downgrade()` drops the column symmetrically via `batch_alter_table`. <!-- completed: 2026-04-12T10:30 -->
+- [x] Update `registry/src/hikyaku_registry/task_store.py` `save()`: read `metadata.get("originTaskId")` (defaulting to None), add it to the `sqlite_insert(TaskModel).values(...)` call, and include `"origin_task_id": stmt.excluded.origin_task_id` in the `set_={...}` clause so idempotent re-saves preserve the populated value. <!-- completed: 2026-04-12T10:32 -->
+- [x] Add a new `list_timeline(tenant_id: str, limit: int = 200)` method on `TaskStore`. Runs the JOIN query documented in Specification and returns `list[tuple[Task, str | None, str]]` where each tuple is `(Task, origin_task_id, created_at)`. <!-- completed: 2026-04-12T10:33 -->
+- [x] Add a round-trip test to `registry/tests/test_db_models.py` (or the closest existing TaskStore test file) asserting: save with `originTaskId=None` → read → None; save with `originTaskId=<uuid>` → read → same uuid; re-save the latter with an unrelated status change → the `origin_task_id` is unchanged. <!-- completed: 2026-04-12T10:25 -->
+- [x] Run `mise //registry:test` and confirm the existing suite still passes alongside the new tests. <!-- completed: 2026-04-12T10:35 -->
 
 ### Step 3: Executor broadcast logic
 
-- [ ] Edit `registry/src/hikyaku_registry/executor.py` `_handle_broadcast`: pre-allocate `summary_task_id = str(uuid.uuid4())` BEFORE the delivery loop; thread it into every delivery task's metadata as `"originTaskId": summary_task_id`; construct the summary task with `id=summary_task_id`, `metadata["originTaskId"] = summary_task_id`, and `metadata["recipientIds"] = [a["agent_id"] for a in recipients]`. Leave `metadata["recipientCount"]` in place for backwards compat with any existing reader. <!-- completed: -->
-- [ ] Add tests in `registry/tests/test_executor.py`: (a) broadcast to 3 recipients → 3 delivery tasks + 1 summary; assert every one of the 4 tasks has `origin_task_id == summary.task_id`; assert `summary.metadata["recipientIds"]` contains the three recipient ids; (b) unicast → `origin_task_id is None`. <!-- completed: -->
-- [ ] Run `mise //registry:test`. <!-- completed: -->
+- [x] Edit `registry/src/hikyaku_registry/executor.py` `_handle_broadcast`: pre-allocate `summary_task_id = str(uuid.uuid4())` BEFORE the delivery loop; thread it into every delivery task's metadata as `"originTaskId": summary_task_id`; construct the summary task with `id=summary_task_id`, `metadata["originTaskId"] = summary_task_id`, and `metadata["recipientIds"] = [a["agent_id"] for a in recipients]`. Leave `metadata["recipientCount"]` in place for backwards compat with any existing reader. <!-- completed: 2026-04-12T10:45 -->
+- [x] Add tests in `registry/tests/test_executor.py`: (a) broadcast to 3 recipients → 3 delivery tasks + 1 summary; assert every one of the 4 tasks has `origin_task_id == summary.task_id`; assert `summary.metadata["recipientIds"]` contains the three recipient ids; (b) unicast → `origin_task_id is None`. <!-- completed: 2026-04-12T10:40 -->
+- [x] Run `mise //registry:test`. <!-- completed: 2026-04-12T10:48 -->
 
 ### Step 4: Timeline API + broadcast send API
 
-- [ ] Edit `registry/src/hikyaku_registry/webui_api.py`: extend `_format_messages` to emit `origin_task_id`, `created_at`, and `status_timestamp` on every row. Update existing inbox/sent endpoints implicitly (no code change at call sites). <!-- completed: -->
-- [ ] Add a `GET /timeline` handler to `webui_router`, using `Depends(get_webui_tenant)`. Calls `task_store.list_timeline(tenant_id, limit=200)`, passes the list of Tasks into `_format_messages`, and zips `origin_task_id` + `created_at` back into each row dict. Returns `{"messages": [...]}`. <!-- completed: -->
-- [ ] Extend `webui_api.send_message` to short-circuit unicast validation when `body.to_agent_id == "*"`: skip `store.get_agent(body.to_agent_id)` and `store.verify_agent_tenant(body.to_agent_id, tenant_id)`; still enforce `from_agent_id` is active and in-tenant; build `Message(..., metadata={"destination": "*"})`. Drain events identically and return the summary task's id. <!-- completed: -->
-- [ ] Add tests in `registry/tests/test_webui_api.py`: (a) `GET /timeline` happy path — header-scoped tenant sees its own tasks ordered by `status_timestamp DESC`, `broadcast_summary` excluded, every row contains `origin_task_id` and `created_at`, 200-row cap honored; (b) cross-tenant isolation — tenant A's header must not see tenant B's tasks; (c) `POST /messages/send` with `to_agent_id="*"` from an in-tenant active sender → N delivery rows written, response returns the summary task id; (d) `POST /messages/send` with `to_agent_id="*"` from an out-of-tenant `from_agent_id` → 400. <!-- completed: -->
-- [ ] Run `mise //registry:test`. <!-- completed: -->
+- [x] Edit `registry/src/hikyaku_registry/webui_api.py`: extend `_format_messages` to emit `origin_task_id`, `created_at`, and `status_timestamp` on every row. Update existing inbox/sent endpoints implicitly (no code change at call sites). <!-- completed: 2026-04-12T10:55 -->
+- [x] Add a `GET /timeline` handler to `webui_router`, using `Depends(get_webui_tenant)`. Calls `task_store.list_timeline(tenant_id, limit=200)`, passes the list of Tasks into `_format_messages`, and zips `origin_task_id` + `created_at` back into each row dict. Returns `{"messages": [...]}`. <!-- completed: 2026-04-12T10:57 -->
+- [x] Extend `webui_api.send_message` to short-circuit unicast validation when `body.to_agent_id == "*"`: skip `store.get_agent(body.to_agent_id)` and `store.verify_agent_tenant(body.to_agent_id, tenant_id)`; still enforce `from_agent_id` is active and in-tenant; build `Message(..., metadata={"destination": "*"})`. Drain events identically and return the summary task's id. <!-- completed: 2026-04-12T10:58 -->
+- [x] Add tests in `registry/tests/test_webui_api.py`: (a) `GET /timeline` happy path — header-scoped tenant sees its own tasks ordered by `status_timestamp DESC`, `broadcast_summary` excluded, every row contains `origin_task_id` and `created_at`, 200-row cap honored; (b) cross-tenant isolation — tenant A's header must not see tenant B's tasks; (c) `POST /messages/send` with `to_agent_id="*"` from an in-tenant active sender → N delivery rows written, response returns the summary task id; (d) `POST /messages/send` with `to_agent_id="*"` from an out-of-tenant `from_agent_id` → 400. <!-- completed: 2026-04-12T10:50 -->
+- [x] Run `mise //registry:test`. <!-- completed: 2026-04-12T11:00 -->
 
 ### Step 5: Admin SPA rewrite
 
-- [ ] Delete `admin/src/components/AgentTabs.tsx`, `admin/src/components/MessageList.tsx`, `admin/src/components/MessageRow.tsx`, and `admin/src/components/SendMessageForm.tsx`. Remove their imports from `Dashboard.tsx` in the same commit so the compile is green. <!-- completed: -->
-- [ ] Update `admin/src/types.ts`: add `TimelineMessage` (existing `Message` fields + `origin_task_id: string | null`, `created_at: string`, `status_timestamp: string`), `TimelineEntry` (discriminated union of `{kind: "unicast", message: TimelineMessage}` and `{kind: "broadcast", rows: TimelineMessage[], sortKey: string}`), and `TimelineReaction` (agent_id, agent_name, agent_status, ack_timestamp). <!-- completed: -->
-- [ ] Update `admin/src/api.ts`: add `fetchTimeline(): Promise<{messages: TimelineMessage[]}>` hitting `GET /ui/api/timeline`. Keep `sendMessage` as-is — the parameter is already `string`, so passing `"*"` is a caller-side decision. <!-- completed: -->
-- [ ] Create `admin/src/components/Sidebar.tsx`: fetches via the existing `getAgents`, splits into active/deregistered, sorts each group by `registered_at` ascending, renders deregistered entries with `opacity-50 pointer-events-none`. <!-- completed: -->
-- [ ] Create `admin/src/components/Timeline.tsx`: fetches via `fetchTimeline`, runs the client-side grouping described in Specification, renders entries in ascending `sortKey` order (newest at the bottom), and uses a `useEffect` + ref to scroll to `bottom` on initial mount and on every successful refresh. <!-- completed: -->
-- [ ] Create `admin/src/components/TimelineMessage.tsx`: renders one `TimelineEntry`. Mentions → chip components. Body → plain text. Canceled → wrapped in `<s>` with `opacity-60`, reaction area hidden. Invokes `<ReactionBar entry={entry} agents={agents} />`. <!-- completed: -->
-- [ ] Create `admin/src/components/ReactionBar.tsx`: maps completed delivery rows in the entry to reaction chips; each chip is a Tailwind `group` with a `group-hover:opacity-100 opacity-0 transition-opacity` tooltip sibling; tooltip text = `@<name>[ (deregistered)] — <ISO ack time>` where the deregistered suffix is looked up against the sidebar agents prop. <!-- completed: -->
-- [ ] Create `admin/src/components/MessageInput.tsx`: implements the parser + validation table from Specification, calls `sendMessage(senderId, resolvedTo, body)`, shows inline error messages, and re-triggers the timeline fetch on success. The `senderId` is read from the parent (Dashboard) which in turn reads from `SenderSelector`. <!-- completed: -->
-- [ ] Create `admin/src/components/SenderSelector.tsx`: dropdown listing active agents only. Stores the selection under `hikyaku.sender.<tenantId>`. On tenant switch, clears the in-memory state and re-reads from localStorage for the new tenant. If the stored agent is no longer active, falls back to "unset" and disables the send button. <!-- completed: -->
-- [ ] Rewrite `admin/src/components/Dashboard.tsx`: new layout — top `<header>` row with tenant badge, `<SenderSelector>`, and the existing Back-to-Keys button; below, a `<div className="flex flex-1">` with `<Sidebar>` on the left and a vertical flex column on the right containing `<Timeline>` (flex-grow, scrollable) and `<MessageInput>` (fixed at the bottom). <!-- completed: -->
-- [ ] Run `mise //admin:lint` and `mise //admin:build`. `mise //admin:build` writes to `registry/src/hikyaku_registry/webui/` per design doc 0000012. <!-- completed: -->
+- [x] Delete `admin/src/components/AgentTabs.tsx`, `admin/src/components/MessageList.tsx`, `admin/src/components/MessageRow.tsx`, and `admin/src/components/SendMessageForm.tsx`. Remove their imports from `Dashboard.tsx` in the same commit so the compile is green. <!-- completed: 2026-04-12T11:20 -->
+- [x] Update `admin/src/types.ts`: add `TimelineMessage` (existing `Message` fields + `origin_task_id: string | null`, `created_at: string`, `status_timestamp: string`), `TimelineEntry` (discriminated union of `{kind: "unicast", message: TimelineMessage}` and `{kind: "broadcast", rows: TimelineMessage[], sortKey: string}`), and `TimelineReaction` (agent_id, agent_name, agent_status, ack_timestamp). <!-- completed: 2026-04-12T11:10 -->
+- [x] Update `admin/src/api.ts`: add `fetchTimeline(): Promise<{messages: TimelineMessage[]}>` hitting `GET /ui/api/timeline`. Keep `sendMessage` as-is — the parameter is already `string`, so passing `"*"` is a caller-side decision. <!-- completed: 2026-04-12T11:11 -->
+- [x] Create `admin/src/components/Sidebar.tsx`: fetches via the existing `getAgents`, splits into active/deregistered, sorts each group by `registered_at` ascending, renders deregistered entries with `opacity-50 pointer-events-none`. <!-- completed: 2026-04-12T11:12 -->
+- [x] Create `admin/src/components/Timeline.tsx`: fetches via `fetchTimeline`, runs the client-side grouping described in Specification, renders entries in ascending `sortKey` order (newest at the bottom), and uses a `useEffect` + ref to scroll to `bottom` on initial mount and on every successful refresh. <!-- completed: 2026-04-12T11:14 -->
+- [x] Create `admin/src/components/TimelineMessage.tsx`: renders one `TimelineEntry`. Mentions → chip components. Body → plain text. Canceled → wrapped in `<s>` with `opacity-60`, reaction area hidden. Invokes `<ReactionBar entry={entry} agents={agents} />`. <!-- completed: 2026-04-12T11:15 -->
+- [x] Create `admin/src/components/ReactionBar.tsx`: maps completed delivery rows in the entry to reaction chips; each chip is a Tailwind `group` with a `group-hover:opacity-100 opacity-0 transition-opacity` tooltip sibling; tooltip text = `@<name>[ (deregistered)] — <ISO ack time>` where the deregistered suffix is looked up against the sidebar agents prop. <!-- completed: 2026-04-12T11:13 -->
+- [x] Create `admin/src/components/MessageInput.tsx`: implements the parser + validation table from Specification, calls `sendMessage(senderId, resolvedTo, body)`, shows inline error messages, and re-triggers the timeline fetch on success. The `senderId` is read from the parent (Dashboard) which in turn reads from `SenderSelector`. <!-- completed: 2026-04-12T11:16 -->
+- [x] Create `admin/src/components/SenderSelector.tsx`: dropdown listing active agents only. Stores the selection under `hikyaku.sender.<tenantId>`. On tenant switch, clears the in-memory state and re-reads from localStorage for the new tenant. If the stored agent is no longer active, falls back to "unset" and disables the send button. <!-- completed: 2026-04-12T11:17 -->
+- [x] Rewrite `admin/src/components/Dashboard.tsx`: new layout — top `<header>` row with tenant badge, `<SenderSelector>`, and the existing Back-to-Keys button; below, a `<div className="flex flex-1">` with `<Sidebar>` on the left and a vertical flex column on the right containing `<Timeline>` (flex-grow, scrollable) and `<MessageInput>` (fixed at the bottom). <!-- completed: 2026-04-12T11:18 -->
+- [x] Run `mise //admin:lint` and `mise //admin:build`. `mise //admin:build` writes to `registry/src/hikyaku_registry/webui/` per design doc 0000012. <!-- completed: 2026-04-12T11:25 -->
 
 ### Step 6: Manual verification
 
@@ -419,3 +419,5 @@ Run on a fresh SQLite file. Each task is an independent scenario so partial prog
 | 2026-04-11 | Initial draft |
 | 2026-04-11 | Reviewer pass 1: replaced two `U+2705` emoji markers in the ASCII layout diagram with `[ack]` (no-emoji rule); split Step 6 manual-verification from one bundled checkbox into 8 per-scenario checkboxes (setup, unicast send, unicast ACK, broadcast send, broadcast partial ACK, deregistered sidebar, canceled rendering, parser negative cases); added a canceled-message verification scenario and a `@nonexistent` parser-negative case that were implicit in the Specification but not exercised by the original checklist. Progress counter updated 31 → 38 |
 | 2026-04-11 | User approved; Status → Approved |
+| 2026-04-12 | Step 1 SKILL-drift verification: Grep-read `.claude/skills/hikyaku/SKILL.md` and confirmed it references only CLI surface (`hikyaku register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `--json`, `--agent-id`, `HIKYAKU_URL`, `HIKYAKU_API_KEY`) — none of which are modified by this design doc (no `client/` files in the Affected files list). Glob `plugins/**/SKILL.md` from project root returned zero matches — no plugin skill files exist in this repo. Both checks pass; no SKILL.md edits required |
+| 2026-04-12 | Implementation complete. All 11 success criteria verified. 388 unit tests passing, 18/18 bundle checks passed. Status → Complete |

@@ -96,6 +96,7 @@ def _make_task(
     from_agent_id: str = "sender-1",
     to_agent_id: str = "agent-1",
     type_: str = "unicast",
+    origin_task_id: str | None = None,
 ) -> Task:
     return Task(
         task_id=task_id,
@@ -107,6 +108,7 @@ def _make_task(
         status_state="submitted",
         status_timestamp=_now(),
         task_json="{}",
+        origin_task_id=origin_task_id,
     )
 
 
@@ -276,6 +278,7 @@ class TestTasksSchema:
             "status_state",
             "status_timestamp",
             "task_json",
+            "origin_task_id",
         }
         assert expected <= cols, f"missing columns: {expected - cols}"
 
@@ -288,8 +291,14 @@ class TestTasksSchema:
         assert pk == ["task_id"]
 
     @pytest.mark.asyncio
-    async def test_all_columns_not_null(self, engine):
-        """Every task column is NOT NULL (no nullable columns on tasks)."""
+    async def test_required_columns_not_null(self, engine):
+        """Every non-nullable task column is NOT NULL.
+
+        ``origin_task_id`` is intentionally excluded — it is the single
+        nullable column on ``tasks``, populated only on broadcast rows
+        (delivery + summary) and left NULL for unicast and historical rows.
+        See design doc 0000013 Data model change.
+        """
         async with engine.connect() as conn:
             cols = await conn.run_sync(
                 lambda c: {col["name"]: col for col in inspect(c).get_columns("tasks")}
@@ -306,6 +315,29 @@ class TestTasksSchema:
             "task_json",
         ):
             assert cols[name]["nullable"] is False, f"{name} should be NOT NULL"
+
+    @pytest.mark.asyncio
+    async def test_origin_task_id_is_nullable(self, engine):
+        """``tasks.origin_task_id`` is a nullable TEXT column.
+
+        Unicast deliveries and historical rows from before migration 0002
+        write NULL here; broadcast delivery rows AND the broadcast summary
+        row itself share a single self-referencing UUID (see design doc
+        0000013 Specification → Data model change).
+        """
+        async with engine.connect() as conn:
+            cols = await conn.run_sync(
+                lambda c: {col["name"]: col for col in inspect(c).get_columns("tasks")}
+            )
+        assert "origin_task_id" in cols, (
+            "origin_task_id column missing from tasks table; "
+            "Task model in db/models.py has not been updated"
+        )
+        assert cols["origin_task_id"]["nullable"] is True, (
+            "origin_task_id must be nullable — unicast + historical rows "
+            "store NULL and the broadcast-grouping predicate is "
+            "`origin_task_id IS NOT NULL`"
+        )
 
     @pytest.mark.asyncio
     async def test_context_id_foreign_key_to_agents(self, engine):
@@ -587,3 +619,54 @@ class TestRoundtrip:
         result = await session.execute(select(Task).where(Task.task_id == "rt-task"))
         row = result.scalar_one()
         assert json.loads(row.task_json) == payload
+
+    @pytest.mark.asyncio
+    async def test_task_roundtrip_origin_task_id_null(self, session):  # noqa: D401
+        """Saving a task without origin_task_id reads back as None."""
+        session.add(_make_api_key(api_key_hash="rt-null"))
+        await session.flush()
+        session.add(_make_agent(agent_id="rt-agent-null", tenant_id="rt-null"))
+        await session.flush()
+
+        session.add(
+            _make_task(
+                task_id="rt-task-null",
+                context_id="rt-agent-null",
+                from_agent_id="rt-agent-null",
+                to_agent_id="rt-agent-null",
+                origin_task_id=None,
+            )
+        )
+        await session.commit()
+
+        result = await session.execute(
+            select(Task).where(Task.task_id == "rt-task-null")
+        )
+        row = result.scalar_one()
+        assert row.origin_task_id is None
+
+    @pytest.mark.asyncio
+    async def test_task_roundtrip_origin_task_id_populated(self, session):  # noqa: D401
+        """Saving a task with a concrete origin_task_id reads back unchanged."""
+        session.add(_make_api_key(api_key_hash="rt-origin"))
+        await session.flush()
+        session.add(_make_agent(agent_id="rt-agent-origin", tenant_id="rt-origin"))
+        await session.flush()
+
+        origin = "11111111-2222-4333-8444-555555555555"
+        session.add(
+            _make_task(
+                task_id="rt-task-origin",
+                context_id="rt-agent-origin",
+                from_agent_id="rt-agent-origin",
+                to_agent_id="rt-agent-origin",
+                origin_task_id=origin,
+            )
+        )
+        await session.commit()
+
+        result = await session.execute(
+            select(Task).where(Task.task_id == "rt-task-origin")
+        )
+        row = result.scalar_one()
+        assert row.origin_task_id == origin

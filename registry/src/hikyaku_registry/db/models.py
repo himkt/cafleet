@@ -60,6 +60,7 @@ class Task(Base):
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     status_state: Mapped[str] = mapped_column(String, nullable=False)
     status_timestamp: Mapped[str] = mapped_column(String, nullable=False)
+    origin_task_id: Mapped[str | None] = mapped_column(String, nullable=True)
     task_json: Mapped[str] = mapped_column(String, nullable=False)
 
     __table_args__ = (

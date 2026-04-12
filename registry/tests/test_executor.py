@@ -1120,3 +1120,145 @@ class TestTenantScopedBroadcast:
 
         # A2 deregistered, so no delivery tasks
         assert len(delivery_tasks) == 0
+
+
+# ===========================================================================
+# Broadcast origin_task_id tests (design doc 0000013 Step 3)
+# ===========================================================================
+
+_OWNER_BROADCAST = "auth0|exec-broadcast"
+
+
+@pytest.fixture
+async def broadcast_env(store: RegistryStore, task_store: TaskStore):
+    """4-agent single-tenant env for origin_task_id broadcast tests.
+
+    The existing ``env`` fixture has only 3 agents (2 recipients after
+    excluding the sender). The design doc requires testing broadcast to
+    3 recipients, so this fixture registers 4 agents.
+    """
+    api_key, tenant_id, _ = await store.create_api_key(_OWNER_BROADCAST)
+    executor = BrokerExecutor(registry_store=store, task_store=task_store)
+
+    sender = await store.create_agent(
+        name="Sender", description="Broadcast sender", api_key=api_key
+    )
+    r1 = await store.create_agent(
+        name="Recipient 1", description="First recipient", api_key=api_key
+    )
+    r2 = await store.create_agent(
+        name="Recipient 2", description="Second recipient", api_key=api_key
+    )
+    r3 = await store.create_agent(
+        name="Recipient 3", description="Third recipient", api_key=api_key
+    )
+
+    return {
+        "executor": executor,
+        "task_store": task_store,
+        "tenant_id": tenant_id,
+        "sender": sender,
+        "r1": r1,
+        "r2": r2,
+        "r3": r3,
+    }
+
+
+class TestBroadcastOriginTaskId:
+    """origin_task_id population in broadcast flow (design doc 0000013 Step 3).
+
+    Broadcast to 3 recipients produces 3 delivery tasks + 1 summary.
+    Every one of the 4 tasks carries ``originTaskId == summary.task_id``
+    in its metadata, and the summary carries ``recipientIds``.
+    """
+
+    async def _broadcast(self, broadcast_env):
+        """Send a broadcast and return ``(deliveries, summary)``."""
+        executor = broadcast_env["executor"]
+        sender = broadcast_env["sender"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=sender["agent_id"],
+            tenant_id=broadcast_env["tenant_id"],
+            destination="*",
+            text="Build failed on main",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        tasks = [e for e in events if isinstance(e, Task)]
+
+        summary = next(
+            t
+            for t in tasks
+            if t.metadata and t.metadata.get("type") in ("broadcast", "broadcast_summary")
+        )
+        deliveries = [
+            t
+            for t in tasks
+            if t.metadata and t.metadata.get("type") == "unicast"
+        ]
+        return deliveries, summary
+
+    async def test_creates_3_deliveries_and_1_summary(self, broadcast_env):
+        """Broadcast to 3 recipients → exactly 3 delivery tasks + 1 summary."""
+        deliveries, summary = await self._broadcast(broadcast_env)
+        assert len(deliveries) == 3
+        assert summary is not None
+
+    async def test_all_delivery_tasks_have_origin_task_id(self, broadcast_env):
+        """Every delivery task has ``originTaskId == summary.id`` in metadata."""
+        deliveries, summary = await self._broadcast(broadcast_env)
+        for d in deliveries:
+            assert d.metadata["originTaskId"] == summary.id
+
+    async def test_summary_origin_task_id_is_self_reference(self, broadcast_env):
+        """Summary task's ``originTaskId`` equals its own ``id``."""
+        _, summary = await self._broadcast(broadcast_env)
+        assert summary.metadata["originTaskId"] == summary.id
+
+    async def test_all_four_tasks_share_same_origin_task_id(self, broadcast_env):
+        """All 4 tasks (3 delivery + 1 summary) share one ``originTaskId``."""
+        deliveries, summary = await self._broadcast(broadcast_env)
+        all_tasks = deliveries + [summary]
+        origin_ids = {t.metadata["originTaskId"] for t in all_tasks}
+        assert len(origin_ids) == 1
+        assert origin_ids.pop() == summary.id
+
+    async def test_summary_metadata_contains_recipient_ids(self, broadcast_env):
+        """Summary metadata has ``recipientIds`` matching the 3 recipient agent ids."""
+        _, summary = await self._broadcast(broadcast_env)
+        expected = {
+            broadcast_env["r1"]["agent_id"],
+            broadcast_env["r2"]["agent_id"],
+            broadcast_env["r3"]["agent_id"],
+        }
+        assert "recipientIds" in summary.metadata
+        assert set(summary.metadata["recipientIds"]) == expected
+
+    async def test_recipient_ids_excludes_sender(self, broadcast_env):
+        """``recipientIds`` does not include the sender."""
+        _, summary = await self._broadcast(broadcast_env)
+        sender_id = broadcast_env["sender"]["agent_id"]
+        assert sender_id not in summary.metadata["recipientIds"]
+
+
+class TestUnicastOriginTaskId:
+    """Unicast sends leave origin_task_id NULL (design doc 0000013 Step 3)."""
+
+    async def test_unicast_has_no_origin_task_id_in_metadata(self, env):
+        """Unicast delivery task metadata has no ``originTaskId`` key (or None)."""
+        executor, agent_a, agent_b = env["executor"], env["agent_a"], env["agent_b"]
+        queue = EventQueue()
+
+        context = _make_send_context(
+            from_agent_id=agent_a["agent_id"],
+            tenant_id=env["tenant_id"],
+            destination=agent_b["agent_id"],
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        task = next(e for e in events if isinstance(e, Task))
+        assert task.metadata.get("originTaskId") is None

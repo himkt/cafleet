@@ -58,6 +58,10 @@ from a2a.types import (
     TaskStatus,
     TextPart,
 )
+from sqlalchemy import select
+
+from hikyaku_registry.db.models import Task as TaskModel
+from hikyaku_registry.task_store import TaskStore
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +85,7 @@ def _make_task(
     timestamp: str | None = None,
     text: str = "hello",
     extra_metadata: dict | None = None,
+    origin_task_id: str | None = None,
 ) -> Task:
     """Construct an A2A ``Task`` with Hikyaku routing metadata.
 
@@ -89,6 +94,11 @@ def _make_task(
     and drive what the store writes to the indexed columns. The
     ``context_id`` keyword is required because every test in this file
     needs to scope tasks to a specific agent (FK requirement).
+
+    ``origin_task_id`` (when non-None) is injected into
+    ``metadata["originTaskId"]`` — ``TaskStore.save`` reads that key to
+    populate the dedicated ``tasks.origin_task_id`` column. Leaving the
+    kwarg at ``None`` matches the unicast-send path, which writes NULL.
     """
     if task_id is None:
         task_id = str(uuid.uuid4())
@@ -100,6 +110,8 @@ def _make_task(
         "toAgentId": to_agent_id,
         "type": msg_type,
     }
+    if origin_task_id is not None:
+        metadata["originTaskId"] = origin_task_id
     if extra_metadata:
         metadata.update(extra_metadata)
 
@@ -147,6 +159,49 @@ async def _seed_two_agents(store) -> tuple[str, str]:
     a = await _seed_agent(store)
     b = await _seed_agent(store)
     return a, b
+
+
+async def _seed_tenant_with_agents(store, n: int = 1) -> tuple[str, list[str]]:
+    """Create one tenant with ``n`` agents; return ``(tenant_id, agent_ids)``.
+
+    Used by ``list_timeline`` tests, which filter by ``tenant_id`` (the
+    ``api_key_hash``). Seeding via the public ``RegistryStore`` API
+    keeps the fixture path identical to production — if
+    ``create_api_key`` or ``create_agent`` ever adds a required field,
+    these tests break loudly at seed time.
+    """
+    owner_sub = f"auth0|timeline-test-{uuid.uuid4().hex[:12]}"
+    api_key, tenant_id, _ = await store.create_api_key(owner_sub)
+    agent_ids: list[str] = []
+    for i in range(n):
+        result = await store.create_agent(
+            name=f"Timeline Agent {i}",
+            description=f"agent {i} for list_timeline tests",
+            skills=None,
+            api_key=api_key,
+        )
+        agent_ids.append(result["agent_id"])
+    return tenant_id, agent_ids
+
+
+async def _read_origin_task_id_column(
+    task_store: TaskStore, task_id: str
+) -> str | None:
+    """Return the RAW ``tasks.origin_task_id`` column for a task_id.
+
+    Bypasses ``TaskStore.get`` (which materializes a Task from the
+    ``task_json`` blob) to verify the dedicated column was written by
+    ``save``. The column — not the blob — is the one queried by
+    ``list_timeline`` and surfaced to the client, so it MUST be
+    populated even when ``task.metadata["originTaskId"]`` round-trips
+    through the JSON payload.
+    """
+    async with task_store._sessionmaker() as session:
+        result = await session.execute(
+            select(TaskModel.origin_task_id).where(TaskModel.task_id == task_id)
+        )
+        row = result.first()
+    return row[0] if row else None
 
 
 # ---------------------------------------------------------------------------
@@ -494,4 +549,379 @@ class TestTaskJsonRoundtrip:
         assert retrieved.metadata["type"] == "unicast"
         assert retrieved.metadata["traceId"] == "trace-xyz-123", (
             "non-routing metadata keys must survive the task_json roundtrip"
+        )
+
+
+# ---------------------------------------------------------------------------
+# origin_task_id column — save / re-save semantics
+# ---------------------------------------------------------------------------
+
+
+class TestOriginTaskId:
+    """Tests for the dedicated ``tasks.origin_task_id`` column.
+
+    Design doc 0000013 §"Data model change":
+
+    - Unicast delivery rows write NULL (no ``originTaskId`` in metadata).
+    - Broadcast delivery rows + the broadcast summary row itself all
+      share one UUID — the summary task's own ``task_id`` — which
+      ``TaskStore.save`` reads from ``metadata["originTaskId"]`` and
+      writes into the dedicated column.
+    - Historical rows (pre-migration) carry NULL; no backfill.
+    - Idempotent re-saves preserve the populated value so ACK-flow
+      re-saves on broadcast deliveries do not drop the group-membership
+      link.
+    """
+
+    async def test_save_unicast_path_writes_null_column(self, task_store, store):
+        """Saving a task with no ``originTaskId`` in metadata leaves the column NULL.
+
+        This is the unicast default — ``_handle_unicast`` does not set
+        ``originTaskId``, so ``metadata.get("originTaskId")`` returns
+        ``None`` and the column is written as NULL.
+        """
+        agent_id = await _seed_agent(store)
+        await task_store.save(
+            _make_task(task_id="task-uni", context_id=agent_id),
+        )
+
+        value = await _read_origin_task_id_column(task_store, "task-uni")
+        assert value is None, (
+            f"unicast save must leave origin_task_id NULL; got {value!r}"
+        )
+
+    async def test_save_broadcast_path_writes_populated_column(
+        self, task_store, store
+    ):
+        """Saving a task with ``metadata["originTaskId"]`` writes that value.
+
+        This is the broadcast-delivery path — ``_handle_broadcast`` sets
+        every delivery task's metadata to include the pre-allocated
+        summary task id, and ``TaskStore.save`` must promote that value
+        from the metadata dict into the dedicated column.
+        """
+        agent_id = await _seed_agent(store)
+        origin = str(uuid.uuid4())
+        await task_store.save(
+            _make_task(
+                task_id="task-bcast",
+                context_id=agent_id,
+                origin_task_id=origin,
+            ),
+        )
+
+        value = await _read_origin_task_id_column(task_store, "task-bcast")
+        assert value == origin, (
+            f"broadcast save must promote metadata['originTaskId'] to the "
+            f"dedicated column; expected {origin!r}, got {value!r}"
+        )
+
+    async def test_save_summary_self_reference_writes_own_id(
+        self, task_store, store
+    ):
+        """A broadcast summary row self-references: ``origin_task_id == task_id``.
+
+        Per the design doc, the summary task writes its OWN task_id into
+        ``origin_task_id`` so every row in a broadcast group — deliveries
+        AND summary — shares one non-NULL value, making the whole group
+        queryable as ``origin_task_id = '<summary-id>'``.
+        """
+        agent_id = await _seed_agent(store)
+        summary_id = str(uuid.uuid4())
+        await task_store.save(
+            _make_task(
+                task_id=summary_id,
+                context_id=agent_id,
+                msg_type="broadcast_summary",
+                state=TaskState.completed,
+                origin_task_id=summary_id,
+            ),
+        )
+
+        value = await _read_origin_task_id_column(task_store, summary_id)
+        assert value == summary_id
+
+    async def test_re_save_preserves_populated_origin_task_id(
+        self, task_store, store
+    ):
+        """Re-saving with the same metadata must not clear ``origin_task_id``.
+
+        The ACK path re-saves a delivery task with a status change from
+        ``input_required`` → ``completed``. The task's metadata is
+        unchanged (it still contains ``originTaskId``), and the UPSERT
+        must therefore preserve the column value.
+        """
+        agent_id = await _seed_agent(store)
+        origin = str(uuid.uuid4())
+        task = _make_task(
+            task_id="task-resave",
+            context_id=agent_id,
+            state=TaskState.input_required,
+            origin_task_id=origin,
+        )
+        await task_store.save(task)
+
+        task.status = TaskStatus(
+            state=TaskState.completed,
+            timestamp=_ts(datetime.now(UTC) + timedelta(minutes=5)),
+        )
+        await task_store.save(task)
+
+        value = await _read_origin_task_id_column(task_store, "task-resave")
+        assert value == origin, (
+            f"re-save with unchanged metadata must preserve origin_task_id; "
+            f"expected {origin!r}, got {value!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# list_timeline — tenant-scoped JOIN used by GET /ui/api/timeline
+# ---------------------------------------------------------------------------
+
+
+class TestListTimeline:
+    """Tests for ``TaskStore.list_timeline(tenant_id, limit=200)``.
+
+    Design doc 0000013 §"Timeline API" mandates the following query:
+
+        SELECT t.task_json, t.origin_task_id, t.created_at
+        FROM tasks t
+        JOIN agents a ON a.agent_id = t.context_id
+        WHERE a.tenant_id = :tenant_id
+          AND t.type != 'broadcast_summary'
+        ORDER BY t.status_timestamp DESC
+        LIMIT :limit
+
+    Return shape: ``list[tuple[Task, str | None, str]]`` where each
+    tuple is ``(Task, origin_task_id, created_at)``. The Task is the
+    deserialized ``task_json`` blob; the second element is the raw
+    ``origin_task_id`` column (NULL for unicast/historical); the third
+    is the ``created_at`` wallclock set at initial INSERT.
+    """
+
+    async def test_returns_tenant_tasks(self, task_store, store):
+        """Happy path: tasks in the tenant are returned."""
+        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        await task_store.save(
+            _make_task(task_id="tl-1", context_id=agent_id),
+        )
+        await task_store.save(
+            _make_task(task_id="tl-2", context_id=agent_id),
+        )
+
+        results = await task_store.list_timeline(tenant_id)
+        task_ids = {t.id for (t, _o, _c) in results}
+        assert task_ids == {"tl-1", "tl-2"}
+
+    async def test_tuple_shape_is_task_origin_created_at(
+        self, task_store, store
+    ):
+        """Each result is a 3-tuple ``(Task, origin_task_id, created_at)``.
+
+        The Task is a deserialized a2a.types.Task. The origin is either
+        a str (broadcast group) or None (unicast). The created_at is an
+        ISO 8601 string parseable by ``datetime.fromisoformat``.
+        """
+        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        await task_store.save(
+            _make_task(task_id="tl-shape", context_id=agent_id),
+        )
+
+        results = await task_store.list_timeline(tenant_id)
+        assert len(results) == 1
+
+        row = results[0]
+        assert isinstance(row, tuple), f"row must be a tuple, got {type(row)}"
+        assert len(row) == 3, f"row must be a 3-tuple, got {len(row)}-tuple"
+
+        task, origin, created_at = row
+        assert isinstance(task, Task)
+        assert task.id == "tl-shape"
+        assert origin is None  # unicast path
+        assert isinstance(created_at, str)
+        datetime.fromisoformat(created_at)  # must parse
+
+    async def test_returns_origin_task_id_for_broadcast_row(
+        self, task_store, store
+    ):
+        """Broadcast delivery rows surface their ``origin_task_id`` value."""
+        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        origin = str(uuid.uuid4())
+        await task_store.save(
+            _make_task(
+                task_id="tl-bcast",
+                context_id=agent_id,
+                origin_task_id=origin,
+            ),
+        )
+
+        results = await task_store.list_timeline(tenant_id)
+        assert len(results) == 1
+        _task, origin_val, _created = results[0]
+        assert origin_val == origin
+
+    async def test_returns_null_origin_task_id_for_unicast_row(
+        self, task_store, store
+    ):
+        """Unicast rows surface ``origin_task_id = None``."""
+        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        await task_store.save(
+            _make_task(task_id="tl-uni", context_id=agent_id),
+        )
+
+        results = await task_store.list_timeline(tenant_id)
+        assert len(results) == 1
+        _task, origin_val, _created = results[0]
+        assert origin_val is None
+
+    async def test_orders_by_status_timestamp_desc(self, task_store, store):
+        """Results are ordered newest-first by ``status_timestamp``."""
+        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        base = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
+        for i in range(3):
+            await task_store.save(
+                _make_task(
+                    task_id=f"tl-order-{i}",
+                    context_id=agent_id,
+                    timestamp=_ts(base + timedelta(minutes=i)),
+                ),
+            )
+
+        results = await task_store.list_timeline(tenant_id)
+        ids = [t.id for (t, _o, _c) in results]
+        assert ids == ["tl-order-2", "tl-order-1", "tl-order-0"], (
+            f"list_timeline must be DESC by status_timestamp; got {ids}"
+        )
+
+    async def test_excludes_broadcast_summary_rows(self, task_store, store):
+        """Rows with ``type = 'broadcast_summary'`` are filtered out.
+
+        Summary rows never appear in the timeline feed — the frontend
+        only needs the delivery rows to render reactions. The summary
+        row's metadata (recipientIds, recipientCount) is consulted only
+        via the group link, not by surfacing the summary row itself.
+        """
+        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        await task_store.save(
+            _make_task(
+                task_id="tl-regular",
+                context_id=agent_id,
+                msg_type="unicast",
+            ),
+        )
+        await task_store.save(
+            _make_task(
+                task_id="tl-summary",
+                context_id=agent_id,
+                msg_type="broadcast_summary",
+                state=TaskState.completed,
+            ),
+        )
+
+        results = await task_store.list_timeline(tenant_id)
+        task_ids = {t.id for (t, _o, _c) in results}
+        assert "tl-regular" in task_ids
+        assert "tl-summary" not in task_ids, (
+            "broadcast_summary rows must be excluded from list_timeline"
+        )
+
+    async def test_cross_tenant_isolation(self, task_store, store):
+        """Tenant A's list must not include tenant B's tasks."""
+        tenant_a, [agent_a] = await _seed_tenant_with_agents(store, n=1)
+        tenant_b, [agent_b] = await _seed_tenant_with_agents(store, n=1)
+
+        await task_store.save(
+            _make_task(task_id="tl-a", context_id=agent_a),
+        )
+        await task_store.save(
+            _make_task(task_id="tl-b", context_id=agent_b),
+        )
+
+        a_results = await task_store.list_timeline(tenant_a)
+        b_results = await task_store.list_timeline(tenant_b)
+
+        a_ids = {t.id for (t, _o, _c) in a_results}
+        b_ids = {t.id for (t, _o, _c) in b_results}
+
+        assert a_ids == {"tl-a"}
+        assert b_ids == {"tl-b"}
+
+    async def test_multi_agent_tenant_includes_all_contexts(
+        self, task_store, store
+    ):
+        """Within one tenant, tasks on ALL member agents' contexts appear."""
+        tenant_id, agent_ids = await _seed_tenant_with_agents(store, n=3)
+        for i, agent_id in enumerate(agent_ids):
+            await task_store.save(
+                _make_task(task_id=f"tl-multi-{i}", context_id=agent_id),
+            )
+
+        results = await task_store.list_timeline(tenant_id)
+        task_ids = {t.id for (t, _o, _c) in results}
+        assert task_ids == {"tl-multi-0", "tl-multi-1", "tl-multi-2"}
+
+    async def test_empty_tenant_returns_empty_list(self, task_store, store):
+        """A tenant with no tasks yields an empty list (not ``None``)."""
+        tenant_id, _agents = await _seed_tenant_with_agents(store, n=1)
+        results = await task_store.list_timeline(tenant_id)
+        assert results == []
+
+    async def test_respects_explicit_limit(self, task_store, store):
+        """``limit=N`` caps the result at N rows."""
+        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        base = datetime(2026, 4, 10, 0, 0, 0, tzinfo=UTC)
+        for i in range(10):
+            await task_store.save(
+                _make_task(
+                    task_id=f"tl-limit-{i}",
+                    context_id=agent_id,
+                    timestamp=_ts(base + timedelta(seconds=i)),
+                ),
+            )
+
+        results = await task_store.list_timeline(tenant_id, limit=3)
+        assert len(results) == 3
+
+    async def test_default_limit_caps_at_200(self, task_store, store):
+        """Calling without ``limit`` caps the result at 200 rows.
+
+        Design doc 0000013 mandates a 200-row hard cap with no
+        pagination in v1. The frontend renders whatever the API
+        returns; the cap protects the server from unbounded fetches on
+        busy tenants.
+        """
+        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        base = datetime(2026, 4, 10, 0, 0, 0, tzinfo=UTC)
+        for i in range(205):
+            await task_store.save(
+                _make_task(
+                    task_id=f"tl-cap-{i:03d}",
+                    context_id=agent_id,
+                    timestamp=_ts(base + timedelta(seconds=i)),
+                ),
+            )
+
+        results = await task_store.list_timeline(tenant_id)
+        assert len(results) == 200, (
+            f"default limit must be 200; got {len(results)}"
+        )
+
+    async def test_limit_picks_newest_rows(self, task_store, store):
+        """When over-capped, the newest-first ORDER BY keeps the top rows."""
+        tenant_id, [agent_id] = await _seed_tenant_with_agents(store, n=1)
+        base = datetime(2026, 4, 10, 0, 0, 0, tzinfo=UTC)
+        for i in range(5):
+            await task_store.save(
+                _make_task(
+                    task_id=f"tl-newest-{i}",
+                    context_id=agent_id,
+                    timestamp=_ts(base + timedelta(minutes=i)),
+                ),
+            )
+
+        results = await task_store.list_timeline(tenant_id, limit=2)
+        ids = [t.id for (t, _o, _c) in results]
+        assert ids == ["tl-newest-4", "tl-newest-3"], (
+            f"limit must preserve DESC ordering and keep the newest rows; "
+            f"got {ids}"
         )
