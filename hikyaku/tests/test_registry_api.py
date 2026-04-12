@@ -207,6 +207,61 @@ class TestRegisterAgent:
         data2 = await _register_agent(client, session_id, name="Agent 2")
         assert data1["agent_id"] != data2["agent_id"]
 
+    async def test_register_with_placement_includes_coding_agent(self, api_env):
+        """POST /agents with placement returns coding_agent in PlacementView."""
+        client, store, session_id = (
+            api_env["client"],
+            api_env["store"],
+            api_env["session_id"],
+        )
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
+
+        resp = await client.post(
+            "/api/v1/agents",
+            json={
+                "session_id": session_id,
+                "name": "Codex-Member",
+                "description": "Uses codex",
+                "placement": {
+                    "director_agent_id": director["agent_id"],
+                    "tmux_session": "main",
+                    "tmux_window_id": "@3",
+                    "coding_agent": "codex",
+                },
+            },
+            headers={"X-Agent-Id": director["agent_id"]},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["placement"]["coding_agent"] == "codex"
+
+    async def test_register_with_placement_default_coding_agent(self, api_env):
+        """POST /agents with placement defaults coding_agent to 'claude'."""
+        client, store, session_id = (
+            api_env["client"],
+            api_env["store"],
+            api_env["session_id"],
+        )
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
+
+        resp = await client.post(
+            "/api/v1/agents",
+            json={
+                "session_id": session_id,
+                "name": "Claude-Member",
+                "description": "Default",
+                "placement": {
+                    "director_agent_id": director["agent_id"],
+                    "tmux_session": "main",
+                    "tmux_window_id": "@3",
+                },
+            },
+            headers={"X-Agent-Id": director["agent_id"]},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["placement"]["coding_agent"] == "claude"
+
 
 # ---------------------------------------------------------------------------
 # GET /api/v1/agents — List Agents (session_id query param)
@@ -283,6 +338,54 @@ class TestListAgents:
         client = api_env["client"]
         resp = await client.get("/api/v1/agents")
         assert resp.status_code == 400
+
+    async def test_list_with_director_includes_coding_agent(self, api_env):
+        """GET /agents?director_agent_id=... returns coding_agent in placement."""
+        from hikyaku.models import PlacementCreate
+
+        client, store, session_id = (
+            api_env["client"],
+            api_env["store"],
+            api_env["session_id"],
+        )
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
+
+        await store.create_agent_with_placement(
+            name="Claude-M",
+            description="d",
+            skills=None,
+            session_id=session_id,
+            placement=PlacementCreate(
+                director_agent_id=director["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@1",
+                tmux_pane_id="%1",
+                coding_agent="claude",
+            ),
+        )
+        await store.create_agent_with_placement(
+            name="Codex-M",
+            description="d",
+            skills=None,
+            session_id=session_id,
+            placement=PlacementCreate(
+                director_agent_id=director["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@1",
+                tmux_pane_id="%2",
+                coding_agent="codex",
+            ),
+        )
+
+        resp = await client.get(
+            f"/api/v1/agents?session_id={session_id}"
+            f"&director_agent_id={director['agent_id']}"
+        )
+        assert resp.status_code == 200
+        agents = resp.json()["agents"]
+        by_name = {a["name"]: a for a in agents}
+        assert by_name["Claude-M"]["placement"]["coding_agent"] == "claude"
+        assert by_name["Codex-M"]["placement"]["coding_agent"] == "codex"
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +470,38 @@ class TestGetAgentDetail:
 
         resp = await client.get(f"/api/v1/agents/{agent['agent_id']}")
         assert resp.status_code == 400
+
+    async def test_detail_includes_coding_agent_in_placement(self, api_env):
+        """GET /agents/{id} returns coding_agent in placement."""
+        from hikyaku.models import PlacementCreate
+
+        client, store, session_id = (
+            api_env["client"],
+            api_env["store"],
+            api_env["session_id"],
+        )
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
+        member = await store.create_agent_with_placement(
+            name="Codex-Agent",
+            description="d",
+            skills=None,
+            session_id=session_id,
+            placement=PlacementCreate(
+                director_agent_id=director["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@1",
+                tmux_pane_id="%1",
+                coding_agent="codex",
+            ),
+        )
+
+        resp = await client.get(
+            f"/api/v1/agents/{member['agent_id']}",
+            headers={"X-Session-Id": session_id},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["placement"]["coding_agent"] == "codex"
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +603,53 @@ class TestDeregisterAgent:
 
         resp = await client.delete(f"/api/v1/agents/{agent['agent_id']}")
         assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/v1/agents/{agent_id}/placement — coding_agent in response
+# ---------------------------------------------------------------------------
+
+
+class TestPatchPlacement:
+    """Tests for PATCH /api/v1/agents/{agent_id}/placement.
+
+    Design doc 0000018: response PlacementView includes coding_agent
+    (no new patch field — only tmux_pane_id is patched).
+    """
+
+    async def test_patch_response_includes_coding_agent(self, api_env):
+        """PATCH placement response includes coding_agent from the stored row."""
+        from hikyaku.models import PlacementCreate
+
+        client, store, session_id = (
+            api_env["client"],
+            api_env["store"],
+            api_env["session_id"],
+        )
+        director = await store.create_agent("Dir", "d", None, session_id=session_id)
+        member = await store.create_agent_with_placement(
+            name="Member",
+            description="d",
+            skills=None,
+            session_id=session_id,
+            placement=PlacementCreate(
+                director_agent_id=director["agent_id"],
+                tmux_session="main",
+                tmux_window_id="@1",
+                tmux_pane_id=None,
+                coding_agent="codex",
+            ),
+        )
+
+        resp = await client.patch(
+            f"/api/v1/agents/{member['agent_id']}/placement",
+            json={"tmux_pane_id": "%9"},
+            headers={"X-Agent-Id": director["agent_id"]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["coding_agent"] == "codex"
+        assert data["tmux_pane_id"] == "%9"
 
 
 # ---------------------------------------------------------------------------

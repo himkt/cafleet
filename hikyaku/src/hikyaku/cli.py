@@ -31,6 +31,7 @@ from sqlalchemy.exc import IntegrityError
 
 from hikyaku import broker_client as api
 from hikyaku import output
+from hikyaku.coding_agent import CodingAgentConfig, get_coding_agent
 from hikyaku.config import settings
 
 
@@ -618,7 +619,10 @@ def member():
 
 
 def _resolve_prompt(
-    ctx: click.Context, director_agent_id: str, prompt_argv: tuple[str, ...]
+    ctx: click.Context,
+    director_agent_id: str,
+    prompt_argv: tuple[str, ...],
+    coding_agent_config: CodingAgentConfig,
 ) -> str:
     if prompt_argv:
         return " ".join(prompt_argv)
@@ -630,11 +634,9 @@ def _resolve_prompt(
             agent_id=director_agent_id,
         )
     )
-    return (
-        f"Load Skill(hikyaku). Your agent_id is $HIKYAKU_AGENT_ID. "
-        f"You are a member of the team led by {director['name']} "
-        f"({director_agent_id}). Wait for instructions via "
-        f"`hikyaku poll --agent-id $HIKYAKU_AGENT_ID`."
+    return coding_agent_config.default_prompt_template.format(
+        director_name=director["name"],
+        director_agent_id=director_agent_id,
     )
 
 
@@ -663,26 +665,35 @@ def _rollback_register(broker_url, session_id, director_id, new_agent_id, *, rea
 @click.option("--agent-id", required=True, help="Director's agent ID")
 @click.option("--name", required=True, help="Member name")
 @click.option("--description", required=True, help="Member description")
+@click.option(
+    "--coding-agent",
+    type=click.Choice(["claude", "codex"]),
+    default="claude",
+    show_default=True,
+    help="Coding agent to spawn in the tmux pane",
+)
 @click.argument("prompt_argv", nargs=-1)
 @click.pass_context
-def member_create(ctx, agent_id, name, description, prompt_argv):
-    """Register a new member and spawn its claude pane in the Director's window."""
+def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
+    """Register a new member and spawn its coding agent pane in the Director's window."""
     from hikyaku import tmux
 
     _require_session_id(ctx)
     broker_url = ctx.obj["url"]
     session_id = ctx.obj["session_id"]
+    coding_agent_config = get_coding_agent(coding_agent)
 
     # Pre-flight: must be running inside a tmux session.
     try:
         tmux.ensure_tmux_available()
+        coding_agent_config.ensure_available()
         director_ctx = tmux.director_context()
-    except tmux.TmuxError as exc:
+    except (tmux.TmuxError, RuntimeError) as exc:
         click.echo(f"Error: {exc}", err=True)
         ctx.exit(1)
         return
 
-    prompt = _resolve_prompt(ctx, agent_id, prompt_argv)
+    prompt = _resolve_prompt(ctx, agent_id, prompt_argv, coding_agent_config)
 
     # Step 1 — register member with pending placement (tmux_pane_id=null).
     try:
@@ -698,6 +709,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
                     "tmux_session": director_ctx.session,
                     "tmux_window_id": director_ctx.window_id,
                     "tmux_pane_id": None,
+                    "coding_agent": coding_agent_config.name,
                 },
             )
         )
@@ -716,7 +728,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
                 "HIKYAKU_SESSION_ID": session_id,
                 "HIKYAKU_AGENT_ID": new_agent_id,
             },
-            claude_prompt=prompt,
+            command=coding_agent_config.build_command(prompt),
         )
     except tmux.TmuxError as exc:
         _rollback_register(

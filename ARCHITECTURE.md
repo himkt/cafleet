@@ -77,6 +77,7 @@ No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret namesp
 | `webui_api.py` | `hikyaku/src/hikyaku/` | WebUI API router (`/ui/api/*`) — session list, agents, inbox, sent, send |
 | `broker_client.py` | `hikyaku/src/hikyaku/` | httpx helpers for CLI agent operations |
 | `output.py` | `hikyaku/src/hikyaku/` | CLI output formatting (tables + JSON) |
+| `coding_agent.py` | `hikyaku/src/hikyaku/` | `CodingAgentConfig` dataclass, `CLAUDE`/`CODEX` built-in configs, `CODING_AGENTS` registry, `get_coding_agent()` helper |
 | `tmux.py` | `hikyaku/src/hikyaku/` | tmux subprocess helper: `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit`, `capture_pane` |
 | `admin/` | Project root | WebUI SPA (Vite + React + TypeScript + Tailwind CSS) |
 
@@ -154,14 +155,16 @@ The `hikyaku member` CLI subgroup wraps the two-step "register an agent + spawn 
 
 **Atomic create flow** (`hikyaku member create`):
 
-1. Register the member agent with a pending placement (`tmux_pane_id = NULL`) via `POST /api/v1/agents` with a `placement` object.
-2. Spawn `claude <prompt>` in the Director's own tmux window via `tmux split-window -t <window_id>`, capturing the new pane ID.
+1. Register the member agent with a pending placement (`tmux_pane_id = NULL`, `coding_agent` field) via `POST /api/v1/agents` with a `placement` object.
+2. Spawn the coding agent (Claude or Codex, selected via `--coding-agent`) in the Director's own tmux window via `tmux split-window -t <window_id>`, capturing the new pane ID.
 3. Patch the placement row with the real pane ID via `PATCH /api/v1/agents/{id}/placement`.
 4. Rebalance the window layout via `tmux select-layout main-vertical`.
 
 If step 2 fails, the registered agent is rolled back via `DELETE /api/v1/agents/{id}`. If step 3 fails, the pane is `/exit`'d and the agent rolled back.
 
 **Delete ordering** (`hikyaku member delete`): Deregister the agent first, THEN `/exit` the pane. This preserves the pane for retry if deregister fails.
+
+**Multi-runner support**: The `--coding-agent` option on `member create` selects which coding agent binary to spawn (`claude` or `codex`, default: `claude`). Agent-specific configuration (binary name, extra args, default prompt template) is encapsulated in `CodingAgentConfig` dataclasses in `hikyaku/src/hikyaku/coding_agent.py`. The `agent_placements` table tracks which coding agent was spawned via a `coding_agent` column (default: `"claude"`). The `tmux.split_window()` function accepts a generic `command: list[str]` instead of a hardcoded Claude prompt, making it agent-agnostic.
 
 **Commands**: `member create`, `member delete`, `member list`, `member capture`. All require `--agent-id` (the Director's ID). The tmux helper module (`hikyaku/src/hikyaku/tmux.py`) isolates all subprocess interaction with tmux.
 

@@ -160,11 +160,14 @@ hikyaku deregister --agent-id <self-agent-id>
 
 ### Member Create
 
-Register a new member agent and spawn its `claude` pane in the Director's own tmux window. Must be run inside a tmux session. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
+Register a new member agent and spawn a coding agent pane in the Director's own tmux window. Must be run inside a tmux session. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
 
 ```bash
 hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
   --description "Reviewer for PR #42"
+
+hikyaku member create --agent-id $DIRECTOR_ID --name Codex-B \
+  --description "Reviewer for PR #42" --coding-agent codex
 
 hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
   --description "Reviewer for PR #42" \
@@ -176,7 +179,8 @@ hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
 | `--agent-id` | yes | The Director's agent ID (sent as `X-Agent-Id`) |
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
-| *(positional, after `--`)* | no | Prompt for the spawned `claude` process. If omitted, a default prompt is generated. |
+| `--coding-agent` | no | Coding agent to spawn: `claude` (default) or `codex`. Codex is spawned with `--approval-mode auto-edit`. |
+| *(positional, after `--`)* | no | Prompt for the spawned coding agent process. If omitted, a default prompt is generated (agent-specific). |
 
 If the tmux `split-window` fails, the registered agent is rolled back. If the placement PATCH fails, the pane is `/exit`'d and the agent rolled back.
 
@@ -185,6 +189,7 @@ Output (text):
 Member registered and spawned.
   agent_id:  <new-uuid>
   name:      Claude-B
+  backend:   claude
   pane_id:   %7
   window_id: @3
 ```
@@ -200,6 +205,7 @@ Output (`--json`):
     "tmux_session": "main",
     "tmux_window_id": "@3",
     "tmux_pane_id": "%7",
+    "coding_agent": "claude",
     "created_at": "2026-04-12T10:15:00Z"
   }
 }
@@ -238,7 +244,7 @@ hikyaku --json member list --agent-id $DIRECTOR_ID
 |---|---|---|
 | `--agent-id` | yes | The Director's agent ID |
 
-Output columns: `agent_id`, `name`, `status`, `session`, `window_id`, `pane_id`, `created_at`. A pending placement (pane not yet spawned) shows `(pending)` for `pane_id` in text mode and `null` in JSON.
+Output columns: `agent_id`, `name`, `status`, `backend`, `session`, `window_id`, `pane_id`, `created_at`. The `backend` column shows which coding agent is running (`claude` or `codex`). A pending placement (pane not yet spawned) shows `(pending)` for `pane_id` in text mode and `null` in JSON.
 
 Output (`--json`):
 ```json
@@ -253,6 +259,7 @@ Output (`--json`):
       "tmux_session": "main",
       "tmux_window_id": "@3",
       "tmux_pane_id": "%7",
+      "coding_agent": "claude",
       "created_at": "2026-04-12T10:15:00Z"
     }
   }

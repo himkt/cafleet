@@ -54,16 +54,16 @@ def split_window(
     *,
     target_window_id: str,
     env: dict[str, str],
-    claude_prompt: str,
+    command: list[str],
 ) -> str:
-    """Spawn `claude <prompt>` in a new pane in `target_window_id`.
+    """Spawn a coding agent in a new pane in `target_window_id`.
 
     Returns the new pane_id (e.g. '%7'). Forwards env as `-e KEY=VAL` flags.
     """
     args = ["tmux", "split-window", "-t", target_window_id, "-P", "-F", "#{pane_id}"]
     for k, v in env.items():
         args += ["-e", f"{k}={v}"]
-    args += ["claude", claude_prompt]
+    args += command
     return _run(args).strip()
 
 

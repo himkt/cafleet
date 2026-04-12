@@ -90,9 +90,95 @@ class TestSplitWindow:
                 "HIKYAKU_URL": "http://localhost:8000",
                 "HIKYAKU_SESSION_ID": "key123",
             },
-            claude_prompt="Hello world",
+            command=["claude", "Hello world"],
         )
         assert pane_id == "%7"
+
+    def test_command_appended_directly_to_args(self, monkeypatch):
+        """The command list is appended directly to tmux args — no wrapping."""
+        captured_args = []
+
+        def mock_run(args):
+            captured_args.extend(args)
+            return "%8\n"
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        tmux.split_window(
+            target_window_id="@5",
+            env={},
+            command=["my-binary", "--flag", "value", "prompt text"],
+        )
+        # The command elements should appear at the end of the args list
+        assert captured_args[-4:] == ["my-binary", "--flag", "value", "prompt text"]
+
+    def test_claude_style_command(self, monkeypatch):
+        """Claude-style command: [\"claude\", \"prompt\"] — backward compatible."""
+        captured_args = []
+
+        def mock_run(args):
+            captured_args.extend(args)
+            return "%9\n"
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        tmux.split_window(
+            target_window_id="@3",
+            env={},
+            command=[
+                "claude",
+                "Load Skill(hikyaku). Your agent_id is $HIKYAKU_AGENT_ID.",
+            ],
+        )
+        assert captured_args[-2] == "claude"
+        assert "Load Skill(hikyaku)" in captured_args[-1]
+
+    def test_codex_style_command(self, monkeypatch):
+        """Codex-style command: [\"codex\", \"--approval-mode\", \"auto-edit\", \"prompt\"]."""
+        captured_args = []
+
+        def mock_run(args):
+            captured_args.extend(args)
+            return "%10\n"
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        tmux.split_window(
+            target_window_id="@3",
+            env={},
+            command=["codex", "--approval-mode", "auto-edit", "Do the task"],
+        )
+        assert captured_args[-4:] == [
+            "codex",
+            "--approval-mode",
+            "auto-edit",
+            "Do the task",
+        ]
+
+    def test_env_vars_forwarded_as_flags(self, monkeypatch):
+        """Environment variables are forwarded as -e KEY=VAL flags before the command."""
+        captured_args = []
+
+        def mock_run(args):
+            captured_args.extend(args)
+            return "%11\n"
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        tmux.split_window(
+            target_window_id="@3",
+            env={
+                "HIKYAKU_URL": "http://localhost:8000",
+                "HIKYAKU_SESSION_ID": "sess-001",
+                "HIKYAKU_AGENT_ID": "agent-001",
+            },
+            command=["claude", "prompt"],
+        )
+        # Each env var should appear as -e KEY=VAL
+        assert "-e" in captured_args
+        env_pairs = []
+        for i, a in enumerate(captured_args):
+            if a == "-e" and i + 1 < len(captured_args):
+                env_pairs.append(captured_args[i + 1])
+        assert "HIKYAKU_URL=http://localhost:8000" in env_pairs
+        assert "HIKYAKU_SESSION_ID=sess-001" in env_pairs
+        assert "HIKYAKU_AGENT_ID=agent-001" in env_pairs
 
 
 # ---------------------------------------------------------------------------

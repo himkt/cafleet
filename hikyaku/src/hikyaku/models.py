@@ -6,6 +6,7 @@ class PlacementCreate(BaseModel):
     tmux_session: str
     tmux_window_id: str
     tmux_pane_id: str | None = None
+    coding_agent: str = "claude"
 
 
 class PlacementView(BaseModel):
@@ -13,6 +14,7 @@ class PlacementView(BaseModel):
     tmux_session: str
     tmux_window_id: str
     tmux_pane_id: str | None
+    coding_agent: str
     created_at: str
 
 
