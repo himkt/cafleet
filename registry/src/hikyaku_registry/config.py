@@ -17,9 +17,6 @@ class Settings(BaseSettings):
     broker_host: str = "0.0.0.0"
     broker_port: int = 8000
     broker_base_url: str = "http://localhost:8000"
-    auth0_domain: str = ""
-    auth0_client_id: str = ""
-    auth0_audience: str = ""
 
     model_config = {"env_prefix": "", "populate_by_name": True}
 

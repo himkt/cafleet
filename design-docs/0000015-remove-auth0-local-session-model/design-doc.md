@@ -1,7 +1,7 @@
 # Remove Auth0: Local-Only Session Model
 
 **Status**: Approved
-**Progress**: 24/80 tasks complete
+**Progress**: 29/80 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -516,14 +516,14 @@ Implementation order is **documentation-first** per project rule `.claude/rules/
 
 ### Step 5: Backend — auth & middleware removal
 
-- [ ] Delete `Auth0Verifier`, `verify_auth0_user`, `get_user_id` from `registry/src/hikyaku_registry/auth.py` <!-- completed: -->
-- [ ] Delete `get_authenticated_agent`'s bearer-check path; replace with two new dependencies:
+- [x] Delete `Auth0Verifier`, `verify_auth0_user`, `get_user_id` from `registry/src/hikyaku_registry/auth.py` <!-- completed: 2026-04-12 -->
+- [x] Delete `get_authenticated_agent`'s bearer-check path; replace with two new dependencies:
   - `get_session_from_agent_id(request, store)` — reads `X-Agent-Id` header, looks up `agents.session_id`, returns `(agent_id, session_id)`. Used by JSON-RPC and REST endpoints that identify the caller by agent (e.g., `DELETE /agents/{id}`, `POST /`)
   - `get_session_from_header(request, store)` — reads `X-Session-Id` header, verifies existence in `sessions` table, returns `session_id`. Used by REST endpoints that do not identify a caller agent (e.g., `GET /agents`, `GET /agents/{id}`)
-  <!-- completed: -->
-- [ ] Delete `get_registration_tenant` entirely <!-- completed: -->
-- [ ] Delete `auth0_domain`, `auth0_client_id`, `auth0_audience` from `config.py` <!-- completed: -->
-- [ ] Remove PyJWT from `registry/pyproject.toml` dependencies; run `uv sync` <!-- completed: -->
+  <!-- completed: 2026-04-12 -->
+- [x] Delete `get_registration_tenant` entirely <!-- completed: 2026-04-12 -->
+- [x] Delete `auth0_domain`, `auth0_client_id`, `auth0_audience` from `config.py` <!-- completed: 2026-04-12 -->
+- [x] Remove PyJWT from `registry/pyproject.toml` dependencies; run `uv sync` <!-- completed: 2026-04-12 -->
 
 ### Step 6: Backend — HTTP routes
 
