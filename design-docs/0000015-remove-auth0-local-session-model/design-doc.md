@@ -1,7 +1,7 @@
 # Remove Auth0: Local-Only Session Model
 
 **Status**: Approved
-**Progress**: 7/80 tasks complete
+**Progress**: 11/80 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -490,10 +490,10 @@ Implementation order is **documentation-first** per project rule `.claude/rules/
 
 ### Step 2: Documentation — skills & settings
 
-- [ ] Update `.claude/skills/hikyaku/SKILL.md` — rename `HIKYAKU_API_KEY` → `HIKYAKU_SESSION_ID` globally; update Environment Variables section; update tmux spawn recipe; add `hikyaku-registry session create` bootstrap step to Typical Workflow <!-- completed: -->
-- [ ] Update `.claude/settings.json` — replace `Bash(printenv HIKYAKU_URL HIKYAKU_API_KEY)` with `Bash(printenv HIKYAKU_URL HIKYAKU_SESSION_ID)`; add `Bash(hikyaku-registry session *)` to the allow list <!-- completed: -->
-- [ ] Verify `.claude/settings.local.json` does not exist in the repo (confirmed absent at design time). If a developer's local copy exists at implementation time, grep it for `auth0|HIKYAKU_API_KEY` and remove hits; otherwise no-op <!-- completed: -->
-- [ ] Update `0000013-admin-discord-style-timeline/design-doc.md` — change Status line from `Approved` to `Blocked on 0000015`. No other edits. <!-- completed: -->
+- [x] Update `.claude/skills/hikyaku/SKILL.md` — rename `HIKYAKU_API_KEY` → `HIKYAKU_SESSION_ID` globally; update Environment Variables section; update tmux spawn recipe; add `hikyaku-registry session create` bootstrap step to Typical Workflow <!-- completed: 2026-04-12T02:40 -->
+- [x] Update `.claude/settings.json` — replace `Bash(printenv HIKYAKU_URL HIKYAKU_API_KEY)` with `Bash(printenv HIKYAKU_URL HIKYAKU_SESSION_ID)`; add `Bash(hikyaku-registry session *)` to the allow list <!-- completed: 2026-04-12T02:40 -->
+- [x] Verify `.claude/settings.local.json` does not exist in the repo (confirmed absent at design time). If a developer's local copy exists at implementation time, grep it for `auth0|HIKYAKU_API_KEY` and remove hits; otherwise no-op <!-- completed: 2026-04-12T02:40 -->
+- [x] Update `0000013-admin-discord-style-timeline/design-doc.md` — change Status line from `Approved` to `Blocked on 0000015`. No other edits. <!-- completed: 2026-04-12T02:40 -->
 
 ### Step 3: Backend — schema & migration
 

@@ -13,7 +13,9 @@
       "Bash(mise tasks)",
       "Bash(mise tasks --all)",
       "Skill(update-readme)",
-      "Bash(hikyaku *)"
+      "Bash(printenv HIKYAKU_URL HIKYAKU_SESSION_ID)",
+      "Bash(hikyaku *)",
+      "Bash(hikyaku-registry session *)"
     ],
     "deny": [
       "Bash(uv run pytest *)",
