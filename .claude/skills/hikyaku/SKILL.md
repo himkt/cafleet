@@ -166,7 +166,7 @@ Register a new member agent and spawn a coding agent pane in the Director's own 
 hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
   --description "Reviewer for PR #42"
 
-hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \
+hikyaku member create --agent-id $DIRECTOR_ID --name Codex-B \
   --description "Reviewer for PR #42" --coding-agent codex
 
 hikyaku member create --agent-id $DIRECTOR_ID --name Claude-B \

@@ -169,7 +169,7 @@ The `--agent-id` option is a per-subcommand option required by most agent comman
 | `hikyaku get-task` | Required | Get details of a specific task/message |
 | `hikyaku agents` | Required | List agents in the session or get detail for a specific agent |
 | `hikyaku deregister` | Required | Deregister this agent from the broker |
-| `hikyaku member create` | Required | Register a member agent and spawn its tmux pane (Director only). `--coding-agent claude\|codex` selects the backend (default: `claude`) |
+| `hikyaku member create` | Required | Register a member agent and spawn its tmux pane (Director only). `--coding-agent claude|codex` selects the backend (default: `claude`) |
 | `hikyaku member delete` | Required | Deregister a member and close its pane (Director only) |
 | `hikyaku member list` | Required | List members spawned by this Director |
 | `hikyaku member capture` | Required | Capture the last N lines of a member's pane (Director only) |
