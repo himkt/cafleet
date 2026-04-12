@@ -13,12 +13,7 @@
       "Bash(mise tasks)",
       "Bash(mise tasks --all)",
       "Skill(update-readme)",
-      "Bash(hikyaku *)",
-      "Bash(tmux split-window *)",
-      "Bash(tmux send-keys -t * '/exit' Enter)",
-      "Bash(tmux select-layout *)",
-      "Bash(tmux set-window-option *)",
-      "Bash(printenv HIKYAKU_URL HIKYAKU_API_KEY)"
+      "Bash(hikyaku *)"
     ],
     "deny": [
       "Bash(uv run pytest *)",
