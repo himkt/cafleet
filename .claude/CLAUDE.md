@@ -17,7 +17,7 @@ These files are the authoritative reference. Always verify design decisions and 
 - `A2A/` — Google A2A protocol specification repository (reference only, do not modify)
 - `solace-agent-mesh/` — Solace Agent Mesh framework (reference for related work comparison, do not modify)
 
-## Project: Hikyaku
+## Project: CAFleet
 
 A2A-native message broker + agent registry for coding agents.
 
@@ -25,8 +25,8 @@ A2A-native message broker + agent registry for coding agents.
 - **Design document**: `design-docs/0000002-access-control/design-doc.md` — Tenant isolation via shared API key (Status: Complete)
 - **Design document**: `design-docs/0000010-sqlite-store-migration/design-doc.md` — SQLite + SQLAlchemy + Alembic store migration (Status: Complete)
 - **Single package** (uv workspace):
-  - `hikyaku/` — `hikyaku` (FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk + click + httpx)
-- **Unified CLI command**: `hikyaku` (with `db init` for schema management, `session` for namespace CRUD, and all agent/messaging commands)
+  - `cafleet/` — `cafleet` (FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk + click + httpx)
+- **Unified CLI command**: `cafleet` (with `db init` for schema management, `session` for namespace CRUD, and all agent/messaging commands)
 
 ## Tech Stack
 
@@ -42,6 +42,6 @@ See `.claude/rules/commands.md` for the full command reference.
 
 When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE taking any other action. Pay attention to override instructions (what NOT to do) in each entry.
 
-- `/hikyaku` — Interact with the Hikyaku A2A message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
-- `/hikyaku-monitoring` — Mandatory supervision protocol for a Director managing member agents via Hikyaku. Defines monitoring loop, spawn protocol, and stall response.
+- `/cafleet` — Interact with the CAFleet A2A message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
+- `/cafleet-monitoring` — Mandatory supervision protocol for a Director managing member agents via CAFleet. Defines monitoring loop, spawn protocol, and stall response.
 - `/update-readme` — Update README.md based on ARCHITECTURE.md and docs/ directory. Use when documentation sources change and README needs to reflect the latest state.

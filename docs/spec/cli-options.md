@@ -1,6 +1,6 @@
 # CLI Option Specification
 
-How the unified Hikyaku CLI (`hikyaku`) accepts configuration parameters.
+How the unified CAFleet CLI (`cafleet`) accepts configuration parameters.
 
 ## Option Source Matrix
 
@@ -8,8 +8,8 @@ Each parameter has exactly one input source:
 
 | Parameter | CLI (`client/`) |
 |---|---|
-| Session ID | `HIKYAKU_SESSION_ID` env var |
-| Broker URL | `HIKYAKU_URL` env var (default: `http://127.0.0.1:8000`) |
+| Session ID | `CAFLEET_SESSION_ID` env var |
+| Broker URL | `CAFLEET_URL` env var (default: `http://127.0.0.1:8000`) |
 | Agent ID | `--agent-id` subcommand option |
 | JSON output | `--json` global flag |
 
@@ -18,14 +18,14 @@ Each parameter has exactly one input source:
 Set these environment variables before using the CLI:
 
 ```bash
-export HIKYAKU_URL=http://127.0.0.1:8000      # Broker URL (defaults to http://127.0.0.1:8000)
-export HIKYAKU_SESSION_ID=your-session-id-here  # Required for all operations
+export CAFLEET_URL=http://127.0.0.1:8000      # Broker URL (defaults to http://127.0.0.1:8000)
+export CAFLEET_SESSION_ID=your-session-id-here  # Required for all operations
 ```
 
 Create a session first if you don't have one:
 
 ```bash
-hikyaku session create --label "my-project"
+cafleet session create --label "my-project"
 # → prints the session_id
 ```
 
@@ -33,7 +33,7 @@ hikyaku session create --label "my-project"
 
 The following CLI options have been removed:
 
-- `--url` — Use `HIKYAKU_URL` environment variable instead
+- `--url` — Use `CAFLEET_URL` environment variable instead
 - `--api-key` — Removed entirely (sessions replace API keys)
 
 These options were removed to prevent secrets from appearing in shell history or `ps` output.
@@ -61,9 +61,9 @@ These options were removed to prevent secrets from appearing in shell history or
 
 - `register` — Register a new agent (returns an agent ID)
 
-## `hikyaku session` — Session Management
+## `cafleet session` — Session Management
 
-The `hikyaku session` subgroup manages session namespaces. These commands write directly to SQLite — the broker server does not need to be running.
+The `cafleet session` subgroup manages session namespaces. These commands write directly to SQLite — the broker server does not need to be running.
 
 ### `session create`
 
@@ -101,7 +101,7 @@ Deletes a session. Fails with a friendly error if agents still reference the ses
 
 ## Member Commands
 
-The `hikyaku member` subgroup manages tmux-backed member agents. All commands require `--agent-id` (the Director's agent ID) and must be run inside a tmux session.
+The `cafleet member` subgroup manages tmux-backed member agents. All commands require `--agent-id` (the Director's agent ID) and must be run inside a tmux session.
 
 ### `member create`
 
@@ -138,5 +138,5 @@ The `hikyaku member` subgroup manages tmux-backed member agents. All commands re
 
 | Situation | Error Message |
 |---|---|
-| Missing session ID | `Error: HIKYAKU_SESSION_ID environment variable is required. Create a session with 'hikyaku session create'.` |
+| Missing session ID | `Error: CAFLEET_SESSION_ID environment variable is required. Create a session with 'cafleet session create'.` |
 | Missing agent ID | `Error: Missing option '--agent-id'.` (Click built-in) |

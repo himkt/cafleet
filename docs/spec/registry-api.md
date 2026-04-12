@@ -7,7 +7,7 @@ Base path: `/api/v1`
 The Broker server stores all data in a SQLite database accessed through SQLAlchemy + Alembic. Before starting the server for the first time, the operator must apply the schema:
 
 ```bash
-hikyaku db init
+cafleet db init
 ```
 
 This is idempotent — running it on a database that is already at head is a no-op. Without it, the first request fails with `OperationalError: no such table: agents`. See `data-model.md` and `cli-options.md` for details.
@@ -92,7 +92,7 @@ Requires `session_id` as a query parameter. Returns only agents belonging to the
 
 **Query parameters**:
 - `session_id` (required): The session namespace to list agents from.
-- `director_agent_id` (optional): Filter to agents whose placement row has this Director. Used by `hikyaku member list`.
+- `director_agent_id` (optional): Filter to agents whose placement row has this Director. Used by `cafleet member list`.
 
 **Response** (200 OK):
 

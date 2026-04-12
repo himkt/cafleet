@@ -1,10 +1,10 @@
-# Hikyaku
+# CAFleet
 
 A2A-native message broker and agent registry for coding agents.
 
-> **Hikyaku is a local-only tool.** It is designed to run on a single developer machine and does not perform authentication. Do not expose the broker on a shared network unless you accept that every listener can see and act within every session.
+> **CAFleet is a local-only tool.** It is designed to run on a single developer machine and does not perform authentication. Do not expose the broker on a shared network unless you accept that every listener can see and act within every session.
 
-Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners, and other coding agents -- to discover each other and exchange messages using the standard [A2A (Agent-to-Agent) protocol](https://github.com/google/A2A). Agents do not need to host HTTP servers; the broker handles all message routing and storage. Agents are organized into **sessions** -- a non-secret namespace created via `hikyaku session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
+CAFleet enables ephemeral agents -- such as Claude Code sessions, CI/CD runners, and other coding agents -- to discover each other and exchange messages using the standard [A2A (Agent-to-Agent) protocol](https://github.com/google/A2A). Agents do not need to host HTTP servers; the broker handles all message routing and storage. Agents are organized into **sessions** -- a non-secret namespace created via `cafleet session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
 
 ## Features
 
@@ -16,11 +16,11 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 - **Message Lifecycle** -- Acknowledge, cancel (retract), and track message status
 - **Session-Based Routing** -- `X-Session-Id` (namespace) + `X-Agent-Id` (identity) headers on all requests; no authentication or bearer tokens
 - **WebUI** -- Browser-based dashboard; session picker at `/ui/#/sessions`, then a Discord-style unified timeline per session (sidebar of active/deregistered agents, message timeline with broadcasts collapsed to one entry + per-recipient ACK reactions on hover, and an `@<agent>` / `@all` input)
-- **Member Lifecycle** -- `hikyaku member create/delete/list/capture` commands wrap tmux pane spawning + agent registration into atomic operations; the `agent_placements` table persists the agent-to-pane mapping in the registry
+- **Member Lifecycle** -- `cafleet member create/delete/list/capture` commands wrap tmux pane spawning + agent registration into atomic operations; the `agent_placements` table persists the agent-to-pane mapping in the registry
 - **Multi-Runner Support** -- `--coding-agent claude|codex` flag on `member create` selects which coding agent to spawn; defaults to `claude` for backward compatibility. Codex runs with `--approval-mode auto-edit`
-- **Director Monitoring Skill** -- `.claude/skills/hikyaku-monitoring/SKILL.md` defines mandatory supervision protocol for Directors: 2-stage health check (poll inbox → capture terminal), spawn protocol, stall response, and a `/loop` prompt template
-- **Unified CLI** -- Single `hikyaku` command for all operations: server admin (`db init`, `session`), agent messaging (`register`, `send`, `poll`, `ack`), and member lifecycle (`member create/delete/list/capture`)
-- **SQLite Storage** -- Single-file database; no daemon required. Schema managed by Alembic via `hikyaku db init`
+- **Director Monitoring Skill** -- `.claude/skills/cafleet-monitoring/SKILL.md` defines mandatory supervision protocol for Directors: 2-stage health check (poll inbox → capture terminal), spawn protocol, stall response, and a `/loop` prompt template
+- **Unified CLI** -- Single `cafleet` command for all operations: server admin (`db init`, `session`), agent messaging (`register`, `send`, `poll`, `ack`), and member lifecycle (`member create/delete/list/capture`)
+- **SQLite Storage** -- Single-file database; no daemon required. Schema managed by Alembic via `cafleet db init`
 
 ## Architecture
 
@@ -53,14 +53,14 @@ Hikyaku enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 
 Key design decisions:
 
-- The `session_id` is the namespace boundary. Sessions are created via `hikyaku session create` and are non-secret identifiers for organizing agents. All agents registered with the same session form one namespace.
+- The `session_id` is the namespace boundary. Sessions are created via `cafleet session create` and are non-secret identifiers for organizing agents. All agents registered with the same session form one namespace.
 - The `contextId` field is set to the recipient's agent ID on every delivery Task, enabling inbox discovery via `ListTasks(contextId=myAgentId)`.
 - Task states map to message lifecycle: `INPUT_REQUIRED` (unread), `COMPLETED` (acknowledged), `CANCELED` (retracted), `FAILED` (routing error).
 - FastAPI is the ASGI parent; the A2A SDK handler is mounted at the root path. FastAPI routes (`/api/v1/*`) take priority.
-- Sessions are created via `hikyaku session create` (direct SQLite write, no HTTP). Deleting a session is rejected while agents still reference it (FK `RESTRICT`). An empty session (no agents) remains valid indefinitely.
+- Sessions are created via `cafleet session create` (direct SQLite write, no HTTP). Deleting a session is rejected while agents still reference it (FK `RESTRICT`). An empty session (no agents) remains valid indefinitely.
 - The broker exposes three API surfaces: A2A Server (JSON-RPC 2.0), Registry REST API (`/api/v1/`), and WebUI (`/ui/`).
 - The WebUI requires no login. A session picker at `/ui/#/sessions` lets the user select which session to view.
-- **Storage layer**: All data is persisted in a single SQLite file (`~/.local/share/hikyaku/registry.db` by default). Indexed fields are columns; A2A protocol payloads (`AgentCard`, `Task`) are stored as JSON blobs. No physical cleanup loop -- deregistered agents and tasks persist forever and are invisible to normal traffic via `status='active'` filters.
+- **Storage layer**: All data is persisted in a single SQLite file (`~/.local/share/cafleet/registry.db` by default). Indexed fields are columns; A2A protocol payloads (`AgentCard`, `Task`) are stored as JSON blobs. No physical cleanup loop -- deregistered agents and tasks persist forever and are invisible to normal traffic via `status='active'` filters.
 
 ## Quick Start
 
@@ -75,24 +75,24 @@ Key design decisions:
 Before starting the server for the first time, apply the database schema:
 
 ```bash
-hikyaku db init
+cafleet db init
 ```
 
-This command is idempotent -- running it on a database that is already at head is a no-op. The database file is created at `~/.local/share/hikyaku/registry.db` by default. Override with `HIKYAKU_DATABASE_URL` (e.g. `sqlite+aiosqlite:////var/lib/hikyaku/registry.db`).
+This command is idempotent -- running it on a database that is already at head is a no-op. The database file is created at `~/.local/share/cafleet/registry.db` by default. Override with `CAFLEET_DATABASE_URL` (e.g. `sqlite+aiosqlite:////var/lib/cafleet/registry.db`).
 
 ### Create a Session
 
 Before starting the broker, create at least one session namespace:
 
 ```bash
-hikyaku session create --label "my-project"
+cafleet session create --label "my-project"
 # → prints: 550e8400-e29b-41d4-a716-446655440000
 ```
 
 ### Start the Broker Server
 
 ```bash
-mise //hikyaku:dev
+mise //cafleet:dev
 ```
 
 The broker will be available at `http://127.0.0.1:8000`.
@@ -100,46 +100,46 @@ The broker will be available at `http://127.0.0.1:8000`.
 ### Set Session
 
 ```bash
-export HIKYAKU_SESSION_ID="550e8400-e29b-41d4-a716-446655440000"
-export HIKYAKU_URL="http://127.0.0.1:8000"   # optional, defaults to http://127.0.0.1:8000
+export CAFLEET_SESSION_ID="550e8400-e29b-41d4-a716-446655440000"
+export CAFLEET_URL="http://127.0.0.1:8000"   # optional, defaults to http://127.0.0.1:8000
 ```
 
 ### Register an Agent
 
 ```bash
-hikyaku register --name "my-agent" --description "A coding assistant"
+cafleet register --name "my-agent" --description "A coding assistant"
 ```
 
-Save the returned `agent_id` for subsequent commands. Registration requires a valid `HIKYAKU_SESSION_ID`.
+Save the returned `agent_id` for subsequent commands. Registration requires a valid `CAFLEET_SESSION_ID`.
 
 ### Send a Message
 
 ```bash
-hikyaku send --agent-id <your-agent-id> --to <recipient-agent-id> --text "Hello from my agent"
+cafleet send --agent-id <your-agent-id> --to <recipient-agent-id> --text "Hello from my agent"
 ```
 
 ### Poll for Messages
 
 ```bash
-hikyaku poll --agent-id <your-agent-id>
+cafleet poll --agent-id <your-agent-id>
 ```
 
 ### Acknowledge a Message
 
 ```bash
-hikyaku ack --agent-id <your-agent-id> --task-id <task-id>
+cafleet ack --agent-id <your-agent-id> --task-id <task-id>
 ```
 
 ## CLI Usage
 
-The unified `hikyaku` CLI handles both server administration and agent operations.
+The unified `cafleet` CLI handles both server administration and agent operations.
 
 Configuration is set via environment variables:
 
 | Variable | Required | Description |
 |---|---|---|
-| `HIKYAKU_SESSION_ID` | Yes (for agent commands) | Session namespace for agent routing |
-| `HIKYAKU_URL` | No | Broker URL (default: `http://127.0.0.1:8000`) |
+| `CAFLEET_SESSION_ID` | Yes (for agent commands) | Session namespace for agent routing |
+| `CAFLEET_URL` | No | Broker URL (default: `http://127.0.0.1:8000`) |
 
 The `--agent-id` option is a per-subcommand option required by most agent commands. The global `--json` flag enables JSON output.
 
@@ -147,32 +147,32 @@ The `--agent-id` option is a per-subcommand option required by most agent comman
 
 | Command | Description |
 |---|---|
-| `hikyaku db init` | Apply Alembic migrations to bring the schema to head (idempotent) |
-| `hikyaku session create [--label TEXT]` | Create a new session namespace; prints the session_id |
-| `hikyaku session list` | List all sessions with agent counts |
-| `hikyaku session show <id>` | Show details of a single session |
-| `hikyaku session delete <id>` | Delete a session (fails if agents still reference it) |
+| `cafleet db init` | Apply Alembic migrations to bring the schema to head (idempotent) |
+| `cafleet session create [--label TEXT]` | Create a new session namespace; prints the session_id |
+| `cafleet session list` | List all sessions with agent counts |
+| `cafleet session show <id>` | Show details of a single session |
+| `cafleet session delete <id>` | Delete a session (fails if agents still reference it) |
 
-`hikyaku db init` must be run once before the server starts. It handles six database states: missing file (creates it), empty schema, at head (no-op), behind head (upgrades), ahead of head (error), and legacy tables without Alembic version (error with manual instructions).
+`cafleet db init` must be run once before the server starts. It handles six database states: missing file (creates it), empty schema, at head (no-op), behind head (upgrades), ahead of head (error), and legacy tables without Alembic version (error with manual instructions).
 
 ### Agent Commands
 
 | Command | `--agent-id` | Description |
 |---|---|---|
-| `hikyaku env` | Not required | Print current HIKYAKU_URL and HIKYAKU_SESSION_ID values |
-| `hikyaku register` | Not required | Register a new agent; returns an agent ID |
-| `hikyaku send` | Required | Send a unicast message to another agent in the same session |
-| `hikyaku broadcast` | Required | Broadcast a message to all agents in the same session |
-| `hikyaku poll` | Required | Poll inbox for incoming messages |
-| `hikyaku ack` | Required | Acknowledge receipt of a message |
-| `hikyaku cancel` | Required | Cancel (retract) a sent message before it is acknowledged |
-| `hikyaku get-task` | Required | Get details of a specific task/message |
-| `hikyaku agents` | Required | List agents in the session or get detail for a specific agent |
-| `hikyaku deregister` | Required | Deregister this agent from the broker |
-| `hikyaku member create` | Required | Register a member agent and spawn its tmux pane (Director only). `--coding-agent claude|codex` selects the backend (default: `claude`) |
-| `hikyaku member delete` | Required | Deregister a member and close its pane (Director only) |
-| `hikyaku member list` | Required | List members spawned by this Director |
-| `hikyaku member capture` | Required | Capture the last N lines of a member's pane (Director only) |
+| `cafleet env` | Not required | Print current CAFLEET_URL and CAFLEET_SESSION_ID values |
+| `cafleet register` | Not required | Register a new agent; returns an agent ID |
+| `cafleet send` | Required | Send a unicast message to another agent in the same session |
+| `cafleet broadcast` | Required | Broadcast a message to all agents in the same session |
+| `cafleet poll` | Required | Poll inbox for incoming messages |
+| `cafleet ack` | Required | Acknowledge receipt of a message |
+| `cafleet cancel` | Required | Cancel (retract) a sent message before it is acknowledged |
+| `cafleet get-task` | Required | Get details of a specific task/message |
+| `cafleet agents` | Required | List agents in the session or get detail for a specific agent |
+| `cafleet deregister` | Required | Deregister this agent from the broker |
+| `cafleet member create` | Required | Register a member agent and spawn its tmux pane (Director only). `--coding-agent claude|codex` selects the backend (default: `claude`) |
+| `cafleet member delete` | Required | Deregister a member and close its pane (Director only) |
+| `cafleet member list` | Required | List members spawned by this Director |
+| `cafleet member capture` | Required | Capture the last N lines of a member's pane (Director only) |
 
 ## API Overview
 
@@ -254,7 +254,7 @@ The WebUI API is consumed by the browser SPA. No authentication is required. Ses
 | GET | `/ui/api/timeline` | `X-Session-Id` | Unified session timeline (up to 200 most-recent non-`broadcast_summary` tasks, newest first, each row carrying `origin_task_id` + `created_at` + `status_timestamp` for client-side broadcast grouping) |
 | POST | `/ui/api/messages/send` | `X-Session-Id` | Send a message from a same-session sender. `to_agent_id=<uuid>` is unicast; `to_agent_id="*"` triggers a broadcast to every active agent in the session |
 
-The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vite + React + TypeScript + Tailwind CSS) and the build output is bundled inside the package at `hikyaku/src/hikyaku/webui/`, which ships inside the `hikyaku` wheel -- a single `pip install hikyaku` produces a runnable broker that serves `/ui/` without any external file lookup.
+The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vite + React + TypeScript + Tailwind CSS) and the build output is bundled inside the package at `cafleet/src/cafleet/webui/`, which ships inside the `cafleet` wheel -- a single `pip install cafleet` produces a runnable broker that serves `/ui/` without any external file lookup.
 
 ## Tech Stack
 
@@ -266,10 +266,10 @@ The WebUI SPA is served as static files at `/ui/`. It is built from `admin/` (Vi
 ## Project Structure
 
 ```
-hikyaku/                    # Repository root (uv workspace)
+cafleet/                    # Repository root (uv workspace)
   pyproject.toml            # Workspace root (virtual, no [project] table)
-  hikyaku/                  # hikyaku package (server + CLI)
-    src/hikyaku/
+  cafleet/                  # cafleet package (server + CLI)
+    src/cafleet/
       server.py             # ASGI app entry point
       cli.py                # Unified CLI (db, session, agent, member commands)
       config.py             # Settings via pydantic-settings
@@ -304,10 +304,10 @@ cd hikyaku
 uv sync
 
 # Initialize the database schema (one-time)
-hikyaku db init
+cafleet db init
 
 # Run tests
-mise //hikyaku:test
+mise //cafleet:test
 ```
 
 ### Build the WebUI
@@ -315,16 +315,16 @@ mise //hikyaku:test
 The broker serves the SPA at `/ui/`, but the build is a separate manual step so backend-only contributors are not forced to install bun. Run these two commands in order:
 
 ```bash
-# 1. Build the SPA into hikyaku/src/hikyaku/webui/
+# 1. Build the SPA into cafleet/src/cafleet/webui/
 mise //admin:build
 
 # 2. Start the broker — it serves the freshly built SPA at http://localhost:8000/ui/
-mise //hikyaku:dev
+mise //cafleet:dev
 ```
 
 If step 1 is skipped, the server still starts and the JSON-RPC and Registry REST surfaces remain functional; only `/ui/` 404s until you run `mise //admin:build`.
 
-**Release maintainers**: run `mise //admin:build` before any `uv build`. The wheel only includes whatever is currently sitting in `hikyaku/src/hikyaku/webui/`, so a stale or missing build will produce a wheel without the SPA. After building, verify the wheel contents with `unzip -l dist/hikyaku-*.whl | grep webui/index.html`.
+**Release maintainers**: run `mise //admin:build` before any `uv build`. The wheel only includes whatever is currently sitting in `cafleet/src/cafleet/webui/`, so a stale or missing build will produce a wheel without the SPA. After building, verify the wheel contents with `unzip -l dist/cafleet-*.whl | grep webui/index.html`.
 
 ## License
 

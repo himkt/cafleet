@@ -1,7 +1,7 @@
 # Project Rename: hikyaku → cafleet
 
 **Status**: Approved
-**Progress**: 0/36 tasks complete
+**Progress**: 9/36 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -267,15 +267,15 @@ The `plugin.json` field `"repository"` currently points to `https://github.com/h
 
 Per project rules, documentation is updated before code.
 
-- [ ] Update `ARCHITECTURE.md`: replace "Hikyaku" → "CAFleet", `hikyaku` → `cafleet` in paths/commands <!-- completed: -->
-- [ ] Update `README.md`: replace "Hikyaku" → "CAFleet", `hikyaku` → `cafleet` in paths/commands/examples <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md`: CLI command, env vars, paths <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md`: any "hikyaku" references <!-- completed: -->
-- [ ] Update `docs/spec/registry-api.md`: any "hikyaku" references <!-- completed: -->
-- [ ] Verify `docs/spec/a2a-operations.md` and `docs/spec/webui-api.md` contain no "hikyaku" references (no-op) <!-- completed: -->
-- [ ] Update `CLAUDE.md` (root): project name, package, CLI, skill names <!-- completed: -->
-- [ ] Update `.claude/CLAUDE.md`: project name, package, CLI, skill names <!-- completed: -->
-- [ ] Update `.claude/rules/commands.md`: `mise //hikyaku:*` → `mise //cafleet:*` <!-- completed: -->
+- [x] Update `ARCHITECTURE.md`: replace "Hikyaku" → "CAFleet", `hikyaku` → `cafleet` in paths/commands <!-- completed: 2026-04-12T10:00 -->
+- [x] Update `README.md`: replace "Hikyaku" → "CAFleet", `hikyaku` → `cafleet` in paths/commands/examples <!-- completed: 2026-04-12T10:01 -->
+- [x] Update `docs/spec/cli-options.md`: CLI command, env vars, paths <!-- completed: 2026-04-12T10:01 -->
+- [x] Update `docs/spec/data-model.md`: any "hikyaku" references <!-- completed: 2026-04-12T10:01 -->
+- [x] Update `docs/spec/registry-api.md`: any "hikyaku" references <!-- completed: 2026-04-12T10:01 -->
+- [x] Verify `docs/spec/a2a-operations.md` and `docs/spec/webui-api.md` contain no "hikyaku" references (no-op) <!-- completed: 2026-04-12T10:02 -->
+- [x] Update `CLAUDE.md` (root): project name, package, CLI, skill names <!-- completed: 2026-04-12T10:02 -->
+- [x] Update `.claude/CLAUDE.md`: project name, package, CLI, skill names <!-- completed: 2026-04-12T10:02 -->
+- [x] Update `.claude/rules/commands.md`: `mise //hikyaku:*` → `mise //cafleet:*` <!-- completed: 2026-04-12T10:02 -->
 
 ### Step 2: Skills & Plugin Files
 

@@ -2,14 +2,14 @@
 
 **IMPORTANT**: Always use mise full-path tasks. Run from the project root — do NOT `cd` into package directories.
 
-- Run tests: `mise //hikyaku:test`
+- Run tests: `mise //cafleet:test`
 - Lint (root): `mise //:lint`
-- Lint (hikyaku): `mise //hikyaku:lint`
+- Lint (cafleet): `mise //cafleet:lint`
 - Lint (admin): `mise //admin:lint`
 - Format check (root): `mise //:format`
 - Type check: `mise //:typecheck`
 - Sync workspace: `uv sync` (from project root)
-- Start broker server: `mise //hikyaku:dev` (`//hikyaku:dev` serves `/ui/` only after `//admin:build` has been run)
+- Start broker server: `mise //cafleet:dev` (`//cafleet:dev` serves `/ui/` only after `//admin:build` has been run)
 - Start admin dev server: `mise //admin:dev`
 - Build admin: `mise //admin:build`
 
