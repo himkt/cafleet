@@ -117,6 +117,7 @@ def _make_placement(
     tmux_session: str = "main",
     tmux_window_id: str = "@3",
     tmux_pane_id: str | None = "%7",
+    coding_agent: str = "claude",
 ) -> AgentPlacement:
     return AgentPlacement(
         agent_id=agent_id,
@@ -124,6 +125,7 @@ def _make_placement(
         tmux_session=tmux_session,
         tmux_window_id=tmux_window_id,
         tmux_pane_id=tmux_pane_id,
+        coding_agent=coding_agent,
         created_at=_now(),
     )
 
@@ -457,6 +459,7 @@ class TestAgentPlacementsSchema:
             "tmux_session",
             "tmux_window_id",
             "tmux_pane_id",
+            "coding_agent",
             "created_at",
         }
         assert expected <= cols, f"missing columns: {expected - cols}"
@@ -499,6 +502,7 @@ class TestAgentPlacementsSchema:
             "director_agent_id",
             "tmux_session",
             "tmux_window_id",
+            "coding_agent",
             "created_at",
         ):
             assert cols[name]["nullable"] is False, f"{name} should be NOT NULL"
@@ -548,6 +552,115 @@ class TestAgentPlacementsSchema:
             f"expected idx_placements_director, got: {[i['name'] for i in indexes]}"
         )
         assert match[0]["column_names"] == ["director_agent_id"]
+
+    @pytest.mark.asyncio
+    async def test_coding_agent_column_not_nullable(self, engine):
+        """``coding_agent`` column is NOT NULL."""
+        async with engine.connect() as conn:
+            cols = await conn.run_sync(
+                lambda c: {
+                    col["name"]: col
+                    for col in inspect(c).get_columns("agent_placements")
+                }
+            )
+        assert cols["coding_agent"]["nullable"] is False
+
+    @pytest.mark.asyncio
+    async def test_coding_agent_server_default_is_claude(self, engine):
+        """``coding_agent`` has server_default='claude' for backward compatibility."""
+        async with engine.connect() as conn:
+            cols = await conn.run_sync(
+                lambda c: {
+                    col["name"]: col
+                    for col in inspect(c).get_columns("agent_placements")
+                }
+            )
+        default = cols["coding_agent"].get("default")
+        assert default is not None, "coding_agent should have a server default"
+        assert "claude" in default, (
+            f"server default should be 'claude', got: {default}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_coding_agent_defaults_to_claude_on_insert(self, session):
+        """Inserting a placement without explicit coding_agent gets 'claude'."""
+        session.add(_make_session(session_id="ca-def-sess"))
+        session.add(_make_agent(agent_id="ca-def-dir", session_id="ca-def-sess"))
+        session.add(_make_agent(agent_id="ca-def-mem", session_id="ca-def-sess"))
+        await session.flush()
+
+        # Insert placement without setting coding_agent explicitly
+        placement = AgentPlacement(
+            agent_id="ca-def-mem",
+            director_agent_id="ca-def-dir",
+            tmux_session="main",
+            tmux_window_id="@3",
+            tmux_pane_id="%7",
+            created_at=_now(),
+        )
+        session.add(placement)
+        await session.flush()
+
+        result = await session.execute(
+            select(AgentPlacement).where(AgentPlacement.agent_id == "ca-def-mem")
+        )
+        row = result.scalar_one()
+        assert row.coding_agent == "claude"
+
+    @pytest.mark.asyncio
+    async def test_coding_agent_stores_codex(self, session):
+        """Can store 'codex' as the coding_agent value."""
+        session.add(_make_session(session_id="ca-codex-sess"))
+        session.add(_make_agent(agent_id="ca-codex-dir", session_id="ca-codex-sess"))
+        session.add(_make_agent(agent_id="ca-codex-mem", session_id="ca-codex-sess"))
+        await session.flush()
+
+        session.add(
+            _make_placement(
+                agent_id="ca-codex-mem",
+                director_agent_id="ca-codex-dir",
+                coding_agent="codex",
+            )
+        )
+        await session.flush()
+
+        result = await session.execute(
+            select(AgentPlacement).where(AgentPlacement.agent_id == "ca-codex-mem")
+        )
+        row = result.scalar_one()
+        assert row.coding_agent == "codex"
+
+    @pytest.mark.asyncio
+    async def test_coding_agent_stores_claude_explicitly(self, session):
+        """Explicitly setting coding_agent='claude' is stored correctly."""
+        session.add(_make_session(session_id="ca-claude-sess"))
+        session.add(
+            _make_agent(agent_id="ca-claude-dir", session_id="ca-claude-sess")
+        )
+        session.add(
+            _make_agent(agent_id="ca-claude-mem", session_id="ca-claude-sess")
+        )
+        await session.flush()
+
+        session.add(
+            _make_placement(
+                agent_id="ca-claude-mem",
+                director_agent_id="ca-claude-dir",
+                coding_agent="claude",
+            )
+        )
+        await session.flush()
+
+        result = await session.execute(
+            select(AgentPlacement).where(AgentPlacement.agent_id == "ca-claude-mem")
+        )
+        row = result.scalar_one()
+        assert row.coding_agent == "claude"
+
+    @pytest.mark.asyncio
+    async def test_coding_agent_attribute_exists_on_model(self, engine):
+        """AgentPlacement model has a ``coding_agent`` attribute."""
+        assert hasattr(AgentPlacement, "coding_agent")
 
 
 # ---------------------------------------------------------------------------
