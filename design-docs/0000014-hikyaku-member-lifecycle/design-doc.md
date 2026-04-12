@@ -1,7 +1,7 @@
 # Hikyaku Member Lifecycle
 
 **Status**: Approved
-**Progress**: 6/44 tasks complete
+**Progress**: 19/44 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -1224,25 +1224,25 @@ Per `.claude/rules/design-doc-numbering.md`, documentation is updated before any
 
 ### Step 5: Client — tmux helper
 
-- [ ] Create `client/src/hikyaku_client/tmux.py` as specified in "Client-side changes → tmux.py" above, including `TmuxError`, `DirectorContext`, `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit(target_pane_id, ignore_missing=False)`, `_PANE_GONE_MARKERS`, and `_run`. The `ignore_missing=True` branch matches the captured stderr against `_PANE_GONE_MARKERS` so the CLI can call `send_exit(..., ignore_missing=True)` during `member delete` without caring whether the user already closed the pane manually. <!-- completed: -->
-- [ ] Add `capture_pane(target_pane_id, lines=80)` helper to `client/src/hikyaku_client/tmux.py` that invokes `tmux capture-pane -p -t <pane_id> -S -<lines>` and returns the raw stdout. Guard against `lines <= 0` with a `TmuxError`. Unlike `send_exit`, the helper never swallows "can't find pane" — capture is a read and the caller needs that signal. <!-- completed: -->
+- [x] Create `client/src/hikyaku_client/tmux.py` as specified in "Client-side changes → tmux.py" above, including `TmuxError`, `DirectorContext`, `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit(target_pane_id, ignore_missing=False)`, `_PANE_GONE_MARKERS`, and `_run`. The `ignore_missing=True` branch matches the captured stderr against `_PANE_GONE_MARKERS` so the CLI can call `send_exit(..., ignore_missing=True)` during `member delete` without caring whether the user already closed the pane manually. <!-- completed: 2026-04-12T17:30 -->
+- [x] Add `capture_pane(target_pane_id, lines=80)` helper to `client/src/hikyaku_client/tmux.py` that invokes `tmux capture-pane -p -t <pane_id> -S -<lines>` and returns the raw stdout. Guard against `lines <= 0` with a `TmuxError`. Unlike `send_exit`, the helper never swallows "can't find pane" — capture is a read and the caller needs that signal. <!-- completed: 2026-04-12T17:30 -->
 
 ### Step 6: Client — api.py
 
-- [ ] Extend `register_agent` in `client/src/hikyaku_client/api.py` to accept optional `placement` and `director_agent_id` kwargs as specified. When `director_agent_id` is provided, set the `X-Agent-Id` header. <!-- completed: -->
-- [ ] Add `patch_placement(broker_url, api_key, director_agent_id, member_agent_id, pane_id)` helper that issues `PATCH /api/v1/agents/{member_agent_id}/placement` with `X-Agent-Id: <director>` and body `{"tmux_pane_id": pane_id}` <!-- completed: -->
-- [ ] Add `list_members(broker_url, api_key, director_agent_id)` helper that issues `GET /api/v1/agents?director_agent_id=<id>` with `X-Agent-Id: <director>` and returns `response["agents"]` <!-- completed: -->
-- [ ] Extend `deregister_agent` with an optional `caller_id` kwarg so the Director can deregister a member while sending its own id in `X-Agent-Id`. Default `caller_id=None` preserves the existing self-deregister behavior. Used by both `member delete` and the `member create` rollback path. <!-- completed: -->
+- [x] Extend `register_agent` in `client/src/hikyaku_client/api.py` to accept optional `placement` and `director_agent_id` kwargs as specified. When `director_agent_id` is provided, set the `X-Agent-Id` header. <!-- completed: 2026-04-12T17:35 -->
+- [x] Add `patch_placement(broker_url, api_key, director_agent_id, member_agent_id, pane_id)` helper that issues `PATCH /api/v1/agents/{member_agent_id}/placement` with `X-Agent-Id: <director>` and body `{"tmux_pane_id": pane_id}` <!-- completed: 2026-04-12T17:35 -->
+- [x] Add `list_members(broker_url, api_key, director_agent_id)` helper that issues `GET /api/v1/agents?director_agent_id=<id>` with `X-Agent-Id: <director>` and returns `response["agents"]` <!-- completed: 2026-04-12T17:35 -->
+- [x] Extend `deregister_agent` with an optional `caller_id` kwarg so the Director can deregister a member while sending its own id in `X-Agent-Id`. Default `caller_id=None` preserves the existing self-deregister behavior. Used by both `member delete` and the `member create` rollback path. <!-- completed: 2026-04-12T17:35 -->
 
 ### Step 7: Client — CLI member subgroup
 
-- [ ] Add `@cli.group() def member()` in `client/src/hikyaku_client/cli.py` <!-- completed: -->
-- [ ] Implement `member create` with the 4-step atomicity flow (register → split → patch → rebalance) and the rollback branches from "Atomicity and error handling" <!-- completed: -->
-- [ ] Implement `_resolve_prompt` helper that either joins `prompt_argv` or synthesizes the default prompt via `api.list_agents(broker_url, api_key, caller_id=director_id, agent_id=director_id)` (routes to `GET /api/v1/agents/{director_id}` — no new helper required) <!-- completed: -->
-- [ ] Implement `member delete` with the 4-step ordering (get → delete → /exit → rebalance) and the error matrix rules <!-- completed: -->
-- [ ] Implement `member list` that calls `list_members` and formats output via a new `format_member_list` in `output.py`, rendering `tmux_pane_id IS NULL` as `(pending)` in text mode and `null` in JSON <!-- completed: -->
-- [ ] Implement `member capture` that fetches the placement via `api.list_agents(..., caller_id, agent_id=member_id)`, verifies `placement.director_agent_id == --agent-id` (cross-Director guard), rejects pending placements, then calls `tmux.capture_pane(target_pane_id, lines)`. Text mode prints the raw buffer; `--json` emits `{member_agent_id, pane_id, lines, content}`. <!-- completed: -->
-- [ ] Add `format_member` / `format_member_list` to `client/src/hikyaku_client/output.py` <!-- completed: -->
+- [x] Add `@cli.group() def member()` in `client/src/hikyaku_client/cli.py` <!-- completed: 2026-04-12T17:50 -->
+- [x] Implement `member create` with the 4-step atomicity flow (register → split → patch → rebalance) and the rollback branches from "Atomicity and error handling" <!-- completed: 2026-04-12T17:50 -->
+- [x] Implement `_resolve_prompt` helper that either joins `prompt_argv` or synthesizes the default prompt via `api.list_agents(broker_url, api_key, caller_id=director_id, agent_id=director_id)` (routes to `GET /api/v1/agents/{director_id}` — no new helper required) <!-- completed: 2026-04-12T17:50 -->
+- [x] Implement `member delete` with the 4-step ordering (get → delete → /exit → rebalance) and the error matrix rules <!-- completed: 2026-04-12T17:50 -->
+- [x] Implement `member list` that calls `list_members` and formats output via a new `format_member_list` in `output.py`, rendering `tmux_pane_id IS NULL` as `(pending)` in text mode and `null` in JSON <!-- completed: 2026-04-12T17:50 -->
+- [x] Implement `member capture` that fetches the placement via `api.list_agents(..., caller_id, agent_id=member_id)`, verifies `placement.director_agent_id == --agent-id` (cross-Director guard), rejects pending placements, then calls `tmux.capture_pane(target_pane_id, lines)`. Text mode prints the raw buffer; `--json` emits `{member_agent_id, pane_id, lines, content}`. <!-- completed: 2026-04-12T17:50 -->
+- [x] Add `format_member` / `format_member_list` to `client/src/hikyaku_client/output.py` <!-- completed: 2026-04-12T17:50 -->
 
 ### Step 8: Tests
 
