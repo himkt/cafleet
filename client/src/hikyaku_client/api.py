@@ -11,11 +11,17 @@ async def register_agent(
     skills: list[dict] | None = None,
     *,
     api_key: str,
+    placement: dict | None = None,
+    director_agent_id: str | None = None,
 ) -> dict:
     body: dict[str, Any] = {"name": name, "description": description}
     if skills is not None:
         body["skills"] = skills
+    if placement is not None:
+        body["placement"] = placement
     headers = {"Authorization": f"Bearer {api_key}"}
+    if director_agent_id is not None:
+        headers["X-Agent-Id"] = director_agent_id
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{broker_url}/api/v1/agents", json=body, headers=headers
@@ -231,13 +237,54 @@ async def deregister_agent(
     broker_url: str,
     api_key: str,
     agent_id: str,
+    *,
+    caller_id: str | None = None,
 ) -> None:
     async with httpx.AsyncClient() as client:
         resp = await client.delete(
             f"{broker_url}/api/v1/agents/{agent_id}",
             headers={
                 "Authorization": f"Bearer {api_key}",
-                "X-Agent-Id": agent_id,
+                "X-Agent-Id": caller_id if caller_id is not None else agent_id,
             },
         )
         resp.raise_for_status()
+
+
+async def patch_placement(
+    broker_url: str,
+    api_key: str,
+    *,
+    director_agent_id: str,
+    member_agent_id: str,
+    pane_id: str,
+) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.patch(
+            f"{broker_url}/api/v1/agents/{member_agent_id}/placement",
+            json={"tmux_pane_id": pane_id},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "X-Agent-Id": director_agent_id,
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def list_members(
+    broker_url: str,
+    api_key: str,
+    director_agent_id: str,
+) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{broker_url}/api/v1/agents",
+            params={"director_agent_id": director_agent_id},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "X-Agent-Id": director_agent_id,
+            },
+        )
+        resp.raise_for_status()
+        return resp.json().get("agents", [])
