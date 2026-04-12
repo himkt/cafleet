@@ -585,6 +585,7 @@ class TestAgentPlacementsSchema:
     async def test_coding_agent_defaults_to_claude_on_insert(self, session):
         """Inserting a placement without explicit coding_agent gets 'claude'."""
         session.add(_make_session(session_id="ca-def-sess"))
+        await session.flush()
         session.add(_make_agent(agent_id="ca-def-dir", session_id="ca-def-sess"))
         session.add(_make_agent(agent_id="ca-def-mem", session_id="ca-def-sess"))
         await session.flush()
@@ -611,6 +612,7 @@ class TestAgentPlacementsSchema:
     async def test_coding_agent_stores_codex(self, session):
         """Can store 'codex' as the coding_agent value."""
         session.add(_make_session(session_id="ca-codex-sess"))
+        await session.flush()
         session.add(_make_agent(agent_id="ca-codex-dir", session_id="ca-codex-sess"))
         session.add(_make_agent(agent_id="ca-codex-mem", session_id="ca-codex-sess"))
         await session.flush()
@@ -634,6 +636,7 @@ class TestAgentPlacementsSchema:
     async def test_coding_agent_stores_claude_explicitly(self, session):
         """Explicitly setting coding_agent='claude' is stored correctly."""
         session.add(_make_session(session_id="ca-claude-sess"))
+        await session.flush()
         session.add(
             _make_agent(agent_id="ca-claude-dir", session_id="ca-claude-sess")
         )

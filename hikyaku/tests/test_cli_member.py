@@ -6,6 +6,10 @@ All tmux interaction is mocked — no real tmux server required.
 Design doc 0000015 Step 10: replace ``HIKYAKU_API_KEY`` env fixtures
 with ``HIKYAKU_SESSION_ID``; update ``BROKER_URL`` to ``127.0.0.1``;
 remove ``api_key`` from ``SAMPLE_REGISTER_RESULT``.
+
+Design doc 0000018 Step 6: ``--coding-agent`` option on ``member create``;
+``split_window`` receives ``command`` instead of ``claude_prompt``;
+``coding_agent_config.ensure_available()`` called during pre-flight.
 """
 
 import json
@@ -36,6 +40,7 @@ SAMPLE_PLACEMENT_VIEW = {
     "tmux_session": "main",
     "tmux_window_id": "@3",
     "tmux_pane_id": "%7",
+    "coding_agent": "claude",
     "created_at": "2026-04-12T10:15:00Z",
 }
 
@@ -65,8 +70,13 @@ def _auth_env():
     return {"HIKYAKU_URL": BROKER_URL, "HIKYAKU_SESSION_ID": SESSION_ID}
 
 
-def _mock_tmux(monkeypatch):
-    """Set up tmux env vars and mock the tmux module functions."""
+def _mock_tmux(monkeypatch, *, split_window_captures=None):
+    """Set up tmux env vars and mock the tmux module functions.
+
+    Args:
+        split_window_captures: If provided, a list that will be appended
+            with the kwargs dict from each split_window call for assertion.
+    """
     monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
     monkeypatch.setenv("TMUX_PANE", "%0")
 
@@ -82,10 +92,16 @@ def _mock_tmux(monkeypatch):
         "director_context",
         lambda: tmux_mod.DirectorContext(session="main", window_id="@3", pane_id="%0"),
     )
+
+    def _mock_split_window(**kw):
+        if split_window_captures is not None:
+            split_window_captures.append(kw)
+        return "%7"
+
     monkeypatch.setattr(
         tmux_mod,
         "split_window",
-        lambda **kw: "%7",
+        _mock_split_window,
     )
     monkeypatch.setattr(
         tmux_mod,
@@ -252,6 +268,215 @@ class TestMemberCreate:
         # With trailing args, no need to look up director info
         list_agents_mock.assert_not_called()
 
+    def test_coding_agent_default_is_claude(self, runner, monkeypatch):
+        """Without --coding-agent flag, default is 'claude'."""
+        split_captures = []
+        _mock_tmux(monkeypatch, split_window_captures=split_captures)
+
+        register_mock = AsyncMock(return_value=SAMPLE_REGISTER_RESULT)
+        patch_mock = AsyncMock(return_value=SAMPLE_PLACEMENT_VIEW)
+        list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
+
+        with (
+            patch("hikyaku.cli.api.register_agent", register_mock),
+            patch("hikyaku.cli.api.patch_placement", patch_mock),
+            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "member",
+                    "create",
+                    "--agent-id",
+                    DIRECTOR_ID,
+                    "--name",
+                    "Claude-B",
+                    "--description",
+                    "test",
+                ],
+                env=_auth_env(),
+            )
+
+        assert result.exit_code == 0
+        # split_window should receive command starting with "claude"
+        assert len(split_captures) == 1
+        assert "command" in split_captures[0]
+        assert split_captures[0]["command"][0] == "claude"
+
+    def test_coding_agent_codex_flag(self, runner, monkeypatch):
+        """--coding-agent codex passes codex config through the flow."""
+        split_captures = []
+        _mock_tmux(monkeypatch, split_window_captures=split_captures)
+
+        # Mock ensure_available for codex binary
+        monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+        codex_placement_view = {**SAMPLE_PLACEMENT_VIEW, "coding_agent": "codex"}
+        register_mock = AsyncMock(return_value=SAMPLE_REGISTER_RESULT)
+        patch_mock = AsyncMock(return_value=codex_placement_view)
+        list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
+
+        with (
+            patch("hikyaku.cli.api.register_agent", register_mock),
+            patch("hikyaku.cli.api.patch_placement", patch_mock),
+            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "member",
+                    "create",
+                    "--agent-id",
+                    DIRECTOR_ID,
+                    "--name",
+                    "Codex-B",
+                    "--description",
+                    "test",
+                    "--coding-agent",
+                    "codex",
+                ],
+                env=_auth_env(),
+            )
+
+        assert result.exit_code == 0
+        # split_window should receive command starting with "codex"
+        assert len(split_captures) == 1
+        assert split_captures[0]["command"][0] == "codex"
+        assert "--approval-mode" in split_captures[0]["command"]
+        assert "auto-edit" in split_captures[0]["command"]
+
+    def test_coding_agent_invalid_choice_rejected(self, runner, monkeypatch):
+        """--coding-agent with an invalid choice is rejected by Click."""
+        _mock_tmux(monkeypatch)
+
+        result = runner.invoke(
+            cli,
+            [
+                "member",
+                "create",
+                "--agent-id",
+                DIRECTOR_ID,
+                "--name",
+                "Bad-B",
+                "--description",
+                "test",
+                "--coding-agent",
+                "aider",
+            ],
+            env=_auth_env(),
+        )
+
+        assert result.exit_code != 0
+
+    def test_coding_agent_in_placement_payload(self, runner, monkeypatch):
+        """Placement dict sent to register includes coding_agent field."""
+        _mock_tmux(monkeypatch)
+
+        monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+        register_mock = AsyncMock(return_value=SAMPLE_REGISTER_RESULT)
+        codex_placement_view = {**SAMPLE_PLACEMENT_VIEW, "coding_agent": "codex"}
+        patch_mock = AsyncMock(return_value=codex_placement_view)
+        list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
+
+        with (
+            patch("hikyaku.cli.api.register_agent", register_mock),
+            patch("hikyaku.cli.api.patch_placement", patch_mock),
+            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "member",
+                    "create",
+                    "--agent-id",
+                    DIRECTOR_ID,
+                    "--name",
+                    "Codex-B",
+                    "--description",
+                    "test",
+                    "--coding-agent",
+                    "codex",
+                ],
+                env=_auth_env(),
+            )
+
+        assert result.exit_code == 0
+        # Verify the placement dict passed to register_agent includes coding_agent
+        call_kwargs = register_mock.call_args
+        placement_arg = call_kwargs.kwargs.get("placement") or call_kwargs[1].get(
+            "placement"
+        )
+        assert placement_arg is not None
+        assert placement_arg["coding_agent"] == "codex"
+
+    def test_ensure_available_called_for_codex(self, runner, monkeypatch):
+        """ensure_available() is called during pre-flight for codex."""
+        _mock_tmux(monkeypatch)
+
+        # Make shutil.which return None so ensure_available raises
+        monkeypatch.setattr("shutil.which", lambda name: None)
+
+        result = runner.invoke(
+            cli,
+            [
+                "member",
+                "create",
+                "--agent-id",
+                DIRECTOR_ID,
+                "--name",
+                "Codex-B",
+                "--description",
+                "test",
+                "--coding-agent",
+                "codex",
+            ],
+            env=_auth_env(),
+        )
+
+        # Should fail because codex binary is not found
+        assert result.exit_code != 0
+        assert "codex" in (result.output + (result.stderr or "")).lower()
+
+    def test_codex_default_prompt_no_skill_reference(self, runner, monkeypatch):
+        """Codex default prompt does not include 'Skill(' — uses explicit CLI."""
+        split_captures = []
+        _mock_tmux(monkeypatch, split_window_captures=split_captures)
+
+        monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+        codex_placement_view = {**SAMPLE_PLACEMENT_VIEW, "coding_agent": "codex"}
+        register_mock = AsyncMock(return_value=SAMPLE_REGISTER_RESULT)
+        patch_mock = AsyncMock(return_value=codex_placement_view)
+        list_agents_mock = AsyncMock(return_value=SAMPLE_DIRECTOR_INFO)
+
+        with (
+            patch("hikyaku.cli.api.register_agent", register_mock),
+            patch("hikyaku.cli.api.patch_placement", patch_mock),
+            patch("hikyaku.cli.api.list_agents", list_agents_mock),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "member",
+                    "create",
+                    "--agent-id",
+                    DIRECTOR_ID,
+                    "--name",
+                    "Codex-B",
+                    "--description",
+                    "test",
+                    "--coding-agent",
+                    "codex",
+                ],
+                env=_auth_env(),
+            )
+
+        assert result.exit_code == 0
+        # The prompt is the last element of the command list
+        prompt = split_captures[0]["command"][-1]
+        assert "Skill(" not in prompt
+
 
 # ---------------------------------------------------------------------------
 # member delete
@@ -360,6 +585,7 @@ class TestMemberList:
         assert "tmux_session" in p
         assert "tmux_window_id" in p
         assert "tmux_pane_id" in p
+        assert "coding_agent" in p
         assert "created_at" in p
 
     def test_renders_pending_pane_as_literal(self, runner):
