@@ -50,7 +50,7 @@ export default function SessionPicker({ onSelect }: SessionPickerProps) {
               <p className="text-gray-400 text-xs mt-2">
                 Run{" "}
                 <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
-                  cafleet-registry session create
+                  cafleet session create
                 </code>{" "}
                 to create one.
               </p>
