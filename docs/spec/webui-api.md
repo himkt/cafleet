@@ -35,7 +35,7 @@ Returns all sessions with agent counts. No headers required.
 
 Returns agents belonging to the selected session.
 
-**Request**: Query parameter `?session_id=<uuid>`.
+**Request**: `X-Session-Id: <session_id>` header.
 
 **Response** (200 OK):
 

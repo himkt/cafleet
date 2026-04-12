@@ -137,6 +137,15 @@ class RegistryStore:
             record["deregistered_at"] = agent.deregistered_at
         return record
 
+    async def get_agent_session_id(self, agent_id: str) -> str | None:
+        """Return the session_id for an agent, or None if not found."""
+        async with self._sessionmaker() as session:
+            result = await session.execute(
+                select(Agent.session_id).where(Agent.agent_id == agent_id)
+            )
+            row = result.first()
+        return row[0] if row else None
+
     async def list_active_agents(
         self, session_id: str | None = None
     ) -> list[AgentListItem]:
@@ -299,6 +308,7 @@ class RegistryStore:
                 ),
             )
             .group_by(Session.session_id)
+            .order_by(Session.created_at)
         )
 
         async with self._sessionmaker() as session:

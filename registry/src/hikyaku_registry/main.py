@@ -7,7 +7,6 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from a2a.server.agent_execution import RequestContext
@@ -29,7 +28,6 @@ from hikyaku_registry.api.registry import (
 )
 from hikyaku_registry.config import settings
 from hikyaku_registry.db.engine import dispose_engine, get_sessionmaker
-from hikyaku_registry.db.models import Agent
 from hikyaku_registry.executor import BrokerExecutor, SessionMismatchError
 from hikyaku_registry.registry_store import RegistryStore
 from hikyaku_registry.task_store import TaskStore
@@ -283,16 +281,9 @@ def create_app(
                 status_code=400, content={"error": "X-Agent-Id header required"}
             )
 
-        async with registry_store._sessionmaker() as session:
-            result = await session.execute(
-                select(Agent.session_id).where(Agent.agent_id == agent_id)
-            )
-            row = result.first()
-
-        if row is None:
+        session_id = await registry_store.get_agent_session_id(agent_id)
+        if session_id is None:
             return JSONResponse(status_code=404, content={"error": "Agent not found"})
-
-        session_id = row[0]
 
         # Parse JSON-RPC request
         body = await request.json()

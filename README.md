@@ -252,7 +252,7 @@ The WebUI API is consumed by the browser SPA. No authentication is required. Ses
 | Method | Endpoint | Headers / Params | Description |
 |---|---|---|---|
 | GET | `/ui/api/sessions` | None | List all sessions with agent counts |
-| GET | `/ui/api/agents` | Query: `?session_id=<uuid>` | List agents in the selected session |
+| GET | `/ui/api/agents` | `X-Session-Id` | List agents in the selected session |
 | GET | `/ui/api/agents/{id}/inbox` | `X-Session-Id` | Inbox messages for an agent (newest first) |
 | GET | `/ui/api/agents/{id}/sent` | `X-Session-Id` | Sent messages for an agent (newest first) |
 | GET | `/ui/api/timeline` | `X-Session-Id` | Unified session timeline (up to 200 most-recent non-`broadcast_summary` tasks, newest first, each row carrying `origin_task_id` + `created_at` + `status_timestamp` for client-side broadcast grouping) |

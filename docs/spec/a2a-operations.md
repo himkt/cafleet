@@ -257,8 +257,8 @@ Sender can retract an unread message:
 
 | Condition | Error | Code |
 |---|---|---|
-| Missing `X-Agent-Id` header | HTTP 400 `AGENT_ID_REQUIRED` | N/A |
-| `X-Agent-Id` present but agent does not exist | HTTP 404 `AGENT_NOT_FOUND` | N/A |
+| Missing `X-Agent-Id` header | HTTP 400 `{"error": "X-Agent-Id header required"}` | N/A |
+| `X-Agent-Id` present but agent does not exist | HTTP 404 `{"error": "Agent not found"}` | N/A |
 | Missing `metadata.destination` | `InvalidParams`: "metadata.destination is required" | `-32602` |
 | `destination` is not a valid UUID or `"*"` | `InvalidParams`: "invalid destination format" | `-32602` |
 | Destination agent not found (same session) | `InvalidParams`: "destination agent not found" | `-32602` |

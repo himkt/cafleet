@@ -9,9 +9,6 @@ Two FastAPI dependencies resolve callers to their session:
 """
 
 from fastapi import HTTPException, Request
-from sqlalchemy import select
-
-from hikyaku_registry.db.models import Agent
 
 
 async def get_session_from_agent_id(request: Request, store) -> tuple[str, str]:
@@ -25,16 +22,11 @@ async def get_session_from_agent_id(request: Request, store) -> tuple[str, str]:
     if not agent_id:
         raise HTTPException(status_code=400)
 
-    async with store._sessionmaker() as session:
-        result = await session.execute(
-            select(Agent.session_id).where(Agent.agent_id == agent_id)
-        )
-        row = result.first()
-
-    if row is None:
+    session_id = await store.get_agent_session_id(agent_id)
+    if session_id is None:
         raise HTTPException(status_code=404)
 
-    return (agent_id, row[0])
+    return (agent_id, session_id)
 
 
 async def get_session_from_header(request: Request, store) -> str:
