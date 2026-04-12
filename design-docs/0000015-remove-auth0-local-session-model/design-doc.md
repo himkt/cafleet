@@ -1,7 +1,7 @@
 # Remove Auth0: Local-Only Session Model
 
 **Status**: Approved
-**Progress**: 33/80 tasks complete
+**Progress**: 39/80 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -559,12 +559,12 @@ Implementation order is **documentation-first** per project rule `.claude/rules/
 
 ### Step 7: Backend — `hikyaku-registry session` CLI
 
-- [ ] Add `@main.group() def session()` to `registry/src/hikyaku_registry/cli.py` <!-- completed: -->
-- [ ] Implement `session create [--label TEXT] [--json]`: open sync engine via `create_engine(_sync_db_url())`, `uuid4()` → `INSERT INTO sessions`, print UUID on stdout <!-- completed: -->
-- [ ] Implement `session list [--json]`: sync `SELECT ... LEFT JOIN agents` + count agents per session; table output by default <!-- completed: -->
-- [ ] Implement `session show <session_id> [--json]`: sync `SELECT` from sessions; exit 1 with friendly error if missing <!-- completed: -->
-- [ ] Implement `session delete <session_id>`: sync `DELETE FROM sessions`; catch `IntegrityError`, query agent count, raise `click.UsageError` <!-- completed: -->
-- [ ] Verify `db init` remains unchanged and does NOT auto-create a session <!-- completed: -->
+- [x] Add `@main.group() def session()` to `registry/src/hikyaku_registry/cli.py` <!-- completed: 2026-04-12 -->
+- [x] Implement `session create [--label TEXT] [--json]`: open sync engine via `create_engine(_sync_db_url())`, `uuid4()` → `INSERT INTO sessions`, print UUID on stdout <!-- completed: 2026-04-12 -->
+- [x] Implement `session list [--json]`: sync `SELECT ... LEFT JOIN agents` + count agents per session; table output by default <!-- completed: 2026-04-12 -->
+- [x] Implement `session show <session_id> [--json]`: sync `SELECT` from sessions; exit 1 with friendly error if missing <!-- completed: 2026-04-12 -->
+- [x] Implement `session delete <session_id>`: sync `DELETE FROM sessions`; catch `IntegrityError`, query agent count, raise `click.UsageError` <!-- completed: 2026-04-12 -->
+- [x] Verify `db init` remains unchanged and does NOT auto-create a session <!-- completed: 2026-04-12 -->
 
 ### Step 8: Client — CLI & api rename
 

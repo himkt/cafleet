@@ -1,12 +1,15 @@
-"""hikyaku-registry CLI — schema management commands.
+"""hikyaku-registry CLI — schema management and session commands.
 
-Currently only ``db init`` is implemented (v1). The ``db`` subgroup is
-scaffolded so future commands (``db current``, ``db revision``,
-``db downgrade``) can be added later without restructuring.
+Subgroups:
+  - ``db``      — Database schema management (init, etc.)
+  - ``session`` — Session CRUD (create, list, show, delete)
 """
 
 import importlib.resources
+import json
 import sys
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -14,8 +17,9 @@ from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine.url import make_url
+from sqlalchemy.exc import IntegrityError
 
 from hikyaku_registry.config import settings
 
@@ -117,6 +121,166 @@ def init() -> None:
                 click.echo(f"Upgraded from {old_rev} to {head_rev}.")
         finally:
             engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# session group — sibling of db
+# ---------------------------------------------------------------------------
+
+
+@main.group()
+def session() -> None:
+    """Session management commands."""
+
+
+@session.command("create")
+@click.option("--label", default=None, help="Optional human-readable label.")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def session_create(label: str | None, as_json: bool) -> None:
+    """Create a new session."""
+    sync_url = _sync_db_url()
+    session_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    engine = create_engine(sync_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO sessions (session_id, label, created_at) "
+                    "VALUES (:sid, :label, :created_at)"
+                ),
+                {"sid": session_id, "label": label, "created_at": created_at},
+            )
+    finally:
+        engine.dispose()
+
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "session_id": session_id,
+                    "label": label,
+                    "created_at": created_at,
+                }
+            )
+        )
+    else:
+        click.echo(session_id)
+
+
+@session.command("list")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def session_list(as_json: bool) -> None:
+    """List all sessions."""
+    sync_url = _sync_db_url()
+    engine = create_engine(sync_url)
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT s.session_id, s.label, s.created_at, "
+                    "COUNT(CASE WHEN a.status = 'active' THEN 1 END) AS agent_count "
+                    "FROM sessions s "
+                    "LEFT JOIN agents a ON a.session_id = s.session_id "
+                    "GROUP BY s.session_id "
+                    "ORDER BY s.created_at"
+                )
+            ).fetchall()
+    finally:
+        engine.dispose()
+
+    if as_json:
+        data = [
+            {
+                "session_id": r[0],
+                "label": r[1],
+                "created_at": r[2],
+                "agent_count": r[3],
+            }
+            for r in rows
+        ]
+        click.echo(json.dumps(data))
+    else:
+        if not rows:
+            click.echo("No sessions found.")
+            return
+        click.echo(f"{'SESSION_ID':<40} {'LABEL':<20} {'AGENTS':<8} {'CREATED_AT'}")
+        for r in rows:
+            sid, lbl, created, count = r
+            click.echo(f"{sid:<40} {lbl or '':<20} {count:<8} {created}")
+
+
+@session.command("show")
+@click.argument("session_id")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def session_show(session_id: str, as_json: bool) -> None:
+    """Show details of a single session."""
+    sync_url = _sync_db_url()
+    engine = create_engine(sync_url)
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT session_id, label, created_at FROM sessions "
+                    "WHERE session_id = :sid"
+                ),
+                {"sid": session_id},
+            ).first()
+    finally:
+        engine.dispose()
+
+    if row is None:
+        click.echo(f"Error: session '{session_id}' not found.", err=True)
+        sys.exit(1)
+
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "session_id": row[0],
+                    "label": row[1],
+                    "created_at": row[2],
+                }
+            )
+        )
+    else:
+        click.echo(f"session_id: {row[0]}")
+        click.echo(f"label:      {row[1] or ''}")
+        click.echo(f"created_at: {row[2]}")
+
+
+@session.command("delete")
+@click.argument("session_id")
+def session_delete(session_id: str) -> None:
+    """Delete a session."""
+    sync_url = _sync_db_url()
+    engine = create_engine(sync_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("PRAGMA foreign_keys = ON"))
+            try:
+                result = conn.execute(
+                    text("DELETE FROM sessions WHERE session_id = :sid"),
+                    {"sid": session_id},
+                )
+            except IntegrityError:
+                count = conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM agents WHERE session_id = :sid"
+                    ),
+                    {"sid": session_id},
+                ).scalar()
+                raise click.UsageError(
+                    f"Cannot delete session {session_id}: "
+                    f"it still has {count} agent(s) referencing it."
+                )
+        if result.rowcount == 0:
+            click.echo(f"Error: session '{session_id}' not found.", err=True)
+            sys.exit(1)
+        click.echo(f"Deleted session {session_id}.")
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":
