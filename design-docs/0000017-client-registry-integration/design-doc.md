@@ -1,7 +1,7 @@
 # Merge Client and Registry into a Single Package
 
 **Status**: Approved
-**Progress**: 12/32 tasks complete
+**Progress**: 13/32 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -369,7 +369,7 @@ client/                    # entire directory
 
 ### Step 5: Merge CLIs
 
-- [ ] Merge registry CLI (`db`, `session` subgroups) and client CLI (`env` command, top-level commands, `member` subgroup) into single `hikyaku/src/hikyaku/cli.py` <!-- completed: -->
+- [x] Merge registry CLI (`db`, `session` subgroups) and client CLI (`env` command, top-level commands, `member` subgroup) into single `hikyaku/src/hikyaku/cli.py` <!-- completed: 2026-04-12T09:23 -->
 
 ### Step 6: Rewrite All Internal Imports
 
