@@ -1,5 +1,5 @@
 [tasks.dev]
-run = "uv run src/hikyaku/server.py"
+run = "uv run src/cafleet/server.py"
 description = "Start the broker server"
 
 [tasks.test]

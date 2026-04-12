@@ -1,12 +1,12 @@
 [tool.uv.workspace]
-members = ["hikyaku"]
+members = ["cafleet"]
 
 [tool.uv.sources]
-hikyaku = { workspace = true }
+cafleet = { workspace = true }
 
 [dependency-groups]
 dev = [
-    "hikyaku",
+    "cafleet",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "ruff>=0.11.0",
@@ -19,7 +19,7 @@ dev = [
 python-version = "3.12"
 
 [tool.ty.src]
-include = ["hikyaku/src"]
+include = ["cafleet/src"]
 
 [tool.ty.analysis]
 # Suppress errors for third-party libraries without type stubs.

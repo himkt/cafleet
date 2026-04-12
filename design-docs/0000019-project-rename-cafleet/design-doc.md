@@ -1,7 +1,7 @@
 # Project Rename: hikyaku → cafleet
 
 **Status**: Approved
-**Progress**: 18/36 tasks complete
+**Progress**: 22/36 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -294,10 +294,10 @@ Per project rules, documentation is updated before code.
 
 ### Step 4: Package Configuration
 
-- [ ] Update root `pyproject.toml`: workspace members, sources, dev deps, ty.src include <!-- completed: -->
-- [ ] Update `cafleet/pyproject.toml`: package name, console script, hatch build paths <!-- completed: -->
-- [ ] Update root `mise.toml`: monorepo config_roots, `HIKYAKU_URL` → `CAFLEET_URL` <!-- completed: -->
-- [ ] Update `cafleet/mise.toml`: dev task server path <!-- completed: -->
+- [x] Update root `pyproject.toml`: workspace members, sources, dev deps, ty.src include <!-- completed: 2026-04-12T10:25 -->
+- [x] Update `cafleet/pyproject.toml`: package name, console script, hatch build paths <!-- completed: 2026-04-12T10:25 -->
+- [x] Update root `mise.toml`: monorepo config_roots, `HIKYAKU_URL` → `CAFLEET_URL` <!-- completed: 2026-04-12T10:25 -->
+- [x] Update `cafleet/mise.toml`: dev task server path <!-- completed: 2026-04-12T10:25 -->
 
 ### Step 5: Python Source Code
 
