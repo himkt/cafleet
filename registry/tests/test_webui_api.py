@@ -1241,7 +1241,7 @@ class TestTimeline:
             webui_env["client"],
         )
         api_key, tenant_id = webui_env["api_key"], webui_env["tenant_id"]
-        other_api_key, other_tenant_id = (
+        other_api_key, _other_tenant_id = (
             webui_env["other_api_key"],
             webui_env["other_tenant_id"],
         )
