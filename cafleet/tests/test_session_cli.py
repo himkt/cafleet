@@ -24,10 +24,22 @@ import json
 import sqlite3
 import uuid
 
+import pytest
 from click.testing import CliRunner
 
 from cafleet import config
 from cafleet.cli import cli
+from cafleet.db import engine as engine_mod
+
+
+@pytest.fixture(autouse=True)
+def _reset_engine_singletons():
+    """Reset broker engine singletons so each test gets a fresh engine."""
+    engine_mod._sync_engine = None
+    engine_mod._sync_sessionmaker = None
+    yield
+    engine_mod._sync_engine = None
+    engine_mod._sync_sessionmaker = None
 
 
 # ---------------------------------------------------------------------------

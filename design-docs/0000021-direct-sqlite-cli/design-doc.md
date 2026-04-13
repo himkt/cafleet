@@ -1,7 +1,7 @@
 # Direct SQLite CLI
 
-**Status**: Approved
-**Progress**: 0/30 tasks complete
+**Status**: Complete
+**Progress**: 30/30 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -10,13 +10,13 @@ Remove the HTTP/A2A server from the critical path entirely. All CLI commands and
 
 ## Success Criteria
 
-- [ ] All CLI commands operate without a running server
-- [ ] No `a2a-sdk` or `httpx` imports anywhere in the codebase
-- [ ] Admin WebUI endpoints call `broker` (not async stores or executor)
-- [ ] `broker` module is the single data access layer for both CLI and WebUI
-- [ ] `a2a-sdk`, `httpx`, and `aiosqlite` removed from package dependencies
-- [ ] Concurrent SQLite access handled via `PRAGMA busy_timeout=5000`
-- [ ] CLI output (human-readable and `--json`) is unchanged
+- [x] All CLI commands operate without a running server
+- [x] No `a2a-sdk` or `httpx` imports anywhere in the codebase
+- [x] Admin WebUI endpoints call `broker` (not async stores or executor)
+- [x] `broker` module is the single data access layer for both CLI and WebUI
+- [x] `a2a-sdk`, `httpx`, and `aiosqlite` removed from package dependencies
+- [x] Concurrent SQLite access handled via `PRAGMA busy_timeout=5000`
+- [x] CLI output (human-readable and `--json`) is unchanged
 
 ---
 
@@ -463,60 +463,60 @@ Specific sections to update:
 
 ### Step 1: Documentation
 
-- [ ] Update `ARCHITECTURE.md` — remove "Three API Surfaces", "ASGI Mount Strategy", update Component Layout, Storage Layer, Design Decisions (see ARCHITECTURE.md Updates section) <!-- completed: -->
-- [ ] Update `README.md` — remove server requirement for CLI, update getting started <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet/SKILL.md` — remove `CAFLEET_URL`, update CLI workflow <!-- completed: -->
-- [ ] Update `CLAUDE.md` and `.claude/CLAUDE.md` — reflect architecture change <!-- completed: -->
-- [ ] Update `.claude/rules/commands.md` — note `cafleet dev` is WebUI-only <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` — remove "Three API Surfaces", "ASGI Mount Strategy", update Component Layout, Storage Layer, Design Decisions (see ARCHITECTURE.md Updates section) <!-- completed: 2026-04-13T13:35 -->
+- [x] Update `README.md` — remove server requirement for CLI, update getting started <!-- completed: 2026-04-13T13:35 -->
+- [x] Update `.claude/skills/cafleet/SKILL.md` — remove `CAFLEET_URL`, update CLI workflow <!-- completed: 2026-04-13T13:35 -->
+- [x] Update `CLAUDE.md` and `.claude/CLAUDE.md` — reflect architecture change <!-- completed: 2026-04-13T13:35 -->
+- [x] Update `.claude/rules/commands.md` — note `cafleet dev` is WebUI-only <!-- completed: 2026-04-13T13:35 -->
 
 ### Step 2: Sync engine infrastructure
 
-- [ ] Add `PRAGMA busy_timeout=5000` to event listener in `db/engine.py` (rename to `_enable_sqlite_pragmas`) <!-- completed: -->
-- [ ] Add `get_sync_engine()`, `get_sync_sessionmaker()` to `db/engine.py` <!-- completed: -->
-- [ ] Remove async engine functions (`get_engine`, `get_sessionmaker`, `dispose_engine`) and `aiosqlite` import from `db/engine.py` <!-- completed: -->
+- [x] Add `PRAGMA busy_timeout=5000` to event listener in `db/engine.py` (rename to `_enable_sqlite_pragmas`) <!-- completed: 2026-04-13T13:42 -->
+- [x] Add `get_sync_engine()`, `get_sync_sessionmaker()` to `db/engine.py` <!-- completed: 2026-04-13T13:42 -->
+- [x] Remove async engine functions (`get_engine`, `get_sessionmaker`, `dispose_engine`) and `aiosqlite` import from `db/engine.py` <!-- completed: 2026-04-13T13:42 -->
 
 ### Step 3: broker.py — session + registry operations
 
-- [ ] Create `broker.py` with session operations: `create_session`, `list_sessions`, `get_session`, `delete_session` <!-- completed: -->
-- [ ] Add agent registry operations: `register_agent`, `get_agent`, `list_agents`, `verify_agent_session` <!-- completed: -->
-- [ ] Add `deregister_agent`, `update_placement_pane_id`, `list_members` <!-- completed: -->
+- [x] Create `broker.py` with session operations: `create_session`, `list_sessions`, `get_session`, `delete_session` <!-- completed: 2026-04-13T13:50 -->
+- [x] Add agent registry operations: `register_agent`, `get_agent`, `list_agents`, `verify_agent_session` <!-- completed: 2026-04-13T13:50 -->
+- [x] Add `deregister_agent`, `update_placement_pane_id`, `list_members` <!-- completed: 2026-04-13T13:50 -->
 
 ### Step 4: broker.py — messaging operations
 
-- [ ] Add internal helpers `_save_task` (UPSERT) and `_read_task` <!-- completed: -->
-- [ ] Add `send_message` with unicast validation and `broadcast_message` with fan-out <!-- completed: -->
-- [ ] Add `poll_tasks`, `ack_task`, `cancel_task`, `get_task` <!-- completed: -->
+- [x] Add internal helpers `_save_task` (UPSERT) and `_read_task` <!-- completed: 2026-04-13T13:55 -->
+- [x] Add `send_message` with unicast validation and `broadcast_message` with fan-out <!-- completed: 2026-04-13T13:55 -->
+- [x] Add `poll_tasks`, `ack_task`, `cancel_task`, `get_task` <!-- completed: 2026-04-13T13:55 -->
 
 ### Step 5: broker.py — WebUI query operations
 
-- [ ] Add `list_session_agents` (active + deregistered with tasks) <!-- completed: -->
-- [ ] Add `list_inbox`, `list_sent`, `list_timeline`, `get_agent_names`, `get_task_created_ats` <!-- completed: -->
+- [x] Add `list_session_agents` (active + deregistered with tasks) <!-- completed: 2026-04-13T14:10 -->
+- [x] Add `list_inbox`, `list_sent`, `list_timeline`, `get_agent_names`, `get_task_created_ats` <!-- completed: 2026-04-13T14:10 -->
 
 ### Step 6: CLI rewrite
 
-- [ ] Replace `broker_client` import with `broker`, drop `CAFLEET_URL`, remove `_run()` wrapper <!-- completed: -->
-- [ ] Rewrite session commands to call `broker` instead of inline raw SQL <!-- completed: -->
-- [ ] Rewrite client commands: `register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister` <!-- completed: -->
-- [ ] Rewrite member commands: `create` (env forwarding), `delete`, `list`, `capture` <!-- completed: -->
-- [ ] Update `env` command to print `CAFLEET_DATABASE_URL` instead of `CAFLEET_URL` <!-- completed: -->
+- [x] Replace `broker_client` import with `broker`, drop `CAFLEET_URL`, remove `_run()` wrapper <!-- completed: 2026-04-13T14:20 -->
+- [x] Rewrite session commands to call `broker` instead of inline raw SQL <!-- completed: 2026-04-13T14:20 -->
+- [x] Rewrite client commands: `register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister` <!-- completed: 2026-04-13T14:20 -->
+- [x] Rewrite member commands: `create` (env forwarding), `delete`, `list`, `capture` <!-- completed: 2026-04-13T14:20 -->
+- [x] Update `env` command to print `CAFLEET_DATABASE_URL` instead of `CAFLEET_URL` <!-- completed: 2026-04-13T14:20 -->
 
 ### Step 7: Admin WebUI rewrite
 
-- [ ] Rewrite `server.py` — minimal FastAPI app with `webui_router` + static files only <!-- completed: -->
-- [ ] Rewrite `webui_api.py` — all endpoints call `broker`, sync `def` handlers, rewrite `_format_messages` for dicts <!-- completed: -->
+- [x] Rewrite `server.py` — minimal FastAPI app with `webui_router` + static files only <!-- completed: 2026-04-13T14:30 -->
+- [x] Rewrite `webui_api.py` — all endpoints call `broker`, sync `def` handlers, rewrite `_format_messages` for dicts <!-- completed: 2026-04-13T14:30 -->
 
 ### Step 8: Delete dead code + update dependencies
 
-- [ ] Delete `broker_client.py`, `executor.py`, `agent_card.py`, `auth.py`, `models.py`, `api/registry.py` <!-- completed: -->
-- [ ] Delete `registry_store.py`, `task_store.py` <!-- completed: -->
-- [ ] Remove `a2a-sdk`, `httpx`, `aiosqlite` from `pyproject.toml` dependencies <!-- completed: -->
-- [ ] Verify no remaining imports of deleted modules in any code path <!-- completed: -->
+- [x] Delete `broker_client.py`, `executor.py`, `agent_card.py`, `auth.py`, `models.py`, `api/registry.py` <!-- completed: 2026-04-13T14:40 -->
+- [x] Delete `registry_store.py`, `task_store.py` <!-- completed: 2026-04-13T14:40 -->
+- [x] Remove `a2a-sdk`, `httpx`, `aiosqlite` from `pyproject.toml` dependencies <!-- completed: 2026-04-13T14:40 -->
+- [x] Verify no remaining imports of deleted modules in any code path <!-- completed: 2026-04-13T14:40 -->
 
 ### Step 9: Tests
 
-- [ ] Unit tests for `broker` session + registry operations <!-- completed: -->
-- [ ] Unit tests for `broker` messaging operations (`send_message`, `broadcast_message`, `poll_tasks`, `ack_task`, `cancel_task`, `get_task`) <!-- completed: -->
-- [ ] Unit tests for `broker` WebUI query operations (`list_session_agents`, `list_inbox`, `list_sent`, `list_timeline`) <!-- completed: -->
+- [x] Unit tests for `broker` session + registry operations <!-- completed: 2026-04-13T13:42 -->
+- [x] Unit tests for `broker` messaging operations (`send_message`, `broadcast_message`, `poll_tasks`, `ack_task`, `cancel_task`, `get_task`) <!-- completed: 2026-04-13T13:46 -->
+- [x] Unit tests for `broker` WebUI query operations (`list_session_agents`, `list_inbox`, `list_sent`, `list_timeline`) <!-- completed: 2026-04-13T13:47 -->
 
 ---
 
@@ -526,3 +526,4 @@ Specific sections to update:
 |------|---------|
 | 2026-04-12 | Initial draft |
 | 2026-04-12 | Revision: rename local_ops→broker, add dependency removal (a2a-sdk/httpx/aiosqlite), add async engine cleanup, add models.py deletion, add ARCHITECTURE.md update specifics |
+| 2026-04-13 | Implementation complete. All 30/30 tasks done. All 7 success criteria verified. 249 tests passing. Status → Complete |

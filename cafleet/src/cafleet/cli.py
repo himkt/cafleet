@@ -9,28 +9,21 @@ Top-level commands:
   env, register, send, broadcast, poll, ack, cancel, get-task, agents, deregister
 """
 
-import asyncio
 import importlib.resources
 import json
 import os
 import sys
-import uuid
-from collections.abc import Coroutine
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import click
 from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.url import make_url
-from sqlalchemy.exc import IntegrityError
 
-from cafleet import broker_client as api
-from cafleet import output
+from cafleet import broker, output
 from cafleet.coding_agent import CodingAgentConfig, get_coding_agent
 from cafleet.config import settings
 
@@ -38,11 +31,6 @@ from cafleet.config import settings
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _run(coro: Coroutine) -> Any:
-    """Run an async coroutine synchronously."""
-    return asyncio.run(coro)
 
 
 def _require_session_id(ctx: click.Context) -> None:
@@ -73,9 +61,7 @@ def _sync_db_url() -> str:
 def cli(ctx, json_output):
     """CAFleet — CLI for the A2A message broker."""
     ctx.ensure_object(dict)
-    url = os.environ.get("CAFLEET_URL") or "http://127.0.0.1:8000"
     session_id = os.environ.get("CAFLEET_SESSION_ID")
-    ctx.obj["url"] = url
     ctx.obj["session_id"] = session_id
     ctx.obj["json_output"] = json_output
 
@@ -88,9 +74,10 @@ def cli(ctx, json_output):
 @cli.command()
 @click.pass_context
 def env(ctx):
-    """Print CAFLEET_URL and CAFLEET_SESSION_ID from the environment."""
-    click.echo(f"CAFLEET_URL={ctx.obj['url']}")
+    """Print CAFLEET_DATABASE_URL and CAFLEET_SESSION_ID from the environment."""
+    db_url = settings.database_url
     session_id = ctx.obj["session_id"] or ""
+    click.echo(f"CAFLEET_DATABASE_URL={db_url}")
     click.echo(f"CAFLEET_SESSION_ID={session_id}")
 
 
@@ -204,77 +191,32 @@ def session() -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def session_create(label: str | None, as_json: bool) -> None:
     """Create a new session."""
-    sync_url = _sync_db_url()
-    session_id = str(uuid.uuid4())
-    created_at = datetime.now(timezone.utc).isoformat()
-
-    engine = create_engine(sync_url)
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO sessions (session_id, label, created_at) "
-                    "VALUES (:sid, :label, :created_at)"
-                ),
-                {"sid": session_id, "label": label, "created_at": created_at},
-            )
-    finally:
-        engine.dispose()
+    result = broker.create_session(label=label)
 
     if as_json:
-        click.echo(
-            json.dumps(
-                {
-                    "session_id": session_id,
-                    "label": label,
-                    "created_at": created_at,
-                }
-            )
-        )
+        click.echo(json.dumps(result))
     else:
-        click.echo(session_id)
+        click.echo(result["session_id"])
 
 
 @session.command("list")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def session_list(as_json: bool) -> None:
     """List all sessions."""
-    sync_url = _sync_db_url()
-    engine = create_engine(sync_url)
-    try:
-        with engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT s.session_id, s.label, s.created_at, "
-                    "COUNT(CASE WHEN a.status = 'active' THEN 1 END) AS agent_count "
-                    "FROM sessions s "
-                    "LEFT JOIN agents a ON a.session_id = s.session_id "
-                    "GROUP BY s.session_id "
-                    "ORDER BY s.created_at"
-                )
-            ).fetchall()
-    finally:
-        engine.dispose()
+    rows = broker.list_sessions()
 
     if as_json:
-        data = [
-            {
-                "session_id": r[0],
-                "label": r[1],
-                "created_at": r[2],
-                "agent_count": r[3],
-            }
-            for r in rows
-        ]
-        click.echo(json.dumps(data))
+        click.echo(json.dumps(rows))
     else:
         if not rows:
             click.echo("No sessions found.")
             return
         click.echo(f"{'SESSION_ID':<40} {'LABEL':<20} {'AGENTS':<8} {'CREATED_AT'}")
         for r in rows:
-            sid, lbl, created, count = r
-            click.echo(f"{sid:<40} {lbl or '':<20} {count:<8} {created}")
+            click.echo(
+                f"{r['session_id']:<40} {r['label'] or '':<20} "
+                f"{r['agent_count']:<8} {r['created_at']}"
+            )
 
 
 @session.command("show")
@@ -282,73 +224,30 @@ def session_list(as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def session_show(session_id: str, as_json: bool) -> None:
     """Show details of a single session."""
-    sync_url = _sync_db_url()
-    engine = create_engine(sync_url)
-    try:
-        with engine.connect() as conn:
-            row = conn.execute(
-                text(
-                    "SELECT session_id, label, created_at FROM sessions "
-                    "WHERE session_id = :sid"
-                ),
-                {"sid": session_id},
-            ).first()
-    finally:
-        engine.dispose()
+    result = broker.get_session(session_id)
 
-    if row is None:
+    if result is None:
         click.echo(f"Error: session '{session_id}' not found.", err=True)
         sys.exit(1)
 
     if as_json:
-        click.echo(
-            json.dumps(
-                {
-                    "session_id": row[0],
-                    "label": row[1],
-                    "created_at": row[2],
-                }
-            )
-        )
+        click.echo(json.dumps(result))
     else:
-        click.echo(f"session_id: {row[0]}")
-        click.echo(f"label:      {row[1] or ''}")
-        click.echo(f"created_at: {row[2]}")
+        click.echo(f"session_id: {result['session_id']}")
+        click.echo(f"label:      {result['label'] or ''}")
+        click.echo(f"created_at: {result['created_at']}")
 
 
 @session.command("delete")
 @click.argument("session_id")
 def session_delete(session_id: str) -> None:
     """Delete a session."""
-    sync_url = _sync_db_url()
-    engine = create_engine(sync_url)
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("PRAGMA foreign_keys = ON"))
-            try:
-                result = conn.execute(
-                    text("DELETE FROM sessions WHERE session_id = :sid"),
-                    {"sid": session_id},
-                )
-            except IntegrityError:
-                count = conn.execute(
-                    text("SELECT COUNT(*) FROM agents WHERE session_id = :sid"),
-                    {"sid": session_id},
-                ).scalar()
-                raise click.UsageError(
-                    f"Cannot delete session {session_id}: "
-                    f"it still has {count} agent(s) referencing it."
-                )
-        if result.rowcount == 0:
-            click.echo(f"Error: session '{session_id}' not found.", err=True)
-            sys.exit(1)
-        click.echo(f"Deleted session {session_id}.")
-    finally:
-        engine.dispose()
+    broker.delete_session(session_id)
+    click.echo(f"Deleted session {session_id}.")
 
 
 # ---------------------------------------------------------------------------
-# Client commands (require CAFLEET_URL + CAFLEET_SESSION_ID)
+# Client commands (require CAFLEET_SESSION_ID)
 # ---------------------------------------------------------------------------
 
 
@@ -372,14 +271,11 @@ def register(ctx, name, description, skills):
                 ctx.exit(1)
                 return
 
-        result = _run(
-            api.register_agent(
-                ctx.obj["url"],
-                name,
-                description,
-                skills=parsed_skills,
-                session_id=session_id,
-            )
+        result = broker.register_agent(
+            session_id,
+            name,
+            description,
+            skills=parsed_skills,
         )
 
         if ctx.obj["json_output"]:
@@ -400,14 +296,11 @@ def send(ctx, agent_id, to, text):
     """Send a unicast message to another agent."""
     _require_session_id(ctx)
     try:
-        result = _run(
-            api.send_message(
-                ctx.obj["url"],
-                ctx.obj["session_id"],
-                agent_id,
-                to,
-                text,
-            )
+        result = broker.send_message(
+            ctx.obj["session_id"],
+            agent_id,
+            to,
+            text,
         )
 
         if ctx.obj["json_output"]:
@@ -415,8 +308,6 @@ def send(ctx, agent_id, to, text):
         else:
             click.echo("Message sent.")
             click.echo(output.format_task(result))
-            if result.get("notification_sent"):
-                click.echo("  (push notification sent)")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(1)
@@ -430,13 +321,10 @@ def broadcast(ctx, agent_id, text):
     """Broadcast a message to all agents."""
     _require_session_id(ctx)
     try:
-        result = _run(
-            api.broadcast_message(
-                ctx.obj["url"],
-                ctx.obj["session_id"],
-                agent_id,
-                text,
-            )
+        result = broker.broadcast_message(
+            ctx.obj["session_id"],
+            agent_id,
+            text,
         )
 
         if ctx.obj["json_output"]:
@@ -444,11 +332,6 @@ def broadcast(ctx, agent_id, text):
         else:
             click.echo("Broadcast sent.")
             click.echo(output.format_task_list(result))
-            for item in result:
-                count = item.get("notifications_sent_count")
-                if count is not None:
-                    click.echo(f"  {count} push notifications sent")
-                    break
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(1)
@@ -463,14 +346,10 @@ def poll(ctx, agent_id, since, page_size):
     """Poll inbox for messages."""
     _require_session_id(ctx)
     try:
-        result = _run(
-            api.poll_tasks(
-                ctx.obj["url"],
-                ctx.obj["session_id"],
-                agent_id,
-                since=since,
-                page_size=page_size,
-            )
+        result = broker.poll_tasks(
+            agent_id,
+            since=since,
+            page_size=page_size,
         )
 
         if ctx.obj["json_output"]:
@@ -490,14 +369,7 @@ def ack(ctx, agent_id, task_id):
     """Acknowledge receipt of a message."""
     _require_session_id(ctx)
     try:
-        result = _run(
-            api.ack_task(
-                ctx.obj["url"],
-                ctx.obj["session_id"],
-                agent_id,
-                task_id,
-            )
-        )
+        result = broker.ack_task(agent_id, task_id)
 
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
@@ -517,14 +389,7 @@ def cancel(ctx, agent_id, task_id):
     """Cancel (retract) a sent message."""
     _require_session_id(ctx)
     try:
-        result = _run(
-            api.cancel_task(
-                ctx.obj["url"],
-                ctx.obj["session_id"],
-                agent_id,
-                task_id,
-            )
-        )
+        result = broker.cancel_task(agent_id, task_id)
 
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
@@ -544,14 +409,7 @@ def get_task(ctx, agent_id, task_id):
     """Get details of a specific task."""
     _require_session_id(ctx)
     try:
-        result = _run(
-            api.get_task(
-                ctx.obj["url"],
-                ctx.obj["session_id"],
-                agent_id,
-                task_id,
-            )
-        )
+        result = broker.get_task(ctx.obj["session_id"], task_id)
 
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
@@ -570,22 +428,20 @@ def agents(ctx, agent_id, detail_id):
     """List registered agents or get agent detail."""
     _require_session_id(ctx)
     try:
-        result = _run(
-            api.list_agents(
-                ctx.obj["url"],
-                ctx.obj["session_id"],
-                caller_id=agent_id,
-                agent_id=detail_id,
-            )
-        )
-
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(result))
-        else:
-            if isinstance(result, list):
-                click.echo(output.format_agent_list(result))
+        if detail_id:
+            result = broker.get_agent(detail_id, ctx.obj["session_id"])
+            if result is None:
+                raise ValueError(f"Agent {detail_id} not found")
+            if ctx.obj["json_output"]:
+                click.echo(output.format_json(result))
             else:
                 click.echo(output.format_agent(result))
+        else:
+            result = broker.list_agents(ctx.obj["session_id"])
+            if ctx.obj["json_output"]:
+                click.echo(output.format_json(result))
+            else:
+                click.echo(output.format_agent_list(result))
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(1)
@@ -598,13 +454,7 @@ def deregister(ctx, agent_id):
     """Deregister this agent from the broker."""
     _require_session_id(ctx)
     try:
-        _run(
-            api.deregister_agent(
-                ctx.obj["url"],
-                ctx.obj["session_id"],
-                agent_id,
-            )
-        )
+        broker.deregister_agent(agent_id)
 
         if ctx.obj["json_output"]:
             click.echo(output.format_json({"status": "deregistered"}))
@@ -633,32 +483,23 @@ def _resolve_prompt(
 ) -> str:
     if prompt_argv:
         return " ".join(prompt_argv)
-    director = _run(
-        api.list_agents(
-            ctx.obj["url"],
-            ctx.obj["session_id"],
-            caller_id=director_agent_id,
-            agent_id=director_agent_id,
-        )
-    )
+    director = broker.get_agent(director_agent_id, ctx.obj["session_id"])
+    if director is None:
+        raise click.UsageError(f"Director agent {director_agent_id} not found")
     return coding_agent_config.default_prompt_template.format(
         director_name=director["name"],
         director_agent_id=director_agent_id,
     )
 
 
-def _rollback_register(broker_url, session_id, director_id, new_agent_id, *, reason):
-    """Best-effort rollback: deregister the just-created agent as the Director."""
+def _rollback_register(new_agent_id, *, reason):
+    """Best-effort rollback: deregister the just-created agent."""
     click.echo(
         f"Error: {reason}. Rolling back registration of {new_agent_id}.",
         err=True,
     )
     try:
-        _run(
-            api.deregister_agent(
-                broker_url, session_id, new_agent_id, caller_id=director_id
-            )
-        )
+        broker.deregister_agent(new_agent_id)
     except Exception as drop_exc:
         click.echo(
             f"WARNING: rollback deregister failed — agent {new_agent_id} is "
@@ -686,7 +527,6 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
     from cafleet import tmux
 
     _require_session_id(ctx)
-    broker_url = ctx.obj["url"]
     session_id = ctx.obj["session_id"]
     coding_agent_config = get_coding_agent(coding_agent)
 
@@ -704,21 +544,17 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
 
     # Step 1 — register member with pending placement (tmux_pane_id=null).
     try:
-        result = _run(
-            api.register_agent(
-                broker_url,
-                name,
-                description,
-                session_id=session_id,
-                director_agent_id=agent_id,
-                placement={
-                    "director_agent_id": agent_id,
-                    "tmux_session": director_ctx.session,
-                    "tmux_window_id": director_ctx.window_id,
-                    "tmux_pane_id": None,
-                    "coding_agent": coding_agent_config.name,
-                },
-            )
+        result = broker.register_agent(
+            session_id,
+            name,
+            description,
+            placement={
+                "director_agent_id": agent_id,
+                "tmux_session": director_ctx.session,
+                "tmux_window_id": director_ctx.window_id,
+                "tmux_pane_id": None,
+                "coding_agent": coding_agent_config.name,
+            },
         )
     except Exception as exc:
         click.echo(f"Error: register failed: {exc}", err=True)
@@ -726,51 +562,40 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         return
     new_agent_id = result["agent_id"]
 
-    # Step 2 — split-window, forwarding env so the spawned claude can reach the broker.
+    # Step 2 — split-window, forwarding env so the spawned agent can reach the DB.
     try:
+        fwd_env = {
+            "CAFLEET_SESSION_ID": session_id,
+            "CAFLEET_AGENT_ID": new_agent_id,
+        }
+        db_url = os.environ.get("CAFLEET_DATABASE_URL")
+        if db_url:
+            fwd_env["CAFLEET_DATABASE_URL"] = db_url
         pane_id = tmux.split_window(
             target_window_id=director_ctx.window_id,
-            env={
-                "CAFLEET_URL": broker_url,
-                "CAFLEET_SESSION_ID": session_id,
-                "CAFLEET_AGENT_ID": new_agent_id,
-            },
+            env=fwd_env,
             command=coding_agent_config.build_command(prompt),
         )
     except tmux.TmuxError as exc:
         _rollback_register(
-            broker_url,
-            session_id,
-            agent_id,
             new_agent_id,
             reason=f"tmux split-window failed: {exc}",
         )
         ctx.exit(1)
         return
 
-    # Step 3 — PATCH the pending placement with the real pane_id.
+    # Step 3 — update the pending placement with the real pane_id.
     try:
-        placement_view = _run(
-            api.patch_placement(
-                broker_url,
-                session_id,
-                director_agent_id=agent_id,
-                member_agent_id=new_agent_id,
-                pane_id=pane_id,
-            )
-        )
+        placement_view = broker.update_placement_pane_id(new_agent_id, pane_id)
     except Exception as exc:
-        # Placement patch failed: pane is alive but dangling. /exit it, then roll back.
+        # Placement update failed: pane is alive but dangling. /exit it, then roll back.
         try:
             tmux.send_exit(target_pane_id=pane_id, ignore_missing=True)
         except tmux.TmuxError:
             pass
         _rollback_register(
-            broker_url,
-            session_id,
-            agent_id,
             new_agent_id,
-            reason=f"placement PATCH failed: {exc}",
+            reason=f"placement update failed: {exc}",
         )
         ctx.exit(1)
         return
@@ -798,7 +623,6 @@ def member_delete(ctx, agent_id, member_id):
     from cafleet import tmux
 
     _require_session_id(ctx)
-    broker_url = ctx.obj["url"]
     session_id = ctx.obj["session_id"]
 
     try:
@@ -811,14 +635,9 @@ def member_delete(ctx, agent_id, member_id):
 
     # Step 1 — fetch the target agent + placement.
     try:
-        target = _run(
-            api.list_agents(
-                broker_url,
-                session_id,
-                caller_id=agent_id,
-                agent_id=member_id,
-            )
-        )
+        target = broker.get_agent(member_id, session_id)
+        if target is None:
+            raise ValueError(f"Agent {member_id} not found")
     except Exception as exc:
         click.echo(f"Error: failed to fetch member: {exc}", err=True)
         ctx.exit(1)
@@ -837,9 +656,7 @@ def member_delete(ctx, agent_id, member_id):
 
     # Step 2 — deregister the member (BEFORE closing pane).
     try:
-        _run(
-            api.deregister_agent(broker_url, session_id, member_id, caller_id=agent_id)
-        )
+        broker.deregister_agent(member_id)
     except Exception as exc:
         click.echo(f"Error: deregister failed: {exc}", err=True)
         ctx.exit(1)
@@ -887,13 +704,7 @@ def member_list(ctx, agent_id):
     """List member agents managed by this Director."""
     _require_session_id(ctx)
     try:
-        members = _run(
-            api.list_members(
-                ctx.obj["url"],
-                ctx.obj["session_id"],
-                agent_id,
-            )
-        )
+        members = broker.list_members(ctx.obj["session_id"], agent_id)
 
         if ctx.obj["json_output"]:
             click.echo(output.format_json(members))
@@ -920,7 +731,6 @@ def member_capture(ctx, agent_id, member_id, lines):
     from cafleet import tmux
 
     _require_session_id(ctx)
-    broker_url = ctx.obj["url"]
     session_id = ctx.obj["session_id"]
 
     try:
@@ -932,14 +742,9 @@ def member_capture(ctx, agent_id, member_id, lines):
 
     # Fetch the target's agent + placement.
     try:
-        target = _run(
-            api.list_agents(
-                broker_url,
-                session_id,
-                caller_id=agent_id,
-                agent_id=member_id,
-            )
-        )
+        target = broker.get_agent(member_id, session_id)
+        if target is None:
+            raise ValueError(f"Agent {member_id} not found")
     except Exception as exc:
         click.echo(f"Error: failed to fetch member: {exc}", err=True)
         ctx.exit(1)

@@ -9,7 +9,7 @@
 - Format check (root): `mise //:format`
 - Type check: `mise //:typecheck`
 - Sync workspace: `uv sync` (from project root)
-- Start broker server: `mise //cafleet:dev` (`//cafleet:dev` serves `/ui/` only after `//admin:build` has been run)
+- Start admin WebUI server: `mise //cafleet:dev` (WebUI-only; CLI commands do not require a running server. Serves `/ui/` only after `//admin:build` has been run)
 - Start admin dev server: `mise //admin:dev`
 - Build admin: `mise //admin:build`
 
