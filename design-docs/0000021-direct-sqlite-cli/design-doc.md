@@ -1,7 +1,7 @@
 # Direct SQLite CLI
 
 **Status**: Approved
-**Progress**: 8/30 tasks complete
+**Progress**: 11/30 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -477,9 +477,9 @@ Specific sections to update:
 
 ### Step 3: broker.py — session + registry operations
 
-- [ ] Create `broker.py` with session operations: `create_session`, `list_sessions`, `get_session`, `delete_session` <!-- completed: -->
-- [ ] Add agent registry operations: `register_agent`, `get_agent`, `list_agents`, `verify_agent_session` <!-- completed: -->
-- [ ] Add `deregister_agent`, `update_placement_pane_id`, `list_members` <!-- completed: -->
+- [x] Create `broker.py` with session operations: `create_session`, `list_sessions`, `get_session`, `delete_session` <!-- completed: 2026-04-13T13:50 -->
+- [x] Add agent registry operations: `register_agent`, `get_agent`, `list_agents`, `verify_agent_session` <!-- completed: 2026-04-13T13:50 -->
+- [x] Add `deregister_agent`, `update_placement_pane_id`, `list_members` <!-- completed: 2026-04-13T13:50 -->
 
 ### Step 4: broker.py — messaging operations
 
