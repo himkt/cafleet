@@ -1,7 +1,7 @@
 # Direct SQLite CLI
 
-**Status**: Approved
-**Progress**: 27/30 tasks complete
+**Status**: Complete
+**Progress**: 30/30 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -10,13 +10,13 @@ Remove the HTTP/A2A server from the critical path entirely. All CLI commands and
 
 ## Success Criteria
 
-- [ ] All CLI commands operate without a running server
-- [ ] No `a2a-sdk` or `httpx` imports anywhere in the codebase
-- [ ] Admin WebUI endpoints call `broker` (not async stores or executor)
-- [ ] `broker` module is the single data access layer for both CLI and WebUI
-- [ ] `a2a-sdk`, `httpx`, and `aiosqlite` removed from package dependencies
-- [ ] Concurrent SQLite access handled via `PRAGMA busy_timeout=5000`
-- [ ] CLI output (human-readable and `--json`) is unchanged
+- [x] All CLI commands operate without a running server
+- [x] No `a2a-sdk` or `httpx` imports anywhere in the codebase
+- [x] Admin WebUI endpoints call `broker` (not async stores or executor)
+- [x] `broker` module is the single data access layer for both CLI and WebUI
+- [x] `a2a-sdk`, `httpx`, and `aiosqlite` removed from package dependencies
+- [x] Concurrent SQLite access handled via `PRAGMA busy_timeout=5000`
+- [x] CLI output (human-readable and `--json`) is unchanged
 
 ---
 
@@ -514,9 +514,9 @@ Specific sections to update:
 
 ### Step 9: Tests
 
-- [ ] Unit tests for `broker` session + registry operations <!-- completed: -->
-- [ ] Unit tests for `broker` messaging operations (`send_message`, `broadcast_message`, `poll_tasks`, `ack_task`, `cancel_task`, `get_task`) <!-- completed: -->
-- [ ] Unit tests for `broker` WebUI query operations (`list_session_agents`, `list_inbox`, `list_sent`, `list_timeline`) <!-- completed: -->
+- [x] Unit tests for `broker` session + registry operations <!-- completed: 2026-04-13T13:42 -->
+- [x] Unit tests for `broker` messaging operations (`send_message`, `broadcast_message`, `poll_tasks`, `ack_task`, `cancel_task`, `get_task`) <!-- completed: 2026-04-13T13:46 -->
+- [x] Unit tests for `broker` WebUI query operations (`list_session_agents`, `list_inbox`, `list_sent`, `list_timeline`) <!-- completed: 2026-04-13T13:47 -->
 
 ---
 
@@ -526,3 +526,4 @@ Specific sections to update:
 |------|---------|
 | 2026-04-12 | Initial draft |
 | 2026-04-12 | Revision: rename local_ops→broker, add dependency removal (a2a-sdk/httpx/aiosqlite), add async engine cleanup, add models.py deletion, add ARCHITECTURE.md update specifics |
+| 2026-04-13 | Implementation complete. All 30/30 tasks done. All 7 success criteria verified. 249 tests passing. Status → Complete |
