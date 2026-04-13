@@ -1,7 +1,7 @@
 # Direct SQLite CLI
 
 **Status**: Approved
-**Progress**: 16/30 tasks complete
+**Progress**: 21/30 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -494,11 +494,11 @@ Specific sections to update:
 
 ### Step 6: CLI rewrite
 
-- [ ] Replace `broker_client` import with `broker`, drop `CAFLEET_URL`, remove `_run()` wrapper <!-- completed: -->
-- [ ] Rewrite session commands to call `broker` instead of inline raw SQL <!-- completed: -->
-- [ ] Rewrite client commands: `register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister` <!-- completed: -->
-- [ ] Rewrite member commands: `create` (env forwarding), `delete`, `list`, `capture` <!-- completed: -->
-- [ ] Update `env` command to print `CAFLEET_DATABASE_URL` instead of `CAFLEET_URL` <!-- completed: -->
+- [x] Replace `broker_client` import with `broker`, drop `CAFLEET_URL`, remove `_run()` wrapper <!-- completed: 2026-04-13T14:20 -->
+- [x] Rewrite session commands to call `broker` instead of inline raw SQL <!-- completed: 2026-04-13T14:20 -->
+- [x] Rewrite client commands: `register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister` <!-- completed: 2026-04-13T14:20 -->
+- [x] Rewrite member commands: `create` (env forwarding), `delete`, `list`, `capture` <!-- completed: 2026-04-13T14:20 -->
+- [x] Update `env` command to print `CAFLEET_DATABASE_URL` instead of `CAFLEET_URL` <!-- completed: 2026-04-13T14:20 -->
 
 ### Step 7: Admin WebUI rewrite
 
