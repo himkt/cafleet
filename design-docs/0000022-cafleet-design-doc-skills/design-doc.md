@@ -1,7 +1,7 @@
 # CAFleet-Native Design Document Orchestration Skills
 
 **Status**: Approved
-**Progress**: 7/19 tasks complete
+**Progress**: 10/19 tasks complete
 **Last Updated**: 2026-04-14
 
 ## Overview
@@ -638,9 +638,9 @@ Tool Discovery, Verification, Graceful Degradation workflows — unchanged logic
 
 ### Step 5: cafleet-design-doc-create role files
 
-- [ ] Create `roles/director.md` — CAFleet-adapted Director role for create workflow <!-- completed: -->
-- [ ] Create `roles/drafter.md` — CAFleet-adapted Drafter role with communication protocol <!-- completed: -->
-- [ ] Create `roles/reviewer.md` — CAFleet-adapted Reviewer role with communication protocol <!-- completed: -->
+- [x] Create `roles/director.md` — CAFleet-adapted Director role for create workflow <!-- completed: 2026-04-14T01:10 -->
+- [x] Create `roles/drafter.md` — CAFleet-adapted Drafter role with communication protocol <!-- completed: 2026-04-14T01:10 -->
+- [x] Create `roles/reviewer.md` — CAFleet-adapted Reviewer role with communication protocol <!-- completed: 2026-04-14T01:10 -->
 
 ### Step 6: cafleet-design-doc-execute SKILL.md
 
