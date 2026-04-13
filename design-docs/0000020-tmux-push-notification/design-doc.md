@@ -1,7 +1,7 @@
 # tmux Push Notification
 
 **Status**: Approved
-**Progress**: 0/15 tasks complete
+**Progress**: 3/15 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -165,9 +165,9 @@ return result
 
 ### Step 1: Documentation
 
-- [ ] Update `ARCHITECTURE.md` with push notification section <!-- completed: -->
-- [ ] Update `README.md` to mention tmux push notification <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet/SKILL.md` to document notification behavior <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` with push notification section <!-- completed: 2026-04-13T12:10 -->
+- [x] Update `README.md` to mention tmux push notification <!-- completed: 2026-04-13T12:10 -->
+- [x] Update `.claude/skills/cafleet/SKILL.md` to document notification behavior <!-- completed: 2026-04-13T12:10 -->
 
 ### Step 2: `tmux.py` -- Add `send_poll_trigger()`
 

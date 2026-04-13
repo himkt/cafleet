@@ -170,6 +170,27 @@ If step 2 fails, the registered agent is rolled back via `DELETE /api/v1/agents/
 
 **Supervision skill**: The Director's monitoring obligations are defined in `.claude/skills/cafleet-monitoring/SKILL.md`. This skill must be loaded (`Skill(cafleet-monitoring)`) before spawning any members. It provides a 2-stage health check protocol (message poll then terminal capture) and a ready-to-use `/loop` prompt template.
 
+## tmux Push Notifications
+
+CAFleet uses a pull-based delivery model by default: recipients discover messages via `cafleet poll`. To reduce latency, the broker can also push a poll trigger into a recipient's tmux pane immediately after persisting a message.
+
+After `BrokerExecutor` saves a delivery task, it looks up the recipient's `agent_placements` row. If the recipient has a non-null `tmux_pane_id` and is not the sender, the broker runs:
+
+```
+tmux send-keys -t <tmux_pane_id> "cafleet poll --agent-id <recipient_agent_id>" Enter
+```
+
+The injected text lands in the coding agent's input prompt. If the agent is idle, it interprets the command immediately. If the agent is busy, tmux buffers the keystrokes until the agent returns to its prompt. Since `cafleet poll` is idempotent, duplicate or late-arriving triggers are harmless.
+
+**Design principles**:
+
+- **Best-effort**: The message queue remains the sole source of truth. Push notification is an optimization — if it fails, the message is still available for normal polling.
+- **Self-send skip**: When sender == recipient, the notification is suppressed.
+- **Silent failure**: Missing placements, null `tmux_pane_id`, dead panes, and absent `tmux` binary all result in `False` — no exceptions propagate to the caller.
+- **No `TMUX` env var required**: `tmux send-keys -t <pane>` works from any process on the same host as long as the tmux server socket is accessible.
+
+**Response annotations**: Unicast responses include a top-level `notification_sent` boolean. Broadcast summary tasks include `notifications_sent_count` in their metadata, reflecting how many recipient panes were successfully triggered.
+
 ## Key Design Decisions
 
 ### contextId Convention
