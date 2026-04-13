@@ -96,14 +96,18 @@ class BrokerExecutor(AgentExecutor):
         """Attempt tmux push notification. Returns True on success."""
         if agent_id == from_agent_id:
             return False
-        placement = await self._registry_store.get_placement(agent_id)
-        if placement is None or placement["tmux_pane_id"] is None:
+        try:
+            placement = await self._registry_store.get_placement(agent_id)
+            if placement is None or placement["tmux_pane_id"] is None:
+                return False
+            async with asyncio.timeout(1.0):
+                return await asyncio.to_thread(
+                    tmux.send_poll_trigger,
+                    target_pane_id=placement["tmux_pane_id"],
+                    agent_id=agent_id,
+                )
+        except Exception:
             return False
-        return await asyncio.to_thread(
-            tmux.send_poll_trigger,
-            target_pane_id=placement["tmux_pane_id"],
-            agent_id=agent_id,
-        )
 
     async def _handle_unicast(
         self,
