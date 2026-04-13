@@ -29,27 +29,16 @@ import uuid
 
 import click
 import pytest
-from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Engine
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet.db.models import Base
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@event.listens_for(Engine, "connect")
-def _enable_fk_pragma(dbapi_conn, _record):
-    """Mirror the production pragma listener for test engines."""
-    import sqlite3
-
-    if isinstance(dbapi_conn, sqlite3.Connection):
-        cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
 
 
 @pytest.fixture

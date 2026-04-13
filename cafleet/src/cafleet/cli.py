@@ -484,7 +484,8 @@ def _resolve_prompt(
     if prompt_argv:
         return " ".join(prompt_argv)
     director = broker.get_agent(director_agent_id, ctx.obj["session_id"])
-    assert director is not None, f"Director agent {director_agent_id} not found"
+    if director is None:
+        raise click.UsageError(f"Director agent {director_agent_id} not found")
     return coding_agent_config.default_prompt_template.format(
         director_name=director["name"],
         director_agent_id=director_agent_id,

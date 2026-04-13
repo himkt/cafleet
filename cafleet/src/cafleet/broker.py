@@ -32,6 +32,26 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _try_notify_recipient(session, *, recipient_id: str, sender_id: str) -> bool:
+    """Best-effort tmux push notification. Returns True on success.
+
+    Looks up the recipient's placement. If a tmux_pane_id exists and the
+    recipient is not the sender, sends a ``cafleet poll`` trigger via
+    ``tmux send-keys``. Failures are silent — the message queue is the
+    source of truth.
+    """
+    if recipient_id == sender_id:
+        return False
+    row = session.execute(
+        select(AgentPlacement.tmux_pane_id).where(AgentPlacement.agent_id == recipient_id)
+    ).first()
+    if row is None or row[0] is None:
+        return False
+    from cafleet.tmux import send_poll_trigger
+
+    return send_poll_trigger(target_pane_id=row[0], agent_id=recipient_id)
+
+
 # ---------------------------------------------------------------------------
 # Session operations
 # ---------------------------------------------------------------------------
@@ -522,7 +542,12 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
 
             _save_task(session, task_dict)
 
-    return {"task": task_dict}
+            # tmux push notification (best-effort)
+            notification_sent = _try_notify_recipient(
+                session, recipient_id=to, sender_id=agent_id
+            )
+
+    return {"task": task_dict, "notification_sent": notification_sent}
 
 
 def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
@@ -586,6 +611,7 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
 
             # Create summary task
             now = _now_iso()
+            notifications_sent_count = 0
             summary_dict = {
                 "id": summary_task_id,
                 "contextId": agent_id,
@@ -615,7 +641,13 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
             }
             _save_task(session, summary_dict)
 
-    return [{"task": summary_dict}]
+            # tmux push notifications (best-effort, after commit)
+            for recipient_id in recipient_ids:
+                if _try_notify_recipient(session, recipient_id=recipient_id, sender_id=agent_id):
+                    notifications_sent_count += 1
+
+    summary_dict["metadata"]["notificationsSentCount"] = notifications_sent_count
+    return [{"task": summary_dict, "notifications_sent_count": notifications_sent_count}]
 
 
 def poll_tasks(
