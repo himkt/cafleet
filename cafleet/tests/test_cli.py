@@ -1121,3 +1121,118 @@ class TestErrorHandling:
         )
 
         assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# Tmux push notification output (design doc 0000020 Step 5)
+# ---------------------------------------------------------------------------
+
+# API response shapes after Steps 3+4:
+#   send_message()      → {"task": {...}, "notification_sent": true/false}
+#   broadcast_message() → [{"task": {...}, "notifications_sent_count": N}]
+
+SAMPLE_SEND_RESULT_NOTIFIED = {
+    "task": SAMPLE_TASK,
+    "notification_sent": True,
+}
+
+SAMPLE_SEND_RESULT_NOT_NOTIFIED = {
+    "task": SAMPLE_TASK,
+    "notification_sent": False,
+}
+
+SAMPLE_BROADCAST_RESULT_WITH_COUNT = [
+    {
+        "task": {
+            "id": "summary-001",
+            "contextId": AGENT_ID,
+            "status": {"state": "completed", "timestamp": "2026-03-28T12:00:00Z"},
+            "artifacts": [
+                {
+                    "parts": [
+                        {"type": "text", "text": "Broadcast sent to 3 recipients"}
+                    ],
+                }
+            ],
+            "metadata": {
+                "fromAgentId": AGENT_ID,
+                "type": "broadcast_summary",
+                "recipientCount": 3,
+                "notificationsSentCount": 2,
+            },
+        },
+        "notifications_sent_count": 2,
+    }
+]
+
+
+class TestSendNotificationOutput:
+    """Tests for `cafleet send` push notification output."""
+
+    def test_send_shows_push_notification_sent(self, runner):
+        """Send with notification_sent=true shows '(push notification sent)'."""
+        mock = AsyncMock(return_value=SAMPLE_SEND_RESULT_NOTIFIED)
+        with patch("cafleet.cli.api.send_message", mock):
+            result = runner.invoke(
+                cli,
+                [
+                    "send",
+                    "--agent-id",
+                    AGENT_ID,
+                    "--to",
+                    "target-001",
+                    "--text",
+                    "Hello",
+                ],
+                env=_auth_env(),
+            )
+
+        assert result.exit_code == 0
+        assert "(push notification sent)" in result.output
+
+    def test_send_omits_notification_text_when_false(self, runner):
+        """Send with notification_sent=false does NOT show notification text."""
+        mock = AsyncMock(return_value=SAMPLE_SEND_RESULT_NOT_NOTIFIED)
+        with patch("cafleet.cli.api.send_message", mock):
+            result = runner.invoke(
+                cli,
+                [
+                    "send",
+                    "--agent-id",
+                    AGENT_ID,
+                    "--to",
+                    "target-001",
+                    "--text",
+                    "Hello",
+                ],
+                env=_auth_env(),
+            )
+
+        assert result.exit_code == 0
+        assert "(push notification sent)" not in result.output
+
+
+class TestBroadcastNotificationOutput:
+    """Tests for `cafleet broadcast` push notification count output."""
+
+    def test_broadcast_shows_notification_count(self, runner):
+        """Broadcast shows notification count from notifications_sent_count."""
+        mock = AsyncMock(return_value=SAMPLE_BROADCAST_RESULT_WITH_COUNT)
+        with patch("cafleet.cli.api.broadcast_message", mock):
+            result = runner.invoke(
+                cli,
+                [
+                    "broadcast",
+                    "--agent-id",
+                    AGENT_ID,
+                    "--text",
+                    "Build failed",
+                ],
+                env=_auth_env(),
+            )
+
+        assert result.exit_code == 0
+        # Output should mention the notification count somewhere
+        assert "2" in result.output
+        # Should indicate these are push notifications
+        assert "notification" in result.output.lower()

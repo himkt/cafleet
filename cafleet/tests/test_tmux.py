@@ -259,3 +259,71 @@ class TestCapturPane:
             tmux.capture_pane(target_pane_id="%7", lines=0)
         with pytest.raises(tmux.TmuxError, match="lines must be positive, got -1"):
             tmux.capture_pane(target_pane_id="%7", lines=-1)
+
+
+# ---------------------------------------------------------------------------
+# send_poll_trigger
+# ---------------------------------------------------------------------------
+
+
+class TestSendPollTrigger:
+    def test_success_returns_true(self, monkeypatch):
+        """Returns True when tmux send-keys succeeds."""
+        monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
+        captured_args = []
+
+        def mock_run(args, **kwargs):
+            captured_args.extend(args)
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        result = tmux.send_poll_trigger(target_pane_id="%7", agent_id="agent-001")
+        assert result is True
+        assert captured_args == [
+            "tmux",
+            "send-keys",
+            "-t",
+            "%7",
+            "cafleet poll --agent-id agent-001",
+            "Enter",
+        ]
+
+    def test_pane_not_found_returns_false(self, monkeypatch):
+        """Returns False when tmux reports the pane no longer exists."""
+        monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
+
+        def mock_run(args, **kwargs):
+            raise tmux.TmuxError(
+                "tmux command failed: tmux send-keys -t %99\n"
+                "stderr: can't find pane: %99"
+            )
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        result = tmux.send_poll_trigger(target_pane_id="%99", agent_id="agent-001")
+        assert result is False
+
+    def test_tmux_binary_missing_returns_false(self, monkeypatch):
+        """Returns False when tmux binary is not on PATH — never calls _run."""
+        monkeypatch.setattr("shutil.which", lambda _: None)
+        run_called = False
+
+        def mock_run(args):
+            nonlocal run_called
+            run_called = True
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        result = tmux.send_poll_trigger(target_pane_id="%7", agent_id="agent-001")
+        assert result is False
+        assert not run_called, "_run should not be called when tmux is not on PATH"
+
+    def test_never_raises_on_tmux_error(self, monkeypatch):
+        """Never raises — catches TmuxError internally and returns False."""
+        monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
+
+        def mock_run(args, **kwargs):
+            raise tmux.TmuxError("tmux command failed: server exited unexpectedly")
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        result = tmux.send_poll_trigger(target_pane_id="%7", agent_id="agent-001")
+        assert result is False

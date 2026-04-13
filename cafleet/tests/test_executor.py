@@ -808,3 +808,306 @@ class TestSessionScopedBroadcast:
         ]
         # Session A has agent_a1 + agent_a2, so 1 delivery
         assert len(delivery_tasks) == 1
+
+
+# ===========================================================================
+# Tmux push notification tests (design doc 0000020)
+# ===========================================================================
+
+
+@pytest.fixture
+async def notify_env(store: RegistryStore, task_store: TaskStore, db_sessionmaker):
+    """Set up BrokerExecutor with agents that have varying placement states.
+
+    - agent_with_pane: has a placement with tmux_pane_id set
+    - agent_no_placement: registered without any placement row
+    - agent_pending_pane: has a placement with tmux_pane_id=None (pending)
+    - director: the director agent (has placement, used as sender)
+    """
+    from cafleet.models import PlacementCreate
+
+    session_id = await _create_test_session(db_sessionmaker)
+    executor = BrokerExecutor(registry_store=store, task_store=task_store)
+
+    director = await store.create_agent(
+        name="Director",
+        description="Director agent",
+        session_id=session_id,
+    )
+
+    agent_with_pane = await store.create_agent_with_placement(
+        name="Agent-Pane",
+        description="Agent with tmux pane",
+        session_id=session_id,
+        placement=PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="main",
+            tmux_window_id="@0",
+            tmux_pane_id="%7",
+        ),
+    )
+
+    agent_no_placement = await store.create_agent(
+        name="Agent-NoPl",
+        description="Agent without placement",
+        session_id=session_id,
+    )
+
+    agent_pending_pane = await store.create_agent_with_placement(
+        name="Agent-Pending",
+        description="Agent with pending pane",
+        session_id=session_id,
+        placement=PlacementCreate(
+            director_agent_id=director["agent_id"],
+            tmux_session="main",
+            tmux_window_id="@0",
+            tmux_pane_id=None,
+        ),
+    )
+
+    return {
+        "executor": executor,
+        "store": store,
+        "task_store": task_store,
+        "session_id": session_id,
+        "director": director,
+        "agent_with_pane": agent_with_pane,
+        "agent_no_placement": agent_no_placement,
+        "agent_pending_pane": agent_pending_pane,
+    }
+
+
+# ---------------------------------------------------------------------------
+# _try_notify_agent
+# ---------------------------------------------------------------------------
+
+
+class TestTryNotifyAgent:
+    """Tests for BrokerExecutor._try_notify_agent — tmux push notification helper."""
+
+    async def test_self_send_returns_false(self, notify_env, monkeypatch):
+        """Self-send (agent_id == from_agent_id) returns False without lookup."""
+        executor = notify_env["executor"]
+        agent = notify_env["agent_with_pane"]
+
+        lookup_called = False
+        original_get_placement = notify_env["store"].get_placement
+
+        async def spy_get_placement(agent_id):
+            nonlocal lookup_called
+            lookup_called = True
+            return await original_get_placement(agent_id)
+
+        monkeypatch.setattr(notify_env["store"], "get_placement", spy_get_placement)
+
+        result = await executor._try_notify_agent(agent["agent_id"], agent["agent_id"])
+        assert result is False
+        assert not lookup_called, "get_placement should not be called for self-send"
+
+    async def test_agent_with_placement_and_pane_calls_trigger(
+        self, notify_env, monkeypatch
+    ):
+        """Agent with placement + pane_id calls send_poll_trigger and returns its result."""
+        executor = notify_env["executor"]
+        director = notify_env["director"]
+        agent = notify_env["agent_with_pane"]
+
+        trigger_calls = []
+
+        def mock_trigger(*, target_pane_id, agent_id):
+            trigger_calls.append((target_pane_id, agent_id))
+            return True
+
+        monkeypatch.setattr("cafleet.tmux.send_poll_trigger", mock_trigger)
+
+        result = await executor._try_notify_agent(
+            agent["agent_id"], director["agent_id"]
+        )
+        assert result is True
+        assert len(trigger_calls) == 1
+        assert trigger_calls[0] == ("%7", agent["agent_id"])
+
+    async def test_agent_without_placement_returns_false(self, notify_env, monkeypatch):
+        """Agent without any placement row returns False."""
+        executor = notify_env["executor"]
+        director = notify_env["director"]
+        agent = notify_env["agent_no_placement"]
+
+        trigger_called = False
+
+        def mock_trigger(*, target_pane_id, agent_id):
+            nonlocal trigger_called
+            trigger_called = True
+            return True
+
+        monkeypatch.setattr("cafleet.tmux.send_poll_trigger", mock_trigger)
+
+        result = await executor._try_notify_agent(
+            agent["agent_id"], director["agent_id"]
+        )
+        assert result is False
+        assert not trigger_called, (
+            "send_poll_trigger should not be called without placement"
+        )
+
+    async def test_agent_with_null_pane_id_returns_false(self, notify_env, monkeypatch):
+        """Agent with placement but tmux_pane_id=None (pending) returns False."""
+        executor = notify_env["executor"]
+        director = notify_env["director"]
+        agent = notify_env["agent_pending_pane"]
+
+        trigger_called = False
+
+        def mock_trigger(*, target_pane_id, agent_id):
+            nonlocal trigger_called
+            trigger_called = True
+            return True
+
+        monkeypatch.setattr("cafleet.tmux.send_poll_trigger", mock_trigger)
+
+        result = await executor._try_notify_agent(
+            agent["agent_id"], director["agent_id"]
+        )
+        assert result is False
+        assert not trigger_called, (
+            "send_poll_trigger should not be called with null pane_id"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Unicast notification integration
+# ---------------------------------------------------------------------------
+
+
+class TestUnicastNotification:
+    """Tests for notification_sent in unicast delivery task metadata."""
+
+    async def test_unicast_sets_notification_sent_true(self, notify_env, monkeypatch):
+        """Unicast to agent with pane sets notification_sent=True in task metadata."""
+        executor = notify_env["executor"]
+        director = notify_env["director"]
+        agent = notify_env["agent_with_pane"]
+
+        def mock_trigger(*, target_pane_id, agent_id):
+            return True
+
+        monkeypatch.setattr("cafleet.tmux.send_poll_trigger", mock_trigger)
+
+        queue = EventQueue()
+        context = _make_send_context(
+            from_agent_id=director["agent_id"],
+            session_id=notify_env["session_id"],
+            destination=agent["agent_id"],
+            text="Hello with notification",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        task = next(e for e in events if isinstance(e, Task))
+        assert task.metadata["notificationSent"] is True
+
+    async def test_unicast_sets_notification_sent_false_no_placement(
+        self, notify_env, monkeypatch
+    ):
+        """Unicast to agent without placement sets notification_sent=False."""
+        executor = notify_env["executor"]
+        director = notify_env["director"]
+        agent = notify_env["agent_no_placement"]
+
+        def mock_trigger(*, target_pane_id, agent_id):
+            return True
+
+        monkeypatch.setattr("cafleet.tmux.send_poll_trigger", mock_trigger)
+
+        queue = EventQueue()
+        context = _make_send_context(
+            from_agent_id=director["agent_id"],
+            session_id=notify_env["session_id"],
+            destination=agent["agent_id"],
+            text="Hello no placement",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        task = next(e for e in events if isinstance(e, Task))
+        assert task.metadata["notificationSent"] is False
+
+
+# ---------------------------------------------------------------------------
+# Broadcast notification integration
+# ---------------------------------------------------------------------------
+
+
+class TestBroadcastNotification:
+    """Tests for notifications_sent_count in broadcast summary task metadata."""
+
+    async def test_broadcast_counts_notifications(self, notify_env, monkeypatch):
+        """Broadcast with mixed placements reports correct notifications_sent_count.
+
+        notify_env has 4 agents: director (sender, skipped), agent_with_pane (notified),
+        agent_no_placement (not notified), agent_pending_pane (not notified).
+        Expected: notifications_sent_count == 1.
+        """
+        executor = notify_env["executor"]
+        director = notify_env["director"]
+
+        def mock_trigger(*, target_pane_id, agent_id):
+            return True
+
+        monkeypatch.setattr("cafleet.tmux.send_poll_trigger", mock_trigger)
+
+        queue = EventQueue()
+        context = _make_send_context(
+            from_agent_id=director["agent_id"],
+            session_id=notify_env["session_id"],
+            destination="*",
+            text="Broadcast notification test",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        summary_tasks = [
+            e
+            for e in events
+            if isinstance(e, Task)
+            and e.metadata
+            and e.metadata.get("type") in ("broadcast", "broadcast_summary")
+        ]
+        assert len(summary_tasks) >= 1
+        summary = summary_tasks[0]
+        assert summary.metadata["notificationsSentCount"] == 1
+
+    async def test_broadcast_individual_tasks_lack_notification_sent(
+        self, notify_env, monkeypatch
+    ):
+        """Individual broadcast delivery tasks do NOT carry notification_sent.
+
+        Per design doc: only the summary task reports the aggregate count.
+        """
+        executor = notify_env["executor"]
+        director = notify_env["director"]
+
+        def mock_trigger(*, target_pane_id, agent_id):
+            return True
+
+        monkeypatch.setattr("cafleet.tmux.send_poll_trigger", mock_trigger)
+
+        queue = EventQueue()
+        context = _make_send_context(
+            from_agent_id=director["agent_id"],
+            session_id=notify_env["session_id"],
+            destination="*",
+            text="Broadcast no individual annotation",
+        )
+        await executor.execute(context, queue)
+
+        events = await _collect_events(queue)
+        delivery_tasks = [
+            e
+            for e in events
+            if isinstance(e, Task)
+            and e.metadata
+            and e.metadata.get("type") == "unicast"
+        ]
+        for task in delivery_tasks:
+            assert "notificationSent" not in task.metadata

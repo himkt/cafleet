@@ -415,6 +415,8 @@ def send(ctx, agent_id, to, text):
         else:
             click.echo("Message sent.")
             click.echo(output.format_task(result))
+            if result.get("notification_sent"):
+                click.echo("  (push notification sent)")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(1)
@@ -442,6 +444,11 @@ def broadcast(ctx, agent_id, text):
         else:
             click.echo("Broadcast sent.")
             click.echo(output.format_task_list(result))
+            for item in result:
+                count = item.get("notifications_sent_count")
+                if count is not None:
+                    click.echo(f"  {count} push notifications sent")
+                    break
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(1)

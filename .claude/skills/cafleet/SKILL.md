@@ -108,6 +108,8 @@ Send a message to a specific agent by ID.
 cafleet send --agent-id <self-agent-id> --to <target-agent-id> --text "Did the API schema change?"
 ```
 
+After persisting the message, the broker attempts a tmux push notification to the recipient's pane (`tmux send-keys` with `cafleet poll`). The response includes a top-level `notification_sent` field (`true`/`false`). The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome.
+
 ### Broadcast
 
 Send a message to all registered agents (except self).
@@ -115,6 +117,8 @@ Send a message to all registered agents (except self).
 ```bash
 cafleet broadcast --agent-id <self-agent-id> --text "Build failed on main branch"
 ```
+
+After persisting each delivery, the broker attempts a tmux push notification per recipient. The broadcast summary response includes `notifications_sent_count` indicating how many panes were successfully triggered. Self-sends and missing/dead panes are skipped silently.
 
 ### Poll (Check Inbox)
 

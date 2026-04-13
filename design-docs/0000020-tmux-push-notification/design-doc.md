@@ -1,7 +1,7 @@
 # tmux Push Notification
 
-**Status**: Approved
-**Progress**: 0/15 tasks complete
+**Status**: Complete
+**Progress**: 15/15 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -10,12 +10,12 @@ Add server-side tmux push notifications to complement CAFleet's pull-based messa
 
 ## Success Criteria
 
-- [ ] Unicast `cafleet send` triggers tmux poll notification to recipient pane
-- [ ] Broadcast `cafleet broadcast` triggers tmux poll notifications to all recipient panes
-- [ ] Self-send (sender == recipient) skips notification
-- [ ] Missing or dead pane fails silently; message remains in queue for normal polling
-- [ ] Response includes `notification_sent` (unicast) / `notifications_sent_count` (broadcast)
-- [ ] Existing polling behavior is completely unchanged
+- [x] Unicast `cafleet send` triggers tmux poll notification to recipient pane
+- [x] Broadcast `cafleet broadcast` triggers tmux poll notifications to all recipient panes
+- [x] Self-send (sender == recipient) skips notification
+- [x] Missing or dead pane fails silently; message remains in queue for normal polling
+- [x] Response includes `notification_sent` (unicast) / `notifications_sent_count` (broadcast)
+- [x] Existing polling behavior is completely unchanged
 
 ---
 
@@ -165,33 +165,33 @@ return result
 
 ### Step 1: Documentation
 
-- [ ] Update `ARCHITECTURE.md` with push notification section <!-- completed: -->
-- [ ] Update `README.md` to mention tmux push notification <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet/SKILL.md` to document notification behavior <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` with push notification section <!-- completed: 2026-04-13T12:10 -->
+- [x] Update `README.md` to mention tmux push notification <!-- completed: 2026-04-13T12:10 -->
+- [x] Update `.claude/skills/cafleet/SKILL.md` to document notification behavior <!-- completed: 2026-04-13T12:10 -->
 
 ### Step 2: `tmux.py` -- Add `send_poll_trigger()`
 
-- [ ] Add `send_poll_trigger(*, target_pane_id: str, agent_id: str) -> bool` function that runs `tmux send-keys` and returns success/failure without raising <!-- completed: -->
+- [x] Add `send_poll_trigger(*, target_pane_id: str, agent_id: str) -> bool` function that runs `tmux send-keys` and returns success/failure without raising <!-- completed: 2026-04-13T12:18 -->
 
 ### Step 3: `executor.py` -- Notification Logic
 
-- [ ] Add `import asyncio` and `from cafleet import tmux` <!-- completed: -->
-- [ ] Add `async _try_notify_agent(self, agent_id: str, from_agent_id: str) -> bool` helper method <!-- completed: -->
-- [ ] Modify `_handle_unicast()`: call `_try_notify_agent()` after `task_store.save()`, set `notification_sent` in task metadata before enqueue <!-- completed: -->
-- [ ] Modify `_handle_broadcast()`: call `_try_notify_agent()` per recipient after save, track count, add `notifications_sent_count` to summary metadata <!-- completed: -->
+- [x] Add `import asyncio` and `from cafleet import tmux` <!-- completed: 2026-04-13T12:25 -->
+- [x] Add `async _try_notify_agent(self, agent_id: str, from_agent_id: str) -> bool` helper method <!-- completed: 2026-04-13T12:25 -->
+- [x] Modify `_handle_unicast()`: call `_try_notify_agent()` after `task_store.save()`, set `notification_sent` in task metadata before enqueue <!-- completed: 2026-04-13T12:25 -->
+- [x] Modify `_handle_broadcast()`: call `_try_notify_agent()` per recipient after save, track count, add `notifications_sent_count` to summary metadata <!-- completed: 2026-04-13T12:25 -->
 
 ### Step 4: `server.py` -- Response Format
 
-- [ ] Update `_handle_send_message()` to extract `notification_sent` / `notifications_sent_count` from task metadata and include at response top level <!-- completed: -->
+- [x] Update `_handle_send_message()` to extract `notification_sent` / `notifications_sent_count` from task metadata and include at response top level <!-- completed: 2026-04-13T12:30 -->
 
 ### Step 5: `cli.py` + `output.py` -- CLI Output
 
-- [ ] Update `send` command to show `(push notification sent)` or nothing based on `notification_sent` <!-- completed: -->
-- [ ] Update `broadcast` command to show notification count from response <!-- completed: -->
+- [x] Update `send` command to show `(push notification sent)` or nothing based on `notification_sent` <!-- completed: 2026-04-13T12:35 -->
+- [x] Update `broadcast` command to show notification count from response <!-- completed: 2026-04-13T12:35 -->
 
 ### Step 6: Tests
 
-- [ ] Unit test `send_poll_trigger()`: success case, pane-not-found, tmux binary missing <!-- completed: -->
-- [ ] Unit test executor notification paths: unicast with/without placement, self-send skip, broadcast with mixed placements <!-- completed: -->
-- [ ] Unit test `_handle_send_message()` response includes `notification_sent` (unicast) and `notifications_sent_count` (broadcast) at top level <!-- completed: -->
-- [ ] Unit test CLI output: `send` shows `(push notification sent)` when true, `broadcast` shows notification count <!-- completed: -->
+- [x] Unit test `send_poll_trigger()`: success case, pane-not-found, tmux binary missing <!-- completed: 2026-04-13T12:12 -->
+- [x] Unit test executor notification paths: unicast with/without placement, self-send skip, broadcast with mixed placements <!-- completed: 2026-04-13T12:16 -->
+- [x] Unit test `_handle_send_message()` response includes `notification_sent` (unicast) and `notifications_sent_count` (broadcast) at top level <!-- completed: 2026-04-13T12:22 -->
+- [x] Unit test CLI output: `send` shows `(push notification sent)` when true, `broadcast` shows notification count <!-- completed: 2026-04-13T12:26 -->
