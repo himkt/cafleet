@@ -1,7 +1,7 @@
 # Direct SQLite CLI
 
 **Status**: Approved
-**Progress**: 23/30 tasks complete
+**Progress**: 27/30 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -507,10 +507,10 @@ Specific sections to update:
 
 ### Step 8: Delete dead code + update dependencies
 
-- [ ] Delete `broker_client.py`, `executor.py`, `agent_card.py`, `auth.py`, `models.py`, `api/registry.py` <!-- completed: -->
-- [ ] Delete `registry_store.py`, `task_store.py` <!-- completed: -->
-- [ ] Remove `a2a-sdk`, `httpx`, `aiosqlite` from `pyproject.toml` dependencies <!-- completed: -->
-- [ ] Verify no remaining imports of deleted modules in any code path <!-- completed: -->
+- [x] Delete `broker_client.py`, `executor.py`, `agent_card.py`, `auth.py`, `models.py`, `api/registry.py` <!-- completed: 2026-04-13T14:40 -->
+- [x] Delete `registry_store.py`, `task_store.py` <!-- completed: 2026-04-13T14:40 -->
+- [x] Remove `a2a-sdk`, `httpx`, `aiosqlite` from `pyproject.toml` dependencies <!-- completed: 2026-04-13T14:40 -->
+- [x] Verify no remaining imports of deleted modules in any code path <!-- completed: 2026-04-13T14:40 -->
 
 ### Step 9: Tests
 
