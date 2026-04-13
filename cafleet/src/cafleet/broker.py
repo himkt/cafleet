@@ -234,7 +234,7 @@ def get_agent(agent_id: str, session_id: str) -> dict | None:
             select(AgentPlacement).where(AgentPlacement.agent_id == agent_id)
         ).scalar_one_or_none()
 
-    result = {
+    result: dict = {
         "agent_id": agent.agent_id,
         "name": agent.name,
         "description": agent.description,
