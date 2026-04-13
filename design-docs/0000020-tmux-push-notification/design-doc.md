@@ -1,6 +1,6 @@
 # tmux Push Notification
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 15/15 tasks complete
 **Last Updated**: 2026-04-12
 
@@ -10,12 +10,12 @@ Add server-side tmux push notifications to complement CAFleet's pull-based messa
 
 ## Success Criteria
 
-- [ ] Unicast `cafleet send` triggers tmux poll notification to recipient pane
-- [ ] Broadcast `cafleet broadcast` triggers tmux poll notifications to all recipient panes
-- [ ] Self-send (sender == recipient) skips notification
-- [ ] Missing or dead pane fails silently; message remains in queue for normal polling
-- [ ] Response includes `notification_sent` (unicast) / `notifications_sent_count` (broadcast)
-- [ ] Existing polling behavior is completely unchanged
+- [x] Unicast `cafleet send` triggers tmux poll notification to recipient pane
+- [x] Broadcast `cafleet broadcast` triggers tmux poll notifications to all recipient panes
+- [x] Self-send (sender == recipient) skips notification
+- [x] Missing or dead pane fails silently; message remains in queue for normal polling
+- [x] Response includes `notification_sent` (unicast) / `notifications_sent_count` (broadcast)
+- [x] Existing polling behavior is completely unchanged
 
 ---
 
