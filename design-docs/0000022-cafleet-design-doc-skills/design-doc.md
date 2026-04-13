@@ -1,7 +1,7 @@
 # CAFleet-Native Design Document Orchestration Skills
 
 **Status**: Approved
-**Progress**: 6/19 tasks complete
+**Progress**: 7/19 tasks complete
 **Last Updated**: 2026-04-14
 
 ## Overview
@@ -634,7 +634,7 @@ Tool Discovery, Verification, Graceful Degradation workflows — unchanged logic
 
 ### Step 4: cafleet-design-doc-create SKILL.md
 
-- [ ] Create `.claude/skills/cafleet-design-doc-create/SKILL.md` with full process (Steps 0–6), spawn prompts, and role table <!-- completed: -->
+- [x] Create `.claude/skills/cafleet-design-doc-create/SKILL.md` with full process (Steps 0–6), spawn prompts, and role table <!-- completed: 2026-04-14T00:55 -->
 
 ### Step 5: cafleet-design-doc-create role files
 
