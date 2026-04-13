@@ -149,6 +149,22 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 **Supervision skill**: The Director's monitoring obligations are defined in `.claude/skills/cafleet-monitoring/SKILL.md`. This skill must be loaded (`Skill(cafleet-monitoring)`) before spawning any members. It provides a 2-stage health check protocol (message poll then terminal capture) and a ready-to-use `/loop` prompt template.
 
+## Design Document Orchestration Skills
+
+CAFleet ships CAFleet-native replicas of the global Agent Teams design document workflows. They replace Claude Code's `TeamCreate` / `Agent(team_name=...)` / `SendMessage` primitives with `cafleet register`, `cafleet member create`, and `cafleet send`, so every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline.
+
+| Skill | Location | Purpose |
+|---|---|---|
+| `cafleet-design-doc` | `.claude/skills/cafleet-design-doc/` | Plugin-local copy of the global `/design-doc` skill (template + guidelines). Spawned members load this instead of the global skill so the plugin is self-contained. |
+| `cafleet-design-doc-create` | `.claude/skills/cafleet-design-doc-create/` | Create a design document through CAFleet-orchestrated Director / Drafter / Reviewer roles. Mirrors the process of `/design-doc-create`. |
+| `cafleet-design-doc-execute` | `.claude/skills/cafleet-design-doc-execute/` | Execute a design document through CAFleet-orchestrated Director / Programmer / Tester / (optional) Verifier roles with per-step TDD cycle. Mirrors the process of `/design-doc-execute`. |
+
+**Role files**: Each `*-create` and `*-execute` skill ships a `roles/` directory with one Markdown file per role. The Director reads the relevant role file and embeds its content verbatim in the `cafleet member create` spawn prompt.
+
+**Communication pattern**: Director → member messages are delivered via `cafleet send`, which triggers a tmux push notification that injects `cafleet poll` into the member's pane. Member → Director replies use the same `cafleet send` path. The Director runs the `Skill(cafleet-monitoring)` `/loop` to watch for incoming messages and stalled panes.
+
+**Coexistence**: The global `/design-doc-create` and `/design-doc-execute` Agent Teams skills remain functional. A user picks between them based on whether they want ephemeral in-memory coordination (Agent Teams) or a persistent, auditable message trail in SQLite + WebUI (CAFleet).
+
 ## tmux Push Notifications
 
 CAFleet uses a pull-based delivery model by default: recipients discover messages via `cafleet poll`. To reduce latency, the broker can also push a poll trigger into a recipient's tmux pane immediately after persisting a message.
