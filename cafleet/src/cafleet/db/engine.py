@@ -35,7 +35,9 @@ def get_sync_engine() -> Engine:
     global _sync_engine
     if _sync_engine is None:
         sync_url = str(make_url(settings.database_url).set(drivername="sqlite"))
-        _sync_engine = create_engine(sync_url)
+        _sync_engine = create_engine(
+            sync_url, connect_args={"check_same_thread": False}
+        )
     return _sync_engine
 
 

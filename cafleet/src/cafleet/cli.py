@@ -75,7 +75,7 @@ def cli(ctx, json_output):
 @click.pass_context
 def env(ctx):
     """Print CAFLEET_DATABASE_URL and CAFLEET_SESSION_ID from the environment."""
-    db_url = os.environ.get("CAFLEET_DATABASE_URL") or ""
+    db_url = settings.database_url
     session_id = ctx.obj["session_id"] or ""
     click.echo(f"CAFLEET_DATABASE_URL={db_url}")
     click.echo(f"CAFLEET_SESSION_ID={session_id}")

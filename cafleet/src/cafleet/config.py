@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings
 
 def _default_database_url() -> str:
     db_path = Path("~/.local/share/cafleet/registry.db").expanduser()
-    return f"sqlite+aiosqlite:///{db_path}"
+    return f"sqlite:///{db_path}"
 
 
 class Settings(BaseSettings):
