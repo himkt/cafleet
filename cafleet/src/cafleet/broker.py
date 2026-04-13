@@ -119,9 +119,9 @@ def delete_session(session_id: str) -> None:
                 )
             except IntegrityError:
                 count = session.execute(
-                    select(func.count()).select_from(Agent).where(
-                        Agent.session_id == session_id
-                    )
+                    select(func.count())
+                    .select_from(Agent)
+                    .where(Agent.session_id == session_id)
                 ).scalar()
                 raise click.UsageError(
                     f"Cannot delete session {session_id}: "
@@ -304,9 +304,7 @@ def deregister_agent(agent_id: str) -> bool:
             )
             if result.rowcount > 0:
                 session.execute(
-                    delete(AgentPlacement).where(
-                        AgentPlacement.agent_id == agent_id
-                    )
+                    delete(AgentPlacement).where(AgentPlacement.agent_id == agent_id)
                 )
     return result.rowcount > 0
 
@@ -446,9 +444,7 @@ def _save_task(session, task_dict: dict) -> None:
 
 def _read_task(session, task_id: str) -> dict | None:
     """SELECT task_json by task_id. Returns parsed dict or None."""
-    row = session.execute(
-        select(Task.task_json).where(Task.task_id == task_id)
-    ).first()
+    row = session.execute(select(Task.task_json).where(Task.task_id == task_id)).first()
     if row is None:
         return None
     return json.loads(row[0])
@@ -489,9 +485,7 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
 
             # 3. Destination agent is in the same session
             if dest_agent.session_id != session_id:
-                raise ValueError(
-                    f"Destination agent not in session: {to}"
-                )
+                raise ValueError(f"Destination agent not in session: {to}")
 
             now = _now_iso()
             task_dict = {
@@ -880,9 +874,7 @@ def get_agent_names(agent_ids: list[str]) -> dict[str, str]:
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(
-            select(Agent.agent_id, Agent.name).where(
-                Agent.agent_id.in_(agent_ids)
-            )
+            select(Agent.agent_id, Agent.name).where(Agent.agent_id.in_(agent_ids))
         ).all()
     return {row.agent_id: row.name for row in rows}
 
@@ -894,9 +886,7 @@ def get_task_created_ats(task_ids: list[str]) -> dict[str, str]:
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(
-            select(Task.task_id, Task.created_at).where(
-                Task.task_id.in_(task_ids)
-            )
+            select(Task.task_id, Task.created_at).where(Task.task_id.in_(task_ids))
         ).all()
     return {row.task_id: row.created_at for row in rows}
 

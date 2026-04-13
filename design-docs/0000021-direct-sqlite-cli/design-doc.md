@@ -1,7 +1,7 @@
 # Direct SQLite CLI
 
 **Status**: Approved
-**Progress**: 21/30 tasks complete
+**Progress**: 23/30 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -502,8 +502,8 @@ Specific sections to update:
 
 ### Step 7: Admin WebUI rewrite
 
-- [ ] Rewrite `server.py` — minimal FastAPI app with `webui_router` + static files only <!-- completed: -->
-- [ ] Rewrite `webui_api.py` — all endpoints call `broker`, sync `def` handlers, rewrite `_format_messages` for dicts <!-- completed: -->
+- [x] Rewrite `server.py` — minimal FastAPI app with `webui_router` + static files only <!-- completed: 2026-04-13T14:30 -->
+- [x] Rewrite `webui_api.py` — all endpoints call `broker`, sync `def` handlers, rewrite `_format_messages` for dicts <!-- completed: 2026-04-13T14:30 -->
 
 ### Step 8: Delete dead code + update dependencies
 

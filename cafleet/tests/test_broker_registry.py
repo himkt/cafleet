@@ -31,7 +31,7 @@ import click
 import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from cafleet.db.models import Base
 
@@ -363,7 +363,6 @@ class TestRegisterAgent:
 
     def test_placement_validates_director_active_in_same_session(self):
         """Director must be active and in the same session."""
-        from cafleet import broker
 
         session1 = _create_session()
         session2 = _create_session()
@@ -557,13 +556,19 @@ class TestVerifyAgentSession:
         session_b = _create_session()
         agent = _register_agent(session_a["session_id"], name="there")
 
-        assert broker.verify_agent_session(agent["agent_id"], session_b["session_id"]) is False
+        assert (
+            broker.verify_agent_session(agent["agent_id"], session_b["session_id"])
+            is False
+        )
 
     def test_returns_false_for_nonexistent_agent(self):
         from cafleet import broker
 
         session = _create_session()
-        assert broker.verify_agent_session(str(uuid.uuid4()), session["session_id"]) is False
+        assert (
+            broker.verify_agent_session(str(uuid.uuid4()), session["session_id"])
+            is False
+        )
 
 
 class TestDeregisterAgent:

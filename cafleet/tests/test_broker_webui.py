@@ -257,10 +257,7 @@ class TestListInbox:
 
         # Sender's inbox should not have the broadcast_summary
         sender_inbox = broker.list_inbox(sender)
-        summaries = [
-            t for t in sender_inbox
-            if t.get("type") == "broadcast_summary"
-        ]
+        summaries = [t for t in sender_inbox if t.get("type") == "broadcast_summary"]
         assert len(summaries) == 0
 
     def test_only_returns_tasks_where_context_id_matches(self):

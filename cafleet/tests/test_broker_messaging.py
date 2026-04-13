@@ -316,9 +316,7 @@ class TestBroadcastMessage:
 
         b_tasks = broker.poll_tasks(b_id)
         assert len(b_tasks) >= 1
-        origin_ids = [
-            t.get("metadata", {}).get("originTaskId") for t in b_tasks
-        ]
+        origin_ids = [t.get("metadata", {}).get("originTaskId") for t in b_tasks]
         assert summary_id in origin_ids
 
     def test_delivery_tasks_type_is_unicast(self):
@@ -343,8 +341,7 @@ class TestBroadcastMessage:
         # is filtered out by poll_tasks)
         sender_tasks = broker.poll_tasks(sender)
         delivery_tasks = [
-            t for t in sender_tasks
-            if t.get("metadata", {}).get("type") == "unicast"
+            t for t in sender_tasks if t.get("metadata", {}).get("type") == "unicast"
         ]
         assert len(delivery_tasks) == 0
 
@@ -443,7 +440,8 @@ class TestPollTasks:
         # Sender's poll should not show the broadcast_summary
         sender_tasks = broker.poll_tasks(sender)
         summary_tasks = [
-            t for t in sender_tasks
+            t
+            for t in sender_tasks
             if t.get("metadata", {}).get("type") == "broadcast_summary"
         ]
         assert len(summary_tasks) == 0
@@ -746,7 +744,9 @@ class TestGetTask:
         sender = _register_agent(sid_a, name="sender")
         recipient = _register_agent(sid_a, name="recipient")
 
-        sent = broker.send_message(sid_a, sender["agent_id"], recipient["agent_id"], "Hi")
+        sent = broker.send_message(
+            sid_a, sender["agent_id"], recipient["agent_id"], "Hi"
+        )
         task_id = sent["task"]["id"]
 
         # Should succeed with the correct session
