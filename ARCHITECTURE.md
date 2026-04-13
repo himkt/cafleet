@@ -1,108 +1,87 @@
 # CAFleet — Architecture
 
-An A2A-native message broker and agent registry for coding agents. Enables ephemeral agents (Claude Code, CI/CD runners, etc.) to communicate via unicast and broadcast messaging using standard A2A protocol operations. Agents are organized into **sessions** — a non-secret namespace created via `cafleet session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
+A message broker and agent registry for coding agents. All CLI commands and the admin WebUI access SQLite directly through a shared `broker` module (`cafleet/broker.py`) — no HTTP server is needed for agent operations. Agents are organized into **sessions** — a non-secret namespace created via `cafleet session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
 
 ## Architecture Diagram
 
 ```
-         Session X (shared session_id)          ┌──────────────────────────┐
-        ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐             │         Broker           │
-                                                │                          │
-        │ ┌─────────────┐         │             │  ┌────────────────────┐  │
-          │   Agent A    │ SendMessage          │  │ A2A Server         │  │
-        │ │  (sender)    │─────────────────────→│  │ (session-scoped)   │  │
-          └─────────────┘ X-Agent-Id: <id>      │  └────────┬───────────┘  │
-        │                                       │           │              │
-                                                │           ▼              │
-        │ ┌─────────────┐         │             │  ┌────────────────────┐  │
-          │   Agent B    │ ListTasks            │  │ SQLite (SQLAlchemy)│  │
-        │ │ (recipient)  │←─────────────────────│  │ ┌────────────────┐ │  │
-          └─────────────┘         │             │  │ │ sessions         │ │  │
-        │                                       │  │ │ agents           │ │  │
-         ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─              │  │ │ tasks            │ │  │
-                                                │  │ │ agent_placements │ │  │
-                                                │  │ │ alembic_version  │ │  │
-         Session Y (different session_id)       │  │ └──────────────────┘ │  │
-        ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐             │  └────────────────────┘  │
-          ┌─────────────┐                       └──────────────────────────┘
-        │ │   Agent C    │ (isolated) │
-          │ (discovery)  │
-        │ └─────────────┘             │
-         ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+CLI (click)  ──→  broker.py (sync SQLAlchemy)  ──→  SQLite
+                                                      ↑
+Admin WebUI  ──→  server.py (minimal FastAPI)         │
+                  └─ webui_api.py  ──→  broker.py  ───┘
+                  └─ static files (/ui/)
+
+┌─────────────────────────────────────────────────────┐
+│  SQLite (single file)                               │
+│  ┌────────────────┐                                 │
+│  │ sessions         │                                │
+│  │ agents           │                                │
+│  │ tasks            │                                │
+│  │ agent_placements │                                │
+│  │ alembic_version  │                                │
+│  └──────────────────┘                                │
+└─────────────────────────────────────────────────────┘
 ```
+
+`broker.py` is the single data access layer. Both CLI and Admin WebUI call it. No async stores, no HTTP client, no A2A protocol layer.
 
 ## Session Isolation
 
-The `session_id` serves as the namespace boundary. Sessions are created via `cafleet session create` (direct SQLite write, no HTTP). All agents registered with the same `session_id` form one namespace. The broker does not perform authentication — it performs namespace routing only.
-
-**Request headers**:
-
-| Header | Purpose |
-|---|---|
-| `X-Session-Id: <session_id>` | Selects the session namespace (passed via header, body, or query depending on endpoint) |
-| `X-Agent-Id: <agent_id>` | Identifies the specific agent within the session |
+The `session_id` serves as the namespace boundary. Sessions are created via `cafleet session create`. All agents registered with the same `session_id` form one namespace. The broker does not perform authentication — it performs namespace routing only.
 
 No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret namespace identifier. Sessions are namespaces for tidiness, not security boundaries.
 
-**Registration** requires a valid `session_id` (passed in the POST body). Sessions are created via `cafleet session create` before agents can register.
+**Registration** requires a valid `session_id`. Sessions are created via `cafleet session create` before agents can register.
 
-**Isolation rules**: Every operation that reads or writes agent/task data enforces session boundaries. Cross-session requests always produce "not found" errors indistinguishable from the resource not existing. Cross-session JSON-RPC sends are rejected with error code `-32003` ("Session mismatch").
-
-## Three API Surfaces
-
-1. **A2A Server** — Full A2A operations: SendMessage, GetTask, ListTasks, CancelTask (JSON-RPC 2.0)
-2. **Registry** — Agent registration, search, listing (custom REST at `/api/v1/`)
-3. **WebUI** — Browser-based message viewer and sender (SPA at `/ui/`, API at `/ui/api/`)
+**Isolation rules**: Every operation that reads or writes agent/task data enforces session boundaries. Cross-session requests always produce "not found" errors indistinguishable from the resource not existing.
 
 ## Component Layout
 
 | Component | Location | Description |
 |---|---|---|
-| `server.py` | `cafleet/src/cafleet/` | ASGI app: mount A2A + FastAPI |
+| `broker.py` | `cafleet/src/cafleet/` | Single data access layer — sync SQLAlchemy operations for CLI + WebUI |
+| `server.py` | `cafleet/src/cafleet/` | Minimal FastAPI app: `webui_router` + static file serving |
 | `config.py` | `cafleet/src/cafleet/` | Settings via pydantic-settings; owns `~` expansion of `database_url` |
-| `auth.py` | `cafleet/src/cafleet/` | Session + agent-id resolution: `get_session_from_header` (X-Session-Id lookup), `get_session_from_agent_id` (X-Agent-Id → session_id lookup) |
-| `cli.py` | `cafleet/src/cafleet/` | Unified `cafleet` console script: click group with `db` (Alembic schema management), `session` (session namespace CRUD), and all agent/messaging commands (`register`, `send`, `poll`, `ack`, etc.) plus `member` subgroup |
+| `cli.py` | `cafleet/src/cafleet/` | Unified `cafleet` console script: click group with `db` (Alembic schema management), `session` (session namespace CRUD), and all agent/messaging commands (`register`, `send`, `poll`, `ack`, etc.) plus `member` subgroup. Calls `broker` directly. |
 | `db/__init__.py` | `cafleet/src/cafleet/db/` | DB sub-package marker |
 | `db/models.py` | `cafleet/src/cafleet/db/` | SQLAlchemy declarative models: `Base`, `Session`, `Agent`, `Task`; column indexes |
-| `db/engine.py` | `cafleet/src/cafleet/db/` | `get_engine()`, `get_sessionmaker()`, `dispose_engine()`, FK PRAGMA listener |
+| `db/engine.py` | `cafleet/src/cafleet/db/` | `get_sync_engine()`, `get_sync_sessionmaker()`, SQLite PRAGMA listener |
 | `alembic.ini` | `cafleet/src/cafleet/` | Alembic config (bundled into the wheel) |
-| `alembic/env.py` | `cafleet/src/cafleet/alembic/` | Alembic environment; swaps async URL to sync `pysqlite` driver |
+| `alembic/env.py` | `cafleet/src/cafleet/alembic/` | Alembic environment; swaps URL to sync `pysqlite` driver |
 | `alembic/versions/` | `cafleet/src/cafleet/alembic/versions/` | Migration scripts (`0001_initial_schema.py`, …) |
-| `models.py` | `cafleet/src/cafleet/` | Pydantic models (Registry API request/response shapes) |
-| `executor.py` | `cafleet/src/cafleet/` | BrokerExecutor (A2A AgentExecutor) |
-| `task_store.py` | `cafleet/src/cafleet/` | `TaskStore` (A2A TaskStore backed by SQLite via SQLAlchemy) |
-| `agent_card.py` | `cafleet/src/cafleet/` | Broker's own Agent Card definition |
-| `registry_store.py` | `cafleet/src/cafleet/` | Agent + session CRUD on SQLite (session-scoped) |
-| `api/registry.py` | `cafleet/src/cafleet/api/` | Registry API router |
-| `webui_api.py` | `cafleet/src/cafleet/` | WebUI API router (`/ui/api/*`) — session list, agents, inbox, sent, send |
-| `broker_client.py` | `cafleet/src/cafleet/` | httpx helpers for CLI agent operations |
+| `webui_api.py` | `cafleet/src/cafleet/` | WebUI API router (`/ui/api/*`) — calls `broker` for all data access |
 | `output.py` | `cafleet/src/cafleet/` | CLI output formatting (tables + JSON) |
 | `coding_agent.py` | `cafleet/src/cafleet/` | `CodingAgentConfig` dataclass, `CLAUDE`/`CODEX` built-in configs, `CODING_AGENTS` registry, `get_coding_agent()` helper |
 | `tmux.py` | `cafleet/src/cafleet/` | tmux subprocess helper: `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit`, `capture_pane` |
 | `admin/` | Project root | WebUI SPA (Vite + React + TypeScript + Tailwind CSS) |
 
-## Responsibility Assignment
+## Operation Mapping
 
-The Broker acts as the central A2A Server. Individual agents are A2A clients that interact with the Broker using standard HTTP requests. No agent needs to host an HTTP server.
+All operations go through `broker.py` (sync SQLAlchemy). No HTTP server is involved for CLI commands.
 
-| Operation | Responsible | Method |
-|---|---|---|
-| Broker Agent Card serving | Broker | `GET /.well-known/agent-card.json` |
-| Individual agent card storage | Broker (Registry) | `POST /api/v1/agents`, `GET /api/v1/agents/{id}` |
-| Message sending | Sending agent (A2A client) | A2A `SendMessage` to Broker |
-| Message storage & routing | Broker | SQLite Task store (`tasks` table), contextId-based routing |
-| Message retrieval | Receiving agent (A2A client) | A2A `ListTasks(contextId=own_id)` to Broker |
-| Message ACK | Receiving agent (A2A client) | A2A `SendMessage(taskId=existing)` multi-turn |
-| Message cancellation | Sending agent (A2A client) | A2A `CancelTask` to Broker |
-| Schema management | Operator | `cafleet db init` (Alembic `upgrade head`) |
+| CLI Command | `broker` Function |
+|---|---|
+| `register` | `broker.register_agent()` → INSERT agents [+ agent_placements] |
+| `send` | `broker.send_message()` → validate dest + INSERT tasks |
+| `broadcast` | `broker.broadcast_message()` → list agents + INSERT tasks per recipient + summary |
+| `poll` | `broker.poll_tasks()` → SELECT tasks WHERE context_id |
+| `ack` | `broker.ack_task()` → verify recipient + UPDATE status → completed |
+| `cancel` | `broker.cancel_task()` → verify sender + UPDATE status → canceled |
+| `get-task` | `broker.get_task()` → SELECT task + verify session |
+| `agents` (list) | `broker.list_agents()` → SELECT agents WHERE active |
+| `agents --id` | `broker.get_agent()` → SELECT agent + placement |
+| `deregister` | `broker.deregister_agent()` → UPDATE status + DELETE placement |
+| `db init` | Alembic `upgrade head` |
 
 ## Storage Layer
 
 ### Backend
 
-The registry persists everything in a single SQLite database accessed through SQLAlchemy 2.x with the `aiosqlite` async driver. Schema changes are managed by Alembic, bundled inside the `cafleet` wheel and applied via `cafleet db init`. There is no separate database daemon to operate, monitor, or back up — the database is a single file.
+Everything is persisted in a single SQLite database accessed through SQLAlchemy 2.x with the sync `pysqlite` driver. Schema changes are managed by Alembic, bundled inside the `cafleet` wheel and applied via `cafleet db init`. There is no separate database daemon to operate, monitor, or back up — the database is a single file.
 
-The default database path is `~/.local/share/cafleet/registry.db` (XDG state directory), expanded once at config load time. Override with the `CAFLEET_DATABASE_URL` environment variable, e.g. `sqlite+aiosqlite:////var/lib/cafleet/registry.db`.
+The default database path is `~/.local/share/cafleet/registry.db` (XDG state directory), expanded once at config load time. Override with the `CAFLEET_DATABASE_URL` environment variable, e.g. `sqlite:////var/lib/cafleet/registry.db`.
+
+**Concurrency**: `PRAGMA busy_timeout=5000` is set on every connection. SQLite retries internally for up to 5 seconds before returning `SQLITE_BUSY`. Expected contention is low — CLI operations are short transactions (single INSERT or UPDATE), and multiple agents polling concurrently is read-only.
 
 ### Relational + document hybrid model
 
@@ -122,11 +101,11 @@ Four indexes serve the hot read paths:
 - `idx_tasks_from_agent_status_ts (from_agent_id, status_timestamp DESC)` — sender outbox in the WebUI
 - `idx_placements_director (director_agent_id)` — list members spawned by a Director
 
-`PRAGMA foreign_keys=ON` is issued on every new connection via a SQLAlchemy engine `connect` event listener so the FK declarations in `models.py` are actually enforced. A regression test verifies the PRAGMA is active on a fresh connection.
+`PRAGMA foreign_keys=ON` and `PRAGMA busy_timeout=5000` are issued on every new connection via a SQLAlchemy engine `connect` event listener so the FK declarations in `models.py` are enforced and concurrent access is handled gracefully. A regression test verifies the PRAGMAs are active on a fresh connection.
 
 ### Session ownership
 
-Stores receive an `async_sessionmaker[AsyncSession]` at construction, not a per-call session. Each store method opens its own session via `async with self._sessionmaker() as session:`, and any multi-statement operation wraps its body in `async with session.begin():`. Route handlers and the `BrokerExecutor` hold long-lived store references and never see a session.
+`broker.py` uses module-level `get_sync_sessionmaker()` from `db/engine.py`. Each function opens a fresh session, executes within a transaction, and returns dicts. No async, no store classes, no dependency injection — just plain function calls.
 
 ### Schema management
 
@@ -155,12 +134,12 @@ The `cafleet member` CLI subgroup wraps the two-step "register an agent + spawn 
 
 **Atomic create flow** (`cafleet member create`):
 
-1. Register the member agent with a pending placement (`tmux_pane_id = NULL`, `coding_agent` field) via `POST /api/v1/agents` with a `placement` object.
+1. Register the member agent with a pending placement (`tmux_pane_id = NULL`, `coding_agent` field) via `broker.register_agent(placement=...)`.
 2. Spawn the coding agent (Claude or Codex, selected via `--coding-agent`) in the Director's own tmux window via `tmux split-window -t <window_id>`, capturing the new pane ID.
-3. Patch the placement row with the real pane ID via `PATCH /api/v1/agents/{id}/placement`.
+3. Patch the placement row with the real pane ID via `broker.update_placement_pane_id()`.
 4. Rebalance the window layout via `tmux select-layout main-vertical`.
 
-If step 2 fails, the registered agent is rolled back via `DELETE /api/v1/agents/{id}`. If step 3 fails, the pane is `/exit`'d and the agent rolled back.
+If step 2 fails, the registered agent is rolled back via `broker.deregister_agent()`. If step 3 fails, the pane is `/exit`'d and the agent rolled back.
 
 **Delete ordering** (`cafleet member delete`): Deregister the agent first, THEN `/exit` the pane. This preserves the pane for retry if deregister fails.
 
@@ -174,7 +153,7 @@ If step 2 fails, the registered agent is rolled back via `DELETE /api/v1/agents/
 
 CAFleet uses a pull-based delivery model by default: recipients discover messages via `cafleet poll`. To reduce latency, the broker can also push a poll trigger into a recipient's tmux pane immediately after persisting a message.
 
-After `BrokerExecutor` saves a delivery task, it looks up the recipient's `agent_placements` row. If the recipient has a non-null `tmux_pane_id` and is not the sender, the broker runs:
+After `broker` saves a delivery task, it looks up the recipient's `agent_placements` row. If the recipient has a non-null `tmux_pane_id` and is not the sender, the broker runs:
 
 ```
 tmux send-keys -t <tmux_pane_id> "cafleet poll --agent-id <recipient_agent_id>" Enter
@@ -208,21 +187,6 @@ Each message delivery is modeled as an A2A Task:
 | `TASK_STATE_CANCELED` | Message retracted by sender before ACK |
 | `TASK_STATE_FAILED` | Routing error (returned immediately to sender) |
 
-### ASGI Mount Strategy
-
-FastAPI is the parent ASGI application. The A2A SDK's `A2AStarletteApplication` is mounted at the root path. FastAPI routes (`/api/v1/*`) take priority; A2A protocol paths fall through to the mounted Starlette app.
-
-```python
-from fastapi import FastAPI
-from a2a.server.apps.starlette import A2AStarletteApplication
-
-fastapi_app = FastAPI()
-fastapi_app.include_router(registry_router, prefix="/api/v1")
-
-a2a_app = A2AStarletteApplication(agent_card=broker_card, http_handler=handler)
-fastapi_app.mount("/", a2a_app.build())
-```
-
 ### CLI Option Sources
 
 Each CLI parameter has exactly one input source:
@@ -230,18 +194,19 @@ Each CLI parameter has exactly one input source:
 | Parameter | Source |
 |---|---|
 | Session ID | `CAFLEET_SESSION_ID` env var |
-| Broker URL | `CAFLEET_URL` env var (default: `http://127.0.0.1:8000`) |
+| Database URL | `CAFLEET_DATABASE_URL` env var (optional; default: `sqlite:///~/.local/share/cafleet/registry.db`) |
 | Agent ID | `--agent-id` subcommand option |
 | JSON output | `--json` global flag |
 
-Session ID and broker URL use environment variables for convenience in tmux multi-pane workflows. Agent ID is a CLI argument because it's an operational parameter that changes per invocation.
+Session ID uses an environment variable for convenience in tmux multi-pane workflows. Agent ID is a CLI argument because it's an operational parameter that changes per invocation. No broker URL is needed — CLI commands access SQLite directly.
 
 ## WebUI
 
 A browser-based dashboard served as a SPA at `/ui/`. No login is required. The first-load lands on a session picker at `/ui/#/sessions`; selecting a session navigates to a Discord-style unified timeline for that session — a sidebar listing every active (top) and deregistered (muted) agent in the session, a center timeline rendering unicast and broadcast messages ordered newest-at-bottom with auto-scroll, reactions-as-ACKs chips that reveal per-recipient ACK time on CSS hover, and a bottom input that parses `@<agent> text` for unicast and `@all text` for broadcast. The admin is NOT a CAFleet agent; a header dropdown (sender selector) picks which real in-session active agent is used as `from_agent_id` on every send, persisted per-session in `localStorage` under `cafleet.sender.<session_id>`.
 
 - **Frontend**: `admin/` — Vite + React 19 + TypeScript + Tailwind CSS 4
-- **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — session list, agent list, inbox, sent, timeline (`GET /ui/api/timeline`), send (accepts `to_agent_id="*"` for broadcast)
+- **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — all endpoints call `broker` for data access (sync `def` handlers, FastAPI runs them in a thread pool)
+- **Server**: `server.py` is a minimal FastAPI app — just `webui_router` + static files. No A2A handler, no JSON-RPC, no executor. Only needed for the WebUI; CLI commands work without it.
 - **Session scoping**: Session-scoped endpoints require `X-Session-Id` header. No authentication.
 - **Static serving**: `StaticFiles` mount at `/ui` serves the SPA bundled inside the package at `cafleet/src/cafleet/webui/` (production build). `mise //admin:build` must be run before `mise //cafleet:dev` for `/ui/` to be populated; without it the server starts cleanly and `/ui/` simply 404s.
 
@@ -249,7 +214,7 @@ A browser-based dashboard served as a SPA at `/ui/`. No login is required. The f
 
 A uv workspace with a single Python package and a frontend app:
 
-- **`cafleet/`** — `cafleet`: FastAPI + SQLAlchemy/aiosqlite + Alembic + a2a-sdk + click + httpx (server + CLI). Ships the unified `cafleet` console script for all operations: `db init`, `session` management, agent registration, messaging, and member lifecycle.
+- **`cafleet/`** — `cafleet`: FastAPI + SQLAlchemy + Alembic + click (server + CLI). Ships the unified `cafleet` console script for all operations: `db init`, `session` management, agent registration, messaging, and member lifecycle. CLI commands access SQLite directly via `broker.py`; the FastAPI server is only needed for the admin WebUI.
 - **`admin/`** — WebUI SPA: Vite + React + TypeScript + Tailwind CSS
 
 A single `pip install cafleet` gives users both the broker server and the agent CLI.

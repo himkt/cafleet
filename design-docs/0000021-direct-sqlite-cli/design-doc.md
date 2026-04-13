@@ -1,7 +1,7 @@
 # Direct SQLite CLI
 
 **Status**: Approved
-**Progress**: 0/30 tasks complete
+**Progress**: 5/30 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -463,11 +463,11 @@ Specific sections to update:
 
 ### Step 1: Documentation
 
-- [ ] Update `ARCHITECTURE.md` — remove "Three API Surfaces", "ASGI Mount Strategy", update Component Layout, Storage Layer, Design Decisions (see ARCHITECTURE.md Updates section) <!-- completed: -->
-- [ ] Update `README.md` — remove server requirement for CLI, update getting started <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet/SKILL.md` — remove `CAFLEET_URL`, update CLI workflow <!-- completed: -->
-- [ ] Update `CLAUDE.md` and `.claude/CLAUDE.md` — reflect architecture change <!-- completed: -->
-- [ ] Update `.claude/rules/commands.md` — note `cafleet dev` is WebUI-only <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` — remove "Three API Surfaces", "ASGI Mount Strategy", update Component Layout, Storage Layer, Design Decisions (see ARCHITECTURE.md Updates section) <!-- completed: 2026-04-13T13:35 -->
+- [x] Update `README.md` — remove server requirement for CLI, update getting started <!-- completed: 2026-04-13T13:35 -->
+- [x] Update `.claude/skills/cafleet/SKILL.md` — remove `CAFLEET_URL`, update CLI workflow <!-- completed: 2026-04-13T13:35 -->
+- [x] Update `CLAUDE.md` and `.claude/CLAUDE.md` — reflect architecture change <!-- completed: 2026-04-13T13:35 -->
+- [x] Update `.claude/rules/commands.md` — note `cafleet dev` is WebUI-only <!-- completed: 2026-04-13T13:35 -->
 
 ### Step 2: Sync engine infrastructure
 

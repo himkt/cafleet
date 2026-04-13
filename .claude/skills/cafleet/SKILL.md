@@ -1,10 +1,10 @@
 ---
-description: Interact with the CAFleet A2A message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
+description: Interact with the CAFleet message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
 ---
 
-# CAFleet — A2A Message Broker CLI
+# CAFleet — Message Broker CLI
 
-Use the `cafleet` CLI to register as an agent, send and receive messages, and discover other agents on the CAFleet A2A message broker.
+Use the `cafleet` CLI to register as an agent, send and receive messages, and discover other agents on the CAFleet message broker. CLI commands access SQLite directly — no running server is required.
 
 ## When to Use
 
@@ -20,10 +20,12 @@ Use the `cafleet` CLI to register as an agent, send and receive messages, and di
 
 ## Environment Variables
 
-The CLI reads both variables from the environment — they are the **only** way to configure the CLI. There are no `--url` / `--session-id` flags.
+The CLI reads environment variables for configuration. There are no `--url` / `--session-id` flags.
 
-- `CAFLEET_URL` — Broker URL, must include the `http://` / `https://` scheme (default: `http://127.0.0.1:8000`). The CLI errors with "Request URL is missing an 'http://' or 'https://' protocol" if the scheme is missing.
 - `CAFLEET_SESSION_ID` — Session namespace ID created via `cafleet session create`. The CLI exits with `Error: CAFLEET_SESSION_ID environment variable is required. Create a session with 'cafleet session create'.` if this is not set.
+- `CAFLEET_DATABASE_URL` — SQLite database URL (optional; default: `sqlite:///~/.local/share/cafleet/registry.db`).
+
+CLI commands access SQLite directly — no running server is required.
 
 ## Agent ID
 
@@ -44,11 +46,11 @@ cafleet --json agents --agent-id <agent-id>
 
 ### Env
 
-Print the current `CAFLEET_URL` and `CAFLEET_SESSION_ID` values from the environment. Useful for verifying configuration before running other commands.
+Print the current `CAFLEET_DATABASE_URL` and `CAFLEET_SESSION_ID` values from the environment. Useful for verifying configuration before running other commands.
 
 ```bash
 cafleet env
-# CAFLEET_URL=http://127.0.0.1:8000
+# CAFLEET_DATABASE_URL=sqlite:///~/.local/share/cafleet/registry.db
 # CAFLEET_SESSION_ID=550e8400-e29b-41d4-a716-446655440000
 ```
 
@@ -108,7 +110,7 @@ Send a message to a specific agent by ID.
 cafleet send --agent-id <self-agent-id> --to <target-agent-id> --text "Did the API schema change?"
 ```
 
-After persisting the message, the broker attempts a tmux push notification to the recipient's pane (`tmux send-keys` with `cafleet poll`). The response includes a top-level `notification_sent` field (`true`/`false`). The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome.
+After persisting the message, the broker attempts a tmux push notification to the recipient's pane (`tmux send-keys` with `cafleet poll`). The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome.
 
 ### Broadcast
 
@@ -371,7 +373,7 @@ cafleet member create --agent-id $DIRECTOR_ID --name Claude-B \
   --description "Reviewer for PR #42"
 ```
 
-The command handles everything atomically: registering the agent, forwarding `CAFLEET_URL`, `CAFLEET_SESSION_ID`, and `CAFLEET_AGENT_ID` to the new pane via `-e` flags, spawning `claude` with the prompt, and rebalancing the layout. No `printenv` step is needed.
+The command handles everything atomically: registering the agent, forwarding `CAFLEET_SESSION_ID` and `CAFLEET_AGENT_ID` (plus `CAFLEET_DATABASE_URL` if set) to the new pane via `-e` flags, spawning `claude` with the prompt, and rebalancing the layout. No `printenv` step is needed.
 
 ### Shut down a member
 
@@ -389,15 +391,14 @@ cafleet deregister --agent-id <director-agent-id>
 
 ## Message Lifecycle
 
-Messages are modeled as A2A Tasks with this lifecycle:
-- **INPUT_REQUIRED** — Message delivered, waiting for recipient to ACK
-- **COMPLETED** — Recipient acknowledged the message
-- **CANCELED** — Sender retracted the message before ACK
+Messages are modeled as tasks with this lifecycle:
+- **input_required** — Message delivered, waiting for recipient to ACK
+- **completed** — Recipient acknowledged the message
+- **canceled** — Sender retracted the message before ACK
 
 ## Error Handling
 
 - Missing `CAFLEET_SESSION_ID` env var or missing `--agent-id` on commands exits with non-zero code
-- `CAFLEET_URL` without an `http://` / `https://` scheme causes `Request URL is missing an 'http://' or 'https://' protocol`
-- Network errors and API errors are printed to stderr and exit with non-zero code
+- Errors are printed to stderr and exit with non-zero code
 - Use `cafleet --json <cmd>` for machine-parseable output (including errors)
 - `member` commands require a tmux session (`TMUX` env var must be set) and exit with "cafleet member commands must be run inside a tmux session" if not
