@@ -1004,7 +1004,7 @@ class TestUnicastNotification:
 
         events = await _collect_events(queue)
         task = next(e for e in events if isinstance(e, Task))
-        assert task.metadata["notification_sent"] is True
+        assert task.metadata["notificationSent"] is True
 
     async def test_unicast_sets_notification_sent_false_no_placement(
         self, notify_env, monkeypatch
@@ -1030,7 +1030,7 @@ class TestUnicastNotification:
 
         events = await _collect_events(queue)
         task = next(e for e in events if isinstance(e, Task))
-        assert task.metadata["notification_sent"] is False
+        assert task.metadata["notificationSent"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -1075,7 +1075,7 @@ class TestBroadcastNotification:
         ]
         assert len(summary_tasks) >= 1
         summary = summary_tasks[0]
-        assert summary.metadata["notifications_sent_count"] == 1
+        assert summary.metadata["notificationsSentCount"] == 1
 
     async def test_broadcast_individual_tasks_lack_notification_sent(
         self, notify_env, monkeypatch
@@ -1110,4 +1110,4 @@ class TestBroadcastNotification:
             and e.metadata.get("type") == "unicast"
         ]
         for task in delivery_tasks:
-            assert "notification_sent" not in task.metadata
+            assert "notificationSent" not in task.metadata

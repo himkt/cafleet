@@ -272,7 +272,7 @@ class TestSendPollTrigger:
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
         captured_args = []
 
-        def mock_run(args):
+        def mock_run(args, **kwargs):
             captured_args.extend(args)
             return ""
 
@@ -292,7 +292,7 @@ class TestSendPollTrigger:
         """Returns False when tmux reports the pane no longer exists."""
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
 
-        def mock_run(args):
+        def mock_run(args, **kwargs):
             raise tmux.TmuxError(
                 "tmux command failed: tmux send-keys -t %99\n"
                 "stderr: can't find pane: %99"
@@ -321,7 +321,7 @@ class TestSendPollTrigger:
         """Never raises — catches TmuxError internally and returns False."""
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
 
-        def mock_run(args):
+        def mock_run(args, **kwargs):
             raise tmux.TmuxError("tmux command failed: server exited unexpectedly")
 
         monkeypatch.setattr(tmux, "_run", mock_run)

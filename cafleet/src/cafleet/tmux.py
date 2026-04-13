@@ -107,7 +107,8 @@ def send_poll_trigger(*, target_pane_id: str, agent_id: str) -> bool:
                 target_pane_id,
                 f"cafleet poll --agent-id {agent_id}",
                 "Enter",
-            ]
+            ],
+            timeout=5,
         )
     except TmuxError:
         return False
@@ -128,11 +129,17 @@ def capture_pane(*, target_pane_id: str, lines: int = 80) -> str:
     return _run(["tmux", "capture-pane", "-p", "-t", target_pane_id, "-S", f"-{lines}"])
 
 
-def _run(args: list[str]) -> str:
+def _run(args: list[str], *, timeout: float | None = None) -> str:
     try:
-        result = subprocess.run(args, capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            args, capture_output=True, text=True, check=True, timeout=timeout
+        )
     except FileNotFoundError as exc:
         raise TmuxError(f"tmux binary not found: {exc}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise TmuxError(
+            f"tmux command timed out after {exc.timeout}s: {' '.join(args)}"
+        ) from exc
     except subprocess.CalledProcessError as exc:
         raise TmuxError(
             f"tmux command failed: {' '.join(args)}\nstderr: {exc.stderr.strip()}"

@@ -136,11 +136,11 @@ async def _handle_send_message(
 
     result = {"task": _task_to_dict(last_task)}
     if last_task.metadata:
-        if "notification_sent" in last_task.metadata:
-            result["notification_sent"] = last_task.metadata["notification_sent"]
-        if "notifications_sent_count" in last_task.metadata:
+        if "notificationSent" in last_task.metadata:
+            result["notification_sent"] = last_task.metadata["notificationSent"]
+        if "notificationsSentCount" in last_task.metadata:
             result["notifications_sent_count"] = last_task.metadata[
-                "notifications_sent_count"
+                "notificationsSentCount"
             ]
     return result
 
