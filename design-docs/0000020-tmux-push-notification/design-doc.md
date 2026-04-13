@@ -1,7 +1,7 @@
 # tmux Push Notification
 
 **Status**: Approved
-**Progress**: 9/15 tasks complete
+**Progress**: 11/15 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -186,8 +186,8 @@ return result
 
 ### Step 5: `cli.py` + `output.py` -- CLI Output
 
-- [ ] Update `send` command to show `(push notification sent)` or nothing based on `notification_sent` <!-- completed: -->
-- [ ] Update `broadcast` command to show notification count from response <!-- completed: -->
+- [x] Update `send` command to show `(push notification sent)` or nothing based on `notification_sent` <!-- completed: 2026-04-13T12:35 -->
+- [x] Update `broadcast` command to show notification count from response <!-- completed: 2026-04-13T12:35 -->
 
 ### Step 6: Tests
 
