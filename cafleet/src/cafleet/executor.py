@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import UTC, datetime
 
@@ -13,6 +14,7 @@ from a2a.types import (
     TextPart,
 )
 
+from cafleet import tmux
 from cafleet.registry_store import RegistryStore
 from cafleet.task_store import TaskStore
 
@@ -90,6 +92,19 @@ class BrokerExecutor(AgentExecutor):
         await self._task_store.save(canceled_task)
         await event_queue.enqueue_event(canceled_task)
 
+    async def _try_notify_agent(self, agent_id: str, from_agent_id: str) -> bool:
+        """Attempt tmux push notification. Returns True on success."""
+        if agent_id == from_agent_id:
+            return False
+        placement = await self._registry_store.get_placement(agent_id)
+        if placement is None or placement["tmux_pane_id"] is None:
+            return False
+        return await asyncio.to_thread(
+            tmux.send_poll_trigger,
+            target_pane_id=placement["tmux_pane_id"],
+            agent_id=agent_id,
+        )
+
     async def _handle_unicast(
         self,
         event_queue: EventQueue,
@@ -135,6 +150,8 @@ class BrokerExecutor(AgentExecutor):
         )
 
         await self._task_store.save(delivery_task)
+        notification_sent = await self._try_notify_agent(destination, from_agent_id)
+        delivery_task.metadata["notification_sent"] = notification_sent
         await event_queue.enqueue_event(delivery_task)
 
     async def _handle_broadcast(
@@ -150,6 +167,7 @@ class BrokerExecutor(AgentExecutor):
         recipients = [a for a in active_agents if a["agent_id"] != from_agent_id]
 
         summary_task_id = str(uuid.uuid4())
+        notifications_sent_count = 0
 
         for agent in recipients:
             now = datetime.now(UTC).isoformat()
@@ -173,6 +191,10 @@ class BrokerExecutor(AgentExecutor):
 
             await self._task_store.save(delivery_task)
             await event_queue.enqueue_event(delivery_task)
+
+            sent = await self._try_notify_agent(agent["agent_id"], from_agent_id)
+            if sent:
+                notifications_sent_count += 1
 
         summary_task = Task(
             id=summary_task_id,
@@ -199,6 +221,7 @@ class BrokerExecutor(AgentExecutor):
                 "recipientCount": len(recipients),
                 "recipientIds": [a["agent_id"] for a in recipients],
                 "originTaskId": summary_task_id,
+                "notifications_sent_count": notifications_sent_count,
             },
         )
 

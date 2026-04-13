@@ -1,7 +1,7 @@
 # tmux Push Notification
 
 **Status**: Approved
-**Progress**: 4/15 tasks complete
+**Progress**: 8/15 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -175,10 +175,10 @@ return result
 
 ### Step 3: `executor.py` -- Notification Logic
 
-- [ ] Add `import asyncio` and `from cafleet import tmux` <!-- completed: -->
-- [ ] Add `async _try_notify_agent(self, agent_id: str, from_agent_id: str) -> bool` helper method <!-- completed: -->
-- [ ] Modify `_handle_unicast()`: call `_try_notify_agent()` after `task_store.save()`, set `notification_sent` in task metadata before enqueue <!-- completed: -->
-- [ ] Modify `_handle_broadcast()`: call `_try_notify_agent()` per recipient after save, track count, add `notifications_sent_count` to summary metadata <!-- completed: -->
+- [x] Add `import asyncio` and `from cafleet import tmux` <!-- completed: 2026-04-13T12:25 -->
+- [x] Add `async _try_notify_agent(self, agent_id: str, from_agent_id: str) -> bool` helper method <!-- completed: 2026-04-13T12:25 -->
+- [x] Modify `_handle_unicast()`: call `_try_notify_agent()` after `task_store.save()`, set `notification_sent` in task metadata before enqueue <!-- completed: 2026-04-13T12:25 -->
+- [x] Modify `_handle_broadcast()`: call `_try_notify_agent()` per recipient after save, track count, add `notifications_sent_count` to summary metadata <!-- completed: 2026-04-13T12:25 -->
 
 ### Step 4: `server.py` -- Response Format
 
