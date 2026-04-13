@@ -1,14 +1,17 @@
 {
   "name": "cafleet",
-  "version": "0.1.0",
-  "description": "A2A-native message broker CLI for coding agents. Register, send/receive messages, poll inbox, and discover peers.",
+  "version": "0.2.0",
+  "description": "A2A-native message broker CLI and design document orchestration skills for coding agents.",
   "author": {
     "name": "himkt"
   },
   "repository": "https://github.com/himkt/hikyaku",
   "license": "MIT",
-  "keywords": ["a2a", "messaging", "broker", "agents", "cli"],
+  "keywords": ["a2a", "messaging", "broker", "agents", "cli", "design-doc"],
   "skills": [
-    "./.claude/skills/cafleet"
+    "./.claude/skills/cafleet",
+    "./.claude/skills/cafleet-design-doc",
+    "./.claude/skills/cafleet-design-doc-create",
+    "./.claude/skills/cafleet-design-doc-execute"
   ]
 }

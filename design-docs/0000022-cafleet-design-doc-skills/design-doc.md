@@ -1,7 +1,7 @@
 # CAFleet-Native Design Document Orchestration Skills
 
 **Status**: Approved
-**Progress**: 4/19 tasks complete
+**Progress**: 6/19 tasks complete
 **Last Updated**: 2026-04-14
 
 ## Overview
@@ -628,8 +628,8 @@ Tool Discovery, Verification, Graceful Degradation workflows — unchanged logic
 
 ### Step 3: Plugin infrastructure
 
-- [ ] Update `.claude-plugin/plugin.json` — add new skill paths (including `cafleet-design-doc`), bump version to 0.2.0 <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet-monitoring/SKILL.md` — replace `SendMessage` references with `cafleet send` equivalents <!-- completed: -->
+- [x] Update `.claude-plugin/plugin.json` — add new skill paths (including `cafleet-design-doc`), bump version to 0.2.0 <!-- completed: 2026-04-14T00:35 -->
+- [x] Update `.claude/skills/cafleet-monitoring/SKILL.md` — replace `SendMessage` references with `cafleet send` equivalents <!-- completed: 2026-04-14T00:35 -->
 - [ ] Run `/sync-skills` to update `CLAUDE.md` and `.claude/CLAUDE.md` with new skill entries <!-- completed: -->
 
 ### Step 4: cafleet-design-doc-create SKILL.md
