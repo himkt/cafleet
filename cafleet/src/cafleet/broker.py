@@ -407,3 +407,336 @@ def verify_agent_session(agent_id: str, session_id: str) -> bool:
             )
         )
         return result.first() is not None
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers (messaging)
+# ---------------------------------------------------------------------------
+
+
+def _save_task(session, task_dict: dict) -> None:
+    """INSERT with UPSERT. Promotes indexed fields to columns.
+
+    Preserves created_at on re-save.
+    """
+    metadata = task_dict.get("metadata", {})
+    stmt = sqlite_insert(Task).values(
+        task_id=task_dict["id"],
+        context_id=task_dict["contextId"],
+        from_agent_id=metadata.get("fromAgentId", ""),
+        to_agent_id=metadata.get("toAgentId", ""),
+        type=metadata.get("type", ""),
+        created_at=_now_iso(),
+        status_state=task_dict["status"]["state"],
+        status_timestamp=task_dict["status"]["timestamp"],
+        origin_task_id=metadata.get("originTaskId"),
+        task_json=json.dumps(task_dict),
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["task_id"],
+        set_={
+            "status_state": stmt.excluded.status_state,
+            "status_timestamp": stmt.excluded.status_timestamp,
+            "origin_task_id": stmt.excluded.origin_task_id,
+            "task_json": stmt.excluded.task_json,
+        },
+    )
+    session.execute(stmt)
+
+
+def _read_task(session, task_id: str) -> dict | None:
+    """SELECT task_json by task_id. Returns parsed dict or None."""
+    row = session.execute(
+        select(Task.task_json).where(Task.task_id == task_id)
+    ).first()
+    if row is None:
+        return None
+    return json.loads(row[0])
+
+
+# ---------------------------------------------------------------------------
+# Messaging operations
+# ---------------------------------------------------------------------------
+
+
+def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
+    """Unicast. Returns {"task": <camelCase task dict>}.
+
+    Validation:
+      1. Destination is valid UUID
+      2. Destination agent exists and status='active'
+      3. Destination agent is in the same session
+    Creates task: status.state='input_required', context_id=destination.
+    """
+    # 1. Validate destination UUID
+    try:
+        uuid.UUID(to)
+    except ValueError:
+        raise ValueError(f"Invalid destination format: {to}")
+
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        with session.begin():
+            # 2. Destination agent exists and is active
+            dest_agent = session.execute(
+                select(Agent).where(
+                    Agent.agent_id == to,
+                    Agent.status == "active",
+                )
+            ).scalar_one_or_none()
+            if dest_agent is None:
+                raise ValueError(f"Destination agent not found: {to}")
+
+            # 3. Destination agent is in the same session
+            if dest_agent.session_id != session_id:
+                raise ValueError(
+                    f"Destination agent not in session: {to}"
+                )
+
+            now = _now_iso()
+            task_dict = {
+                "id": str(uuid.uuid4()),
+                "contextId": to,
+                "status": {
+                    "state": "input_required",
+                    "timestamp": now,
+                },
+                "artifacts": [
+                    {
+                        "artifactId": str(uuid.uuid4()),
+                        "parts": [{"kind": "text", "text": text}],
+                    }
+                ],
+                "metadata": {
+                    "fromAgentId": agent_id,
+                    "toAgentId": to,
+                    "type": "unicast",
+                },
+                "history": [],
+            }
+
+            _save_task(session, task_dict)
+
+    return {"task": task_dict}
+
+
+def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
+    """Broadcast. Returns [{"task": <summary task dict>}].
+
+    Lists active agents in session (excluding sender). Creates one delivery task
+    per recipient (type='unicast', originTaskId=summary_id) plus one summary
+    (type='broadcast_summary', context_id=sender).
+    """
+    summary_task_id = str(uuid.uuid4())
+
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        with session.begin():
+            # List active agents in session, excluding sender
+            rows = session.execute(
+                select(Agent.agent_id).where(
+                    Agent.session_id == session_id,
+                    Agent.status == "active",
+                    Agent.agent_id != agent_id,
+                )
+            ).all()
+            recipient_ids = [row[0] for row in rows]
+
+            # Create delivery tasks for each recipient
+            for recipient_id in recipient_ids:
+                now = _now_iso()
+                delivery_dict = {
+                    "id": str(uuid.uuid4()),
+                    "contextId": recipient_id,
+                    "status": {
+                        "state": "input_required",
+                        "timestamp": now,
+                    },
+                    "artifacts": [
+                        {
+                            "artifactId": str(uuid.uuid4()),
+                            "parts": [{"kind": "text", "text": text}],
+                        }
+                    ],
+                    "metadata": {
+                        "fromAgentId": agent_id,
+                        "toAgentId": recipient_id,
+                        "type": "unicast",
+                        "originTaskId": summary_task_id,
+                    },
+                    "history": [],
+                }
+                _save_task(session, delivery_dict)
+
+            # Create summary task
+            now = _now_iso()
+            summary_dict = {
+                "id": summary_task_id,
+                "contextId": agent_id,
+                "status": {
+                    "state": "completed",
+                    "timestamp": now,
+                },
+                "artifacts": [
+                    {
+                        "artifactId": str(uuid.uuid4()),
+                        "parts": [
+                            {
+                                "kind": "text",
+                                "text": f"Broadcast sent to {len(recipient_ids)} recipients",
+                            }
+                        ],
+                    }
+                ],
+                "metadata": {
+                    "fromAgentId": agent_id,
+                    "type": "broadcast_summary",
+                    "recipientCount": len(recipient_ids),
+                    "recipientIds": recipient_ids,
+                    "originTaskId": summary_task_id,
+                },
+                "history": [],
+            }
+            _save_task(session, summary_dict)
+
+    return [{"task": summary_dict}]
+
+
+def poll_tasks(
+    agent_id: str,
+    since: str | None = None,
+    page_size: int | None = None,
+    status: str | None = None,
+) -> list[dict]:
+    """Inbox query. Returns [<camelCase task dict>, ...].
+
+    SELECT WHERE context_id=agent_id, ORDER BY status_timestamp DESC.
+    Filters out type='broadcast_summary'.
+    """
+    stmt = (
+        select(Task.task_json)
+        .where(
+            Task.context_id == agent_id,
+            Task.type != "broadcast_summary",
+        )
+        .order_by(Task.status_timestamp.desc())
+    )
+
+    if since is not None:
+        stmt = stmt.where(Task.status_timestamp > since)
+    if status is not None:
+        stmt = stmt.where(Task.status_state == status)
+    if page_size is not None:
+        stmt = stmt.limit(page_size)
+
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        rows = session.execute(stmt).all()
+
+    return [json.loads(row[0]) for row in rows]
+
+
+def ack_task(agent_id: str, task_id: str) -> dict:
+    """ACK. Returns {"task": <updated task dict>}.
+
+    Verifies context_id == agent_id. Verifies state == 'input_required'.
+    Transitions to 'completed'.
+    """
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        with session.begin():
+            task_dict = _read_task(session, task_id)
+            if task_dict is None:
+                raise ValueError(f"Task {task_id} not found")
+
+            if task_dict["contextId"] != agent_id:
+                raise PermissionError("Only the recipient can ACK a task")
+
+            if task_dict["status"]["state"] != "input_required":
+                raise ValueError(
+                    f"Cannot ACK task in state {task_dict['status']['state']}"
+                )
+
+            now = _now_iso()
+            task_dict["status"] = {
+                "state": "completed",
+                "timestamp": now,
+            }
+
+            _save_task(session, task_dict)
+
+    return {"task": task_dict}
+
+
+def cancel_task(agent_id: str, task_id: str) -> dict:
+    """Cancel. Returns {"task": <updated task dict>}.
+
+    Verifies metadata.fromAgentId == agent_id. Verifies state == 'input_required'.
+    Transitions to 'canceled'.
+    """
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        with session.begin():
+            task_dict = _read_task(session, task_id)
+            if task_dict is None:
+                raise ValueError(f"Task {task_id} not found")
+
+            metadata = task_dict.get("metadata", {})
+            if metadata.get("fromAgentId") != agent_id:
+                raise PermissionError("Only the sender can cancel a task")
+
+            if task_dict["status"]["state"] != "input_required":
+                raise ValueError(
+                    f"Cannot cancel task in state {task_dict['status']['state']}"
+                )
+
+            now = _now_iso()
+            task_dict["status"] = {
+                "state": "canceled",
+                "timestamp": now,
+            }
+
+            _save_task(session, task_dict)
+
+    return {"task": task_dict}
+
+
+def get_task(session_id: str, task_id: str) -> dict:
+    """Get task. Returns {"task": <task dict>}.
+
+    Verifies fromAgentId or toAgentId belongs to session.
+    """
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        task_dict = _read_task(session, task_id)
+        if task_dict is None:
+            raise ValueError(f"Task {task_id} not found")
+
+        metadata = task_dict.get("metadata", {})
+        from_id = metadata.get("fromAgentId", "")
+        to_id = metadata.get("toAgentId", "")
+
+        # Verify at least one of the agents belongs to the given session
+        from_ok = (
+            session.execute(
+                select(Agent.agent_id).where(
+                    Agent.agent_id == from_id,
+                    Agent.session_id == session_id,
+                )
+            ).first()
+            is not None
+        )
+        to_ok = (
+            session.execute(
+                select(Agent.agent_id).where(
+                    Agent.agent_id == to_id,
+                    Agent.session_id == session_id,
+                )
+            ).first()
+            is not None
+        )
+
+        if not from_ok and not to_ok:
+            raise ValueError(f"Task {task_id} not found")
+
+    return {"task": task_dict}

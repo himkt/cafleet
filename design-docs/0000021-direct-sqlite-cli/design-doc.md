@@ -1,7 +1,7 @@
 # Direct SQLite CLI
 
 **Status**: Approved
-**Progress**: 11/30 tasks complete
+**Progress**: 14/30 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -483,9 +483,9 @@ Specific sections to update:
 
 ### Step 4: broker.py — messaging operations
 
-- [ ] Add internal helpers `_save_task` (UPSERT) and `_read_task` <!-- completed: -->
-- [ ] Add `send_message` with unicast validation and `broadcast_message` with fan-out <!-- completed: -->
-- [ ] Add `poll_tasks`, `ack_task`, `cancel_task`, `get_task` <!-- completed: -->
+- [x] Add internal helpers `_save_task` (UPSERT) and `_read_task` <!-- completed: 2026-04-13T13:55 -->
+- [x] Add `send_message` with unicast validation and `broadcast_message` with fan-out <!-- completed: 2026-04-13T13:55 -->
+- [x] Add `poll_tasks`, `ack_task`, `cancel_task`, `get_task` <!-- completed: 2026-04-13T13:55 -->
 
 ### Step 5: broker.py — WebUI query operations
 
