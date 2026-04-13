@@ -89,6 +89,31 @@ def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
         raise
 
 
+def send_poll_trigger(*, target_pane_id: str, agent_id: str) -> bool:
+    """Send a cafleet poll trigger to the given tmux pane.
+
+    Returns True on success, False if tmux is unavailable or the pane
+    no longer exists. Never raises — internally calls _run() and catches
+    TmuxError, returning False on any failure.
+    """
+    if shutil.which("tmux") is None:
+        return False
+    try:
+        _run(
+            [
+                "tmux",
+                "send-keys",
+                "-t",
+                target_pane_id,
+                f"cafleet poll --agent-id {agent_id}",
+                "Enter",
+            ]
+        )
+    except TmuxError:
+        return False
+    return True
+
+
 def capture_pane(*, target_pane_id: str, lines: int = 80) -> str:
     """Capture the last `lines` lines of the target pane's terminal buffer.
 

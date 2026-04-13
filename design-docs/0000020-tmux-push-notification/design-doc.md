@@ -1,7 +1,7 @@
 # tmux Push Notification
 
 **Status**: Approved
-**Progress**: 3/15 tasks complete
+**Progress**: 4/15 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -171,7 +171,7 @@ return result
 
 ### Step 2: `tmux.py` -- Add `send_poll_trigger()`
 
-- [ ] Add `send_poll_trigger(*, target_pane_id: str, agent_id: str) -> bool` function that runs `tmux send-keys` and returns success/failure without raising <!-- completed: -->
+- [x] Add `send_poll_trigger(*, target_pane_id: str, agent_id: str) -> bool` function that runs `tmux send-keys` and returns success/failure without raising <!-- completed: 2026-04-13T12:18 -->
 
 ### Step 3: `executor.py` -- Notification Logic
 
