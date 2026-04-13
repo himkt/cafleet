@@ -1,7 +1,7 @@
 # CAFleet-Native Design Document Orchestration Skills
 
 **Status**: Approved
-**Progress**: 2/19 tasks complete
+**Progress**: 4/19 tasks complete
 **Last Updated**: 2026-04-14
 
 ## Overview
@@ -623,8 +623,8 @@ Tool Discovery, Verification, Graceful Degradation workflows — unchanged logic
 
 ### Step 2: cafleet-design-doc template skill
 
-- [ ] Create `.claude/skills/cafleet-design-doc/SKILL.md` (copy from `~/.claude/skills/design-doc/SKILL.md`, set `name: cafleet-design-doc`) <!-- completed: -->
-- [ ] Copy `template.md` and `guidelines.md` from `~/.claude/skills/design-doc/` to `.claude/skills/cafleet-design-doc/` <!-- completed: -->
+- [x] Create `.claude/skills/cafleet-design-doc/SKILL.md` (copy from `~/.claude/skills/design-doc/SKILL.md`, set `name: cafleet-design-doc`) <!-- completed: 2026-04-14T00:20 -->
+- [x] Copy `template.md` and `guidelines.md` from `~/.claude/skills/design-doc/` to `.claude/skills/cafleet-design-doc/` <!-- completed: 2026-04-14T00:20 -->
 
 ### Step 3: Plugin infrastructure
 
