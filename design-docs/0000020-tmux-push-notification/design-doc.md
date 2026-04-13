@@ -1,7 +1,7 @@
 # tmux Push Notification
 
 **Status**: Approved
-**Progress**: 8/15 tasks complete
+**Progress**: 9/15 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -182,7 +182,7 @@ return result
 
 ### Step 4: `server.py` -- Response Format
 
-- [ ] Update `_handle_send_message()` to extract `notification_sent` / `notifications_sent_count` from task metadata and include at response top level <!-- completed: -->
+- [x] Update `_handle_send_message()` to extract `notification_sent` / `notifications_sent_count` from task metadata and include at response top level <!-- completed: 2026-04-13T12:30 -->
 
 ### Step 5: `cli.py` + `output.py` -- CLI Output
 

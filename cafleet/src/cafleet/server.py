@@ -134,7 +134,15 @@ async def _handle_send_message(
     if last_task is None:
         raise ValueError("No task produced by executor")
 
-    return {"task": _task_to_dict(last_task)}
+    result = {"task": _task_to_dict(last_task)}
+    if last_task.metadata:
+        if "notification_sent" in last_task.metadata:
+            result["notification_sent"] = last_task.metadata["notification_sent"]
+        if "notifications_sent_count" in last_task.metadata:
+            result["notifications_sent_count"] = last_task.metadata[
+                "notifications_sent_count"
+            ]
+    return result
 
 
 async def _handle_get_task(
