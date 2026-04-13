@@ -1,7 +1,7 @@
 # Direct SQLite CLI
 
 **Status**: Approved
-**Progress**: 5/30 tasks complete
+**Progress**: 8/30 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -471,9 +471,9 @@ Specific sections to update:
 
 ### Step 2: Sync engine infrastructure
 
-- [ ] Add `PRAGMA busy_timeout=5000` to event listener in `db/engine.py` (rename to `_enable_sqlite_pragmas`) <!-- completed: -->
-- [ ] Add `get_sync_engine()`, `get_sync_sessionmaker()` to `db/engine.py` <!-- completed: -->
-- [ ] Remove async engine functions (`get_engine`, `get_sessionmaker`, `dispose_engine`) and `aiosqlite` import from `db/engine.py` <!-- completed: -->
+- [x] Add `PRAGMA busy_timeout=5000` to event listener in `db/engine.py` (rename to `_enable_sqlite_pragmas`) <!-- completed: 2026-04-13T13:42 -->
+- [x] Add `get_sync_engine()`, `get_sync_sessionmaker()` to `db/engine.py` <!-- completed: 2026-04-13T13:42 -->
+- [x] Remove async engine functions (`get_engine`, `get_sessionmaker`, `dispose_engine`) and `aiosqlite` import from `db/engine.py` <!-- completed: 2026-04-13T13:42 -->
 
 ### Step 3: broker.py — session + registry operations
 
