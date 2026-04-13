@@ -1,7 +1,7 @@
 # tmux Push Notification
 
 **Status**: Approved
-**Progress**: 11/15 tasks complete
+**Progress**: 15/15 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -191,7 +191,7 @@ return result
 
 ### Step 6: Tests
 
-- [ ] Unit test `send_poll_trigger()`: success case, pane-not-found, tmux binary missing <!-- completed: -->
-- [ ] Unit test executor notification paths: unicast with/without placement, self-send skip, broadcast with mixed placements <!-- completed: -->
-- [ ] Unit test `_handle_send_message()` response includes `notification_sent` (unicast) and `notifications_sent_count` (broadcast) at top level <!-- completed: -->
-- [ ] Unit test CLI output: `send` shows `(push notification sent)` when true, `broadcast` shows notification count <!-- completed: -->
+- [x] Unit test `send_poll_trigger()`: success case, pane-not-found, tmux binary missing <!-- completed: 2026-04-13T12:12 -->
+- [x] Unit test executor notification paths: unicast with/without placement, self-send skip, broadcast with mixed placements <!-- completed: 2026-04-13T12:16 -->
+- [x] Unit test `_handle_send_message()` response includes `notification_sent` (unicast) and `notifications_sent_count` (broadcast) at top level <!-- completed: 2026-04-13T12:22 -->
+- [x] Unit test CLI output: `send` shows `(push notification sent)` when true, `broadcast` shows notification count <!-- completed: 2026-04-13T12:26 -->

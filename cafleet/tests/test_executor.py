@@ -900,9 +900,7 @@ class TestTryNotifyAgent:
 
         monkeypatch.setattr(notify_env["store"], "get_placement", spy_get_placement)
 
-        result = await executor._try_notify_agent(
-            agent["agent_id"], agent["agent_id"]
-        )
+        result = await executor._try_notify_agent(agent["agent_id"], agent["agent_id"])
         assert result is False
         assert not lookup_called, "get_placement should not be called for self-send"
 
@@ -929,9 +927,7 @@ class TestTryNotifyAgent:
         assert len(trigger_calls) == 1
         assert trigger_calls[0] == ("%7", agent["agent_id"])
 
-    async def test_agent_without_placement_returns_false(
-        self, notify_env, monkeypatch
-    ):
+    async def test_agent_without_placement_returns_false(self, notify_env, monkeypatch):
         """Agent without any placement row returns False."""
         executor = notify_env["executor"]
         director = notify_env["director"]
@@ -950,11 +946,11 @@ class TestTryNotifyAgent:
             agent["agent_id"], director["agent_id"]
         )
         assert result is False
-        assert not trigger_called, "send_poll_trigger should not be called without placement"
+        assert not trigger_called, (
+            "send_poll_trigger should not be called without placement"
+        )
 
-    async def test_agent_with_null_pane_id_returns_false(
-        self, notify_env, monkeypatch
-    ):
+    async def test_agent_with_null_pane_id_returns_false(self, notify_env, monkeypatch):
         """Agent with placement but tmux_pane_id=None (pending) returns False."""
         executor = notify_env["executor"]
         director = notify_env["director"]
@@ -973,7 +969,9 @@ class TestTryNotifyAgent:
             agent["agent_id"], director["agent_id"]
         )
         assert result is False
-        assert not trigger_called, "send_poll_trigger should not be called with null pane_id"
+        assert not trigger_called, (
+            "send_poll_trigger should not be called with null pane_id"
+        )
 
 
 # ---------------------------------------------------------------------------

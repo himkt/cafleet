@@ -151,6 +151,7 @@ class BrokerExecutor(AgentExecutor):
 
         await self._task_store.save(delivery_task)
         notification_sent = await self._try_notify_agent(destination, from_agent_id)
+        assert delivery_task.metadata is not None
         delivery_task.metadata["notification_sent"] = notification_sent
         await event_queue.enqueue_event(delivery_task)
 

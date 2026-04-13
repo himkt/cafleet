@@ -35,9 +35,7 @@ async def _create_test_session(
     async with db_sessionmaker() as session:
         async with session.begin():
             session.add(
-                SessionModel(
-                    session_id=session_id, label=None, created_at=created_at
-                )
+                SessionModel(session_id=session_id, label=None, created_at=created_at)
             )
     return session_id
 
@@ -230,9 +228,7 @@ class TestResponseBackwardCompatibility:
         ack_resp = await env["client"].post(
             "/",
             json=ack_payload,
-            headers=_auth(
-                env["session_id"], env["recipient_no_placement"]["agent_id"]
-            ),
+            headers=_auth(env["session_id"], env["recipient_no_placement"]["agent_id"]),
         )
 
         assert ack_resp.status_code == 200
