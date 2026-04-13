@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import cast
 
 import click
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, delete, exists, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
@@ -699,6 +699,206 @@ def cancel_task(agent_id: str, task_id: str) -> dict:
             _save_task(session, task_dict)
 
     return {"task": task_dict}
+
+
+# ---------------------------------------------------------------------------
+# WebUI query operations
+# ---------------------------------------------------------------------------
+
+
+def list_session_agents(session_id: str) -> list[dict]:
+    """Active agents + deregistered agents that have tasks.
+
+    Returns list of dicts with keys: agent_id, name, description, status,
+    registered_at.  Deregistered agents appear only when they are referenced
+    by at least one task (as sender or recipient).
+    """
+    has_tasks = exists().where(
+        or_(
+            Task.context_id == Agent.agent_id,
+            Task.from_agent_id == Agent.agent_id,
+        )
+    )
+    stmt = select(
+        Agent.agent_id,
+        Agent.name,
+        Agent.description,
+        Agent.status,
+        Agent.registered_at,
+    ).where(
+        Agent.session_id == session_id,
+        or_(
+            Agent.status == "active",
+            and_(Agent.status == "deregistered", has_tasks),
+        ),
+    )
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        rows = session.execute(stmt).all()
+    return [
+        {
+            "agent_id": row.agent_id,
+            "name": row.name,
+            "description": row.description,
+            "status": row.status,
+            "registered_at": row.registered_at,
+        }
+        for row in rows
+    ]
+
+
+def list_inbox(agent_id: str) -> list[dict]:
+    """Inbox tasks as raw row dicts.
+
+    SELECT WHERE context_id=agent_id, filters broadcast_summary,
+    ordered by status_timestamp DESC.
+    """
+    stmt = (
+        select(
+            Task.task_id,
+            Task.context_id,
+            Task.from_agent_id,
+            Task.to_agent_id,
+            Task.type,
+            Task.created_at,
+            Task.status_state,
+            Task.status_timestamp,
+            Task.origin_task_id,
+            Task.task_json,
+        )
+        .where(
+            Task.context_id == agent_id,
+            Task.type != "broadcast_summary",
+        )
+        .order_by(Task.status_timestamp.desc())
+    )
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        rows = session.execute(stmt).all()
+    return [
+        {
+            "task_id": row.task_id,
+            "context_id": row.context_id,
+            "from_agent_id": row.from_agent_id,
+            "to_agent_id": row.to_agent_id,
+            "type": row.type,
+            "created_at": row.created_at,
+            "status_state": row.status_state,
+            "status_timestamp": row.status_timestamp,
+            "origin_task_id": row.origin_task_id,
+            "task_json": row.task_json,
+        }
+        for row in rows
+    ]
+
+
+def list_sent(agent_id: str) -> list[dict]:
+    """Sent tasks as raw row dicts.
+
+    SELECT WHERE from_agent_id=agent_id, filters broadcast_summary,
+    ordered by status_timestamp DESC.
+    """
+    stmt = (
+        select(
+            Task.task_id,
+            Task.context_id,
+            Task.from_agent_id,
+            Task.to_agent_id,
+            Task.type,
+            Task.created_at,
+            Task.status_state,
+            Task.status_timestamp,
+            Task.origin_task_id,
+            Task.task_json,
+        )
+        .where(
+            Task.from_agent_id == agent_id,
+            Task.type != "broadcast_summary",
+        )
+        .order_by(Task.status_timestamp.desc())
+    )
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        rows = session.execute(stmt).all()
+    return [
+        {
+            "task_id": row.task_id,
+            "context_id": row.context_id,
+            "from_agent_id": row.from_agent_id,
+            "to_agent_id": row.to_agent_id,
+            "type": row.type,
+            "created_at": row.created_at,
+            "status_state": row.status_state,
+            "status_timestamp": row.status_timestamp,
+            "origin_task_id": row.origin_task_id,
+            "task_json": row.task_json,
+        }
+        for row in rows
+    ]
+
+
+def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
+    """Session-wide timeline. Returns structured entries.
+
+    Each entry: {"task": <parsed dict>, "origin_task_id": ..., "created_at": ...}.
+    Filters broadcast_summary. Scoped to session via JOIN on from_agent_id.
+    Ordered by status_timestamp DESC.
+    """
+    stmt = (
+        select(
+            Task.task_id,
+            Task.origin_task_id,
+            Task.created_at,
+            Task.status_timestamp,
+            Task.task_json,
+        )
+        .join(Agent, Task.from_agent_id == Agent.agent_id)
+        .where(
+            Agent.session_id == session_id,
+            Task.type != "broadcast_summary",
+        )
+        .order_by(Task.status_timestamp.desc())
+        .limit(limit)
+    )
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        rows = session.execute(stmt).all()
+    return [
+        {
+            "task": json.loads(row.task_json),
+            "origin_task_id": row.origin_task_id,
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
+
+
+def get_agent_names(agent_ids: list[str]) -> dict[str, str]:
+    """Batch lookup: {agent_id: name}. Includes deregistered agents."""
+    if not agent_ids:
+        return {}
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        rows = session.execute(
+            select(Agent.agent_id, Agent.name).where(
+                Agent.agent_id.in_(agent_ids)
+            )
+        ).all()
+    return {row.agent_id: row.name for row in rows}
+
+
+def get_task_created_ats(task_ids: list[str]) -> dict[str, str]:
+    """Batch lookup: {task_id: created_at}."""
+    if not task_ids:
+        return {}
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        rows = session.execute(
+            select(Task.task_id, Task.created_at).where(
+                Task.task_id.in_(task_ids)
+            )
+        ).all()
+    return {row.task_id: row.created_at for row in rows}
 
 
 def get_task(session_id: str, task_id: str) -> dict:

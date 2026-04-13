@@ -1,7 +1,7 @@
 # Direct SQLite CLI
 
 **Status**: Approved
-**Progress**: 14/30 tasks complete
+**Progress**: 16/30 tasks complete
 **Last Updated**: 2026-04-12
 
 ## Overview
@@ -489,8 +489,8 @@ Specific sections to update:
 
 ### Step 5: broker.py — WebUI query operations
 
-- [ ] Add `list_session_agents` (active + deregistered with tasks) <!-- completed: -->
-- [ ] Add `list_inbox`, `list_sent`, `list_timeline`, `get_agent_names`, `get_task_created_ats` <!-- completed: -->
+- [x] Add `list_session_agents` (active + deregistered with tasks) <!-- completed: 2026-04-13T14:10 -->
+- [x] Add `list_inbox`, `list_sent`, `list_timeline`, `get_agent_names`, `get_task_created_ats` <!-- completed: 2026-04-13T14:10 -->
 
 ### Step 6: CLI rewrite
 
