@@ -189,7 +189,7 @@ The injected text lands in the coding agent's input prompt. If the agent is idle
 - **Silent failure**: Missing placements, null `tmux_pane_id`, dead panes, and absent `tmux` binary all result in `False` — no exceptions propagate to the caller.
 - **No `TMUX` env var required**: `tmux send-keys -t <pane>` works from any process on the same host as long as the tmux server socket is accessible.
 
-**Response annotations**: Unicast responses include a top-level `notification_sent` boolean. Broadcast summary tasks include `notifications_sent_count` in their metadata, reflecting how many recipient panes were successfully triggered.
+**Response annotations**: Unicast responses include a top-level `notification_sent` boolean. Broadcast summary tasks include `notificationsSentCount` in their metadata, reflecting how many recipient panes were successfully triggered; the top-level response exposes this value as `notifications_sent_count`.
 
 ## Key Design Decisions
 

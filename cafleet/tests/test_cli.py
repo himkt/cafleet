@@ -1158,7 +1158,7 @@ SAMPLE_BROADCAST_RESULT_WITH_COUNT = [
                 "fromAgentId": AGENT_ID,
                 "type": "broadcast_summary",
                 "recipientCount": 3,
-                "notifications_sent_count": 2,
+                "notificationsSentCount": 2,
             },
         },
         "notifications_sent_count": 2,
