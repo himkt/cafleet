@@ -255,11 +255,11 @@ After the Drafter reports a completed draft:
    ```
 4. Wait for the Drafter's revision report, then loop back to step 1 (re-route to Reviewer).
 5. Repeat until the Reviewer explicitly signals `APPROVED - Ready for user review.`
-6. **Iteration limit**: Aim for 2–3 rounds. If not converging, proceed to Step 4 with a note about remaining issues.
+6. **Iteration limit**: Aim for 2–3 rounds. If not converging, escalate to the user: summarize the remaining issues at a high level and use `AskUserQuestion` to ask whether to continue iterating or abort. Do not proceed to Step 4 until the Reviewer has approved.
 
 ### Step 4: Present to User (Director)
 
-Once the Reviewer approves, present a summary (including file path) and use `AskUserQuestion`:
+Only after the Reviewer explicitly approves, present a summary (including file path) and use `AskUserQuestion`:
 
 | Option | Label | Description | Behavior |
 |:--|:--|:--|:--|
@@ -288,7 +288,7 @@ No round limit — loop continues until approved or aborted.
 
 1. Instruct the Drafter to finalize:
    ```bash
-   cafleet send --agent-id $DIRECTOR_ID --to $DRAFTER_ID --text "User approved. Please finalize: update Status to Approved/Draft as appropriate, verify implementation steps are actionable, then report done."
+   cafleet send --agent-id $DIRECTOR_ID --to $DRAFTER_ID --text "User approved. Please finalize: set Status to Approved, refresh Last Updated, bump the Progress header field if present in the template, verify implementation steps are actionable, then report done."
    ```
    Wait for the Drafter's confirmation.
 
@@ -306,5 +306,3 @@ No round limit — loop continues until approved or aborted.
    ```
 
 No `TeamDelete` equivalent is needed — the CAFleet session persists for audit purposes so the message history remains inspectable in the admin WebUI.
-
-$ARGUMENTS

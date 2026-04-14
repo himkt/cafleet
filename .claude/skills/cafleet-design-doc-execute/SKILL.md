@@ -461,5 +461,3 @@ No round limit — the loop continues until the user approves or aborts.
    ```
 
 No `TeamDelete` equivalent is needed — the CAFleet session persists for audit purposes so the message history remains inspectable in the admin WebUI.
-
-$ARGUMENTS
