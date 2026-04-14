@@ -1,7 +1,7 @@
 # CAFleet-Native Design Document Orchestration Skills
 
 **Status**: Approved
-**Progress**: 11/19 tasks complete
+**Progress**: 15/19 tasks complete
 **Last Updated**: 2026-04-14
 
 ## Overview
@@ -648,10 +648,10 @@ Tool Discovery, Verification, Graceful Degradation workflows — unchanged logic
 
 ### Step 7: cafleet-design-doc-execute role files
 
-- [ ] Create `roles/director.md` — CAFleet-adapted Director role for execute workflow <!-- completed: -->
-- [ ] Create `roles/programmer.md` — CAFleet-adapted Programmer role with communication protocol <!-- completed: -->
-- [ ] Create `roles/tester.md` — CAFleet-adapted Tester role with communication protocol <!-- completed: -->
-- [ ] Create `roles/verifier.md` — CAFleet-adapted Verifier role with communication protocol <!-- completed: -->
+- [x] Create `roles/director.md` — CAFleet-adapted Director role for execute workflow <!-- completed: 2026-04-14T01:45 -->
+- [x] Create `roles/programmer.md` — CAFleet-adapted Programmer role with communication protocol <!-- completed: 2026-04-14T01:45 -->
+- [x] Create `roles/tester.md` — CAFleet-adapted Tester role with communication protocol <!-- completed: 2026-04-14T01:45 -->
+- [x] Create `roles/verifier.md` — CAFleet-adapted Verifier role with communication protocol <!-- completed: 2026-04-14T01:45 -->
 
 ### Step 8: Verification
 
