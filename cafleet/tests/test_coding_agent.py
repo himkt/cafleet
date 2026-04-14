@@ -97,7 +97,10 @@ class TestBuildCommand:
         from cafleet.coding_agent import CodingAgentConfig
 
         config = CodingAgentConfig(name="test", binary="agent")
-        prompt = "Review PR #42 and post feedback. Use $CAFLEET_AGENT_ID."
+        prompt = (
+            "Review PR #42 and post feedback. "
+            "Use --agent-id 7ba91234-5678-90ab-cdef-112233445566."
+        )
         result = config.build_command(prompt)
         assert result == ["agent", prompt]
         assert len(result) == 2
@@ -206,21 +209,34 @@ class TestClaudeConfig:
 
         assert "Load Skill(cafleet)" in CLAUDE.default_prompt_template
 
-    def test_prompt_template_contains_agent_id_placeholder(self):
-        """Claude prompt template references $CAFLEET_AGENT_ID."""
+    def test_prompt_template_uses_format_placeholders_for_ids(self):
+        """Claude prompt template uses {session_id}/{agent_id} format placeholders.
+
+        Design doc 0000023: shell-expansion placeholders like $CAFLEET_AGENT_ID
+        are replaced by Python ``str.format`` placeholders so the spawn site
+        can bake literal UUIDs into the prompt text. The template must no
+        longer reference the old shell-variable form.
+        """
         from cafleet.coding_agent import CLAUDE
 
-        assert "$CAFLEET_AGENT_ID" in CLAUDE.default_prompt_template
+        assert "{session_id}" in CLAUDE.default_prompt_template
+        assert "{agent_id}" in CLAUDE.default_prompt_template
+        assert "$CAFLEET_AGENT_ID" not in CLAUDE.default_prompt_template
+        assert "$CAFLEET_SESSION_ID" not in CLAUDE.default_prompt_template
 
     def test_prompt_template_has_format_placeholders(self):
-        """Claude prompt template has {director_name} and {director_agent_id} placeholders."""
+        """Claude template accepts session_id/agent_id/director_name/director_agent_id."""
         from cafleet.coding_agent import CLAUDE
 
-        # Verify template can be formatted with the expected keys
+        # Verify template can be formatted with all four expected keys
         result = CLAUDE.default_prompt_template.format(
+            session_id="550e8400-e29b-41d4-a716-446655440000",
+            agent_id="7ba91234-5678-90ab-cdef-112233445566",
             director_name="Alice",
             director_agent_id="dir-001",
         )
+        assert "550e8400-e29b-41d4-a716-446655440000" in result
+        assert "7ba91234-5678-90ab-cdef-112233445566" in result
         assert "Alice" in result
         assert "dir-001" in result
 
@@ -250,31 +266,53 @@ class TestCodexConfig:
 
         assert "Skill(" not in CODEX.default_prompt_template
 
-    def test_prompt_template_contains_agent_id_placeholder(self):
-        """Codex prompt template references $CAFLEET_AGENT_ID."""
+    def test_prompt_template_uses_format_placeholders_for_ids(self):
+        """Codex prompt template uses {session_id}/{agent_id} format placeholders.
+
+        Design doc 0000023: same migration as CLAUDE — shell-variable form
+        (``$CAFLEET_AGENT_ID``) is replaced by ``str.format`` placeholders.
+        """
         from cafleet.coding_agent import CODEX
 
-        assert "$CAFLEET_AGENT_ID" in CODEX.default_prompt_template
+        assert "{session_id}" in CODEX.default_prompt_template
+        assert "{agent_id}" in CODEX.default_prompt_template
+        assert "$CAFLEET_AGENT_ID" not in CODEX.default_prompt_template
+        assert "$CAFLEET_SESSION_ID" not in CODEX.default_prompt_template
 
     def test_prompt_template_has_format_placeholders(self):
-        """Codex prompt template has {director_name} and {director_agent_id} placeholders."""
+        """Codex template accepts session_id/agent_id/director_name/director_agent_id."""
         from cafleet.coding_agent import CODEX
 
         result = CODEX.default_prompt_template.format(
+            session_id="550e8400-e29b-41d4-a716-446655440000",
+            agent_id="7ba91234-5678-90ab-cdef-112233445566",
             director_name="Bob",
             director_agent_id="dir-002",
         )
+        assert "550e8400-e29b-41d4-a716-446655440000" in result
+        assert "7ba91234-5678-90ab-cdef-112233445566" in result
         assert "Bob" in result
         assert "dir-002" in result
 
     def test_prompt_template_contains_explicit_cli_instructions(self):
-        """Codex template includes explicit cafleet CLI usage (poll, ack, send)."""
+        """Codex template includes explicit cafleet CLI usage (poll, ack, send).
+
+        Design doc 0000023 (Copilot review fix): ``--session-id`` is a
+        root-group global option (before the subcommand); ``--agent-id`` is
+        a per-subcommand option (after the subcommand). The template must
+        emit the exact literal form click accepts so that Claude Code's
+        ``permissions.allow`` can match it as a literal string.
+        """
         from cafleet.coding_agent import CODEX
 
         template = CODEX.default_prompt_template
-        assert "cafleet poll" in template
-        assert "cafleet ack" in template
-        assert "cafleet send" in template
+        assert (
+            "cafleet --session-id {session_id} poll --agent-id {agent_id}" in template
+        )
+        assert "cafleet --session-id {session_id} ack --agent-id {agent_id}" in template
+        assert (
+            "cafleet --session-id {session_id} send --agent-id {agent_id}" in template
+        )
 
 
 # ---------------------------------------------------------------------------

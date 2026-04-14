@@ -18,59 +18,68 @@ Use the `cafleet` CLI to register as an agent, send and receive messages, and di
 - Spawning and managing member agents in tmux panes (Director only)
 - Inspecting a stalled member's terminal output (Director only)
 
-## Environment Variables
+## Required Flags
 
-The CLI reads environment variables for configuration. There are no `--url` / `--session-id` flags.
+Every `cafleet` invocation that touches agents or messages must carry two literal UUIDs as flags. There is no env-var fallback.
 
-- `CAFLEET_SESSION_ID` — Session namespace ID created via `cafleet session create`. The CLI exits with `Error: CAFLEET_SESSION_ID environment variable is required. Create a session with 'cafleet session create'.` if this is not set.
-- `CAFLEET_DATABASE_URL` — SQLite database URL (optional; default: `sqlite:///~/.local/share/cafleet/registry.db`).
+| Flag | Scope | Required for | Notes |
+|---|---|---|---|
+| `--session-id <uuid>` | global (placed **before** the subcommand) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member *`) | UUID of the session created via `cafleet session create`. Silently accepted (and ignored) on `db init` / `session *`. |
+| `--agent-id <uuid>` | per-subcommand (placed **after** the subcommand name) | every subcommand **except** `register` | The acting agent's UUID. `register` returns the new `agent_id` — record it and pass it to every subsequent command. |
 
-CLI commands access SQLite directly — no running server is required.
+If `--session-id` is missing on a subcommand that needs it, the CLI exits with `Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id.`
 
-## Agent ID
+> **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --session-id <uuid> <subcmd> --agent-id <uuid>` invocation matches a single allow pattern across every subcommand for that session. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — never store them in shell variables.
 
-Every command **except `register`** requires `--agent-id <id>`. `register` returns the new `agent_id` — save it and pass it to every subsequent command.
+The only environment variable the CLI still reads is:
+
+- `CAFLEET_DATABASE_URL` — SQLite database URL (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db` with `~` expanded at load time). When setting `CAFLEET_DATABASE_URL` yourself, use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs.
+
+## Placeholder convention used below
+
+In every example below, substitute the literal UUID strings printed by `cafleet session create` / `cafleet register`. Angle-bracket tokens are placeholders, **not** shell variables:
+
+- `<session-id>` — the session UUID printed by `cafleet session create`
+- `<my-agent-id>` — the UUID returned by your own `cafleet ... register` call
+- `<director-agent-id>` — the Director's UUID (handed to you in your spawn prompt if you are a member)
+- `<member-agent-id>` — a target member's UUID (from `member create` / `member list`)
+- `<target-agent-id>` — the recipient of a unicast message
+- `<task-id>` — the task UUID printed by `poll` / `send`
 
 ## Global Options
 
-Only `--json` exists, and it must be placed **before** the subcommand:
+Only `--json` and `--session-id` are global (before the subcommand). `--agent-id` is a per-subcommand option and must appear **after** the subcommand name:
 
 ```bash
-cafleet --json register --name "My Agent" --description "..."
-cafleet --json agents --agent-id <agent-id>
+cafleet --session-id <session-id> --json register --name "My Agent" --description "..."
+cafleet --session-id <session-id> --json agents --agent-id <my-agent-id>
 ```
 
-`cafleet agents --json` will fail with `No such option: --json`.
+`cafleet agents --json` will fail with `No such option: --json`. Same for `--session-id` placed after the subcommand — keep it before. `--agent-id` must come **after** the subcommand, not before it.
 
 ## Command Reference
 
-### Env
-
-Print the current `CAFLEET_DATABASE_URL` and `CAFLEET_SESSION_ID` values from the environment. Useful for verifying configuration before running other commands.
-
-```bash
-cafleet env
-# CAFLEET_DATABASE_URL=sqlite:///~/.local/share/cafleet/registry.db
-# CAFLEET_SESSION_ID=550e8400-e29b-41d4-a716-446655440000
-```
-
 ### Register
 
-Register a new agent with the broker. `CAFLEET_SESSION_ID` must be set.
+Register a new agent with the broker.
 
 ```bash
-cafleet register --name "My Agent" --description "What this agent does"
-cafleet register --name "My Agent" --description "Frontend dev" --skills '[{"id":"react","name":"React Dev","description":"React/TS"}]'
+cafleet --session-id <session-id> register \
+  --name "My Agent" --description "What this agent does"
+
+cafleet --session-id <session-id> register \
+  --name "My Agent" --description "Frontend dev" \
+  --skills '[{"id":"react","name":"React Dev","description":"React/TS"}]'
 ```
 
-Returns the newly created `agent_id`. Record it; every other command needs it via `--agent-id`.
+Returns the newly created `agent_id`. Record it; every other command needs it via `--agent-id` (placed after the subcommand name).
 
 #### Self-registration recipe
 
 Use `--json` so the output is machine-parseable, and capture `agent_id` for every subsequent call:
 
 ```bash
-cafleet --json register \
+cafleet --session-id <session-id> --json register \
   --name "<short-label>" \
   --description "<one-sentence purpose>"
 ```
@@ -91,15 +100,15 @@ Rules:
 - **Description**: one sentence stating who the agent is and what it is for.
 - **Capture `agent_id` immediately.** It is required for every subsequent call; losing it forces re-registration.
 - Non-`--json` output prints `Agent registered successfully!` followed by `  agent_id:  <uuid>` and `  name:      <name>`. Parse the `agent_id:` line if `--json` is not an option.
-- Call `cafleet deregister --agent-id <id>` at end of session so stale registrations do not accumulate.
+- Call `cafleet --session-id <session-id> deregister --agent-id <my-agent-id>` at end of session so stale registrations do not accumulate.
 
 ### List Agents
 
 List all registered agents, or get detail for a specific agent.
 
 ```bash
-cafleet agents --agent-id <self-agent-id>
-cafleet agents --agent-id <self-agent-id> --id <target-agent-id>
+cafleet --session-id <session-id> agents --agent-id <my-agent-id>
+cafleet --session-id <session-id> agents --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
 ### Send (Unicast)
@@ -107,17 +116,19 @@ cafleet agents --agent-id <self-agent-id> --id <target-agent-id>
 Send a message to a specific agent by ID.
 
 ```bash
-cafleet send --agent-id <self-agent-id> --to <target-agent-id> --text "Did the API schema change?"
+cafleet --session-id <session-id> send --agent-id <my-agent-id> \
+  --to <target-agent-id> --text "Did the API schema change?"
 ```
 
-After persisting the message, the broker attempts a tmux push notification to the recipient's pane (`tmux send-keys` with `cafleet poll`). The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome.
+After persisting the message, the broker attempts a tmux push notification to the recipient's pane (`tmux send-keys` with `cafleet --session-id <session-id> poll --agent-id <recipient-id>`). The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome.
 
 ### Broadcast
 
 Send a message to all registered agents (except self).
 
 ```bash
-cafleet broadcast --agent-id <self-agent-id> --text "Build failed on main branch"
+cafleet --session-id <session-id> broadcast --agent-id <my-agent-id> \
+  --text "Build failed on main branch"
 ```
 
 After persisting each delivery, the broker attempts a tmux push notification per recipient. The broadcast summary response includes `notifications_sent_count` indicating how many panes were successfully triggered. Self-sends and missing/dead panes are skipped silently.
@@ -127,9 +138,9 @@ After persisting each delivery, the broker attempts a tmux push notification per
 Poll for incoming messages. Returns tasks addressed to this agent.
 
 ```bash
-cafleet poll --agent-id <self-agent-id>
-cafleet poll --agent-id <self-agent-id> --since "2026-03-28T12:00:00Z"
-cafleet poll --agent-id <self-agent-id> --page-size 10
+cafleet --session-id <session-id> poll --agent-id <my-agent-id>
+cafleet --session-id <session-id> poll --agent-id <my-agent-id> --since "2026-03-28T12:00:00Z"
+cafleet --session-id <session-id> poll --agent-id <my-agent-id> --page-size 10
 ```
 
 ### Acknowledge (ACK)
@@ -137,7 +148,7 @@ cafleet poll --agent-id <self-agent-id> --page-size 10
 Acknowledge receipt of a message. Moves the task from INPUT_REQUIRED to COMPLETED.
 
 ```bash
-cafleet ack --agent-id <self-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 ### Cancel (Retract)
@@ -145,7 +156,7 @@ cafleet ack --agent-id <self-agent-id> --task-id <task-id>
 Cancel a sent message that hasn't been acknowledged yet. Only the sender can cancel.
 
 ```bash
-cafleet cancel --agent-id <self-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> cancel --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 ### Get Task
@@ -153,7 +164,7 @@ cafleet cancel --agent-id <self-agent-id> --task-id <task-id>
 Get details of a specific task by ID.
 
 ```bash
-cafleet get-task --agent-id <self-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> get-task --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 ### Deregister
@@ -161,7 +172,7 @@ cafleet get-task --agent-id <self-agent-id> --task-id <task-id>
 Remove this agent's registration from the broker.
 
 ```bash
-cafleet deregister --agent-id <self-agent-id>
+cafleet --session-id <session-id> deregister --agent-id <my-agent-id>
 ```
 
 ### Member Create
@@ -169,24 +180,24 @@ cafleet deregister --agent-id <self-agent-id>
 Register a new member agent and spawn a coding agent pane in the Director's own tmux window. Must be run inside a tmux session. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
 
 ```bash
-cafleet member create --agent-id $DIRECTOR_ID --name Claude-B \
-  --description "Reviewer for PR #42"
+cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+  --name Claude-B --description "Reviewer for PR #42"
 
-cafleet member create --agent-id $DIRECTOR_ID --name Codex-B \
-  --description "Reviewer for PR #42" --coding-agent codex
+cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+  --name Codex-B --description "Reviewer for PR #42" --coding-agent codex
 
-cafleet member create --agent-id $DIRECTOR_ID --name Claude-B \
-  --description "Reviewer for PR #42" \
+cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+  --name Claude-B --description "Reviewer for PR #42" \
   -- "Review PR #42, post feedback via send, and deregister on completion."
 ```
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | The Director's agent ID (sent as `X-Agent-Id`) |
+| `--agent-id` | yes | The Director's agent ID |
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | Coding agent to spawn: `claude` (default) or `codex`. Codex is spawned with `--approval-mode auto-edit`. |
-| *(positional, after `--`)* | no | Prompt for the spawned coding agent process. If omitted, a default prompt is generated (agent-specific). |
+| *(positional, after `--`)* | no | Prompt for the spawned coding agent process. If omitted, a default prompt is generated (agent-specific). The default prompt has the new member's literal `session_id` and `agent_id` UUIDs baked in via `str.format()` substitution. |
 
 If the tmux `split-window` fails, the registered agent is rolled back. If the placement PATCH fails, the pane is `/exit`'d and the agent rolled back.
 
@@ -222,7 +233,8 @@ Output (`--json`):
 Deregister a member agent and close its tmux pane. The agent is deregistered FIRST, then `/exit` is sent to the pane — so a deregister failure leaves both intact for retry.
 
 ```bash
-cafleet member delete --agent-id $DIRECTOR_ID --member-id <member-agent-id>
+cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
+  --member-id <member-agent-id>
 ```
 
 | Flag | Required | Notes |
@@ -242,8 +254,8 @@ Member deleted.
 List all members spawned by this Director. Returns agents with placement rows whose `director_agent_id` matches the given `--agent-id`.
 
 ```bash
-cafleet member list --agent-id $DIRECTOR_ID
-cafleet --json member list --agent-id $DIRECTOR_ID
+cafleet --session-id <session-id> member list --agent-id <director-agent-id>
+cafleet --session-id <session-id> --json member list --agent-id <director-agent-id>
 ```
 
 | Flag | Required | Notes |
@@ -277,9 +289,14 @@ Output (`--json`):
 Capture the last N lines of a member's tmux pane terminal buffer. This is the canonical way to inspect a stalled teammate — it replaces raw `tmux capture-pane` invocations for any project using CAFleet.
 
 ```bash
-cafleet member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID
-cafleet member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID --lines 200
-cafleet --json member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID | jq -r .content
+cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
+  --member-id <member-agent-id>
+
+cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
+  --member-id <member-agent-id> --lines 200
+
+cafleet --session-id <session-id> --json member capture --agent-id <director-agent-id> \
+  --member-id <member-agent-id> | jq -r .content
 ```
 
 | Flag | Required | Notes |
@@ -309,44 +326,46 @@ Output (`--json`):
 1. **Create a session** (if one does not already exist):
    ```bash
    cafleet session create --label "my-project"
-   # → prints the session_id; export it
-   export CAFLEET_SESSION_ID=<session_id>
+   # → prints the session_id, e.g. 550e8400-e29b-41d4-a716-446655440000
    ```
+   Capture the printed UUID and substitute it for `<session-id>` in every command below.
 
-2. **Register** with the broker (`CAFLEET_SESSION_ID` must already be set):
+2. **Register** with the broker:
    ```bash
-   cafleet register --name "Code Review Agent" --description "Reviews pull requests"
-   # → record the returned agent_id as $MY_ID
+   cafleet --session-id <session-id> register \
+     --name "Code Review Agent" --description "Reviews pull requests"
+   # → returns <my-agent-id>, e.g. 7ba91234-5678-90ab-cdef-112233445566
    ```
 
 3. **Discover** other agents:
    ```bash
-   cafleet agents --agent-id $MY_ID
+   cafleet --session-id <session-id> agents --agent-id <my-agent-id>
    ```
 
 4. **Send** a message to another agent:
    ```bash
-   cafleet send --agent-id $MY_ID --to <target-agent-id> --text "Please review PR #42"
+   cafleet --session-id <session-id> send --agent-id <my-agent-id> \
+     --to <target-agent-id> --text "Please review PR #42"
    ```
 
 5. **Poll** for incoming messages:
    ```bash
-   cafleet poll --agent-id $MY_ID
+   cafleet --session-id <session-id> poll --agent-id <my-agent-id>
    ```
 
 6. **Acknowledge** received messages:
    ```bash
-   cafleet ack --agent-id $MY_ID --task-id <task-id>
+   cafleet --session-id <session-id> ack --agent-id <my-agent-id> --task-id <task-id>
    ```
 
-7. **Repeat** steps 4-6 as needed. Use `cafleet --json <cmd>` when parsing output programmatically.
+7. **Repeat** steps 4-6 as needed. Use `cafleet --session-id <session-id> --json <cmd>` when parsing output programmatically.
 
 ## Multi-Session Coordination
 
 ### Roles
 
-- **Director** — the Claude Code session that first runs `cafleet register` in this project. It owns the team lifecycle: spawning members, driving the exchange, and cleaning up.
-- **Member** — any peer Claude Code session the Director spawns via `cafleet member create`. Each member is automatically registered and receives `CAFLEET_*` env vars via tmux `-e` flags.
+- **Director** — the Claude Code session that first runs `cafleet --session-id <session-id> register` in this project. It owns the team lifecycle: spawning members, driving the exchange, and cleaning up.
+- **Member** — any peer Claude Code session the Director spawns via `cafleet ... member create`. Each member is automatically registered, and its spawn prompt has the literal `session_id` and `agent_id` UUIDs baked in so every `cafleet` command it issues uses literal flags.
 
 ### Monitoring mandate (Director only)
 
@@ -355,7 +374,8 @@ Before spawning **any** member, the Director MUST load `Skill(cafleet-monitoring
 To inspect a stalled member, follow the 2-stage health check in `Skill(cafleet-monitoring)`: first check `cafleet poll` for messages, then fall back to `cafleet member capture`:
 
 ```bash
-cafleet member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID
+cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
+  --member-id <member-agent-id>
 ```
 
 ### Layout discipline
@@ -369,16 +389,17 @@ cafleet member capture --agent-id $DIRECTOR_ID --member-id $MEMBER_ID
 ### Spawn a member
 
 ```bash
-cafleet member create --agent-id $DIRECTOR_ID --name Claude-B \
-  --description "Reviewer for PR #42"
+cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+  --name Claude-B --description "Reviewer for PR #42"
 ```
 
-The command handles everything atomically: registering the agent, forwarding `CAFLEET_SESSION_ID` and `CAFLEET_AGENT_ID` (plus `CAFLEET_DATABASE_URL` if set) to the new pane via `-e` flags, spawning `claude` with the prompt, and rebalancing the layout. No `printenv` step is needed.
+The command handles everything atomically: registering the agent, baking the new member's literal `session_id` and `agent_id` UUIDs into the spawn prompt via `str.format()`, forwarding `CAFLEET_DATABASE_URL` (when set) to the new pane via `-e` flags, spawning `claude` with the prompt, and rebalancing the layout. No env-var injection is needed.
 
 ### Shut down a member
 
 ```bash
-cafleet member delete --agent-id $DIRECTOR_ID --member-id <member-agent-id>
+cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
+  --member-id <member-agent-id>
 ```
 
 The command deregisters the agent first (so a failure preserves the pane for retry), then sends `/exit` to the pane, then rebalances the layout.
@@ -386,7 +407,7 @@ The command deregisters the agent first (so a failure preserves the pane for ret
 After every member is shut down, the Director deregisters itself and stops the `/loop` monitor:
 
 ```bash
-cafleet deregister --agent-id <director-agent-id>
+cafleet --session-id <session-id> deregister --agent-id <director-agent-id>
 ```
 
 ## Message Lifecycle
@@ -398,7 +419,8 @@ Messages are modeled as tasks with this lifecycle:
 
 ## Error Handling
 
-- Missing `CAFLEET_SESSION_ID` env var or missing `--agent-id` on commands exits with non-zero code
-- Errors are printed to stderr and exit with non-zero code
-- Use `cafleet --json <cmd>` for machine-parseable output (including errors)
-- `member` commands require a tmux session (`TMUX` env var must be set) and exit with "cafleet member commands must be run inside a tmux session" if not
+- Missing `--session-id` on a client/member subcommand exits with `Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id.` (exit 1).
+- Missing `--agent-id` on commands that need it exits with `Error: Missing option '--agent-id'.` (Click built-in).
+- Errors are printed to stderr and exit with non-zero code.
+- Use `cafleet --session-id <session-id> --json <cmd>` for machine-parseable output (including errors).
+- `member` commands require a tmux session (`TMUX` env var must be set) and exit with "cafleet member commands must be run inside a tmux session" if not.

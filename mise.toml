@@ -20,6 +20,3 @@ description = "Format code with ruff"
 [tasks.typecheck]
 run = "uv run ty check"
 description = "Run ty type checker"
-
-[env]
-CAFLEET_URL = "http://localhost:8000"

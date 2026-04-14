@@ -87,8 +87,7 @@ class TestSplitWindow:
         pane_id = tmux.split_window(
             target_window_id="@3",
             env={
-                "CAFLEET_URL": "http://localhost:8000",
-                "CAFLEET_SESSION_ID": "key123",
+                "CAFLEET_DATABASE_URL": "sqlite+aiosqlite:////tmp/registry.db",
             },
             command=["claude", "Hello world"],
         )
@@ -125,7 +124,10 @@ class TestSplitWindow:
             env={},
             command=[
                 "claude",
-                "Load Skill(cafleet). Your agent_id is $CAFLEET_AGENT_ID.",
+                (
+                    "Load Skill(cafleet). Your agent_id is "
+                    "7ba91234-5678-90ab-cdef-112233445566."
+                ),
             ],
         )
         assert captured_args[-2] == "claude"
@@ -153,7 +155,13 @@ class TestSplitWindow:
         ]
 
     def test_env_vars_forwarded_as_flags(self, monkeypatch):
-        """Environment variables are forwarded as -e KEY=VAL flags before the command."""
+        """Only CAFLEET_DATABASE_URL is forwarded as -e KEY=VAL when set.
+
+        Design doc 0000023: session_id and agent_id are now passed as literal
+        CLI flags via the prompt text, not via tmux env inheritance. The only
+        env var that member-create forwards is CAFLEET_DATABASE_URL so the
+        spawned agent can reach the same SQLite file.
+        """
         captured_args = []
 
         def mock_run(args):
@@ -164,21 +172,43 @@ class TestSplitWindow:
         tmux.split_window(
             target_window_id="@3",
             env={
-                "CAFLEET_URL": "http://localhost:8000",
-                "CAFLEET_SESSION_ID": "sess-001",
-                "CAFLEET_AGENT_ID": "agent-001",
+                "CAFLEET_DATABASE_URL": "sqlite+aiosqlite:////tmp/registry.db",
             },
             command=["claude", "prompt"],
         )
-        # Each env var should appear as -e KEY=VAL
-        assert "-e" in captured_args
         env_pairs = []
         for i, a in enumerate(captured_args):
             if a == "-e" and i + 1 < len(captured_args):
                 env_pairs.append(captured_args[i + 1])
-        assert "CAFLEET_URL=http://localhost:8000" in env_pairs
-        assert "CAFLEET_SESSION_ID=sess-001" in env_pairs
-        assert "CAFLEET_AGENT_ID=agent-001" in env_pairs
+        assert "CAFLEET_DATABASE_URL=sqlite+aiosqlite:////tmp/registry.db" in env_pairs
+        # The deprecated env vars must not be forwarded any more.
+        for pair in env_pairs:
+            assert not pair.startswith("CAFLEET_SESSION_ID="), (
+                f"CAFLEET_SESSION_ID must no longer be forwarded; got {pair!r}"
+            )
+            assert not pair.startswith("CAFLEET_AGENT_ID="), (
+                f"CAFLEET_AGENT_ID must no longer be forwarded; got {pair!r}"
+            )
+            assert not pair.startswith("CAFLEET_URL="), (
+                f"CAFLEET_URL is dead and must not be forwarded; got {pair!r}"
+            )
+
+    def test_empty_env_emits_no_e_flags(self, monkeypatch):
+        """When env is empty (CAFLEET_DATABASE_URL unset), no -e flags emitted."""
+        captured_args = []
+
+        def mock_run(args):
+            captured_args.extend(args)
+            return "%12\n"
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        tmux.split_window(
+            target_window_id="@3",
+            env={},
+            command=["claude", "prompt"],
+        )
+        # No -e flag should appear when env is empty
+        assert "-e" not in captured_args
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +298,14 @@ class TestCapturPane:
 
 class TestSendPollTrigger:
     def test_success_returns_true(self, monkeypatch):
-        """Returns True when tmux send-keys succeeds."""
+        """Returns True when tmux send-keys succeeds.
+
+        Design doc 0000023 (Copilot review fix): ``--session-id`` is a
+        root-group global option and MUST come before the subcommand;
+        ``--agent-id`` is a per-subcommand option and MUST come after
+        ``poll``. This ordering is what click's parser actually accepts and
+        is the literal string ``permissions.allow`` entries need to match.
+        """
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
         captured_args = []
 
@@ -277,14 +314,18 @@ class TestSendPollTrigger:
             return ""
 
         monkeypatch.setattr(tmux, "_run", mock_run)
-        result = tmux.send_poll_trigger(target_pane_id="%7", agent_id="agent-001")
+        result = tmux.send_poll_trigger(
+            target_pane_id="%7",
+            session_id="sess-001",
+            agent_id="agent-001",
+        )
         assert result is True
         assert captured_args == [
             "tmux",
             "send-keys",
             "-t",
             "%7",
-            "cafleet poll --agent-id agent-001",
+            "cafleet --session-id sess-001 poll --agent-id agent-001",
             "Enter",
         ]
 
@@ -299,7 +340,11 @@ class TestSendPollTrigger:
             )
 
         monkeypatch.setattr(tmux, "_run", mock_run)
-        result = tmux.send_poll_trigger(target_pane_id="%99", agent_id="agent-001")
+        result = tmux.send_poll_trigger(
+            target_pane_id="%99",
+            session_id="sess-001",
+            agent_id="agent-001",
+        )
         assert result is False
 
     def test_tmux_binary_missing_returns_false(self, monkeypatch):
@@ -313,7 +358,11 @@ class TestSendPollTrigger:
             return ""
 
         monkeypatch.setattr(tmux, "_run", mock_run)
-        result = tmux.send_poll_trigger(target_pane_id="%7", agent_id="agent-001")
+        result = tmux.send_poll_trigger(
+            target_pane_id="%7",
+            session_id="sess-001",
+            agent_id="agent-001",
+        )
         assert result is False
         assert not run_called, "_run should not be called when tmux is not on PATH"
 
@@ -325,5 +374,9 @@ class TestSendPollTrigger:
             raise tmux.TmuxError("tmux command failed: server exited unexpectedly")
 
         monkeypatch.setattr(tmux, "_run", mock_run)
-        result = tmux.send_poll_trigger(target_pane_id="%7", agent_id="agent-001")
+        result = tmux.send_poll_trigger(
+            target_pane_id="%7",
+            session_id="sess-001",
+            agent_id="agent-001",
+        )
         assert result is False

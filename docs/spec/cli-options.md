@@ -6,21 +6,31 @@ How the unified CAFleet CLI (`cafleet`) accepts configuration parameters.
 
 Each parameter has exactly one input source:
 
-| Parameter | CLI (`client/`) |
+| Parameter | Source |
 |---|---|
-| Session ID | `CAFLEET_SESSION_ID` env var |
-| Broker URL | `CAFLEET_URL` env var (default: `http://127.0.0.1:8000`) |
-| Agent ID | `--agent-id` subcommand option |
+| Session ID | `--session-id <uuid>` global flag |
+| Database URL | `CAFLEET_DATABASE_URL` env var (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db` with `~` expanded at load time. When setting `CAFLEET_DATABASE_URL` yourself, use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs.) |
+| Agent ID | `--agent-id <uuid>` subcommand option |
 | JSON output | `--json` global flag |
 
-## Environment Variable Setup
+> **Why `--session-id` is a literal CLI flag, not an environment variable.** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --session-id <uuid> ...` invocation matches a single `permissions.allow` pattern of the same shape across every subcommand for that session. Shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts that interrupt agent work. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — do not use shell variables to hold them.
 
-Set these environment variables before using the CLI:
+## Global Options
 
-```bash
-export CAFLEET_URL=http://127.0.0.1:8000      # Broker URL (defaults to http://127.0.0.1:8000)
-export CAFLEET_SESSION_ID=your-session-id-here  # Required for all operations
-```
+Placed **before** the subcommand:
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--json` | no | Emit JSON output. |
+| `--session-id <uuid>` | yes for client + member subcommands; no for `db init` and `session *` | Session namespace UUID. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-uuid> *` works for every subcommand. |
+
+### Subcommands that require `--session-id`
+
+`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member create`, `member delete`, `member list`, `member capture`.
+
+### Subcommands that do NOT require `--session-id`
+
+`db init`, `db *`, `session create`, `session list`, `session show`, `session delete`.
 
 Create a session first if you don't have one:
 
@@ -29,14 +39,19 @@ cafleet session create --label "my-project"
 # → prints the session_id
 ```
 
+Then pass the printed UUID as `--session-id <uuid>` on every client + member command.
+
 ## Removed CLI Options
 
-The following CLI options have been removed:
+The following CLI options, environment variables, and subcommands have been removed:
 
-- `--url` — Use `CAFLEET_URL` environment variable instead
-- `--api-key` — Removed entirely (sessions replace API keys)
+- `--url` flag and the corresponding broker-URL env var — CLI commands access SQLite directly; no broker URL is needed.
+- `--api-key` flag — Removed entirely (sessions replace API keys).
+- The session-id env var — Replaced by the `--session-id` global flag.
+- The agent-id env var — Replaced by literal `--agent-id <uuid>` substitution at member-spawn time.
+- `cafleet env` subcommand — Existed only to dump env vars; obsolete now that session/agent IDs are passed as flags.
 
-These options were removed to prevent secrets from appearing in shell history or `ps` output.
+These removals keep secrets out of shell history and let `permissions.allow` patterns match every invocation literally.
 
 ## Agent ID (`--agent-id`)
 
@@ -138,5 +153,5 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 
 | Situation | Error Message |
 |---|---|
-| Missing session ID | `Error: CAFLEET_SESSION_ID environment variable is required. Create a session with 'cafleet session create'.` |
-| Missing agent ID | `Error: Missing option '--agent-id'.` (Click built-in) |
+| Missing `--session-id` on a client/member subcommand | `Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id.` |
+| Missing `--agent-id` | `Error: Missing option '--agent-id'.` (Click built-in) |

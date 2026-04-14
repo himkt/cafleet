@@ -32,24 +32,33 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _try_notify_recipient(session, *, recipient_id: str, sender_id: str) -> bool:
+def _try_notify_recipient(
+    session, *, session_id: str, recipient_id: str, sender_id: str
+) -> bool:
     """Best-effort tmux push notification. Returns True on success.
 
     Looks up the recipient's placement. If a tmux_pane_id exists and the
-    recipient is not the sender, sends a ``cafleet poll`` trigger via
-    ``tmux send-keys``. Failures are silent — the message queue is the
-    source of truth.
+    recipient is not the sender, sends a ``cafleet --session-id <sid> poll
+    --agent-id <aid>`` trigger via ``tmux send-keys`` so the literal command
+    text can be matched by the recipient's ``permissions.allow``.
+    Failures are silent — the message queue is the source of truth.
     """
     if recipient_id == sender_id:
         return False
     row = session.execute(
-        select(AgentPlacement.tmux_pane_id).where(AgentPlacement.agent_id == recipient_id)
+        select(AgentPlacement.tmux_pane_id).where(
+            AgentPlacement.agent_id == recipient_id
+        )
     ).first()
     if row is None or row[0] is None:
         return False
     from cafleet.tmux import send_poll_trigger
 
-    return send_poll_trigger(target_pane_id=row[0], agent_id=recipient_id)
+    return send_poll_trigger(
+        target_pane_id=row[0],
+        session_id=session_id,
+        agent_id=recipient_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -502,7 +511,9 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
                 )
             ).scalar_one_or_none()
             if sender_agent is None:
-                raise ValueError(f"Sender agent not found or not active in session: {agent_id}")
+                raise ValueError(
+                    f"Sender agent not found or not active in session: {agent_id}"
+                )
 
             # 2. Destination agent exists and is active
             dest_agent = session.execute(
@@ -544,7 +555,10 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
 
             # tmux push notification (best-effort)
             notification_sent = _try_notify_recipient(
-                session, recipient_id=to, sender_id=agent_id
+                session,
+                session_id=session_id,
+                recipient_id=to,
+                sender_id=agent_id,
             )
 
     return {"task": task_dict, "notification_sent": notification_sent}
@@ -571,7 +585,9 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
                 )
             ).scalar_one_or_none()
             if sender_agent is None:
-                raise ValueError(f"Sender agent not found or not active in session: {agent_id}")
+                raise ValueError(
+                    f"Sender agent not found or not active in session: {agent_id}"
+                )
 
             # List active agents in session, excluding sender
             rows = session.execute(
@@ -641,13 +657,22 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
             }
             _save_task(session, summary_dict)
 
-            # tmux push notifications (best-effort, after commit)
+            # tmux push notifications (best-effort, still inside the session
+            # transaction; the queue remains the source of truth if a notify
+            # races the commit).
             for recipient_id in recipient_ids:
-                if _try_notify_recipient(session, recipient_id=recipient_id, sender_id=agent_id):
+                if _try_notify_recipient(
+                    session,
+                    session_id=session_id,
+                    recipient_id=recipient_id,
+                    sender_id=agent_id,
+                ):
                     notifications_sent_count += 1
 
     summary_dict["metadata"]["notificationsSentCount"] = notifications_sent_count
-    return [{"task": summary_dict, "notifications_sent_count": notifications_sent_count}]
+    return [
+        {"task": summary_dict, "notifications_sent_count": notifications_sent_count}
+    ]
 
 
 def poll_tasks(

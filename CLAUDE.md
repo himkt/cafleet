@@ -12,16 +12,6 @@ When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE 
 - `/cafleet-design-doc-create` — Create a new design document using CAFleet-native orchestration (Director / Drafter / Reviewer). Use when the user wants to create a specification with CAFleet message broker coordination.
 - `/cafleet-design-doc-execute` — Implement features based on a design document using CAFleet-native orchestration with TDD cycle (Director / Programmer / Tester / optional Verifier).
 
-## Plugin Skills
-
-When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE taking any other action. Pay attention to override instructions (what NOT to do) in each entry.
-
-- `/cafleet:cafleet` — Interact with the CAFleet A2A message broker.
-- `/cafleet:cafleet-monitoring` — Mandatory supervision protocol for a Director managing member agents via CAFleet.
-- `/cafleet:cafleet-design-doc` — Standardized design document format with template and guidelines (plugin-local copy).
-- `/cafleet:cafleet-design-doc-create` — Create a new design document using CAFleet-native orchestration.
-- `/cafleet:cafleet-design-doc-execute` — Implement features based on a design document using CAFleet-native orchestration with TDD cycle.
-
 ## Project: CAFleet
 
 A2A-native message broker + agent registry for coding agents.
@@ -42,4 +32,10 @@ A2A-native message broker + agent registry for coding agents.
 ## Commands
 
 See `.claude/rules/commands.md` for the full command reference.
+
+## Skill Discovery & Authorization Scope
+
+See `.claude/rules/skill-discovery.md`. Two mandatory rules:
+1. **Load the matching skill BEFORE running ad-hoc commands** — especially `github-cli` for any `gh pr *` / `gh api repos/.../comments` / reviewer-request operation. Do NOT guess reviewer slugs or API paths.
+2. **Authorization is scoped to the specific action** — when the user says "PR 24 created", stop acting on the push/PR workflow. Do NOT run further `git push`, `gh pr edit`, or similar remote-visible commands without explicit re-authorization. When the user signals stop (including profanity/frustration), acknowledge and wait; skip cron firings and idle notifications until they re-engage.
 
