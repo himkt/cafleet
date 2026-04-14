@@ -172,7 +172,7 @@ CAFleet uses a pull-based delivery model by default: recipients discover message
 After `broker` saves a delivery task, it looks up the recipient's `agent_placements` row. If the recipient has a non-null `tmux_pane_id` and is not the sender, the broker runs:
 
 ```
-tmux send-keys -t <tmux_pane_id> "cafleet poll --agent-id <recipient_agent_id>" Enter
+tmux send-keys -t <tmux_pane_id> "cafleet --session-id <session_id> --agent-id <recipient_agent_id> poll" Enter
 ```
 
 The injected text lands in the coding agent's input prompt. If the agent is idle, it interprets the command immediately. If the agent is busy, tmux buffers the keystrokes until the agent returns to its prompt. Since `cafleet poll` is idempotent, duplicate or late-arriving triggers are harmless.
@@ -209,12 +209,12 @@ Each CLI parameter has exactly one input source:
 
 | Parameter | Source |
 |---|---|
-| Session ID | `CAFLEET_SESSION_ID` env var |
+| Session ID | `--session-id` global flag (UUID; required for client + member subcommands) |
 | Database URL | `CAFLEET_DATABASE_URL` env var (optional; default: `sqlite:///~/.local/share/cafleet/registry.db`) |
 | Agent ID | `--agent-id` subcommand option |
 | JSON output | `--json` global flag |
 
-Session ID uses an environment variable for convenience in tmux multi-pane workflows. Agent ID is a CLI argument because it's an operational parameter that changes per invocation. No broker URL is needed — CLI commands access SQLite directly.
+Session ID and Agent ID are passed as literal CLI flags (not environment variables) so a single Claude Code `permissions.allow` pattern of the form `cafleet --session-id <literal-uuid> *` matches every subcommand for that session, eliminating per-invocation permission prompts. `--session-id` is global (placed before the subcommand) and required for every client + member subcommand; it is silently accepted (and ignored) on `db init` / `session *` so one allow pattern stays usable everywhere. No broker URL is needed — CLI commands access SQLite directly.
 
 ## WebUI
 

@@ -43,7 +43,7 @@ Key design decisions:
 - Sessions are created via `cafleet session create`. Deleting a session is rejected while agents still reference it (FK `RESTRICT`). An empty session (no agents) remains valid indefinitely.
 - The WebUI requires no login. A session picker at `/ui/#/sessions` lets the user select which session to view.
 - **Storage layer**: All data is persisted in a single SQLite file (`~/.local/share/cafleet/registry.db` by default). Indexed fields are columns; task payloads are stored as JSON blobs. `PRAGMA busy_timeout=5000` handles concurrent access. No physical cleanup loop -- deregistered agents and tasks persist forever and are invisible to normal traffic via `status='active'` filters.
-- **tmux push notifications**: After persisting a message, the broker looks up the recipient's `agent_placements` row and, if a tmux pane is available, injects `cafleet poll --agent-id <id>` via `tmux send-keys`. This is best-effort -- failures are silent, and the queue remains the source of truth. Unicast responses include `notification_sent`; broadcast summaries include `notifications_sent_count`.
+- **tmux push notifications**: After persisting a message, the broker looks up the recipient's `agent_placements` row and, if a tmux pane is available, injects `cafleet --session-id <id> --agent-id <id> poll` via `tmux send-keys`. This is best-effort -- failures are silent, and the queue remains the source of truth. Unicast responses include `notification_sent`; broadcast summaries include `notifications_sent_count`.
 
 ## Quick Start
 
@@ -65,59 +65,64 @@ This command is idempotent -- running it on a database that is already at head i
 
 ### Create a Session
 
-Before starting the broker, create at least one session namespace:
+Before registering any agents, create at least one session namespace:
 
 ```bash
 cafleet session create --label "my-project"
 # → prints: 550e8400-e29b-41d4-a716-446655440000
 ```
 
-### Set Session
+Capture the printed UUID and pass it as `--session-id <session-id>` (a global flag, placed before the subcommand) on every subsequent command. CLI commands access SQLite directly -- no server needed. Start `mise //cafleet:dev` only if you want the admin WebUI.
 
-```bash
-export CAFLEET_SESSION_ID="550e8400-e29b-41d4-a716-446655440000"
-```
-
-CLI commands access SQLite directly -- no server needed. Start `mise //cafleet:dev` only if you want the admin WebUI.
+> **Why a literal flag, not an env var?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. Passing `--session-id <literal-uuid>` lets a single allow-list pattern match every subcommand for that session; shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — do not introduce shell variables to hold them.
 
 ### Register an Agent
 
 ```bash
-cafleet register --name "my-agent" --description "A coding assistant"
+cafleet --session-id 550e8400-e29b-41d4-a716-446655440000 register \
+  --name "my-agent" --description "A coding assistant"
+# → prints: 7ba91234-5678-90ab-cdef-112233445566
 ```
 
-Save the returned `agent_id` for subsequent commands. Registration requires a valid `CAFLEET_SESSION_ID`.
+Save the returned `agent_id` for subsequent commands.
 
 ### Send a Message
 
 ```bash
-cafleet send --agent-id <your-agent-id> --to <recipient-agent-id> --text "Hello from my agent"
+cafleet --session-id <session-id> --agent-id <your-agent-id> send \
+  --to <recipient-agent-id> --text "Hello from my agent"
 ```
 
 ### Poll for Messages
 
 ```bash
-cafleet poll --agent-id <your-agent-id>
+cafleet --session-id <session-id> --agent-id <your-agent-id> poll
 ```
 
 ### Acknowledge a Message
 
 ```bash
-cafleet ack --agent-id <your-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> --agent-id <your-agent-id> ack --task-id <task-id>
 ```
 
 ## CLI Usage
 
 The unified `cafleet` CLI handles both server administration and agent operations.
 
-Configuration is set via environment variables:
+Global flags (placed **before** the subcommand):
+
+| Flag | Required | Description |
+|---|---|---|
+| `--session-id <uuid>` | Yes (for client + member subcommands) | Session namespace UUID for agent routing. Required for `register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member *`. Silently accepted (and ignored) on `db init` / `session *`. |
+| `--json` | No | Emit JSON output. |
+
+Configuration via environment variables:
 
 | Variable | Required | Description |
 |---|---|---|
-| `CAFLEET_SESSION_ID` | Yes (for agent commands) | Session namespace for agent routing |
 | `CAFLEET_DATABASE_URL` | No | SQLite database URL (default: `sqlite:///~/.local/share/cafleet/registry.db`) |
 
-The `--agent-id` option is a per-subcommand option required by most agent commands. The global `--json` flag enables JSON output. CLI commands access SQLite directly -- no running server is required.
+The `--agent-id` option is a per-subcommand option required by most agent commands. CLI commands access SQLite directly -- no running server is required.
 
 ### Server Administration
 
@@ -133,22 +138,23 @@ The `--agent-id` option is a per-subcommand option required by most agent comman
 
 ### Agent Commands
 
+All commands below require the global `--session-id <uuid>` flag (placed before the subcommand). The `--agent-id` column indicates whether the per-subcommand `--agent-id <uuid>` flag is also required.
+
 | Command | `--agent-id` | Description |
 |---|---|---|
-| `cafleet env` | Not required | Print current CAFLEET_DATABASE_URL and CAFLEET_SESSION_ID values |
-| `cafleet register` | Not required | Register a new agent; returns an agent ID |
-| `cafleet send` | Required | Send a unicast message to another agent in the same session |
-| `cafleet broadcast` | Required | Broadcast a message to all agents in the same session |
-| `cafleet poll` | Required | Poll inbox for incoming messages |
-| `cafleet ack` | Required | Acknowledge receipt of a message |
-| `cafleet cancel` | Required | Cancel (retract) a sent message before it is acknowledged |
-| `cafleet get-task` | Required | Get details of a specific task/message |
-| `cafleet agents` | Required | List agents in the session or get detail for a specific agent |
-| `cafleet deregister` | Required | Deregister this agent from the broker |
-| `cafleet member create` | Required | Register a member agent and spawn its tmux pane (Director only). `--coding-agent claude|codex` selects the backend (default: `claude`) |
-| `cafleet member delete` | Required | Deregister a member and close its pane (Director only) |
-| `cafleet member list` | Required | List members spawned by this Director |
-| `cafleet member capture` | Required | Capture the last N lines of a member's pane (Director only) |
+| `cafleet --session-id <id> register` | Not required | Register a new agent; returns an agent ID |
+| `cafleet --session-id <id> --agent-id <id> send` | Required | Send a unicast message to another agent in the same session |
+| `cafleet --session-id <id> --agent-id <id> broadcast` | Required | Broadcast a message to all agents in the same session |
+| `cafleet --session-id <id> --agent-id <id> poll` | Required | Poll inbox for incoming messages |
+| `cafleet --session-id <id> --agent-id <id> ack` | Required | Acknowledge receipt of a message |
+| `cafleet --session-id <id> --agent-id <id> cancel` | Required | Cancel (retract) a sent message before it is acknowledged |
+| `cafleet --session-id <id> --agent-id <id> get-task` | Required | Get details of a specific task/message |
+| `cafleet --session-id <id> --agent-id <id> agents` | Required | List agents in the session or get detail for a specific agent |
+| `cafleet --session-id <id> --agent-id <id> deregister` | Required | Deregister this agent from the broker |
+| `cafleet --session-id <id> --agent-id <id> member create` | Required | Register a member agent and spawn its tmux pane (Director only). `--coding-agent claude\|codex` selects the backend (default: `claude`) |
+| `cafleet --session-id <id> --agent-id <id> member delete` | Required | Deregister a member and close its pane (Director only) |
+| `cafleet --session-id <id> --agent-id <id> member list` | Required | List members spawned by this Director |
+| `cafleet --session-id <id> --agent-id <id> member capture` | Required | Capture the last N lines of a member's pane (Director only) |
 
 ## API Overview
 
