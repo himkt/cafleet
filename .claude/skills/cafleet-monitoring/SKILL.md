@@ -25,7 +25,7 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-
 
 ## Monitoring Mandate
 
-Before spawning **any** member, start a `/loop` monitor with a **3-minute interval**. The loop uses cafleet-native commands exclusively.
+Before spawning **any** member, start a `/loop` monitor with a **1-minute interval** (the `CronCreate` / `ScheduleWakeup` floor — sub-minute polling is not supported by the harness). The loop uses cafleet-native commands exclusively.
 
 | Step | Command | Purpose |
 |---|---|---|
@@ -85,7 +85,7 @@ If a member is still unresponsive after 2 nudges via `cafleet send` AND `cafleet
 Substitute the literal UUIDs into every `<session-id>`, `<director-agent-id>`, and `<member-agent-id>` placeholder before passing the prompt to `/loop`. The prompt must contain literal UUIDs, **not** shell variables — the `permissions.allow` matcher only allows literal command strings. Remember: `--session-id` goes before the subcommand, `--agent-id` goes after.
 
 ```
-Monitor team health (interval: 3 minutes). For each member spawned via `cafleet member create`:
+Monitor team health (interval: 1 minute). For each member spawned via `cafleet member create`:
 
 1. Run `cafleet --session-id <session-id> --json member list --agent-id <director-agent-id>` to get all members.
 2. Run `cafleet --session-id <session-id> --json poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check>"` to check for incoming messages. ACK any progress reports.

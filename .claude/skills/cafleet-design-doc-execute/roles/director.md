@@ -110,7 +110,7 @@ When the user selects "Other" and provides free text, use LLM reasoning to deter
 
 ## Progress Monitoring
 
-Track team progress via the `Skill(cafleet-monitoring)` `/loop` (3-minute interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet send` about what you expect next.
+Track team progress via the `Skill(cafleet-monitoring)` `/loop` (1-minute interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet send` about what you expect next.
 
 ### Skill-specific milestones
 
