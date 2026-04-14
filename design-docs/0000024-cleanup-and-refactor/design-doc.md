@@ -1,7 +1,7 @@
 # Cleanup and Refactor — Post-Rapid-Iteration Debt Payment
 
 **Status**: Approved
-**Progress**: 0/50 tasks complete — ready for implementation
+**Progress**: 17/50 tasks complete — Phase 1 complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -187,23 +187,23 @@ Known pre-existing references (as of 2026-04-14 drafting): README.md:202-203 (pr
 
 ### Step 1 — Phase 1: Low-risk deletions
 
-- [ ] 1.1 Run the pre-delete cross-reference scan from the Verification Strategy section. Record every file that mentions `docs/spec/a2a-operations.md` or `docs/spec/registry-api.md` so that Step 1.X edits cover all of them. Known matches as of drafting: README.md:202-203 (handled by 1.15). Abort and reopen this design doc if any new surface is found. <!-- completed: -->
-- [ ] 1.2 Run `git status -s vendor/A2A` and abort if output is non-empty. <!-- completed: -->
-- [ ] 1.3 `git submodule deinit -f vendor/A2A`. <!-- completed: -->
-- [ ] 1.4 Edit `.gitmodules` — remove the `[submodule "vendor/A2A"]` stanza; if `.gitmodules` becomes empty, `git rm .gitmodules`. <!-- completed: -->
-- [ ] 1.5 `git rm -rf vendor/A2A`. <!-- completed: -->
-- [ ] 1.6 If `vendor/` directory is now empty, `rmdir vendor/`. <!-- completed: -->
-- [ ] 1.7 Delete `docs/spec/a2a-operations.md`. <!-- completed: -->
-- [ ] 1.8 Delete `docs/spec/registry-api.md`. <!-- completed: -->
-- [ ] 1.9 Delete `.claude/rules/a2a-reference.md`. <!-- completed: -->
-- [ ] 1.10 Edit `.claude/CLAUDE.md` — delete the "A2A Protocol Reference" section (the heading and its bullet list describing `A2A/specification/a2a.proto` etc.) AND the "Related Codebases" section (the heading and its `A2A/` + `solace-agent-mesh/` bullets). Currently at lines 5-19 but use the section headers as the locator since subsequent tasks will depend on the post-deletion layout. <!-- completed: -->
-- [ ] 1.11 Edit `CLAUDE.md:20` — rewrite the 0000002 bullet from "Tenant isolation via shared API key" to "Access-control via shared API key (superseded by 0000015 session model)". <!-- completed: -->
-- [ ] 1.12 Edit `.claude/CLAUDE.md` — find the bullet line currently saying `"Design document: design-docs/0000002-access-control/design-doc.md — Tenant isolation via shared API key (Status: Complete)"` and rewrite it to `"Design document: design-docs/0000002-access-control/design-doc.md — Access-control via shared API key (superseded by 0000015 session model) (Status: Complete)"`. (Evidence cell cites pre-Phase-1 line as :25; content-based locator is used here because 1.10 deletes 15 preceding lines in the same phase and would shift any line-number cite.) <!-- completed: -->
-- [ ] 1.13 Edit `pyproject.toml` — remove the `"a2a.*"` entry from `[tool.ty.analysis].allowed-unresolved-imports`. <!-- completed: -->
-- [ ] 1.14 Edit `pyproject.toml` — remove `exclude = ["vendor/"]` from `[tool.ruff]` (only after 1.6 confirms `vendor/` is gone). <!-- completed: -->
-- [ ] 1.15 Edit `README.md:200-208` project-structure tree — delete the two lines listing `registry-api.md` and `a2a-operations.md` (D9). Keep the enclosing `spec/` subtree structure; only the deleted filenames go away. <!-- completed: -->
-- [ ] 1.16 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass. <!-- completed: -->
-- [ ] 1.17 Run Phase 1 smoke checks from the Verification Strategy table. <!-- completed: -->
+- [x] 1.1 Run the pre-delete cross-reference scan from the Verification Strategy section. Record every file that mentions `docs/spec/a2a-operations.md` or `docs/spec/registry-api.md` so that Step 1.X edits cover all of them. Known matches as of drafting: README.md:202-203 (handled by 1.15). Abort and reopen this design doc if any new surface is found. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.2 Run `git status -s vendor/A2A` and abort if output is non-empty. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.3 `git submodule deinit -f vendor/A2A`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.4 Edit `.gitmodules` — remove the `[submodule "vendor/A2A"]` stanza; if `.gitmodules` becomes empty, `git rm .gitmodules`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.5 `git rm -rf vendor/A2A`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.6 If `vendor/` directory is now empty, `rmdir vendor/`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.7 Delete `docs/spec/a2a-operations.md`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.8 Delete `docs/spec/registry-api.md`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.9 Delete `.claude/rules/a2a-reference.md`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.10 Edit `.claude/CLAUDE.md` — delete the "A2A Protocol Reference" section (the heading and its bullet list describing `A2A/specification/a2a.proto` etc.) AND the "Related Codebases" section (the heading and its `A2A/` + `solace-agent-mesh/` bullets). Currently at lines 5-19 but use the section headers as the locator since subsequent tasks will depend on the post-deletion layout. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.11 Edit `CLAUDE.md:20` — rewrite the 0000002 bullet from "Tenant isolation via shared API key" to "Access-control via shared API key (superseded by 0000015 session model)". <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.12 Edit `.claude/CLAUDE.md` — find the bullet line currently saying `"Design document: design-docs/0000002-access-control/design-doc.md — Tenant isolation via shared API key (Status: Complete)"` and rewrite it to `"Design document: design-docs/0000002-access-control/design-doc.md — Access-control via shared API key (superseded by 0000015 session model) (Status: Complete)"`. (Evidence cell cites pre-Phase-1 line as :25; content-based locator is used here because 1.10 deletes 15 preceding lines in the same phase and would shift any line-number cite.) <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.13 Edit `pyproject.toml` — remove the `"a2a.*"` entry from `[tool.ty.analysis].allowed-unresolved-imports`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.14 Edit `pyproject.toml` — remove `exclude = ["vendor/"]` from `[tool.ruff]` (only after 1.6 confirms `vendor/` is gone). <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.15 Edit `README.md:200-208` project-structure tree — delete the two lines listing `registry-api.md` and `a2a-operations.md` (D9). Keep the enclosing `spec/` subtree structure; only the deleted filenames go away. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.16 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass. <!-- completed: 2026-04-15T12:05 -->
+- [x] 1.17 Run Phase 1 smoke checks from the Verification Strategy table. <!-- completed: 2026-04-15T12:05 -->
 
 ### Step 2 — Phase 2: `_resolve_prompt` fix + repo-wide lineage unification
 

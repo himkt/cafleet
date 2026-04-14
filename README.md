@@ -199,8 +199,6 @@ cafleet/                    # Repository root (uv workspace)
   admin/                    # WebUI SPA (Vite + React + TypeScript + Tailwind CSS)
   docs/
     spec/                   # API and data model specifications
-      registry-api.md
-      a2a-operations.md
       data-model.md
       webui-api.md
       cli-options.md
