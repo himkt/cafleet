@@ -1,7 +1,7 @@
 # Migrate session-id and agent-id from env vars / shell expansion to CLI flags
 
 **Status**: Approved
-**Progress**: 11/33 tasks complete
+**Progress**: 13/33 tasks complete
 **Last Updated**: 2026-04-14
 
 ## Overview
@@ -181,8 +181,8 @@ The repository-root and `.claude/` `CLAUDE.md` both list `## Plugin Skills` refe
 
 ### Step 3: Documentation — CLAUDE.md cleanup
 
-- [ ] Delete the `## Plugin Skills` section from `/home/himkt/work/himkt/cafleet/CLAUDE.md` (the one referencing `/cafleet:cafleet`, `/cafleet:cafleet-monitoring`, `/cafleet:cafleet-design-doc`, `/cafleet:cafleet-design-doc-create`, `/cafleet:cafleet-design-doc-execute`). <!-- completed: -->
-- [ ] Verify `.claude/CLAUDE.md` does not also need a similar deletion (it only lists `## Project Skills`, not `## Plugin Skills` — confirm with Grep before editing). <!-- completed: -->
+- [x] Delete the `## Plugin Skills` section from `/home/himkt/work/himkt/cafleet/CLAUDE.md` (the one referencing `/cafleet:cafleet`, `/cafleet:cafleet-monitoring`, `/cafleet:cafleet-design-doc`, `/cafleet:cafleet-design-doc-create`, `/cafleet:cafleet-design-doc-execute`). <!-- completed: 2026-04-14T12:45 -->
+- [x] Verify `.claude/CLAUDE.md` does not also need a similar deletion (it only lists `## Project Skills`, not `## Plugin Skills` — confirm with Grep before editing). <!-- completed: 2026-04-14T12:45 -->
 
 ### Step 4: Code — CLI flag implementation
 
