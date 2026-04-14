@@ -34,12 +34,12 @@ The new skills replicate the same processes but use CAFleet primitives exclusive
 | Agent Teams Primitive | CAFleet Equivalent |
 |---|---|
 | `TeamCreate(name="create-{slug}")` | CAFleet session (pre-existing; Director registers with `cafleet register`) |
-| `Agent(team_name=..., subagent_type=...)` | `cafleet member create --agent-id $DIR --name "..." --description "..." -- "prompt"` |
-| `SendMessage(to="Drafter")` | `cafleet send --agent-id $DIR --to $MEMBER_ID --text "..."` (push notification auto-triggers poll in member pane) |
+| `Agent(team_name=..., subagent_type=...)` | `cafleet member create --agent-id $DIRECTOR_ID --name "..." --description "..." -- "prompt"` |
+| `SendMessage(to="Drafter")` | `cafleet send --agent-id $DIRECTOR_ID --to $MEMBER_ID --text "..."` (push notification auto-triggers poll in member pane) |
 | `SendMessage(to="Director")` (from member) | `cafleet send --agent-id $CAFLEET_AGENT_ID --to $DIRECTOR_ID --text "..."` |
 | `agent-team-supervision` `/loop` | `Skill(cafleet-monitoring)` `/loop` |
-| Teammate shutdown | `cafleet member delete --agent-id $DIR --member-id $MEMBER_ID` |
-| `TeamDelete` | `cafleet deregister --agent-id $DIR` |
+| Teammate shutdown | `cafleet member delete --agent-id $DIRECTOR_ID --member-id $MEMBER_ID` |
+| `TeamDelete` | `cafleet deregister --agent-id $DIRECTOR_ID` |
 | Message auto-delivery to teammate | Push notification sends `cafleet poll --agent-id $CAFLEET_AGENT_ID` to member's tmux pane |
 
 ### Communication Flow
@@ -120,6 +120,7 @@ Update `.claude-plugin/plugin.json` to expose the new skills:
   "keywords": ["a2a", "messaging", "broker", "agents", "cli", "design-doc"],
   "skills": [
     "./.claude/skills/cafleet",
+    "./.claude/skills/cafleet-monitoring",
     "./.claude/skills/cafleet-design-doc",
     "./.claude/skills/cafleet-design-doc-create",
     "./.claude/skills/cafleet-design-doc-execute"

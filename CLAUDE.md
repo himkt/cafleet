@@ -17,6 +17,7 @@ When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE 
 When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE taking any other action. Pay attention to override instructions (what NOT to do) in each entry.
 
 - `/cafleet:cafleet` — Interact with the CAFleet A2A message broker.
+- `/cafleet:cafleet-monitoring` — Mandatory supervision protocol for a Director managing member agents via CAFleet.
 - `/cafleet:cafleet-design-doc` — Standardized design document format with template and guidelines (plugin-local copy).
 - `/cafleet:cafleet-design-doc-create` — Create a new design document using CAFleet-native orchestration.
 - `/cafleet:cafleet-design-doc-execute` — Implement features based on a design document using CAFleet-native orchestration with TDD cycle.

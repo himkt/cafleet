@@ -343,6 +343,8 @@ For each step in the design document:
 
 #### Phase A: Test Writing
 
+**Skip this phase entirely when the Tester was not spawned** (Programmer-only team composition for config/documentation-only steps). Proceed directly to Phase B and assign the step to the Programmer without a separate test-writing commit.
+
 1. **Assign**: Send the Tester the step number, description, and specification:
    ```bash
    cafleet send --agent-id $DIRECTOR_ID --to $TESTER_ID --text "Step N: <description>. Spec: <…>. Write unit tests and report file paths when done."
