@@ -68,10 +68,10 @@ Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt.
 1. **File does not exist** → Fresh creation (proceed to Step 1 as normal).
 2. **File exists** → Check for COMMENT markers:
    - Use Grep to search for `COMMENT(` in the file.
-   - **COMMENT markers found** → This is **resume mode**. Proceed to Step 1 with the resume-specific Drafter spawn prompt. Set an internal flag so Step 2 (clarification) is skipped.
+   - **COMMENT markers found** → This is **resume mode**. Proceed to Step 1 with the resume-specific Drafter spawn prompt. Set an internal flag `SKIP_CLARIFICATION=true` so Step 2 (clarification) is skipped.
    - **No COMMENT markers found** → Inform the user: "No COMMENT markers found in the existing document." Use `AskUserQuestion` with two options:
-     - **"Run quality review"**: Run the Reviewer on the existing document (spawn Reviewer, route the document for review via `cafleet send`, then enter the quality loop at Step 3).
-     - **"Start fresh"**: Treat as new creation, ignoring the existing file (proceed to Step 1 as normal).
+     - **"Run quality review"**: Set internal flags `SKIP_CLARIFICATION=true` and `QUALITY_REVIEW_ONLY=true`. Skip Step 2 entirely and enter Step 3 by immediately routing the existing `${DOC_PATH}` to the Reviewer via `cafleet send` (no new draft is produced; the Drafter is only involved later if the Reviewer requests revisions).
+     - **"Start fresh"**: Treat as new creation, ignoring the existing file. Ensure `SKIP_CLARIFICATION` and `QUALITY_REVIEW_ONLY` are unset, then proceed to Step 1 as normal.
 
 ### Step 1: Register & Spawn Members (Director)
 
@@ -225,7 +225,7 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 ### Step 2: Clarification Phase (Director)
 
-**Resume mode**: Skip this step entirely. In resume mode, the COMMENT markers serve as the clarification — the Drafter already has all the information needed. Proceed directly to Step 3 after the Drafter reports its changes.
+**Skip this step entirely when `SKIP_CLARIFICATION=true`** (set by Step 0 in resume mode or quality-review-only mode). Resume mode: the COMMENT markers serve as the clarification and the Drafter already has all the information needed. Quality-review-only mode: the Drafter is not producing a new draft at all — proceed directly to Step 3 by routing the existing `${DOC_PATH}` to the Reviewer.
 
 1. Wait for the Drafter's clarifying questions. The monitoring `/loop` and periodic `cafleet poll --agent-id $DIRECTOR_ID` will surface the Drafter's message once it arrives.
 2. `cafleet ack --agent-id $DIRECTOR_ID --task-id <task-id>` each received message after reading it.
@@ -242,7 +242,7 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 ### Step 3: Internal Quality Loop (Director)
 
-After the Drafter reports a completed draft:
+Enter this step after the Drafter reports a completed draft, **or immediately** when `QUALITY_REVIEW_ONLY=true` (the existing `${DOC_PATH}` is treated as the "completed draft" — no waiting for a Drafter report):
 
 1. **Route to Reviewer** with the document path:
    ```bash

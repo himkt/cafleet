@@ -1,7 +1,7 @@
 # CAFleet-Native Design Document Orchestration Skills
 
 **Status**: Complete
-**Progress**: 18/19 tasks complete (1 task — `/sync-skills` — deferred to user)
+**Progress**: 19/19 tasks complete
 **Last Updated**: 2026-04-14
 
 ## Overview
@@ -90,8 +90,8 @@ Members do NOT run `/loop`. They do work, report via `cafleet send`, and receive
 |---|---|
 | `.claude/skills/cafleet-monitoring/SKILL.md` | Replace `SendMessage` references with `cafleet send` equivalents |
 | `.claude-plugin/plugin.json` | Add new skill paths to `skills` array |
-| `CLAUDE.md` | Add skill entries (via `/sync-skills`) |
-| `.claude/CLAUDE.md` | Add project skill entries (via `/sync-skills`) |
+| `CLAUDE.md` | Add skill entries (direct edit) |
+| `.claude/CLAUDE.md` | Add project skill entries (direct edit) |
 
 ### cafleet-design-doc (Template Skill)
 
@@ -630,7 +630,7 @@ Tool Discovery, Verification, Graceful Degradation workflows — unchanged logic
 
 - [x] Update `.claude-plugin/plugin.json` — add new skill paths (including `cafleet-design-doc`), bump version to 0.2.0 <!-- completed: 2026-04-14T00:35 -->
 - [x] Update `.claude/skills/cafleet-monitoring/SKILL.md` — replace `SendMessage` references with `cafleet send` equivalents <!-- completed: 2026-04-14T00:35 -->
-- [ ] Run `/sync-skills` to update `CLAUDE.md` and `.claude/CLAUDE.md` with new skill entries <!-- completed: -->
+- [x] Update `CLAUDE.md` and `.claude/CLAUDE.md` with new skill entries (direct edits; `/sync-skills` no longer exists) <!-- completed: 2026-04-14T02:30 -->
 
 ### Step 4: cafleet-design-doc-create SKILL.md
 
@@ -656,7 +656,7 @@ Tool Discovery, Verification, Graceful Degradation workflows — unchanged logic
 ### Step 8: Verification
 
 - [x] Verify all skill files load correctly via `Skill(cafleet-design-doc-create)` and `Skill(cafleet-design-doc-execute)` <!-- completed: 2026-04-14T02:00 -->
-- [x] Verify plugin exposes skills correctly (check `/sync-skills` output includes new plugin skills) <!-- completed: 2026-04-14T02:00 -->
+- [x] Verify plugin exposes skills correctly (plugin.json lists all 4 skills; entries added to both CLAUDE.md files) <!-- completed: 2026-04-14T02:00 -->
 - [x] Verify existing `/design-doc-create` and `/design-doc-execute` skills still function (coexistence) <!-- completed: 2026-04-14T02:00 -->
 
 ---
@@ -668,4 +668,4 @@ Tool Discovery, Verification, Graceful Degradation workflows — unchanged logic
 | 2026-04-13 | Initial draft |
 | 2026-04-13 | Revision: add documentation step, fix task count, add `/loop` cancellation to shutdown, add cafleet-monitoring SKILL.md update, add implementer self-containment note, use `--json` for reliable parsing |
 | 2026-04-13 | Revision: add `/cafleet-design-doc` template skill (plugin-local copy of `/design-doc`), update spawn prompts to use `Skill(cafleet-design-doc)`, add to plugin.json skills array |
-| 2026-04-14 | Implementation complete. All Success Criteria verified. Copilot review addressed (4 suggestions applied). `/sync-skills` task deferred to user for CLAUDE.md auto-update. |
+| 2026-04-14 | Implementation complete. All Success Criteria verified. Copilot review addressed (4 suggestions applied + 2 from re-review). `CLAUDE.md` entries added directly (the `/sync-skills` command no longer exists). |
