@@ -21,7 +21,7 @@ A2A-inspired message broker + agent registry for coding agents.
 - **Design document**: `design-docs/0000010-sqlite-store-migration/design-doc.md` — SQLite + SQLAlchemy + Alembic store migration (Status: Complete)
 - **Single package** (uv workspace):
   - `cafleet/` — `cafleet` (FastAPI + SQLAlchemy + Alembic + click)
-- **Unified CLI command**: `cafleet` (with `db init` for schema management, `session` for namespace CRUD, and all agent/messaging commands)
+- **Unified CLI command**: `cafleet` (with `db init` for schema management, `session` for session CRUD, and all agent/messaging commands)
 
 ## Tech Stack
 

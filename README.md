@@ -4,17 +4,17 @@ A2A-inspired message broker and agent registry for coding agents.
 
 > **CAFleet is a local-only tool.** It is designed to run on a single developer machine and does not perform authentication. Do not expose the broker on a shared network unless you accept that every listener can see and act within every session.
 
-CAFleet enables ephemeral agents -- such as Claude Code sessions, CI/CD runners, and other coding agents -- to discover each other and exchange messages. All CLI commands access SQLite directly through a shared `broker` module -- no HTTP server is needed for agent operations. Agents are organized into **sessions** -- a non-secret namespace created via `cafleet session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
+CAFleet enables ephemeral agents -- such as Claude Code sessions, CI/CD runners, and other coding agents -- to discover each other and exchange messages. All CLI commands access SQLite directly through a shared `broker` module -- no HTTP server is needed for agent operations. Agents are organized into **sessions** -- a non-secret identifier created via `cafleet session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
 
 ## Features
 
 - **Agent Registry** -- Register, discover, and deregister agents via CLI
-- **Session Isolation** -- A `session_id` namespace defines a session boundary; cross-session agents are fully invisible to each other
+- **Session Isolation** -- A `session_id` defines a session boundary; cross-session agents are fully invisible to each other
 - **Unicast Messaging** -- Send messages to a specific agent by ID (same-session only)
 - **Broadcast Messaging** -- Send messages to all agents in the same session
 - **Inbox Polling** -- Agents poll for new messages at their own pace; supports delta polling via `statusTimestampAfter`
 - **Message Lifecycle** -- Acknowledge, cancel (retract), and track message status
-- **Session-Based Routing** -- `session_id` (namespace) + `agent_id` (identity) parameters on all operations; no authentication or bearer tokens
+- **Session-Based Routing** -- `session_id` + `agent_id` (identity) parameters on all operations; no authentication or bearer tokens
 - **WebUI** -- Browser-based dashboard; session picker at `/ui/#/sessions`, then a Discord-style unified timeline per session (sidebar of active/deregistered agents, message timeline with broadcasts collapsed to one entry + per-recipient ACK reactions on hover, and an `@<agent>` / `@all` input)
 - **Member Lifecycle** -- `cafleet member create/delete/list/capture` commands wrap tmux pane spawning + agent registration into atomic operations; the `agent_placements` table persists the agent-to-pane mapping in the registry
 - **Multi-Runner Support** -- `--coding-agent claude|codex` flag on `member create` selects which coding agent to spawn; defaults to `claude` for backward compatibility. Codex runs with `--approval-mode auto-edit`
@@ -37,7 +37,7 @@ Admin WebUI  ──→  server.py (minimal FastAPI)         |
 Key design decisions:
 
 - **Direct SQLite access**: CLI commands call `broker.py` directly — no HTTP server needed for agent operations. The FastAPI server is only used for the admin WebUI.
-- The `session_id` is the namespace boundary. Sessions are created via `cafleet session create` and are non-secret identifiers for organizing agents. All agents registered with the same session form one namespace.
+- The `session_id` is the session boundary. Sessions are created via `cafleet session create` and are non-secret identifiers for organizing agents. All agents registered with the same session form one session.
 - The `contextId` field is set to the recipient's agent ID on every delivery task, enabling inbox discovery via `broker.poll_tasks(agent_id=myAgentId)`.
 - Task states map to message lifecycle: `input_required` (unread), `completed` (acknowledged), `canceled` (retracted), `failed` (routing error).
 - Sessions are created via `cafleet session create`. Deleting a session is rejected while agents still reference it (FK `RESTRICT`). An empty session (no agents) remains valid indefinitely.
@@ -65,7 +65,7 @@ This command is idempotent -- running it on a database that is already at head i
 
 ### Create a Session
 
-Before registering any agents, create at least one session namespace:
+Before registering any agents, create at least one session:
 
 ```bash
 cafleet session create --label "my-project"
@@ -113,7 +113,7 @@ Global flags (placed **before** the subcommand):
 
 | Flag | Required | Description |
 |---|---|---|
-| `--session-id <uuid>` | Yes (for client + member subcommands) | Session namespace UUID for agent routing. Required for `register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member *`. Silently accepted (and ignored) on `db init` / `session *`. |
+| `--session-id <uuid>` | Yes (for client + member subcommands) | Session UUID for agent routing. Required for `register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member *`. Silently accepted (and ignored) on `db init` / `session *`. |
 | `--json` | No | Emit JSON output. |
 
 Configuration via environment variables:
@@ -129,7 +129,7 @@ The `--agent-id` option is a per-subcommand option required by most agent comman
 | Command | Description |
 |---|---|
 | `cafleet db init` | Apply Alembic migrations to bring the schema to head (idempotent) |
-| `cafleet session create [--label TEXT]` | Create a new session namespace; prints the session_id |
+| `cafleet session create [--label TEXT]` | Create a new session; prints the session_id |
 | `cafleet session list` | List all sessions with agent counts |
 | `cafleet session show <id>` | Show details of a single session |
 | `cafleet session delete <id>` | Delete a session (fails if agents still reference it) |

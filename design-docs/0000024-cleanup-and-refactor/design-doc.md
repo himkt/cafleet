@@ -1,7 +1,7 @@
 # Cleanup and Refactor — Post-Rapid-Iteration Debt Payment
 
 **Status**: Approved
-**Progress**: 35/50 tasks complete — Phase 1 + Phase 2 implementation complete (2.13 smoke-check delegated)
+**Progress**: 44/50 tasks complete — Phases 1 + 2 + 3 implementation complete (2.13 smoke-check + 4.x commit sequence remaining)
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -231,15 +231,15 @@ Known pre-existing references (as of 2026-04-14 drafting): README.md:202-203 (pr
 
 Files with ZERO hits — `.claude/skills/cafleet/SKILL.md` and `docs/spec/webui-api.md` — have no task in Phase 3. The dual-name exception survives in exactly ONE location: `docs/spec/cli-options.md:25`. Everything else is rewritten.
 
-- [ ] 3.1 Edit `README.md` — rewrite 7 occurrences at lines 7, 12, 17, 40, 68, 116, 132. Do NOT attempt a single sed replace — apply per-line reasoning so that phrases like "session_id namespace" become "session_id", "namespace boundary" becomes "session boundary", "session namespace" becomes "session", etc. <!-- completed: -->
-- [ ] 3.2 Edit `ARCHITECTURE.md` — rewrite occurrences at lines 3, 30, 32, 45 (7+ total occurrences across those lines): line 3 "non-secret namespace" → "non-secret session"; line 30 "namespace boundary" → "session boundary", "form one namespace" → "form one session", "namespace routing" → "session routing"; line 32 "non-secret namespace identifier" → "non-secret session identifier", "Sessions are namespaces for tidiness" → "Sessions are partitions for tidiness"; line 45 "session namespace CRUD" → "session CRUD". <!-- completed: -->
-- [ ] 3.3 Edit `CLAUDE.md:24` — rewrite "session for namespace CRUD" to "session for session CRUD" (or the least-redundant phrasing decided during Phase-3 review; "session CRUD" alone is preferred). <!-- completed: -->
-- [ ] 3.4 Edit `.claude/CLAUDE.md` — find the line currently saying `"Unified CLI command: cafleet (with db init for schema management, session for namespace CRUD, and all agent/messaging commands)"` (mirror of 3.3; was line :29 pre-Phase-1, shifts to ~:14 after 1.10) and apply the same "session for namespace CRUD" → "session for session CRUD" (or preferred "session CRUD") rewrite as 3.3. <!-- completed: -->
-- [ ] 3.5 Edit `docs/spec/cli-options.md:25` — keep the dual-name form ONCE at this location: change "Session namespace UUID" to "Session UUID (namespace identifier)". This is the sole surviving dual-name spot. <!-- completed: -->
-- [ ] 3.6 Edit `docs/spec/cli-options.md:81` — change "manages session namespaces" to "manages sessions". <!-- completed: -->
-- [ ] 3.7 Re-run the grep assertion: `grep -rn 'namespace' README.md ARCHITECTURE.md CLAUDE.md .claude/CLAUDE.md docs/spec/cli-options.md`. Exactly ONE match must remain — the dual-name form at `docs/spec/cli-options.md:25`. Abort and fix if any other match surfaces. <!-- completed: -->
-- [ ] 3.8 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass (typecheck + test are effectively no-ops for prose-only changes, but run them to rule out accidental file corruption). <!-- completed: -->
-- [ ] 3.9 Run Phase 3 smoke checks from the Verification Strategy table. <!-- completed: -->
+- [x] 3.1 Edit `README.md` — rewrite 7 occurrences at lines 7, 12, 17, 40, 68, 116, 132. Do NOT attempt a single sed replace — apply per-line reasoning so that phrases like "session_id namespace" become "session_id", "namespace boundary" becomes "session boundary", "session namespace" becomes "session", etc. <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.2 Edit `ARCHITECTURE.md` — rewrite occurrences at lines 3, 30, 32, 45 (7+ total occurrences across those lines): line 3 "non-secret namespace" → "non-secret session"; line 30 "namespace boundary" → "session boundary", "form one namespace" → "form one session", "namespace routing" → "session routing"; line 32 "non-secret namespace identifier" → "non-secret session identifier", "Sessions are namespaces for tidiness" → "Sessions are partitions for tidiness"; line 45 "session namespace CRUD" → "session CRUD". <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.3 Edit `CLAUDE.md:24` — rewrite "session for namespace CRUD" to "session for session CRUD" (or the least-redundant phrasing decided during Phase-3 review; "session CRUD" alone is preferred). <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.4 Edit `.claude/CLAUDE.md` — find the line currently saying `"Unified CLI command: cafleet (with db init for schema management, session for namespace CRUD, and all agent/messaging commands)"` (mirror of 3.3; was line :29 pre-Phase-1, shifts to ~:14 after 1.10) and apply the same "session for namespace CRUD" → "session for session CRUD" (or preferred "session CRUD") rewrite as 3.3. <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.5 Edit `docs/spec/cli-options.md:25` — keep the dual-name form ONCE at this location: change "Session namespace UUID" to "Session UUID (namespace identifier)". This is the sole surviving dual-name spot. <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.6 Edit `docs/spec/cli-options.md:81` — change "manages session namespaces" to "manages sessions". <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.7 Re-run the grep assertion: `grep -rn 'namespace' README.md ARCHITECTURE.md CLAUDE.md .claude/CLAUDE.md docs/spec/cli-options.md`. Exactly ONE match must remain — the dual-name form at `docs/spec/cli-options.md:25`. Abort and fix if any other match surfaces. <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.8 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass (typecheck + test are effectively no-ops for prose-only changes, but run them to rule out accidental file corruption). <!-- completed: 2026-04-15T12:50 -->
+- [x] 3.9 Run Phase 3 smoke checks from the Verification Strategy table. <!-- completed: 2026-04-15T12:50 -->
 
 ### Step 4 — Commit + review sequence
 

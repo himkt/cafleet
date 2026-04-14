@@ -22,7 +22,7 @@ Placed **before** the subcommand:
 | Flag | Required | Notes |
 |---|---|---|
 | `--json` | no | Emit JSON output. |
-| `--session-id <uuid>` | yes for client + member subcommands; no for `db init` and `session *` | Session namespace UUID. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-uuid> *` works for every subcommand. |
+| `--session-id <uuid>` | yes for client + member subcommands; no for `db init` and `session *` | Session UUID (namespace identifier). Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-uuid> *` works for every subcommand. |
 
 ### Subcommands that require `--session-id`
 
@@ -78,7 +78,7 @@ These removals keep secrets out of shell history and let `permissions.allow` pat
 
 ## `cafleet session` — Session Management
 
-The `cafleet session` subgroup manages session namespaces. These commands write directly to SQLite — the broker server does not need to be running.
+The `cafleet session` subgroup manages sessions. These commands write directly to SQLite — the broker server does not need to be running.
 
 ### `session create`
 
