@@ -6,7 +6,7 @@ Subgroups:
   - ``member``  — Manage tmux-backed member agents (Director only)
 
 Top-level commands:
-  env, register, send, broadcast, poll, ack, cancel, get-task, agents, deregister
+  register, send, broadcast, poll, ack, cancel, get-task, agents, deregister
 """
 
 import importlib.resources
@@ -34,11 +34,11 @@ from cafleet.config import settings
 
 
 def _require_session_id(ctx: click.Context) -> None:
-    """Validate that CAFLEET_SESSION_ID is set."""
+    """Validate that --session-id was provided on the root group."""
     if not ctx.obj.get("session_id"):
         click.echo(
-            "Error: CAFLEET_SESSION_ID environment variable is required. "
-            "Create a session with 'cafleet session create'.",
+            "Error: --session-id <uuid> is required for this subcommand. "
+            "Create a session with 'cafleet session create' and pass its id.",
             err=True,
         )
         ctx.exit(1)
@@ -57,28 +57,18 @@ def _sync_db_url() -> str:
 @click.option(
     "--json", "json_output", is_flag=True, default=False, help="Output in JSON format"
 )
+@click.option(
+    "--session-id",
+    "session_id",
+    default=None,
+    help="Session ID (UUID); required for client subcommands.",
+)
 @click.pass_context
-def cli(ctx, json_output):
+def cli(ctx, json_output, session_id):
     """CAFleet — CLI for the A2A message broker."""
     ctx.ensure_object(dict)
-    session_id = os.environ.get("CAFLEET_SESSION_ID")
     ctx.obj["session_id"] = session_id
     ctx.obj["json_output"] = json_output
-
-
-# ---------------------------------------------------------------------------
-# env command
-# ---------------------------------------------------------------------------
-
-
-@cli.command()
-@click.pass_context
-def env(ctx):
-    """Print CAFLEET_DATABASE_URL and CAFLEET_SESSION_ID from the environment."""
-    db_url = settings.database_url
-    session_id = ctx.obj["session_id"] or ""
-    click.echo(f"CAFLEET_DATABASE_URL={db_url}")
-    click.echo(f"CAFLEET_SESSION_ID={session_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +237,7 @@ def session_delete(session_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Client commands (require CAFLEET_SESSION_ID)
+# Client commands (require --session-id)
 # ---------------------------------------------------------------------------
 
 
@@ -478,15 +468,19 @@ def member():
 def _resolve_prompt(
     ctx: click.Context,
     director_agent_id: str,
+    new_agent_id: str,
     prompt_argv: tuple[str, ...],
     coding_agent_config: CodingAgentConfig,
 ) -> str:
     if prompt_argv:
         return " ".join(prompt_argv)
-    director = broker.get_agent(director_agent_id, ctx.obj["session_id"])
+    session_id = ctx.obj["session_id"]
+    director = broker.get_agent(director_agent_id, session_id)
     if director is None:
         raise click.UsageError(f"Director agent {director_agent_id} not found")
     return coding_agent_config.default_prompt_template.format(
+        session_id=session_id,
+        agent_id=new_agent_id,
         director_name=director["name"],
         director_agent_id=director_agent_id,
     )
@@ -540,8 +534,6 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         ctx.exit(1)
         return
 
-    prompt = _resolve_prompt(ctx, agent_id, prompt_argv, coding_agent_config)
-
     # Step 1 — register member with pending placement (tmux_pane_id=null).
     try:
         result = broker.register_agent(
@@ -562,12 +554,23 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         return
     new_agent_id = result["agent_id"]
 
-    # Step 2 — split-window, forwarding env so the spawned agent can reach the DB.
+    # Resolve the prompt now that we know the new member's agent_id so the
+    # template can bake the literal UUIDs for session_id and agent_id.
     try:
-        fwd_env = {
-            "CAFLEET_SESSION_ID": session_id,
-            "CAFLEET_AGENT_ID": new_agent_id,
-        }
+        prompt = _resolve_prompt(
+            ctx, agent_id, new_agent_id, prompt_argv, coding_agent_config
+        )
+    except click.UsageError as exc:
+        _rollback_register(
+            new_agent_id,
+            reason=f"prompt resolution failed: {exc}",
+        )
+        ctx.exit(1)
+        return
+
+    # Step 2 — split-window, forwarding only CAFLEET_DATABASE_URL when set.
+    try:
+        fwd_env: dict[str, str] = {}
         db_url = os.environ.get("CAFLEET_DATABASE_URL")
         if db_url:
             fwd_env["CAFLEET_DATABASE_URL"] = db_url

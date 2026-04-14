@@ -32,13 +32,16 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _try_notify_recipient(session, *, recipient_id: str, sender_id: str) -> bool:
+def _try_notify_recipient(
+    session, *, session_id: str, recipient_id: str, sender_id: str
+) -> bool:
     """Best-effort tmux push notification. Returns True on success.
 
     Looks up the recipient's placement. If a tmux_pane_id exists and the
-    recipient is not the sender, sends a ``cafleet poll`` trigger via
-    ``tmux send-keys``. Failures are silent — the message queue is the
-    source of truth.
+    recipient is not the sender, sends a ``cafleet --session-id <sid>
+    --agent-id <aid> poll`` trigger via ``tmux send-keys`` so the literal
+    command text can be matched by the recipient's ``permissions.allow``.
+    Failures are silent — the message queue is the source of truth.
     """
     if recipient_id == sender_id:
         return False
@@ -49,7 +52,11 @@ def _try_notify_recipient(session, *, recipient_id: str, sender_id: str) -> bool
         return False
     from cafleet.tmux import send_poll_trigger
 
-    return send_poll_trigger(target_pane_id=row[0], agent_id=recipient_id)
+    return send_poll_trigger(
+        target_pane_id=row[0],
+        session_id=session_id,
+        agent_id=recipient_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -544,7 +551,10 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
 
             # tmux push notification (best-effort)
             notification_sent = _try_notify_recipient(
-                session, recipient_id=to, sender_id=agent_id
+                session,
+                session_id=session_id,
+                recipient_id=to,
+                sender_id=agent_id,
             )
 
     return {"task": task_dict, "notification_sent": notification_sent}
@@ -643,7 +653,12 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
 
             # tmux push notifications (best-effort, after commit)
             for recipient_id in recipient_ids:
-                if _try_notify_recipient(session, recipient_id=recipient_id, sender_id=agent_id):
+                if _try_notify_recipient(
+                    session,
+                    session_id=session_id,
+                    recipient_id=recipient_id,
+                    sender_id=agent_id,
+                ):
                     notifications_sent_count += 1
 
     summary_dict["metadata"]["notificationsSentCount"] = notifications_sent_count

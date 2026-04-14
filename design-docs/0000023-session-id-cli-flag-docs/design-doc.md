@@ -1,7 +1,7 @@
 # Migrate session-id and agent-id from env vars / shell expansion to CLI flags
 
 **Status**: Approved
-**Progress**: 13/33 tasks complete
+**Progress**: 26/33 tasks complete
 **Last Updated**: 2026-04-14
 
 ## Overview
@@ -186,25 +186,25 @@ The repository-root and `.claude/` `CLAUDE.md` both list `## Plugin Skills` refe
 
 ### Step 4: Code — CLI flag implementation
 
-- [ ] Modify `cafleet/src/cafleet/cli.py` `cli()` group: add `@click.option("--session-id", default=None, help="Session ID (UUID); required for client subcommands")`; populate `ctx.obj["session_id"]` from the flag value; remove the `os.environ.get("CAFLEET_SESSION_ID")` line. <!-- completed: -->
-- [ ] Update `_require_session_id()` error message to: `"Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id."`. <!-- completed: -->
-- [ ] Delete the `cafleet env` subcommand definition (`cli.py:74-81`). Update any tests that exercised it. <!-- completed: -->
-- [ ] Modify `cafleet/src/cafleet/cli.py` `member create` (around `cli.py:567-573`): drop `CAFLEET_SESSION_ID` and `CAFLEET_AGENT_ID` from `fwd_env`; keep only `CAFLEET_DATABASE_URL` forwarding. <!-- completed: -->
-- [ ] Modify `cafleet/src/cafleet/coding_agent.py`: change `default_prompt_template` for both `CLAUDE` and `CODEX` to use `{session_id}` / `{agent_id}` placeholders instead of `$CAFLEET_AGENT_ID`; rewrite `cafleet poll --agent-id $CAFLEET_AGENT_ID` etc. to `cafleet --session-id {session_id} --agent-id {agent_id} poll` etc. <!-- completed: -->
-- [ ] Modify `_resolve_prompt()` in `cli.py` (around `cli.py:478-492`) to also pass `session_id=session_id, agent_id=new_agent_id` to `default_prompt_template.format(...)`. <!-- completed: -->
+- [x] Modify `cafleet/src/cafleet/cli.py` `cli()` group: add `@click.option("--session-id", default=None, help="Session ID (UUID); required for client subcommands")`; populate `ctx.obj["session_id"]` from the flag value; remove the `os.environ.get("CAFLEET_SESSION_ID")` line. <!-- completed: 2026-04-14T13:30 -->
+- [x] Update `_require_session_id()` error message to: `"Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id."`. <!-- completed: 2026-04-14T13:30 -->
+- [x] Delete the `cafleet env` subcommand definition (`cli.py:74-81`). Update any tests that exercised it. <!-- completed: 2026-04-14T13:30 -->
+- [x] Modify `cafleet/src/cafleet/cli.py` `member create` (around `cli.py:567-573`): drop `CAFLEET_SESSION_ID` and `CAFLEET_AGENT_ID` from `fwd_env`; keep only `CAFLEET_DATABASE_URL` forwarding. <!-- completed: 2026-04-14T13:30 -->
+- [x] Modify `cafleet/src/cafleet/coding_agent.py`: change `default_prompt_template` for both `CLAUDE` and `CODEX` to use `{session_id}` / `{agent_id}` placeholders instead of `$CAFLEET_AGENT_ID`; rewrite `cafleet poll --agent-id $CAFLEET_AGENT_ID` etc. to `cafleet --session-id {session_id} --agent-id {agent_id} poll` etc. <!-- completed: 2026-04-14T13:30 -->
+- [x] Modify `_resolve_prompt()` in `cli.py` (around `cli.py:478-492`) to also pass `session_id=session_id, agent_id=new_agent_id` to `default_prompt_template.format(...)`. <!-- completed: 2026-04-14T13:30 -->
 
 ### Step 5: Code — Push-notification rewiring
 
-- [ ] Modify `cafleet/src/cafleet/tmux.py` `send_poll_trigger`: change signature to `(*, target_pane_id, session_id, agent_id)`; emit `f"cafleet --session-id {session_id} --agent-id {agent_id} poll"`. <!-- completed: -->
-- [ ] Modify `cafleet/src/cafleet/broker.py` `_try_notify_recipient`: accept `session_id` and pass it through to `send_poll_trigger`; update both call sites in `send_message` and `broadcast_message` to pass `session_id=session_id` (already in scope). <!-- completed: -->
+- [x] Modify `cafleet/src/cafleet/tmux.py` `send_poll_trigger`: change signature to `(*, target_pane_id, session_id, agent_id)`; emit `f"cafleet --session-id {session_id} --agent-id {agent_id} poll"`. <!-- completed: 2026-04-14T13:30 -->
+- [x] Modify `cafleet/src/cafleet/broker.py` `_try_notify_recipient`: accept `session_id` and pass it through to `send_poll_trigger`; update both call sites in `send_message` and `broadcast_message` to pass `session_id=session_id` (already in scope). <!-- completed: 2026-04-14T13:30 -->
 
 ### Step 6: Tests
 
-- [ ] Update `cafleet/tests/test_tmux.py`: drop `CAFLEET_SESSION_ID` / `CAFLEET_URL` from the env dicts; add session-id parameter to `send_poll_trigger` calls and assert the emitted command string contains `--session-id <uuid> --agent-id <uuid> poll`; assert tmux `-e` env list no longer carries the session/agent vars. <!-- completed: -->
-- [ ] Update `cafleet/tests/test_coding_agent.py`: flip `test_prompt_template_contains_agent_id_placeholder` (CLAUDE at line 209-213, CODEX at line 253-257) from asserting `"$CAFLEET_AGENT_ID" in template` to asserting `"{agent_id}" in template` and `"{session_id}" in template`; update `test_prompt_template_has_format_placeholders` to call `.format(...)` with the new `session_id=` and `agent_id=` keyword arguments; update the fixture string at line 100 (`"…Use $CAFLEET_AGENT_ID."`) to reflect the new convention or remove the example reference if it is decorative. <!-- completed: -->
-- [ ] Update CLI-runner-based tests (`test_session_cli.py`, `test_broker_messaging.py`, `test_broker_registry.py`, `test_broker_webui.py`) to invoke `cafleet` with `["--session-id", session_id, ...]` instead of injecting the env var. Where `CliRunner.invoke(env=...)` was used solely for `CAFLEET_SESSION_ID`, drop the env arg. <!-- completed: -->
-- [ ] Add `cafleet/tests/test_cli_session_flag.py` covering: (a) missing `--session-id` on `register` exits 1 with the new error string; (b) `--session-id <uuid>` flows into `broker.register_agent`; (c) `db init` and `session create` succeed without the flag; (d) `cafleet env` no longer exists (`Result.exit_code != 0` and stderr contains `No such command`); (e) `--session-id` supplied to `db init` is silently accepted (validates the "Provided but not required" rule). <!-- completed: -->
-- [ ] Run `mise //cafleet:test` — must pass with zero failures. <!-- completed: -->
+- [x] Update `cafleet/tests/test_tmux.py`: drop `CAFLEET_SESSION_ID` / `CAFLEET_URL` from the env dicts; add session-id parameter to `send_poll_trigger` calls and assert the emitted command string contains `--session-id <uuid> --agent-id <uuid> poll`; assert tmux `-e` env list no longer carries the session/agent vars. <!-- completed: 2026-04-14T13:30 -->
+- [x] Update `cafleet/tests/test_coding_agent.py`: flip `test_prompt_template_contains_agent_id_placeholder` (CLAUDE at line 209-213, CODEX at line 253-257) from asserting `"$CAFLEET_AGENT_ID" in template` to asserting `"{agent_id}" in template` and `"{session_id}" in template`; update `test_prompt_template_has_format_placeholders` to call `.format(...)` with the new `session_id=` and `agent_id=` keyword arguments; update the fixture string at line 100 (`"…Use $CAFLEET_AGENT_ID."`) to reflect the new convention or remove the example reference if it is decorative. <!-- completed: 2026-04-14T13:30 -->
+- [x] Update CLI-runner-based tests (`test_session_cli.py`, `test_broker_messaging.py`, `test_broker_registry.py`, `test_broker_webui.py`) to invoke `cafleet` with `["--session-id", session_id, ...]` instead of injecting the env var. Where `CliRunner.invoke(env=...)` was used solely for `CAFLEET_SESSION_ID`, drop the env arg. <!-- completed: 2026-04-14T13:30 -->
+- [x] Add `cafleet/tests/test_cli_session_flag.py` covering: (a) missing `--session-id` on `register` exits 1 with the new error string; (b) `--session-id <uuid>` flows into `broker.register_agent`; (c) `db init` and `session create` succeed without the flag; (d) `cafleet env` no longer exists (`Result.exit_code != 0` and stderr contains `No such command`); (e) `--session-id` supplied to `db init` is silently accepted (validates the "Provided but not required" rule). <!-- completed: 2026-04-14T13:30 -->
+- [x] Run `mise //cafleet:test` — must pass with zero failures. <!-- completed: 2026-04-14T13:30 -->
 
 ### Step 7: Quality gates
 

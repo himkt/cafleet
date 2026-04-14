@@ -295,13 +295,27 @@ class TestCodexConfig:
         assert "dir-002" in result
 
     def test_prompt_template_contains_explicit_cli_instructions(self):
-        """Codex template includes explicit cafleet CLI usage (poll, ack, send)."""
+        """Codex template includes explicit cafleet CLI usage (poll, ack, send).
+
+        Design doc 0000023: CLI invocations in the template now carry the
+        ``--session-id {session_id} --agent-id {agent_id}`` prefix so that
+        Claude Code's ``permissions.allow`` can match them as literal strings.
+        """
         from cafleet.coding_agent import CODEX
 
         template = CODEX.default_prompt_template
-        assert "cafleet poll" in template
-        assert "cafleet ack" in template
-        assert "cafleet send" in template
+        assert (
+            "cafleet --session-id {session_id} --agent-id {agent_id} poll"
+            in template
+        )
+        assert (
+            "cafleet --session-id {session_id} --agent-id {agent_id} ack"
+            in template
+        )
+        assert (
+            "cafleet --session-id {session_id} --agent-id {agent_id} send"
+            in template
+        )
 
 
 # ---------------------------------------------------------------------------
