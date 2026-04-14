@@ -1,7 +1,7 @@
 # CAFleet-Native Design Document Orchestration Skills
 
 **Status**: Approved
-**Progress**: 15/19 tasks complete
+**Progress**: 18/19 tasks complete
 **Last Updated**: 2026-04-14
 
 ## Overview
@@ -10,12 +10,12 @@ Two new skills (`/cafleet-design-doc-create` and `/cafleet-design-doc-execute`) 
 
 ## Success Criteria
 
-- [ ] `/cafleet-design-doc-create` produces design documents through the same clarification → drafting → review → approval process as `/design-doc-create`
-- [ ] `/cafleet-design-doc-execute` implements features through the same TDD cycle as `/design-doc-execute`
-- [ ] Both skills use CAFleet primitives exclusively (no `TeamCreate`, `Agent(team_name=...)`, or `SendMessage`)
-- [ ] Skills are accessible in other projects via plugin as `/cafleet:cafleet-design-doc-create` and `/cafleet:cafleet-design-doc-execute`
-- [ ] Existing `/design-doc-create` and `/design-doc-execute` Agent Teams skills remain functional (coexistence)
-- [ ] No changes to CAFleet Python codebase or database schema
+- [x] `/cafleet-design-doc-create` produces design documents through the same clarification → drafting → review → approval process as `/design-doc-create`
+- [x] `/cafleet-design-doc-execute` implements features through the same TDD cycle as `/design-doc-execute`
+- [x] Both skills use CAFleet primitives exclusively (no `TeamCreate`, `Agent(team_name=...)`, or `SendMessage`)
+- [x] Skills are accessible in other projects via plugin as `/cafleet:cafleet-design-doc-create` and `/cafleet:cafleet-design-doc-execute`
+- [x] Existing `/design-doc-create` and `/design-doc-execute` Agent Teams skills remain functional (coexistence)
+- [x] No changes to CAFleet Python codebase or database schema
 
 ---
 
@@ -655,9 +655,9 @@ Tool Discovery, Verification, Graceful Degradation workflows — unchanged logic
 
 ### Step 8: Verification
 
-- [ ] Verify all skill files load correctly via `Skill(cafleet-design-doc-create)` and `Skill(cafleet-design-doc-execute)` <!-- completed: -->
-- [ ] Verify plugin exposes skills correctly (check `/sync-skills` output includes new plugin skills) <!-- completed: -->
-- [ ] Verify existing `/design-doc-create` and `/design-doc-execute` skills still function (coexistence) <!-- completed: -->
+- [x] Verify all skill files load correctly via `Skill(cafleet-design-doc-create)` and `Skill(cafleet-design-doc-execute)` <!-- completed: 2026-04-14T02:00 -->
+- [x] Verify plugin exposes skills correctly (check `/sync-skills` output includes new plugin skills) <!-- completed: 2026-04-14T02:00 -->
+- [x] Verify existing `/design-doc-create` and `/design-doc-execute` skills still function (coexistence) <!-- completed: 2026-04-14T02:00 -->
 
 ---
 
