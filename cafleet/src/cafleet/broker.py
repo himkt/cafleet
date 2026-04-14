@@ -657,7 +657,9 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
             }
             _save_task(session, summary_dict)
 
-            # tmux push notifications (best-effort, after commit)
+            # tmux push notifications (best-effort, still inside the session
+            # transaction; the queue remains the source of truth if a notify
+            # races the commit).
             for recipient_id in recipient_ids:
                 if _try_notify_recipient(
                     session,

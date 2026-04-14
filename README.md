@@ -120,7 +120,7 @@ Configuration via environment variables:
 
 | Variable | Required | Description |
 |---|---|---|
-| `CAFLEET_DATABASE_URL` | No | SQLite database URL (default: `sqlite:///~/.local/share/cafleet/registry.db`) |
+| `CAFLEET_DATABASE_URL` | No | SQLite database URL. Default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db` with `~` expanded at load time. When setting this env var yourself, use an absolute path (SQLAlchemy does not expand `~` in SQLite URLs). |
 
 The `--agent-id` option is a per-subcommand option required by most agent commands. CLI commands access SQLite directly -- no running server is required.
 

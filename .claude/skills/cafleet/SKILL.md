@@ -33,7 +33,7 @@ If `--session-id` is missing on a subcommand that needs it, the CLI exits with `
 
 The only environment variable the CLI still reads is:
 
-- `CAFLEET_DATABASE_URL` — SQLite database URL (optional; default: `sqlite:///~/.local/share/cafleet/registry.db`).
+- `CAFLEET_DATABASE_URL` — SQLite database URL (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db` with `~` expanded at load time). When setting `CAFLEET_DATABASE_URL` yourself, use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs.
 
 ## Placeholder convention used below
 

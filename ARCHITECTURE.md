@@ -210,7 +210,7 @@ Each CLI parameter has exactly one input source:
 | Parameter | Source |
 |---|---|
 | Session ID | `--session-id` global flag (UUID; required for client + member subcommands) |
-| Database URL | `CAFLEET_DATABASE_URL` env var (optional; default: `sqlite:///~/.local/share/cafleet/registry.db`) |
+| Database URL | `CAFLEET_DATABASE_URL` env var (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db` with `~` expanded at load time via `Path(...).expanduser()`) |
 | Agent ID | `--agent-id` subcommand option |
 | JSON output | `--json` global flag |
 

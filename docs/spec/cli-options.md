@@ -9,7 +9,7 @@ Each parameter has exactly one input source:
 | Parameter | Source |
 |---|---|
 | Session ID | `--session-id <uuid>` global flag |
-| Database URL | `CAFLEET_DATABASE_URL` env var (optional; default: `sqlite:///~/.local/share/cafleet/registry.db`) |
+| Database URL | `CAFLEET_DATABASE_URL` env var (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db` with `~` expanded at load time. When setting `CAFLEET_DATABASE_URL` yourself, use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs.) |
 | Agent ID | `--agent-id <uuid>` subcommand option |
 | JSON output | `--json` global flag |
 
