@@ -33,3 +33,9 @@ A2A-native message broker + agent registry for coding agents.
 
 See `.claude/rules/commands.md` for the full command reference.
 
+## Skill Discovery & Authorization Scope
+
+See `.claude/rules/skill-discovery.md`. Two mandatory rules:
+1. **Load the matching skill BEFORE running ad-hoc commands** — especially `github-cli` for any `gh pr *` / `gh api repos/.../comments` / reviewer-request operation. Do NOT guess reviewer slugs or API paths.
+2. **Authorization is scoped to the specific action** — when the user says "PR 24 created", stop acting on the push/PR workflow. Do NOT run further `git push`, `gh pr edit`, or similar remote-visible commands without explicit re-authorization. When the user signals stop (including profanity/frustration), acknowledge and wait; skip cron firings and idle notifications until they re-engage.
+
