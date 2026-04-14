@@ -1,7 +1,7 @@
 # Migrate session-id and agent-id from env vars / shell expansion to CLI flags
 
 **Status**: Approved
-**Progress**: 5/33 tasks complete
+**Progress**: 11/33 tasks complete
 **Last Updated**: 2026-04-14
 
 ## Overview
@@ -172,12 +172,12 @@ The repository-root and `.claude/` `CLAUDE.md` both list `## Plugin Skills` refe
 
 ### Step 2: Documentation — Skill files
 
-- [ ] Update `.claude/skills/cafleet/SKILL.md`: rewrite "Environment Variables" (lines 22-28) to "Required Flags"; delete the "Env" subsection (lines 47-55); rewrite every `cafleet ...` example in the Command Reference, Multi-Session Coordination, and Typical Workflow sections to use literal `--session-id <session-id>` and `--agent-id <agent-id>` flags; remove the `export CAFLEET_SESSION_ID=...` lines; replace every `$DIRECTOR_ID`, `$MY_ID`, `$MEMBER_ID` reference with `<director-agent-id>`, `<my-agent-id>`, `<member-agent-id>` placeholders alongside an instruction to substitute the literal UUID returned by `cafleet register`. <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet-monitoring/SKILL.md`: replace `$DIRECTOR_ID` and `$MEMBER_ID` placeholders in every command example with `<director-agent-id>` / `<member-agent-id>`; prepend `--session-id <session-id>` to every `cafleet` invocation; rewrite the `/loop` Prompt Template at the bottom to instruct the Director to substitute the literal session UUID and director UUID into every command, not to rely on shell vars. <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet-design-doc-create/SKILL.md`: rewrite Section 1a (lines 80-89) — remove `export CAFLEET_SESSION_ID=...`; the session create step now stores the printed UUID and passes it as `--session-id <uuid>` on every subsequent command; rewrite all `cafleet --json register`, `cafleet --json member create`, `cafleet send`, `cafleet poll`, `cafleet member delete`, `cafleet deregister` examples in Steps 1b–6 to use the new flag form with literal placeholders. <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet-design-doc-execute/SKILL.md`: same rewrite as the create skill (Section 3a lines 169-178 + every command example through Step 6). <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet-design-doc-create/roles/director.md`, `roles/drafter.md`, `roles/reviewer.md`: rewrite every `cafleet send --agent-id $DIRECTOR_ID --to $DRAFTER_ID ...` example to literal-flag form. <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet-design-doc-execute/roles/director.md`, `roles/programmer.md`, `roles/tester.md`, `roles/verifier.md`: same rewrite. <!-- completed: -->
+- [x] Update `.claude/skills/cafleet/SKILL.md`: rewrite "Environment Variables" (lines 22-28) to "Required Flags"; delete the "Env" subsection (lines 47-55); rewrite every `cafleet ...` example in the Command Reference, Multi-Session Coordination, and Typical Workflow sections to use literal `--session-id <session-id>` and `--agent-id <agent-id>` flags; remove the `export CAFLEET_SESSION_ID=...` lines; replace every `$DIRECTOR_ID`, `$MY_ID`, `$MEMBER_ID` reference with `<director-agent-id>`, `<my-agent-id>`, `<member-agent-id>` placeholders alongside an instruction to substitute the literal UUID returned by `cafleet register`. <!-- completed: 2026-04-14T12:30 -->
+- [x] Update `.claude/skills/cafleet-monitoring/SKILL.md`: replace `$DIRECTOR_ID` and `$MEMBER_ID` placeholders in every command example with `<director-agent-id>` / `<member-agent-id>`; prepend `--session-id <session-id>` to every `cafleet` invocation; rewrite the `/loop` Prompt Template at the bottom to instruct the Director to substitute the literal session UUID and director UUID into every command, not to rely on shell vars. <!-- completed: 2026-04-14T12:30 -->
+- [x] Update `.claude/skills/cafleet-design-doc-create/SKILL.md`: rewrite Section 1a (lines 80-89) — remove `export CAFLEET_SESSION_ID=...`; the session create step now stores the printed UUID and passes it as `--session-id <uuid>` on every subsequent command; rewrite all `cafleet --json register`, `cafleet --json member create`, `cafleet send`, `cafleet poll`, `cafleet member delete`, `cafleet deregister` examples in Steps 1b–6 to use the new flag form with literal placeholders. <!-- completed: 2026-04-14T12:30 -->
+- [x] Update `.claude/skills/cafleet-design-doc-execute/SKILL.md`: same rewrite as the create skill (Section 3a lines 169-178 + every command example through Step 6). <!-- completed: 2026-04-14T12:30 -->
+- [x] Update `.claude/skills/cafleet-design-doc-create/roles/director.md`, `roles/drafter.md`, `roles/reviewer.md`: rewrite every `cafleet send --agent-id $DIRECTOR_ID --to $DRAFTER_ID ...` example to literal-flag form. <!-- completed: 2026-04-14T12:30 -->
+- [x] Update `.claude/skills/cafleet-design-doc-execute/roles/director.md`, `roles/programmer.md`, `roles/tester.md`, `roles/verifier.md`: same rewrite. <!-- completed: 2026-04-14T12:30 -->
 
 ### Step 3: Documentation — CLAUDE.md cleanup
 
