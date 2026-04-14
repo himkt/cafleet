@@ -15,7 +15,7 @@ Members spawned via `cafleet member create` do not act autonomously. They respon
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet session create` and `cafleet register` directly into the command. Do **not** introduce shell variables (`$DIRECTOR_ID`, `$MEMBER_ID`, etc.) — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
+Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet session create` and `cafleet register` directly into the command. Do **not** introduce shell variables for agent or session IDs — `permissions.allow` matches command strings literally, and shell expansion breaks that matching.
 
 - `<session-id>` — the session UUID printed by `cafleet session create` (a single value reused across every command in this Director's run)
 - `<director-agent-id>` — the Director's agent UUID returned by `cafleet ... register`

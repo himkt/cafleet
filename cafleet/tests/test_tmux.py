@@ -180,9 +180,7 @@ class TestSplitWindow:
         for i, a in enumerate(captured_args):
             if a == "-e" and i + 1 < len(captured_args):
                 env_pairs.append(captured_args[i + 1])
-        assert (
-            "CAFLEET_DATABASE_URL=sqlite+aiosqlite:////tmp/registry.db" in env_pairs
-        )
+        assert "CAFLEET_DATABASE_URL=sqlite+aiosqlite:////tmp/registry.db" in env_pairs
         # The deprecated env vars must not be forwarded any more.
         for pair in env_pairs:
             assert not pair.startswith("CAFLEET_SESSION_ID="), (

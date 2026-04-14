@@ -89,9 +89,7 @@ def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
         raise
 
 
-def send_poll_trigger(
-    *, target_pane_id: str, session_id: str, agent_id: str
-) -> bool:
+def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) -> bool:
     """Send a cafleet poll trigger to the given tmux pane.
 
     Emits ``cafleet --session-id <session_id> --agent-id <agent_id> poll`` so

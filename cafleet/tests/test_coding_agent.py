@@ -305,16 +305,11 @@ class TestCodexConfig:
 
         template = CODEX.default_prompt_template
         assert (
-            "cafleet --session-id {session_id} --agent-id {agent_id} poll"
-            in template
+            "cafleet --session-id {session_id} --agent-id {agent_id} poll" in template
         )
+        assert "cafleet --session-id {session_id} --agent-id {agent_id} ack" in template
         assert (
-            "cafleet --session-id {session_id} --agent-id {agent_id} ack"
-            in template
-        )
-        assert (
-            "cafleet --session-id {session_id} --agent-id {agent_id} send"
-            in template
+            "cafleet --session-id {session_id} --agent-id {agent_id} send" in template
         )
 
 

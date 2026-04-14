@@ -46,7 +46,9 @@ def _try_notify_recipient(
     if recipient_id == sender_id:
         return False
     row = session.execute(
-        select(AgentPlacement.tmux_pane_id).where(AgentPlacement.agent_id == recipient_id)
+        select(AgentPlacement.tmux_pane_id).where(
+            AgentPlacement.agent_id == recipient_id
+        )
     ).first()
     if row is None or row[0] is None:
         return False
@@ -509,7 +511,9 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
                 )
             ).scalar_one_or_none()
             if sender_agent is None:
-                raise ValueError(f"Sender agent not found or not active in session: {agent_id}")
+                raise ValueError(
+                    f"Sender agent not found or not active in session: {agent_id}"
+                )
 
             # 2. Destination agent exists and is active
             dest_agent = session.execute(
@@ -581,7 +585,9 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
                 )
             ).scalar_one_or_none()
             if sender_agent is None:
-                raise ValueError(f"Sender agent not found or not active in session: {agent_id}")
+                raise ValueError(
+                    f"Sender agent not found or not active in session: {agent_id}"
+                )
 
             # List active agents in session, excluding sender
             rows = session.execute(
@@ -662,7 +668,9 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
                     notifications_sent_count += 1
 
     summary_dict["metadata"]["notificationsSentCount"] = notifications_sent_count
-    return [{"task": summary_dict, "notifications_sent_count": notifications_sent_count}]
+    return [
+        {"task": summary_dict, "notifications_sent_count": notifications_sent_count}
+    ]
 
 
 def poll_tasks(

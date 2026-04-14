@@ -48,7 +48,7 @@ CODEX = CodingAgentConfig(
         "`cafleet --session-id {session_id} --agent-id {agent_id} poll`.\n"
         "Use `cafleet --session-id {session_id} --agent-id {agent_id} ack --task-id <id>` "
         "to acknowledge messages\n"
-        'and `cafleet --session-id {session_id} --agent-id {agent_id} send '
+        "and `cafleet --session-id {session_id} --agent-id {agent_id} send "
         '--to <id> --text "..."` to reply.'
     ),
 )

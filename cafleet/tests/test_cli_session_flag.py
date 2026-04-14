@@ -217,9 +217,7 @@ class TestSessionIdFlagFlowsIntoBroker:
             f"captured args={captured.get('args')}, kwargs={captured.get('kwargs')}"
         )
 
-    def test_session_id_not_read_from_environment(
-        self, db_runner, monkeypatch
-    ):
+    def test_session_id_not_read_from_environment(self, db_runner, monkeypatch):
         """Setting CAFLEET_SESSION_ID env var alone must no longer satisfy the gate.
 
         Design doc Success Criteria: ``CAFLEET_SESSION_ID`` env var is removed
