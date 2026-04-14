@@ -1,6 +1,6 @@
 # CAFleet
 
-A2A-native message broker and agent registry for coding agents.
+A2A-inspired message broker and agent registry for coding agents.
 
 > **CAFleet is a local-only tool.** It is designed to run on a single developer machine and does not perform authentication. Do not expose the broker on a shared network unless you accept that every listener can see and act within every session.
 
@@ -209,8 +209,8 @@ cafleet/                    # Repository root (uv workspace)
 
 ```bash
 # Clone the repository
-git clone https://github.com/himkt/hikyaku.git
-cd hikyaku
+git clone https://github.com/himkt/cafleet.git
+cd cafleet
 
 # Install all workspace dependencies
 uv sync

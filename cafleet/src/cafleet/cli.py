@@ -65,7 +65,7 @@ def _sync_db_url() -> str:
 )
 @click.pass_context
 def cli(ctx, json_output, session_id):
-    """CAFleet — CLI for the A2A message broker."""
+    """CAFleet — CLI for the A2A-inspired message broker."""
     ctx.ensure_object(dict)
     ctx.obj["session_id"] = session_id
     ctx.obj["json_output"] = json_output
@@ -472,13 +472,26 @@ def _resolve_prompt(
     prompt_argv: tuple[str, ...],
     coding_agent_config: CodingAgentConfig,
 ) -> str:
-    if prompt_argv:
-        return " ".join(prompt_argv)
+    """Resolve the spawn prompt for a new member agent.
+
+    Joins a user-supplied ``prompt_argv`` (or falls back to the coding
+    agent's default template) and runs ``str.format`` on the result with
+    ``session_id`` / ``agent_id`` / ``director_name`` / ``director_agent_id``
+    as kwargs. Applies to BOTH the default template and custom prompts, so
+    callers may embed those placeholders in custom prompts. Literal ``{``
+    or ``}`` characters in a custom prompt must be doubled (``{{`` / ``}}``)
+    to survive ``.format``.
+    """
     session_id = ctx.obj["session_id"]
     director = broker.get_agent(director_agent_id, session_id)
     if director is None:
         raise click.UsageError(f"Director agent {director_agent_id} not found")
-    return coding_agent_config.default_prompt_template.format(
+    template = (
+        " ".join(prompt_argv)
+        if prompt_argv
+        else coding_agent_config.default_prompt_template
+    )
+    return template.format(
         session_id=session_id,
         agent_id=new_agent_id,
         director_name=director["name"],

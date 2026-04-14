@@ -113,7 +113,7 @@ Read the role files that will be embedded verbatim in spawn prompts:
 
 **Drafter spawn prompt (normal mode):**
 
-When constructing the prompt, substitute the literal `<session-id>` and `<director-agent-id>` UUIDs for the placeholders below. The new member's own `<my-agent-id>` will be allocated by `member create` and baked into the spawn prompt automatically by the `coding_agent.py` template (`{session_id}` / `{agent_id}` are filled in by `_resolve_prompt`).
+When constructing the prompt, substitute the literal `<session-id>` and `<director-agent-id>` UUIDs for the placeholders below. The new member's own `<my-agent-id>` will be allocated by `member create` and baked into the spawn prompt automatically by the `coding_agent.py` template — `_resolve_prompt` now runs `str.format()` on BOTH the default template AND any user-supplied custom prompt, so `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` placeholders are substituted either way. See the Template safety note under `Member Create` in `.claude/skills/cafleet/SKILL.md` — literal `{` / `}` in custom prompts must be doubled (`{{` / `}}`) or pre-substituted, otherwise `.format()` will error or clobber the value.
 
 ```
 You are the Drafter in a design document creation team (CAFleet-native).

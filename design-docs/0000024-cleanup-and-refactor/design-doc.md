@@ -1,7 +1,7 @@
 # Cleanup and Refactor — Post-Rapid-Iteration Debt Payment
 
 **Status**: Approved
-**Progress**: 17/50 tasks complete — Phase 1 complete
+**Progress**: 35/50 tasks complete — Phase 1 + Phase 2 implementation complete (2.13 smoke-check delegated)
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -207,24 +207,24 @@ Known pre-existing references (as of 2026-04-14 drafting): README.md:202-203 (pr
 
 ### Step 2 — Phase 2: `_resolve_prompt` fix + repo-wide lineage unification
 
-- [ ] 2.1 Edit `cafleet/src/cafleet/cli.py:468-486` `_resolve_prompt` — when `prompt_argv` is non-empty, join into a template string, then call `.format(session_id=..., agent_id=..., director_name=..., director_agent_id=...)` on the joined string (same kwargs as the default branch). Keep the existing director lookup + UsageError on missing director. <!-- completed: -->
-- [ ] 2.2 Add `cafleet/tests/test_cli_member.py` — FOUR test cases against `_resolve_prompt` directly: (a) default path substitutes UUIDs, (b) `prompt_argv=("message","for","{agent_id}")` substitutes UUIDs, (c) `prompt_argv=("no","placeholders","here")` passes through unchanged, (d) `prompt_argv=("data","is","{{not","a","placeholder}}","closed")` collapses doubled braces to single braces and does NOT attempt placeholder substitution on the inner tokens (covers the Risk-row mitigation for literal-brace JSON snippets). <!-- completed: -->
-- [ ] 2.3 Edit `.claude/skills/cafleet/SKILL.md` — add a "Template safety" note under `Member Create`: custom prompts go through `str.format()`, so literal `{`/`}` must be doubled (`{{` / `}}`) or the value pre-substituted before calling `member create`. <!-- completed: -->
-- [ ] 2.4 Edit `.claude/skills/cafleet-design-doc-create/SKILL.md:116` — update the surrounding copy to confirm the custom-prompt path now substitutes `{session_id}` and `{agent_id}` too. Add a template-safety cross-reference to `cafleet/SKILL.md`. <!-- completed: -->
-- [ ] 2.5 Edit `cafleet/src/cafleet/cli.py:68` — rewrite the CLI docstring to read `"""CAFleet — CLI for the A2A-inspired message broker."""`. (R4) <!-- completed: -->
-- [ ] 2.6 Edit `cafleet/src/cafleet/db/models.py:4` — rewrite the module docstring from "opaque A2A payloads" to "opaque A2A-inspired task + agent-card payloads as JSON TEXT". (R5) <!-- completed: -->
-- [ ] 2.7 Edit `docs/spec/data-model.md:3-7` — remove the `a2a-sdk` claim; rewrite to describe CAFleet's internal A2A-inspired shape. Change line 7's `aiosqlite async driver` reference to the sync `pysqlite` driver with a pointer to `cafleet/src/cafleet/db/engine.py`. (R7) <!-- completed: -->
-- [ ] 2.8 Edit `docs/spec/data-model.md:32, 52, 55, 173` — replace "A2A `AgentCard` blob / `TaskState` enum value / normal A2A traffic" with "AgentCard-shaped blob / TaskState enum value / normal traffic" (or the agreed lineage-marker phrasing). (R8) <!-- completed: -->
-- [ ] 2.9 Edit `.claude-plugin/plugin.json:8` — update `repository` from `github.com/himkt/hikyaku` to the canonical current repo URL. (R2) <!-- completed: -->
-- [ ] 2.10 Edit `README.md:214-215` — update `git clone` URL and the `cd <dir>` line to the canonical current repo name. (R3) <!-- completed: -->
-- [ ] 2.11 **R12 — repo-wide "A2A-native" → "A2A-inspired" unification (6 files, 6 edits)**: <!-- completed: -->
-  - [ ] 2.11.1 `README.md:3` — "A2A-native message broker" → "A2A-inspired message broker". <!-- completed: -->
-  - [ ] 2.11.2 `CLAUDE.md:17` — "A2A-native message broker + agent registry" → "A2A-inspired message broker + agent registry". <!-- completed: -->
-  - [ ] 2.11.3 `.claude/CLAUDE.md` — find the line currently saying `"A2A-native message broker + agent registry for coding agents."` (same bullet as 2.11.2 but in the mirrored `.claude/` copy; was line :22 pre-Phase-1, shifts to ~:7 after 1.10) and change `"A2A-native"` → `"A2A-inspired"`. <!-- completed: -->
-  - [ ] 2.11.4 `.claude-plugin/marketplace.json:14` — "A2A-native message broker CLI" → "A2A-inspired message broker CLI". <!-- completed: -->
-  - [ ] 2.11.5 `.claude-plugin/plugin.json:4` — "A2A-native message broker CLI and design document orchestration skills for coding agents." → "A2A-inspired message broker CLI and design document orchestration skills for coding agents." <!-- completed: -->
-  - [ ] 2.11.6 `cafleet/pyproject.toml:4` — `description = "A2A-native message broker and agent registry for coding agents"` → `description = "A2A-inspired message broker and agent registry for coding agents"`. <!-- completed: -->
-- [ ] 2.12 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass (new test from 2.2 must pass). <!-- completed: -->
+- [x] 2.1 Edit `cafleet/src/cafleet/cli.py:468-486` `_resolve_prompt` — when `prompt_argv` is non-empty, join into a template string, then call `.format(session_id=..., agent_id=..., director_name=..., director_agent_id=...)` on the joined string (same kwargs as the default branch). Keep the existing director lookup + UsageError on missing director. <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.2 Add `cafleet/tests/test_cli_member.py` — FOUR test cases against `_resolve_prompt` directly: (a) default path substitutes UUIDs, (b) `prompt_argv=("message","for","{agent_id}")` substitutes UUIDs, (c) `prompt_argv=("no","placeholders","here")` passes through unchanged, (d) `prompt_argv=("data","is","{{not","a","placeholder}}","closed")` collapses doubled braces to single braces and does NOT attempt placeholder substitution on the inner tokens (covers the Risk-row mitigation for literal-brace JSON snippets). <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.3 Edit `.claude/skills/cafleet/SKILL.md` — add a "Template safety" note under `Member Create`: custom prompts go through `str.format()`, so literal `{`/`}` must be doubled (`{{` / `}}`) or the value pre-substituted before calling `member create`. <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.4 Edit `.claude/skills/cafleet-design-doc-create/SKILL.md:116` — update the surrounding copy to confirm the custom-prompt path now substitutes `{session_id}` and `{agent_id}` too. Add a template-safety cross-reference to `cafleet/SKILL.md`. <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.5 Edit `cafleet/src/cafleet/cli.py:68` — rewrite the CLI docstring to read `"""CAFleet — CLI for the A2A-inspired message broker."""`. (R4) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.6 Edit `cafleet/src/cafleet/db/models.py:4` — rewrite the module docstring from "opaque A2A payloads" to "opaque A2A-inspired task + agent-card payloads as JSON TEXT". (R5) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.7 Edit `docs/spec/data-model.md:3-7` — remove the `a2a-sdk` claim; rewrite to describe CAFleet's internal A2A-inspired shape. Change line 7's `aiosqlite async driver` reference to the sync `pysqlite` driver with a pointer to `cafleet/src/cafleet/db/engine.py`. (R7) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.8 Edit `docs/spec/data-model.md:32, 52, 55, 173` — replace "A2A `AgentCard` blob / `TaskState` enum value / normal A2A traffic" with "AgentCard-shaped blob / TaskState enum value / normal traffic" (or the agreed lineage-marker phrasing). (R8) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.9 Edit `.claude-plugin/plugin.json:8` — update `repository` from `github.com/himkt/hikyaku` to the canonical current repo URL. (R2) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.10 Edit `README.md:214-215` — update `git clone` URL and the `cd <dir>` line to the canonical current repo name. (R3) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.11 **R12 — repo-wide "A2A-native" → "A2A-inspired" unification (6 files, 6 edits)**: <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.1 `README.md:3` — "A2A-native message broker" → "A2A-inspired message broker". <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.2 `CLAUDE.md:17` — "A2A-native message broker + agent registry" → "A2A-inspired message broker + agent registry". <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.3 `.claude/CLAUDE.md` — find the line currently saying `"A2A-native message broker + agent registry for coding agents."` (same bullet as 2.11.2 but in the mirrored `.claude/` copy; was line :22 pre-Phase-1, shifts to ~:7 after 1.10) and change `"A2A-native"` → `"A2A-inspired"`. <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.4 `.claude-plugin/marketplace.json:14` — "A2A-native message broker CLI" → "A2A-inspired message broker CLI". <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.5 `.claude-plugin/plugin.json:4` — "A2A-native message broker CLI and design document orchestration skills for coding agents." → "A2A-inspired message broker CLI and design document orchestration skills for coding agents." <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.6 `cafleet/pyproject.toml:4` — `description = "A2A-native message broker and agent registry for coding agents"` → `description = "A2A-inspired message broker and agent registry for coding agents"`. <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.12 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass (new test from 2.2 must pass). <!-- completed: 2026-04-15T12:35 -->
 - [ ] 2.13 Run Phase 2 smoke checks from the Verification Strategy table. Delegate `cafleet --help` / `cafleet member create` smoke invocations to a teammate that has CLI permission, or ask the user to run them. Do NOT run them directly. The `grep A2A-native` zero-match assertion is self-runnable. <!-- completed: -->
 
 ### Step 3 — Phase 3: Naming unification (prose-only, per re-greped line truth)
