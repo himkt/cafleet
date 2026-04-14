@@ -6,6 +6,8 @@ You are the **Director** in a design document creation team orchestrated via the
 
 Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-id>`, `<drafter-agent-id>`, `<reviewer-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet session create`, `cafleet register`, and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
 
+**Flag placement**: `--session-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --session-id <session-id> poll --agent-id <director-agent-id>`.
+
 ## Your Accountability
 
 - **Register with CAFleet and monitor continuously.** Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`. Create or reuse a CAFleet session, register yourself, and start the monitoring `/loop` BEFORE spawning any member. Keep the loop running until shutdown.
@@ -22,24 +24,24 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 
 **Sending a task to a member:**
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> send \
+cafleet --session-id <session-id> send --agent-id <director-agent-id> \
   --to <member-agent-id> --text "<instruction>"
 ```
-A push notification automatically injects `cafleet --session-id <session-id> --agent-id <member-agent-id> poll` into the member's tmux pane — the member sees the message without polling manually.
+A push notification automatically injects `cafleet --session-id <session-id> poll --agent-id <member-agent-id>` into the member's tmux pane — the member sees the message without polling manually.
 
 **Checking for incoming messages from members:**
 ```bash
-cafleet --session-id <session-id> --json --agent-id <director-agent-id> poll
-cafleet --session-id <session-id> --json --agent-id <director-agent-id> poll --since "<ISO 8601 timestamp of last check>"
+cafleet --session-id <session-id> --json poll --agent-id <director-agent-id>
+cafleet --session-id <session-id> --json poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check>"
 ```
 Acknowledge each message after reading:
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> ack --task-id <task-id>
+cafleet --session-id <session-id> ack --agent-id <director-agent-id> --task-id <task-id>
 ```
 
 **Inspecting a stalled member's terminal (2-stage fallback):**
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> member capture \
+cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
   --member-id <member-agent-id> --lines 200
 ```
 
@@ -50,7 +52,7 @@ cafleet --session-id <session-id> --agent-id <director-agent-id> member capture 
 When the user selects "Scan for COMMENT markers":
 
 1. **Immediately** scan for `COMMENT(` markers in the design document using Grep — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
-2. **If markers are found**: Route COMMENT content and fix instructions to the Drafter via `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <drafter-agent-id> --text "..."`. After the Drafter revises and removes markers, verify with Grep that no `COMMENT(` markers remain.
+2. **If markers are found**: Route COMMENT content and fix instructions to the Drafter via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."`. After the Drafter revises and removes markers, verify with Grep that no `COMMENT(` markers remain.
 3. **If no markers are found**: Explain the COMMENT marker convention to the user — markers follow the pattern `# COMMENT(username): feedback` placed directly in the design document file. Show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / Other).
 
 ### LLM Intent Judgment
@@ -73,22 +75,22 @@ Track team progress via the `Skill(cafleet-monitoring)` `/loop` (3-minute interv
 
 | Phase | Expected event | Stall indicator | Director action |
 |:--|:--|:--|:--|
-| Clarification | Drafter sends clarifying questions via `cafleet send` | Drafter goes idle without sending questions or a draft | `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <drafter-agent-id> --text "Please send your clarifying questions so I can relay them to the user."` |
-| Drafting | Drafter writes the design document | Drafter goes idle after receiving user answers without producing a draft | `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <drafter-agent-id> --text "You have received the user's answers. Please proceed with writing the design document."` |
-| Review | Reviewer sends review feedback via `cafleet send` | Reviewer goes idle without sending feedback | `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <reviewer-agent-id> --text "Please review the draft and send your feedback."` |
-| Revision | Drafter revises based on feedback | Drafter goes idle without sending revised draft | `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <drafter-agent-id> --text "Please address the Reviewer's feedback and send the revised draft."` |
+| Clarification | Drafter sends clarifying questions via `cafleet send` | Drafter goes idle without sending questions or a draft | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "Please send your clarifying questions so I can relay them to the user."` |
+| Drafting | Drafter writes the design document | Drafter goes idle after receiving user answers without producing a draft | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "You have received the user's answers. Please proceed with writing the design document."` |
+| Review | Reviewer sends review feedback via `cafleet send` | Reviewer goes idle without sending feedback | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <reviewer-agent-id> --text "Please review the draft and send your feedback."` |
+| Revision | Drafter revises based on feedback | Drafter goes idle without sending revised draft | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "Please address the Reviewer's feedback and send the revised draft."` |
 
 ## Shutdown Protocol
 
 1. Cancel the `/loop` monitor (`CronDelete` on the cron ID recorded when the loop was created).
 2. Delete each member:
    ```bash
-   cafleet --session-id <session-id> --agent-id <director-agent-id> member delete --member-id <drafter-agent-id>
-   cafleet --session-id <session-id> --agent-id <director-agent-id> member delete --member-id <reviewer-agent-id>
+   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <drafter-agent-id>
+   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <reviewer-agent-id>
    ```
 3. Deregister yourself:
    ```bash
-   cafleet --session-id <session-id> --agent-id <director-agent-id> deregister
+   cafleet --session-id <session-id> deregister --agent-id <director-agent-id>
    ```
 
 The CAFleet session itself is not deleted — it persists so the message trail remains inspectable in the admin WebUI.

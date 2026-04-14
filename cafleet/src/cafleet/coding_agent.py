@@ -33,7 +33,7 @@ CLAUDE = CodingAgentConfig(
         "Load Skill(cafleet). Your session_id is {session_id} and your agent_id is {agent_id}.\n"
         "You are a member of the team led by {director_name} ({director_agent_id}).\n"
         "Wait for instructions via "
-        "`cafleet --session-id {session_id} --agent-id {agent_id} poll`."
+        "`cafleet --session-id {session_id} poll --agent-id {agent_id}`."
     ),
 )
 
@@ -45,10 +45,10 @@ CODEX = CodingAgentConfig(
         "Your session_id is {session_id} and your agent_id is {agent_id}.\n"
         "You are a member of the team led by {director_name} ({director_agent_id}).\n"
         "Check for instructions using "
-        "`cafleet --session-id {session_id} --agent-id {agent_id} poll`.\n"
-        "Use `cafleet --session-id {session_id} --agent-id {agent_id} ack --task-id <id>` "
+        "`cafleet --session-id {session_id} poll --agent-id {agent_id}`.\n"
+        "Use `cafleet --session-id {session_id} ack --agent-id {agent_id} --task-id <id>` "
         "to acknowledge messages\n"
-        "and `cafleet --session-id {session_id} --agent-id {agent_id} send "
+        "and `cafleet --session-id {session_id} send --agent-id {agent_id} "
         '--to <id> --text "..."` to reply.'
     ),
 )

@@ -38,9 +38,9 @@ def _try_notify_recipient(
     """Best-effort tmux push notification. Returns True on success.
 
     Looks up the recipient's placement. If a tmux_pane_id exists and the
-    recipient is not the sender, sends a ``cafleet --session-id <sid>
-    --agent-id <aid> poll`` trigger via ``tmux send-keys`` so the literal
-    command text can be matched by the recipient's ``permissions.allow``.
+    recipient is not the sender, sends a ``cafleet --session-id <sid> poll
+    --agent-id <aid>`` trigger via ``tmux send-keys`` so the literal command
+    text can be matched by the recipient's ``permissions.allow``.
     Failures are silent — the message queue is the source of truth.
     """
     if recipient_id == sender_id:

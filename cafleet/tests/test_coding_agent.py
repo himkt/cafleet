@@ -297,19 +297,21 @@ class TestCodexConfig:
     def test_prompt_template_contains_explicit_cli_instructions(self):
         """Codex template includes explicit cafleet CLI usage (poll, ack, send).
 
-        Design doc 0000023: CLI invocations in the template now carry the
-        ``--session-id {session_id} --agent-id {agent_id}`` prefix so that
-        Claude Code's ``permissions.allow`` can match them as literal strings.
+        Design doc 0000023 (Copilot review fix): ``--session-id`` is a
+        root-group global option (before the subcommand); ``--agent-id`` is
+        a per-subcommand option (after the subcommand). The template must
+        emit the exact literal form click accepts so that Claude Code's
+        ``permissions.allow`` can match it as a literal string.
         """
         from cafleet.coding_agent import CODEX
 
         template = CODEX.default_prompt_template
         assert (
-            "cafleet --session-id {session_id} --agent-id {agent_id} poll" in template
+            "cafleet --session-id {session_id} poll --agent-id {agent_id}" in template
         )
-        assert "cafleet --session-id {session_id} --agent-id {agent_id} ack" in template
+        assert "cafleet --session-id {session_id} ack --agent-id {agent_id}" in template
         assert (
-            "cafleet --session-id {session_id} --agent-id {agent_id} send" in template
+            "cafleet --session-id {session_id} send --agent-id {agent_id}" in template
         )
 
 

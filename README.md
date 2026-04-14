@@ -43,7 +43,7 @@ Key design decisions:
 - Sessions are created via `cafleet session create`. Deleting a session is rejected while agents still reference it (FK `RESTRICT`). An empty session (no agents) remains valid indefinitely.
 - The WebUI requires no login. A session picker at `/ui/#/sessions` lets the user select which session to view.
 - **Storage layer**: All data is persisted in a single SQLite file (`~/.local/share/cafleet/registry.db` by default). Indexed fields are columns; task payloads are stored as JSON blobs. `PRAGMA busy_timeout=5000` handles concurrent access. No physical cleanup loop -- deregistered agents and tasks persist forever and are invisible to normal traffic via `status='active'` filters.
-- **tmux push notifications**: After persisting a message, the broker looks up the recipient's `agent_placements` row and, if a tmux pane is available, injects `cafleet --session-id <id> --agent-id <id> poll` via `tmux send-keys`. This is best-effort -- failures are silent, and the queue remains the source of truth. Unicast responses include `notification_sent`; broadcast summaries include `notifications_sent_count`.
+- **tmux push notifications**: After persisting a message, the broker looks up the recipient's `agent_placements` row and, if a tmux pane is available, injects `cafleet --session-id <id> poll --agent-id <id>` via `tmux send-keys`. This is best-effort -- failures are silent, and the queue remains the source of truth. Unicast responses include `notification_sent`; broadcast summaries include `notifications_sent_count`.
 
 ## Quick Start
 
@@ -89,20 +89,20 @@ Save the returned `agent_id` for subsequent commands.
 ### Send a Message
 
 ```bash
-cafleet --session-id <session-id> --agent-id <your-agent-id> send \
+cafleet --session-id <session-id> send --agent-id <your-agent-id> \
   --to <recipient-agent-id> --text "Hello from my agent"
 ```
 
 ### Poll for Messages
 
 ```bash
-cafleet --session-id <session-id> --agent-id <your-agent-id> poll
+cafleet --session-id <session-id> poll --agent-id <your-agent-id>
 ```
 
 ### Acknowledge a Message
 
 ```bash
-cafleet --session-id <session-id> --agent-id <your-agent-id> ack --task-id <task-id>
+cafleet --session-id <session-id> ack --agent-id <your-agent-id> --task-id <task-id>
 ```
 
 ## CLI Usage
@@ -143,18 +143,18 @@ All commands below require the global `--session-id <uuid>` flag (placed before 
 | Command | `--agent-id` | Description |
 |---|---|---|
 | `cafleet --session-id <id> register` | Not required | Register a new agent; returns an agent ID |
-| `cafleet --session-id <id> --agent-id <id> send` | Required | Send a unicast message to another agent in the same session |
-| `cafleet --session-id <id> --agent-id <id> broadcast` | Required | Broadcast a message to all agents in the same session |
-| `cafleet --session-id <id> --agent-id <id> poll` | Required | Poll inbox for incoming messages |
-| `cafleet --session-id <id> --agent-id <id> ack` | Required | Acknowledge receipt of a message |
-| `cafleet --session-id <id> --agent-id <id> cancel` | Required | Cancel (retract) a sent message before it is acknowledged |
-| `cafleet --session-id <id> --agent-id <id> get-task` | Required | Get details of a specific task/message |
-| `cafleet --session-id <id> --agent-id <id> agents` | Required | List agents in the session or get detail for a specific agent |
-| `cafleet --session-id <id> --agent-id <id> deregister` | Required | Deregister this agent from the broker |
-| `cafleet --session-id <id> --agent-id <id> member create` | Required | Register a member agent and spawn its tmux pane (Director only). `--coding-agent claude\|codex` selects the backend (default: `claude`) |
-| `cafleet --session-id <id> --agent-id <id> member delete` | Required | Deregister a member and close its pane (Director only) |
-| `cafleet --session-id <id> --agent-id <id> member list` | Required | List members spawned by this Director |
-| `cafleet --session-id <id> --agent-id <id> member capture` | Required | Capture the last N lines of a member's pane (Director only) |
+| `cafleet --session-id <id> send --agent-id <id>` | Required | Send a unicast message to another agent in the same session |
+| `cafleet --session-id <id> broadcast --agent-id <id>` | Required | Broadcast a message to all agents in the same session |
+| `cafleet --session-id <id> poll --agent-id <id>` | Required | Poll inbox for incoming messages |
+| `cafleet --session-id <id> ack --agent-id <id>` | Required | Acknowledge receipt of a message |
+| `cafleet --session-id <id> cancel --agent-id <id>` | Required | Cancel (retract) a sent message before it is acknowledged |
+| `cafleet --session-id <id> get-task --agent-id <id>` | Required | Get details of a specific task/message |
+| `cafleet --session-id <id> agents --agent-id <id>` | Required | List agents in the session or get detail for a specific agent |
+| `cafleet --session-id <id> deregister --agent-id <id>` | Required | Deregister this agent from the broker |
+| `cafleet --session-id <id> member create --agent-id <id>` | Required | Register a member agent and spawn its tmux pane (Director only). `--coding-agent claude\|codex` selects the backend (default: `claude`) |
+| `cafleet --session-id <id> member delete --agent-id <id>` | Required | Deregister a member and close its pane (Director only) |
+| `cafleet --session-id <id> member list --agent-id <id>` | Required | List members spawned by this Director |
+| `cafleet --session-id <id> member capture --agent-id <id>` | Required | Capture the last N lines of a member's pane (Director only) |
 
 ## API Overview
 

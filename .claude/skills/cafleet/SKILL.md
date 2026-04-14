@@ -25,11 +25,11 @@ Every `cafleet` invocation that touches agents or messages must carry two litera
 | Flag | Scope | Required for | Notes |
 |---|---|---|---|
 | `--session-id <uuid>` | global (placed **before** the subcommand) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member *`) | UUID of the session created via `cafleet session create`. Silently accepted (and ignored) on `db init` / `session *`. |
-| `--agent-id <uuid>` | per-subcommand | every subcommand **except** `register` | The acting agent's UUID. `register` returns the new `agent_id` — record it and pass it to every subsequent command. |
+| `--agent-id <uuid>` | per-subcommand (placed **after** the subcommand name) | every subcommand **except** `register` | The acting agent's UUID. `register` returns the new `agent_id` — record it and pass it to every subsequent command. |
 
 If `--session-id` is missing on a subcommand that needs it, the CLI exits with `Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id.`
 
-> **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --session-id <uuid> --agent-id <uuid> <subcmd>` invocation matches a single allow pattern across every subcommand for that session. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — never store them in shell variables.
+> **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --session-id <uuid> <subcmd> --agent-id <uuid>` invocation matches a single allow pattern across every subcommand for that session. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — never store them in shell variables.
 
 The only environment variable the CLI still reads is:
 
@@ -48,14 +48,14 @@ In every example below, substitute the literal UUID strings printed by `cafleet 
 
 ## Global Options
 
-Only `--json` and `--session-id` are global (before the subcommand):
+Only `--json` and `--session-id` are global (before the subcommand). `--agent-id` is a per-subcommand option and must appear **after** the subcommand name:
 
 ```bash
 cafleet --session-id <session-id> --json register --name "My Agent" --description "..."
 cafleet --session-id <session-id> --json agents --agent-id <my-agent-id>
 ```
 
-`cafleet agents --json` will fail with `No such option: --json`. Same for `--session-id` placed after the subcommand — keep it before.
+`cafleet agents --json` will fail with `No such option: --json`. Same for `--session-id` placed after the subcommand — keep it before. `--agent-id` must come **after** the subcommand, not before it.
 
 ## Command Reference
 
@@ -72,7 +72,7 @@ cafleet --session-id <session-id> register \
   --skills '[{"id":"react","name":"React Dev","description":"React/TS"}]'
 ```
 
-Returns the newly created `agent_id`. Record it; every other command needs it via `--agent-id`.
+Returns the newly created `agent_id`. Record it; every other command needs it via `--agent-id` (placed after the subcommand name).
 
 #### Self-registration recipe
 
@@ -100,15 +100,15 @@ Rules:
 - **Description**: one sentence stating who the agent is and what it is for.
 - **Capture `agent_id` immediately.** It is required for every subsequent call; losing it forces re-registration.
 - Non-`--json` output prints `Agent registered successfully!` followed by `  agent_id:  <uuid>` and `  name:      <name>`. Parse the `agent_id:` line if `--json` is not an option.
-- Call `cafleet --session-id <session-id> --agent-id <my-agent-id> deregister` at end of session so stale registrations do not accumulate.
+- Call `cafleet --session-id <session-id> deregister --agent-id <my-agent-id>` at end of session so stale registrations do not accumulate.
 
 ### List Agents
 
 List all registered agents, or get detail for a specific agent.
 
 ```bash
-cafleet --session-id <session-id> --agent-id <my-agent-id> agents
-cafleet --session-id <session-id> --agent-id <my-agent-id> agents --id <target-agent-id>
+cafleet --session-id <session-id> agents --agent-id <my-agent-id>
+cafleet --session-id <session-id> agents --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
 ### Send (Unicast)
@@ -116,18 +116,18 @@ cafleet --session-id <session-id> --agent-id <my-agent-id> agents --id <target-a
 Send a message to a specific agent by ID.
 
 ```bash
-cafleet --session-id <session-id> --agent-id <my-agent-id> send \
+cafleet --session-id <session-id> send --agent-id <my-agent-id> \
   --to <target-agent-id> --text "Did the API schema change?"
 ```
 
-After persisting the message, the broker attempts a tmux push notification to the recipient's pane (`tmux send-keys` with `cafleet --session-id <session-id> --agent-id <recipient-id> poll`). The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome.
+After persisting the message, the broker attempts a tmux push notification to the recipient's pane (`tmux send-keys` with `cafleet --session-id <session-id> poll --agent-id <recipient-id>`). The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome.
 
 ### Broadcast
 
 Send a message to all registered agents (except self).
 
 ```bash
-cafleet --session-id <session-id> --agent-id <my-agent-id> broadcast \
+cafleet --session-id <session-id> broadcast --agent-id <my-agent-id> \
   --text "Build failed on main branch"
 ```
 
@@ -138,9 +138,9 @@ After persisting each delivery, the broker attempts a tmux push notification per
 Poll for incoming messages. Returns tasks addressed to this agent.
 
 ```bash
-cafleet --session-id <session-id> --agent-id <my-agent-id> poll
-cafleet --session-id <session-id> --agent-id <my-agent-id> poll --since "2026-03-28T12:00:00Z"
-cafleet --session-id <session-id> --agent-id <my-agent-id> poll --page-size 10
+cafleet --session-id <session-id> poll --agent-id <my-agent-id>
+cafleet --session-id <session-id> poll --agent-id <my-agent-id> --since "2026-03-28T12:00:00Z"
+cafleet --session-id <session-id> poll --agent-id <my-agent-id> --page-size 10
 ```
 
 ### Acknowledge (ACK)
@@ -148,7 +148,7 @@ cafleet --session-id <session-id> --agent-id <my-agent-id> poll --page-size 10
 Acknowledge receipt of a message. Moves the task from INPUT_REQUIRED to COMPLETED.
 
 ```bash
-cafleet --session-id <session-id> --agent-id <my-agent-id> ack --task-id <task-id>
+cafleet --session-id <session-id> ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 ### Cancel (Retract)
@@ -156,7 +156,7 @@ cafleet --session-id <session-id> --agent-id <my-agent-id> ack --task-id <task-i
 Cancel a sent message that hasn't been acknowledged yet. Only the sender can cancel.
 
 ```bash
-cafleet --session-id <session-id> --agent-id <my-agent-id> cancel --task-id <task-id>
+cafleet --session-id <session-id> cancel --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 ### Get Task
@@ -164,7 +164,7 @@ cafleet --session-id <session-id> --agent-id <my-agent-id> cancel --task-id <tas
 Get details of a specific task by ID.
 
 ```bash
-cafleet --session-id <session-id> --agent-id <my-agent-id> get-task --task-id <task-id>
+cafleet --session-id <session-id> get-task --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 ### Deregister
@@ -172,7 +172,7 @@ cafleet --session-id <session-id> --agent-id <my-agent-id> get-task --task-id <t
 Remove this agent's registration from the broker.
 
 ```bash
-cafleet --session-id <session-id> --agent-id <my-agent-id> deregister
+cafleet --session-id <session-id> deregister --agent-id <my-agent-id>
 ```
 
 ### Member Create
@@ -180,13 +180,13 @@ cafleet --session-id <session-id> --agent-id <my-agent-id> deregister
 Register a new member agent and spawn a coding agent pane in the Director's own tmux window. Must be run inside a tmux session. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
 
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> member create \
+cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42"
 
-cafleet --session-id <session-id> --agent-id <director-agent-id> member create \
+cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Codex-B --description "Reviewer for PR #42" --coding-agent codex
 
-cafleet --session-id <session-id> --agent-id <director-agent-id> member create \
+cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42" \
   -- "Review PR #42, post feedback via send, and deregister on completion."
 ```
@@ -233,7 +233,7 @@ Output (`--json`):
 Deregister a member agent and close its tmux pane. The agent is deregistered FIRST, then `/exit` is sent to the pane — so a deregister failure leaves both intact for retry.
 
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> member delete \
+cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
   --member-id <member-agent-id>
 ```
 
@@ -254,8 +254,8 @@ Member deleted.
 List all members spawned by this Director. Returns agents with placement rows whose `director_agent_id` matches the given `--agent-id`.
 
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> member list
-cafleet --session-id <session-id> --json --agent-id <director-agent-id> member list
+cafleet --session-id <session-id> member list --agent-id <director-agent-id>
+cafleet --session-id <session-id> --json member list --agent-id <director-agent-id>
 ```
 
 | Flag | Required | Notes |
@@ -289,13 +289,13 @@ Output (`--json`):
 Capture the last N lines of a member's tmux pane terminal buffer. This is the canonical way to inspect a stalled teammate — it replaces raw `tmux capture-pane` invocations for any project using CAFleet.
 
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> member capture \
+cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
   --member-id <member-agent-id>
 
-cafleet --session-id <session-id> --agent-id <director-agent-id> member capture \
+cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
   --member-id <member-agent-id> --lines 200
 
-cafleet --session-id <session-id> --json --agent-id <director-agent-id> member capture \
+cafleet --session-id <session-id> --json member capture --agent-id <director-agent-id> \
   --member-id <member-agent-id> | jq -r .content
 ```
 
@@ -339,23 +339,23 @@ Output (`--json`):
 
 3. **Discover** other agents:
    ```bash
-   cafleet --session-id <session-id> --agent-id <my-agent-id> agents
+   cafleet --session-id <session-id> agents --agent-id <my-agent-id>
    ```
 
 4. **Send** a message to another agent:
    ```bash
-   cafleet --session-id <session-id> --agent-id <my-agent-id> send \
+   cafleet --session-id <session-id> send --agent-id <my-agent-id> \
      --to <target-agent-id> --text "Please review PR #42"
    ```
 
 5. **Poll** for incoming messages:
    ```bash
-   cafleet --session-id <session-id> --agent-id <my-agent-id> poll
+   cafleet --session-id <session-id> poll --agent-id <my-agent-id>
    ```
 
 6. **Acknowledge** received messages:
    ```bash
-   cafleet --session-id <session-id> --agent-id <my-agent-id> ack --task-id <task-id>
+   cafleet --session-id <session-id> ack --agent-id <my-agent-id> --task-id <task-id>
    ```
 
 7. **Repeat** steps 4-6 as needed. Use `cafleet --session-id <session-id> --json <cmd>` when parsing output programmatically.
@@ -374,7 +374,7 @@ Before spawning **any** member, the Director MUST load `Skill(cafleet-monitoring
 To inspect a stalled member, follow the 2-stage health check in `Skill(cafleet-monitoring)`: first check `cafleet poll` for messages, then fall back to `cafleet member capture`:
 
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> member capture \
+cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
   --member-id <member-agent-id>
 ```
 
@@ -389,7 +389,7 @@ cafleet --session-id <session-id> --agent-id <director-agent-id> member capture 
 ### Spawn a member
 
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> member create \
+cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42"
 ```
 
@@ -398,7 +398,7 @@ The command handles everything atomically: registering the agent, baking the new
 ### Shut down a member
 
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> member delete \
+cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
   --member-id <member-agent-id>
 ```
 
@@ -407,7 +407,7 @@ The command deregisters the agent first (so a failure preserves the pane for ret
 After every member is shut down, the Director deregisters itself and stops the `/loop` monitor:
 
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> deregister
+cafleet --session-id <session-id> deregister --agent-id <director-agent-id>
 ```
 
 ## Message Lifecycle

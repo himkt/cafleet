@@ -300,9 +300,11 @@ class TestSendPollTrigger:
     def test_success_returns_true(self, monkeypatch):
         """Returns True when tmux send-keys succeeds.
 
-        Design doc 0000023: the injected command now carries both
-        ``--session-id`` and ``--agent-id`` as literal CLI flags so that
-        ``permissions.allow`` entries can match it as a literal string.
+        Design doc 0000023 (Copilot review fix): ``--session-id`` is a
+        root-group global option and MUST come before the subcommand;
+        ``--agent-id`` is a per-subcommand option and MUST come after
+        ``poll``. This ordering is what click's parser actually accepts and
+        is the literal string ``permissions.allow`` entries need to match.
         """
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
         captured_args = []
@@ -323,7 +325,7 @@ class TestSendPollTrigger:
             "send-keys",
             "-t",
             "%7",
-            "cafleet --session-id sess-001 --agent-id agent-001 poll",
+            "cafleet --session-id sess-001 poll --agent-id agent-001",
             "Enter",
         ]
 

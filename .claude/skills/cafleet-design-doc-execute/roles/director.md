@@ -6,6 +6,8 @@ You are the **Director** in a design document execution team orchestrated via th
 
 Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-id>`, `<programmer-agent-id>`, `<tester-agent-id>`, `<verifier-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet session create`, `cafleet register`, and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
 
+**Flag placement**: `--session-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --session-id <session-id> poll --agent-id <director-agent-id>`.
+
 ## Your Accountability
 
 - **Register with CAFleet and monitor continuously.** Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`. Create or reuse a CAFleet session, register yourself, and start the monitoring `/loop` BEFORE spawning any member. Keep the loop running until shutdown.
@@ -31,24 +33,24 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 
 **Sending a task to a member:**
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> send \
+cafleet --session-id <session-id> send --agent-id <director-agent-id> \
   --to <member-agent-id> --text "<instruction>"
 ```
-A push notification automatically injects `cafleet --session-id <session-id> --agent-id <member-agent-id> poll` into the member's tmux pane — the member sees the message without polling manually.
+A push notification automatically injects `cafleet --session-id <session-id> poll --agent-id <member-agent-id>` into the member's tmux pane — the member sees the message without polling manually.
 
 **Checking for incoming messages from members:**
 ```bash
-cafleet --session-id <session-id> --json --agent-id <director-agent-id> poll
-cafleet --session-id <session-id> --json --agent-id <director-agent-id> poll --since "<ISO 8601 timestamp of last check>"
+cafleet --session-id <session-id> --json poll --agent-id <director-agent-id>
+cafleet --session-id <session-id> --json poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check>"
 ```
 Acknowledge each message after reading:
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> ack --task-id <task-id>
+cafleet --session-id <session-id> ack --agent-id <director-agent-id> --task-id <task-id>
 ```
 
 **Inspecting a stalled member's terminal (2-stage fallback):**
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> member capture \
+cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
   --member-id <member-agent-id> --lines 200
 ```
 
@@ -91,8 +93,8 @@ When the user selects "Scan for COMMENT markers":
 ### COMMENT Classification by File Location
 
 - **Design document** (`design-docs/` directory): Spec-level change — Director resolves the COMMENT markers directly (apply changes, remove markers), then reassess if the spec change impacts implementation and route to the appropriate member via `cafleet send` if needed.
-- **Source file**: Implementation-level fix — route to Programmer via `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <programmer-agent-id> --text "..."`.
-- **Test file**: Test-level fix — route to Tester via `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <tester-agent-id> --text "..."`.
+- **Source file**: Implementation-level fix — route to Programmer via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."`.
+- **Test file**: Test-level fix — route to Tester via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <tester-agent-id> --text "..."`.
 
 ### LLM Intent Judgment
 
@@ -114,23 +116,23 @@ Track team progress via the `Skill(cafleet-monitoring)` `/loop` (3-minute interv
 
 | Phase | Expected event | Stall indicator | Director action |
 |:--|:--|:--|:--|
-| Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <tester-agent-id> --text "Please complete the tests for the current step and report back."` |
-| Implementation (Phase B) | Programmer implements code and runs tests | Programmer goes idle without reporting implementation result | `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <programmer-agent-id> --text "Please complete the implementation for the current step and run the tests."` |
-| Verification (Phase D) | Verifier performs E2E testing | Verifier goes idle without reporting verification result | `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <verifier-agent-id> --text "Please complete the E2E verification and report your findings."` |
-| Escalation | Member responds to escalation | Escalation recipient goes idle without responding | `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <member-agent-id> --text "Please respond to the escalation regarding [specific issue]."` |
+| Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <tester-agent-id> --text "Please complete the tests for the current step and report back."` |
+| Implementation (Phase B) | Programmer implements code and runs tests | Programmer goes idle without reporting implementation result | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <programmer-agent-id> --text "Please complete the implementation for the current step and run the tests."` |
+| Verification (Phase D) | Verifier performs E2E testing | Verifier goes idle without reporting verification result | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <verifier-agent-id> --text "Please complete the E2E verification and report your findings."` |
+| Escalation | Member responds to escalation | Escalation recipient goes idle without responding | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id> --text "Please respond to the escalation regarding [specific issue]."` |
 
 ## Shutdown Protocol
 
 1. Cancel the `/loop` monitor (`CronDelete` on the cron ID recorded when the loop was created).
 2. Delete each member:
    ```bash
-   cafleet --session-id <session-id> --agent-id <director-agent-id> member delete --member-id <programmer-agent-id>
-   cafleet --session-id <session-id> --agent-id <director-agent-id> member delete --member-id <tester-agent-id>
-   cafleet --session-id <session-id> --agent-id <director-agent-id> member delete --member-id <verifier-agent-id>   # if spawned
+   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <programmer-agent-id>
+   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <tester-agent-id>
+   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <verifier-agent-id>   # if spawned
    ```
 3. Deregister yourself:
    ```bash
-   cafleet --session-id <session-id> --agent-id <director-agent-id> deregister
+   cafleet --session-id <session-id> deregister --agent-id <director-agent-id>
    ```
 
 The CAFleet session itself is not deleted — it persists so the message trail remains inspectable in the admin WebUI.

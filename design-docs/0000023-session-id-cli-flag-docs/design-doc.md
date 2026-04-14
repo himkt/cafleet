@@ -13,10 +13,10 @@ Replace the `CAFLEET_SESSION_ID` and `CAFLEET_AGENT_ID` environment variables wi
 - [x] `cafleet --session-id <uuid> ...` global flag is the only supported way to pass session-id; `CAFLEET_SESSION_ID` env var is removed from the codebase
 - [x] `CAFLEET_AGENT_ID` env var is removed; the spawned member's coding-agent prompt receives a literal `agent_id` UUID instead of `$CAFLEET_AGENT_ID`
 - [x] `cafleet env` subcommand is removed (its purpose disappears with env vars)
-- [x] `broker._try_notify_recipient` injects `cafleet --session-id <uuid> --agent-id <uuid> poll` into the recipient pane (currently `cafleet poll --agent-id <uuid>`)
+- [x] `broker._try_notify_recipient` injects `cafleet --session-id <uuid> poll --agent-id <uuid>` into the recipient pane (currently `cafleet poll --agent-id <uuid>`)
 - [x] `cafleet member create`'s tmux `-e` env injection no longer carries `CAFLEET_SESSION_ID` / `CAFLEET_AGENT_ID`; only `CAFLEET_DATABASE_URL` remains forwarded when set
 - [x] `coding_agent.py` prompt templates use literal substitution placeholders (`{session_id}`, `{agent_id}`) instead of shell vars `$CAFLEET_AGENT_ID`
-- [x] `README.md`, `ARCHITECTURE.md`, `docs/spec/cli-options.md`, all `.claude/skills/*/SKILL.md`, all `.claude/skills/cafleet-design-doc-*/roles/*.md` show `cafleet --session-id <uuid> --agent-id <uuid> <subcmd> ...` and contain zero `export CAFLEET_*` and zero `$CAFLEET_*` / `$DIRECTOR_ID` / `$MY_ID` / `$MEMBER_ID` / `$PROGRAMMER_ID` / `$TESTER_ID` / `$VERIFIER_ID` / `$DRAFTER_ID` / `$REVIEWER_ID` references
+- [x] `README.md`, `ARCHITECTURE.md`, `docs/spec/cli-options.md`, all `.claude/skills/*/SKILL.md`, all `.claude/skills/cafleet-design-doc-*/roles/*.md` show `cafleet --session-id <uuid> <subcmd> --agent-id <uuid> ...` (with `--session-id` as a global flag before the subcommand and `--agent-id` as a per-subcommand option after the subcommand name) and contain zero `export CAFLEET_*` and zero `$CAFLEET_*` / `$DIRECTOR_ID` / `$MY_ID` / `$MEMBER_ID` / `$PROGRAMMER_ID` / `$TESTER_ID` / `$VERIFIER_ID` / `$DRAFTER_ID` / `$REVIEWER_ID` references
 - [x] `CAFLEET_URL` is removed from `mise.toml`, `docs/spec/cli-options.md`, and `cafleet/tests/test_tmux.py` (dead reference; no longer read anywhere)
 - [x] **Residual-grep zero-hits**: `grep -rn "CAFLEET_SESSION_ID\|CAFLEET_AGENT_ID\|\$DIRECTOR_ID\|\$MY_ID\|\$MEMBER_ID\|\$PROGRAMMER_ID\|\$TESTER_ID\|\$VERIFIER_ID\|\$DRAFTER_ID\|\$REVIEWER_ID\|export CAFLEET_" README.md ARCHITECTURE.md docs/ .claude/skills/ cafleet/src/ cafleet/tests/ CLAUDE.md .claude/CLAUDE.md` returns zero hits **in production docs and source** (remaining hits are load-bearing negative assertions in `cafleet/tests/test_cli_session_flag.py`, `test_tmux.py`, `test_coding_agent.py` that prove the migration worked, plus a "Removed Surface" historical line in `docs/spec/cli-options.md:52` explaining what was removed — all legitimate)
 - [x] `CLAUDE.md` (root) no longer contains the `## Plugin Skills` section referencing non-existent `plugins/cafleet/skills/...` paths
@@ -36,7 +36,7 @@ Claude Code matches Bash invocations against `permissions.allow` patterns as **l
 | `export CAFLEET_SESSION_ID=...` | Sets shell state — there is no allow-list entry for "set env var", and subsequent commands depend on opaque shell state the matcher cannot inspect |
 | `cafleet send --agent-id $DIRECTOR_ID --to $MEMBER_ID --text ...` | The expanded form differs every run; literal `$DIRECTOR_ID` does not match a literal `<uuid>` allow pattern |
 
-A literal invocation like `cafleet --session-id 550e8400-... --agent-id 7ba91234-... poll` matches a `permissions.allow` entry of the same shape exactly once and stays matched across the session.
+A literal invocation like `cafleet --session-id 550e8400-... poll --agent-id 7ba91234-...` matches a `permissions.allow` entry of the same shape exactly once and stays matched across the session. (`--session-id` is a global flag before the subcommand; `--agent-id` is a per-subcommand option after the subcommand name.)
 
 ### Current state (Status: Complete designs that established the env-var convention)
 
@@ -115,8 +115,10 @@ cafleet poll --agent-id <recipient-uuid>
 into the recipient's pane. After this change the broker passes both ids through:
 
 ```
-cafleet --session-id <session-uuid> --agent-id <recipient-uuid> poll
+cafleet --session-id <session-uuid> poll --agent-id <recipient-uuid>
 ```
+
+`--session-id` is a global flag (placed **before** the subcommand); `--agent-id` is a per-subcommand option (placed **after** the subcommand name).
 
 `broker._try_notify_recipient` already has the session in scope (it's the message's session); thread it down through `send_poll_trigger(target_pane_id=..., session_id=..., agent_id=...)`.
 
@@ -130,10 +132,10 @@ Apply globally to README, ARCHITECTURE, docs/spec/, and every SKILL.md / roles/*
 | `export CAFLEET_AGENT_ID=...` | (deleted entirely) |
 | `$CAFLEET_SESSION_ID` | literal `<session-id>` placeholder, e.g. `550e8400-e29b-41d4-a716-446655440000` |
 | `$CAFLEET_AGENT_ID` | literal `<agent-id>` placeholder |
-| `cafleet poll --agent-id $MY_ID` | `cafleet --session-id <session-id> --agent-id <my-agent-id> poll` |
-| `cafleet member create --agent-id $DIRECTOR_ID ...` | `cafleet --session-id <session-id> --agent-id <director-agent-id> member create ...` |
-| `cafleet send --agent-id $CAFLEET_AGENT_ID --to $DIRECTOR_ID ...` | `cafleet --session-id <session-id> --agent-id <my-agent-id> send --to <director-agent-id> ...` |
-| *(concrete final form, with example UUIDs)* | `cafleet --session-id 550e8400-e29b-41d4-a716-446655440000 --agent-id 7ba91234-5678-90ab-cdef-112233445566 poll` |
+| `cafleet poll --agent-id $MY_ID` | `cafleet --session-id <session-id> poll --agent-id <my-agent-id>` |
+| `cafleet member create --agent-id $DIRECTOR_ID ...` | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> ...` |
+| `cafleet send --agent-id $CAFLEET_AGENT_ID --to $DIRECTOR_ID ...` | `cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> ...` |
+| *(concrete final form, with example UUIDs)* | `cafleet --session-id 550e8400-e29b-41d4-a716-446655440000 poll --agent-id 7ba91234-5678-90ab-cdef-112233445566` |
 
 **Placeholder convention** (applied uniformly across README, ARCHITECTURE, docs/spec, and every SKILL.md / roles/*.md):
 
@@ -190,17 +192,17 @@ The repository-root and `.claude/` `CLAUDE.md` both list `## Plugin Skills` refe
 - [x] Update `_require_session_id()` error message to: `"Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id."`. <!-- completed: 2026-04-14T13:30 -->
 - [x] Delete the `cafleet env` subcommand definition (`cli.py:74-81`). Update any tests that exercised it. <!-- completed: 2026-04-14T13:30 -->
 - [x] Modify `cafleet/src/cafleet/cli.py` `member create` (around `cli.py:567-573`): drop `CAFLEET_SESSION_ID` and `CAFLEET_AGENT_ID` from `fwd_env`; keep only `CAFLEET_DATABASE_URL` forwarding. <!-- completed: 2026-04-14T13:30 -->
-- [x] Modify `cafleet/src/cafleet/coding_agent.py`: change `default_prompt_template` for both `CLAUDE` and `CODEX` to use `{session_id}` / `{agent_id}` placeholders instead of `$CAFLEET_AGENT_ID`; rewrite `cafleet poll --agent-id $CAFLEET_AGENT_ID` etc. to `cafleet --session-id {session_id} --agent-id {agent_id} poll` etc. <!-- completed: 2026-04-14T13:30 -->
+- [x] Modify `cafleet/src/cafleet/coding_agent.py`: change `default_prompt_template` for both `CLAUDE` and `CODEX` to use `{session_id}` / `{agent_id}` placeholders instead of `$CAFLEET_AGENT_ID`; rewrite `cafleet poll --agent-id $CAFLEET_AGENT_ID` etc. to `cafleet --session-id {session_id} poll --agent-id {agent_id}` etc. (`--session-id` global before subcommand; `--agent-id` per-subcommand after subcommand name) <!-- completed: 2026-04-14T13:30 -->
 - [x] Modify `_resolve_prompt()` in `cli.py` (around `cli.py:478-492`) to also pass `session_id=session_id, agent_id=new_agent_id` to `default_prompt_template.format(...)`. <!-- completed: 2026-04-14T13:30 -->
 
 ### Step 5: Code — Push-notification rewiring
 
-- [x] Modify `cafleet/src/cafleet/tmux.py` `send_poll_trigger`: change signature to `(*, target_pane_id, session_id, agent_id)`; emit `f"cafleet --session-id {session_id} --agent-id {agent_id} poll"`. <!-- completed: 2026-04-14T13:30 -->
+- [x] Modify `cafleet/src/cafleet/tmux.py` `send_poll_trigger`: change signature to `(*, target_pane_id, session_id, agent_id)`; emit `f"cafleet --session-id {session_id} poll --agent-id {agent_id}"`. <!-- completed: 2026-04-14T13:30 -->
 - [x] Modify `cafleet/src/cafleet/broker.py` `_try_notify_recipient`: accept `session_id` and pass it through to `send_poll_trigger`; update both call sites in `send_message` and `broadcast_message` to pass `session_id=session_id` (already in scope). <!-- completed: 2026-04-14T13:30 -->
 
 ### Step 6: Tests
 
-- [x] Update `cafleet/tests/test_tmux.py`: drop `CAFLEET_SESSION_ID` / `CAFLEET_URL` from the env dicts; add session-id parameter to `send_poll_trigger` calls and assert the emitted command string contains `--session-id <uuid> --agent-id <uuid> poll`; assert tmux `-e` env list no longer carries the session/agent vars. <!-- completed: 2026-04-14T13:30 -->
+- [x] Update `cafleet/tests/test_tmux.py`: drop `CAFLEET_SESSION_ID` / `CAFLEET_URL` from the env dicts; add session-id parameter to `send_poll_trigger` calls and assert the emitted command string contains `--session-id <uuid> poll --agent-id <uuid>`; assert tmux `-e` env list no longer carries the session/agent vars. <!-- completed: 2026-04-14T13:30 -->
 - [x] Update `cafleet/tests/test_coding_agent.py`: flip `test_prompt_template_contains_agent_id_placeholder` (CLAUDE at line 209-213, CODEX at line 253-257) from asserting `"$CAFLEET_AGENT_ID" in template` to asserting `"{agent_id}" in template` and `"{session_id}" in template`; update `test_prompt_template_has_format_placeholders` to call `.format(...)` with the new `session_id=` and `agent_id=` keyword arguments; update the fixture string at line 100 (`"…Use $CAFLEET_AGENT_ID."`) to reflect the new convention or remove the example reference if it is decorative. <!-- completed: 2026-04-14T13:30 -->
 - [x] Update CLI-runner-based tests (`test_session_cli.py`, `test_broker_messaging.py`, `test_broker_registry.py`, `test_broker_webui.py`) to invoke `cafleet` with `["--session-id", session_id, ...]` instead of injecting the env var. Where `CliRunner.invoke(env=...)` was used solely for `CAFLEET_SESSION_ID`, drop the env arg. <!-- completed: 2026-04-14T13:30 -->
 - [x] Add `cafleet/tests/test_cli_session_flag.py` covering: (a) missing `--session-id` on `register` exits 1 with the new error string; (b) `--session-id <uuid>` flows into `broker.register_agent`; (c) `db init` and `session create` succeed without the flag; (d) `cafleet env` no longer exists (`Result.exit_code != 0` and stderr contains `No such command`); (e) `--session-id` supplied to `db init` is silently accepted (validates the "Provided but not required" rule). <!-- completed: 2026-04-14T13:30 -->
@@ -229,3 +231,4 @@ The repository-root and `.claude/` `CLAUDE.md` both list `## Plugin Skills` refe
 | 2026-04-14 | Reviewer revisions: added `mise.toml` and `test_coding_agent.py` to inventory; corrected `CAFLEET_URL` location list; added "provided but not required" silent-accept rule; added placeholder convention; expanded Overview to cover drift cleanup; added concrete-UUID example to rewrite table; promoted residual-grep to Success Criteria |
 | 2026-04-14 | User approved — Status set to Approved |
 | 2026-04-14 | Implementation complete: 267/267 tests pass, lint/format/typecheck green, residual-grep clean (production code/docs zero hits), smoke test verified end-to-end. Status: Complete. |
+| 2026-04-14 | Copilot review fix: corrected `--agent-id` placement throughout implementation and documentation — `--session-id` is a global flag (before subcommand) but `--agent-id` is a per-subcommand option (after subcommand name). Updated `tmux.py`, `broker.py`, `coding_agent.py`, README, ARCHITECTURE, design-doc, and every SKILL.md / roles/*.md file accordingly. Matching tests updated. |

@@ -172,7 +172,7 @@ CAFleet uses a pull-based delivery model by default: recipients discover message
 After `broker` saves a delivery task, it looks up the recipient's `agent_placements` row. If the recipient has a non-null `tmux_pane_id` and is not the sender, the broker runs:
 
 ```
-tmux send-keys -t <tmux_pane_id> "cafleet --session-id <session_id> --agent-id <recipient_agent_id> poll" Enter
+tmux send-keys -t <tmux_pane_id> "cafleet --session-id <session_id> poll --agent-id <recipient_agent_id>" Enter
 ```
 
 The injected text lands in the coding agent's input prompt. If the agent is idle, it interprets the command immediately. If the agent is busy, tmux buffers the keystrokes until the agent returns to its prompt. Since `cafleet poll` is idempotent, duplicate or late-arriving triggers are harmless.

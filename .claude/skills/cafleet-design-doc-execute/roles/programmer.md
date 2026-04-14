@@ -14,20 +14,22 @@ You are the **Programmer** in a design document execution team orchestrated via 
 
 Every command below uses angle-bracket tokens (`<session-id>`, `<my-agent-id>`, `<director-agent-id>`) as **placeholders, not shell variables**. Your spawn prompt contained the literal UUIDs for SESSION ID, DIRECTOR AGENT ID, and YOUR AGENT ID — substitute those literal UUIDs directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
 
+**Flag placement**: `--session-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --session-id <session-id> poll --agent-id <my-agent-id>`.
+
 ## Communication Protocol
 
 You do NOT speak to the user directly. All communication goes through the Director via the CAFleet message broker.
 
 **Sending a message to the Director:**
 ```bash
-cafleet --session-id <session-id> --agent-id <my-agent-id> send \
+cafleet --session-id <session-id> send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "<your report or escalation>"
 ```
 The literal `<session-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
-**Receiving tasks from the Director:** When the Director sends a message, the broker injects `cafleet --session-id <session-id> --agent-id <my-agent-id> poll` into your tmux pane via push notification. You will see the `cafleet poll` output with the Director's task. Read the message, then acknowledge it:
+**Receiving tasks from the Director:** When the Director sends a message, the broker injects `cafleet --session-id <session-id> poll --agent-id <my-agent-id>` into your tmux pane via push notification. You will see the `cafleet poll` output with the Director's task. Read the message, then acknowledge it:
 ```bash
-cafleet --session-id <session-id> --agent-id <my-agent-id> ack --task-id <task-id>
+cafleet --session-id <session-id> ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 Then act on the Director's instructions. Report completion or follow-up questions via `cafleet send` to the Director.
 

@@ -92,8 +92,10 @@ def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
 def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) -> bool:
     """Send a cafleet poll trigger to the given tmux pane.
 
-    Emits ``cafleet --session-id <session_id> --agent-id <agent_id> poll`` so
+    Emits ``cafleet --session-id <session_id> poll --agent-id <agent_id>`` so
     the recipient's ``permissions.allow`` can match it as a literal string.
+    ``--session-id`` is global (before the subcommand); ``--agent-id`` is a
+    per-subcommand option (after the subcommand name).
     Returns True on success, False if tmux is unavailable or the pane
     no longer exists. Never raises — internally calls _run() and catches
     TmuxError, returning False on any failure.
@@ -107,7 +109,7 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
                 "send-keys",
                 "-t",
                 target_pane_id,
-                f"cafleet --session-id {session_id} --agent-id {agent_id} poll",
+                f"cafleet --session-id {session_id} poll --agent-id {agent_id}",
                 "Enter",
             ],
             timeout=5,

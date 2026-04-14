@@ -33,7 +33,7 @@ User
 - **Director ↔ User**: `AskUserQuestion` (clarification relay, draft presentation, feedback collection)
 - **Director ↔ Drafter**: `cafleet send` (questions relay, user answers, reviewer feedback, drafting instructions)
 - **Director ↔ Reviewer**: `cafleet send` (draft review requests, review feedback)
-- Members receive messages via a push notification: the broker injects `cafleet --session-id <session-id> --agent-id <recipient-agent-id> poll` into the member's pane via `tmux send-keys` whenever a `cafleet send` is persisted. The literal `<session-id>` and `<recipient-agent-id>` UUIDs are the session and target member UUIDs the broker has in scope, baked into the injected command string.
+- Members receive messages via a push notification: the broker injects `cafleet --session-id <session-id> poll --agent-id <recipient-agent-id>` into the member's pane via `tmux send-keys` whenever a `cafleet send` is persisted. The literal `<session-id>` and `<recipient-agent-id>` UUIDs are the session and target member UUIDs the broker has in scope, baked into the injected command string. `--session-id` is global (before the subcommand); `--agent-id` is per-subcommand (after the subcommand name).
 
 ## Prerequisites
 
@@ -44,12 +44,12 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 | Agent Teams primitive | CAFleet equivalent |
 |---|---|
 | `TeamCreate(name="create-{slug}")` | CAFleet session (pre-existing or `cafleet session create`) + `cafleet --session-id <session-id> register` (Director) |
-| `Agent(team_name=..., subagent_type=...)` | `cafleet --session-id <session-id> --agent-id <director-agent-id> member create --name "..." --description "..." -- "<prompt>"` |
-| `SendMessage(to="Drafter")` | `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <drafter-agent-id> --text "..."` |
-| `SendMessage(to="Director")` (from member) | `cafleet --session-id <session-id> --agent-id <my-agent-id> send --to <director-agent-id> --text "..."` |
+| `Agent(team_name=..., subagent_type=...)` | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
+| `SendMessage(to="Drafter")` | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."` |
+| `SendMessage(to="Director")` (from member) | `cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
 | `agent-team-supervision` `/loop` | `Skill(cafleet-monitoring)` `/loop` |
-| `TeamDelete` | `cafleet --session-id <session-id> --agent-id <director-agent-id> member delete` for each member + `cafleet --session-id <session-id> --agent-id <director-agent-id> deregister` |
-| Auto message delivery | Push notification injects `cafleet --session-id <session-id> --agent-id <recipient-agent-id> poll` into member's tmux pane |
+| `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id>` for each member + `cafleet --session-id <session-id> deregister --agent-id <director-agent-id>` |
+| Auto message delivery | Push notification injects `cafleet --session-id <session-id> poll --agent-id <recipient-agent-id>` into member's tmux pane |
 
 ## Process
 
@@ -134,7 +134,7 @@ OUTPUT PATH: [INSERT ${DOC_PATH}]
 The user's request: [INSERT USER'S ORIGINAL REQUEST]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> --agent-id <my-agent-id> send --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
 - When you see cafleet poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.
@@ -164,7 +164,7 @@ YOUR AGENT ID: <my-agent-id>
 DESIGN DOCUMENT: [INSERT ${DOC_PATH}]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> --agent-id <my-agent-id> send --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
 - When you see cafleet poll output with a message from the Director, act on those instructions.
 
 This is a RESUME session. The document contains COMMENT markers from a previous
@@ -176,7 +176,7 @@ Start by reading the design document.
 Spawn with:
 
 ```bash
-cafleet --session-id <session-id> --json --agent-id <director-agent-id> member create \
+cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
   --name "Drafter" \
   --description "Writes and revises the design document" \
   -- "<Drafter spawn prompt (embedded role content)>"
@@ -204,7 +204,7 @@ DIRECTOR AGENT ID: <director-agent-id>
 YOUR AGENT ID: <my-agent-id>
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> --agent-id <my-agent-id> send --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
 - When you see cafleet poll output with a message from the Director, act on those instructions.
 
 Wait for the Director to assign a document for review. Read the document file and
@@ -215,7 +215,7 @@ signal: "APPROVED - Ready for user review."
 Spawn with:
 
 ```bash
-cafleet --session-id <session-id> --json --agent-id <director-agent-id> member create \
+cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
   --name "Reviewer" \
   --description "Critically reviews drafts for rule compliance and quality" \
   -- "<Reviewer spawn prompt (embedded role content)>"
@@ -226,7 +226,7 @@ Parse `agent_id` from the JSON response and substitute it for `<reviewer-agent-i
 #### 1g. Verify members are live
 
 ```bash
-cafleet --session-id <session-id> --agent-id <director-agent-id> member list
+cafleet --session-id <session-id> member list --agent-id <director-agent-id>
 ```
 
 Both members must show `status: active` with a non-null `pane_id`. If either is missing or pending, retry the spawn before proceeding.
@@ -235,17 +235,17 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 **Skip this step entirely when `SKIP_CLARIFICATION=true`** (set by Step 0 in resume mode or quality-review-only mode). Resume mode: the COMMENT markers serve as the clarification and the Drafter already has all the information needed. Quality-review-only mode: the Drafter is not producing a new draft at all — proceed directly to Step 3 by routing the existing `${DOC_PATH}` to the Reviewer.
 
-1. Wait for the Drafter's clarifying questions. The monitoring `/loop` and periodic `cafleet --session-id <session-id> --agent-id <director-agent-id> poll` will surface the Drafter's message once it arrives.
-2. `cafleet --session-id <session-id> --agent-id <director-agent-id> ack --task-id <task-id>` each received message after reading it.
+1. Wait for the Drafter's clarifying questions. The monitoring `/loop` and periodic `cafleet --session-id <session-id> poll --agent-id <director-agent-id>` will surface the Drafter's message once it arrives.
+2. `cafleet --session-id <session-id> ack --agent-id <director-agent-id> --task-id <task-id>` each received message after reading it.
 3. Relay the questions to the user via `AskUserQuestion`. If the number of questions exceeds the per-call limit of `AskUserQuestion`, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter:
    ```bash
-   cafleet --session-id <session-id> --agent-id <director-agent-id> send \
+   cafleet --session-id <session-id> send --agent-id <director-agent-id> \
      --to <drafter-agent-id> --text "User answers: ..."
    ```
 5. **Gate check**: If the Drafter produces a draft without prior questions, reject it and instruct them to ask first:
    ```bash
-   cafleet --session-id <session-id> --agent-id <director-agent-id> send \
+   cafleet --session-id <session-id> send --agent-id <director-agent-id> \
      --to <drafter-agent-id> --text "Stop — you must send clarifying questions before drafting. Discard the draft and send questions first."
    ```
    A focused confirmation round counts as valid clarification.
@@ -256,13 +256,13 @@ Enter this step after the Drafter reports a completed draft, **or immediately** 
 
 1. **Route to Reviewer** with the document path:
    ```bash
-   cafleet --session-id <session-id> --agent-id <director-agent-id> send \
+   cafleet --session-id <session-id> send --agent-id <director-agent-id> \
      --to <reviewer-agent-id> --text "Please review the draft at ${DOC_PATH}. Provide feedback or signal APPROVED."
    ```
-2. **Wait** for the Reviewer's feedback via `cafleet --session-id <session-id> --agent-id <director-agent-id> poll`.
+2. **Wait** for the Reviewer's feedback via `cafleet --session-id <session-id> poll --agent-id <director-agent-id>`.
 3. **On feedback**: Route to Drafter for revision:
    ```bash
-   cafleet --session-id <session-id> --agent-id <director-agent-id> send \
+   cafleet --session-id <session-id> send --agent-id <director-agent-id> \
      --to <drafter-agent-id> --text "Reviewer feedback: ... Please address and reply when done."
    ```
 4. Wait for the Drafter's revision report, then loop back to step 1 (re-route to Reviewer).
@@ -287,7 +287,7 @@ Process the user's selection:
 
 - **"Scan for COMMENT markers"**:
   1. **Immediately** scan the document with Grep for `COMMENT(` markers — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
-  2. **If markers are found**: Route COMMENT content and fix instructions to the Drafter via `cafleet --session-id <session-id> --agent-id <director-agent-id> send --to <drafter-agent-id> --text "..."`. After the Drafter revises and removes markers, verify with Grep that no `COMMENT(` markers remain. Then re-enter the quality loop (Step 3) and re-present (Step 4).
+  2. **If markers are found**: Route COMMENT content and fix instructions to the Drafter via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."`. After the Drafter revises and removes markers, verify with Grep that no `COMMENT(` markers remain. Then re-enter the quality loop (Step 3) and re-present (Step 4).
   3. **If no markers are found**: Explain the COMMENT marker convention to the user — markers follow the pattern `# COMMENT(username): feedback` placed directly in the design document file. Show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / Other).
 
 - **"Other" (free text)**: Use LLM reasoning — not keyword matching — to distinguish between:
@@ -300,7 +300,7 @@ No round limit — loop continues until approved or aborted.
 
 1. Instruct the Drafter to finalize:
    ```bash
-   cafleet --session-id <session-id> --agent-id <director-agent-id> send \
+   cafleet --session-id <session-id> send --agent-id <director-agent-id> \
      --to <drafter-agent-id> --text "User approved. Please finalize: set Status to Approved, refresh Last Updated, bump the Progress header field if present in the template, verify implementation steps are actionable, then report done."
    ```
    Wait for the Drafter's confirmation.
@@ -309,13 +309,13 @@ No round limit — loop continues until approved or aborted.
 
 3. Shut down members:
    ```bash
-   cafleet --session-id <session-id> --agent-id <director-agent-id> member delete --member-id <drafter-agent-id>
-   cafleet --session-id <session-id> --agent-id <director-agent-id> member delete --member-id <reviewer-agent-id>
+   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <drafter-agent-id>
+   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <reviewer-agent-id>
    ```
 
 4. Deregister the Director:
    ```bash
-   cafleet --session-id <session-id> --agent-id <director-agent-id> deregister
+   cafleet --session-id <session-id> deregister --agent-id <director-agent-id>
    ```
 
 No `TeamDelete` equivalent is needed — the CAFleet session persists for audit purposes so the message history remains inspectable in the admin WebUI.
