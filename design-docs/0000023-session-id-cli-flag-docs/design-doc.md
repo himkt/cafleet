@@ -29,7 +29,7 @@ Replace the `CAFLEET_SESSION_ID` and `CAFLEET_AGENT_ID` environment variables wi
 
 ### Why the env-var pattern broke
 
-Claude Code matches Bash invocations against `permissions.allow` patterns as **literal command strings** (see `.claude/rules/bash-command.md`). Two patterns trip the matcher and force a per-invocation permission prompt that breaks autonomous agent loops:
+Claude Code matches Bash invocations against `permissions.allow` patterns as **literal command strings** — it does not re-expand shell variables, evaluate `$(...)` substitutions, or track `export` side-effects when deciding whether a command matches an entry. Two patterns trip the matcher and force a per-invocation permission prompt that breaks autonomous agent loops:
 
 | Pattern | Reason it breaks allow-matching |
 |---|---|

@@ -29,6 +29,6 @@ The commands above are the **only** way to run these operations. Do NOT invoke t
 | `uv run ruff format [--check] .` | `mise //:format` | bypasses project-wide format config |
 | `uv run ty check` | `mise //:typecheck` | bypasses project-wide typecheck config |
 | `uv run --frozen --package cafleet python -m pytest ...` | `mise //cafleet:test` | bypasses the project's test runner config and env setup |
-| `uv run cafleet ...` for verification/smoke | delegate to a teammate that already has permission, or ask the user | see `.claude/rules/authorization-scope.md` |
+| `uv run cafleet ...` for verification/smoke | delegate to a teammate that already has permission, or ask the user | see `.claude/rules/skill-discovery.md` (Authorization scope section) |
 
 This rule applies **even when a teammate is blocked on permissions** and you are tempted to "just run it yourself" — using `mise` keeps commands matching the project's `permissions.allow` patterns, which is the entire point of this project's session-id / agent-id CLI design.

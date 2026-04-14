@@ -486,7 +486,7 @@ def _resolve_prompt(
     )
 
 
-def _rollback_register(new_agent_id, *, reason):
+def _rollback_register(new_agent_id, *, session_id, reason):
     """Best-effort rollback: deregister the just-created agent."""
     click.echo(
         f"Error: {reason}. Rolling back registration of {new_agent_id}.",
@@ -497,8 +497,9 @@ def _rollback_register(new_agent_id, *, reason):
     except Exception as drop_exc:
         click.echo(
             f"WARNING: rollback deregister failed — agent {new_agent_id} is "
-            f"orphaned in the registry. Run `cafleet deregister --agent-id "
-            f"{new_agent_id}` manually to clean up. Cause: {drop_exc}",
+            f"orphaned in the registry. Run `cafleet --session-id {session_id} "
+            f"deregister --agent-id {new_agent_id}` manually to clean up. "
+            f"Cause: {drop_exc}",
             err=True,
         )
 
@@ -563,6 +564,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
     except click.UsageError as exc:
         _rollback_register(
             new_agent_id,
+            session_id=session_id,
             reason=f"prompt resolution failed: {exc}",
         )
         ctx.exit(1)
@@ -582,6 +584,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
     except tmux.TmuxError as exc:
         _rollback_register(
             new_agent_id,
+            session_id=session_id,
             reason=f"tmux split-window failed: {exc}",
         )
         ctx.exit(1)
@@ -598,6 +601,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
             pass
         _rollback_register(
             new_agent_id,
+            session_id=session_id,
             reason=f"placement update failed: {exc}",
         )
         ctx.exit(1)
