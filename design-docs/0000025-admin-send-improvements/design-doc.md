@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 12/52 tasks complete
+**Progress**: 15/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -320,9 +320,9 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 4: Alembic 0006 data migration
 
-- [ ] Create `cafleet/src/cafleet/alembic/versions/0006_seed_administrator_agent.py` (revises `0005`). <!-- completed: -->
-- [ ] `upgrade()` iterates all sessions and inserts an Administrator where absent. UUID is generated in Python (`uuid.uuid4()`) inside the migration script — NOT via a SQL-side function. Probe for existing Administrator via `json_extract(agent_card_json, '$.cafleet.kind') = 'builtin-administrator'` so re-runs are idempotent. <!-- completed: -->
-- [ ] `downgrade()` deletes Administrator rows via `json_extract`. Document forward-only intent in a docstring; do not try to work around `ON DELETE RESTRICT` on `tasks.context_id`. <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/alembic/versions/0006_seed_administrator_agent.py` (revises `0005`). <!-- completed: 2026-04-15T15:22 -->
+- [x] `upgrade()` iterates all sessions and inserts an Administrator where absent. UUID is generated in Python (`uuid.uuid4()`) inside the migration script — NOT via a SQL-side function. Probe for existing Administrator via `json_extract(agent_card_json, '$.cafleet.kind') = 'builtin-administrator'` so re-runs are idempotent. <!-- completed: 2026-04-15T15:22 -->
+- [x] `downgrade()` deletes Administrator rows via `json_extract`. Document forward-only intent in a docstring; do not try to work around `ON DELETE RESTRICT` on `tasks.context_id`. <!-- completed: 2026-04-15T15:22 -->
 
 ### Step 5: Broker protections
 
