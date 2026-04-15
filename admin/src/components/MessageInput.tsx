@@ -271,7 +271,8 @@ export default function MessageInput({
       if (e.shiftKey) return; // default textarea newline
       if (popoverOpen) {
         e.preventDefault();
-        insertCandidate(candidates[selectedIndex]);
+        const candidate = candidates[selectedIndex];
+        if (candidate) insertCandidate(candidate);
         return;
       }
       e.preventDefault();
@@ -282,7 +283,8 @@ export default function MessageInput({
       if (composing) return;
       if (popoverOpen) {
         e.preventDefault();
-        insertCandidate(candidates[selectedIndex]);
+        const candidate = candidates[selectedIndex];
+        if (candidate) insertCandidate(candidate);
       }
       return;
     }
