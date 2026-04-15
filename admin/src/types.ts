@@ -4,6 +4,7 @@ export interface Agent {
   description: string;
   status: "active" | "deregistered";
   registered_at: string;
+  kind: "builtin-administrator" | "user";
 }
 
 export interface Message {

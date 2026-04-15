@@ -474,15 +474,25 @@ def deregister(ctx, agent_id):
     """Deregister this agent from the broker."""
     _require_session_id(ctx)
     try:
-        broker.deregister_agent(agent_id)
-
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json({"status": "deregistered"}))
-        else:
-            click.echo("Agent deregistered successfully.")
+        deregistered = broker.deregister_agent(agent_id)
+    except broker.AdministratorProtectedError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        ctx.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(1)
+
+    if not deregistered:
+        click.echo(
+            f"Error: agent {agent_id} not found or already deregistered.",
+            err=True,
+        )
+        ctx.exit(1)
+
+    if ctx.obj["json_output"]:
+        click.echo(output.format_json({"status": "deregistered"}))
+    else:
+        click.echo("Agent deregistered successfully.")
 
 
 # ---------------------------------------------------------------------------

@@ -1,23 +1,14 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { Agent } from "../types";
 import { getAgents } from "../api";
 import Sidebar from "./Sidebar";
 import Timeline from "./Timeline";
 import MessageInput from "./MessageInput";
-import SenderSelector from "./SenderSelector";
 
 interface DashboardProps {
   sessionId: string;
   initialAgents: Agent[];
   onBack: () => void;
-}
-
-function getStoredSender(sessionId: string, agents: Agent[]): string | null {
-  const stored = localStorage.getItem(`cafleet.sender.${sessionId}`);
-  if (stored && agents.some((a) => a.agent_id === stored && a.status === "active")) {
-    return stored;
-  }
-  return null;
 }
 
 export default function Dashboard({
@@ -26,10 +17,11 @@ export default function Dashboard({
   onBack,
 }: DashboardProps) {
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
-  const [senderId, setSenderId] = useState<string | null>(() =>
-    getStoredSender(sessionId, initialAgents),
-  );
   const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    localStorage.removeItem(`cafleet.sender.${sessionId}`);
+  }, [sessionId]);
 
   const refreshAll = useCallback(async () => {
     try {
@@ -40,6 +32,11 @@ export default function Dashboard({
     }
     setRefreshKey((k) => k + 1);
   }, []);
+
+  const administrator =
+    agents.find((a) => a.kind === "builtin-administrator") ?? null;
+  const senderId =
+    administrator?.status === "active" ? administrator.agent_id : null;
 
   const noAgents = agents.length === 0;
 
@@ -53,11 +50,12 @@ export default function Dashboard({
           </span>
         </h1>
         <div className="flex items-center gap-3">
-          <SenderSelector
-            agents={agents}
-            sessionId={sessionId}
-            onSelect={setSenderId}
-          />
+          {senderId !== null && (
+            <span className="text-sm text-gray-700">
+              Sending as{" "}
+              <span className="font-medium text-gray-900">Administrator</span>
+            </span>
+          )}
           <button
             onClick={refreshAll}
             className="text-xs text-gray-500 hover:text-gray-700"
@@ -76,6 +74,19 @@ export default function Dashboard({
       <div className="flex flex-1 min-h-0">
         <Sidebar agents={agents} />
         <div className="flex flex-col flex-1 min-h-0">
+          {senderId === null && (
+            <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-700">
+              This session has no Administrator agent. Send is disabled.
+              If you just upgraded, run
+              <code className="mx-1 bg-red-100 px-1 rounded">
+                cafleet db init
+              </code>
+              to apply the backfill migration. If the Administrator was manually
+              deleted, contact the operator —
+              <code className="mx-1 bg-red-100 px-1 rounded">db init</code>
+              will not re-seed it.
+            </div>
+          )}
           {noAgents ? (
             <div className="flex-1 flex items-center justify-center">
               <p className="text-gray-400 text-sm">
@@ -91,6 +102,7 @@ export default function Dashboard({
             senderId={senderId}
             agents={agents}
             onSent={refreshAll}
+            disabled={senderId === null}
           />
         </div>
       </div>

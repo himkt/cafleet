@@ -247,6 +247,103 @@ class TestSessionCreate:
         rows = _session_rows(db_file)
         assert len(rows) == 2, "two creates should produce two session rows"
 
+    def test_json_output_includes_administrator_agent_id(self, tmp_path, monkeypatch):
+        """--json output now contains ``administrator_agent_id`` (design 0000025 §B)."""
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        _init_db(runner)
+
+        result = runner.invoke(cli, ["session", "create", "--json"])
+
+        assert result.exit_code == 0, (
+            f"session create --json failed.\noutput: {result.output}\n"
+            f"exception: {result.exception}"
+        )
+        data = json.loads(result.output)
+        assert "administrator_agent_id" in data, (
+            "JSON output should contain 'administrator_agent_id'"
+        )
+        # Validate it's a UUID-shaped string.
+        uuid.UUID(data["administrator_agent_id"])
+
+    def test_json_administrator_agent_id_matches_db_row(self, tmp_path, monkeypatch):
+        """The returned administrator_agent_id must correspond to a real agents row
+        in the same session marked as an administrator.
+        """
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        _init_db(runner)
+
+        result = runner.invoke(cli, ["session", "create", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        sid = data["session_id"]
+        admin_id = data["administrator_agent_id"]
+
+        conn = sqlite3.connect(str(db_file))
+        try:
+            rows = conn.execute(
+                "SELECT agent_id, session_id, name, status, agent_card_json "
+                "FROM agents WHERE agent_id = ?",
+                (admin_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        assert len(rows) == 1, (
+            f"expected one agents row matching administrator_agent_id {admin_id}"
+        )
+        row_agent_id, row_session_id, row_name, row_status, row_card_json = rows[0]
+        assert row_session_id == sid
+        assert row_name == "Administrator"
+        assert row_status == "active"
+        card = json.loads(row_card_json)
+        assert card.get("cafleet", {}).get("kind") == "builtin-administrator"
+
+    def test_non_json_output_unchanged_single_uuid_line(self, tmp_path, monkeypatch):
+        """Per design §B: the non-JSON path is unchanged — prints session_id only.
+
+        This guard ensures we do not accidentally leak ``administrator_agent_id``
+        into the legacy text output.
+        """
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        _init_db(runner)
+
+        result = runner.invoke(cli, ["session", "create"])
+        assert result.exit_code == 0, (
+            f"session create failed.\noutput: {result.output}\n"
+            f"exception: {result.exception}"
+        )
+
+        output = result.output.strip()
+        lines = [line for line in output.splitlines() if line.strip()]
+        # Exactly one non-empty line — the session_id.
+        assert len(lines) == 1, (
+            f"non-JSON session create should print a single line, got lines={lines!r}"
+        )
+        # That line must parse as a UUID.
+        uuid.UUID(lines[0].strip())
+        # And must NOT mention administrator_agent_id.
+        assert "administrator_agent_id" not in output.lower(), (
+            "non-JSON output must not expose administrator_agent_id"
+        )
+
 
 # ===========================================================================
 # session list
@@ -528,11 +625,14 @@ class TestSessionDelete:
             f"exception: {result.exception}"
         )
 
-    def test_delete_session_with_active_agents_fails(self, tmp_path, monkeypatch):
-        """Cannot delete a session that still has agents (FK RESTRICT).
+    def test_delete_session_with_active_agents_succeeds(self, tmp_path, monkeypatch):
+        """Sessions with agents but no tasks are deletable.
 
-        Design doc: catches IntegrityError, queries agent count,
-        raises click.UsageError with "session <id> has N active agents".
+        Design 0000025 §B auto-seeds an Administrator into every session,
+        so ``delete_session`` cascade-deletes agent rows in the same
+        transaction before deleting the session itself; without that the
+        ``ON DELETE RESTRICT`` on ``agents.session_id`` would lock every
+        session forever.
         """
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
@@ -550,22 +650,18 @@ class TestSessionDelete:
 
         result = runner.invoke(cli, ["session", "delete", sid])
 
-        assert result.exit_code != 0, (
-            f"session delete should fail when agents reference the session. "
+        assert result.exit_code == 0, (
+            f"session delete should succeed for a task-free session. "
             f"exit_code={result.exit_code}, output: {result.output}"
         )
-        # Verify the session still exists (delete was rolled back)
         rows = _session_rows(db_file)
         session_ids = [r[0] for r in rows]
-        assert sid in session_ids, "session should still exist after failed delete"
+        assert sid not in session_ids, "session should be removed after delete"
 
-    def test_delete_session_with_deregistered_agents_fails(self, tmp_path, monkeypatch):
-        """Deregistered agents still reference the session via FK.
-
-        Design doc edge case: "cafleet-registry session delete on a
-        session with deregistered (but not purged) agents rows hits
-        the ondelete='RESTRICT' — friendly error needed."
-        """
+    def test_delete_session_with_deregistered_agents_succeeds(
+        self, tmp_path, monkeypatch
+    ):
+        """Deregistered agents are also cleared by the cascade delete."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
             config.settings,
@@ -581,44 +677,13 @@ class TestSessionDelete:
 
         result = runner.invoke(cli, ["session", "delete", sid])
 
-        assert result.exit_code != 0, (
-            f"session delete should fail even with deregistered agents "
-            f"(FK RESTRICT still applies). "
+        assert result.exit_code == 0, (
+            f"session delete should succeed even with deregistered agents. "
             f"exit_code={result.exit_code}, output: {result.output}"
         )
-        # Session must still be present
         rows = _session_rows(db_file)
         session_ids = [r[0] for r in rows]
-        assert sid in session_ids
-
-    def test_delete_friendly_error_message(self, tmp_path, monkeypatch):
-        """FK violation produces a friendly error, not a raw IntegrityError."""
-        db_file = tmp_path / "registry.db"
-        monkeypatch.setattr(
-            config.settings,
-            "database_url",
-            f"sqlite+aiosqlite:///{db_file}",
-        )
-        runner = CliRunner()
-        _init_db(runner)
-
-        sid = str(uuid.uuid4())
-        _seed_session(db_file, sid)
-        _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
-
-        result = runner.invoke(cli, ["session", "delete", sid])
-
-        assert result.exit_code != 0
-        # The error message should be user-friendly, not a raw traceback
-        assert "IntegrityError" not in result.output, (
-            "error should be a friendly message, not a raw IntegrityError"
-        )
-        # Should mention agents or the session
-        output_lower = result.output.lower()
-        assert "agent" in output_lower or sid in result.output, (
-            f"friendly error should mention 'agent' count or the session id. "
-            f"got: {result.output!r}"
-        )
+        assert sid not in session_ids
 
 
 # ===========================================================================

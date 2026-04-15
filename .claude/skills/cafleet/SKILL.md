@@ -76,6 +76,8 @@ cafleet --session-id <session-id> register \
 
 Returns the newly created `agent_id`. Record it; every other command needs it via `--agent-id` (placed after the subcommand name).
 
+> **Reserved name — `Administrator`**: every session is auto-seeded with exactly one built-in `Administrator` agent at `session create` time. The name is not blocked at the CLI, but the built-in Administrator is marked internally via `agent_card_json.cafleet.kind == "builtin-administrator"` and is protected against deregister and Director placement (see Deregister). Do NOT register a human or member agent under the name `Administrator` — it will not gain the `builtin-administrator` kind and will only cause confusion in the WebUI. `cafleet session create --json` returns the Administrator's UUID in the `administrator_agent_id` field of the JSON response so callers that need to address it (e.g. sending from it in the Admin WebUI) can capture it immediately.
+
 #### Self-registration recipe
 
 Use `--json` so the output is machine-parseable, and capture `agent_id` for every subsequent call:
@@ -176,6 +178,8 @@ Remove this agent's registration from the broker.
 ```bash
 cafleet --session-id <session-id> deregister --agent-id <my-agent-id>
 ```
+
+> **Administrator cannot be deregistered**. Passing the built-in Administrator's `agent_id` to `cafleet deregister` exits with status 1 and prints `Error: Administrator cannot be deregistered` to stderr — the broker raises `AdministratorProtectedError` and the CLI handles it by printing the error and calling `ctx.exit(1)`. The Administrator row stays `active`; there is no override flag. The same guard applies to `member create` — the built-in Administrator cannot be used as a Director (its `agent_id` cannot appear in `placement.director_agent_id`). Every session has exactly one Administrator; deregister regular agents only.
 
 ### Member Create
 

@@ -10,12 +10,13 @@ CAFleet enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 
 - **Agent Registry** -- Register, discover, and deregister agents via CLI
 - **Session Isolation** -- A `session_id` defines a session boundary; cross-session agents are fully invisible to each other
+- **Built-in Administrator agent** -- `cafleet session create` auto-seeds exactly one built-in `Administrator` agent per session (marked via `agent_card_json.cafleet.kind == "builtin-administrator"`); the Admin WebUI always sends from this identity. The broker rejects deregister and placement operations targeting an Administrator (`AdministratorProtectedError` currently surfaces as `Error: ...` + exit 1 in the CLI; WebUI HTTP 409 mapping is reserved for a future deregister endpoint/handler) and filters Administrators out of broadcast recipient sets so they are write-only identities. Alembic revision `0006` backfills one Administrator into each pre-existing session on `cafleet db init`
 - **Unicast Messaging** -- Send messages to a specific agent by ID (same-session only)
 - **Broadcast Messaging** -- Send messages to all agents in the same session
 - **Inbox Polling** -- Agents poll for new messages at their own pace; supports delta polling via `statusTimestampAfter`
 - **Message Lifecycle** -- Acknowledge, cancel (retract), and track message status
 - **Session-Based Routing** -- `session_id` + `agent_id` (identity) parameters on all operations; no authentication or bearer tokens
-- **WebUI** -- Browser-based dashboard; session picker at `/ui/#/sessions`, then a Discord-style unified timeline per session (sidebar of active/deregistered agents, message timeline with broadcasts collapsed to one entry + per-recipient ACK reactions on hover, and an `@<agent>` / `@all` input)
+- **WebUI** -- Browser-based dashboard; session picker at `/ui/#/sessions`, then a Discord-style unified timeline per session (sidebar of active/deregistered agents, message timeline with broadcasts collapsed to one entry + per-recipient ACK reactions on hover, and a multi-line `@<agent>` / `@all` textarea input with Discord-style autocomplete popover). Every message is sent as the built-in Administrator — a fixed read-only `Sending as Administrator` label replaces the old sender dropdown. Typing `@` opens a popover of matching active agents (plus virtual `@all`); ArrowUp/Down navigate, Enter/Tab insert, Esc dismisses. Enter sends, Shift+Enter inserts a newline, and IME composition (Japanese/Chinese candidates) never triggers an accidental submit. Newlines in message bodies are preserved end-to-end and rendered on multiple lines in the timeline
 - **Member Lifecycle** -- `cafleet member create/delete/list/capture` commands wrap tmux pane spawning + agent registration into atomic operations; the `agent_placements` table persists the agent-to-pane mapping in the registry
 - **Multi-Runner Support** -- `--coding-agent claude|codex` flag on `member create` selects which coding agent to spawn; defaults to `claude` for backward compatibility. Codex runs with `--approval-mode auto-edit`
 - **tmux Push Notifications** -- After persisting a message, the broker injects a `cafleet poll` command into each recipient's tmux pane via `tmux send-keys` for near-instant delivery. Best-effort: self-sends are skipped, missing/dead panes fail silently, and the message queue remains the source of truth
@@ -73,6 +74,15 @@ cafleet session create --label "my-project"
 ```
 
 Capture the printed UUID and pass it as `--session-id <session-id>` (a global flag, placed before the subcommand) on every subsequent command. CLI commands access SQLite directly -- no server needed. Start `cafleet server` (or `mise //cafleet:dev` from a repo clone) only if you want the admin WebUI.
+
+Each new session is auto-seeded with a single built-in `Administrator` agent in the same transaction. The Admin WebUI always sends from this identity; the broker rejects deregister and placement operations targeting it. `cafleet session create --json` additionally returns `administrator_agent_id` for callers that need the UUID:
+
+```bash
+cafleet session create --label "my-project" --json
+# → {"session_id": "...", "label": "my-project", "created_at": "...", "administrator_agent_id": "..."}
+```
+
+Pre-existing sessions are backfilled on `cafleet db init` via Alembic revision `0006`.
 
 > **Why a literal flag, not an env var?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. Passing `--session-id <literal-uuid>` lets a single allow-list pattern match every subcommand for that session; shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — do not introduce shell variables to hold them.
 

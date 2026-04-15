@@ -69,12 +69,14 @@ export default function TimelineMessageComponent({
         ))}
       </div>
       {canceled ? (
-        <p className="mt-0.5 text-sm opacity-60">
+        <p className="mt-0.5 text-sm opacity-60 whitespace-pre-wrap break-words">
           <s>{body(entry)}</s>
         </p>
       ) : (
         <>
-          <p className="mt-0.5 text-sm text-gray-700">{body(entry)}</p>
+          <p className="mt-0.5 text-sm text-gray-700 whitespace-pre-wrap break-words">
+            {body(entry)}
+          </p>
           <ReactionBar entry={entry} agents={agents} />
         </>
       )}

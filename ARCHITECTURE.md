@@ -35,6 +35,8 @@ No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret sessio
 
 **Isolation rules**: Every operation that reads or writes agent/task data enforces session boundaries. Cross-session requests always produce "not found" errors indistinguishable from the resource not existing.
 
+**Built-in Administrator agent**: `cafleet session create` inserts a single `Administrator` agent into the new session in the same transaction as the session row. The Administrator is an ordinary `agents` row distinguished only by `agent_card_json.cafleet.kind == "builtin-administrator"` — no schema change, no separate table. Every session has exactly one Administrator, and Alembic revision `0006_seed_administrator_agent.py` backfills one into each pre-existing session on `cafleet db init` (idempotent via a `json_extract` probe). The Admin WebUI Send control always submits messages with `from_agent_id = administrator.agent_id`, so there is no sender dropdown. Protection lives entirely in `broker.py`: a single `AdministratorProtectedError` class is raised from `broker.deregister_agent` (preventing deregister) and from `broker.register_agent` (preventing `placement.director_agent_id` from pointing at an Administrator — the Administrator never receives a tmux pane). `broker.broadcast_message` filters Administrators out of the recipient set, so they are write-only identities. The CLI handles `AdministratorProtectedError` by printing `Error: ...` to stderr and exiting with status 1; any future WebUI deregister endpoint maps it to HTTP 409.
+
 ## Component Layout
 
 | Component | Location | Description |

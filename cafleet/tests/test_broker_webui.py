@@ -109,6 +109,7 @@ class TestListSessionAgents:
     """broker.list_session_agents(session_id) → active + deregistered with tasks."""
 
     def test_returns_active_agents(self):
+        """Returned list includes both user agents and the auto-seeded Administrator."""
         from cafleet import broker
 
         session = _create_session()
@@ -117,10 +118,12 @@ class TestListSessionAgents:
         _register_agent(sid, name="active-2")
 
         result = broker.list_session_agents(sid)
-        assert len(result) == 2
+        # 2 user agents + 1 Administrator.
+        assert len(result) == 3
         names = {a["name"] for a in result}
         assert "active-1" in names
         assert "active-2" in names
+        assert "Administrator" in names
 
     def test_active_agents_have_active_status(self):
         from cafleet import broker
@@ -162,12 +165,14 @@ class TestListSessionAgents:
         agent_ids = {a["agent_id"] for a in result}
         assert agent["agent_id"] not in agent_ids
 
-    def test_empty_session_returns_empty_list(self):
+    def test_newly_created_session_returns_only_administrator(self):
+        """A freshly created session always surfaces its auto-seeded Administrator."""
         from cafleet import broker
 
         session = _create_session()
         result = broker.list_session_agents(session["session_id"])
-        assert result == []
+        assert len(result) == 1
+        assert result[0]["name"] == "Administrator"
 
     def test_result_contains_required_keys(self):
         from cafleet import broker
@@ -185,7 +190,7 @@ class TestListSessionAgents:
         assert "registered_at" in agent
 
     def test_scoped_to_session(self):
-        """Agents from other sessions are not included."""
+        """Agents from other sessions are not included (each session has its own Admin)."""
         from cafleet import broker
 
         session_a = _create_session()
@@ -194,8 +199,113 @@ class TestListSessionAgents:
         _register_agent(session_b["session_id"], name="in-b")
 
         result = broker.list_session_agents(session_a["session_id"])
-        assert len(result) == 1
-        assert result[0]["name"] == "in-a"
+        # Administrator (for session A) + in-a.
+        assert len(result) == 2
+        names = {a["name"] for a in result}
+        assert "in-a" in names
+        assert "Administrator" in names
+        assert "in-b" not in names
+
+
+# ===========================================================================
+# kind field on agents — design doc 0000025 §F
+# ===========================================================================
+
+
+class TestListSessionAgentsKind:
+    """/ui/api/agents exposes ``kind`` per row via ``broker.list_session_agents``.
+
+    webui_api.py is a thin passthrough (`GET /ui/api/agents` simply wraps
+    ``broker.list_session_agents(session_id)`` and wraps the result as
+    ``{"agents": [...]}``), so testing at the broker layer covers the
+    public HTTP surface.
+    """
+
+    def test_entries_include_kind_field(self):
+        from cafleet import broker
+
+        session = _create_session()
+        sid = session["session_id"]
+        _register_agent(sid, name="user-a")
+        _register_agent(sid, name="user-b")
+
+        result = broker.list_session_agents(sid)
+        for entry in result:
+            assert "kind" in entry, (
+                f"every agent entry must carry a 'kind' field, got entry={entry!r}"
+            )
+
+    def test_administrator_marked_as_builtin_administrator(self):
+        from cafleet import broker
+        from cafleet.broker import ADMINISTRATOR_KIND
+
+        session = _create_session()
+        sid = session["session_id"]
+        _register_agent(sid, name="user-a")
+        _register_agent(sid, name="user-b")
+
+        result = broker.list_session_agents(sid)
+        admins = [e for e in result if e.get("kind") == ADMINISTRATOR_KIND]
+        users = [e for e in result if e.get("kind") == "user"]
+
+        # Exactly one Administrator entry, and its name matches.
+        assert len(admins) == 1, (
+            f"expected exactly one Administrator entry, got {len(admins)}: {admins!r}"
+        )
+        assert admins[0]["name"] == "Administrator"
+        assert admins[0]["agent_id"] == session["administrator_agent_id"]
+
+        # The two user agents carry kind='user'.
+        assert len(users) == 2, (
+            f"expected 2 user-kind entries, got {len(users)}: {users!r}"
+        )
+        user_names = {e["name"] for e in users}
+        assert user_names == {"user-a", "user-b"}
+
+    def test_kind_values_are_restricted_to_known_set(self):
+        """No entry carries a kind outside the documented set."""
+        from cafleet import broker
+        from cafleet.broker import ADMINISTRATOR_KIND
+
+        session = _create_session()
+        sid = session["session_id"]
+        _register_agent(sid, name="user-a")
+
+        result = broker.list_session_agents(sid)
+        valid_kinds = {ADMINISTRATOR_KIND, "user"}
+        for entry in result:
+            assert entry.get("kind") in valid_kinds, (
+                f"kind must be one of {valid_kinds}, got {entry.get('kind')!r}"
+            )
+
+
+class TestGetAgentKind:
+    """broker.get_agent returned dict includes ``kind`` per §F."""
+
+    def test_get_agent_for_administrator_returns_builtin_administrator(self):
+        from cafleet import broker
+        from cafleet.broker import ADMINISTRATOR_KIND
+
+        session = _create_session()
+        sid = session["session_id"]
+        admin_id = session["administrator_agent_id"]
+
+        result = broker.get_agent(admin_id, sid)
+        assert result is not None
+        assert "kind" in result
+        assert result["kind"] == ADMINISTRATOR_KIND
+
+    def test_get_agent_for_user_returns_user_kind(self):
+        from cafleet import broker
+
+        session = _create_session()
+        sid = session["session_id"]
+        user = _register_agent(sid, name="regular")
+
+        result = broker.get_agent(user["agent_id"], sid)
+        assert result is not None
+        assert "kind" in result
+        assert result["kind"] == "user"
 
 
 # ===========================================================================

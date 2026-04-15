@@ -87,7 +87,22 @@ The `cafleet session` subgroup manages sessions. These commands write directly t
 | `--label` | no | Free-form text label for the session |
 | `--json` | no | Output as JSON |
 
-Creates a new session with a UUIDv4 identifier. Prints the session_id to stdout.
+Creates a new session with a UUIDv4 identifier and auto-seeds the session's built-in `Administrator` agent in the same transaction. The Administrator is an ordinary `agents` row marked via `agent_card_json.cafleet.kind == "builtin-administrator"`; every session has exactly one.
+
+**Non-JSON output** (unchanged): prints the `session_id` only.
+
+**`--json` output**: includes an additional `administrator_agent_id` field holding the UUID of the auto-seeded Administrator row. Example:
+
+```json
+{
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "label": "my-project",
+  "created_at": "2026-04-15T10:00:00+00:00",
+  "administrator_agent_id": "7ba91234-5678-90ab-cdef-112233445566"
+}
+```
+
+Attempting `cafleet --session-id <session_id> deregister --agent-id <administrator_id>` exits non-zero (code 1) with `Error: Administrator cannot be deregistered` on stderr: the broker raises `AdministratorProtectedError`, which the CLI catches and turns into a plain error message + `ctx.exit(1)`.
 
 ### `session list`
 

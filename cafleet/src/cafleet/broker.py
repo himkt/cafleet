@@ -24,6 +24,45 @@ from cafleet.db.models import Agent, AgentPlacement, Session, Task
 
 
 # ---------------------------------------------------------------------------
+# Built-in Administrator agent — constants, helpers, and exception
+# ---------------------------------------------------------------------------
+
+
+ADMINISTRATOR_KIND = "builtin-administrator"
+
+
+class AdministratorProtectedError(Exception):
+    """Raised when an operation targets a built-in Administrator agent."""
+
+
+def _administrator_agent_card(session_id: str) -> dict:
+    """Canonical AgentCard dict for the built-in Administrator of a session."""
+    short_id = session_id[:8]
+    return {
+        "name": "Administrator",
+        "description": f"Built-in administrator agent for session {short_id}",
+        "skills": [],
+        "cafleet": {"kind": ADMINISTRATOR_KIND},
+    }
+
+
+def _is_administrator_card(agent_card_json: str | None) -> bool:
+    """Return True iff the stored card JSON marks an Administrator agent."""
+    if not agent_card_json:
+        return False
+    try:
+        card = json.loads(agent_card_json)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(card, dict):
+        return False
+    cafleet_ns = card.get("cafleet")
+    if not isinstance(cafleet_ns, dict):
+        return False
+    return cafleet_ns.get("kind") == ADMINISTRATOR_KIND
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -67,9 +106,16 @@ def _try_notify_recipient(
 
 
 def create_session(label: str | None = None) -> dict:
-    """INSERT into sessions. Returns {"session_id": ..., "label": ..., "created_at": ...}."""
+    """INSERT sessions + auto-seeded Administrator agent in one transaction.
+
+    Returns ``{"session_id", "label", "created_at", "administrator_agent_id"}``.
+    Per design 0000025 §B, every new session owns exactly one built-in
+    Administrator whose ``registered_at`` matches the session's ``created_at``.
+    """
     session_id = str(uuid.uuid4())
     created_at = _now_iso()
+    administrator_agent_id = str(uuid.uuid4())
+    administrator_card = _administrator_agent_card(session_id)
     sm = get_sync_sessionmaker()
     with sm() as session:
         with session.begin():
@@ -80,7 +126,25 @@ def create_session(label: str | None = None) -> dict:
                     created_at=created_at,
                 )
             )
-    return {"session_id": session_id, "label": label, "created_at": created_at}
+            session.flush()
+            session.add(
+                Agent(
+                    agent_id=administrator_agent_id,
+                    session_id=session_id,
+                    name=administrator_card["name"],
+                    description=administrator_card["description"],
+                    status="active",
+                    registered_at=created_at,
+                    deregistered_at=None,
+                    agent_card_json=json.dumps(administrator_card),
+                )
+            )
+    return {
+        "session_id": session_id,
+        "label": label,
+        "created_at": created_at,
+        "administrator_agent_id": administrator_agent_id,
+    }
 
 
 def list_sessions() -> list[dict]:
@@ -135,27 +199,60 @@ def get_session(session_id: str) -> dict | None:
 
 
 def delete_session(session_id: str) -> None:
-    """DELETE session. Raises click.UsageError if FK constraint blocks deletion."""
+    """DELETE placements + agents in the session, then DELETE the session.
+
+    Because ``create_session`` always auto-seeds an Administrator agent
+    (design 0000025 §B), no session is agent-free at the point the user
+    calls delete. ``agents.session_id`` is ``ON DELETE RESTRICT``, so we
+    must clear agent rows first in the same transaction. Two FKs from
+    ``agent_placements`` complicate that: ``agent_placements.agent_id``
+    cascades on agent delete but ``agent_placements.director_agent_id``
+    is ``ON DELETE RESTRICT``, so deleting a director while a sibling
+    placement still points at it fails. We sidestep the ordering by
+    explicitly deleting all placements that reference any agent in this
+    session first. If ``tasks.context_id`` (``ON DELETE RESTRICT``) then
+    blocks the agent delete, we raise ``click.UsageError``.
+    """
     sm = get_sync_sessionmaker()
     with sm() as session:
         with session.begin():
-            try:
-                result = cast(
-                    CursorResult,
-                    session.execute(
-                        delete(Session).where(Session.session_id == session_id)
-                    ),
+            agents_in_session = select(Agent.agent_id).where(
+                Agent.session_id == session_id
+            )
+            # Clear placements that point at any agent in this session via
+            # either side of the FK pair: ``agent_id`` (the placed member)
+            # or ``director_agent_id`` (RESTRICT). Filtering only by
+            # ``agent_id`` would leave a placement whose director is in
+            # this session intact and the next ``DELETE FROM agents`` would
+            # then surface an IntegrityError that gets misreported as a
+            # task-FK violation.
+            session.execute(
+                delete(AgentPlacement).where(
+                    or_(
+                        AgentPlacement.agent_id.in_(agents_in_session),
+                        AgentPlacement.director_agent_id.in_(agents_in_session),
+                    )
                 )
+            )
+            try:
+                session.execute(delete(Agent).where(Agent.session_id == session_id))
             except IntegrityError:
-                count = session.execute(
-                    select(func.count())
-                    .select_from(Agent)
-                    .where(Agent.session_id == session_id)
-                ).scalar()
+                # The transaction is now in a failed state — any further
+                # query on the same session would raise PendingRollbackError
+                # and mask the click.UsageError below. Raising directly lets
+                # the surrounding `with session.begin()` block roll back
+                # cleanly via its own __exit__ handler.
                 raise click.UsageError(
                     f"Cannot delete session {session_id}: "
-                    f"it still has {count} agent(s) referencing it."
+                    f"its agent(s) are still referenced by tasks "
+                    f"(tasks.context_id ON DELETE RESTRICT)."
                 )
+            result = cast(
+                CursorResult,
+                session.execute(
+                    delete(Session).where(Session.session_id == session_id)
+                ),
+            )
         if result.rowcount == 0:
             raise click.UsageError(f"session '{session_id}' not found.")
 
@@ -207,6 +304,10 @@ def register_agent(
                     raise click.UsageError(
                         f"Director agent '{director_id}' not found or not active "
                         f"in session '{session_id}'."
+                    )
+                if _is_administrator_card(director.agent_card_json):
+                    raise AdministratorProtectedError(
+                        "Administrator cannot be a director"
                     )
 
             session.add(
@@ -269,6 +370,11 @@ def get_agent(agent_id: str, session_id: str) -> dict | None:
         "description": agent.description,
         "status": agent.status,
         "registered_at": agent.registered_at,
+        "kind": (
+            ADMINISTRATOR_KIND
+            if _is_administrator_card(agent.agent_card_json)
+            else "user"
+        ),
         "placement": None,
     }
     if placement_row is not None:
@@ -313,10 +419,19 @@ def deregister_agent(agent_id: str) -> bool:
     """UPDATE status='deregistered', deregistered_at=now, DELETE placement.
 
     Returns True if agent was active and got deregistered.
+    Raises ``AdministratorProtectedError`` when the target is the built-in
+    Administrator agent (design 0000025 §D).
     """
     sm = get_sync_sessionmaker()
     with sm() as session:
         with session.begin():
+            card_json = session.execute(
+                select(Agent.agent_card_json).where(Agent.agent_id == agent_id)
+            ).scalar_one_or_none()
+            if card_json is not None and _is_administrator_card(card_json):
+                raise AdministratorProtectedError(
+                    "Administrator cannot be deregistered"
+                )
             result = cast(
                 CursorResult,
                 session.execute(
@@ -589,15 +704,26 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
                     f"Sender agent not found or not active in session: {agent_id}"
                 )
 
-            # List active agents in session, excluding sender
+            # List active agents in session, excluding sender and any
+            # built-in Administrator agents (they are write-only identities,
+            # per design 0000025 §E). Filter the Administrator out at the
+            # SQL layer via ``json_extract`` so we don't have to ship every
+            # ``agent_card_json`` blob into Python just to discard it. The
+            # sender may itself be an Administrator — that case is handled
+            # by the sender exclusion above, not by this filter.
             rows = session.execute(
                 select(Agent.agent_id).where(
                     Agent.session_id == session_id,
                     Agent.status == "active",
                     Agent.agent_id != agent_id,
+                    func.coalesce(
+                        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"),
+                        "",
+                    )
+                    != ADMINISTRATOR_KIND,
                 )
             ).all()
-            recipient_ids = [row[0] for row in rows]
+            recipient_ids = [aid for (aid,) in rows]
 
             # Create delivery tasks for each recipient
             for recipient_id in recipient_ids:
@@ -783,8 +909,12 @@ def list_session_agents(session_id: str) -> list[dict]:
     """Active agents + deregistered agents that have tasks.
 
     Returns list of dicts with keys: agent_id, name, description, status,
-    registered_at.  Deregistered agents appear only when they are referenced
-    by at least one task (as sender or recipient).
+    registered_at, kind.  ``kind`` is ``"builtin-administrator"`` when
+    ``agent_card_json`` contains ``$.cafleet.kind`` with that value
+    (extracted in SQL via ``json_extract``/``coalesce`` so the full blob
+    never leaves the database) and ``"user"`` for every other agent.
+    Deregistered agents appear only when they are referenced by at least
+    one task (as sender or recipient).
     """
     has_tasks = exists().where(
         or_(
@@ -792,12 +922,21 @@ def list_session_agents(session_id: str) -> list[dict]:
             Task.from_agent_id == Agent.agent_id,
         )
     )
+    # Derive ``kind`` directly in SQL via ``json_extract`` so we do not
+    # have to ship the entire ``agent_card_json`` blob into Python just to
+    # compute a one-token discriminator. ``coalesce`` substitutes an empty
+    # string when the row has no ``cafleet.kind`` path so the comparison
+    # always evaluates cleanly.
+    kind_expr = func.coalesce(
+        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"), ""
+    )
     stmt = select(
         Agent.agent_id,
         Agent.name,
         Agent.description,
         Agent.status,
         Agent.registered_at,
+        kind_expr.label("kind_raw"),
     ).where(
         Agent.session_id == session_id,
         or_(
@@ -815,6 +954,9 @@ def list_session_agents(session_id: str) -> list[dict]:
             "description": row.description,
             "status": row.status,
             "registered_at": row.registered_at,
+            "kind": (
+                ADMINISTRATOR_KIND if row.kind_raw == ADMINISTRATOR_KIND else "user"
+            ),
         }
         for row in rows
     ]
