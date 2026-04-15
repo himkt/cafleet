@@ -1,7 +1,8 @@
-"""Tests for the ``cafleet server`` CLI subcommand (design doc 0000024).
+"""Tests for the ``cafleet server`` CLI subcommand (design doc 0000028).
 
-The subcommand launches the admin WebUI FastAPI app via uvicorn.  Design doc
-Specification, Tests subsection defines these five behavioural contracts:
+The subcommand launches the admin WebUI FastAPI app via uvicorn.  These tests
+cover the five behavioural contracts from the design doc Specification, Tests
+subsection and run as part of the standard ``mise //cafleet:test`` suite:
 
   1. ``cafleet server --help`` exits 0 and shows both ``--host`` / ``--port``.
   2. With ``uvicorn.run`` monkey-patched, flag parsing threads defaults from
@@ -15,10 +16,6 @@ Specification, Tests subsection defines these five behavioural contracts:
   5. ``Settings().broker_host`` default is ``"127.0.0.1"`` (flipped from
      ``"0.0.0.0"`` to match CAFleet's local-only stance) and the
      ``CAFLEET_BROKER_HOST`` / ``CAFLEET_BROKER_PORT`` aliases are wired.
-
-These tests rely on changes delivered in Steps 4-6 (``config.py``,
-``server.py``, ``cli.py``) and WILL fail until those steps are implemented.
-That is expected — this file is written first in the TDD cycle.
 """
 
 import uuid
