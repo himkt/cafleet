@@ -27,6 +27,7 @@ Coverage map:
 
 import uuid
 
+import click
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -376,6 +377,66 @@ class TestDeleteSession:
         broker.delete_session(sid)
 
         assert broker.get_session(sid) is None
+
+    def test_raises_usage_error_when_tasks_reference_an_agent(self):
+        """``tasks.context_id`` ON DELETE RESTRICT blocks the cascade.
+
+        Once a unicast send creates a task whose ``context_id`` points at
+        the recipient agent, deleting the session must fail with a clear
+        ``click.UsageError`` (not a raw IntegrityError or
+        PendingRollbackError) and the session row must remain.
+        """
+        from cafleet import broker
+
+        created = _create_session()
+        sid = created["session_id"]
+        sender = _register_agent(sid, name="sender")
+        recipient = _register_agent(sid, name="recipient")
+        broker.send_message(sid, sender["agent_id"], recipient["agent_id"], "hello")
+
+        with pytest.raises(click.UsageError) as exc_info:
+            broker.delete_session(sid)
+        assert "still referenced by tasks" in str(exc_info.value)
+        assert broker.get_session(sid) is not None
+
+    def test_cascade_deletes_session_with_member_placements(self, broker_session):
+        """``agent_placements.agent_id`` is ON DELETE CASCADE, so deleting
+        the agent in ``delete_session`` should sweep its placement away
+        and then the session itself should be removed."""
+        from cafleet import broker
+        from cafleet.db.models import Agent, AgentPlacement
+
+        created = _create_session()
+        sid = created["session_id"]
+        director = _register_agent(sid, name="director-agent")
+        member = _register_agent(sid, name="member-agent")
+
+        with broker_session() as s:
+            s.add(
+                AgentPlacement(
+                    agent_id=member["agent_id"],
+                    director_agent_id=director["agent_id"],
+                    tmux_session="main",
+                    tmux_window_id="@1",
+                    tmux_pane_id="%1",
+                    coding_agent="claude",
+                    created_at=created["created_at"],
+                )
+            )
+            s.commit()
+
+        broker.delete_session(sid)
+
+        assert broker.get_session(sid) is None
+        with broker_session() as s:
+            remaining_agents = s.query(Agent).filter(Agent.session_id == sid).count()
+            remaining_placements = (
+                s.query(AgentPlacement)
+                .filter(AgentPlacement.agent_id == member["agent_id"])
+                .count()
+            )
+        assert remaining_agents == 0
+        assert remaining_placements == 0
 
 
 # ===========================================================================

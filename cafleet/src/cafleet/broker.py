@@ -199,21 +199,30 @@ def get_session(session_id: str) -> dict | None:
 
 
 def delete_session(session_id: str) -> None:
-    """DELETE all agents in the session, then DELETE the session itself.
+    """DELETE placements + agents in the session, then DELETE the session.
 
     Because ``create_session`` always auto-seeds an Administrator agent
     (design 0000025 §B), no session is agent-free at the point the user
     calls delete. ``agents.session_id`` is ``ON DELETE RESTRICT``, so we
-    delete agent rows first inside the same transaction
-    (``agent_placements`` cascades). If ``tasks.context_id``
-    (``ON DELETE RESTRICT``) still references any agent in the session,
-    the agent delete fails with ``IntegrityError`` and we raise
-    ``click.UsageError`` with a message that surfaces the task FK as the
-    blocking constraint.
+    must clear agent rows first in the same transaction. Two FKs from
+    ``agent_placements`` complicate that: ``agent_placements.agent_id``
+    cascades on agent delete but ``agent_placements.director_agent_id``
+    is ``ON DELETE RESTRICT``, so deleting a director while a sibling
+    placement still points at it fails. We sidestep the ordering by
+    explicitly deleting all placements that reference any agent in this
+    session first. If ``tasks.context_id`` (``ON DELETE RESTRICT``) then
+    blocks the agent delete, we raise ``click.UsageError``.
     """
     sm = get_sync_sessionmaker()
     with sm() as session:
         with session.begin():
+            session.execute(
+                delete(AgentPlacement).where(
+                    AgentPlacement.agent_id.in_(
+                        select(Agent.agent_id).where(Agent.session_id == session_id)
+                    )
+                )
+            )
             try:
                 session.execute(delete(Agent).where(Agent.session_id == session_id))
             except IntegrityError:
