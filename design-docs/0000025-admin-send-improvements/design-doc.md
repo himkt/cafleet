@@ -1,6 +1,6 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 52/52 tasks complete
 **Last Updated**: 2026-04-15
 
@@ -393,3 +393,4 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 |------|---------|
 | 2026-04-15 | Initial draft |
 | 2026-04-15 | Reviewer pass 1: fix FK description (tasks RESTRICT vs placements CASCADE); explicit `agent_card_json` SELECT extension for list_session_agents / get_agent / register_agent director guard; IME composition guard; popover mechanics (initial index, clamp, mouse click, empty hide, blur dismiss); `@all` matches its label; banner text covers both failure modes; Python-side UUID in migration; drop speculative rename row; drop defensive strip paragraph; line numbers 72 and 77 for TimelineMessage; add idempotency / deregister-CLI / downgrade-smoke tests; `/update-readme` workflow reference; progress recount to 52. |
+| 2026-04-15 | Implementation complete. All 12 steps executed via CAFleet-native TDD cycle (Director + Tester + Programmer + Verifier). 54 new tests, 349/349 suite pass, all mise validators pass, admin:build clean. Interactive UI QA (popover, multi-line compose, warning banner, IME Enter) deferred to manual verification in browser. Pre-existing tracked webui/ build artifacts untracked to align with .gitignore. Status set to Complete. |
