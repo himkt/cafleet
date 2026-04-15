@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 29/52 tasks complete
+**Progress**: 36/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -352,13 +352,13 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 9: WebUI — @mention autocomplete popover
 
-- [ ] Rewrite `MessageInput.tsx` to use a `<textarea>` with auto-grow. <!-- completed: -->
-- [ ] Add mention-query detection (regex `/@([A-Za-z0-9_-]*)$/` against the text to the left of the cursor, gated on the preceding character being whitespace/BOL). <!-- completed: -->
-- [ ] Build the popover UI (up to 6 rows, name only, absolute-positioned above the textarea; empty-filter hides the popover; mouse click inserts and refocuses). <!-- completed: -->
-- [ ] Implement IME-composition guard: every Enter/Tab handler MUST return early when `event.nativeEvent.isComposing` is true, so IME confirmation does not submit or insert a mention. <!-- completed: -->
-- [ ] Implement keyboard handling per Spec §H (ArrowUp/Down/Enter/Tab/Esc, Shift+Enter always newline; initial `selectedIndex = 0`; clamp on shrink). <!-- completed: -->
-- [ ] Implement insertion logic (replace `@<query>` with `@<slug> ` and move caret). <!-- completed: -->
-- [ ] Build the candidate list per Spec §H: virtual `@all` filtered against its label `"all"` first, then active user agents (excluding the Administrator and deregistered) filtered by `slugify(name).startsWith(...)`. Dismiss on Escape or textarea blur. <!-- completed: -->
+- [x] Rewrite `MessageInput.tsx` to use a `<textarea>` with auto-grow. <!-- completed: 2026-04-15T16:50 -->
+- [x] Add mention-query detection (regex `/@([A-Za-z0-9_-]*)$/` against the text to the left of the cursor, gated on the preceding character being whitespace/BOL). <!-- completed: 2026-04-15T16:50 -->
+- [x] Build the popover UI (up to 6 rows, name only, absolute-positioned above the textarea; empty-filter hides the popover; mouse click inserts and refocuses). <!-- completed: 2026-04-15T16:50 -->
+- [x] Implement IME-composition guard: every Enter/Tab handler MUST return early when `event.nativeEvent.isComposing` is true, so IME confirmation does not submit or insert a mention. <!-- completed: 2026-04-15T16:50 -->
+- [x] Implement keyboard handling per Spec §H (ArrowUp/Down/Enter/Tab/Esc, Shift+Enter always newline; initial `selectedIndex = 0`; clamp on shrink). <!-- completed: 2026-04-15T16:50 -->
+- [x] Implement insertion logic (replace `@<query>` with `@<slug> ` and move caret). <!-- completed: 2026-04-15T16:50 -->
+- [x] Build the candidate list per Spec §H: virtual `@all` filtered against its label `"all"` first, then active user agents (excluding the Administrator and deregistered) filtered by `slugify(name).startsWith(...)`. Dismiss on Escape or textarea blur. <!-- completed: 2026-04-15T16:50 -->
 
 ### Step 10: WebUI — newline rendering
 
