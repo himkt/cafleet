@@ -457,6 +457,38 @@ class TestDeregisterAdministratorCliGuard:
             f"got: {out!r}"
         )
 
+    def test_cli_deregister_unknown_agent_exits_nonzero(self, tmp_path, monkeypatch):
+        """``broker.deregister_agent`` returns ``False`` when the agent
+        does not exist or is already deregistered. The CLI must surface
+        that as a non-zero exit so callers do not see a misleading
+        "Agent deregistered successfully" line.
+        """
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        init = runner.invoke(cli, ["db", "init"])
+        assert init.exit_code == 0
+
+        session_id, _admin_id = _create_session_via_cli(runner)
+        bogus_agent_id = str(uuid.uuid4())
+
+        result = runner.invoke(
+            cli,
+            ["--session-id", session_id, "deregister", "--agent-id", bogus_agent_id],
+        )
+        assert result.exit_code != 0, (
+            f"deregister of an unknown agent must exit non-zero. "
+            f"exit_code={result.exit_code}, output: {result.output}"
+        )
+        assert "not found or already deregistered" in (result.output or ""), (
+            f"error output must mention the missing/deregistered state. "
+            f"got: {result.output!r}"
+        )
+
     def test_cli_deregister_admin_leaves_row_active(self, tmp_path, monkeypatch):
         """The administrators row must still be active after the failed CLI call."""
         db_file = tmp_path / "registry.db"

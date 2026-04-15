@@ -216,10 +216,21 @@ def delete_session(session_id: str) -> None:
     sm = get_sync_sessionmaker()
     with sm() as session:
         with session.begin():
+            agents_in_session = select(Agent.agent_id).where(
+                Agent.session_id == session_id
+            )
+            # Clear placements that point at any agent in this session via
+            # either side of the FK pair: ``agent_id`` (the placed member)
+            # or ``director_agent_id`` (RESTRICT). Filtering only by
+            # ``agent_id`` would leave a placement whose director is in
+            # this session intact and the next ``DELETE FROM agents`` would
+            # then surface an IntegrityError that gets misreported as a
+            # task-FK violation.
             session.execute(
                 delete(AgentPlacement).where(
-                    AgentPlacement.agent_id.in_(
-                        select(Agent.agent_id).where(Agent.session_id == session_id)
+                    or_(
+                        AgentPlacement.agent_id.in_(agents_in_session),
+                        AgentPlacement.director_agent_id.in_(agents_in_session),
                     )
                 )
             )
