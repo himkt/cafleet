@@ -211,9 +211,14 @@ export default function MessageInput({
     }
     const slug = c.kind === "virtual" ? c.label : slugify(c.agent.name);
     const replacement = `@${slug} `;
-    const mentionEnd =
-      currentMention.anchor + currentMention.query.length + 1;
-    const replaceEnd = Math.max(cursor, mentionEnd);
+    // Scan right from the `@` to find the actual end of the mention token
+    // so a caret inside the token (e.g. `@al|x`) still rewrites the full
+    // `@alx`, not just `@al`.
+    let tokenEnd = currentMention.anchor + 1;
+    while (tokenEnd < value.length && /[A-Za-z0-9_-]/.test(value[tokenEnd])) {
+      tokenEnd++;
+    }
+    const replaceEnd = Math.max(cursor, tokenEnd);
     const newValue =
       value.slice(0, currentMention.anchor) +
       replacement +
