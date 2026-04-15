@@ -106,9 +106,16 @@ def _try_notify_recipient(
 
 
 def create_session(label: str | None = None) -> dict:
-    """INSERT into sessions. Returns {"session_id": ..., "label": ..., "created_at": ...}."""
+    """INSERT sessions + auto-seeded Administrator agent in one transaction.
+
+    Returns ``{"session_id", "label", "created_at", "administrator_agent_id"}``.
+    Per design 0000025 §B, every new session owns exactly one built-in
+    Administrator whose ``registered_at`` matches the session's ``created_at``.
+    """
     session_id = str(uuid.uuid4())
     created_at = _now_iso()
+    administrator_agent_id = str(uuid.uuid4())
+    administrator_card = _administrator_agent_card(session_id)
     sm = get_sync_sessionmaker()
     with sm() as session:
         with session.begin():
@@ -119,7 +126,25 @@ def create_session(label: str | None = None) -> dict:
                     created_at=created_at,
                 )
             )
-    return {"session_id": session_id, "label": label, "created_at": created_at}
+            session.flush()
+            session.add(
+                Agent(
+                    agent_id=administrator_agent_id,
+                    session_id=session_id,
+                    name=administrator_card["name"],
+                    description=administrator_card["description"],
+                    status="active",
+                    registered_at=created_at,
+                    deregistered_at=None,
+                    agent_card_json=json.dumps(administrator_card),
+                )
+            )
+    return {
+        "session_id": session_id,
+        "label": label,
+        "created_at": created_at,
+        "administrator_agent_id": administrator_agent_id,
+    }
 
 
 def list_sessions() -> list[dict]:
@@ -822,8 +847,11 @@ def list_session_agents(session_id: str) -> list[dict]:
     """Active agents + deregistered agents that have tasks.
 
     Returns list of dicts with keys: agent_id, name, description, status,
-    registered_at.  Deregistered agents appear only when they are referenced
-    by at least one task (as sender or recipient).
+    registered_at, kind.  ``kind`` is ``"builtin-administrator"`` for the
+    session's built-in Administrator and ``"user"`` for every other agent,
+    derived from ``agent_card_json`` via ``_is_administrator_card``.
+    Deregistered agents appear only when they are referenced by at least
+    one task (as sender or recipient).
     """
     has_tasks = exists().where(
         or_(
@@ -837,6 +865,7 @@ def list_session_agents(session_id: str) -> list[dict]:
         Agent.description,
         Agent.status,
         Agent.registered_at,
+        Agent.agent_card_json,
     ).where(
         Agent.session_id == session_id,
         or_(
@@ -854,6 +883,11 @@ def list_session_agents(session_id: str) -> list[dict]:
             "description": row.description,
             "status": row.status,
             "registered_at": row.registered_at,
+            "kind": (
+                ADMINISTRATOR_KIND
+                if _is_administrator_card(row.agent_card_json)
+                else "user"
+            ),
         }
         for row in rows
     ]

@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 10/52 tasks complete
+**Progress**: 12/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -315,8 +315,8 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 3: Session-create auto-seeding
 
-- [ ] Extend `broker.create_session` to insert the Administrator agent in the same transaction and return `administrator_agent_id` in the result dict. <!-- completed: -->
-- [ ] Update `cli.session_create` to include `administrator_agent_id` in `--json` output; leave the text path unchanged. <!-- completed: -->
+- [x] Extend `broker.create_session` to insert the Administrator agent in the same transaction and return `administrator_agent_id` in the result dict. <!-- completed: 2026-04-15T15:05 -->
+- [x] Update `cli.session_create` to include `administrator_agent_id` in `--json` output; leave the text path unchanged. <!-- completed: 2026-04-15T15:05 -->
 
 ### Step 4: Alembic 0006 data migration
 
