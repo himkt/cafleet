@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 37/52 tasks complete
+**Progress**: 46/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -366,15 +366,15 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 11: Tests
 
-- [ ] Add broker tests for `create_session` auto-seeding + `kind` surfacing. <!-- completed: -->
-- [ ] Add broker tests for `AdministratorProtectedError` on deregister and placement. <!-- completed: -->
-- [ ] Add broker tests for broadcast recipient exclusion, including an assertion that the summary artifact's `"Broadcast sent to N recipients"` text reflects the POST-exclusion recipient count. <!-- completed: -->
-- [ ] Add `tests/test_alembic_0006_upgrade.py` verifying the data migration on a pre-seeded DB. <!-- completed: -->
-- [ ] Add migration idempotency test: run `alembic upgrade head` twice and assert exactly one Administrator per session. <!-- completed: -->
-- [ ] Add migration downgrade smoke test on an empty session (no tasks) — assert the Administrator is removed. <!-- completed: -->
-- [ ] Add WebUI API test for `kind` in `/ui/api/agents` response. <!-- completed: -->
-- [ ] Add CLI test for `session create --json` shape. <!-- completed: -->
-- [ ] Add CLI test for `cafleet deregister --agent-id <administrator_id>`: asserts non-zero exit, stderr mentions "Administrator cannot be deregistered", and the row is still `active`. <!-- completed: -->
+- [x] Add broker tests for `create_session` auto-seeding + `kind` surfacing. <!-- completed: 2026-04-15T10:00 -->
+- [x] Add broker tests for `AdministratorProtectedError` on deregister and placement. <!-- completed: 2026-04-15T10:10 -->
+- [x] Add broker tests for broadcast recipient exclusion, including an assertion that the summary artifact's `"Broadcast sent to N recipients"` text reflects the POST-exclusion recipient count. <!-- completed: 2026-04-15T10:20 -->
+- [x] Add `tests/test_alembic_0006_upgrade.py` verifying the data migration on a pre-seeded DB. <!-- completed: 2026-04-15T10:30 -->
+- [x] Add migration idempotency test: run `alembic upgrade head` twice and assert exactly one Administrator per session. <!-- completed: 2026-04-15T10:30 -->
+- [x] Add migration downgrade smoke test on an empty session (no tasks) — assert the Administrator is removed. <!-- completed: 2026-04-15T10:30 -->
+- [x] Add WebUI API test for `kind` in `/ui/api/agents` response. <!-- completed: 2026-04-15T10:40 -->
+- [x] Add CLI test for `session create --json` shape. <!-- completed: 2026-04-15T10:00 -->
+- [x] Add CLI test for `cafleet deregister --agent-id <administrator_id>`: asserts non-zero exit, stderr mentions "Administrator cannot be deregistered", and the row is still `active`. <!-- completed: 2026-04-15T10:10 -->
 
 ### Step 12: Verification
 
