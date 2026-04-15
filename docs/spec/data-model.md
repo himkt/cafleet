@@ -1,6 +1,6 @@
 # SQLite Data Model Specification
 
-All core data structures — `Task`, `Message`, `Part`, `Artifact`, `AgentCard`, `TaskStatus`, `TaskState` — follow an internal A2A-inspired shape defined by CAFleet's own Pydantic models. There is no dependency on `a2a-sdk` or any external A2A library. SQLite stores the `Task` and `AgentCard` payloads as JSON `TEXT` blobs and deserializes them back to Pydantic models on read. Broker-specific information (routing metadata, etc.) lives in indexed columns alongside the JSON blob.
+All core data structures — `Task`, `Message`, `Part`, `Artifact`, `AgentCard`, `TaskStatus`, `TaskState` — follow an internal A2A-inspired shape, but CAFleet does not maintain Pydantic models for them. There is no dependency on `a2a-sdk` or any external A2A library. SQLite stores the `Task` and `AgentCard` payloads as JSON `TEXT` blobs that the broker layer serializes via `json.dumps` and reads back as plain Python dicts via `json.loads` (see `cafleet/src/cafleet/broker.py`). Broker-specific information (routing metadata, etc.) lives in indexed columns alongside the JSON blob.
 
 The model is a **relational + document hybrid**: indexed fields are columns, while the A2A-inspired payloads are stored as opaque JSON `TEXT`. The columns are queried; the JSON blobs are not.
 

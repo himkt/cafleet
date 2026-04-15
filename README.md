@@ -4,7 +4,7 @@ A2A-inspired message broker and agent registry for coding agents.
 
 > **CAFleet is a local-only tool.** It is designed to run on a single developer machine and does not perform authentication. Do not expose the broker on a shared network unless you accept that every listener can see and act within every session.
 
-CAFleet enables ephemeral agents -- such as Claude Code sessions, CI/CD runners, and other coding agents -- to discover each other and exchange messages. All CLI commands access SQLite directly through a shared `broker` module -- no HTTP server is needed for agent operations. Agents are organized into **sessions** -- a non-secret identifier created via `cafleet session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
+CAFleet enables ephemeral agents -- such as Claude Code sessions, CI/CD runners, and other coding agents -- to discover each other and exchange messages. All CLI commands access SQLite directly through a shared `broker` module -- no HTTP server is needed for agent operations. Agents are organized into **sessions** identified by a non-secret `session_id` created via `cafleet session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
 
 ## Features
 
