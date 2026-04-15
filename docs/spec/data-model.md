@@ -39,6 +39,39 @@ Indexes:
 
 Deregistration is a soft-delete: `status='deregistered'` plus `deregistered_at` is set in a single statement. There is no row delete and no background cleanup loop. Active query paths filter `status='active'` so dead rows are invisible to normal traffic.
 
+#### Built-in Administrator agent
+
+Each session owns exactly one built-in `Administrator` agent, marked by a flag inside `agent_card_json`:
+
+```json
+{
+  "name": "Administrator",
+  "description": "Built-in administrator agent for session <short-id>",
+  "skills": [],
+  "cafleet": {
+    "kind": "builtin-administrator"
+  }
+}
+```
+
+The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned flags. `broker.register_agent` always builds the card itself from `(name, description, skills)`, so callers cannot smuggle `cafleet.kind` through any current public path. A module-level constant `ADMINISTRATOR_KIND = "builtin-administrator"` in `broker.py` plus two helpers (`_administrator_agent_card(session_id)` builder, `_is_administrator_card(agent_card_json)` predicate) encapsulate every read of this flag.
+
+**Creation paths**:
+
+- `broker.create_session(label)` inserts the Administrator row in the same transaction as the `sessions` row; `registered_at` matches `sessions.created_at` exactly. The result dict exposes `administrator_agent_id` for the caller.
+- Alembic revision `0006_seed_administrator_agent.py` backfills one Administrator into each pre-existing session. The migration generates `agent_id = str(uuid.uuid4())` in Python (matching the broker's idiom — no SQL-side `gen_random_uuid()`), probes for an existing Administrator via `json_extract(agent_card_json, '$.cafleet.kind') = 'builtin-administrator'`, and is idempotent by construction (a second `upgrade` finds the existing row and skips the INSERT). Downgrade is provided for empty sessions only and is forward-only in practice — `tasks.context_id` uses `ON DELETE RESTRICT`, so downgrading a session that has tasks addressed to or from the Administrator raises `IntegrityError`. (`agent_placements.agent_id` uses `ON DELETE CASCADE`, but Administrators never receive a placement anyway.)
+
+**Invariant**: Every session has exactly one active `Administrator` agent. `broker.list_session_agents` and `broker.get_agent` extend their SELECT column list with `agent_card_json` and surface a derived `kind` field (`"builtin-administrator"` | `"user"`) so the WebUI can locate the Administrator without matching on the name.
+
+**Protection**: A single `AdministratorProtectedError` class in `broker.py` guards two write paths today:
+
+| Operation | Guard |
+|---|---|
+| `broker.deregister_agent` | SELECTs the target's `agent_card_json` before the UPDATE and raises `AdministratorProtectedError("Administrator cannot be deregistered")` if the card matches. |
+| `broker.register_agent(..., placement=...)` | The existing director-validation SELECT is extended to load `agent_card_json`; if the director row matches, raises `AdministratorProtectedError("Administrator cannot be a director")`. The Administrator never gets handed a tmux pane. |
+
+A future `rename_agent` broker function MUST apply the same guard. `broker.broadcast_message` filters Administrators out of the recipient set (they are write-only identities), but the sender itself may be an Administrator.
+
 ### `tasks`
 
 | Column | Type | Constraints | Notes |

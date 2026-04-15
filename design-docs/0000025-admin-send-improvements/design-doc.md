@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 0/52 tasks complete
+**Progress**: 6/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -299,12 +299,12 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 1: Documentation (MUST precede code)
 
-- [ ] Update `ARCHITECTURE.md` — note that `cafleet session create` auto-seeds an Administrator agent, and that `broker.py` enforces Administrator protection (deregister / placement / broadcast-recipient) in one place. <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md` — document the `agent_card_json.cafleet.kind = "builtin-administrator"` flag and the one-Administrator-per-session invariant. <!-- completed: -->
-- [ ] Update `docs/spec/webui-api.md` — add `kind` field to `/ui/api/agents` response, note that WebUI always sends from the Administrator, and describe the 409 mapping for any future deregister endpoint. <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md` — extend the `session create` entry with the `administrator_agent_id` JSON field. <!-- completed: -->
-- [ ] Update `README.md` — in the Session section mention auto-seeded Administrator; in the Admin WebUI section describe the fixed sender label, mention autocomplete, and multi-line input. Run the `/update-readme` skill after ARCHITECTURE.md and docs/ are updated, per `.claude/rules/design-doc-numbering.md`. <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet/SKILL.md` — add a callout under Register and Deregister that the Administrator is reserved and cannot be deregistered; note that `session create --json` returns `administrator_agent_id`. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` — note that `cafleet session create` auto-seeds an Administrator agent, and that `broker.py` enforces Administrator protection (deregister / placement / broadcast-recipient) in one place. <!-- completed: 2026-04-15T14:05 -->
+- [x] Update `docs/spec/data-model.md` — document the `agent_card_json.cafleet.kind = "builtin-administrator"` flag and the one-Administrator-per-session invariant. <!-- completed: 2026-04-15T14:08 -->
+- [x] Update `docs/spec/webui-api.md` — add `kind` field to `/ui/api/agents` response, note that WebUI always sends from the Administrator, and describe the 409 mapping for any future deregister endpoint. <!-- completed: 2026-04-15T14:12 -->
+- [x] Update `docs/spec/cli-options.md` — extend the `session create` entry with the `administrator_agent_id` JSON field. <!-- completed: 2026-04-15T14:15 -->
+- [x] Update `README.md` — in the Session section mention auto-seeded Administrator; in the Admin WebUI section describe the fixed sender label, mention autocomplete, and multi-line input. Run the `/update-readme` skill after ARCHITECTURE.md and docs/ are updated, per `.claude/rules/design-doc-numbering.md`. <!-- completed: 2026-04-15T14:18 -->
+- [x] Update `.claude/skills/cafleet/SKILL.md` — add a callout under Register and Deregister that the Administrator is reserved and cannot be deregistered; note that `session create --json` returns `administrator_agent_id`. <!-- completed: 2026-04-15T14:22 -->
 
 ### Step 2: Broker helpers and constants
 
