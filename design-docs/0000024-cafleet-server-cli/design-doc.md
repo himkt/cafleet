@@ -1,7 +1,7 @@
 # Add `cafleet server` CLI subcommand to launch the admin WebUI server
 
 **Status**: Approved
-**Progress**: 6/22 tasks complete
+**Progress**: 8/22 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -285,8 +285,8 @@ No functional test spins up a real uvicorn server — smoke tests only, per Dire
 
 ### Step 4: Code — config changes
 
-- [ ] Modify `cafleet/src/cafleet/config.py`: change `broker_host: str = "0.0.0.0"` to `broker_host: str = "127.0.0.1"`. Convert `broker_host` and `broker_port` from bare defaults to `Field(default=..., validation_alias="CAFLEET_BROKER_HOST")` / `Field(default=..., validation_alias="CAFLEET_BROKER_PORT")`. Leave `broker_base_url` untouched. <!-- completed: -->
-- [ ] Verify no other code currently reads `BROKER_HOST` / `BROKER_PORT` directly (should be no hits; pydantic-settings is the only consumer). Grep before and after. <!-- completed: -->
+- [x] Modify `cafleet/src/cafleet/config.py`: change `broker_host: str = "0.0.0.0"` to `broker_host: str = "127.0.0.1"`. Convert `broker_host` and `broker_port` from bare defaults to `Field(default=..., validation_alias="CAFLEET_BROKER_HOST")` / `Field(default=..., validation_alias="CAFLEET_BROKER_PORT")`. Leave `broker_base_url` untouched. <!-- completed: 2026-04-15T11:50 -->
+- [x] Verify no other code currently reads `BROKER_HOST` / `BROKER_PORT` directly (should be no hits; pydantic-settings is the only consumer). Grep before and after. <!-- completed: 2026-04-15T11:50 -->
 
 ### Step 5: Code — server.py cleanup and warning
 
