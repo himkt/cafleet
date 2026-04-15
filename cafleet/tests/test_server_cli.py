@@ -124,8 +124,7 @@ class TestServerCommandFlagParsing:
         )
         kwargs = captured.get("kwargs", {})
         assert kwargs.get("host") == "0.0.0.0", (
-            f"--host 0.0.0.0 must pass host='0.0.0.0'. "
-            f"got: {kwargs.get('host')!r}"
+            f"--host 0.0.0.0 must pass host='0.0.0.0'. got: {kwargs.get('host')!r}"
         )
         assert kwargs.get("port") == 9000, (
             f"--port 9000 must pass port=9000. got: {kwargs.get('port')!r}"
@@ -185,8 +184,7 @@ class TestServerDoesNotRequireSessionId:
         )
         out = result.output or ""
         assert "is required" not in out, (
-            f"server --help must not complain about missing --session-id. "
-            f"got: {out!r}"
+            f"server --help must not complain about missing --session-id. got: {out!r}"
         )
 
     def test_server_help_with_session_id_silently_accepted(self):
@@ -254,9 +252,7 @@ class TestWebUIDistWarning:
         """Default path (webui_dist_dir=None) + non-existent dir → warning."""
         nonexistent = tmp_path / "never_built"
         assert not nonexistent.exists()
-        monkeypatch.setattr(
-            server_mod, "default_webui_dist_dir", lambda: nonexistent
-        )
+        monkeypatch.setattr(server_mod, "default_webui_dist_dir", lambda: nonexistent)
         server_mod.create_app()
         captured = capsys.readouterr()
         assert self._WARNING_PREFIX in captured.err, (
@@ -296,9 +292,7 @@ class TestWebUIDistWarning:
             f"webui_dist_dir. stderr={captured.err!r}"
         )
 
-    def test_no_warning_when_default_dir_exists(
-        self, tmp_path, monkeypatch, capsys
-    ):
+    def test_no_warning_when_default_dir_exists(self, tmp_path, monkeypatch, capsys):
         """Default path + existing dir → no warning."""
         built = tmp_path / "dist"
         built.mkdir()
@@ -306,8 +300,7 @@ class TestWebUIDistWarning:
         server_mod.create_app()
         captured = capsys.readouterr()
         assert self._WARNING_PREFIX not in captured.err, (
-            f"warning must NOT fire when dist dir exists. "
-            f"stderr={captured.err!r}"
+            f"warning must NOT fire when dist dir exists. stderr={captured.err!r}"
         )
 
 
@@ -341,8 +334,7 @@ class TestBrokerHostDefault:
         monkeypatch.delenv("CAFLEET_BROKER_PORT", raising=False)
         s = Settings()
         assert s.broker_port == 8000, (
-            f"Settings().broker_port default must be 8000. "
-            f"got: {s.broker_port!r}"
+            f"Settings().broker_port default must be 8000. got: {s.broker_port!r}"
         )
 
     def test_cafleet_broker_host_env_var_is_read(self, monkeypatch):
@@ -351,8 +343,7 @@ class TestBrokerHostDefault:
         monkeypatch.setenv("CAFLEET_BROKER_HOST", "10.20.30.40")
         s = Settings()
         assert s.broker_host == "10.20.30.40", (
-            f"Settings() must read CAFLEET_BROKER_HOST from env. "
-            f"got: {s.broker_host!r}"
+            f"Settings() must read CAFLEET_BROKER_HOST from env. got: {s.broker_host!r}"
         )
 
     def test_cafleet_broker_port_env_var_is_read(self, monkeypatch):
@@ -361,6 +352,5 @@ class TestBrokerHostDefault:
         monkeypatch.setenv("CAFLEET_BROKER_PORT", "9876")
         s = Settings()
         assert s.broker_port == 9876, (
-            f"Settings() must read CAFLEET_BROKER_PORT from env. "
-            f"got: {s.broker_port!r}"
+            f"Settings() must read CAFLEET_BROKER_PORT from env. got: {s.broker_port!r}"
         )
