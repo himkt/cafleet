@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 46/52 tasks complete
+**Progress**: 52/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -10,15 +10,15 @@ Three related papercuts in the Admin WebUI Send feature: the sender selector is 
 
 ## Success Criteria
 
-- [ ] Every session (new and pre-existing) has exactly one active `Administrator` agent, marked via `agent_card_json.cafleet.kind == "builtin-administrator"`.
-- [ ] Broker rejects deregister, rename, and placement operations targeting an Administrator with a dedicated error class (mapped to HTTP 409 in WebUI, `click.UsageError` in CLI).
-- [ ] `cafleet broadcast` excludes Administrator agents from the recipient set.
-- [ ] WebUI Send shows a read-only `Sending as Administrator` label and submits every message with `from_agent_id = administrator.agent_id`. No sender dropdown exists.
-- [ ] Typing `@` anywhere in the message textarea opens a popover listing active agents (by name prefix) plus a virtual `@all` entry; ArrowUp/Down navigate, Enter/Tab insert, Esc dismisses.
-- [ ] The message input is a textarea: Enter sends (unless popover is open), Shift+Enter inserts a newline.
-- [ ] Timeline renders message bodies with newlines preserved (multi-line messages render on multiple lines with correct wrapping).
-- [ ] When a session is missing an Administrator (pre-migration or manual DB edit), the Dashboard shows a warning banner and disables the Send control. The WebUI does not lazy-create.
-- [ ] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`, and `mise //admin:lint` all pass.
+- [x] Every session (new and pre-existing) has exactly one active `Administrator` agent, marked via `agent_card_json.cafleet.kind == "builtin-administrator"`.
+- [x] Broker rejects deregister, rename, and placement operations targeting an Administrator with a dedicated error class (mapped to HTTP 409 in WebUI, `click.UsageError` in CLI).
+- [x] `cafleet broadcast` excludes Administrator agents from the recipient set.
+- [x] WebUI Send shows a read-only `Sending as Administrator` label and submits every message with `from_agent_id = administrator.agent_id`. No sender dropdown exists.
+- [x] Typing `@` anywhere in the message textarea opens a popover listing active agents (by name prefix) plus a virtual `@all` entry; ArrowUp/Down navigate, Enter/Tab insert, Esc dismisses.
+- [x] The message input is a textarea: Enter sends (unless popover is open), Shift+Enter inserts a newline.
+- [x] Timeline renders message bodies with newlines preserved (multi-line messages render on multiple lines with correct wrapping).
+- [x] When a session is missing an Administrator (pre-migration or manual DB edit), the Dashboard shows a warning banner and disables the Send control. The WebUI does not lazy-create.
+- [x] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`, and `mise //admin:lint` all pass.
 
 ---
 
