@@ -1,7 +1,7 @@
 # Add `cafleet server` CLI subcommand to launch the admin WebUI server
 
 **Status**: Approved
-**Progress**: 11/22 tasks complete
+**Progress**: 13/22 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -296,8 +296,8 @@ No functional test spins up a real uvicorn server — smoke tests only, per Dire
 
 ### Step 6: Code — CLI subcommand
 
-- [ ] Add `@cli.command("server")` in `cafleet/src/cafleet/cli.py` at an appropriate spot in the top-level commands section. Follow the Click implementation sketch in the Specification (no warning logic in the handler — `create_app()` owns that). Import `uvicorn` and `cafleet.config.settings` lazily inside the handler. <!-- completed: -->
-- [ ] Verify `_require_session_id()` is NOT called in the `server` handler (session-id is silently accepted, never required). <!-- completed: -->
+- [x] Add `@cli.command("server")` in `cafleet/src/cafleet/cli.py` at an appropriate spot in the top-level commands section. Follow the Click implementation sketch in the Specification (no warning logic in the handler — `create_app()` owns that). Import `uvicorn` and `cafleet.config.settings` lazily inside the handler. <!-- completed: 2026-04-15T12:00 -->
+- [x] Verify `_require_session_id()` is NOT called in the `server` handler (session-id is silently accepted, never required). <!-- completed: 2026-04-15T12:00 -->
 
 ### Step 7: Tests
 

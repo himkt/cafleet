@@ -237,6 +237,39 @@ def session_delete(session_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# server (does NOT require --session-id; supplying one is silently accepted)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("server")
+@click.option(
+    "--host",
+    default=None,
+    help="Bind address (default: settings.broker_host = 127.0.0.1).",
+)
+@click.option(
+    "--port",
+    default=None,
+    type=int,
+    help="Bind port (default: settings.broker_port = 8000).",
+)
+def server(host: str | None, port: int | None) -> None:
+    """Start the admin WebUI FastAPI server."""
+    import uvicorn
+
+    from cafleet.config import settings
+
+    effective_host = host or settings.broker_host
+    effective_port = port if port is not None else settings.broker_port
+
+    uvicorn.run(
+        "cafleet.server:app",
+        host=effective_host,
+        port=effective_port,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Client commands (require --session-id)
 # ---------------------------------------------------------------------------
 
