@@ -247,6 +247,103 @@ class TestSessionCreate:
         rows = _session_rows(db_file)
         assert len(rows) == 2, "two creates should produce two session rows"
 
+    def test_json_output_includes_administrator_agent_id(self, tmp_path, monkeypatch):
+        """--json output now contains ``administrator_agent_id`` (design 0000025 §B)."""
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        _init_db(runner)
+
+        result = runner.invoke(cli, ["session", "create", "--json"])
+
+        assert result.exit_code == 0, (
+            f"session create --json failed.\noutput: {result.output}\n"
+            f"exception: {result.exception}"
+        )
+        data = json.loads(result.output)
+        assert "administrator_agent_id" in data, (
+            "JSON output should contain 'administrator_agent_id'"
+        )
+        # Validate it's a UUID-shaped string.
+        uuid.UUID(data["administrator_agent_id"])
+
+    def test_json_administrator_agent_id_matches_db_row(self, tmp_path, monkeypatch):
+        """The returned administrator_agent_id must correspond to a real agents row
+        in the same session marked as an administrator.
+        """
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        _init_db(runner)
+
+        result = runner.invoke(cli, ["session", "create", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        sid = data["session_id"]
+        admin_id = data["administrator_agent_id"]
+
+        conn = sqlite3.connect(str(db_file))
+        try:
+            rows = conn.execute(
+                "SELECT agent_id, session_id, name, status, agent_card_json "
+                "FROM agents WHERE agent_id = ?",
+                (admin_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        assert len(rows) == 1, (
+            f"expected one agents row matching administrator_agent_id {admin_id}"
+        )
+        row_agent_id, row_session_id, row_name, row_status, row_card_json = rows[0]
+        assert row_session_id == sid
+        assert row_name == "Administrator"
+        assert row_status == "active"
+        card = json.loads(row_card_json)
+        assert card.get("cafleet", {}).get("kind") == "builtin-administrator"
+
+    def test_non_json_output_unchanged_single_uuid_line(self, tmp_path, monkeypatch):
+        """Per design §B: the non-JSON path is unchanged — prints session_id only.
+
+        This guard ensures we do not accidentally leak ``administrator_agent_id``
+        into the legacy text output.
+        """
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        _init_db(runner)
+
+        result = runner.invoke(cli, ["session", "create"])
+        assert result.exit_code == 0, (
+            f"session create failed.\noutput: {result.output}\n"
+            f"exception: {result.exception}"
+        )
+
+        output = result.output.strip()
+        lines = [line for line in output.splitlines() if line.strip()]
+        # Exactly one non-empty line — the session_id.
+        assert len(lines) == 1, (
+            f"non-JSON session create should print a single line, got lines={lines!r}"
+        )
+        # That line must parse as a UUID.
+        uuid.UUID(lines[0].strip())
+        # And must NOT mention administrator_agent_id.
+        assert "administrator_agent_id" not in output.lower(), (
+            "non-JSON output must not expose administrator_agent_id"
+        )
+
 
 # ===========================================================================
 # session list
