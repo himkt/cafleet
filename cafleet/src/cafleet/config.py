@@ -14,8 +14,14 @@ class Settings(BaseSettings):
         default_factory=_default_database_url,
         validation_alias="CAFLEET_DATABASE_URL",
     )
-    broker_host: str = "0.0.0.0"
-    broker_port: int = 8000
+    broker_host: str = Field(
+        default="127.0.0.1",
+        validation_alias="CAFLEET_BROKER_HOST",
+    )
+    broker_port: int = Field(
+        default=8000,
+        validation_alias="CAFLEET_BROKER_PORT",
+    )
     broker_base_url: str = "http://localhost:8000"
 
     model_config = {"env_prefix": "", "populate_by_name": True}

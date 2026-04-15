@@ -30,7 +30,7 @@ Placed **before** the subcommand:
 
 ### Subcommands that do NOT require `--session-id`
 
-`db init`, `db *`, `session create`, `session list`, `session show`, `session delete`.
+`db init`, `db *`, `session create`, `session list`, `session show`, `session delete`, `server`.
 
 Create a session first if you don't have one:
 
@@ -113,6 +113,53 @@ Shows details of a single session. Exits non-zero if the session does not exist.
 | `session_id` | yes | The session to delete |
 
 Deletes a session. Fails with a friendly error if agents still reference the session (FK RESTRICT violation).
+
+## `cafleet server` — Admin WebUI Server
+
+Starts the admin WebUI FastAPI app (the same app served by `mise //cafleet:dev`) via uvicorn. CLI commands do not require this server to be running — it is only needed when a user wants to view the WebUI at `/ui/` or hit the `/ui/api/*` endpoints from a browser.
+
+`cafleet server` does NOT require `--session-id`. Supplying `--session-id` is silently accepted and ignored, matching the `db init` / `session *` pattern.
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--host` | `settings.broker_host` (default `127.0.0.1`) | Bind address. Overrides `CAFLEET_BROKER_HOST` when both are set. |
+| `--port` | `settings.broker_port` (default `8000`) | Bind port. Overrides `CAFLEET_BROKER_PORT` when both are set. |
+
+Environment variables (read by `cafleet.config.Settings` via explicit `validation_alias`, consistent with `CAFLEET_DATABASE_URL`):
+
+| Variable | Settings field | Notes |
+|---|---|---|
+| `CAFLEET_BROKER_HOST` | `broker_host` | Wired via `Field(validation_alias="CAFLEET_BROKER_HOST")` on `Settings`. |
+| `CAFLEET_BROKER_PORT` | `broker_port` | Wired via `Field(validation_alias="CAFLEET_BROKER_PORT")` on `Settings`. |
+
+The CLI flag wins when both a flag and the matching env var are set; the env var wins when only it is set; the hardcoded default (`127.0.0.1` / `8000`) applies otherwise.
+
+### Behavior
+
+- Calls `uvicorn.run("cafleet.server:app", host=<resolved>, port=<resolved>)` with no `reload`, no custom `workers`, and no custom `log_level` — uvicorn defaults apply.
+- On startup, if the bundled WebUI dist directory does not exist, `create_app()` emits a one-line warning to stderr: `warning: admin WebUI is not built. /ui/ will return 404. Run 'mise //admin:build'.`. The warning fires from `create_app()`, so `cafleet server`, `mise //cafleet:dev`, and any direct `uv run uvicorn cafleet.server:app` invocation all see it identically.
+- Port-in-use errors are NOT wrapped — uvicorn's native `OSError: [Errno 98] Address already in use` (or the corresponding click/uvicorn traceback) propagates to the terminal.
+- The `cafleet server` handler does not perform any disk check itself; the dist-directory warning is entirely owned by `create_app()`.
+
+### No other flags
+
+`--reload`, `--workers`, `--log-level`, and `--webui-dist-dir` are deliberately NOT exposed on `cafleet server`. Users who need them invoke uvicorn directly — which is exactly what `mise //cafleet:dev` does (it runs `uv run uvicorn cafleet.server:app --host 127.0.0.1 --port 8000` as an independent entry point, without delegating to `cafleet server`).
+
+### Examples
+
+```bash
+# Defaults: 127.0.0.1:8000
+cafleet server
+
+# Override via flags
+cafleet server --host 0.0.0.0 --port 9000
+
+# Override via env vars
+CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
+
+# --session-id is silently accepted and ignored
+cafleet --session-id 550e8400-e29b-41d4-a716-446655440000 server
+```
 
 ## Member Commands
 
