@@ -1,7 +1,7 @@
 # Cleanup and Refactor — Post-Rapid-Iteration Debt Payment
 
-**Status**: Approved
-**Progress**: 44/50 tasks complete — Phases 1 + 2 + 3 implementation complete (2.13 smoke-check + 4.x commit sequence remaining)
+**Status**: Complete
+**Progress**: 50/50 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -10,17 +10,17 @@ Pay down accumulated tech debt from the recent rapid iteration (0000011 remove-m
 
 ## Success Criteria
 
-- [ ] `vendor/A2A` submodule is fully removed from the working tree, `.gitmodules`, and every rule / skill / CLAUDE.md reference.
-- [ ] `docs/spec/a2a-operations.md` is deleted; `docs/spec/registry-api.md` is deleted or collapsed into `docs/spec/webui-api.md`; `docs/spec/data-model.md` no longer claims an `a2a-sdk` / `aiosqlite` dependency that does not exist.
-- [ ] `cafleet/src/cafleet/cli.py:_resolve_prompt` substitutes `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` on BOTH the default prompt template AND user-supplied `prompt_argv`. A regression test in `cafleet/tests/test_cli_member.py` (new file) pins the behaviour.
-- [ ] `grep -rn 'namespace' README.md ARCHITECTURE.md CLAUDE.md .claude/CLAUDE.md docs/spec/cli-options.md` returns zero occurrences where "namespace" is used as a synonym for "session", **except** the single explicit dual-name disambiguation form `session (namespace)` left at `docs/spec/cli-options.md:25` only.
-- [ ] `grep -rn 'Tenant isolation' .` (excluding `design-docs/`, `vendor/`) returns zero matches. (Bare `tenant`/`Tenant` cannot be used as a pattern because Alembic migrations `0001_initial_schema.py`, `0002_local_simplification.py`, and `cafleet/tests/test_alembic_0002_upgrade.py` — all immutable per H4 — legitimately reference the historical `tenant_id` column name.)
-- [ ] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test` all pass after every phase.
-- [ ] Repo-wide "A2A-native" → "A2A-inspired" phrasing unification: `grep -rn 'A2A-native' .` (excluding `design-docs/`, `vendor/`, `admin/node_modules/`, `.venv/`) returns zero matches. The only remaining live A2A-lineage phrasing is "A2A-inspired".
-- [ ] `cafleet --help` CLI help text reads "A2A-inspired", consistent with README.md:3, CLAUDE.md:17, `.claude/CLAUDE.md:22`, `.claude-plugin/marketplace.json:14`, `.claude-plugin/plugin.json:4`, `cafleet/pyproject.toml:4`.
-- [ ] `.claude-plugin/plugin.json` `repository` field points to the current repo URL (not `hikyaku`).
-- [ ] `README.md` Development section no longer says `cd hikyaku`.
-- [ ] `README.md:200-208` project-structure tree no longer lists the deleted `registry-api.md` / `a2a-operations.md` files.
+- [x] `vendor/A2A` submodule is fully removed from the working tree, `.gitmodules`, and every rule / skill / CLAUDE.md reference.
+- [x] `docs/spec/a2a-operations.md` is deleted; `docs/spec/registry-api.md` is deleted or collapsed into `docs/spec/webui-api.md`; `docs/spec/data-model.md` no longer claims an `a2a-sdk` / `aiosqlite` dependency that does not exist.
+- [x] `cafleet/src/cafleet/cli.py:_resolve_prompt` substitutes `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` on BOTH the default prompt template AND user-supplied `prompt_argv`. A regression test in `cafleet/tests/test_cli_member.py` (new file) pins the behaviour.
+- [x] `grep -rn 'namespace' README.md ARCHITECTURE.md CLAUDE.md .claude/CLAUDE.md docs/spec/cli-options.md` returns zero occurrences where "namespace" is used as a synonym for "session", **except** the single explicit dual-name disambiguation form `session (namespace)` left at `docs/spec/cli-options.md:25` only.
+- [x] `grep -rn 'Tenant isolation' .` (excluding `design-docs/`, `vendor/`) returns zero matches. (Bare `tenant`/`Tenant` cannot be used as a pattern because Alembic migrations `0001_initial_schema.py`, `0002_local_simplification.py`, and `cafleet/tests/test_alembic_0002_upgrade.py` — all immutable per H4 — legitimately reference the historical `tenant_id` column name.)
+- [x] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test` all pass after every phase.
+- [x] Repo-wide "A2A-native" → "A2A-inspired" phrasing unification: `grep -rn 'A2A-native' .` (excluding `design-docs/`, `vendor/`, `admin/node_modules/`, `.venv/`) returns zero matches. The only remaining live A2A-lineage phrasing is "A2A-inspired".
+- [x] `cafleet --help` CLI help text reads "A2A-inspired", consistent with README.md:3, CLAUDE.md:17, `.claude/CLAUDE.md:22`, `.claude-plugin/marketplace.json:14`, `.claude-plugin/plugin.json:4`, `cafleet/pyproject.toml:4`.
+- [x] `.claude-plugin/plugin.json` `repository` field points to the current repo URL (not `hikyaku`).
+- [x] `README.md` Development section no longer says `cd hikyaku`.
+- [x] `README.md:200-208` project-structure tree no longer lists the deleted `registry-api.md` / `a2a-operations.md` files.
 
 ---
 
@@ -259,3 +259,4 @@ Files with ZERO hits — `.claude/skills/cafleet/SKILL.md` and `docs/spec/webui-
 | 2026-04-14 | v2 — Reviewer revisions. Fixed R9 per-line evidence (re-greped): README.md 7 hits not 2, ARCHITECTURE.md 4 lines not 0, `.claude/skills/cafleet/SKILL.md` 0 hits not "multiple", docs/spec/cli-options.md 2 lines not 1, docs/spec/webui-api.md 0 hits not 1. Fixed D6 to rewrite BOTH `CLAUDE.md:20` and `.claude/CLAUDE.md:25` with "Access-control" phrasing (removing the literal word "Tenant" so the Phase-1 smoke check is reachable). Added D9 (README.md project-structure tree cleanup) + pre-delete cross-reference scan. Added R12 (repo-wide "A2A-native" → "A2A-inspired" unification across 6 files) to resolve lineage-tone contradiction flagged in Reviewer I3; folded R6 into R12. Added test case (d) in 2.2 for literal-curly-brace escape. Clarified dual-name exception survives at ONE location only (cli-options.md:25). Fixed `.gitmodules` cite to :1-3 and `.claude/CLAUDE.md` line cite to :25. |
 | 2026-04-14 | v3 — Reviewer revisions. (I5) Tightened the `tenant`/`Tenant` smoke-check pattern and success criterion to the exact phrase `Tenant isolation`; rationale now documents the three immutable Alembic migrations + regression test that carry legitimate `tenant_id` references and must not be false positives. Updated R10 row accordingly. (I6) Replaced stale post-Phase-1 line-number cites with content-based locators in tasks 1.10, 1.12, 2.11.3, 3.4 — so that when 1.10 deletes 15 lines from `.claude/CLAUDE.md` the downstream tasks still resolve to the correct bullet. (P4) Updated Phase-3 smoke-check description text to reference the post-edit dual-name phrasing `"Session UUID (namespace identifier)"` from task 3.5. |
 | 2026-04-15 | v3 approved by user. Status → Approved. Last Updated refreshed. Progress set to 0/50 — ready for implementation. |
+| 2026-04-15 | Implementation complete. All 3 phases shipped — Phase 1 c8afc8a (vendor/A2A submodule + dead spec docs removed), Phase 2 e75ae76 + 3c05fc9 (_resolve_prompt str.format fix with 4 regression tests + repo-wide A2A-native → A2A-inspired lineage unification), Phase 3 ba67e3e (session vs namespace prose unification). All 11 Success Criteria PASS, mise //:lint / //:format / //:typecheck pass, 271 pytest tests pass. Status → Complete. |
