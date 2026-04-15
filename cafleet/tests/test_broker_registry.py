@@ -27,7 +27,6 @@ Coverage map:
 
 import uuid
 
-import click
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -350,21 +349,23 @@ class TestDeleteSession:
 
         assert broker.get_session(sid) is None
 
-    def test_raises_usage_error_when_agents_exist(self):
+    def test_cascade_deletes_agents_when_present(self):
+        """delete_session removes all agents in the session before the
+        session row itself, so a task-free session with user agents
+        deletes successfully (regression check for design 0000025 §B —
+        the auto-seeded Administrator otherwise locks every session)."""
         from cafleet import broker
 
         created = _create_session()
         sid = created["session_id"]
         _register_agent(sid, name="blocker")
 
-        with pytest.raises(click.UsageError):
-            broker.delete_session(sid)
+        broker.delete_session(sid)
 
-        # Session must still exist
-        assert broker.get_session(sid) is not None
+        assert broker.get_session(sid) is None
 
-    def test_raises_usage_error_with_deregistered_agents(self):
-        """FK RESTRICT applies even to deregistered agents."""
+    def test_cascade_deletes_deregistered_agents(self):
+        """Deregistered agents are also cleared by the cascade delete."""
         from cafleet import broker
 
         created = _create_session()
@@ -372,10 +373,9 @@ class TestDeleteSession:
         agent = _register_agent(sid, name="temp-agent")
         broker.deregister_agent(agent["agent_id"])
 
-        with pytest.raises(click.UsageError):
-            broker.delete_session(sid)
+        broker.delete_session(sid)
 
-        assert broker.get_session(sid) is not None
+        assert broker.get_session(sid) is None
 
 
 # ===========================================================================

@@ -199,17 +199,23 @@ def get_session(session_id: str) -> dict | None:
 
 
 def delete_session(session_id: str) -> None:
-    """DELETE session. Raises click.UsageError if FK constraint blocks deletion."""
+    """DELETE all agents in the session, then DELETE the session itself.
+
+    Because ``create_session`` always auto-seeds an Administrator agent
+    (design 0000025 §B), no session is agent-free at the point the user
+    calls delete. ``agents.session_id`` is ``ON DELETE RESTRICT``, so we
+    delete agent rows first inside the same transaction
+    (``agent_placements`` cascades). If ``tasks.context_id``
+    (``ON DELETE RESTRICT``) still references any agent in the session,
+    the agent delete fails with ``IntegrityError`` and we raise
+    ``click.UsageError`` with a message that surfaces the task FK as the
+    blocking constraint.
+    """
     sm = get_sync_sessionmaker()
     with sm() as session:
         with session.begin():
             try:
-                result = cast(
-                    CursorResult,
-                    session.execute(
-                        delete(Session).where(Session.session_id == session_id)
-                    ),
-                )
+                session.execute(delete(Agent).where(Agent.session_id == session_id))
             except IntegrityError:
                 count = session.execute(
                     select(func.count())
@@ -218,8 +224,15 @@ def delete_session(session_id: str) -> None:
                 ).scalar()
                 raise click.UsageError(
                     f"Cannot delete session {session_id}: "
-                    f"it still has {count} agent(s) referencing it."
+                    f"its agent(s) are still referenced by tasks "
+                    f"({count} agent row(s) remain)."
                 )
+            result = cast(
+                CursorResult,
+                session.execute(
+                    delete(Session).where(Session.session_id == session_id)
+                ),
+            )
         if result.rowcount == 0:
             raise click.UsageError(f"session '{session_id}' not found.")
 
