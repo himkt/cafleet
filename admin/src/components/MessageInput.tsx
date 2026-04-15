@@ -174,6 +174,24 @@ export default function MessageInput({
     }
   }, [input]);
 
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const syncMentionFromSelection = () => {
+      const value = ta.value;
+      const cursor = ta.selectionStart ?? value.length;
+      setMention(detectMention(value, cursor));
+    };
+    ta.addEventListener("keyup", syncMentionFromSelection);
+    ta.addEventListener("mouseup", syncMentionFromSelection);
+    ta.addEventListener("select", syncMentionFromSelection);
+    return () => {
+      ta.removeEventListener("keyup", syncMentionFromSelection);
+      ta.removeEventListener("mouseup", syncMentionFromSelection);
+      ta.removeEventListener("select", syncMentionFromSelection);
+    };
+  }, []);
+
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     const cursor = e.target.selectionStart ?? value.length;

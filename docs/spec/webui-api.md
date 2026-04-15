@@ -177,7 +177,7 @@ X-Session-Id: <session_id>
 
 **Unicast** (`to_agent_id` is a UUID): the server verifies both the sender and the destination belong to the caller's session and that the destination is active.
 
-**Broadcast** (`to_agent_id == "*"`): the server skips destination validation (no specific recipient to verify) and hands the message to `BrokerExecutor._handle_broadcast`, which fans out to every active agent in the session (except the built-in Administrator, which is filtered out of the recipient set at the broker layer) plus a summary task. The sender is still required to be active and in the caller's session; the sender MAY be the Administrator. The response's `task_id` is the summary task's id.
+**Broadcast** (`to_agent_id == "*"`): the server skips destination validation (no specific recipient to verify) and the WebUI route calls `broker.broadcast_message(...)`, which fans out to every active agent in the session (except the built-in Administrator, which is filtered out of the recipient set at the broker layer) plus a summary task. The sender is still required to be active and in the caller's session; the sender MAY be the Administrator. The response's `task_id` is the summary task's id.
 
 **Sender identity**: The Admin WebUI always submits `from_agent_id = administrator.agent_id` (the session's built-in Administrator). The endpoint itself is sender-agnostic — it accepts any active agent in the session — but no UI path lets the operator pick a different sender.
 
@@ -193,7 +193,7 @@ X-Session-Id: <session_id>
 **Errors**:
 - 400: Missing fields, `from_agent` not in session, destination is deregistered
 - 404: Agent not found or cross-session
-- 409 (reserved for future deregister endpoint): returned when an operation targets the built-in Administrator — the broker raises `AdministratorProtectedError`, which the WebUI router maps to `raise HTTPException(status_code=409, detail=...)`. The 409 is not currently reachable through `POST /ui/api/messages/send`; it is documented here so any future deregister endpoint uses the same mapping.
+- 409 (reserved for future deregister endpoint): for any future endpoint that attempts to deregister or otherwise modify the built-in Administrator, the broker's `AdministratorProtectedError` must be translated to `raise HTTPException(status_code=409, detail=...)`. This 409 is not currently reachable through `POST /ui/api/messages/send` and the WebUI router does not yet register an exception handler for `AdministratorProtectedError`; this entry documents the required mapping for the future endpoint.
 
 ## Error Format
 
