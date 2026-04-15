@@ -366,6 +366,163 @@ class TestBroadcastMessage:
 
 
 # ===========================================================================
+# broadcast — Administrator exclusion (design doc 0000025 §E)
+# ===========================================================================
+
+
+def _get_summary_artifact_text(result: list[dict]) -> str:
+    """Extract the text of the broadcast summary's first text artifact part."""
+    summary = result[0]["task"]
+    artifacts = summary.get("artifacts", [])
+    assert len(artifacts) >= 1, "summary must carry at least one artifact"
+    parts = artifacts[0].get("parts", [])
+    text_parts = [p.get("text") for p in parts if isinstance(p, dict) and "text" in p]
+    assert len(text_parts) >= 1, (
+        f"summary artifact must contain a text part, got parts={parts!r}"
+    )
+    return text_parts[0]
+
+
+class TestBroadcastAdministratorExclusion:
+    """broadcast_message excludes Administrator agents from the recipient set.
+
+    Reference: ``broker.broadcast_message`` at ``broker.py`` ~line 644.
+    Design doc 0000025 §E: the Administrator is write-only — it never
+    receives broadcasts, even when another agent broadcasts to "everyone"
+    in the session.
+    """
+
+    def test_broadcast_from_user_excludes_administrator_from_recipients(self):
+        """A user-agent broadcast does not create a delivery task for the Admin."""
+        from cafleet import broker
+
+        session = _create_session()
+        sid = session["session_id"]
+        admin_id = session["administrator_agent_id"]
+
+        sender = _register_agent(sid, name="sender")
+        user_a = _register_agent(sid, name="user-a")
+        user_b = _register_agent(sid, name="user-b")
+
+        broker.broadcast_message(sid, sender["agent_id"], "Hi all")
+
+        # The Administrator must have no delivery tasks at all.
+        admin_tasks = broker.poll_tasks(admin_id)
+        admin_unicasts = [
+            t for t in admin_tasks if t.get("metadata", {}).get("type") == "unicast"
+        ]
+        assert len(admin_unicasts) == 0, (
+            f"Administrator must not receive broadcast delivery tasks, "
+            f"got {admin_unicasts!r}"
+        )
+
+        # Both user recipients DO receive a delivery task.
+        a_tasks = broker.poll_tasks(user_a["agent_id"])
+        b_tasks = broker.poll_tasks(user_b["agent_id"])
+        assert len(a_tasks) == 1, (
+            f"user-a should receive exactly 1 delivery task, got {len(a_tasks)}"
+        )
+        assert len(b_tasks) == 1, (
+            f"user-b should receive exactly 1 delivery task, got {len(b_tasks)}"
+        )
+
+    def test_summary_count_reflects_post_exclusion_recipients(self):
+        """Summary artifact says 'Broadcast sent to 2 recipients' (NOT 3 w/ Admin)."""
+        from cafleet import broker
+
+        session = _create_session()
+        sid = session["session_id"]
+        admin_id = session["administrator_agent_id"]
+
+        sender = _register_agent(sid, name="sender")
+        _register_agent(sid, name="user-a")
+        _register_agent(sid, name="user-b")
+
+        result = broker.broadcast_message(sid, sender["agent_id"], "hey")
+
+        # Artifact text must use the post-exclusion count.
+        text = _get_summary_artifact_text(result)
+        assert text == "Broadcast sent to 2 recipients", (
+            f"summary text must reflect post-exclusion count (2), got {text!r}"
+        )
+
+        summary_metadata = result[0]["task"].get("metadata", {})
+        assert summary_metadata.get("recipientCount") == 2, (
+            f"summary metadata.recipientCount must be 2, "
+            f"got {summary_metadata.get('recipientCount')!r}"
+        )
+
+        recipient_ids = summary_metadata.get("recipientIds", [])
+        assert admin_id not in recipient_ids, (
+            f"Administrator must not appear in summary.recipientIds, "
+            f"got {recipient_ids!r}"
+        )
+        assert len(recipient_ids) == 2, (
+            f"summary.recipientIds should list 2 user agents, "
+            f"got {recipient_ids!r}"
+        )
+
+    def test_broadcast_from_administrator_delivers_to_all_user_agents(self):
+        """The Admin may send broadcasts; recipients are the other user agents."""
+        from cafleet import broker
+
+        session = _create_session()
+        sid = session["session_id"]
+        admin_id = session["administrator_agent_id"]
+
+        user_a = _register_agent(sid, name="user-a")
+        user_b = _register_agent(sid, name="user-b")
+
+        result = broker.broadcast_message(sid, admin_id, "hello from admin")
+
+        # Both user agents receive one delivery task.
+        a_tasks = broker.poll_tasks(user_a["agent_id"])
+        b_tasks = broker.poll_tasks(user_b["agent_id"])
+        assert len(a_tasks) == 1
+        assert len(b_tasks) == 1
+
+        # Summary count matches the two user recipients.
+        text = _get_summary_artifact_text(result)
+        assert text == "Broadcast sent to 2 recipients", (
+            f"Admin-origin broadcast must still reflect the 2 user recipients, "
+            f"got {text!r}"
+        )
+
+        summary_metadata = result[0]["task"].get("metadata", {})
+        recipient_ids = summary_metadata.get("recipientIds", [])
+        assert set(recipient_ids) == {user_a["agent_id"], user_b["agent_id"]}, (
+            f"summary.recipientIds should be exactly the two user agents, "
+            f"got {recipient_ids!r}"
+        )
+
+    def test_broadcast_with_only_administrator_session_is_zero_recipients(self):
+        """Broadcasting in a session with no user agents yields 0 delivery tasks.
+
+        The Administrator itself is both the only potential sender and
+        the only potential recipient. After ``Agent.agent_id != agent_id``
+        and the Administrator-exclusion filter, the recipient set is empty.
+        """
+        from cafleet import broker
+
+        session = _create_session()
+        sid = session["session_id"]
+        admin_id = session["administrator_agent_id"]
+
+        # Session has ONLY the Administrator. Let Admin broadcast.
+        result = broker.broadcast_message(sid, admin_id, "anybody?")
+
+        text = _get_summary_artifact_text(result)
+        assert text == "Broadcast sent to 0 recipients", (
+            f"summary text for empty-recipients broadcast must say "
+            f"'Broadcast sent to 0 recipients', got {text!r}"
+        )
+
+        summary_metadata = result[0]["task"].get("metadata", {})
+        assert summary_metadata.get("recipientCount") == 0
+        assert summary_metadata.get("recipientIds") == []
+
+
+# ===========================================================================
 # poll_tasks
 # ===========================================================================
 
