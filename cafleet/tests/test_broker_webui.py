@@ -109,6 +109,7 @@ class TestListSessionAgents:
     """broker.list_session_agents(session_id) → active + deregistered with tasks."""
 
     def test_returns_active_agents(self):
+        """Returned list includes both user agents and the auto-seeded Administrator."""
         from cafleet import broker
 
         session = _create_session()
@@ -117,10 +118,12 @@ class TestListSessionAgents:
         _register_agent(sid, name="active-2")
 
         result = broker.list_session_agents(sid)
-        assert len(result) == 2
+        # 2 user agents + 1 Administrator.
+        assert len(result) == 3
         names = {a["name"] for a in result}
         assert "active-1" in names
         assert "active-2" in names
+        assert "Administrator" in names
 
     def test_active_agents_have_active_status(self):
         from cafleet import broker
@@ -162,12 +165,14 @@ class TestListSessionAgents:
         agent_ids = {a["agent_id"] for a in result}
         assert agent["agent_id"] not in agent_ids
 
-    def test_empty_session_returns_empty_list(self):
+    def test_newly_created_session_returns_only_administrator(self):
+        """A freshly created session always surfaces its auto-seeded Administrator."""
         from cafleet import broker
 
         session = _create_session()
         result = broker.list_session_agents(session["session_id"])
-        assert result == []
+        assert len(result) == 1
+        assert result[0]["name"] == "Administrator"
 
     def test_result_contains_required_keys(self):
         from cafleet import broker
@@ -185,7 +190,7 @@ class TestListSessionAgents:
         assert "registered_at" in agent
 
     def test_scoped_to_session(self):
-        """Agents from other sessions are not included."""
+        """Agents from other sessions are not included (each session has its own Admin)."""
         from cafleet import broker
 
         session_a = _create_session()
@@ -194,8 +199,12 @@ class TestListSessionAgents:
         _register_agent(session_b["session_id"], name="in-b")
 
         result = broker.list_session_agents(session_a["session_id"])
-        assert len(result) == 1
-        assert result[0]["name"] == "in-a"
+        # Administrator (for session A) + in-a.
+        assert len(result) == 2
+        names = {a["name"] for a in result}
+        assert "in-a" in names
+        assert "Administrator" in names
+        assert "in-b" not in names
 
 
 # ===========================================================================
