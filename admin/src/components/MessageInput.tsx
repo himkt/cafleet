@@ -183,14 +183,24 @@ export default function MessageInput({
   };
 
   const insertCandidate = (c: MentionCandidate) => {
-    if (mention === null) return;
+    const ta = textareaRef.current;
+    const value = ta?.value ?? input;
+    const cursor = ta?.selectionStart ?? value.length;
+    const currentMention = detectMention(value, cursor);
+    if (currentMention === null) {
+      setMention(null);
+      return;
+    }
     const slug = c.kind === "virtual" ? c.label : slugify(c.agent.name);
     const replacement = `@${slug} `;
-    const ta = textareaRef.current;
-    const cursor = ta?.selectionStart ?? mention.anchor + mention.query.length + 1;
+    const mentionEnd =
+      currentMention.anchor + currentMention.query.length + 1;
+    const replaceEnd = Math.max(cursor, mentionEnd);
     const newValue =
-      input.slice(0, mention.anchor) + replacement + input.slice(cursor);
-    const newCursor = mention.anchor + replacement.length;
+      value.slice(0, currentMention.anchor) +
+      replacement +
+      value.slice(replaceEnd);
+    const newCursor = currentMention.anchor + replacement.length;
     pendingCursorRef.current = newCursor;
     setInput(newValue);
     setMention(null);
