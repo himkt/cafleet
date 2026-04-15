@@ -706,19 +706,24 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
 
             # List active agents in session, excluding sender and any
             # built-in Administrator agents (they are write-only identities,
-            # per design 0000025 §E). The sender may itself be an
-            # Administrator — that case is handled by the sender exclusion
-            # above, not by this filter.
+            # per design 0000025 §E). Filter the Administrator out at the
+            # SQL layer via ``json_extract`` so we don't have to ship every
+            # ``agent_card_json`` blob into Python just to discard it. The
+            # sender may itself be an Administrator — that case is handled
+            # by the sender exclusion above, not by this filter.
             rows = session.execute(
-                select(Agent.agent_id, Agent.agent_card_json).where(
+                select(Agent.agent_id).where(
                     Agent.session_id == session_id,
                     Agent.status == "active",
                     Agent.agent_id != agent_id,
+                    func.coalesce(
+                        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"),
+                        "",
+                    )
+                    != ADMINISTRATOR_KIND,
                 )
             ).all()
-            recipient_ids = [
-                aid for aid, card in rows if not _is_administrator_card(card)
-            ]
+            recipient_ids = [aid for (aid,) in rows]
 
             # Create delivery tasks for each recipient
             for recipient_id in recipient_ids:
@@ -916,13 +921,21 @@ def list_session_agents(session_id: str) -> list[dict]:
             Task.from_agent_id == Agent.agent_id,
         )
     )
+    # Derive ``kind`` directly in SQL via ``json_extract`` so we do not
+    # have to ship the entire ``agent_card_json`` blob into Python just to
+    # compute a one-token discriminator. ``coalesce`` substitutes an empty
+    # string when the row has no ``cafleet.kind`` path so the comparison
+    # always evaluates cleanly.
+    kind_expr = func.coalesce(
+        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"), ""
+    )
     stmt = select(
         Agent.agent_id,
         Agent.name,
         Agent.description,
         Agent.status,
         Agent.registered_at,
-        Agent.agent_card_json,
+        kind_expr.label("kind_raw"),
     ).where(
         Agent.session_id == session_id,
         or_(
@@ -941,9 +954,7 @@ def list_session_agents(session_id: str) -> list[dict]:
             "status": row.status,
             "registered_at": row.registered_at,
             "kind": (
-                ADMINISTRATOR_KIND
-                if _is_administrator_card(row.agent_card_json)
-                else "user"
+                ADMINISTRATOR_KIND if row.kind_raw == ADMINISTRATOR_KIND else "user"
             ),
         }
         for row in rows
