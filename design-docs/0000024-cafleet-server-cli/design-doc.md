@@ -1,7 +1,7 @@
 # Add `cafleet server` CLI subcommand to launch the admin WebUI server
 
 **Status**: Approved
-**Progress**: 3/22 tasks complete
+**Progress**: 5/22 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -276,8 +276,8 @@ No functional test spins up a real uvicorn server — smoke tests only, per Dire
 
 ### Step 2: Documentation — mise and rules
 
-- [ ] Update `cafleet/mise.toml` `[tasks.dev]` to `run = "uv run uvicorn cafleet.server:app --host 127.0.0.1 --port 8000"` with a matching description. <!-- completed: -->
-- [ ] Update `.claude/rules/commands.md` line 12 to note both `cafleet server` and `mise //cafleet:dev` as entry points, and clarify that mise dev does NOT delegate to `cafleet server`. <!-- completed: -->
+- [x] Update `cafleet/mise.toml` `[tasks.dev]` to `run = "uv run uvicorn cafleet.server:app --host 127.0.0.1 --port 8000"` with a matching description. <!-- completed: 2026-04-15T11:35 -->
+- [x] Update `.claude/rules/commands.md` line 12 to note both `cafleet server` and `mise //cafleet:dev` as entry points, and clarify that mise dev does NOT delegate to `cafleet server`. <!-- completed: 2026-04-15T11:35 -->
 
 ### Step 3: Documentation — SKILL.md
 
