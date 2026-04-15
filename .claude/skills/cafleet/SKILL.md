@@ -179,7 +179,7 @@ Remove this agent's registration from the broker.
 cafleet --session-id <session-id> deregister --agent-id <my-agent-id>
 ```
 
-> **Administrator cannot be deregistered**. Passing the built-in Administrator's `agent_id` to `cafleet deregister` exits non-zero with `Error: Administrator cannot be deregistered` on stderr — the broker raises `AdministratorProtectedError` and the CLI maps it to `click.UsageError`. The Administrator row stays `active`; there is no override flag. The same guard applies to `member create` — the built-in Administrator cannot be used as a Director (its `agent_id` cannot appear in `placement.director_agent_id`). Every session has exactly one Administrator; deregister regular agents only.
+> **Administrator cannot be deregistered**. Passing the built-in Administrator's `agent_id` to `cafleet deregister` exits with status 1 and prints `Error: Administrator cannot be deregistered` to stderr — the broker raises `AdministratorProtectedError` and the CLI handles it by printing the error and calling `ctx.exit(1)`. The Administrator row stays `active`; there is no override flag. The same guard applies to `member create` — the built-in Administrator cannot be used as a Director (its `agent_id` cannot appear in `placement.director_agent_id`). Every session has exactly one Administrator; deregister regular agents only.
 
 ### Member Create
 

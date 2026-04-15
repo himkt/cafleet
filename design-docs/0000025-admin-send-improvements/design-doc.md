@@ -11,7 +11,7 @@ Three related papercuts in the Admin WebUI Send feature: the sender selector is 
 ## Success Criteria
 
 - [x] Every session (new and pre-existing) has exactly one active `Administrator` agent, marked via `agent_card_json.cafleet.kind == "builtin-administrator"`.
-- [x] Broker rejects deregister, rename, and placement operations targeting an Administrator with a dedicated error class (mapped to HTTP 409 in WebUI, `click.UsageError` in CLI).
+- [x] Broker rejects deregister, rename, and placement operations targeting an Administrator with a dedicated error class (mapped to HTTP 409 in WebUI, surfaced as `Error: ...` with exit code 1 in CLI).
 - [x] `cafleet broadcast` excludes Administrator agents from the recipient set.
 - [x] WebUI Send shows a read-only `Sending as Administrator` label and submits every message with `from_agent_id = administrator.agent_id`. No sender dropdown exists.
 - [x] Typing `@` anywhere in the message textarea opens a popover listing active agents (by name prefix) plus a virtual `@all` entry; ArrowUp/Down navigate, Enter/Tab insert, Esc dismisses.
@@ -136,7 +136,7 @@ Error mapping:
 
 | Caller | Mapping |
 |---|---|
-| CLI (`cafleet deregister`) | Catch `AdministratorProtectedError` → `click.UsageError(...)` → exit code 1 with message on stderr. |
+| CLI (`cafleet deregister`) | Catch `AdministratorProtectedError` → `click.echo(f"Error: {exc}", err=True)` → `ctx.exit(1)` (stderr message, exit code 1). |
 | WebUI API (future deregister endpoint — not in 1st cut) | Catch → `raise HTTPException(status_code=409, detail=...)`. |
 | Direct `broker` unit tests | Assert `AdministratorProtectedError` is raised. |
 
@@ -328,7 +328,7 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 - [x] `broker.deregister_agent`: before UPDATE, SELECT the target's card and raise `AdministratorProtectedError` if it matches. <!-- completed: 2026-04-15T15:40 -->
 - [x] `broker.register_agent`: when `placement` is provided, reject `placement.director_agent_id` pointing at an Administrator. <!-- completed: 2026-04-15T15:40 -->
-- [x] CLI `cafleet deregister`: catch `AdministratorProtectedError` → `click.UsageError` → exit 1. <!-- completed: 2026-04-15T15:40 -->
+- [x] CLI `cafleet deregister`: catch `AdministratorProtectedError` → print `Error: ...` message → exit 1. <!-- completed: 2026-04-15T15:40 -->
 
 ### Step 6: Broadcast recipient exclusion
 

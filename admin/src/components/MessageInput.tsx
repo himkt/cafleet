@@ -108,6 +108,20 @@ export default function MessageInput({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingCursorRef = useRef<number | null>(null);
+  const closePopoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  const clearClosePopoverTimeout = () => {
+    if (closePopoverTimeoutRef.current !== null) {
+      clearTimeout(closePopoverTimeoutRef.current);
+      closePopoverTimeoutRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => clearClosePopoverTimeout();
+  }, []);
 
   const activeAgents = agents.filter((a) => a.status === "active");
   const userAgents = activeAgents.filter(
@@ -186,10 +200,6 @@ export default function MessageInput({
 
   const submitForm = async () => {
     if (disabled || !senderId) return;
-    if (/^@administrator(?:\s|$)/i.test(input.trimStart())) {
-      setError("Messages cannot be sent to Administrator.");
-      return;
-    }
     const parsed = parseInput(input, userAgents);
     if (parsed.error) {
       setError(parsed.error);
@@ -251,7 +261,11 @@ export default function MessageInput({
 
   const handleBlur = () => {
     // Delay to let row onMouseDown fire first when the user clicks a candidate.
-    setTimeout(closePopover, 100);
+    clearClosePopoverTimeout();
+    closePopoverTimeoutRef.current = setTimeout(() => {
+      closePopoverTimeoutRef.current = null;
+      closePopover();
+    }, 100);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
