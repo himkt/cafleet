@@ -1,7 +1,7 @@
 # Add `cafleet server` CLI subcommand to launch the admin WebUI server
 
 **Status**: Approved
-**Progress**: 5/22 tasks complete
+**Progress**: 6/22 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -281,7 +281,7 @@ No functional test spins up a real uvicorn server — smoke tests only, per Dire
 
 ### Step 3: Documentation — SKILL.md
 
-- [ ] Update `.claude/skills/cafleet/SKILL.md`: add a "### Server" subsection in Command Reference documenting `cafleet server [--host <addr>] [--port <int>]`; note it does not require `--session-id`; mention `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` env vars. <!-- completed: -->
+- [x] Update `.claude/skills/cafleet/SKILL.md`: add a "### Server" subsection in Command Reference documenting `cafleet server [--host <addr>] [--port <int>]`; note it does not require `--session-id`; mention `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` env vars. <!-- completed: 2026-04-15T11:35 -->
 
 ### Step 4: Code — config changes
 

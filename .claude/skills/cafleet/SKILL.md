@@ -24,16 +24,18 @@ Every `cafleet` invocation that touches agents or messages must carry two litera
 
 | Flag | Scope | Required for | Notes |
 |---|---|---|---|
-| `--session-id <uuid>` | global (placed **before** the subcommand) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member *`) | UUID of the session created via `cafleet session create`. Silently accepted (and ignored) on `db init` / `session *`. |
+| `--session-id <uuid>` | global (placed **before** the subcommand) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member *`) | UUID of the session created via `cafleet session create`. Silently accepted (and ignored) on `db init` / `session *` / `server`. |
 | `--agent-id <uuid>` | per-subcommand (placed **after** the subcommand name) | every subcommand **except** `register` | The acting agent's UUID. `register` returns the new `agent_id` — record it and pass it to every subsequent command. |
 
 If `--session-id` is missing on a subcommand that needs it, the CLI exits with `Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id.`
 
 > **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --session-id <uuid> <subcmd> --agent-id <uuid>` invocation matches a single allow pattern across every subcommand for that session. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — never store them in shell variables.
 
-The only environment variable the CLI still reads is:
+The environment variables the CLI reads (all wired through `cafleet.config.Settings` via explicit `validation_alias` on each field, so the `CAFLEET_` prefix is uniform):
 
 - `CAFLEET_DATABASE_URL` — SQLite database URL (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db` with `~` expanded at load time). When setting `CAFLEET_DATABASE_URL` yourself, use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs.
+- `CAFLEET_BROKER_HOST` — Default bind address for `cafleet server` (optional; default `127.0.0.1`). Overridden by an explicit `cafleet server --host <addr>` flag.
+- `CAFLEET_BROKER_PORT` — Default bind port for `cafleet server` (optional; default `8000`). Overridden by an explicit `cafleet server --port <int>` flag.
 
 ## Placeholder convention used below
 
@@ -322,6 +324,28 @@ Output (`--json`):
 ```
 
 **Note**: Projects using CAFleet use `Skill(cafleet-monitoring)` instead of the generic `agent-team-supervision` skill. The cafleet-monitoring skill uses `cafleet member capture` exclusively (no raw `tmux capture-pane`), enforcing the cross-Director boundary.
+
+### Server
+
+Start the admin WebUI FastAPI app via uvicorn. The server is only needed for the admin WebUI at `/ui/` and the `/ui/api/*` endpoints — every other `cafleet` subcommand accesses SQLite directly and does not require the server to be running.
+
+```bash
+cafleet server
+cafleet server --host 0.0.0.0 --port 9000
+CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--host` | no | Bind address. Default `settings.broker_host` (= `127.0.0.1`, overridable via `CAFLEET_BROKER_HOST`). |
+| `--port` | no | Bind port. Default `settings.broker_port` (= `8000`, overridable via `CAFLEET_BROKER_PORT`). |
+
+- **Does NOT require `--session-id`.** Supplying `--session-id <uuid>` is silently accepted and ignored (matches the `db init` / `session *` pattern), so a single `cafleet --session-id <literal-uuid> *` allow pattern keeps working for this subcommand.
+- `--host` / `--port` flags win when both a flag and the matching env var are set. The env var wins when only it is set. The `127.0.0.1` / `8000` defaults apply otherwise.
+- `CAFLEET_BROKER_HOST` and `CAFLEET_BROKER_PORT` are read by `cafleet.config.Settings` via explicit `validation_alias` on each field, so the prefix is consistent with `CAFLEET_DATABASE_URL`.
+- No other flags are exposed. `--reload`, `--workers`, `--log-level`, and `--webui-dist-dir` are deliberately NOT supported — users who need them invoke `uv run uvicorn cafleet.server:app ...` directly (which is exactly what `mise //cafleet:dev` does, as an independent entry point that does not delegate to `cafleet server`).
+- On startup, if the bundled WebUI dist directory does not exist, `create_app()` emits a one-line warning to stderr: `warning: admin WebUI is not built. /ui/ will return 404. Run 'mise //admin:build'.` The server still starts cleanly — only `/ui/` 404s until the SPA is built.
+- Port-in-use errors are NOT wrapped. uvicorn's native `OSError: [Errno 98] Address already in use` propagates to the terminal.
 
 ## Typical Workflow
 
