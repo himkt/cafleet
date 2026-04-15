@@ -217,15 +217,15 @@ def delete_session(session_id: str) -> None:
             try:
                 session.execute(delete(Agent).where(Agent.session_id == session_id))
             except IntegrityError:
-                count = session.execute(
-                    select(func.count())
-                    .select_from(Agent)
-                    .where(Agent.session_id == session_id)
-                ).scalar()
+                # The transaction is now in a failed state — any further
+                # query on the same session would raise PendingRollbackError
+                # and mask the click.UsageError below. Raising directly lets
+                # the surrounding `with session.begin()` block roll back
+                # cleanly via its own __exit__ handler.
                 raise click.UsageError(
                     f"Cannot delete session {session_id}: "
                     f"its agent(s) are still referenced by tasks "
-                    f"({count} agent row(s) remain)."
+                    f"(tasks.context_id ON DELETE RESTRICT)."
                 )
             result = cast(
                 CursorResult,
