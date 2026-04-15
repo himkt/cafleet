@@ -909,9 +909,10 @@ def list_session_agents(session_id: str) -> list[dict]:
     """Active agents + deregistered agents that have tasks.
 
     Returns list of dicts with keys: agent_id, name, description, status,
-    registered_at, kind.  ``kind`` is ``"builtin-administrator"`` for the
-    session's built-in Administrator and ``"user"`` for every other agent,
-    derived from ``agent_card_json`` via ``_is_administrator_card``.
+    registered_at, kind.  ``kind`` is ``"builtin-administrator"`` when
+    ``agent_card_json`` contains ``$.cafleet.kind`` with that value
+    (extracted in SQL via ``json_extract``/``coalesce`` so the full blob
+    never leaves the database) and ``"user"`` for every other agent.
     Deregistered agents appear only when they are referenced by at least
     one task (as sender or recipient).
     """
