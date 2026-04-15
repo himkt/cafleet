@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 19/52 tasks complete
+**Progress**: 23/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -336,10 +336,10 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 7: WebUI API — surface `kind`
 
-- [ ] Extend the SELECT column lists of `broker.list_session_agents` (`broker.py:795-807`) and `broker.get_agent` (`broker.py:243-283`) so they load `Agent.agent_card_json`. <!-- completed: -->
-- [ ] `broker.list_session_agents` and `broker.get_agent` return `kind: "builtin-administrator" | "user"` derived from `agent_card_json` via `_is_administrator_card`. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/webui_api.py` passes the new field through unchanged. <!-- completed: -->
-- [ ] `admin/src/types.ts` adds `kind: "builtin-administrator" | "user"` to `Agent`. <!-- completed: -->
+- [x] Extend the SELECT column lists of `broker.list_session_agents` (`broker.py:795-807`) and `broker.get_agent` (`broker.py:243-283`) so they load `Agent.agent_card_json`. <!-- completed: 2026-04-15T16:10 -->
+- [x] `broker.list_session_agents` and `broker.get_agent` return `kind: "builtin-administrator" | "user"` derived from `agent_card_json` via `_is_administrator_card`. <!-- completed: 2026-04-15T16:10 -->
+- [x] `cafleet/src/cafleet/webui_api.py` passes the new field through unchanged. <!-- completed: 2026-04-15T16:10 -->
+- [x] `admin/src/types.ts` adds `kind: "builtin-administrator" | "user"` to `Agent`. <!-- completed: 2026-04-15T16:10 -->
 
 ### Step 8: WebUI — fixed Administrator sender
 

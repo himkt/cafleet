@@ -337,6 +337,11 @@ def get_agent(agent_id: str, session_id: str) -> dict | None:
         "description": agent.description,
         "status": agent.status,
         "registered_at": agent.registered_at,
+        "kind": (
+            ADMINISTRATOR_KIND
+            if _is_administrator_card(agent.agent_card_json)
+            else "user"
+        ),
         "placement": None,
     }
     if placement_row is not None:
