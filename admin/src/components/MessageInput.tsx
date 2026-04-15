@@ -6,6 +6,7 @@ interface MessageInputProps {
   senderId: string | null;
   agents: Agent[];
   onSent: () => void;
+  disabled?: boolean;
 }
 
 function slugify(name: string): string {
@@ -77,11 +78,15 @@ export default function MessageInput({
   senderId,
   agents,
   onSent,
+  disabled: disabledProp = false,
 }: MessageInputProps) {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const disabled = !senderId || agents.filter((a) => a.status === "active").length === 0;
+  const disabled =
+    disabledProp ||
+    !senderId ||
+    agents.filter((a) => a.status === "active").length === 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

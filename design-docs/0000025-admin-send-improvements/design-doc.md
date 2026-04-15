@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 23/52 tasks complete
+**Progress**: 29/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -343,12 +343,12 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 8: WebUI — fixed Administrator sender
 
-- [ ] Delete `admin/src/components/SenderSelector.tsx`. <!-- completed: -->
-- [ ] Remove `<SenderSelector>` import + usage from `admin/src/components/Dashboard.tsx`. <!-- completed: -->
-- [ ] Derive `senderId` in `Dashboard` from the Administrator entry of the agents list. <!-- completed: -->
-- [ ] Render a read-only `Sending as Administrator` label in the header when `senderId` is set. <!-- completed: -->
-- [ ] Render a red warning banner above the Timeline when `senderId` is null, and disable `MessageInput`. <!-- completed: -->
-- [ ] Strip legacy `localStorage.cafleet.sender.<session_id>` on mount. <!-- completed: -->
+- [x] Delete `admin/src/components/SenderSelector.tsx`. <!-- completed: 2026-04-15T16:25 -->
+- [x] Remove `<SenderSelector>` import + usage from `admin/src/components/Dashboard.tsx`. <!-- completed: 2026-04-15T16:25 -->
+- [x] Derive `senderId` in `Dashboard` from the Administrator entry of the agents list. <!-- completed: 2026-04-15T16:25 -->
+- [x] Render a read-only `Sending as Administrator` label in the header when `senderId` is set. <!-- completed: 2026-04-15T16:25 -->
+- [x] Render a red warning banner above the Timeline when `senderId` is null, and disable `MessageInput`. <!-- completed: 2026-04-15T16:25 -->
+- [x] Strip legacy `localStorage.cafleet.sender.<session_id>` on mount. <!-- completed: 2026-04-15T16:25 -->
 
 ### Step 9: WebUI — @mention autocomplete popover
 
