@@ -1,7 +1,7 @@
 # Add `cafleet server` CLI subcommand to launch the admin WebUI server
 
 **Status**: Approved
-**Progress**: 8/22 tasks complete
+**Progress**: 11/22 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -290,9 +290,9 @@ No functional test spins up a real uvicorn server — smoke tests only, per Dire
 
 ### Step 5: Code — server.py cleanup and warning
 
-- [ ] Modify `cafleet/src/cafleet/server.py`: delete the `if __name__ == "__main__"` block (lines 58-64); delete module-level `import uvicorn`, `from cafleet.config import settings`, `import logging`, and `logger = logging.getLogger(__name__)`; add `import sys`. Keep `app = create_app()` at module scope. <!-- completed: -->
-- [ ] Rename `_default_webui_dist_dir()` → `default_webui_dist_dir()` in `server.py` (drop leading underscore) so the CLI handler and tests can consume it without touching a private symbol. <!-- completed: -->
-- [ ] In `create_app()`, compute `emit_warning_if_missing = webui_dist_dir is None` before falling back to `default_webui_dist_dir()`. If the gate is true and the resolved path does not exist, `print("warning: admin WebUI is not built. /ui/ will return 404. Run 'mise //admin:build'.", file=sys.stderr)` once at startup. This makes the warning visible from every real startup path (`cafleet server`, `mise //cafleet:dev`, direct `uv run uvicorn cafleet.server:app`) while staying silent when tests pass an explicit override. <!-- completed: -->
+- [x] Modify `cafleet/src/cafleet/server.py`: delete the `if __name__ == "__main__"` block (lines 58-64); delete module-level `import uvicorn`, `from cafleet.config import settings`, `import logging`, and `logger = logging.getLogger(__name__)`; add `import sys`. Keep `app = create_app()` at module scope. <!-- completed: 2026-04-15T11:55 -->
+- [x] Rename `_default_webui_dist_dir()` → `default_webui_dist_dir()` in `server.py` (drop leading underscore) so the CLI handler and tests can consume it without touching a private symbol. <!-- completed: 2026-04-15T11:55 -->
+- [x] In `create_app()`, compute `emit_warning_if_missing = webui_dist_dir is None` before falling back to `default_webui_dist_dir()`. If the gate is true and the resolved path does not exist, `print("warning: admin WebUI is not built. /ui/ will return 404. Run 'mise //admin:build'.", file=sys.stderr)` once at startup. This makes the warning visible from every real startup path (`cafleet server`, `mise //cafleet:dev`, direct `uv run uvicorn cafleet.server:app`) while staying silent when tests pass an explicit override. <!-- completed: 2026-04-15T11:55 -->
 
 ### Step 6: Code — CLI subcommand
 
