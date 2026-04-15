@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 36/52 tasks complete
+**Progress**: 37/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -362,7 +362,7 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 10: WebUI — newline rendering
 
-- [ ] Add `whitespace-pre-wrap break-words` to the body `<p>` in both branches of `TimelineMessage.tsx` (lines 72 and 77 — the `<p>` tags, NOT the `<s>` tag at line 73). <!-- completed: -->
+- [x] Add `whitespace-pre-wrap break-words` to the body `<p>` in both branches of `TimelineMessage.tsx` (lines 72 and 77 — the `<p>` tags, NOT the `<s>` tag at line 73). <!-- completed: 2026-04-15T17:05 -->
 
 ### Step 11: Tests
 
