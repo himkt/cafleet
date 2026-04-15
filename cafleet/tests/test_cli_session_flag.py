@@ -429,9 +429,7 @@ class TestDeregisterAdministratorCliGuard:
             f"exit_code={result.exit_code}, output: {result.output}"
         )
 
-    def test_cli_deregister_admin_message_is_user_friendly(
-        self, tmp_path, monkeypatch
-    ):
+    def test_cli_deregister_admin_message_is_user_friendly(self, tmp_path, monkeypatch):
         """The error output must mention the guard text, not a raw traceback."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(

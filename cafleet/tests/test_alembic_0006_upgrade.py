@@ -56,7 +56,9 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _seed_session(engine, *, session_id: str, created_at: str, label: str | None = None):
+def _seed_session(
+    engine, *, session_id: str, created_at: str, label: str | None = None
+):
     """INSERT a session row via raw SQL at the 0005 schema level."""
     with engine.begin() as conn:
         conn.execute(
@@ -78,9 +80,7 @@ def _seed_user_agent(
     status: str = "active",
 ):
     """INSERT a regular (non-Administrator) agent row at the 0005 schema level."""
-    card = json.dumps(
-        {"name": name, "description": "test user agent", "skills": []}
-    )
+    card = json.dumps({"name": name, "description": "test user agent", "skills": []})
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -251,9 +251,7 @@ class TestMigration0006UpgradeSeed:
         try:
             with engine.connect() as conn:
                 row = conn.execute(
-                    text(
-                        "SELECT name, status FROM agents WHERE agent_id = :aid"
-                    ),
+                    text("SELECT name, status FROM agents WHERE agent_id = :aid"),
                     {"aid": user_id},
                 ).fetchone()
             assert row is not None

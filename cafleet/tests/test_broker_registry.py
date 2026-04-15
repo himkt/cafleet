@@ -192,15 +192,9 @@ class TestCreateSessionAdministratorSeed:
 
         with broker_session() as s:
             session_row = (
-                s.query(SessionModel)
-                .filter(SessionModel.session_id == sid)
-                .one()
+                s.query(SessionModel).filter(SessionModel.session_id == sid).one()
             )
-            agent_row = (
-                s.query(Agent)
-                .filter(Agent.agent_id == admin_id)
-                .one()
-            )
+            agent_row = s.query(Agent).filter(Agent.agent_id == admin_id).one()
 
         assert agent_row.registered_at == session_row.created_at
 

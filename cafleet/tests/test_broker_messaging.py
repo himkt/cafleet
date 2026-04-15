@@ -458,8 +458,7 @@ class TestBroadcastAdministratorExclusion:
             f"got {recipient_ids!r}"
         )
         assert len(recipient_ids) == 2, (
-            f"summary.recipientIds should list 2 user agents, "
-            f"got {recipient_ids!r}"
+            f"summary.recipientIds should list 2 user agents, got {recipient_ids!r}"
         )
 
     def test_broadcast_from_administrator_delivers_to_all_user_agents(self):
