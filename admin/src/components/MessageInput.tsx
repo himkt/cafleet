@@ -186,7 +186,11 @@ export default function MessageInput({
 
   const submitForm = async () => {
     if (disabled || !senderId) return;
-    const parsed = parseInput(input, activeAgents);
+    if (/^@administrator(?:\s|$)/i.test(input.trimStart())) {
+      setError("Messages cannot be sent to Administrator.");
+      return;
+    }
+    const parsed = parseInput(input, userAgents);
     if (parsed.error) {
       setError(parsed.error);
       return;

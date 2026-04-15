@@ -102,7 +102,7 @@ Creates a new session with a UUIDv4 identifier and auto-seeds the session's buil
 }
 ```
 
-Attempting `cafleet deregister --agent-id <administrator_id>` exits non-zero: the broker raises `AdministratorProtectedError`, which the CLI maps to `click.UsageError("Administrator cannot be deregistered")`.
+Attempting `cafleet --session-id <session_id> deregister --agent-id <administrator_id>` exits non-zero (code 1) with `Error: Administrator cannot be deregistered` on stderr: the broker raises `AdministratorProtectedError`, which the CLI catches and turns into a plain error message + `ctx.exit(1)`.
 
 ### `session list`
 
