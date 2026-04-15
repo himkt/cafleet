@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 18/52 tasks complete
+**Progress**: 19/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -332,7 +332,7 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 6: Broadcast recipient exclusion
 
-- [ ] `broker.broadcast_message`: filter out Administrator agents from the recipient set. <!-- completed: -->
+- [x] `broker.broadcast_message`: filter out Administrator agents from the recipient set. <!-- completed: 2026-04-15T15:55 -->
 
 ### Step 7: WebUI API — surface `kind`
 

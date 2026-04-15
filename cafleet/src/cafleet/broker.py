@@ -666,15 +666,21 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
                     f"Sender agent not found or not active in session: {agent_id}"
                 )
 
-            # List active agents in session, excluding sender
+            # List active agents in session, excluding sender and any
+            # built-in Administrator agents (they are write-only identities,
+            # per design 0000025 §E). The sender may itself be an
+            # Administrator — that case is handled by the sender exclusion
+            # above, not by this filter.
             rows = session.execute(
-                select(Agent.agent_id).where(
+                select(Agent.agent_id, Agent.agent_card_json).where(
                     Agent.session_id == session_id,
                     Agent.status == "active",
                     Agent.agent_id != agent_id,
                 )
             ).all()
-            recipient_ids = [row[0] for row in rows]
+            recipient_ids = [
+                aid for aid, card in rows if not _is_administrator_card(card)
+            ]
 
             # Create delivery tasks for each recipient
             for recipient_id in recipient_ids:
