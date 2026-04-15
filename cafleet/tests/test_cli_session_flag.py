@@ -401,10 +401,10 @@ def _fetch_agent_status(db_file, agent_id: str) -> tuple[str, str | None]:
 class TestDeregisterAdministratorCliGuard:
     """``cafleet deregister --agent-id <admin_id>`` must fail with a clear error.
 
-    The broker raises ``AdministratorProtectedError``; the CLI catches it
-    and maps it to ``click.UsageError`` → exit code 1 with a message on
-    stderr (folded into ``result.output`` under CliRunner's default
-    ``mix_stderr=True``).
+    The broker raises ``AdministratorProtectedError``; the CLI catches it,
+    prints ``Error: ...`` to stderr, and exits non-zero via ``ctx.exit(1)``.
+    Under CliRunner's default ``mix_stderr=True``, that stderr output is
+    folded into ``result.output``.
     """
 
     def test_cli_deregister_admin_exits_nonzero(self, tmp_path, monkeypatch):
