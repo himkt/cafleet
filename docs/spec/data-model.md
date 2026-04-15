@@ -1,10 +1,10 @@
 # SQLite Data Model Specification
 
-All core data structures — `Task`, `Message`, `Part`, `Artifact`, `AgentCard`, `TaskStatus`, `TaskState` — use types defined by the A2A specification via `a2a-sdk` Pydantic models. No Broker-specific data models are created. SQLite stores `a2a-sdk` `Task` and `AgentCard` objects verbatim as JSON `TEXT` blobs and deserializes them back to Pydantic models on read. Broker-specific information (routing metadata, etc.) lives in indexed columns alongside the JSON blob.
+All core data structures — `Task`, `Message`, `Part`, `Artifact`, `AgentCard`, `TaskStatus`, `TaskState` — follow an internal A2A-inspired shape, but CAFleet does not maintain Pydantic models for them. There is no dependency on `a2a-sdk` or any external A2A library. SQLite stores the `Task` and `AgentCard` payloads as JSON `TEXT` blobs that the broker layer serializes via `json.dumps` and reads back as plain Python dicts via `json.loads` (see `cafleet/src/cafleet/broker.py`). Broker-specific information (routing metadata, etc.) lives in indexed columns alongside the JSON blob.
 
-The model is a **relational + document hybrid**: indexed fields are columns, while A2A protocol payloads are stored as opaque JSON `TEXT`. The columns are queried; the JSON blobs are not.
+The model is a **relational + document hybrid**: indexed fields are columns, while the A2A-inspired payloads are stored as opaque JSON `TEXT`. The columns are queried; the JSON blobs are not.
 
-Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the runtime engine is SQLAlchemy 2.x with the `aiosqlite` async driver. Operators apply migrations once via `cafleet db init` before starting the server.
+Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver (see `cafleet/src/cafleet/db/engine.py`'s `get_sync_engine` / `get_sync_sessionmaker`). Operators apply migrations once via `cafleet db init` before starting the server.
 
 ## SQL Schema
 
@@ -29,7 +29,7 @@ No `status` column. No soft-revoke. Deletion is the only removal path and is rej
 | `status` | `TEXT` | `NOT NULL` | `'active'` or `'deregistered'`. |
 | `registered_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
 | `deregistered_at` | `TEXT` | nullable | ISO-8601 timestamp; populated on soft-delete. |
-| `agent_card_json` | `TEXT` | `NOT NULL` | Full A2A `AgentCard` blob, stored verbatim. |
+| `agent_card_json` | `TEXT` | `NOT NULL` | AgentCard-shaped blob (A2A-inspired, internal schema). |
 
 Indexes:
 
@@ -49,10 +49,10 @@ Deregistration is a soft-delete: `status='deregistered'` plus `deregistered_at` 
 | `to_agent_id` | `TEXT` | `NOT NULL` | Recipient agent. Empty string `''` for `broadcast_summary` rows. |
 | `type` | `TEXT` | `NOT NULL` | `'unicast'` or `'broadcast_summary'`. |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; first-write only, preserved across UPSERT. |
-| `status_state` | `TEXT` | `NOT NULL` | A2A `TaskState` enum value (e.g., `TASK_STATE_INPUT_REQUIRED`). |
+| `status_state` | `TEXT` | `NOT NULL` | TaskState enum value (e.g., `TASK_STATE_INPUT_REQUIRED`). |
 | `status_timestamp` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; updated on every state change. Used for `ORDER BY DESC`. |
 | `origin_task_id` | `TEXT` | nullable | Broadcast grouping link. `NULL` on unicast deliveries. On broadcast delivery rows, holds the summary task's `task_id`, shared across every delivery row in the same broadcast. On the broadcast summary row itself, holds its own `task_id` (self-reference) so the delivery rows and the summary row all share a single grouping value. Historical rows from before the migration are `NULL`. |
-| `task_json` | `TEXT` | `NOT NULL` | Full A2A `Task` blob, stored verbatim. |
+| `task_json` | `TEXT` | `NOT NULL` | Task-shaped blob (A2A-inspired, internal schema). |
 
 Indexes:
 
@@ -170,6 +170,6 @@ The timeline UI renders a per-recipient ACK time in each broadcast's hover toolt
 
 ## Deregistered Agents
 
-Deregistration is a soft-delete only. There is no background cleanup loop and no physical removal of agent or task rows. Deregistered agents continue to exist as rows with `status='deregistered'` indefinitely; their inbox tasks remain readable by the WebUI (the only consumer that surfaces deregistered agents). Active query paths filter `status='active'` so dead rows are invisible to normal A2A traffic.
+Deregistration is a soft-delete only. There is no background cleanup loop and no physical removal of agent or task rows. Deregistered agents continue to exist as rows with `status='deregistered'` indefinitely; their inbox tasks remain readable by the WebUI (the only consumer that surfaces deregistered agents). Active query paths filter `status='active'` so dead rows are invisible to normal traffic.
 
 If physical cleanup becomes necessary in the future, it can be reintroduced as an opt-in admin command (e.g., `cafleet db purge --older-than 30d`) without disturbing the runtime. The previous `DEREGISTERED_TASK_TTL_DAYS` and `CLEANUP_INTERVAL_SECONDS` settings have been removed.

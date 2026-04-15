@@ -1,9 +1,10 @@
 """SQLAlchemy declarative models for the cafleet registry SQLite store.
 
 Schema mirrors `docs/spec/data-model.md` exactly. The hybrid model promotes
-indexed/queried fields to columns and stores opaque A2A payloads
-(`AgentCard`, `Task`) as JSON `TEXT` blobs that the application layer
-serializes and deserializes via Pydantic.
+indexed/queried fields to columns and stores opaque A2A-inspired task +
+agent-card payloads as JSON TEXT (`AgentCard`, `Task`-shaped data) that the
+application layer serializes and deserializes as plain Python dicts via
+`json.dumps` / `json.loads`.
 """
 
 from sqlalchemy import ForeignKey, Index, String

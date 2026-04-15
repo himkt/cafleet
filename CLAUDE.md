@@ -14,14 +14,14 @@ When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE 
 
 ## Project: CAFleet
 
-A2A-native message broker + agent registry for coding agents.
+A2A-inspired message broker + agent registry for coding agents.
 
 - **Design document**: `design-docs/0000001-a2a-registry-broker/design-doc.md` (Status: Complete)
-- **Design document**: `design-docs/0000002-access-control/design-doc.md` — Tenant isolation via shared API key (Status: Complete)
+- **Design document**: `design-docs/0000002-access-control/design-doc.md` — Access-control via shared API key (superseded by 0000015 session model) (Status: Complete)
 - **Design document**: `design-docs/0000010-sqlite-store-migration/design-doc.md` — SQLite + SQLAlchemy + Alembic store migration (Status: Complete)
 - **Single package** (uv workspace):
   - `cafleet/` — `cafleet` (FastAPI + SQLAlchemy + Alembic + click)
-- **Unified CLI command**: `cafleet` (with `db init` for schema management, `session` for namespace CRUD, and all agent/messaging commands)
+- **Unified CLI command**: `cafleet` (with `db init` for schema management, `session` for session CRUD, and all agent/messaging commands)
 
 ## Tech Stack
 

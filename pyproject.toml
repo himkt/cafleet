@@ -25,7 +25,6 @@ include = ["cafleet/src"]
 # Suppress errors for third-party libraries without type stubs.
 # Add more patterns as needed when new dependencies are introduced.
 allowed-unresolved-imports = [
-    "a2a.*",
     "pydantic_settings.*",
     "starlette.*",
     "fastapi.*",
@@ -33,6 +32,3 @@ allowed-unresolved-imports = [
     "click.*",
     "httpx.*",
 ]
-
-[tool.ruff]
-exclude = ["vendor/"]

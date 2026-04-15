@@ -1,7 +1,7 @@
 # Cleanup and Refactor — Post-Rapid-Iteration Debt Payment
 
-**Status**: Approved
-**Progress**: 0/50 tasks complete — ready for implementation
+**Status**: Complete
+**Progress**: 50/50 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -10,17 +10,17 @@ Pay down accumulated tech debt from the recent rapid iteration (0000011 remove-m
 
 ## Success Criteria
 
-- [ ] `vendor/A2A` submodule is fully removed from the working tree, `.gitmodules`, and every rule / skill / CLAUDE.md reference.
-- [ ] `docs/spec/a2a-operations.md` is deleted; `docs/spec/registry-api.md` is deleted or collapsed into `docs/spec/webui-api.md`; `docs/spec/data-model.md` no longer claims an `a2a-sdk` / `aiosqlite` dependency that does not exist.
-- [ ] `cafleet/src/cafleet/cli.py:_resolve_prompt` substitutes `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` on BOTH the default prompt template AND user-supplied `prompt_argv`. A regression test in `cafleet/tests/test_cli_member.py` (new file) pins the behaviour.
-- [ ] `grep -rn 'namespace' README.md ARCHITECTURE.md CLAUDE.md .claude/CLAUDE.md docs/spec/cli-options.md` returns zero occurrences where "namespace" is used as a synonym for "session", **except** the single explicit dual-name disambiguation form `session (namespace)` left at `docs/spec/cli-options.md:25` only.
-- [ ] `grep -rn 'Tenant isolation' .` (excluding `design-docs/`, `vendor/`) returns zero matches. (Bare `tenant`/`Tenant` cannot be used as a pattern because Alembic migrations `0001_initial_schema.py`, `0002_local_simplification.py`, and `cafleet/tests/test_alembic_0002_upgrade.py` — all immutable per H4 — legitimately reference the historical `tenant_id` column name.)
-- [ ] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test` all pass after every phase.
-- [ ] Repo-wide "A2A-native" → "A2A-inspired" phrasing unification: `grep -rn 'A2A-native' .` (excluding `design-docs/`, `vendor/`, `admin/node_modules/`, `.venv/`) returns zero matches. The only remaining live A2A-lineage phrasing is "A2A-inspired".
-- [ ] `cafleet --help` CLI help text reads "A2A-inspired", consistent with README.md:3, CLAUDE.md:17, `.claude/CLAUDE.md:22`, `.claude-plugin/marketplace.json:14`, `.claude-plugin/plugin.json:4`, `cafleet/pyproject.toml:4`.
-- [ ] `.claude-plugin/plugin.json` `repository` field points to the current repo URL (not `hikyaku`).
-- [ ] `README.md` Development section no longer says `cd hikyaku`.
-- [ ] `README.md:200-208` project-structure tree no longer lists the deleted `registry-api.md` / `a2a-operations.md` files.
+- [x] `vendor/A2A` submodule is fully removed from the working tree, `.gitmodules`, and every rule / skill / CLAUDE.md reference.
+- [x] `docs/spec/a2a-operations.md` is deleted; `docs/spec/registry-api.md` is deleted or collapsed into `docs/spec/webui-api.md`; `docs/spec/data-model.md` no longer claims an `a2a-sdk` / `aiosqlite` dependency that does not exist.
+- [x] `cafleet/src/cafleet/cli.py:_resolve_prompt` substitutes `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` on BOTH the default prompt template AND user-supplied `prompt_argv`. A regression test in `cafleet/tests/test_cli_member.py` (new file) pins the behaviour.
+- [x] `grep -rn 'namespace' README.md ARCHITECTURE.md CLAUDE.md .claude/CLAUDE.md docs/spec/cli-options.md` returns zero occurrences where "namespace" is used as a synonym for "session", **except** the single explicit dual-name disambiguation form `session (namespace)` left at `docs/spec/cli-options.md:25` only.
+- [x] `grep -rn 'Tenant isolation' .` (excluding `design-docs/`, `vendor/`) returns zero matches. (Bare `tenant`/`Tenant` cannot be used as a pattern because Alembic migrations `0001_initial_schema.py`, `0002_local_simplification.py`, and `cafleet/tests/test_alembic_0002_upgrade.py` — all immutable per H4 — legitimately reference the historical `tenant_id` column name.)
+- [x] `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test` all pass after every phase.
+- [x] Repo-wide "A2A-native" → "A2A-inspired" phrasing unification: `grep -rn 'A2A-native' .` (excluding `design-docs/`, `vendor/`, `admin/node_modules/`, `.venv/`) returns zero matches. The only remaining live A2A-lineage phrasing is "A2A-inspired".
+- [x] `cafleet --help` CLI help text reads "A2A-inspired", consistent with README.md:3, CLAUDE.md:17, `.claude/CLAUDE.md:22`, `.claude-plugin/marketplace.json:14`, `.claude-plugin/plugin.json:4`, `cafleet/pyproject.toml:4`.
+- [x] `.claude-plugin/plugin.json` `repository` field points to the current repo URL (not `hikyaku`).
+- [x] `README.md` Development section no longer says `cd hikyaku`.
+- [x] `README.md:200-208` project-structure tree no longer lists the deleted `registry-api.md` / `a2a-operations.md` files.
 
 ---
 
@@ -187,59 +187,59 @@ Known pre-existing references (as of 2026-04-14 drafting): README.md:202-203 (pr
 
 ### Step 1 — Phase 1: Low-risk deletions
 
-- [ ] 1.1 Run the pre-delete cross-reference scan from the Verification Strategy section. Record every file that mentions `docs/spec/a2a-operations.md` or `docs/spec/registry-api.md` so that Step 1.X edits cover all of them. Known matches as of drafting: README.md:202-203 (handled by 1.15). Abort and reopen this design doc if any new surface is found. <!-- completed: -->
-- [ ] 1.2 Run `git status -s vendor/A2A` and abort if output is non-empty. <!-- completed: -->
-- [ ] 1.3 `git submodule deinit -f vendor/A2A`. <!-- completed: -->
-- [ ] 1.4 Edit `.gitmodules` — remove the `[submodule "vendor/A2A"]` stanza; if `.gitmodules` becomes empty, `git rm .gitmodules`. <!-- completed: -->
-- [ ] 1.5 `git rm -rf vendor/A2A`. <!-- completed: -->
-- [ ] 1.6 If `vendor/` directory is now empty, `rmdir vendor/`. <!-- completed: -->
-- [ ] 1.7 Delete `docs/spec/a2a-operations.md`. <!-- completed: -->
-- [ ] 1.8 Delete `docs/spec/registry-api.md`. <!-- completed: -->
-- [ ] 1.9 Delete `.claude/rules/a2a-reference.md`. <!-- completed: -->
-- [ ] 1.10 Edit `.claude/CLAUDE.md` — delete the "A2A Protocol Reference" section (the heading and its bullet list describing `A2A/specification/a2a.proto` etc.) AND the "Related Codebases" section (the heading and its `A2A/` + `solace-agent-mesh/` bullets). Currently at lines 5-19 but use the section headers as the locator since subsequent tasks will depend on the post-deletion layout. <!-- completed: -->
-- [ ] 1.11 Edit `CLAUDE.md:20` — rewrite the 0000002 bullet from "Tenant isolation via shared API key" to "Access-control via shared API key (superseded by 0000015 session model)". <!-- completed: -->
-- [ ] 1.12 Edit `.claude/CLAUDE.md` — find the bullet line currently saying `"Design document: design-docs/0000002-access-control/design-doc.md — Tenant isolation via shared API key (Status: Complete)"` and rewrite it to `"Design document: design-docs/0000002-access-control/design-doc.md — Access-control via shared API key (superseded by 0000015 session model) (Status: Complete)"`. (Evidence cell cites pre-Phase-1 line as :25; content-based locator is used here because 1.10 deletes 15 preceding lines in the same phase and would shift any line-number cite.) <!-- completed: -->
-- [ ] 1.13 Edit `pyproject.toml` — remove the `"a2a.*"` entry from `[tool.ty.analysis].allowed-unresolved-imports`. <!-- completed: -->
-- [ ] 1.14 Edit `pyproject.toml` — remove `exclude = ["vendor/"]` from `[tool.ruff]` (only after 1.6 confirms `vendor/` is gone). <!-- completed: -->
-- [ ] 1.15 Edit `README.md:200-208` project-structure tree — delete the two lines listing `registry-api.md` and `a2a-operations.md` (D9). Keep the enclosing `spec/` subtree structure; only the deleted filenames go away. <!-- completed: -->
-- [ ] 1.16 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass. <!-- completed: -->
-- [ ] 1.17 Run Phase 1 smoke checks from the Verification Strategy table. <!-- completed: -->
+- [x] 1.1 Run the pre-delete cross-reference scan from the Verification Strategy section. Record every file that mentions `docs/spec/a2a-operations.md` or `docs/spec/registry-api.md` so that Step 1.X edits cover all of them. Known matches as of drafting: README.md:202-203 (handled by 1.15). Abort and reopen this design doc if any new surface is found. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.2 Run `git status -s vendor/A2A` and abort if output is non-empty. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.3 `git submodule deinit -f vendor/A2A`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.4 Edit `.gitmodules` — remove the `[submodule "vendor/A2A"]` stanza; if `.gitmodules` becomes empty, `git rm .gitmodules`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.5 `git rm -rf vendor/A2A`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.6 If `vendor/` directory is now empty, `rmdir vendor/`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.7 Delete `docs/spec/a2a-operations.md`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.8 Delete `docs/spec/registry-api.md`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.9 Delete `.claude/rules/a2a-reference.md`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.10 Edit `.claude/CLAUDE.md` — delete the "A2A Protocol Reference" section (the heading and its bullet list describing `A2A/specification/a2a.proto` etc.) AND the "Related Codebases" section (the heading and its `A2A/` + `solace-agent-mesh/` bullets). Currently at lines 5-19 but use the section headers as the locator since subsequent tasks will depend on the post-deletion layout. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.11 Edit `CLAUDE.md:20` — rewrite the 0000002 bullet from "Tenant isolation via shared API key" to "Access-control via shared API key (superseded by 0000015 session model)". <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.12 Edit `.claude/CLAUDE.md` — find the bullet line currently saying `"Design document: design-docs/0000002-access-control/design-doc.md — Tenant isolation via shared API key (Status: Complete)"` and rewrite it to `"Design document: design-docs/0000002-access-control/design-doc.md — Access-control via shared API key (superseded by 0000015 session model) (Status: Complete)"`. (Evidence cell cites pre-Phase-1 line as :25; content-based locator is used here because 1.10 deletes 15 preceding lines in the same phase and would shift any line-number cite.) <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.13 Edit `pyproject.toml` — remove the `"a2a.*"` entry from `[tool.ty.analysis].allowed-unresolved-imports`. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.14 Edit `pyproject.toml` — remove `exclude = ["vendor/"]` from `[tool.ruff]` (only after 1.6 confirms `vendor/` is gone). <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.15 Edit `README.md:200-208` project-structure tree — delete the two lines listing `registry-api.md` and `a2a-operations.md` (D9). Keep the enclosing `spec/` subtree structure; only the deleted filenames go away. <!-- completed: 2026-04-15T12:00 -->
+- [x] 1.16 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass. <!-- completed: 2026-04-15T12:05 -->
+- [x] 1.17 Run Phase 1 smoke checks from the Verification Strategy table. <!-- completed: 2026-04-15T12:05 -->
 
 ### Step 2 — Phase 2: `_resolve_prompt` fix + repo-wide lineage unification
 
-- [ ] 2.1 Edit `cafleet/src/cafleet/cli.py:468-486` `_resolve_prompt` — when `prompt_argv` is non-empty, join into a template string, then call `.format(session_id=..., agent_id=..., director_name=..., director_agent_id=...)` on the joined string (same kwargs as the default branch). Keep the existing director lookup + UsageError on missing director. <!-- completed: -->
-- [ ] 2.2 Add `cafleet/tests/test_cli_member.py` — FOUR test cases against `_resolve_prompt` directly: (a) default path substitutes UUIDs, (b) `prompt_argv=("message","for","{agent_id}")` substitutes UUIDs, (c) `prompt_argv=("no","placeholders","here")` passes through unchanged, (d) `prompt_argv=("data","is","{{not","a","placeholder}}","closed")` collapses doubled braces to single braces and does NOT attempt placeholder substitution on the inner tokens (covers the Risk-row mitigation for literal-brace JSON snippets). <!-- completed: -->
-- [ ] 2.3 Edit `.claude/skills/cafleet/SKILL.md` — add a "Template safety" note under `Member Create`: custom prompts go through `str.format()`, so literal `{`/`}` must be doubled (`{{` / `}}`) or the value pre-substituted before calling `member create`. <!-- completed: -->
-- [ ] 2.4 Edit `.claude/skills/cafleet-design-doc-create/SKILL.md:116` — update the surrounding copy to confirm the custom-prompt path now substitutes `{session_id}` and `{agent_id}` too. Add a template-safety cross-reference to `cafleet/SKILL.md`. <!-- completed: -->
-- [ ] 2.5 Edit `cafleet/src/cafleet/cli.py:68` — rewrite the CLI docstring to read `"""CAFleet — CLI for the A2A-inspired message broker."""`. (R4) <!-- completed: -->
-- [ ] 2.6 Edit `cafleet/src/cafleet/db/models.py:4` — rewrite the module docstring from "opaque A2A payloads" to "opaque A2A-inspired task + agent-card payloads as JSON TEXT". (R5) <!-- completed: -->
-- [ ] 2.7 Edit `docs/spec/data-model.md:3-7` — remove the `a2a-sdk` claim; rewrite to describe CAFleet's internal A2A-inspired shape. Change line 7's `aiosqlite async driver` reference to the sync `pysqlite` driver with a pointer to `cafleet/src/cafleet/db/engine.py`. (R7) <!-- completed: -->
-- [ ] 2.8 Edit `docs/spec/data-model.md:32, 52, 55, 173` — replace "A2A `AgentCard` blob / `TaskState` enum value / normal A2A traffic" with "AgentCard-shaped blob / TaskState enum value / normal traffic" (or the agreed lineage-marker phrasing). (R8) <!-- completed: -->
-- [ ] 2.9 Edit `.claude-plugin/plugin.json:8` — update `repository` from `github.com/himkt/hikyaku` to the canonical current repo URL. (R2) <!-- completed: -->
-- [ ] 2.10 Edit `README.md:214-215` — update `git clone` URL and the `cd <dir>` line to the canonical current repo name. (R3) <!-- completed: -->
-- [ ] 2.11 **R12 — repo-wide "A2A-native" → "A2A-inspired" unification (6 files, 6 edits)**: <!-- completed: -->
-  - [ ] 2.11.1 `README.md:3` — "A2A-native message broker" → "A2A-inspired message broker". <!-- completed: -->
-  - [ ] 2.11.2 `CLAUDE.md:17` — "A2A-native message broker + agent registry" → "A2A-inspired message broker + agent registry". <!-- completed: -->
-  - [ ] 2.11.3 `.claude/CLAUDE.md` — find the line currently saying `"A2A-native message broker + agent registry for coding agents."` (same bullet as 2.11.2 but in the mirrored `.claude/` copy; was line :22 pre-Phase-1, shifts to ~:7 after 1.10) and change `"A2A-native"` → `"A2A-inspired"`. <!-- completed: -->
-  - [ ] 2.11.4 `.claude-plugin/marketplace.json:14` — "A2A-native message broker CLI" → "A2A-inspired message broker CLI". <!-- completed: -->
-  - [ ] 2.11.5 `.claude-plugin/plugin.json:4` — "A2A-native message broker CLI and design document orchestration skills for coding agents." → "A2A-inspired message broker CLI and design document orchestration skills for coding agents." <!-- completed: -->
-  - [ ] 2.11.6 `cafleet/pyproject.toml:4` — `description = "A2A-native message broker and agent registry for coding agents"` → `description = "A2A-inspired message broker and agent registry for coding agents"`. <!-- completed: -->
-- [ ] 2.12 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass (new test from 2.2 must pass). <!-- completed: -->
+- [x] 2.1 Edit `cafleet/src/cafleet/cli.py:468-486` `_resolve_prompt` — when `prompt_argv` is non-empty, join into a template string, then call `.format(session_id=..., agent_id=..., director_name=..., director_agent_id=...)` on the joined string (same kwargs as the default branch). Keep the existing director lookup + UsageError on missing director. <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.2 Add `cafleet/tests/test_cli_member.py` — FOUR test cases against `_resolve_prompt` directly: (a) default path substitutes UUIDs, (b) `prompt_argv=("message","for","{agent_id}")` substitutes UUIDs, (c) `prompt_argv=("no","placeholders","here")` passes through unchanged, (d) `prompt_argv=("data","is","{{not","a","placeholder}}","closed")` collapses doubled braces to single braces and does NOT attempt placeholder substitution on the inner tokens (covers the Risk-row mitigation for literal-brace JSON snippets). <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.3 Edit `.claude/skills/cafleet/SKILL.md` — add a "Template safety" note under `Member Create`: custom prompts go through `str.format()`, so literal `{`/`}` must be doubled (`{{` / `}}`) or the value pre-substituted before calling `member create`. <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.4 Edit `.claude/skills/cafleet-design-doc-create/SKILL.md:116` — update the surrounding copy to confirm the custom-prompt path now substitutes `{session_id}` and `{agent_id}` too. Add a template-safety cross-reference to `cafleet/SKILL.md`. <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.5 Edit `cafleet/src/cafleet/cli.py:68` — rewrite the CLI docstring to read `"""CAFleet — CLI for the A2A-inspired message broker."""`. (R4) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.6 Edit `cafleet/src/cafleet/db/models.py:4` — rewrite the module docstring from "opaque A2A payloads" to "opaque A2A-inspired task + agent-card payloads as JSON TEXT". (R5) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.7 Edit `docs/spec/data-model.md:3-7` — remove the `a2a-sdk` claim; rewrite to describe CAFleet's internal A2A-inspired shape. Change line 7's `aiosqlite async driver` reference to the sync `pysqlite` driver with a pointer to `cafleet/src/cafleet/db/engine.py`. (R7) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.8 Edit `docs/spec/data-model.md:32, 52, 55, 173` — replace "A2A `AgentCard` blob / `TaskState` enum value / normal A2A traffic" with "AgentCard-shaped blob / TaskState enum value / normal traffic" (or the agreed lineage-marker phrasing). (R8) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.9 Edit `.claude-plugin/plugin.json:8` — update `repository` from `github.com/himkt/hikyaku` to the canonical current repo URL. (R2) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.10 Edit `README.md:214-215` — update `git clone` URL and the `cd <dir>` line to the canonical current repo name. (R3) <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.11 **R12 — repo-wide "A2A-native" → "A2A-inspired" unification (6 files, 6 edits)**: <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.1 `README.md:3` — "A2A-native message broker" → "A2A-inspired message broker". <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.2 `CLAUDE.md:17` — "A2A-native message broker + agent registry" → "A2A-inspired message broker + agent registry". <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.3 `.claude/CLAUDE.md` — find the line currently saying `"A2A-native message broker + agent registry for coding agents."` (same bullet as 2.11.2 but in the mirrored `.claude/` copy; was line :22 pre-Phase-1, shifts to ~:7 after 1.10) and change `"A2A-native"` → `"A2A-inspired"`. <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.4 `.claude-plugin/marketplace.json:14` — "A2A-native message broker CLI" → "A2A-inspired message broker CLI". <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.5 `.claude-plugin/plugin.json:4` — "A2A-native message broker CLI and design document orchestration skills for coding agents." → "A2A-inspired message broker CLI and design document orchestration skills for coding agents." <!-- completed: 2026-04-15T12:30 -->
+  - [x] 2.11.6 `cafleet/pyproject.toml:4` — `description = "A2A-native message broker and agent registry for coding agents"` → `description = "A2A-inspired message broker and agent registry for coding agents"`. <!-- completed: 2026-04-15T12:30 -->
+- [x] 2.12 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass (new test from 2.2 must pass). <!-- completed: 2026-04-15T12:35 -->
 - [ ] 2.13 Run Phase 2 smoke checks from the Verification Strategy table. Delegate `cafleet --help` / `cafleet member create` smoke invocations to a teammate that has CLI permission, or ask the user to run them. Do NOT run them directly. The `grep A2A-native` zero-match assertion is self-runnable. <!-- completed: -->
 
 ### Step 3 — Phase 3: Naming unification (prose-only, per re-greped line truth)
 
 Files with ZERO hits — `.claude/skills/cafleet/SKILL.md` and `docs/spec/webui-api.md` — have no task in Phase 3. The dual-name exception survives in exactly ONE location: `docs/spec/cli-options.md:25`. Everything else is rewritten.
 
-- [ ] 3.1 Edit `README.md` — rewrite 7 occurrences at lines 7, 12, 17, 40, 68, 116, 132. Do NOT attempt a single sed replace — apply per-line reasoning so that phrases like "session_id namespace" become "session_id", "namespace boundary" becomes "session boundary", "session namespace" becomes "session", etc. <!-- completed: -->
-- [ ] 3.2 Edit `ARCHITECTURE.md` — rewrite occurrences at lines 3, 30, 32, 45 (7+ total occurrences across those lines): line 3 "non-secret namespace" → "non-secret session"; line 30 "namespace boundary" → "session boundary", "form one namespace" → "form one session", "namespace routing" → "session routing"; line 32 "non-secret namespace identifier" → "non-secret session identifier", "Sessions are namespaces for tidiness" → "Sessions are partitions for tidiness"; line 45 "session namespace CRUD" → "session CRUD". <!-- completed: -->
-- [ ] 3.3 Edit `CLAUDE.md:24` — rewrite "session for namespace CRUD" to "session for session CRUD" (or the least-redundant phrasing decided during Phase-3 review; "session CRUD" alone is preferred). <!-- completed: -->
-- [ ] 3.4 Edit `.claude/CLAUDE.md` — find the line currently saying `"Unified CLI command: cafleet (with db init for schema management, session for namespace CRUD, and all agent/messaging commands)"` (mirror of 3.3; was line :29 pre-Phase-1, shifts to ~:14 after 1.10) and apply the same "session for namespace CRUD" → "session for session CRUD" (or preferred "session CRUD") rewrite as 3.3. <!-- completed: -->
-- [ ] 3.5 Edit `docs/spec/cli-options.md:25` — keep the dual-name form ONCE at this location: change "Session namespace UUID" to "Session UUID (namespace identifier)". This is the sole surviving dual-name spot. <!-- completed: -->
-- [ ] 3.6 Edit `docs/spec/cli-options.md:81` — change "manages session namespaces" to "manages sessions". <!-- completed: -->
-- [ ] 3.7 Re-run the grep assertion: `grep -rn 'namespace' README.md ARCHITECTURE.md CLAUDE.md .claude/CLAUDE.md docs/spec/cli-options.md`. Exactly ONE match must remain — the dual-name form at `docs/spec/cli-options.md:25`. Abort and fix if any other match surfaces. <!-- completed: -->
-- [ ] 3.8 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass (typecheck + test are effectively no-ops for prose-only changes, but run them to rule out accidental file corruption). <!-- completed: -->
-- [ ] 3.9 Run Phase 3 smoke checks from the Verification Strategy table. <!-- completed: -->
+- [x] 3.1 Edit `README.md` — rewrite 7 occurrences at lines 7, 12, 17, 40, 68, 116, 132. Do NOT attempt a single sed replace — apply per-line reasoning so that phrases like "session_id namespace" become "session_id", "namespace boundary" becomes "session boundary", "session namespace" becomes "session", etc. <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.2 Edit `ARCHITECTURE.md` — rewrite occurrences at lines 3, 30, 32, 45 (7+ total occurrences across those lines): line 3 "non-secret namespace" → "non-secret session"; line 30 "namespace boundary" → "session boundary", "form one namespace" → "form one session", "namespace routing" → "session routing"; line 32 "non-secret namespace identifier" → "non-secret session identifier", "Sessions are namespaces for tidiness" → "Sessions are partitions for tidiness"; line 45 "session namespace CRUD" → "session CRUD". <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.3 Edit `CLAUDE.md:24` — rewrite "session for namespace CRUD" to "session for session CRUD" (or the least-redundant phrasing decided during Phase-3 review; "session CRUD" alone is preferred). <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.4 Edit `.claude/CLAUDE.md` — find the line currently saying `"Unified CLI command: cafleet (with db init for schema management, session for namespace CRUD, and all agent/messaging commands)"` (mirror of 3.3; was line :29 pre-Phase-1, shifts to ~:14 after 1.10) and apply the same "session for namespace CRUD" → "session for session CRUD" (or preferred "session CRUD") rewrite as 3.3. <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.5 Edit `docs/spec/cli-options.md:25` — keep the dual-name form ONCE at this location: change "Session namespace UUID" to "Session UUID (namespace identifier)". This is the sole surviving dual-name spot. <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.6 Edit `docs/spec/cli-options.md:81` — change "manages session namespaces" to "manages sessions". <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.7 Re-run the grep assertion: `grep -rn 'namespace' README.md ARCHITECTURE.md CLAUDE.md .claude/CLAUDE.md docs/spec/cli-options.md`. Exactly ONE match must remain — the dual-name form at `docs/spec/cli-options.md:25`. Abort and fix if any other match surfaces. <!-- completed: 2026-04-15T12:45 -->
+- [x] 3.8 Run `mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`. All must pass (typecheck + test are effectively no-ops for prose-only changes, but run them to rule out accidental file corruption). <!-- completed: 2026-04-15T12:50 -->
+- [x] 3.9 Run Phase 3 smoke checks from the Verification Strategy table. <!-- completed: 2026-04-15T12:50 -->
 
 ### Step 4 — Commit + review sequence
 
@@ -259,3 +259,4 @@ Files with ZERO hits — `.claude/skills/cafleet/SKILL.md` and `docs/spec/webui-
 | 2026-04-14 | v2 — Reviewer revisions. Fixed R9 per-line evidence (re-greped): README.md 7 hits not 2, ARCHITECTURE.md 4 lines not 0, `.claude/skills/cafleet/SKILL.md` 0 hits not "multiple", docs/spec/cli-options.md 2 lines not 1, docs/spec/webui-api.md 0 hits not 1. Fixed D6 to rewrite BOTH `CLAUDE.md:20` and `.claude/CLAUDE.md:25` with "Access-control" phrasing (removing the literal word "Tenant" so the Phase-1 smoke check is reachable). Added D9 (README.md project-structure tree cleanup) + pre-delete cross-reference scan. Added R12 (repo-wide "A2A-native" → "A2A-inspired" unification across 6 files) to resolve lineage-tone contradiction flagged in Reviewer I3; folded R6 into R12. Added test case (d) in 2.2 for literal-curly-brace escape. Clarified dual-name exception survives at ONE location only (cli-options.md:25). Fixed `.gitmodules` cite to :1-3 and `.claude/CLAUDE.md` line cite to :25. |
 | 2026-04-14 | v3 — Reviewer revisions. (I5) Tightened the `tenant`/`Tenant` smoke-check pattern and success criterion to the exact phrase `Tenant isolation`; rationale now documents the three immutable Alembic migrations + regression test that carry legitimate `tenant_id` references and must not be false positives. Updated R10 row accordingly. (I6) Replaced stale post-Phase-1 line-number cites with content-based locators in tasks 1.10, 1.12, 2.11.3, 3.4 — so that when 1.10 deletes 15 lines from `.claude/CLAUDE.md` the downstream tasks still resolve to the correct bullet. (P4) Updated Phase-3 smoke-check description text to reference the post-edit dual-name phrasing `"Session UUID (namespace identifier)"` from task 3.5. |
 | 2026-04-15 | v3 approved by user. Status → Approved. Last Updated refreshed. Progress set to 0/50 — ready for implementation. |
+| 2026-04-15 | Implementation complete. All 3 phases shipped — Phase 1 c8afc8a (vendor/A2A submodule + dead spec docs removed), Phase 2 e75ae76 + 3c05fc9 (_resolve_prompt str.format fix with 4 regression tests + repo-wide A2A-native → A2A-inspired lineage unification), Phase 3 ba67e3e (session vs namespace prose unification). All 11 Success Criteria PASS, mise //:lint / //:format / //:typecheck pass, 271 pytest tests pass. Status → Complete. |

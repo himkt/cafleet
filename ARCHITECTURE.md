@@ -1,6 +1,6 @@
 # CAFleet — Architecture
 
-A message broker and agent registry for coding agents. All CLI commands and the admin WebUI access SQLite directly through a shared `broker` module (`cafleet/broker.py`) — no HTTP server is needed for agent operations. Agents are organized into **sessions** — a non-secret namespace created via `cafleet session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
+A message broker and agent registry for coding agents. All CLI commands and the admin WebUI access SQLite directly through a shared `broker` module (`cafleet/broker.py`) — no HTTP server is needed for agent operations. Agents are organized into **sessions** identified by a non-secret `session_id` created via `cafleet session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
 
 ## Architecture Diagram
 
@@ -27,9 +27,9 @@ Admin WebUI  ──→  server.py (minimal FastAPI)         │
 
 ## Session Isolation
 
-The `session_id` serves as the namespace boundary. Sessions are created via `cafleet session create`. All agents registered with the same `session_id` form one namespace. The broker does not perform authentication — it performs namespace routing only.
+The `session_id` serves as the session boundary. Sessions are created via `cafleet session create`. All agents registered with the same `session_id` form one session. The broker does not perform authentication — it performs session routing only.
 
-No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret namespace identifier. Sessions are namespaces for tidiness, not security boundaries.
+No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret session identifier. Sessions are partitions for tidiness, not security boundaries.
 
 **Registration** requires a valid `session_id`. Sessions are created via `cafleet session create` before agents can register.
 
@@ -42,7 +42,7 @@ No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret namesp
 | `broker.py` | `cafleet/src/cafleet/` | Single data access layer — sync SQLAlchemy operations for CLI + WebUI |
 | `server.py` | `cafleet/src/cafleet/` | Minimal FastAPI app: `webui_router` + static file serving |
 | `config.py` | `cafleet/src/cafleet/` | Settings via pydantic-settings; owns `~` expansion of `database_url` |
-| `cli.py` | `cafleet/src/cafleet/` | Unified `cafleet` console script: click group with `db` (Alembic schema management), `session` (session namespace CRUD), and all agent/messaging commands (`register`, `send`, `poll`, `ack`, etc.) plus `member` subgroup. Calls `broker` directly. |
+| `cli.py` | `cafleet/src/cafleet/` | Unified `cafleet` console script: click group with `db` (Alembic schema management), `session` (session CRUD), and all agent/messaging commands (`register`, `send`, `poll`, `ack`, etc.) plus `member` subgroup. Calls `broker` directly. |
 | `db/__init__.py` | `cafleet/src/cafleet/db/` | DB sub-package marker |
 | `db/models.py` | `cafleet/src/cafleet/db/` | SQLAlchemy declarative models: `Base`, `Session`, `Agent`, `Task`; column indexes |
 | `db/engine.py` | `cafleet/src/cafleet/db/` | `get_sync_engine()`, `get_sync_sessionmaker()`, SQLite PRAGMA listener |
@@ -85,7 +85,7 @@ The default database path is `~/.local/share/cafleet/registry.db` (XDG state dir
 
 ### Relational + document hybrid model
 
-Indexed fields are columns; A2A protocol payloads (`AgentCard`, `Task`) are stored verbatim as JSON `TEXT` blobs and never queried by content. This keeps hot lookups index-served while preserving the SDK's source of truth for protocol shapes.
+Indexed fields are columns; A2A-inspired payloads (`AgentCard`-shaped, `Task`-shaped) are stored verbatim as JSON `TEXT` blobs and never queried by content. This keeps hot lookups index-served while preserving the canonical internal shape for these payloads.
 
 | Table | Indexed columns | JSON blob |
 |---|---|---|
