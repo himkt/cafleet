@@ -42,7 +42,7 @@ No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret sessio
 | `broker.py` | `cafleet/src/cafleet/` | Single data access layer — sync SQLAlchemy operations for CLI + WebUI |
 | `server.py` | `cafleet/src/cafleet/` | Minimal FastAPI app: `webui_router` + static file serving |
 | `config.py` | `cafleet/src/cafleet/` | Settings via pydantic-settings; owns `~` expansion of `database_url` |
-| `cli.py` | `cafleet/src/cafleet/` | Unified `cafleet` console script: click group with `db` (Alembic schema management), `session` (session CRUD), and all agent/messaging commands (`register`, `send`, `poll`, `ack`, etc.) plus `member` subgroup. Calls `broker` directly. |
+| `cli.py` | `cafleet/src/cafleet/` | Unified `cafleet` console script: click group with `db` (Alembic schema management), `session` (session CRUD), and all agent/messaging commands (`register`, `send`, `poll`, `ack`, etc.) plus `member` subgroup. Also exposes `cafleet server [--host <addr>] [--port <int>]` — the packaged launcher for the admin WebUI FastAPI app via uvicorn (alongside `mise //cafleet:dev`, which calls uvicorn directly without delegating to `cafleet server`). Calls `broker` directly. |
 | `db/__init__.py` | `cafleet/src/cafleet/db/` | DB sub-package marker |
 | `db/models.py` | `cafleet/src/cafleet/db/` | SQLAlchemy declarative models: `Base`, `Session`, `Agent`, `Task`; column indexes |
 | `db/engine.py` | `cafleet/src/cafleet/db/` | `get_sync_engine()`, `get_sync_sessionmaker()`, SQLite PRAGMA listener |
@@ -214,7 +214,9 @@ Each CLI parameter has exactly one input source:
 | Agent ID | `--agent-id` subcommand option |
 | JSON output | `--json` global flag |
 
-Session ID and Agent ID are passed as literal CLI flags (not environment variables) so a single Claude Code `permissions.allow` pattern of the form `cafleet --session-id <literal-uuid> *` matches every subcommand for that session, eliminating per-invocation permission prompts. `--session-id` is global (placed before the subcommand) and required for every client + member subcommand; it is silently accepted (and ignored) on `db init` / `session *` so one allow pattern stays usable everywhere. No broker URL is needed — CLI commands access SQLite directly.
+Session ID and Agent ID are passed as literal CLI flags (not environment variables) so a single Claude Code `permissions.allow` pattern of the form `cafleet --session-id <literal-uuid> *` matches every subcommand for that session, eliminating per-invocation permission prompts. `--session-id` is global (placed before the subcommand) and required for every client + member subcommand; it is silently accepted (and ignored) on `db init` / `session *` / `server` so one allow pattern stays usable everywhere. No broker URL is needed — CLI commands access SQLite directly.
+
+The `cafleet server` bind address and port are configured via `--host` / `--port` flags (defaults sourced from `settings.broker_host` = `127.0.0.1` and `settings.broker_port` = `8000`) or via the `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` environment variables. Pydantic-settings wires these env vars through explicit `validation_alias` on `Settings.broker_host` and `Settings.broker_port`, matching the `CAFLEET_`-prefixed convention already used by `CAFLEET_DATABASE_URL`. CLI flags win over env vars when both are supplied. The `127.0.0.1` default matches CAFleet's local-only stance; users who need external binding pass `--host 0.0.0.0` or set `CAFLEET_BROKER_HOST=0.0.0.0`.
 
 ## WebUI
 
@@ -224,7 +226,7 @@ A browser-based dashboard served as a SPA at `/ui/`. No login is required. The f
 - **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — all endpoints call `broker` for data access (sync `def` handlers, FastAPI runs them in a thread pool)
 - **Server**: `server.py` is a minimal FastAPI app — just `webui_router` + static files. No A2A handler, no JSON-RPC, no executor. Only needed for the WebUI; CLI commands work without it.
 - **Session scoping**: Session-scoped endpoints require `X-Session-Id` header. No authentication.
-- **Static serving**: `StaticFiles` mount at `/ui` serves the SPA bundled inside the package at `cafleet/src/cafleet/webui/` (production build). `mise //admin:build` must be run before `mise //cafleet:dev` for `/ui/` to be populated; without it the server starts cleanly and `/ui/` simply 404s.
+- **Static serving**: `StaticFiles` mount at `/ui` serves the SPA bundled inside the package at `cafleet/src/cafleet/webui/` (production build). `mise //admin:build` must be run before `cafleet server` / `mise //cafleet:dev` for `/ui/` to be populated; without it, `create_app()` emits a one-line `warning: admin WebUI is not built. /ui/ will return 404. Run 'mise //admin:build'.` to stderr at startup, the server starts cleanly, and `/ui/` 404s until the SPA is built. The warning fires from `create_app()` so every startup path (`cafleet server`, `mise //cafleet:dev`, and any `uv run uvicorn cafleet.server:app`) sees it identically.
 
 ## Package Structure
 

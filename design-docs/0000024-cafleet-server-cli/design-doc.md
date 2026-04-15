@@ -1,7 +1,7 @@
 # Add `cafleet server` CLI subcommand to launch the admin WebUI server
 
 **Status**: Approved
-**Progress**: 0/22 tasks complete
+**Progress**: 3/22 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -270,9 +270,9 @@ No functional test spins up a real uvicorn server — smoke tests only, per Dire
 
 ### Step 1: Documentation — Top-level docs
 
-- [ ] Update `ARCHITECTURE.md`: in Component Layout, note `cafleet server` as the packaged launcher; update line 227 `/ui/` 404 note to reference the new `create_app()` warning; change any `broker_host: 0.0.0.0` mention to `127.0.0.1`; document `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` env-var names. <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md`: add `server` to the "Subcommands that do NOT require `--session-id`" list; add a new "## `cafleet server` — Admin WebUI Server" section documenting `--host`, `--port`, defaults, env-var overrides (including the new `validation_alias` wiring), and startup warning. <!-- completed: -->
-- [ ] Update `README.md`: rewrite references to `mise //cafleet:dev` on lines 75, 163, 236 to mention the `cafleet server` alternative; add a short Quick Start snippet. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md`: in Component Layout, note `cafleet server` as the packaged launcher; update line 227 `/ui/` 404 note to reference the new `create_app()` warning; change any `broker_host: 0.0.0.0` mention to `127.0.0.1`; document `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` env-var names. <!-- completed: 2026-04-15T11:35 -->
+- [x] Update `docs/spec/cli-options.md`: add `server` to the "Subcommands that do NOT require `--session-id`" list; add a new "## `cafleet server` — Admin WebUI Server" section documenting `--host`, `--port`, defaults, env-var overrides (including the new `validation_alias` wiring), and startup warning. <!-- completed: 2026-04-15T11:35 -->
+- [x] Update `README.md`: rewrite references to `mise //cafleet:dev` on lines 75, 163, 236 to mention the `cafleet server` alternative; add a short Quick Start snippet. <!-- completed: 2026-04-15T11:35 -->
 
 ### Step 2: Documentation — mise and rules
 

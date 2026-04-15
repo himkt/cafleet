@@ -72,7 +72,7 @@ cafleet session create --label "my-project"
 # → prints: 550e8400-e29b-41d4-a716-446655440000
 ```
 
-Capture the printed UUID and pass it as `--session-id <session-id>` (a global flag, placed before the subcommand) on every subsequent command. CLI commands access SQLite directly -- no server needed. Start `mise //cafleet:dev` only if you want the admin WebUI.
+Capture the printed UUID and pass it as `--session-id <session-id>` (a global flag, placed before the subcommand) on every subsequent command. CLI commands access SQLite directly -- no server needed. Start `cafleet server` (or `mise //cafleet:dev` from a repo clone) only if you want the admin WebUI.
 
 > **Why a literal flag, not an env var?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. Passing `--session-id <literal-uuid>` lets a single allow-list pattern match every subcommand for that session; shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — do not introduce shell variables to hold them.
 
@@ -104,6 +104,21 @@ cafleet --session-id <session-id> poll --agent-id <your-agent-id>
 ```bash
 cafleet --session-id <session-id> ack --agent-id <your-agent-id> --task-id <task-id>
 ```
+
+### Start the Admin WebUI (optional)
+
+```bash
+# Defaults to 127.0.0.1:8000 (settings.broker_host / settings.broker_port)
+cafleet server
+
+# Override via flags
+cafleet server --host 0.0.0.0 --port 9000
+
+# Or via env vars (same values pydantic-settings resolves for settings.broker_host / broker_port)
+CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
+```
+
+`cafleet server` launches the admin WebUI FastAPI app via uvicorn. It does not require `--session-id`; a `--session-id` flag is silently accepted if present. CLI commands (messaging, member lifecycle, `db init`, `session *`) do not need this server. If the WebUI dist directory is missing, startup emits a one-line warning to stderr and `/ui/` returns 404 until you run `mise //admin:build` (see the Build the WebUI section below).
 
 ## CLI Usage
 
@@ -160,7 +175,7 @@ All commands below require the global `--session-id <uuid>` flag (placed before 
 
 ### WebUI API
 
-The admin WebUI is available when the server is running (`mise //cafleet:dev`). CLI commands do not use the server.
+The admin WebUI is available when the server is running (`cafleet server`, or `mise //cafleet:dev` from a repo clone). CLI commands do not use the server.
 
 ### Message Lifecycle
 
@@ -230,11 +245,15 @@ The broker serves the SPA at `/ui/`, but the build is a separate manual step so 
 # 1. Build the SPA into cafleet/src/cafleet/webui/
 mise //admin:build
 
-# 2. Start the broker — it serves the freshly built SPA at http://localhost:8000/ui/
-mise //cafleet:dev
+# 2. Start the broker — it serves the freshly built SPA at http://127.0.0.1:8000/ui/
+#    Pick whichever invocation matches your workflow:
+mise //cafleet:dev           # from a repo clone; runs `uv run uvicorn cafleet.server:app --host 127.0.0.1 --port 8000`
+cafleet server               # packaged launcher (same FastAPI app, --host/--port flags)
 ```
 
-If step 1 is skipped, the server still starts; only `/ui/` 404s until you run `mise //admin:build`. Note: the server is only needed for the WebUI — CLI commands work without it.
+Both `cafleet server` and `mise //cafleet:dev` run the same `cafleet.server:app` FastAPI app on uvicorn without `--reload`; they are independent entry points. `mise //cafleet:dev` calls uvicorn directly (no delegation to `cafleet server`) so contributors can restart manually between edits.
+
+If step 1 is skipped, the server still starts; `create_app()` emits `warning: admin WebUI is not built. /ui/ will return 404. Run 'mise //admin:build'.` to stderr and `/ui/` 404s until you run `mise //admin:build`. Note: the server is only needed for the WebUI — CLI commands work without it.
 
 **Release maintainers**: run `mise //admin:build` before any `uv build`. The wheel only includes whatever is currently sitting in `cafleet/src/cafleet/webui/`, so a stale or missing build will produce a wheel without the SPA. After building, verify the wheel contents with `unzip -l dist/cafleet-*.whl | grep webui/index.html`.
 
