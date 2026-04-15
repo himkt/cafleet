@@ -24,6 +24,45 @@ from cafleet.db.models import Agent, AgentPlacement, Session, Task
 
 
 # ---------------------------------------------------------------------------
+# Built-in Administrator agent — constants, helpers, and exception
+# ---------------------------------------------------------------------------
+
+
+ADMINISTRATOR_KIND = "builtin-administrator"
+
+
+class AdministratorProtectedError(Exception):
+    """Raised when an operation targets a built-in Administrator agent."""
+
+
+def _administrator_agent_card(session_id: str) -> dict:
+    """Canonical AgentCard dict for the built-in Administrator of a session."""
+    short_id = session_id[:8]
+    return {
+        "name": "Administrator",
+        "description": f"Built-in administrator agent for session {short_id}",
+        "skills": [],
+        "cafleet": {"kind": ADMINISTRATOR_KIND},
+    }
+
+
+def _is_administrator_card(agent_card_json: str | None) -> bool:
+    """Return True iff the stored card JSON marks an Administrator agent."""
+    if not agent_card_json:
+        return False
+    try:
+        card = json.loads(agent_card_json)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(card, dict):
+        return False
+    cafleet_ns = card.get("cafleet")
+    if not isinstance(cafleet_ns, dict):
+        return False
+    return cafleet_ns.get("kind") == ADMINISTRATOR_KIND
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 

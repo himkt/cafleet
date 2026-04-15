@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 6/52 tasks complete
+**Progress**: 10/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -308,10 +308,10 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 2: Broker helpers and constants
 
-- [ ] Add `ADMINISTRATOR_KIND = "builtin-administrator"` constant to `cafleet/src/cafleet/broker.py`. <!-- completed: -->
-- [ ] Add `_administrator_agent_card(session_id: str) -> dict` helper. <!-- completed: -->
-- [ ] Add `_is_administrator_card(agent_card_json: str) -> bool` helper. <!-- completed: -->
-- [ ] Add `class AdministratorProtectedError(Exception)`. <!-- completed: -->
+- [x] Add `ADMINISTRATOR_KIND = "builtin-administrator"` constant to `cafleet/src/cafleet/broker.py`. <!-- completed: 2026-04-15T14:35 -->
+- [x] Add `_administrator_agent_card(session_id: str) -> dict` helper. <!-- completed: 2026-04-15T14:35 -->
+- [x] Add `_is_administrator_card(agent_card_json: str) -> bool` helper. <!-- completed: 2026-04-15T14:35 -->
+- [x] Add `class AdministratorProtectedError(Exception)`. <!-- completed: 2026-04-15T14:35 -->
 
 ### Step 3: Session-create auto-seeding
 
