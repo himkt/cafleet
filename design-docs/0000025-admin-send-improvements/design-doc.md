@@ -378,12 +378,12 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 12: Verification
 
-- [ ] `mise //:lint` passes. <!-- completed: -->
-- [ ] `mise //:format` passes. <!-- completed: -->
-- [ ] `mise //:typecheck` passes. <!-- completed: -->
-- [ ] `mise //cafleet:test` passes. <!-- completed: -->
-- [ ] `mise //admin:lint` passes. <!-- completed: -->
-- [ ] `mise //admin:build` succeeds and the built WebUI renders the new features (manual QA: popover, multi-line compose, multi-line render, warning banner). <!-- completed: -->
+- [x] `mise //:lint` passes. <!-- completed: 2026-04-15T15:57 -->
+- [x] `mise //:format` passes. <!-- completed: 2026-04-15T15:57 -->
+- [x] `mise //:typecheck` passes. <!-- completed: 2026-04-15T15:57 -->
+- [x] `mise //cafleet:test` passes. <!-- completed: 2026-04-15T15:57 -->
+- [x] `mise //admin:lint` passes. <!-- completed: 2026-04-15T15:57 -->
+- [x] `mise //admin:build` succeeds and the built WebUI renders the new features (manual QA: popover, multi-line compose, multi-line render, warning banner). <!-- completed: 2026-04-15T15:57 -->
 
 ---
 
