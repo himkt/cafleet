@@ -1,23 +1,31 @@
 """Tests for broker.py — Administrator agent helpers and constants.
 
-Design doc 0000025 Step 2: Administrator-related module-level helpers.
+Design doc 0000025 Step 2 + Step 5: Administrator-related module-level
+helpers and the broker-layer protections built on top of them.
 
-This file tests the low-level primitives introduced for the built-in
-Administrator agent:
+This file covers:
 
 - ``ADMINISTRATOR_KIND`` constant (module-level string)
 - ``_administrator_agent_card(session_id)`` helper (dict builder)
 - ``_is_administrator_card(agent_card_json)`` helper (JSON-string predicate)
 - ``AdministratorProtectedError`` exception class
+- ``broker.deregister_agent`` guard (raises on Administrator)
+- ``broker.register_agent`` placement guard (rejects Admin as director)
 
-No database interaction is required for these tests — they exercise pure
-helpers in ``cafleet.broker``.
+The broker-level integration tests mirror ``test_broker_registry.py``'s
+test-isolation pattern: a fresh in-memory SQLite engine per test, with
+``broker.get_sync_sessionmaker`` monkeypatched.
 """
 
 import json
 import uuid
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
+from cafleet.db.models import Base
 
 
 # ---------------------------------------------------------------------------
@@ -247,3 +255,181 @@ class TestAdministratorProtectedError:
         with pytest.raises(AdministratorProtectedError) as exc_info:
             raise AdministratorProtectedError(msg)
         assert msg in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# Broker-level integration fixtures (shared by guard tests below)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sync_sessionmaker():
+    """Create a sync in-memory SQLite engine with all tables."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    return sessionmaker(engine, expire_on_commit=False)
+
+
+@pytest.fixture
+def _patch_broker(sync_sessionmaker, monkeypatch):
+    """Monkeypatch broker.get_sync_sessionmaker to use the test engine."""
+    from cafleet import broker
+
+    monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
+
+
+@pytest.fixture
+def broker_db(sync_sessionmaker, _patch_broker):
+    """Opt-in fixture: provides a broker backed by an ephemeral SQLite DB."""
+    return sync_sessionmaker
+
+
+# ---------------------------------------------------------------------------
+# broker.deregister_agent — Administrator protection
+# ---------------------------------------------------------------------------
+
+
+class TestDeregisterAdministratorGuard:
+    """Design doc §D: deregister_agent refuses to touch the Administrator."""
+
+    def test_raises_administrator_protected_error(self, broker_db):
+        from cafleet import broker
+        from cafleet.broker import AdministratorProtectedError
+
+        session = broker.create_session()
+        admin_id = session["administrator_agent_id"]
+
+        with pytest.raises(AdministratorProtectedError) as exc_info:
+            broker.deregister_agent(admin_id)
+
+        assert "Administrator cannot be deregistered" in str(exc_info.value)
+
+    def test_admin_row_still_active_after_failed_deregister(self, broker_db):
+        """A failed deregister leaves the Administrator's status unchanged."""
+        from cafleet import broker
+        from cafleet.broker import AdministratorProtectedError
+        from cafleet.db.models import Agent
+
+        session = broker.create_session()
+        admin_id = session["administrator_agent_id"]
+
+        with pytest.raises(AdministratorProtectedError):
+            broker.deregister_agent(admin_id)
+
+        with broker_db() as s:
+            row = s.query(Agent).filter(Agent.agent_id == admin_id).one()
+        assert row.status == "active"
+        assert row.deregistered_at is None
+
+    def test_deregistering_user_agent_still_works(self, broker_db):
+        """Regression guard: user agents can still be deregistered normally."""
+        from cafleet import broker
+
+        session = broker.create_session()
+        sid = session["session_id"]
+        user = broker.register_agent(
+            session_id=sid, name="user", description="A test user"
+        )
+
+        result = broker.deregister_agent(user["agent_id"])
+        assert result is True
+
+        # The Administrator remains untouched.
+        agents = broker.list_agents(sid)
+        assert len(agents) == 1
+        assert agents[0]["name"] == "Administrator"
+
+
+# ---------------------------------------------------------------------------
+# broker.register_agent — placement guard
+# ---------------------------------------------------------------------------
+
+
+class TestRegisterAgentPlacementAdministratorGuard:
+    """Design doc §D: the Administrator must never be handed a tmux pane.
+
+    When ``register_agent`` is called with ``placement.director_agent_id``
+    pointing at an Administrator, the broker raises
+    ``AdministratorProtectedError``.
+    """
+
+    def test_raises_when_director_is_administrator(self, broker_db):
+        from cafleet import broker
+        from cafleet.broker import AdministratorProtectedError
+
+        session = broker.create_session()
+        sid = session["session_id"]
+        admin_id = session["administrator_agent_id"]
+
+        placement = {
+            "director_agent_id": admin_id,
+            "tmux_session": "main",
+            "tmux_window_id": "@1",
+            "coding_agent": "claude",
+        }
+        with pytest.raises(AdministratorProtectedError) as exc_info:
+            broker.register_agent(
+                session_id=sid,
+                name="member",
+                description="member placed under Admin",
+                placement=placement,
+            )
+
+        assert "Administrator cannot be a director" in str(exc_info.value)
+
+    def test_admin_director_rejection_does_not_create_member(self, broker_db):
+        """After the guard fires, no member agent row exists."""
+        from cafleet import broker
+        from cafleet.broker import AdministratorProtectedError
+
+        session = broker.create_session()
+        sid = session["session_id"]
+        admin_id = session["administrator_agent_id"]
+
+        placement = {
+            "director_agent_id": admin_id,
+            "tmux_session": "main",
+            "tmux_window_id": "@1",
+            "coding_agent": "claude",
+        }
+        with pytest.raises(AdministratorProtectedError):
+            broker.register_agent(
+                session_id=sid,
+                name="rejected-member",
+                description="should not exist",
+                placement=placement,
+            )
+
+        names = {a["name"] for a in broker.list_agents(sid)}
+        assert "rejected-member" not in names
+        # Only the Administrator should remain.
+        assert names == {"Administrator"}
+
+    def test_placement_with_user_agent_director_still_works(self, broker_db):
+        """Regression guard: normal user-agent directors still accept placements."""
+        from cafleet import broker
+
+        session = broker.create_session()
+        sid = session["session_id"]
+
+        director = broker.register_agent(
+            session_id=sid, name="director", description="a user director"
+        )
+
+        placement = {
+            "director_agent_id": director["agent_id"],
+            "tmux_session": "main",
+            "tmux_window_id": "@1",
+            "coding_agent": "claude",
+        }
+        member = broker.register_agent(
+            session_id=sid,
+            name="member",
+            description="member of a user director",
+            placement=placement,
+        )
+
+        fetched = broker.get_agent(member["agent_id"], sid)
+        assert fetched is not None
+        assert fetched["placement"] is not None
+        assert fetched["placement"]["director_agent_id"] == director["agent_id"]

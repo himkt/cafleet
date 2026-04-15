@@ -13,11 +13,18 @@ behavioural contract defined in Step 6 task 4 of the design doc:
   (e) ``--session-id`` supplied to ``db init`` is silently accepted
       (Spec's "Provided but not required" rule)
 
+Design doc 0000025 (appended): the ``cafleet deregister`` subcommand
+catches ``AdministratorProtectedError`` from the broker and maps it to
+a non-zero exit with a user-visible error message. Administrators
+cannot be deregistered from the CLI.
+
 Test isolation mirrors ``test_session_cli.py``: a fresh ``tmp_path`` DB,
 ``config.settings.database_url`` monkeypatched, and broker engine
 singletons reset between tests.
 """
 
+import json
+import sqlite3
 import uuid
 
 import pytest
@@ -358,4 +365,124 @@ class TestSessionIdSilentlyAcceptedWhereNotRequired:
             f"session create with --session-id must be silently accepted. "
             f"exit_code={result.exit_code}, output: {result.output}, "
             f"exception: {result.exception}"
+        )
+
+
+# ===========================================================================
+# Design doc 0000025 §D — Administrator cannot be deregistered via the CLI
+# ===========================================================================
+
+
+def _create_session_via_cli(runner: CliRunner) -> tuple[str, str]:
+    """Run ``session create --json`` and return (session_id, administrator_agent_id)."""
+    result = runner.invoke(cli, ["session", "create", "--json"])
+    assert result.exit_code == 0, (
+        f"session create --json failed. output: {result.output}, "
+        f"exception: {result.exception}"
+    )
+    data = json.loads(result.output)
+    return data["session_id"], data["administrator_agent_id"]
+
+
+def _fetch_agent_status(db_file, agent_id: str) -> tuple[str, str | None]:
+    """Return (status, deregistered_at) for a given agent_id via raw SQLite."""
+    conn = sqlite3.connect(str(db_file))
+    try:
+        row = conn.execute(
+            "SELECT status, deregistered_at FROM agents WHERE agent_id = ?",
+            (agent_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, f"agent {agent_id} not found"
+    return row[0], row[1]
+
+
+class TestDeregisterAdministratorCliGuard:
+    """``cafleet deregister --agent-id <admin_id>`` must fail with a clear error.
+
+    The broker raises ``AdministratorProtectedError``; the CLI catches it
+    and maps it to ``click.UsageError`` → exit code 1 with a message on
+    stderr (folded into ``result.output`` under CliRunner's default
+    ``mix_stderr=True``).
+    """
+
+    def test_cli_deregister_admin_exits_nonzero(self, tmp_path, monkeypatch):
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        init = runner.invoke(cli, ["db", "init"])
+        assert init.exit_code == 0
+
+        session_id, admin_id = _create_session_via_cli(runner)
+
+        result = runner.invoke(
+            cli,
+            ["--session-id", session_id, "deregister", "--agent-id", admin_id],
+        )
+        assert result.exit_code != 0, (
+            f"cafleet deregister on an Administrator must exit non-zero. "
+            f"exit_code={result.exit_code}, output: {result.output}"
+        )
+
+    def test_cli_deregister_admin_message_is_user_friendly(
+        self, tmp_path, monkeypatch
+    ):
+        """The error output must mention the guard text, not a raw traceback."""
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        init = runner.invoke(cli, ["db", "init"])
+        assert init.exit_code == 0
+
+        session_id, admin_id = _create_session_via_cli(runner)
+
+        result = runner.invoke(
+            cli,
+            ["--session-id", session_id, "deregister", "--agent-id", admin_id],
+        )
+        out = result.output or ""
+        assert "Administrator cannot be deregistered" in out, (
+            f"error output must mention 'Administrator cannot be deregistered'. "
+            f"got: {out!r}"
+        )
+        assert "Traceback" not in out, (
+            f"error output must be a friendly message, not a raw traceback. "
+            f"got: {out!r}"
+        )
+
+    def test_cli_deregister_admin_leaves_row_active(self, tmp_path, monkeypatch):
+        """The administrators row must still be active after the failed CLI call."""
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        init = runner.invoke(cli, ["db", "init"])
+        assert init.exit_code == 0
+
+        session_id, admin_id = _create_session_via_cli(runner)
+
+        runner.invoke(
+            cli,
+            ["--session-id", session_id, "deregister", "--agent-id", admin_id],
+        )
+        status, deregistered_at = _fetch_agent_status(db_file, admin_id)
+        assert status == "active", (
+            f"Administrator row must still be active after failed CLI deregister, "
+            f"got status={status!r}"
+        )
+        assert deregistered_at is None, (
+            f"Administrator must not have a deregistered_at timestamp after "
+            f"failed CLI deregister, got {deregistered_at!r}"
         )
