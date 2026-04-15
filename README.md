@@ -113,7 +113,7 @@ Global flags (placed **before** the subcommand):
 
 | Flag | Required | Description |
 |---|---|---|
-| `--session-id <uuid>` | Yes (for client + member subcommands) | Session UUID for agent routing. Required for `register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member *`. Silently accepted (and ignored) on `db init` / `session *`. |
+| `--session-id <id>` | Yes (for client + member subcommands) | Session identifier for agent routing (opaque string — new sessions get a UUIDv4, migrated sessions reuse a 64-char hex value). Required for `register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member *`. Silently accepted (and ignored) on `db init` / `session *`. |
 | `--json` | No | Emit JSON output. |
 
 Configuration via environment variables:

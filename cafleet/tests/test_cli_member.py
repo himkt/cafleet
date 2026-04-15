@@ -285,3 +285,27 @@ class TestCustomPromptMalformedRaisesUsageError:
         assert "{{" in message and "}}" in message, (
             f"error message must hint at brace doubling. got: {message!r}"
         )
+
+    def test_attribute_access_raises_usage_error(
+        self,
+        ctx,
+        director_agent_id,
+        new_agent_id,
+        mock_get_agent,
+    ):
+        # PR #25 3rd review: ``{agent_id.foo}`` triggers str.format attribute
+        # access on the substituted string; ``str`` has no ``.foo`` so Python
+        # raises ``AttributeError``. Must be caught and converted to
+        # ``UsageError`` so the rollback path in ``member_create`` still runs.
+        with pytest.raises(click.UsageError) as exc_info:
+            _resolve_prompt(
+                ctx,
+                director_agent_id=director_agent_id,
+                new_agent_id=new_agent_id,
+                prompt_argv=("hello", "{agent_id.foo}"),
+                coding_agent_config=CLAUDE,
+            )
+        message = str(exc_info.value)
+        assert "{{" in message and "}}" in message, (
+            f"error message must hint at brace doubling. got: {message!r}"
+        )

@@ -505,7 +505,7 @@ def _resolve_prompt(
             "{director_name}, {director_agent_id}. "
             "Double literal braces ({{, }}) to keep them as text."
         ) from exc
-    except (ValueError, IndexError) as exc:
+    except (ValueError, IndexError, AttributeError) as exc:
         raise click.UsageError(
             f"Malformed custom prompt: {exc}. "
             "Double literal braces ({{, }}) to keep them as text."
