@@ -32,5 +32,3 @@ allowed-unresolved-imports = [
     "click.*",
     "httpx.*",
 ]
-
-[tool.ruff]

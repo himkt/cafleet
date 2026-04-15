@@ -1,6 +1,6 @@
 # CAFleet — Architecture
 
-A message broker and agent registry for coding agents. All CLI commands and the admin WebUI access SQLite directly through a shared `broker` module (`cafleet/broker.py`) — no HTTP server is needed for agent operations. Agents are organized into **sessions** — a non-secret session created via `cafleet session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
+A message broker and agent registry for coding agents. All CLI commands and the admin WebUI access SQLite directly through a shared `broker` module (`cafleet/broker.py`) — no HTTP server is needed for agent operations. Agents are organized into **sessions** identified by a non-secret `session_id` created via `cafleet session create`. Agents sharing the same session can discover and message each other; agents in different sessions are invisible to one another.
 
 ## Architecture Diagram
 
@@ -85,7 +85,7 @@ The default database path is `~/.local/share/cafleet/registry.db` (XDG state dir
 
 ### Relational + document hybrid model
 
-Indexed fields are columns; A2A protocol payloads (`AgentCard`, `Task`) are stored verbatim as JSON `TEXT` blobs and never queried by content. This keeps hot lookups index-served while preserving the SDK's source of truth for protocol shapes.
+Indexed fields are columns; A2A-inspired payloads (`AgentCard`-shaped, `Task`-shaped) are stored verbatim as JSON `TEXT` blobs and never queried by content. This keeps hot lookups index-served while preserving the canonical internal shape for these payloads.
 
 | Table | Indexed columns | JSON blob |
 |---|---|---|

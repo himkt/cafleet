@@ -491,12 +491,25 @@ def _resolve_prompt(
         if prompt_argv
         else coding_agent_config.default_prompt_template
     )
-    return template.format(
-        session_id=session_id,
-        agent_id=new_agent_id,
-        director_name=director["name"],
-        director_agent_id=director_agent_id,
-    )
+    try:
+        return template.format(
+            session_id=session_id,
+            agent_id=new_agent_id,
+            director_name=director["name"],
+            director_agent_id=director_agent_id,
+        )
+    except KeyError as exc:
+        raise click.UsageError(
+            f"Unknown placeholder {exc} in custom prompt. "
+            "Supported placeholders: {session_id}, {agent_id}, "
+            "{director_name}, {director_agent_id}. "
+            "Double literal braces ({{, }}) to keep them as text."
+        ) from exc
+    except (ValueError, IndexError) as exc:
+        raise click.UsageError(
+            f"Malformed custom prompt: {exc}. "
+            "Double literal braces ({{, }}) to keep them as text."
+        ) from exc
 
 
 def _rollback_register(new_agent_id, *, session_id, reason):

@@ -228,3 +228,60 @@ class TestCustomPromptDoubledBraceEscape:
             f"doubled-brace escape must not substitute director_agent_id. "
             f"got: {result!r}"
         )
+
+
+# ===========================================================================
+# (e) malformed custom prompts surface as click.UsageError, not KeyError /
+#     ValueError, so member_create's rollback path runs.
+# ===========================================================================
+
+
+class TestCustomPromptMalformedRaisesUsageError:
+    """PR #25 review feedback: ``str.format`` failures must convert to
+    ``click.UsageError`` so ``member_create``'s rollback path (which only
+    catches ``UsageError``) reliably runs and the just-registered agent
+    does not get orphaned in the registry.
+    """
+
+    def test_unknown_placeholder_raises_usage_error(
+        self,
+        ctx,
+        director_agent_id,
+        new_agent_id,
+        mock_get_agent,
+    ):
+        with pytest.raises(click.UsageError) as exc_info:
+            _resolve_prompt(
+                ctx,
+                director_agent_id=director_agent_id,
+                new_agent_id=new_agent_id,
+                prompt_argv=("hello", "{foo}"),
+                coding_agent_config=CLAUDE,
+            )
+        message = str(exc_info.value)
+        assert "foo" in message, (
+            f"error message must name the unknown placeholder. got: {message!r}"
+        )
+        assert "{session_id}" in message and "{agent_id}" in message, (
+            f"error message must list supported placeholders. got: {message!r}"
+        )
+
+    def test_unmatched_brace_raises_usage_error(
+        self,
+        ctx,
+        director_agent_id,
+        new_agent_id,
+        mock_get_agent,
+    ):
+        with pytest.raises(click.UsageError) as exc_info:
+            _resolve_prompt(
+                ctx,
+                director_agent_id=director_agent_id,
+                new_agent_id=new_agent_id,
+                prompt_argv=("hello", "{unclosed"),
+                coding_agent_config=CLAUDE,
+            )
+        message = str(exc_info.value)
+        assert "{{" in message and "}}" in message, (
+            f"error message must hint at brace doubling. got: {message!r}"
+        )
