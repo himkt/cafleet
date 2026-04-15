@@ -1,7 +1,7 @@
 # Add `cafleet server` CLI subcommand to launch the admin WebUI server
 
 **Status**: Approved
-**Progress**: 13/22 tasks complete
+**Progress**: 20/22 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -10,19 +10,19 @@ Add a `cafleet server` subcommand that launches the existing admin WebUI FastAPI
 
 ## Success Criteria
 
-- [ ] `cafleet server [--host <addr>] [--port <int>]` starts the admin WebUI FastAPI app via uvicorn and serves `/ui/` + `/ui/api/*` identically to the current `mise //cafleet:dev`
-- [ ] `--host` defaults to `127.0.0.1` and `--port` defaults to `8000` (sourced from `settings.broker_host` / `settings.broker_port`)
-- [ ] `Settings.broker_host` default is `127.0.0.1` (was `0.0.0.0`)
-- [ ] `Settings.broker_host` reads `CAFLEET_BROKER_HOST` and `Settings.broker_port` reads `CAFLEET_BROKER_PORT` via explicit `validation_alias` (today they read `BROKER_HOST` / `BROKER_PORT`; this change aligns with `CAFLEET_DATABASE_URL`)
-- [ ] `cafleet server` does **not** require `--session-id`; supplying one is silently accepted (matches the `db init` / `session *` pattern)
-- [ ] `if __name__ == "__main__"` block is removed from `cafleet/src/cafleet/server.py`; module-level `import uvicorn`, `from cafleet.config import settings`, `import logging`, and the dead `logger` are all removed; `app = create_app()` at module scope is preserved
-- [ ] `_default_webui_dist_dir()` is renamed to `default_webui_dist_dir()` (public) since `create_app` and tests now consume it across module boundaries
-- [ ] `cafleet/mise.toml` `[tasks.dev]` runs `uv run uvicorn cafleet.server:app --host 127.0.0.1 --port 8000` (direct uvicorn, **not** `cafleet server`) — both paths coexist as independent entry points with identical explicit host/port
-- [ ] On startup, if the bundled WebUI dist dir does not exist, a one-line warning is emitted to stderr: `warning: admin WebUI is not built. /ui/ will return 404. Run 'mise //admin:build'.`. The warning fires from `create_app()` so every startup path (`cafleet server`, `mise //cafleet:dev`, and any `uv run uvicorn cafleet.server:app`) sees it
-- [ ] Port-in-use errors are NOT wrapped — uvicorn's native `OSError` propagates so the user sees the stock uvicorn/click traceback
-- [ ] Smoke tests via `CliRunner`: (a) `cafleet server --help` exits 0 and shows both flags; (b) flag parsing succeeds with valid values; (c) `cafleet --session-id <uuid> server --help` is silently accepted; (d) missing WebUI dist produces the warning via `create_app()`; (e) `Settings().broker_host == "127.0.0.1"` default assertion
-- [ ] Docs updated FIRST (before code): `ARCHITECTURE.md`, `docs/spec/cli-options.md`, `README.md`, `cafleet/mise.toml`, `.claude/rules/commands.md`, `.claude/skills/cafleet/SKILL.md`
-- [ ] `mise //cafleet:test`, `mise //:lint`, `mise //:format`, `mise //:typecheck` all pass
+- [x] `cafleet server [--host <addr>] [--port <int>]` starts the admin WebUI FastAPI app via uvicorn and serves `/ui/` + `/ui/api/*` identically to the current `mise //cafleet:dev`
+- [x] `--host` defaults to `127.0.0.1` and `--port` defaults to `8000` (sourced from `settings.broker_host` / `settings.broker_port`)
+- [x] `Settings.broker_host` default is `127.0.0.1` (was `0.0.0.0`)
+- [x] `Settings.broker_host` reads `CAFLEET_BROKER_HOST` and `Settings.broker_port` reads `CAFLEET_BROKER_PORT` via explicit `validation_alias` (today they read `BROKER_HOST` / `BROKER_PORT`; this change aligns with `CAFLEET_DATABASE_URL`)
+- [x] `cafleet server` does **not** require `--session-id`; supplying one is silently accepted (matches the `db init` / `session *` pattern)
+- [x] `if __name__ == "__main__"` block is removed from `cafleet/src/cafleet/server.py`; module-level `import uvicorn`, `from cafleet.config import settings`, `import logging`, and the dead `logger` are all removed; `app = create_app()` at module scope is preserved
+- [x] `_default_webui_dist_dir()` is renamed to `default_webui_dist_dir()` (public) since `create_app` and tests now consume it across module boundaries
+- [x] `cafleet/mise.toml` `[tasks.dev]` runs `uv run uvicorn cafleet.server:app --host 127.0.0.1 --port 8000` (direct uvicorn, **not** `cafleet server`) — both paths coexist as independent entry points with identical explicit host/port
+- [x] On startup, if the bundled WebUI dist dir does not exist, a one-line warning is emitted to stderr: `warning: admin WebUI is not built. /ui/ will return 404. Run 'mise //admin:build'.`. The warning fires from `create_app()` so every startup path (`cafleet server`, `mise //cafleet:dev`, and any `uv run uvicorn cafleet.server:app`) sees it
+- [x] Port-in-use errors are NOT wrapped — uvicorn's native `OSError` propagates so the user sees the stock uvicorn/click traceback
+- [x] Smoke tests via `CliRunner`: (a) `cafleet server --help` exits 0 and shows both flags; (b) flag parsing succeeds with valid values; (c) `cafleet --session-id <uuid> server --help` is silently accepted; (d) missing WebUI dist produces the warning via `create_app()`; (e) `Settings().broker_host == "127.0.0.1"` default assertion
+- [x] Docs updated FIRST (before code): `ARCHITECTURE.md`, `docs/spec/cli-options.md`, `README.md`, `cafleet/mise.toml`, `.claude/rules/commands.md`, `.claude/skills/cafleet/SKILL.md`
+- [x] `mise //cafleet:test`, `mise //:lint`, `mise //:format`, `mise //:typecheck` all pass
 
 ---
 
@@ -301,16 +301,16 @@ No functional test spins up a real uvicorn server — smoke tests only, per Dire
 
 ### Step 7: Tests
 
-- [ ] Create `cafleet/tests/test_server_cli.py` mirroring `test_cli_session_flag.py` style. Include the five test classes listed in the Specification: `TestServerCommandHelp`, `TestServerCommandFlagParsing`, `TestServerDoesNotRequireSessionId`, `TestWebUIDistWarning`, `TestBrokerHostDefault`. Use `monkeypatch` to replace `uvicorn.run` with a no-op capturing call args; `TestWebUIDistWarning` exercises `create_app()` directly (both with `webui_dist_dir=None` for the warning path and with an explicit `tmp_path` override to prove the gate). <!-- completed: -->
-- [ ] Include the `Settings().broker_host == "127.0.0.1"` assertion in `TestBrokerHostDefault`. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` — must pass with zero failures. <!-- completed: -->
+- [x] Create `cafleet/tests/test_server_cli.py` mirroring `test_cli_session_flag.py` style. Include the five test classes listed in the Specification: `TestServerCommandHelp`, `TestServerCommandFlagParsing`, `TestServerDoesNotRequireSessionId`, `TestWebUIDistWarning`, `TestBrokerHostDefault`. Use `monkeypatch` to replace `uvicorn.run` with a no-op capturing call args; `TestWebUIDistWarning` exercises `create_app()` directly (both with `webui_dist_dir=None` for the warning path and with an explicit `tmp_path` override to prove the gate). <!-- completed: 2026-04-15T11:46 -->
+- [x] Include the `Settings().broker_host == "127.0.0.1"` assertion in `TestBrokerHostDefault`. <!-- completed: 2026-04-15T11:46 -->
+- [x] Run `mise //cafleet:test` — must pass with zero failures. <!-- completed: 2026-04-15T12:00 -->
 
 ### Step 8: Quality gates
 
-- [ ] Run `mise //:lint` — must pass (ruff F401 would catch any missed dead imports from Step 5). <!-- completed: -->
-- [ ] Run `mise //:format` — must pass. <!-- completed: -->
-- [ ] Run `mise //:typecheck` — must pass. <!-- completed: -->
-- [ ] Manual smoke: in a terminal, run `cafleet server`; curl `http://127.0.0.1:8000/ui/api/sessions` (or open `http://127.0.0.1:8000/ui/` if the WebUI dist is built); verify the startup warning appears when the WebUI dist is missing; Ctrl-C cleanly shuts down. Confirm `mise //cafleet:dev` still starts the server on `127.0.0.1:8000` with the new uvicorn-direct invocation AND emits the same warning when dist is missing. Confirm `CAFLEET_BROKER_PORT=9001 cafleet server` binds 9001. <!-- completed: -->
+- [x] Run `mise //:lint` — must pass (ruff F401 would catch any missed dead imports from Step 5). <!-- completed: 2026-04-15T12:10 -->
+- [x] Run `mise //:format` — must pass. <!-- completed: 2026-04-15T12:10 -->
+- [x] Run `mise //:typecheck` — must pass. <!-- completed: 2026-04-15T12:10 -->
+- [x] Manual smoke: in a terminal, run `cafleet server`; curl `http://127.0.0.1:8000/ui/api/sessions` (or open `http://127.0.0.1:8000/ui/` if the WebUI dist is built); verify the startup warning appears when the WebUI dist is missing; Ctrl-C cleanly shuts down. Confirm `mise //cafleet:dev` still starts the server on `127.0.0.1:8000` with the new uvicorn-direct invocation AND emits the same warning when dist is missing. Confirm `CAFLEET_BROKER_PORT=9001 cafleet server` binds 9001. <!-- completed: 2026-04-15T12:00 -->
 
 ### Step 9: Finalize
 
