@@ -208,6 +208,107 @@ class TestListSessionAgents:
 
 
 # ===========================================================================
+# kind field on agents — design doc 0000025 §F
+# ===========================================================================
+
+
+class TestListSessionAgentsKind:
+    """/ui/api/agents exposes ``kind`` per row via ``broker.list_session_agents``.
+
+    webui_api.py is a thin passthrough (`GET /ui/api/agents` simply wraps
+    ``broker.list_session_agents(session_id)`` and wraps the result as
+    ``{"agents": [...]}``), so testing at the broker layer covers the
+    public HTTP surface.
+    """
+
+    def test_entries_include_kind_field(self):
+        from cafleet import broker
+
+        session = _create_session()
+        sid = session["session_id"]
+        _register_agent(sid, name="user-a")
+        _register_agent(sid, name="user-b")
+
+        result = broker.list_session_agents(sid)
+        for entry in result:
+            assert "kind" in entry, (
+                f"every agent entry must carry a 'kind' field, got entry={entry!r}"
+            )
+
+    def test_administrator_marked_as_builtin_administrator(self):
+        from cafleet import broker
+        from cafleet.broker import ADMINISTRATOR_KIND
+
+        session = _create_session()
+        sid = session["session_id"]
+        _register_agent(sid, name="user-a")
+        _register_agent(sid, name="user-b")
+
+        result = broker.list_session_agents(sid)
+        admins = [e for e in result if e.get("kind") == ADMINISTRATOR_KIND]
+        users = [e for e in result if e.get("kind") == "user"]
+
+        # Exactly one Administrator entry, and its name matches.
+        assert len(admins) == 1, (
+            f"expected exactly one Administrator entry, got {len(admins)}: {admins!r}"
+        )
+        assert admins[0]["name"] == "Administrator"
+        assert admins[0]["agent_id"] == session["administrator_agent_id"]
+
+        # The two user agents carry kind='user'.
+        assert len(users) == 2, (
+            f"expected 2 user-kind entries, got {len(users)}: {users!r}"
+        )
+        user_names = {e["name"] for e in users}
+        assert user_names == {"user-a", "user-b"}
+
+    def test_kind_values_are_restricted_to_known_set(self):
+        """No entry carries a kind outside the documented set."""
+        from cafleet import broker
+        from cafleet.broker import ADMINISTRATOR_KIND
+
+        session = _create_session()
+        sid = session["session_id"]
+        _register_agent(sid, name="user-a")
+
+        result = broker.list_session_agents(sid)
+        valid_kinds = {ADMINISTRATOR_KIND, "user"}
+        for entry in result:
+            assert entry.get("kind") in valid_kinds, (
+                f"kind must be one of {valid_kinds}, got {entry.get('kind')!r}"
+            )
+
+
+class TestGetAgentKind:
+    """broker.get_agent returned dict includes ``kind`` per §F."""
+
+    def test_get_agent_for_administrator_returns_builtin_administrator(self):
+        from cafleet import broker
+        from cafleet.broker import ADMINISTRATOR_KIND
+
+        session = _create_session()
+        sid = session["session_id"]
+        admin_id = session["administrator_agent_id"]
+
+        result = broker.get_agent(admin_id, sid)
+        assert result is not None
+        assert "kind" in result
+        assert result["kind"] == ADMINISTRATOR_KIND
+
+    def test_get_agent_for_user_returns_user_kind(self):
+        from cafleet import broker
+
+        session = _create_session()
+        sid = session["session_id"]
+        user = _register_agent(sid, name="regular")
+
+        result = broker.get_agent(user["agent_id"], sid)
+        assert result is not None
+        assert "kind" in result
+        assert result["kind"] == "user"
+
+
+# ===========================================================================
 # list_inbox
 # ===========================================================================
 
