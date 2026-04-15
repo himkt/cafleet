@@ -1,7 +1,7 @@
 # Add `cafleet server` CLI subcommand to launch the admin WebUI server
 
-**Status**: Approved
-**Progress**: 20/22 tasks complete
+**Status**: Complete
+**Progress**: 22/22 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -314,8 +314,8 @@ No functional test spins up a real uvicorn server — smoke tests only, per Dire
 
 ### Step 9: Finalize
 
-- [ ] Update Status to Complete and refresh Last Updated. <!-- completed: -->
-- [ ] Add a Changelog entry. <!-- completed: -->
+- [x] Update Status to Complete and refresh Last Updated. <!-- completed: 2026-04-15T12:15 -->
+- [x] Add a Changelog entry. <!-- completed: 2026-04-15T12:15 -->
 
 ---
 
@@ -325,3 +325,4 @@ No functional test spins up a real uvicorn server — smoke tests only, per Dire
 |------|---------|
 | 2026-04-14 | Initial draft |
 | 2026-04-14 | Reviewer revisions: (BLOCKER 1) added `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` `validation_alias` wiring to `config.py` as a new Step 4 bullet plus matching Success Criteria; (BLOCKER 2) replaced incorrect "pip-install no-restart" rationale with accurate "contributors restart manually between edits" wording; (BLOCKER 3) moved the missing-WebUI-dist warning from the CLI handler into `create_app()` gated on `webui_dist_dir is None` so every startup path fires it and tests with explicit overrides stay quiet; (NB 4) added explicit Step 5 bullets for removing dead `from cafleet.config import settings`, `import logging`, `logger`; (NB 5) added `TestBrokerHostDefault` asserting the `127.0.0.1` default; (NB 6) added explicit `--host 127.0.0.1` to mise dev to prevent silent divergence from `cafleet server`'s env-var-aware defaults; (NB 7) renamed `_default_webui_dist_dir` → `default_webui_dist_dir` since it now crosses module boundaries. Progress 18 → 22 tasks. |
+| 2026-04-15 | Implementation complete via CAFleet-orchestrated TDD cycle (Director / Programmer / Tester / Verifier). 9 commits on `feat/0000024-cafleet-server-cli`: docs first (architecture + cli-options + README + mise + commands + SKILL), then tests (`test_server_cli.py`, 5 classes / 17 tests), then code (config.py, server.py, cli.py). Final test suite 291/0; lint, format, typecheck all green; Verifier confirmed all 8 manual smoke items including end-to-end `CAFLEET_BROKER_PORT=9001 cafleet server` binding and live `/ui/api/sessions` HTTP 200. Status → Complete. |
