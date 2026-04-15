@@ -272,6 +272,10 @@ def register_agent(
                         f"Director agent '{director_id}' not found or not active "
                         f"in session '{session_id}'."
                     )
+                if _is_administrator_card(director.agent_card_json):
+                    raise AdministratorProtectedError(
+                        "Administrator cannot be a director"
+                    )
 
             session.add(
                 Agent(
@@ -377,10 +381,19 @@ def deregister_agent(agent_id: str) -> bool:
     """UPDATE status='deregistered', deregistered_at=now, DELETE placement.
 
     Returns True if agent was active and got deregistered.
+    Raises ``AdministratorProtectedError`` when the target is the built-in
+    Administrator agent (design 0000025 §D).
     """
     sm = get_sync_sessionmaker()
     with sm() as session:
         with session.begin():
+            card_json = session.execute(
+                select(Agent.agent_card_json).where(Agent.agent_id == agent_id)
+            ).scalar_one_or_none()
+            if card_json is not None and _is_administrator_card(card_json):
+                raise AdministratorProtectedError(
+                    "Administrator cannot be deregistered"
+                )
             result = cast(
                 CursorResult,
                 session.execute(

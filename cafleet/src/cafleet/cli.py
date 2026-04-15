@@ -480,6 +480,8 @@ def deregister(ctx, agent_id):
             click.echo(output.format_json({"status": "deregistered"}))
         else:
             click.echo("Agent deregistered successfully.")
+    except broker.AdministratorProtectedError as exc:
+        raise click.UsageError(str(exc))
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         ctx.exit(1)

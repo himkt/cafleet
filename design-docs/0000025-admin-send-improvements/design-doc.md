@@ -1,7 +1,7 @@
 # Admin Send UX Improvements — Administrator Agent, @mention Autocomplete, Newline Rendering
 
 **Status**: Approved
-**Progress**: 15/52 tasks complete
+**Progress**: 18/52 tasks complete
 **Last Updated**: 2026-04-15
 
 ## Overview
@@ -326,9 +326,9 @@ No markdown, no code-fence rendering, no link autolinking — explicitly out of 
 
 ### Step 5: Broker protections
 
-- [ ] `broker.deregister_agent`: before UPDATE, SELECT the target's card and raise `AdministratorProtectedError` if it matches. <!-- completed: -->
-- [ ] `broker.register_agent`: when `placement` is provided, reject `placement.director_agent_id` pointing at an Administrator. <!-- completed: -->
-- [ ] CLI `cafleet deregister`: catch `AdministratorProtectedError` → `click.UsageError` → exit 1. <!-- completed: -->
+- [x] `broker.deregister_agent`: before UPDATE, SELECT the target's card and raise `AdministratorProtectedError` if it matches. <!-- completed: 2026-04-15T15:40 -->
+- [x] `broker.register_agent`: when `placement` is provided, reject `placement.director_agent_id` pointing at an Administrator. <!-- completed: 2026-04-15T15:40 -->
+- [x] CLI `cafleet deregister`: catch `AdministratorProtectedError` → `click.UsageError` → exit 1. <!-- completed: 2026-04-15T15:40 -->
 
 ### Step 6: Broadcast recipient exclusion
 
