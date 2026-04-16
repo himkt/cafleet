@@ -5,6 +5,7 @@ import importlib.resources
 import json
 import os
 from pathlib import Path
+from typing import NoReturn
 
 import click
 from alembic import command
@@ -498,12 +499,8 @@ def _resolve_prompt(
         ) from exc
 
 
-def _rollback_register(new_agent_id, *, session_id, reason):
-    """Best-effort rollback of a just-created agent registration."""
-    click.echo(
-        f"Error: {reason}. Rolling back registration of {new_agent_id}.",
-        err=True,
-    )
+def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> NoReturn:
+    """Best-effort deregister of a just-created agent, then raise ClickException."""
     try:
         broker.deregister_agent(new_agent_id)
     except Exception as drop_exc:
@@ -514,6 +511,7 @@ def _rollback_register(new_agent_id, *, session_id, reason):
             f"Cause: {drop_exc}",
             err=True,
         )
+    raise click.ClickException(f"{reason}. Rolled back registration of {new_agent_id}.")
 
 
 @member.command("create")
@@ -569,8 +567,6 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
             session_id=session_id,
             reason=f"prompt resolution failed: {exc}",
         )
-        ctx.exit(1)
-        return
 
     try:
         fwd_env: dict[str, str] = {}
@@ -588,8 +584,6 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
             session_id=session_id,
             reason=f"tmux split-window failed: {exc}",
         )
-        ctx.exit(1)
-        return
 
     try:
         placement_view = broker.update_placement_pane_id(new_agent_id, pane_id)
@@ -603,8 +597,6 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
             session_id=session_id,
             reason=f"placement update failed: {exc}",
         )
-        ctx.exit(1)
-        return
 
     try:
         tmux.select_layout(target_window_id=director_ctx.window_id)
