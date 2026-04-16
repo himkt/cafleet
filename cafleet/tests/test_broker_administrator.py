@@ -1,21 +1,4 @@
-"""Tests for broker.py — Administrator agent helpers and constants.
-
-Design doc 0000025 Step 2 + Step 5: Administrator-related module-level
-helpers and the broker-layer protections built on top of them.
-
-This file covers:
-
-- ``ADMINISTRATOR_KIND`` constant (module-level string)
-- ``_administrator_agent_card(session_id)`` helper (dict builder)
-- ``_is_administrator_card(agent_card_json)`` helper (JSON-string predicate)
-- ``AdministratorProtectedError`` exception class
-- ``broker.deregister_agent`` guard (raises on Administrator)
-- ``broker.register_agent`` placement guard (rejects Admin as director)
-
-The broker-level integration tests mirror ``test_broker_registry.py``'s
-test-isolation pattern: a fresh in-memory SQLite engine per test, with
-``broker.get_sync_sessionmaker`` monkeypatched.
-"""
+"""Tests for the Administrator agent helpers, constants, and broker guards (design 0000025)."""
 
 import json
 import uuid
@@ -29,25 +12,13 @@ from cafleet.db.models import Base
 from cafleet.tmux import DirectorContext
 
 
-# Fake tmux context used when calling broker.create_session at the
-# broker layer (the CLI layer resolves this via tmux.director_context()).
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 
 def _create_session_with_ctx():
-    """Call broker.create_session with a fake DirectorContext.
-
-    Design 0000026 adds a required ``director_context`` arg; this helper
-    keeps the boilerplate in one place for every admin-guard test below.
-    """
     from cafleet import broker
 
     return broker.create_session(director_context=_FAKE_DIRECTOR_CTX)
-
-
-# ---------------------------------------------------------------------------
-# ADMINISTRATOR_KIND constant
-# ---------------------------------------------------------------------------
 
 
 class TestAdministratorKindConstant:
@@ -69,11 +40,6 @@ class TestAdministratorKindConstant:
         from cafleet.broker import ADMINISTRATOR_KIND
 
         assert isinstance(ADMINISTRATOR_KIND, str)
-
-
-# ---------------------------------------------------------------------------
-# _administrator_agent_card helper
-# ---------------------------------------------------------------------------
 
 
 class TestAdministratorAgentCard:
@@ -144,11 +110,6 @@ class TestAdministratorAgentCard:
         card_a = _administrator_agent_card(sid_a)
         card_b = _administrator_agent_card(sid_b)
         assert card_a["description"] != card_b["description"]
-
-
-# ---------------------------------------------------------------------------
-# _is_administrator_card helper
-# ---------------------------------------------------------------------------
 
 
 class TestIsAdministratorCard:
@@ -240,11 +201,6 @@ class TestIsAdministratorCard:
         assert _is_administrator_card("null") is False
 
 
-# ---------------------------------------------------------------------------
-# AdministratorProtectedError exception class
-# ---------------------------------------------------------------------------
-
-
 class TestAdministratorProtectedError:
     """Exception raised when an operation targets a built-in Administrator."""
 
@@ -274,14 +230,8 @@ class TestAdministratorProtectedError:
         assert msg in str(exc_info.value)
 
 
-# ---------------------------------------------------------------------------
-# Broker-level integration fixtures (shared by guard tests below)
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def sync_sessionmaker():
-    """Create a sync in-memory SQLite engine with all tables."""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)
@@ -297,13 +247,7 @@ def _patch_broker(sync_sessionmaker, monkeypatch):
 
 @pytest.fixture
 def broker_db(sync_sessionmaker, _patch_broker):
-    """Opt-in fixture: provides a broker backed by an ephemeral SQLite DB."""
     return sync_sessionmaker
-
-
-# ---------------------------------------------------------------------------
-# broker.deregister_agent — Administrator protection
-# ---------------------------------------------------------------------------
 
 
 class TestDeregisterAdministratorGuard:
@@ -355,11 +299,6 @@ class TestDeregisterAdministratorGuard:
         # 0000026) both remain; only the user agent was deregistered.
         names = {a["name"] for a in broker.list_agents(sid)}
         assert names == {"director", "Administrator"}
-
-
-# ---------------------------------------------------------------------------
-# broker.register_agent — placement guard
-# ---------------------------------------------------------------------------
 
 
 class TestRegisterAgentPlacementAdministratorGuard:
