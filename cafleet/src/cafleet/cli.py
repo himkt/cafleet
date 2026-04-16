@@ -249,30 +249,31 @@ def register(ctx, name, description, skills):
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
-    try:
-        parsed_skills = None
-        if skills is not None:
-            try:
-                parsed_skills = json.loads(skills)
-            except json.JSONDecodeError as e:
-                click.echo(f"Error: Invalid JSON in --skills: {e}", err=True)
-                ctx.exit(1)
-                return
+    parsed_skills = None
+    if skills is not None:
+        try:
+            parsed_skills = json.loads(skills)
+        except json.JSONDecodeError as exc:
+            click.echo(f"Error: Invalid JSON in --skills: {exc}", err=True)
+            ctx.exit(1)
+            return
 
+    try:
         result = broker.register_agent(
             session_id,
             name,
             description,
             skills=parsed_skills,
         )
-
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(result))
-        else:
-            click.echo(output.format_register(result))
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
         ctx.exit(1)
+        return
+
+    if ctx.obj["json_output"]:
+        click.echo(output.format_json(result))
+    else:
+        click.echo(output.format_register(result))
 
 
 @cli.command()
