@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet import broker
+from cafleet.broker import ADMINISTRATOR_KIND
 from cafleet.db.models import Base
 from cafleet.tmux import DirectorContext
 
@@ -182,9 +183,6 @@ class TestListSessionAgentsKind:
             )
 
     def test_administrator_marked_as_builtin_administrator(self):
-        from cafleet import broker
-        from cafleet.broker import ADMINISTRATOR_KIND
-
         session = _create_session()
         sid = session["session_id"]
         _register_agent(sid, name="user-a")
@@ -212,9 +210,6 @@ class TestListSessionAgentsKind:
 
     def test_kind_values_are_restricted_to_known_set(self):
         """No entry carries a kind outside the documented set."""
-        from cafleet import broker
-        from cafleet.broker import ADMINISTRATOR_KIND
-
         session = _create_session()
         sid = session["session_id"]
         _register_agent(sid, name="user-a")
@@ -231,9 +226,6 @@ class TestGetAgentKind:
     """broker.get_agent returned dict includes ``kind`` per §F."""
 
     def test_get_agent_for_administrator_returns_builtin_administrator(self):
-        from cafleet import broker
-        from cafleet.broker import ADMINISTRATOR_KIND
-
         session = _create_session()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]

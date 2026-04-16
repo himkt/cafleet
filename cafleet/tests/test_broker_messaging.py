@@ -41,8 +41,6 @@ def _register_agent(
     name: str = "test-agent",
     description: str = "A test agent",
 ) -> dict:
-    from cafleet import broker
-
     return broker.register_agent(
         session_id=session_id,
         name=name,

@@ -7,7 +7,7 @@ from click.testing import CliRunner
 
 from cafleet import server as server_mod
 from cafleet.cli import cli
-from cafleet.config import Settings
+from cafleet.config import Settings, settings
 
 
 class TestServerCommandHelp:
@@ -41,8 +41,6 @@ class TestServerCommandFlagParsing:
 
     def test_default_flags_pass_settings_defaults_to_uvicorn(self, monkeypatch):
         """No flags → uvicorn.run receives settings.broker_host / broker_port."""
-        from cafleet.config import settings
-
         captured: dict = {}
 
         def fake_run(*args, **kwargs):
