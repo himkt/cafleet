@@ -167,69 +167,68 @@ def create_session(
     }
 
     sm = get_sync_sessionmaker()
-    with sm() as session:
-        with session.begin():
-            # 1. INSERT sessions
-            session.add(
-                Session(
-                    session_id=session_id,
-                    label=label,
-                    created_at=created_at,
-                    deleted_at=None,
-                    director_agent_id=None,
-                )
+    with sm() as session, session.begin():
+        # 1. INSERT sessions
+        session.add(
+            Session(
+                session_id=session_id,
+                label=label,
+                created_at=created_at,
+                deleted_at=None,
+                director_agent_id=None,
             )
-            session.flush()
+        )
+        session.flush()
 
-            # 2. INSERT root Director agent
-            session.add(
-                Agent(
-                    agent_id=director_agent_id,
-                    session_id=session_id,
-                    name=_DIRECTOR_NAME,
-                    description=_DIRECTOR_DESCRIPTION,
-                    status="active",
-                    registered_at=created_at,
-                    deregistered_at=None,
-                    agent_card_json=json.dumps(director_card),
-                )
+        # 2. INSERT root Director agent
+        session.add(
+            Agent(
+                agent_id=director_agent_id,
+                session_id=session_id,
+                name=_DIRECTOR_NAME,
+                description=_DIRECTOR_DESCRIPTION,
+                status="active",
+                registered_at=created_at,
+                deregistered_at=None,
+                agent_card_json=json.dumps(director_card),
             )
-            session.flush()
+        )
+        session.flush()
 
-            # 3. INSERT Director placement (director_agent_id=NULL, no parent)
-            session.add(
-                AgentPlacement(
-                    agent_id=director_agent_id,
-                    director_agent_id=None,
-                    tmux_session=director_context.session,
-                    tmux_window_id=director_context.window_id,
-                    tmux_pane_id=director_context.pane_id,
-                    coding_agent=_ROOT_DIRECTOR_CODING_AGENT,
-                    created_at=created_at,
-                )
+        # 3. INSERT Director placement (director_agent_id=NULL, no parent)
+        session.add(
+            AgentPlacement(
+                agent_id=director_agent_id,
+                director_agent_id=None,
+                tmux_session=director_context.session,
+                tmux_window_id=director_context.window_id,
+                tmux_pane_id=director_context.pane_id,
+                coding_agent=_ROOT_DIRECTOR_CODING_AGENT,
+                created_at=created_at,
             )
-            session.flush()
+        )
+        session.flush()
 
-            # 4. UPDATE sessions.director_agent_id
-            session.execute(
-                update(Session)
-                .where(Session.session_id == session_id)
-                .values(director_agent_id=director_agent_id)
-            )
+        # 4. UPDATE sessions.director_agent_id
+        session.execute(
+            update(Session)
+            .where(Session.session_id == session_id)
+            .values(director_agent_id=director_agent_id)
+        )
 
-            # 5. INSERT built-in Administrator (per design 0000025)
-            session.add(
-                Agent(
-                    agent_id=administrator_agent_id,
-                    session_id=session_id,
-                    name=administrator_card["name"],
-                    description=administrator_card["description"],
-                    status="active",
-                    registered_at=created_at,
-                    deregistered_at=None,
-                    agent_card_json=json.dumps(administrator_card),
-                )
+        # 5. INSERT built-in Administrator (per design 0000025)
+        session.add(
+            Agent(
+                agent_id=administrator_agent_id,
+                session_id=session_id,
+                name=administrator_card["name"],
+                description=administrator_card["description"],
+                status="active",
+                registered_at=created_at,
+                deregistered_at=None,
+                agent_card_json=json.dumps(administrator_card),
             )
+        )
 
     return {
         "session_id": session_id,
@@ -327,59 +326,54 @@ def delete_session(session_id: str) -> dict:
     """
     now = _now_iso()
     sm = get_sync_sessionmaker()
-    with sm() as session:
-        with session.begin():
-            # Check the session exists at all first so we can distinguish
-            # "not found" from "already soft-deleted".
-            exists_row = session.execute(
-                select(Session.session_id).where(Session.session_id == session_id)
-            ).first()
-            if exists_row is None:
-                # ClickException exits 1 (matches ``session show`` wording +
-                # exit code per design 0000026); UsageError would exit 2 with
-                # a Usage: banner which is wrong for a runtime "not found".
-                raise click.ClickException(f"session '{session_id}' not found.")
+    with sm() as session, session.begin():
+        # Check the session exists at all first so we can distinguish
+        # "not found" from "already soft-deleted".
+        exists_row = session.execute(
+            select(Session.session_id).where(Session.session_id == session_id)
+        ).first()
+        if exists_row is None:
+            # ClickException exits 1 (matches ``session show`` wording +
+            # exit code per design 0000026); UsageError would exit 2 with
+            # a Usage: banner which is wrong for a runtime "not found".
+            raise click.ClickException(f"session '{session_id}' not found.")
 
-            # 1. Soft-delete the session row (idempotent via deleted_at IS NULL).
-            step1 = cast(
-                CursorResult,
-                session.execute(
-                    update(Session)
-                    .where(
-                        Session.session_id == session_id,
-                        Session.deleted_at.is_(None),
-                    )
-                    .values(deleted_at=now)
-                ),
-            )
-
-            if step1.rowcount == 0:
-                # Session exists but was already soft-deleted. Short-circuit the cascade.
-                return {"deregistered_count": 0}
-
-            # 2. Deregister every active agent in the session and count them.
-            step2 = cast(
-                CursorResult,
-                session.execute(
-                    update(Agent)
-                    .where(
-                        Agent.session_id == session_id,
-                        Agent.status == "active",
-                    )
-                    .values(status="deregistered", deregistered_at=now)
-                ),
-            )
-            deregistered_count = step2.rowcount
-
-            # 3. Drop every placement whose agent belongs to this session.
-            agents_in_session = select(Agent.agent_id).where(
-                Agent.session_id == session_id
-            )
+        # 1. Soft-delete the session row (idempotent via deleted_at IS NULL).
+        step1 = cast(
+            CursorResult,
             session.execute(
-                delete(AgentPlacement).where(
-                    AgentPlacement.agent_id.in_(agents_in_session)
+                update(Session)
+                .where(
+                    Session.session_id == session_id,
+                    Session.deleted_at.is_(None),
                 )
-            )
+                .values(deleted_at=now)
+            ),
+        )
+
+        if step1.rowcount == 0:
+            # Session exists but was already soft-deleted. Short-circuit the cascade.
+            return {"deregistered_count": 0}
+
+        # 2. Deregister every active agent in the session and count them.
+        step2 = cast(
+            CursorResult,
+            session.execute(
+                update(Agent)
+                .where(
+                    Agent.session_id == session_id,
+                    Agent.status == "active",
+                )
+                .values(status="deregistered", deregistered_at=now)
+            ),
+        )
+        deregistered_count = step2.rowcount
+
+        # 3. Drop every placement whose agent belongs to this session.
+        agents_in_session = select(Agent.agent_id).where(Agent.session_id == session_id)
+        session.execute(
+            delete(AgentPlacement).where(AgentPlacement.agent_id.in_(agents_in_session))
+        )
 
     return {"deregistered_count": deregistered_count}
 
@@ -418,51 +412,48 @@ def register_agent(
     }
 
     sm = get_sync_sessionmaker()
-    with sm() as session:
-        with session.begin():
-            if placement is not None:
-                # Validate director exists and is active in the same session
-                director_id = placement["director_agent_id"]
-                director = session.execute(
-                    select(Agent).where(
-                        Agent.agent_id == director_id,
-                        Agent.session_id == session_id,
-                        Agent.status == "active",
-                    )
-                ).scalar_one_or_none()
-                if director is None:
-                    raise click.UsageError(
-                        f"Director agent '{director_id}' not found or not active "
-                        f"in session '{session_id}'."
-                    )
-                if _is_administrator_card(director.agent_card_json):
-                    raise AdministratorProtectedError(
-                        "Administrator cannot be a director"
-                    )
+    with sm() as session, session.begin():
+        if placement is not None:
+            # Validate director exists and is active in the same session
+            director_id = placement["director_agent_id"]
+            director = session.execute(
+                select(Agent).where(
+                    Agent.agent_id == director_id,
+                    Agent.session_id == session_id,
+                    Agent.status == "active",
+                )
+            ).scalar_one_or_none()
+            if director is None:
+                raise click.UsageError(
+                    f"Director agent '{director_id}' not found or not active "
+                    f"in session '{session_id}'."
+                )
+            if _is_administrator_card(director.agent_card_json):
+                raise AdministratorProtectedError("Administrator cannot be a director")
 
+        session.add(
+            Agent(
+                agent_id=agent_id,
+                session_id=session_id,
+                name=name,
+                description=description,
+                status="active",
+                registered_at=registered_at,
+                agent_card_json=json.dumps(agent_card),
+            )
+        )
+        if placement is not None:
             session.add(
-                Agent(
+                AgentPlacement(
                     agent_id=agent_id,
-                    session_id=session_id,
-                    name=name,
-                    description=description,
-                    status="active",
-                    registered_at=registered_at,
-                    agent_card_json=json.dumps(agent_card),
+                    director_agent_id=placement["director_agent_id"],
+                    tmux_session=placement["tmux_session"],
+                    tmux_window_id=placement["tmux_window_id"],
+                    tmux_pane_id=placement.get("tmux_pane_id"),
+                    coding_agent=placement.get("coding_agent", "claude"),
+                    created_at=registered_at,
                 )
             )
-            if placement is not None:
-                session.add(
-                    AgentPlacement(
-                        agent_id=agent_id,
-                        director_agent_id=placement["director_agent_id"],
-                        tmux_session=placement["tmux_session"],
-                        tmux_window_id=placement["tmux_window_id"],
-                        tmux_pane_id=placement.get("tmux_pane_id"),
-                        coding_agent=placement.get("coding_agent", "claude"),
-                        created_at=registered_at,
-                    )
-                )
 
     return {
         "agent_id": agent_id,
@@ -555,45 +546,42 @@ def deregister_agent(agent_id: str) -> bool:
     session (design 0000026): use ``cafleet session delete`` instead.
     """
     sm = get_sync_sessionmaker()
-    with sm() as session:
-        with session.begin():
-            # Root-Director guard (design 0000026). A session's root Director
-            # is the agent referenced by ``sessions.director_agent_id`` — if
-            # any session points at this agent_id, refuse.
-            root_director_hit = session.execute(
-                select(Session.session_id).where(Session.director_agent_id == agent_id)
-            ).first()
-            if root_director_hit is not None:
-                raise click.UsageError(
-                    "cannot deregister the root Director; "
-                    "use 'cafleet session delete' instead"
-                )
-
-            card_json = session.execute(
-                select(Agent.agent_card_json).where(Agent.agent_id == agent_id)
-            ).scalar_one_or_none()
-            if card_json is not None and _is_administrator_card(card_json):
-                raise AdministratorProtectedError(
-                    "Administrator cannot be deregistered"
-                )
-            result = cast(
-                CursorResult,
-                session.execute(
-                    update(Agent)
-                    .where(
-                        Agent.agent_id == agent_id,
-                        Agent.status == "active",
-                    )
-                    .values(
-                        status="deregistered",
-                        deregistered_at=_now_iso(),
-                    )
-                ),
+    with sm() as session, session.begin():
+        # Root-Director guard (design 0000026). A session's root Director
+        # is the agent referenced by ``sessions.director_agent_id`` — if
+        # any session points at this agent_id, refuse.
+        root_director_hit = session.execute(
+            select(Session.session_id).where(Session.director_agent_id == agent_id)
+        ).first()
+        if root_director_hit is not None:
+            raise click.UsageError(
+                "cannot deregister the root Director; "
+                "use 'cafleet session delete' instead"
             )
-            if result.rowcount > 0:
-                session.execute(
-                    delete(AgentPlacement).where(AgentPlacement.agent_id == agent_id)
+
+        card_json = session.execute(
+            select(Agent.agent_card_json).where(Agent.agent_id == agent_id)
+        ).scalar_one_or_none()
+        if card_json is not None and _is_administrator_card(card_json):
+            raise AdministratorProtectedError("Administrator cannot be deregistered")
+        result = cast(
+            CursorResult,
+            session.execute(
+                update(Agent)
+                .where(
+                    Agent.agent_id == agent_id,
+                    Agent.status == "active",
                 )
+                .values(
+                    status="deregistered",
+                    deregistered_at=_now_iso(),
+                )
+            ),
+        )
+        if result.rowcount > 0:
+            session.execute(
+                delete(AgentPlacement).where(AgentPlacement.agent_id == agent_id)
+            )
     return result.rowcount > 0
 
 
@@ -759,66 +747,65 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
         raise ValueError(f"Invalid destination format: {to}") from exc
 
     sm = get_sync_sessionmaker()
-    with sm() as session:
-        with session.begin():
-            # Validate sender exists and is active in session
-            sender_agent = session.execute(
-                select(Agent).where(
-                    Agent.agent_id == agent_id,
-                    Agent.session_id == session_id,
-                    Agent.status == "active",
-                )
-            ).scalar_one_or_none()
-            if sender_agent is None:
-                raise ValueError(
-                    f"Sender agent not found or not active in session: {agent_id}"
-                )
-
-            # 2. Destination agent exists and is active
-            dest_agent = session.execute(
-                select(Agent).where(
-                    Agent.agent_id == to,
-                    Agent.status == "active",
-                )
-            ).scalar_one_or_none()
-            if dest_agent is None:
-                raise ValueError(f"Destination agent not found: {to}")
-
-            # 3. Destination agent is in the same session
-            if dest_agent.session_id != session_id:
-                raise ValueError(f"Destination agent not in session: {to}")
-
-            now = _now_iso()
-            task_dict = {
-                "id": str(uuid.uuid4()),
-                "contextId": to,
-                "status": {
-                    "state": "input_required",
-                    "timestamp": now,
-                },
-                "artifacts": [
-                    {
-                        "artifactId": str(uuid.uuid4()),
-                        "parts": [{"kind": "text", "text": text}],
-                    }
-                ],
-                "metadata": {
-                    "fromAgentId": agent_id,
-                    "toAgentId": to,
-                    "type": "unicast",
-                },
-                "history": [],
-            }
-
-            _save_task(session, task_dict)
-
-            # tmux push notification (best-effort)
-            notification_sent = _try_notify_recipient(
-                session,
-                session_id=session_id,
-                recipient_id=to,
-                sender_id=agent_id,
+    with sm() as session, session.begin():
+        # Validate sender exists and is active in session
+        sender_agent = session.execute(
+            select(Agent).where(
+                Agent.agent_id == agent_id,
+                Agent.session_id == session_id,
+                Agent.status == "active",
             )
+        ).scalar_one_or_none()
+        if sender_agent is None:
+            raise ValueError(
+                f"Sender agent not found or not active in session: {agent_id}"
+            )
+
+        # 2. Destination agent exists and is active
+        dest_agent = session.execute(
+            select(Agent).where(
+                Agent.agent_id == to,
+                Agent.status == "active",
+            )
+        ).scalar_one_or_none()
+        if dest_agent is None:
+            raise ValueError(f"Destination agent not found: {to}")
+
+        # 3. Destination agent is in the same session
+        if dest_agent.session_id != session_id:
+            raise ValueError(f"Destination agent not in session: {to}")
+
+        now = _now_iso()
+        task_dict = {
+            "id": str(uuid.uuid4()),
+            "contextId": to,
+            "status": {
+                "state": "input_required",
+                "timestamp": now,
+            },
+            "artifacts": [
+                {
+                    "artifactId": str(uuid.uuid4()),
+                    "parts": [{"kind": "text", "text": text}],
+                }
+            ],
+            "metadata": {
+                "fromAgentId": agent_id,
+                "toAgentId": to,
+                "type": "unicast",
+            },
+            "history": [],
+        }
+
+        _save_task(session, task_dict)
+
+        # tmux push notification (best-effort)
+        notification_sent = _try_notify_recipient(
+            session,
+            session_id=session_id,
+            recipient_id=to,
+            sender_id=agent_id,
+        )
 
     return {"task": task_dict, "notification_sent": notification_sent}
 
@@ -833,111 +820,110 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
     summary_task_id = str(uuid.uuid4())
 
     sm = get_sync_sessionmaker()
-    with sm() as session:
-        with session.begin():
-            # Validate sender exists and is active in session
-            sender_agent = session.execute(
-                select(Agent).where(
-                    Agent.agent_id == agent_id,
-                    Agent.session_id == session_id,
-                    Agent.status == "active",
-                )
-            ).scalar_one_or_none()
-            if sender_agent is None:
-                raise ValueError(
-                    f"Sender agent not found or not active in session: {agent_id}"
-                )
+    with sm() as session, session.begin():
+        # Validate sender exists and is active in session
+        sender_agent = session.execute(
+            select(Agent).where(
+                Agent.agent_id == agent_id,
+                Agent.session_id == session_id,
+                Agent.status == "active",
+            )
+        ).scalar_one_or_none()
+        if sender_agent is None:
+            raise ValueError(
+                f"Sender agent not found or not active in session: {agent_id}"
+            )
 
-            # List active agents in session, excluding sender and any
-            # built-in Administrator agents (they are write-only identities,
-            # per design 0000025 §E). Filter the Administrator out at the
-            # SQL layer via ``json_extract`` so we don't have to ship every
-            # ``agent_card_json`` blob into Python just to discard it. The
-            # sender may itself be an Administrator — that case is handled
-            # by the sender exclusion above, not by this filter.
-            rows = session.execute(
-                select(Agent.agent_id).where(
-                    Agent.session_id == session_id,
-                    Agent.status == "active",
-                    Agent.agent_id != agent_id,
-                    func.coalesce(
-                        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"),
-                        "",
-                    )
-                    != ADMINISTRATOR_KIND,
+        # List active agents in session, excluding sender and any
+        # built-in Administrator agents (they are write-only identities,
+        # per design 0000025 §E). Filter the Administrator out at the
+        # SQL layer via ``json_extract`` so we don't have to ship every
+        # ``agent_card_json`` blob into Python just to discard it. The
+        # sender may itself be an Administrator — that case is handled
+        # by the sender exclusion above, not by this filter.
+        rows = session.execute(
+            select(Agent.agent_id).where(
+                Agent.session_id == session_id,
+                Agent.status == "active",
+                Agent.agent_id != agent_id,
+                func.coalesce(
+                    func.json_extract(Agent.agent_card_json, "$.cafleet.kind"),
+                    "",
                 )
-            ).all()
-            recipient_ids = [aid for (aid,) in rows]
+                != ADMINISTRATOR_KIND,
+            )
+        ).all()
+        recipient_ids = [aid for (aid,) in rows]
 
-            # Create delivery tasks for each recipient
-            for recipient_id in recipient_ids:
-                now = _now_iso()
-                delivery_dict = {
-                    "id": str(uuid.uuid4()),
-                    "contextId": recipient_id,
-                    "status": {
-                        "state": "input_required",
-                        "timestamp": now,
-                    },
-                    "artifacts": [
-                        {
-                            "artifactId": str(uuid.uuid4()),
-                            "parts": [{"kind": "text", "text": text}],
-                        }
-                    ],
-                    "metadata": {
-                        "fromAgentId": agent_id,
-                        "toAgentId": recipient_id,
-                        "type": "unicast",
-                        "originTaskId": summary_task_id,
-                    },
-                    "history": [],
-                }
-                _save_task(session, delivery_dict)
-
-            # Create summary task
+        # Create delivery tasks for each recipient
+        for recipient_id in recipient_ids:
             now = _now_iso()
-            notifications_sent_count = 0
-            summary_dict = {
-                "id": summary_task_id,
-                "contextId": agent_id,
+            delivery_dict = {
+                "id": str(uuid.uuid4()),
+                "contextId": recipient_id,
                 "status": {
-                    "state": "completed",
+                    "state": "input_required",
                     "timestamp": now,
                 },
                 "artifacts": [
                     {
                         "artifactId": str(uuid.uuid4()),
-                        "parts": [
-                            {
-                                "kind": "text",
-                                "text": f"Broadcast sent to {len(recipient_ids)} recipients",
-                            }
-                        ],
+                        "parts": [{"kind": "text", "text": text}],
                     }
                 ],
                 "metadata": {
                     "fromAgentId": agent_id,
-                    "type": "broadcast_summary",
-                    "recipientCount": len(recipient_ids),
-                    "recipientIds": recipient_ids,
+                    "toAgentId": recipient_id,
+                    "type": "unicast",
                     "originTaskId": summary_task_id,
                 },
                 "history": [],
             }
-            _save_task(session, summary_dict)
+            _save_task(session, delivery_dict)
 
-            # tmux push notifications (best-effort, still inside the session
-            # transaction; the queue remains the source of truth if a notify
-            # races the commit).
-            for recipient_id in recipient_ids:
-                if _try_notify_recipient(
-                    session,
-                    session_id=session_id,
-                    recipient_id=recipient_id,
-                    sender_id=agent_id,
-                ):
-                    notifications_sent_count += 1
+        # Create summary task
+        now = _now_iso()
+        notifications_sent_count = 0
+        summary_dict = {
+            "id": summary_task_id,
+            "contextId": agent_id,
+            "status": {
+                "state": "completed",
+                "timestamp": now,
+            },
+            "artifacts": [
+                {
+                    "artifactId": str(uuid.uuid4()),
+                    "parts": [
+                        {
+                            "kind": "text",
+                            "text": f"Broadcast sent to {len(recipient_ids)} recipients",
+                        }
+                    ],
+                }
+            ],
+            "metadata": {
+                "fromAgentId": agent_id,
+                "type": "broadcast_summary",
+                "recipientCount": len(recipient_ids),
+                "recipientIds": recipient_ids,
+                "originTaskId": summary_task_id,
+            },
+            "history": [],
+        }
+        _save_task(session, summary_dict)
+
+        # tmux push notifications (best-effort, still inside the session
+        # transaction; the queue remains the source of truth if a notify
+        # races the commit).
+        for recipient_id in recipient_ids:
+            if _try_notify_recipient(
+                session,
+                session_id=session_id,
+                recipient_id=recipient_id,
+                sender_id=agent_id,
+            ):
+                notifications_sent_count += 1
 
     summary_dict["metadata"]["notificationsSentCount"] = notifications_sent_count
     return [
@@ -986,27 +972,24 @@ def ack_task(agent_id: str, task_id: str) -> dict:
     Transitions to 'completed'.
     """
     sm = get_sync_sessionmaker()
-    with sm() as session:
-        with session.begin():
-            task_dict = _read_task(session, task_id)
-            if task_dict is None:
-                raise ValueError(f"Task {task_id} not found")
+    with sm() as session, session.begin():
+        task_dict = _read_task(session, task_id)
+        if task_dict is None:
+            raise ValueError(f"Task {task_id} not found")
 
-            if task_dict["contextId"] != agent_id:
-                raise PermissionError("Only the recipient can ACK a task")
+        if task_dict["contextId"] != agent_id:
+            raise PermissionError("Only the recipient can ACK a task")
 
-            if task_dict["status"]["state"] != "input_required":
-                raise ValueError(
-                    f"Cannot ACK task in state {task_dict['status']['state']}"
-                )
+        if task_dict["status"]["state"] != "input_required":
+            raise ValueError(f"Cannot ACK task in state {task_dict['status']['state']}")
 
-            now = _now_iso()
-            task_dict["status"] = {
-                "state": "completed",
-                "timestamp": now,
-            }
+        now = _now_iso()
+        task_dict["status"] = {
+            "state": "completed",
+            "timestamp": now,
+        }
 
-            _save_task(session, task_dict)
+        _save_task(session, task_dict)
 
     return {"task": task_dict}
 
@@ -1018,28 +1001,27 @@ def cancel_task(agent_id: str, task_id: str) -> dict:
     Transitions to 'canceled'.
     """
     sm = get_sync_sessionmaker()
-    with sm() as session:
-        with session.begin():
-            task_dict = _read_task(session, task_id)
-            if task_dict is None:
-                raise ValueError(f"Task {task_id} not found")
+    with sm() as session, session.begin():
+        task_dict = _read_task(session, task_id)
+        if task_dict is None:
+            raise ValueError(f"Task {task_id} not found")
 
-            metadata = task_dict.get("metadata", {})
-            if metadata.get("fromAgentId") != agent_id:
-                raise PermissionError("Only the sender can cancel a task")
+        metadata = task_dict.get("metadata", {})
+        if metadata.get("fromAgentId") != agent_id:
+            raise PermissionError("Only the sender can cancel a task")
 
-            if task_dict["status"]["state"] != "input_required":
-                raise ValueError(
-                    f"Cannot cancel task in state {task_dict['status']['state']}"
-                )
+        if task_dict["status"]["state"] != "input_required":
+            raise ValueError(
+                f"Cannot cancel task in state {task_dict['status']['state']}"
+            )
 
-            now = _now_iso()
-            task_dict["status"] = {
-                "state": "canceled",
-                "timestamp": now,
-            }
+        now = _now_iso()
+        task_dict["status"] = {
+            "state": "canceled",
+            "timestamp": now,
+        }
 
-            _save_task(session, task_dict)
+        _save_task(session, task_dict)
 
     return {"task": task_dict}
 
