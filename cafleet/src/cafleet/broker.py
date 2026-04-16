@@ -912,8 +912,7 @@ def list_session_agents(session_id: str) -> list[dict]:
     ]
 
 
-def list_inbox(agent_id: str) -> list[dict]:
-    """Return raw task rows addressed to ``agent_id`` (no broadcast_summary)."""
+def _list_tasks_where(*filters) -> list[dict]:
     stmt = (
         select(
             Task.task_id,
@@ -927,10 +926,7 @@ def list_inbox(agent_id: str) -> list[dict]:
             Task.origin_task_id,
             Task.task_json,
         )
-        .where(
-            Task.context_id == agent_id,
-            Task.type != "broadcast_summary",
-        )
+        .where(*filters, Task.type != "broadcast_summary")
         .order_by(Task.status_timestamp.desc())
     )
     sm = get_sync_sessionmaker()
@@ -951,47 +947,16 @@ def list_inbox(agent_id: str) -> list[dict]:
         }
         for row in rows
     ]
+
+
+def list_inbox(agent_id: str) -> list[dict]:
+    """Return raw task rows addressed to ``agent_id`` (no broadcast_summary)."""
+    return _list_tasks_where(Task.context_id == agent_id)
 
 
 def list_sent(agent_id: str) -> list[dict]:
     """Return raw task rows sent by ``agent_id`` (no broadcast_summary)."""
-    stmt = (
-        select(
-            Task.task_id,
-            Task.context_id,
-            Task.from_agent_id,
-            Task.to_agent_id,
-            Task.type,
-            Task.created_at,
-            Task.status_state,
-            Task.status_timestamp,
-            Task.origin_task_id,
-            Task.task_json,
-        )
-        .where(
-            Task.from_agent_id == agent_id,
-            Task.type != "broadcast_summary",
-        )
-        .order_by(Task.status_timestamp.desc())
-    )
-    sm = get_sync_sessionmaker()
-    with sm() as session:
-        rows = session.execute(stmt).all()
-    return [
-        {
-            "task_id": row.task_id,
-            "context_id": row.context_id,
-            "from_agent_id": row.from_agent_id,
-            "to_agent_id": row.to_agent_id,
-            "type": row.type,
-            "created_at": row.created_at,
-            "status_state": row.status_state,
-            "status_timestamp": row.status_timestamp,
-            "origin_task_id": row.origin_task_id,
-            "task_json": row.task_json,
-        }
-        for row in rows
-    ]
+    return _list_tasks_where(Task.from_agent_id == agent_id)
 
 
 def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
