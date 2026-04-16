@@ -637,8 +637,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
 
     result["placement"] = placement_view
     if ctx.obj["json_output"]:
-        sanitized = {k: v for k, v in result.items() if k != "session_id"}
-        click.echo(output.format_json(sanitized))
+        click.echo(output.format_json(result))
     else:
         click.echo(output.format_member(result))
 
