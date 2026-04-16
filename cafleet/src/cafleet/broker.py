@@ -1,12 +1,4 @@
-"""Single data access layer — sync SQLAlchemy operations for CLI + WebUI.
-
-Module-level functions using ``get_sync_sessionmaker()`` from ``db/engine.py``.
-Each function opens a fresh session, executes within a transaction, and returns
-dicts. CLI functions return dicts matching ``output.py`` expectations. WebUI
-query functions return dicts matching ``webui_api.py`` response shapes.
-
-Import: ``from cafleet import broker``.
-"""
+"""Sync SQLAlchemy data-access layer shared by the CLI and WebUI."""
 
 import json
 import uuid
@@ -23,21 +15,10 @@ from cafleet.db.models import Agent, AgentPlacement, Session, Task
 from cafleet.tmux import DirectorContext
 
 
-# ---------------------------------------------------------------------------
-# Root Director bootstrap constants (design 0000026)
-# ---------------------------------------------------------------------------
-
-
 _DIRECTOR_NAME = "director"
 _DIRECTOR_DESCRIPTION = "Root Director for this session"
 # FIXME(claude): auto-detect from $CLAUDECODE / $CLAUDE_CODE_ENTRYPOINT / codex env vars.
 _ROOT_DIRECTOR_CODING_AGENT = "unknown"
-
-
-# ---------------------------------------------------------------------------
-# Built-in Administrator agent — constants, helpers, and exception
-# ---------------------------------------------------------------------------
-
 
 ADMINISTRATOR_KIND = "builtin-administrator"
 
@@ -47,7 +28,6 @@ class AdministratorProtectedError(Exception):
 
 
 def _administrator_agent_card(session_id: str) -> dict:
-    """Canonical AgentCard dict for the built-in Administrator of a session."""
     short_id = session_id[:8]
     return {
         "name": "Administrator",
@@ -58,7 +38,6 @@ def _administrator_agent_card(session_id: str) -> dict:
 
 
 def _is_administrator_card(agent_card_json: str | None) -> bool:
-    """Return True iff the stored card JSON marks an Administrator agent."""
     if not agent_card_json:
         return False
     try:
@@ -73,11 +52,6 @@ def _is_administrator_card(agent_card_json: str | None) -> bool:
     return cafleet_ns.get("kind") == ADMINISTRATOR_KIND
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -85,13 +59,11 @@ def _now_iso() -> str:
 def _try_notify_recipient(
     session, *, session_id: str, recipient_id: str, sender_id: str
 ) -> bool:
-    """Best-effort tmux push notification. Returns True on success.
+    """Best-effort ``tmux send-keys`` poll trigger for the recipient's pane.
 
-    Looks up the recipient's placement. If a tmux_pane_id exists and the
-    recipient is not the sender, sends a ``cafleet --session-id <sid> poll
-    --agent-id <aid>`` trigger via ``tmux send-keys`` so the literal command
-    text can be matched by the recipient's ``permissions.allow``.
-    Failures are silent — the message queue is the source of truth.
+    The literal ``cafleet --session-id <sid> poll --agent-id <aid>`` string
+    is injected so the recipient's ``permissions.allow`` matches it exactly;
+    failures are swallowed because the queue remains the source of truth.
     """
     if recipient_id == sender_id:
         return False
@@ -111,43 +83,16 @@ def _try_notify_recipient(
     )
 
 
-# ---------------------------------------------------------------------------
-# Session operations
-# ---------------------------------------------------------------------------
-
-
 def create_session(
     label: str | None = None,
     director_context: DirectorContext | None = None,
 ) -> dict:
-    """Atomically bootstrap a session + root Director + Administrator.
+    """Atomically bootstrap a session with its root Director and Administrator.
 
-    Design doc 0000026. Runs 5 ordered operations inside a single
-    ``with session.begin():`` block:
-
-      1. INSERT sessions (deleted_at=NULL, director_agent_id=NULL).
-      2. INSERT agents (the hardcoded root Director).
-      3. INSERT agent_placements (director_agent_id=NULL, coding_agent="unknown").
-      4. UPDATE sessions SET director_agent_id=<director agent_id>.
-      5. INSERT agents (the built-in Administrator, per design 0000025).
-
-    Any exception inside the block triggers SQLAlchemy rollback — no partial
-    rows persist. ``director_context`` MUST be read from tmux BEFORE calling
-    this function (the CLI layer owns that resolution); a missing context is
-    a programmer error.
-
-    Returns the nested shape::
-
-        {
-          "session_id", "label", "created_at", "administrator_agent_id",
-          "director": {
-            "agent_id", "name", "description", "registered_at",
-            "placement": {
-              "director_agent_id", "tmux_session", "tmux_window_id",
-              "tmux_pane_id", "coding_agent", "created_at",
-            },
-          },
-        }
+    Design 0000026. The session row is written first with
+    ``director_agent_id=NULL`` and back-filled once the Director's agent row
+    exists, so ``sessions.director_agent_id`` is DB-nullable even though the
+    post-bootstrap invariant is NOT NULL.
     """
     if director_context is None:
         raise TypeError(
@@ -168,7 +113,6 @@ def create_session(
 
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        # 1. INSERT sessions
         session.add(
             Session(
                 session_id=session_id,
@@ -179,8 +123,6 @@ def create_session(
             )
         )
         session.flush()
-
-        # 2. INSERT root Director agent
         session.add(
             Agent(
                 agent_id=director_agent_id,
@@ -194,8 +136,6 @@ def create_session(
             )
         )
         session.flush()
-
-        # 3. INSERT Director placement (director_agent_id=NULL, no parent)
         session.add(
             AgentPlacement(
                 agent_id=director_agent_id,
@@ -208,15 +148,11 @@ def create_session(
             )
         )
         session.flush()
-
-        # 4. UPDATE sessions.director_agent_id
         session.execute(
             update(Session)
             .where(Session.session_id == session_id)
             .values(director_agent_id=director_agent_id)
         )
-
-        # 5. INSERT built-in Administrator (per design 0000025)
         session.add(
             Agent(
                 agent_id=administrator_agent_id,
@@ -253,7 +189,7 @@ def create_session(
 
 
 def list_sessions() -> list[dict]:
-    """SELECT non-soft-deleted sessions with active agent count."""
+    """Return non-soft-deleted sessions with their active agent counts."""
     stmt = (
         select(
             Session.session_id,
@@ -288,10 +224,11 @@ def list_sessions() -> list[dict]:
 
 
 def get_session(session_id: str) -> dict | None:
-    """SELECT single session. Returns dict or None (no ``deleted_at`` filter).
+    """Return the session row (including soft-deleted) or None.
 
-    The returned dict exposes ``deleted_at`` so callers can distinguish between
-    a missing session and a soft-deleted one (``register_agent`` relies on this).
+    The returned dict exposes ``deleted_at`` so callers can distinguish a
+    missing session from a soft-deleted one — ``register_agent`` relies on
+    this to reject soft-deleted sessions with a different error message.
     """
     sm = get_sync_sessionmaker()
     with sm() as session:
@@ -311,35 +248,24 @@ def get_session(session_id: str) -> dict | None:
 
 
 def delete_session(session_id: str) -> dict:
-    """Soft-delete cascade (design 0000026). Returns ``{"deregistered_count": N}``.
+    """Soft-delete a session and deregister its agents, in one transaction.
 
-    All three operations run in a single transaction:
-
-      1. UPDATE sessions SET deleted_at = now WHERE session_id=X AND deleted_at IS NULL.
-      2. UPDATE agents SET status='deregistered', deregistered_at=now
-         WHERE session_id=X AND status='active' — this is the N that we return.
-      3. DELETE FROM agent_placements WHERE agent_id IN (<agents in session>).
-
-    Tasks are untouched (audit history preserved). Idempotent: the initial
-    ``WHERE deleted_at IS NULL`` guard on step 1 short-circuits the cascade on
-    re-run, so step 2 reports 0 rows and the call is a no-op.
+    Tasks are left untouched so audit history survives. Idempotent: re-running
+    against an already-deleted row short-circuits on the ``deleted_at IS NULL``
+    guard and returns ``deregistered_count=0``.
     """
     now = _now_iso()
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        # Check the session exists at all first so we can distinguish
-        # "not found" from "already soft-deleted".
         exists_row = session.execute(
             select(Session.session_id).where(Session.session_id == session_id)
         ).first()
         if exists_row is None:
-            # ClickException exits 1 (matches ``session show`` wording +
-            # exit code per design 0000026); UsageError would exit 2 with
-            # a Usage: banner which is wrong for a runtime "not found".
+            # ClickException exits 1 (matching ``session show``); UsageError
+            # would print a Usage: banner + exit 2, wrong for a runtime miss.
             raise click.ClickException(f"session '{session_id}' not found.")
 
-        # 1. Soft-delete the session row (idempotent via deleted_at IS NULL).
-        step1 = cast(
+        soft_delete = cast(
             CursorResult,
             session.execute(
                 update(Session)
@@ -350,13 +276,10 @@ def delete_session(session_id: str) -> dict:
                 .values(deleted_at=now)
             ),
         )
-
-        if step1.rowcount == 0:
-            # Session exists but was already soft-deleted. Short-circuit the cascade.
+        if soft_delete.rowcount == 0:
             return {"deregistered_count": 0}
 
-        # 2. Deregister every active agent in the session and count them.
-        step2 = cast(
+        deregister = cast(
             CursorResult,
             session.execute(
                 update(Agent)
@@ -367,20 +290,13 @@ def delete_session(session_id: str) -> dict:
                 .values(status="deregistered", deregistered_at=now)
             ),
         )
-        deregistered_count = step2.rowcount
-
-        # 3. Drop every placement whose agent belongs to this session.
+        deregistered_count = deregister.rowcount
         agents_in_session = select(Agent.agent_id).where(Agent.session_id == session_id)
         session.execute(
             delete(AgentPlacement).where(AgentPlacement.agent_id.in_(agents_in_session))
         )
 
     return {"deregistered_count": deregistered_count}
-
-
-# ---------------------------------------------------------------------------
-# Agent registry operations
-# ---------------------------------------------------------------------------
 
 
 def register_agent(
@@ -390,13 +306,13 @@ def register_agent(
     skills: list[dict] | None = None,
     placement: dict | None = None,
 ) -> dict:
-    """INSERT into agents [+ agent_placements].
+    """Register a new agent in the session and optionally create its placement.
 
-    Returns {"agent_id": ..., "name": ..., "registered_at": ...}.
-    Validates session_id exists and is not soft-deleted. When placement is
-    provided, validates director exists and is active in the same session.
+    Rejects soft-deleted sessions with a message that differs from the
+    "not found" case so callers can surface the right recovery hint
+    (design 0000026). When ``placement`` is supplied, the named Director
+    must be active in the same session and must not be the Administrator.
     """
-    # Validate session exists and is not soft-deleted (design 0000026).
     sess = get_session(session_id)
     if sess is None:
         raise click.UsageError(f"Session '{session_id}' not found.")
@@ -414,7 +330,6 @@ def register_agent(
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
         if placement is not None:
-            # Validate director exists and is active in the same session
             director_id = placement["director_agent_id"]
             director = session.execute(
                 select(Agent).where(
@@ -463,11 +378,7 @@ def register_agent(
 
 
 def get_agent(agent_id: str, session_id: str) -> dict | None:
-    """Single agent detail with optional placement.
-
-    Returns dict with agent info + placement or None.
-    Filters by session and excludes deregistered agents.
-    """
+    """Return the active agent's detail (with placement) or None."""
     sm = get_sync_sessionmaker()
     with sm() as session:
         agent = session.execute(
@@ -511,7 +422,7 @@ def get_agent(agent_id: str, session_id: str) -> dict | None:
 
 
 def list_agents(session_id: str) -> list[dict]:
-    """Active agents in session."""
+    """Return all active agents in the session."""
     stmt = select(
         Agent.agent_id,
         Agent.name,
@@ -537,19 +448,16 @@ def list_agents(session_id: str) -> list[dict]:
 
 
 def deregister_agent(agent_id: str) -> bool:
-    """UPDATE status='deregistered', deregistered_at=now, DELETE placement.
+    """Soft-delete the agent and drop its placement.
 
-    Returns True if agent was active and got deregistered.
-    Raises ``AdministratorProtectedError`` when the target is the built-in
-    Administrator agent (design 0000025 §D).
-    Raises ``click.UsageError`` when the target is the root Director of any
-    session (design 0000026): use ``cafleet session delete`` instead.
+    Returns True if a row was flipped from ``active`` to ``deregistered``.
+    Raises ``AdministratorProtectedError`` for the built-in Administrator
+    (design 0000025 §D) and ``click.UsageError`` for the root Director of
+    any session (design 0000026), which must be torn down via
+    ``cafleet session delete``.
     """
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        # Root-Director guard (design 0000026). A session's root Director
-        # is the agent referenced by ``sessions.director_agent_id`` — if
-        # any session points at this agent_id, refuse.
         root_director_hit = session.execute(
             select(Session.session_id).where(Session.director_agent_id == agent_id)
         ).first()
@@ -586,25 +494,19 @@ def deregister_agent(agent_id: str) -> bool:
 
 
 def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
-    """UPDATE agent_placements SET tmux_pane_id.
-
-    Returns placement dict or None if no placement exists.
-    """
+    """Patch the pane id of an existing placement and return the new row."""
     sm = get_sync_sessionmaker()
-    with sm() as session:
-        with session.begin():
-            result = cast(
-                CursorResult,
-                session.execute(
-                    update(AgentPlacement)
-                    .where(AgentPlacement.agent_id == agent_id)
-                    .values(tmux_pane_id=pane_id)
-                ),
-            )
-            if result.rowcount == 0:
-                return None
-
-        # Re-read the placement after update
+    with sm() as session, session.begin():
+        result = cast(
+            CursorResult,
+            session.execute(
+                update(AgentPlacement)
+                .where(AgentPlacement.agent_id == agent_id)
+                .values(tmux_pane_id=pane_id)
+            ),
+        )
+        if result.rowcount == 0:
+            return None
         row = session.execute(
             select(AgentPlacement).where(AgentPlacement.agent_id == agent_id)
         ).scalar_one_or_none()
@@ -622,10 +524,7 @@ def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
 
 
 def list_members(session_id: str, director_agent_id: str) -> list[dict]:
-    """Member agents with placement info for a director.
-
-    SELECT agents JOIN agent_placements WHERE director_agent_id.
-    """
+    """Return active members belonging to the given director, with placements."""
     stmt = (
         select(
             Agent.agent_id,
@@ -671,7 +570,7 @@ def list_members(session_id: str, director_agent_id: str) -> list[dict]:
 
 
 def verify_agent_session(agent_id: str, session_id: str) -> bool:
-    """Check if agent belongs to session. Used by WebUI session validation."""
+    """Return True iff the agent belongs to the session (any status)."""
     sm = get_sync_sessionmaker()
     with sm() as session:
         result = session.execute(
@@ -683,16 +582,8 @@ def verify_agent_session(agent_id: str, session_id: str) -> bool:
         return result.first() is not None
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers (messaging)
-# ---------------------------------------------------------------------------
-
-
 def _save_task(session, task_dict: dict) -> None:
-    """INSERT with UPSERT. Promotes indexed fields to columns.
-
-    Preserves created_at on re-save.
-    """
+    """UPSERT the task, promoting indexed fields from the metadata blob."""
     metadata = task_dict.get("metadata", {})
     stmt = sqlite_insert(Task).values(
         task_id=task_dict["id"],
@@ -719,7 +610,6 @@ def _save_task(session, task_dict: dict) -> None:
 
 
 def _read_task(session, task_id: str) -> dict | None:
-    """SELECT task_json by task_id. Returns parsed dict or None."""
     row = session.execute(select(Task.task_json).where(Task.task_id == task_id)).first()
     if row is None:
         return None
@@ -727,20 +617,8 @@ def _read_task(session, task_id: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Messaging operations
-# ---------------------------------------------------------------------------
-
-
 def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
-    """Unicast. Returns {"task": <camelCase task dict>}.
-
-    Validation:
-      1. Destination is valid UUID
-      2. Destination agent exists and status='active'
-      3. Destination agent is in the same session
-    Creates task: status.state='input_required', context_id=destination.
-    """
-    # 1. Validate destination UUID
+    """Create a unicast task addressed to ``to`` and best-effort notify it."""
     try:
         uuid.UUID(to)
     except ValueError as exc:
@@ -748,7 +626,6 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
 
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        # Validate sender exists and is active in session
         sender_agent = session.execute(
             select(Agent).where(
                 Agent.agent_id == agent_id,
@@ -761,7 +638,6 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
                 f"Sender agent not found or not active in session: {agent_id}"
             )
 
-        # 2. Destination agent exists and is active
         dest_agent = session.execute(
             select(Agent).where(
                 Agent.agent_id == to,
@@ -770,8 +646,6 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
         ).scalar_one_or_none()
         if dest_agent is None:
             raise ValueError(f"Destination agent not found: {to}")
-
-        # 3. Destination agent is in the same session
         if dest_agent.session_id != session_id:
             raise ValueError(f"Destination agent not in session: {to}")
 
@@ -798,8 +672,6 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
         }
 
         _save_task(session, task_dict)
-
-        # tmux push notification (best-effort)
         notification_sent = _try_notify_recipient(
             session,
             session_id=session_id,
@@ -811,17 +683,16 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
 
 
 def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
-    """Broadcast. Returns [{"task": <summary task dict>}].
+    """Fan out one delivery task per active non-admin peer plus a sender summary.
 
-    Lists active agents in session (excluding sender). Creates one delivery task
-    per recipient (type='unicast', originTaskId=summary_id) plus one summary
-    (type='broadcast_summary', context_id=sender).
+    Administrators are excluded at the SQL layer via ``json_extract`` so the
+    card blob stays in the database; they are write-only identities per
+    design 0000025 §E.
     """
     summary_task_id = str(uuid.uuid4())
 
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        # Validate sender exists and is active in session
         sender_agent = session.execute(
             select(Agent).where(
                 Agent.agent_id == agent_id,
@@ -834,13 +705,6 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
                 f"Sender agent not found or not active in session: {agent_id}"
             )
 
-        # List active agents in session, excluding sender and any
-        # built-in Administrator agents (they are write-only identities,
-        # per design 0000025 §E). Filter the Administrator out at the
-        # SQL layer via ``json_extract`` so we don't have to ship every
-        # ``agent_card_json`` blob into Python just to discard it. The
-        # sender may itself be an Administrator — that case is handled
-        # by the sender exclusion above, not by this filter.
         rows = session.execute(
             select(Agent.agent_id).where(
                 Agent.session_id == session_id,
@@ -855,7 +719,6 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
         ).all()
         recipient_ids = [aid for (aid,) in rows]
 
-        # Create delivery tasks for each recipient
         for recipient_id in recipient_ids:
             now = _now_iso()
             delivery_dict = {
@@ -881,7 +744,6 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
             }
             _save_task(session, delivery_dict)
 
-        # Create summary task
         now = _now_iso()
         notifications_sent_count = 0
         summary_dict = {
@@ -913,9 +775,6 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
         }
         _save_task(session, summary_dict)
 
-        # tmux push notifications (best-effort, still inside the session
-        # transaction; the queue remains the source of truth if a notify
-        # races the commit).
         for recipient_id in recipient_ids:
             if _try_notify_recipient(
                 session,
@@ -937,11 +796,7 @@ def poll_tasks(
     page_size: int | None = None,
     status: str | None = None,
 ) -> list[dict]:
-    """Inbox query. Returns [<camelCase task dict>, ...].
-
-    SELECT WHERE context_id=agent_id, ORDER BY status_timestamp DESC.
-    Filters out type='broadcast_summary'.
-    """
+    """Return tasks addressed to ``agent_id`` in DESC timestamp order."""
     stmt = (
         select(Task.task_json)
         .where(
@@ -966,11 +821,7 @@ def poll_tasks(
 
 
 def ack_task(agent_id: str, task_id: str) -> dict:
-    """ACK. Returns {"task": <updated task dict>}.
-
-    Verifies context_id == agent_id. Verifies state == 'input_required'.
-    Transitions to 'completed'.
-    """
+    """Transition a task from ``input_required`` to ``completed`` for the recipient."""
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
         task_dict = _read_task(session, task_id)
@@ -995,11 +846,7 @@ def ack_task(agent_id: str, task_id: str) -> dict:
 
 
 def cancel_task(agent_id: str, task_id: str) -> dict:
-    """Cancel. Returns {"task": <updated task dict>}.
-
-    Verifies metadata.fromAgentId == agent_id. Verifies state == 'input_required'.
-    Transitions to 'canceled'.
-    """
+    """Transition a task from ``input_required`` to ``canceled`` for the sender."""
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
         task_dict = _read_task(session, task_id)
@@ -1026,21 +873,13 @@ def cancel_task(agent_id: str, task_id: str) -> dict:
     return {"task": task_dict}
 
 
-# ---------------------------------------------------------------------------
-# WebUI query operations
-# ---------------------------------------------------------------------------
-
-
 def list_session_agents(session_id: str) -> list[dict]:
-    """Active agents + deregistered agents that have tasks.
+    """Return active agents plus deregistered agents that still own tasks.
 
-    Returns list of dicts with keys: agent_id, name, description, status,
-    registered_at, kind.  ``kind`` is ``"builtin-administrator"`` when
-    ``agent_card_json`` contains ``$.cafleet.kind`` with that value
-    (extracted in SQL via ``json_extract``/``coalesce`` so the full blob
-    never leaves the database) and ``"user"`` for every other agent.
-    Deregistered agents appear only when they are referenced by at least
-    one task (as sender or recipient).
+    ``kind`` is derived in SQL via ``json_extract`` so the card blob never
+    leaves SQLite — otherwise we would materialize every row's JSON just to
+    compute a one-token discriminator. ``coalesce`` handles cards without a
+    ``cafleet.kind`` path by substituting an empty string.
     """
     has_tasks = exists().where(
         or_(
@@ -1048,11 +887,6 @@ def list_session_agents(session_id: str) -> list[dict]:
             Task.from_agent_id == Agent.agent_id,
         )
     )
-    # Derive ``kind`` directly in SQL via ``json_extract`` so we do not
-    # have to ship the entire ``agent_card_json`` blob into Python just to
-    # compute a one-token discriminator. ``coalesce`` substitutes an empty
-    # string when the row has no ``cafleet.kind`` path so the comparison
-    # always evaluates cleanly.
     kind_expr = func.coalesce(
         func.json_extract(Agent.agent_card_json, "$.cafleet.kind"), ""
     )
@@ -1089,11 +923,7 @@ def list_session_agents(session_id: str) -> list[dict]:
 
 
 def list_inbox(agent_id: str) -> list[dict]:
-    """Inbox tasks as raw row dicts.
-
-    SELECT WHERE context_id=agent_id, filters broadcast_summary,
-    ordered by status_timestamp DESC.
-    """
+    """Return raw task rows addressed to ``agent_id`` (no broadcast_summary)."""
     stmt = (
         select(
             Task.task_id,
@@ -1134,11 +964,7 @@ def list_inbox(agent_id: str) -> list[dict]:
 
 
 def list_sent(agent_id: str) -> list[dict]:
-    """Sent tasks as raw row dicts.
-
-    SELECT WHERE from_agent_id=agent_id, filters broadcast_summary,
-    ordered by status_timestamp DESC.
-    """
+    """Return raw task rows sent by ``agent_id`` (no broadcast_summary)."""
     stmt = (
         select(
             Task.task_id,
@@ -1179,12 +1005,7 @@ def list_sent(agent_id: str) -> list[dict]:
 
 
 def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
-    """Session-wide timeline. Returns structured entries.
-
-    Each entry: {"task": <parsed dict>, "origin_task_id": ..., "created_at": ...}.
-    Filters broadcast_summary. Scoped to session via JOIN on from_agent_id.
-    Ordered by status_timestamp DESC.
-    """
+    """Return the session's recent tasks in DESC timestamp order."""
     stmt = (
         select(
             Task.task_id,
@@ -1215,7 +1036,7 @@ def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
 
 
 def get_agent_names(agent_ids: list[str]) -> dict[str, str]:
-    """Batch lookup: {agent_id: name}. Includes deregistered agents."""
+    """Batch ``agent_id → name`` lookup including deregistered agents."""
     if not agent_ids:
         return {}
     sm = get_sync_sessionmaker()
@@ -1227,7 +1048,7 @@ def get_agent_names(agent_ids: list[str]) -> dict[str, str]:
 
 
 def get_task_created_ats(task_ids: list[str]) -> dict[str, str]:
-    """Batch lookup: {task_id: created_at}."""
+    """Batch ``task_id → created_at`` lookup."""
     if not task_ids:
         return {}
     sm = get_sync_sessionmaker()
@@ -1239,10 +1060,7 @@ def get_task_created_ats(task_ids: list[str]) -> dict[str, str]:
 
 
 def get_task(session_id: str, task_id: str) -> dict:
-    """Get task. Returns {"task": <task dict>}.
-
-    Verifies fromAgentId or toAgentId belongs to session.
-    """
+    """Return the task iff at least one of its endpoints lives in the session."""
     sm = get_sync_sessionmaker()
     with sm() as session:
         task_dict = _read_task(session, task_id)
@@ -1253,7 +1071,6 @@ def get_task(session_id: str, task_id: str) -> dict:
         from_id = metadata.get("fromAgentId", "")
         to_id = metadata.get("toAgentId", "")
 
-        # Verify at least one of the agents belongs to the given session
         from_ok = (
             session.execute(
                 select(Agent.agent_id).where(
