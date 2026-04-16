@@ -760,7 +760,6 @@ def member_delete(ctx, agent_id, member_id):
 
     try:
         tmux.ensure_tmux_available()
-        director_ctx = tmux.director_context()
     except tmux.TmuxError as exc:
         click.echo(f"Error: {exc}", err=True)
         ctx.exit(1)
@@ -802,11 +801,12 @@ def member_delete(ctx, agent_id, member_id):
         pane_status = "(pending — no pane)"
 
     # Step 4 — rebalance layout (skip if pending placement).
+    # The member's window is always populated by broker.register_agent (the
+    # column is NOT NULL), so we can trust placement["tmux_window_id"] here
+    # without a director_context fallback.
     if pane_id is not None:
         try:
-            tmux.select_layout(
-                target_window_id=placement.get("tmux_window_id", director_ctx.window_id)
-            )
+            tmux.select_layout(target_window_id=placement["tmux_window_id"])
         except tmux.TmuxError as exc:
             click.echo(f"Warning: select-layout failed: {exc}", err=True)
 
