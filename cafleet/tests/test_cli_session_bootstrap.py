@@ -438,9 +438,10 @@ class TestSessionDeleteUnknownAndIdempotent:
         runner = CliRunner()
         fake = str(uuid.uuid4())
         result = runner.invoke(cli, ["session", "delete", fake])
-        assert result.exit_code != 0, (
-            f"session delete on unknown id must exit non-zero; "
-            f"got exit_code={result.exit_code}, output={result.output!r}"
+        assert result.exit_code == 1, (
+            f"session delete on unknown id must exit 1 (design 0000026 pins "
+            f"this to match session show); got exit_code={result.exit_code}, "
+            f"output={result.output!r}"
         )
         combined = ((result.output or "") + (result.stderr or "")).lower()
         assert "not found" in combined, (

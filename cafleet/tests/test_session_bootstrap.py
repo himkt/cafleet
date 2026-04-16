@@ -423,12 +423,19 @@ class TestDeleteSessionCascade:
             f"got {second.get('deregistered_count')}"
         )
 
-    def test_unknown_session_raises_usage_error(self):
-        """Deleting a session that was never created raises not-found."""
+    def test_unknown_session_raises_click_exception(self):
+        """Deleting a session that was never created raises not-found.
+
+        The broker raises ``click.ClickException`` (exit 1 when the CLI layer
+        catches it) rather than ``click.UsageError`` (exit 2 with a Usage:
+        banner). Design 0000026 pins the exit code to 1 — same as
+        ``session show`` — because "not found" is a runtime condition, not a
+        CLI usage error.
+        """
         from cafleet import broker
 
         fake_sid = str(uuid.uuid4())
-        with pytest.raises(click.UsageError) as exc_info:
+        with pytest.raises(click.ClickException) as exc_info:
             broker.delete_session(fake_sid)
         msg = str(exc_info.value)
         assert "not found" in msg.lower()

@@ -335,7 +335,10 @@ def delete_session(session_id: str) -> dict:
                 select(Session.session_id).where(Session.session_id == session_id)
             ).first()
             if exists_row is None:
-                raise click.UsageError(f"session '{session_id}' not found.")
+                # ClickException exits 1 (matches ``session show`` wording +
+                # exit code per design 0000026); UsageError would exit 2 with
+                # a Usage: banner which is wrong for a runtime "not found".
+                raise click.ClickException(f"session '{session_id}' not found.")
 
             # 1. Soft-delete the session row (idempotent via deleted_at IS NULL).
             step1 = cast(
