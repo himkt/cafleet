@@ -1,24 +1,4 @@
-"""Tests for ``cafleet-registry session`` CLI subcommands.
-
-Design doc 0000015 Step 7 adds a ``session`` click group as a sibling of
-the existing ``db`` group, with four commands:
-
-  - ``session create [--label TEXT] [--json]``
-  - ``session list [--json]``
-  - ``session show <session_id> [--json]``
-  - ``session delete <session_id>``
-
-All commands use sync SQLAlchemy (``create_engine(_sync_db_url())``) to
-talk directly to the SQLite file, the same pattern ``db init`` uses.
-The broker server does NOT need to be running.
-
-Test isolation strategy (mirrors ``test_db_init.py``):
-
-  Each test seeds a fresh ``tmp_path`` DB via ``db init``, then exercises
-  session subcommands against that file.  ``config.settings.database_url``
-  is monkeypatched to the temp path so the CLI's ``_sync_db_url()`` resolves
-  to the right file.
-"""
+"""Tests for the ``cafleet session`` CLI subcommands."""
 
 import json
 import sqlite3
@@ -35,7 +15,6 @@ from cafleet.tmux import DirectorContext
 
 @pytest.fixture(autouse=True)
 def _reset_engine_singletons():
-    """Reset broker engine singletons so each test gets a fresh engine."""
     engine_mod._sync_engine = None
     engine_mod._sync_sessionmaker = None
     yield
@@ -45,34 +24,24 @@ def _reset_engine_singletons():
 
 @pytest.fixture(autouse=True)
 def _mock_tmux_for_session_create(monkeypatch):
-    """Stub out tmux so ``session create`` works inside CliRunner.
+    """Let ``session create`` succeed without a real tmux pane.
 
-    Design 0000026 makes ``cafleet session create`` resolve a
-    ``DirectorContext`` from tmux before calling the broker. Pre-existing
-    tests in this file were written before that dependency existed, so
-    we install a module-wide no-op + deterministic fake context here.
-    Tests that want to exercise the outside-tmux failure path (covered
-    in ``test_cli_session_bootstrap.py``) override these directly.
+    Tests in this file predate the 0000026 director-context dependency,
+    so a blanket stub is applied here; the outside-tmux failure path is
+    covered explicitly in ``test_cli_session_bootstrap.py``.
     """
     from cafleet import cli as cli_mod
 
     ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
     monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
     monkeypatch.setattr("cafleet.tmux.director_context", lambda: ctx)
-    # Cover the ``from cafleet.tmux import …`` import style too.
     if hasattr(cli_mod, "ensure_tmux_available"):
         monkeypatch.setattr(cli_mod, "ensure_tmux_available", lambda: None)
     if hasattr(cli_mod, "director_context"):
         monkeypatch.setattr(cli_mod, "director_context", lambda: ctx)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _init_db(runner: CliRunner) -> None:
-    """Run ``db init`` to set up the schema in the temp DB."""
     result = runner.invoke(cli, ["db", "init"])
     assert result.exit_code == 0, (
         f"db init failed during test setup.\n"
@@ -81,7 +50,6 @@ def _init_db(runner: CliRunner) -> None:
 
 
 def _seed_session(db_path, session_id: str, label: str | None = None) -> None:
-    """Insert a session row directly for test setup (bypasses CLI)."""
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
@@ -96,7 +64,6 @@ def _seed_session(db_path, session_id: str, label: str | None = None) -> None:
 def _seed_agent(
     db_path, agent_id: str, session_id: str, *, status: str = "active"
 ) -> None:
-    """Insert an agent row directly for test setup (bypasses CLI)."""
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
@@ -120,7 +87,6 @@ def _seed_agent(
 
 
 def _session_rows(db_path) -> list[tuple]:
-    """Read all session rows from the DB."""
     conn = sqlite3.connect(str(db_path))
     try:
         return conn.execute(
@@ -131,7 +97,6 @@ def _session_rows(db_path) -> list[tuple]:
 
 
 def _session_deleted_at(db_path, session_id: str) -> str | None:
-    """Return the ``deleted_at`` value for a session row (or None if unset)."""
     conn = sqlite3.connect(str(db_path))
     try:
         row = conn.execute(
@@ -140,11 +105,6 @@ def _session_deleted_at(db_path, session_id: str) -> str | None:
     finally:
         conn.close()
     return None if row is None else row[0]
-
-
-# ===========================================================================
-# session create
-# ===========================================================================
 
 
 class TestSessionCreate:
@@ -355,13 +315,8 @@ class TestSessionCreate:
     # ``test_cli_session_bootstrap.py::TestSessionCreateTextOutput``.
 
 
-# ===========================================================================
-# session list
-# ===========================================================================
-
-
 class TestSessionList:
-    """``cafleet-registry session list`` shows all sessions."""
+    """``cafleet session list`` shows all sessions."""
 
     def test_lists_empty(self, tmp_path, monkeypatch):
         """No sessions: table output with no data rows."""
@@ -489,13 +444,8 @@ class TestSessionList:
         )
 
 
-# ===========================================================================
-# session show
-# ===========================================================================
-
-
 class TestSessionShow:
-    """``cafleet-registry session show <id>`` displays a single session."""
+    """``cafleet session show <id>`` displays a single session."""
 
     def test_shows_existing_session(self, tmp_path, monkeypatch):
         """Shows the session row when it exists."""
@@ -647,13 +597,8 @@ class TestSessionShow:
         )
 
 
-# ===========================================================================
-# session delete
-# ===========================================================================
-
-
 class TestSessionDelete:
-    """``cafleet-registry session delete <id>`` removes a session."""
+    """``cafleet session delete <id>`` removes a session."""
 
     def test_deletes_session(self, tmp_path, monkeypatch):
         """Deletes an empty session and prints success message."""
@@ -777,20 +722,10 @@ class TestSessionDelete:
         )
 
 
-# ===========================================================================
-# db init does NOT auto-create a session
-# ===========================================================================
-
-
 class TestDbInitNoAutoSession:
-    """``db init`` must NOT auto-create a default session.
-
-    Design doc: "cafleet-registry db init remains schema-only.
-    It does NOT auto-create a default session."
-    """
+    """``db init`` must NOT auto-create a default session."""
 
     def test_db_init_creates_no_sessions(self, tmp_path, monkeypatch):
-        """After db init, the sessions table exists but is empty."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
             config.settings,
@@ -806,16 +741,10 @@ class TestDbInitNoAutoSession:
         )
 
 
-# ===========================================================================
-# session group exists as a sibling of db
-# ===========================================================================
-
-
 class TestSessionGroupStructure:
     """Verify the session group is a sibling of db, not a child."""
 
     def test_session_group_exists(self, tmp_path, monkeypatch):
-        """``cafleet-registry session`` is a recognized command group."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
             config.settings,
