@@ -23,23 +23,28 @@ function groupMessages(msgs: TimelineMessage[]): TimelineEntry[] {
   const singletons: TimelineEntry[] = [];
 
   for (const m of msgs) {
-    if (m.origin_task_id) {
-      const g = groups.get(m.origin_task_id) ?? [];
-      g.push(m);
-      groups.set(m.origin_task_id, g);
-    } else {
+    if (!m.origin_task_id) {
       singletons.push({ kind: "unicast", message: m });
+      continue;
+    }
+    const existing = groups.get(m.origin_task_id);
+    if (existing) {
+      existing.push(m);
+    } else {
+      groups.set(m.origin_task_id, [m]);
     }
   }
 
-  const broadcasts: TimelineEntry[] = [...groups.values()].map((rows) => ({
-    kind: "broadcast" as const,
-    rows,
-    sortKey: rows.reduce(
-      (min, r) => (r.created_at < min ? r.created_at : min),
-      rows[0].created_at,
-    ),
-  }));
+  const broadcasts = Array.from(
+    groups.values(),
+    (rows): TimelineEntry => ({
+      kind: "broadcast",
+      rows,
+      sortKey: rows.reduce((a, b) =>
+        a.created_at < b.created_at ? a : b,
+      ).created_at,
+    }),
+  );
 
   return [...singletons, ...broadcasts].sort((a, b) =>
     entrySortKey(a).localeCompare(entrySortKey(b)),
