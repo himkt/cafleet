@@ -170,8 +170,7 @@ def send_message(
     body: SendMessageRequest,
     session_id: str = Depends(get_webui_session),
 ):
-    from_agent = broker.get_agent(body.from_agent_id, session_id)
-    if from_agent is None:
+    if broker.get_agent(body.from_agent_id, session_id) is None:
         raise HTTPException(status_code=400, detail="from_agent not in session")
 
     if body.to_agent_id == "*":
@@ -179,8 +178,7 @@ def send_message(
         summary = result[0]["task"]
         return {"task_id": summary["id"], "status": summary["status"]["state"]}
 
-    to_agent = broker.get_agent(body.to_agent_id, session_id)
-    if to_agent is None:
+    if broker.get_agent(body.to_agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
     result = broker.send_message(
