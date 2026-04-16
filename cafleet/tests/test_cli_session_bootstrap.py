@@ -1,37 +1,4 @@
-"""CLI-level tests for the session-bootstrap surface added by design 0000026.
-
-These tests exercise the ``cafleet session create``, ``cafleet session list``,
-and ``cafleet session delete`` CLI surfaces end-to-end through ``CliRunner``.
-They live in a separate file from the pre-existing ``test_session_cli.py``
-so that the new bootstrap contract (which depends on a valid tmux context) is
-covered in isolation without having to retrofit tmux mocks onto every legacy
-test.
-
-Test isolation strategy (mirrors ``test_session_cli.py``):
-
-  Each test seeds a fresh ``tmp_path`` DB via ``db init``, then exercises
-  session subcommands against that file. ``config.settings.database_url`` is
-  monkeypatched to point at the temp file. ``cafleet.tmux.ensure_tmux_available``
-  and ``cafleet.tmux.director_context`` are monkeypatched to a no-op + a
-  deterministic fake ``DirectorContext`` so the bootstrap path succeeds
-  without a real tmux server.
-
-Covered behaviors (design 0000026 §Specification):
-
-  * ``session create`` text output: line 1 session_id, line 2 director agent_id,
-    plus label / director_name / pane / administrator lines.
-  * ``session create --json`` nested shape: top-level ``session_id``, ``label``,
-    ``created_at``, ``administrator_agent_id``; nested ``director`` with
-    ``agent_id``, ``name``, ``description``, ``registered_at``, and
-    ``placement`` where ``director_agent_id`` is null and ``coding_agent`` is
-    ``"unknown"``.
-  * ``session list`` hides soft-deleted sessions (no ``--all`` flag accepted).
-  * ``session create`` outside tmux fails with the specific error and writes
-    nothing to the DB.
-  * ``session delete`` on an unknown session_id exits 1 with ``not found``.
-  * ``session delete`` twice in a row is idempotent and reports 0 on the
-    second call.
-"""
+"""CLI-level tests for the session-bootstrap surface (design 0000026)."""
 
 import json
 import sqlite3
@@ -46,17 +13,11 @@ from cafleet.db import engine as engine_mod
 from cafleet.tmux import DirectorContext, TmuxError
 
 
-# ---------------------------------------------------------------------------
-# Shared fixtures
-# ---------------------------------------------------------------------------
-
-
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 
 @pytest.fixture(autouse=True)
 def _reset_engine_singletons():
-    """Reset broker engine singletons so each test gets a fresh engine."""
     engine_mod._sync_engine = None
     engine_mod._sync_sessionmaker = None
     yield
@@ -66,7 +27,6 @@ def _reset_engine_singletons():
 
 @pytest.fixture
 def db_file(tmp_path, monkeypatch):
-    """Point ``settings.database_url`` at a fresh temp DB and init its schema."""
     path = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,
@@ -84,14 +44,12 @@ def db_file(tmp_path, monkeypatch):
 
 @pytest.fixture
 def mock_tmux_ok(monkeypatch):
-    """Make ``tmux.ensure_tmux_available`` a no-op and hand back a fake ctx."""
+    """Stub tmux availability and hand back a fixed ``DirectorContext``."""
     from cafleet import cli as cli_mod
 
     monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
     monkeypatch.setattr("cafleet.tmux.director_context", lambda: _FAKE_DIRECTOR_CTX)
-    # Also patch the CLI module's own symbol table in case the implementation
-    # does ``from cafleet.tmux import ensure_tmux_available, director_context``
-    # rather than ``from cafleet import tmux``.
+    # Cover callers that do ``from cafleet.tmux import …`` as well.
     if hasattr(cli_mod, "ensure_tmux_available"):
         monkeypatch.setattr(cli_mod, "ensure_tmux_available", lambda: None)
     if hasattr(cli_mod, "director_context"):
