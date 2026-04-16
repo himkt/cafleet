@@ -18,10 +18,6 @@ def run_recorder(monkeypatch):
 
 
 class TestTmuxHelpers:
-    """Design doc 0000027 Specification § "``tmux.py`` additions"."""
-
-    # ---- send_choice_key -------------------------------------------------
-
     @pytest.mark.parametrize("digit", [1, 2, 3])
     def test_send_choice_key_records_exact_argv(self, run_recorder, digit):
         tmux.send_choice_key(target_pane_id="%7", digit=digit)
@@ -71,8 +67,6 @@ class TestTmuxHelpers:
             "%99",
             "2",
         ], f"got: {run_recorder[0]['args']!r}"
-
-    # ---- send_freetext_and_submit ---------------------------------------
 
     def test_send_freetext_and_submit_three_calls_in_order(self, run_recorder):
         tmux.send_freetext_and_submit(target_pane_id="%7", text="hello")

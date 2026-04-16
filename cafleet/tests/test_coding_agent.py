@@ -95,10 +95,6 @@ class TestBuildCommand:
         result = CODEX.build_command("Hello world")
         assert result == ["codex", "--approval-mode", "auto-edit", "Hello world"]
 
-    # -------------------------------------------------------------------------
-    # Design doc 0000029 Step 4 — display_name kwarg plumbing
-    # -------------------------------------------------------------------------
-
     def test_display_name_kwarg_injects_for_claude(self):
         """``CLAUDE.build_command("p", display_name="Drafter")`` produces the
         exact argv shape ``["claude", "--name", "Drafter", "p"]``.
