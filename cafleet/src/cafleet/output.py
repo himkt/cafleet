@@ -112,11 +112,14 @@ def format_member(data: dict) -> str:
     return "\n".join(lines)
 
 
+_AGENT_ID_COLUMN_WIDTH = 14
+
+
 def format_member_list(members: list) -> str:
-    count = len(members)
-    if count == 0:
+    if not members:
         return "0 members."
-    lines = [f"{count} member{'s' if count != 1 else ''}:"]
+    count = len(members)
+    lines = [f"{count} member{'s' if count > 1 else ''}:"]
     header = "  agent_id        name      status  backend  session  window_id  pane_id  created_at"
     sep = (
         "  --------------  --------  ------  -------  -------  ---------  -------  "
@@ -129,10 +132,10 @@ def format_member_list(members: list) -> str:
         pane_id = placement.get("tmux_pane_id")
         pane_display = pane_id if pane_id is not None else "(pending)"
         agent_id = m.get("agent_id", "?")
-        if len(agent_id) > 14:
-            agent_id = agent_id[:12] + "…"
+        if len(agent_id) > _AGENT_ID_COLUMN_WIDTH:
+            agent_id = agent_id[: _AGENT_ID_COLUMN_WIDTH - 2] + "…"
         lines.append(
-            f"  {agent_id:<14}  {m.get('name', '?'):<8}  "
+            f"  {agent_id:<{_AGENT_ID_COLUMN_WIDTH}}  {m.get('name', '?'):<8}  "
             f"{m.get('status', 'active'):<6}  "
             f"{placement.get('coding_agent', 'claude'):<7}  "
             f"{placement.get('tmux_session', '?'):<7}  "
