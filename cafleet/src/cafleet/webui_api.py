@@ -31,79 +31,84 @@ def _extract_body(task_dict: dict) -> str:
     return ""
 
 
+def _build_message(
+    *,
+    task_id: str,
+    from_id: str,
+    to_id: str,
+    type_: str,
+    status: str,
+    created_at: str,
+    status_timestamp: str,
+    origin_task_id: str | None,
+    body: str,
+    agent_names: dict[str, str],
+) -> dict:
+    return {
+        "task_id": task_id,
+        "from_agent_id": from_id,
+        "from_agent_name": agent_names.get(from_id, "") if from_id else "",
+        "to_agent_id": to_id,
+        "to_agent_name": agent_names.get(to_id, "") if to_id else "",
+        "type": type_,
+        "status": status,
+        "created_at": created_at,
+        "status_timestamp": status_timestamp,
+        "origin_task_id": origin_task_id,
+        "body": body,
+    }
+
+
 def _format_raw_tasks(rows: list[dict]) -> list[dict]:
     if not rows:
         return []
-
-    agent_ids: set[str] = set()
-    for row in rows:
-        if row["from_agent_id"]:
-            agent_ids.add(row["from_agent_id"])
-        if row["to_agent_id"]:
-            agent_ids.add(row["to_agent_id"])
+    agent_ids = {
+        aid for row in rows for aid in (row["from_agent_id"], row["to_agent_id"]) if aid
+    }
     agent_names = broker.get_agent_names(list(agent_ids))
-
-    messages: list[dict] = []
-    for row in rows:
-        task_dict = json.loads(row["task_json"])
-        from_id = row["from_agent_id"]
-        to_id = row["to_agent_id"]
-        messages.append(
-            {
-                "task_id": row["task_id"],
-                "from_agent_id": from_id,
-                "from_agent_name": agent_names.get(from_id, "") if from_id else "",
-                "to_agent_id": to_id,
-                "to_agent_name": agent_names.get(to_id, "") if to_id else "",
-                "type": row["type"],
-                "status": row["status_state"],
-                "created_at": row["created_at"],
-                "status_timestamp": row["status_timestamp"],
-                "origin_task_id": row["origin_task_id"],
-                "body": _extract_body(task_dict),
-            }
+    return [
+        _build_message(
+            task_id=row["task_id"],
+            from_id=row["from_agent_id"],
+            to_id=row["to_agent_id"],
+            type_=row["type"],
+            status=row["status_state"],
+            created_at=row["created_at"],
+            status_timestamp=row["status_timestamp"],
+            origin_task_id=row["origin_task_id"],
+            body=_extract_body(json.loads(row["task_json"])),
+            agent_names=agent_names,
         )
-    return messages
+        for row in rows
+    ]
 
 
 def _format_timeline_entries(entries: list[dict]) -> list[dict]:
     if not entries:
         return []
-
-    agent_ids: set[str] = set()
-    for entry in entries:
-        task = entry["task"]
-        metadata = task.get("metadata", {})
-        from_id = metadata.get("fromAgentId", "")
-        to_id = metadata.get("toAgentId", "")
-        if from_id:
-            agent_ids.add(from_id)
-        if to_id:
-            agent_ids.add(to_id)
+    metas = [(entry, entry["task"].get("metadata", {})) for entry in entries]
+    agent_ids = {
+        aid
+        for _, meta in metas
+        for aid in (meta.get("fromAgentId", ""), meta.get("toAgentId", ""))
+        if aid
+    }
     agent_names = broker.get_agent_names(list(agent_ids))
-
-    messages: list[dict] = []
-    for entry in entries:
-        task = entry["task"]
-        metadata = task.get("metadata", {})
-        from_id = metadata.get("fromAgentId", "")
-        to_id = metadata.get("toAgentId", "")
-        messages.append(
-            {
-                "task_id": task["id"],
-                "from_agent_id": from_id,
-                "from_agent_name": agent_names.get(from_id, "") if from_id else "",
-                "to_agent_id": to_id,
-                "to_agent_name": agent_names.get(to_id, "") if to_id else "",
-                "type": metadata.get("type", ""),
-                "status": task.get("status", {}).get("state", ""),
-                "created_at": entry["created_at"],
-                "status_timestamp": task.get("status", {}).get("timestamp", ""),
-                "origin_task_id": entry["origin_task_id"],
-                "body": _extract_body(task),
-            }
+    return [
+        _build_message(
+            task_id=entry["task"]["id"],
+            from_id=meta.get("fromAgentId", ""),
+            to_id=meta.get("toAgentId", ""),
+            type_=meta.get("type", ""),
+            status=entry["task"].get("status", {}).get("state", ""),
+            created_at=entry["created_at"],
+            status_timestamp=entry["task"].get("status", {}).get("timestamp", ""),
+            origin_task_id=entry["origin_task_id"],
+            body=_extract_body(entry["task"]),
+            agent_names=agent_names,
         )
-    return messages
+        for entry, meta in metas
+    ]
 
 
 class SendMessageRequest(BaseModel):
