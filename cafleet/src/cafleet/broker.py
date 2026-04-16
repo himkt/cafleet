@@ -616,7 +616,6 @@ def _read_task(session, task_id: str) -> dict | None:
     return json.loads(row[0])
 
 
-# ---------------------------------------------------------------------------
 def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
     """Create a unicast task addressed to ``to`` and best-effort notify it."""
     try:

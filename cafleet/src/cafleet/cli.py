@@ -131,11 +131,6 @@ def init() -> None:
             engine.dispose()
 
 
-# ---------------------------------------------------------------------------
-# session subgroup
-# ---------------------------------------------------------------------------
-
-
 @cli.group()
 def session() -> None:
     """Session management commands."""
@@ -466,11 +461,6 @@ def deregister(ctx, agent_id):
         click.echo(output.format_json({"status": "deregistered"}))
     else:
         click.echo("Agent deregistered successfully.")
-
-
-# ---------------------------------------------------------------------------
-# member subgroup
-# ---------------------------------------------------------------------------
 
 
 @cli.group()
