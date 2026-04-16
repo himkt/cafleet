@@ -570,6 +570,82 @@ class TestSessionShow:
             f"error message must mention 'not found'. got: {result.output!r}"
         )
 
+    def test_soft_deleted_session_surfaces_deleted_at_line(self, tmp_path, monkeypatch):
+        """Design 0000026: ``get_session`` intentionally returns soft-deleted
+        rows (exposing ``deleted_at`` for audit), but pre-fix the text output
+        dropped that field, so a soft-deleted session was visually identical
+        to an active one. This regression guard pins the new behavior: when
+        ``deleted_at`` is non-NULL, text output includes a ``deleted_at:``
+        line so users can distinguish it without parsing JSON.
+        """
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        _init_db(runner)
+
+        sid = str(uuid.uuid4())
+        _seed_session(db_file, sid, label="audit-me")
+        # Flip deleted_at directly; bypass the cascade so the rest of the DB
+        # stays untouched and we only pin the show-output behavior.
+        conn = sqlite3.connect(str(db_file))
+        try:
+            conn.execute(
+                "UPDATE sessions SET deleted_at = ? WHERE session_id = ?",
+                ("2026-04-16T10:00:00+00:00", sid),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = runner.invoke(cli, ["session", "show", sid])
+
+        assert result.exit_code == 0, (
+            f"session show on a soft-deleted row must still succeed "
+            f"(audit semantics). got exit_code={result.exit_code}, "
+            f"output: {result.output!r}"
+        )
+        assert "deleted_at:" in result.output, (
+            f"text output must include a 'deleted_at:' line when the session "
+            f"row has a non-NULL deleted_at. got: {result.output!r}"
+        )
+        assert "2026-04-16T10:00:00+00:00" in result.output, (
+            f"text output must show the actual deleted_at timestamp. "
+            f"got: {result.output!r}"
+        )
+
+    def test_active_session_does_not_print_deleted_at_line(self, tmp_path, monkeypatch):
+        """Symmetric check: an active (``deleted_at IS NULL``) session must
+        NOT show a ``deleted_at:`` line — otherwise users would see a blank
+        or misleading field on every healthy session.
+        """
+        db_file = tmp_path / "registry.db"
+        monkeypatch.setattr(
+            config.settings,
+            "database_url",
+            f"sqlite+aiosqlite:///{db_file}",
+        )
+        runner = CliRunner()
+        _init_db(runner)
+
+        sid = str(uuid.uuid4())
+        _seed_session(db_file, sid, label="live-session")
+
+        result = runner.invoke(cli, ["session", "show", sid])
+
+        assert result.exit_code == 0, (
+            f"session show on an active row must succeed. "
+            f"got exit_code={result.exit_code}, output: {result.output!r}"
+        )
+        assert "deleted_at" not in result.output, (
+            f"active session text output must NOT include a 'deleted_at' "
+            f"line (that line is reserved for soft-deleted rows). "
+            f"got: {result.output!r}"
+        )
+
 
 # ===========================================================================
 # session delete

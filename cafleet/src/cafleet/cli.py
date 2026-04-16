@@ -246,6 +246,8 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
         click.echo(f"session_id: {result['session_id']}")
         click.echo(f"label:      {result['label'] or ''}")
         click.echo(f"created_at: {result['created_at']}")
+        if result.get("deleted_at") is not None:
+            click.echo(f"deleted_at: {result['deleted_at']}")
 
 
 @session.command("delete")
