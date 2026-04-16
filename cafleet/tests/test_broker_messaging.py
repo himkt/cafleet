@@ -1,23 +1,4 @@
-"""Tests for broker.py — messaging operations.
-
-Design doc 0000021 Step 4: messaging operations in the broker module.
-All functions are sync, using ``get_sync_sessionmaker()`` from ``db/engine.py``.
-
-Test isolation strategy:
-  Same as test_broker_registry.py — each test gets a fresh in-memory SQLite
-  database via the ``broker_session`` fixture with ``broker.get_sync_sessionmaker``
-  monkeypatched.
-
-Coverage map:
-  | Function           | Test class                |
-  |--------------------|---------------------------|
-  | send_message       | TestSendMessage           |
-  | broadcast_message  | TestBroadcastMessage      |
-  | poll_tasks         | TestPollTasks             |
-  | ack_task           | TestAckTask               |
-  | cancel_task        | TestCancelTask            |
-  | get_task           | TestGetTask               |
-"""
+"""Tests for ``broker`` messaging operations."""
 
 import uuid
 
@@ -29,14 +10,8 @@ import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet.db.models import Base
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def sync_sessionmaker():
-    """Create a sync in-memory SQLite engine with all tables."""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)
@@ -44,7 +19,6 @@ def sync_sessionmaker():
 
 @pytest.fixture
 def _patch_broker(sync_sessionmaker, monkeypatch):
-    """Monkeypatch broker.get_sync_sessionmaker to use the test engine."""
     from cafleet import broker
 
     monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
@@ -52,13 +26,7 @@ def _patch_broker(sync_sessionmaker, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def broker_session(sync_sessionmaker, _patch_broker):
-    """Autouse fixture that sets up broker with a test DB for every test."""
     return sync_sessionmaker
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _create_session(label: str | None = None) -> dict:
@@ -86,7 +54,6 @@ def _register_agent(
 
 
 def _setup_two_agents() -> tuple[str, str, str]:
-    """Create a session with two agents. Returns (session_id, agent_a_id, agent_b_id)."""
     session = _create_session()
     sid = session["session_id"]
     agent_a = _register_agent(sid, name="sender")
@@ -95,7 +62,6 @@ def _setup_two_agents() -> tuple[str, str, str]:
 
 
 def _setup_three_agents() -> tuple[str, str, str, str]:
-    """Create a session with three agents. Returns (session_id, a_id, b_id, c_id)."""
     session = _create_session()
     sid = session["session_id"]
     a = _register_agent(sid, name="agent-a")

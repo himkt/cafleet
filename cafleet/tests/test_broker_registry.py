@@ -1,29 +1,4 @@
-"""Tests for broker.py — session + registry operations.
-
-Design doc 0000021 Step 3: broker.py is the single data access layer.
-All functions are sync, using ``get_sync_sessionmaker()`` from ``db/engine.py``.
-
-Test isolation strategy:
-  Each test gets a fresh in-memory SQLite database via the ``broker_session``
-  fixture. ``broker.get_sync_sessionmaker`` is monkeypatched to return a
-  sessionmaker bound to this ephemeral engine, so broker functions operate
-  on a clean DB with no cross-test contamination.
-
-Coverage map:
-  | Function                   | Test class                        |
-  |----------------------------|-----------------------------------|
-  | create_session             | TestCreateSession                 |
-  | list_sessions              | TestListSessions                  |
-  | get_session                | TestGetSession                    |
-  | delete_session             | TestDeleteSession                 |
-  | register_agent             | TestRegisterAgent                 |
-  | get_agent                  | TestGetAgent                      |
-  | list_agents                | TestListAgents                    |
-  | verify_agent_session       | TestVerifyAgentSession            |
-  | deregister_agent           | TestDeregisterAgent               |
-  | update_placement_pane_id   | TestUpdatePlacementPaneId         |
-  | list_members               | TestListMembers                   |
-"""
+"""Tests for ``broker`` session + registry operations."""
 
 import uuid
 
@@ -35,14 +10,8 @@ import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet.db.models import Base
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def sync_sessionmaker():
-    """Create a sync in-memory SQLite engine with all tables."""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)
@@ -50,7 +19,6 @@ def sync_sessionmaker():
 
 @pytest.fixture
 def _patch_broker(sync_sessionmaker, monkeypatch):
-    """Monkeypatch broker.get_sync_sessionmaker to use the test engine."""
     from cafleet import broker
 
     monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
@@ -58,17 +26,10 @@ def _patch_broker(sync_sessionmaker, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def broker_session(sync_sessionmaker, _patch_broker):
-    """Autouse fixture that sets up broker with a test DB for every test."""
     return sync_sessionmaker
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _create_session(label: str | None = None) -> dict:
-    """Create a session via broker and return the result dict."""
     from cafleet import broker
     from cafleet.tmux import DirectorContext
 
@@ -85,7 +46,6 @@ def _register_agent(
     skills: list[dict] | None = None,
     placement: dict | None = None,
 ) -> dict:
-    """Register an agent via broker and return the result dict."""
     from cafleet import broker
 
     return broker.register_agent(
