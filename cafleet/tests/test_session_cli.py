@@ -561,7 +561,7 @@ class TestSessionShow:
         result = runner.invoke(cli, ["session", "show", fake_id])
 
         assert result.exit_code == 1, (
-            f"session show must exit 1 for missing session (sys.exit(1) in "
+            f"session show must exit 1 for missing session (ctx.exit(1) in "
             f"cli.session_show). got exit_code={result.exit_code}, "
             f"output: {result.output}"
         )

@@ -239,7 +239,8 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
 
     if result is None:
         click.echo(f"Error: session '{session_id}' not found.", err=True)
-        sys.exit(1)
+        ctx.exit(1)
+        return
 
     if as_json or ctx.obj.get("json_output"):
         click.echo(json.dumps(result))
