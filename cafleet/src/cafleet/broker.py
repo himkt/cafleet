@@ -1023,29 +1023,18 @@ def get_task(session_id: str, task_id: str) -> dict:
             raise ValueError(f"Task {task_id} not found")
 
         metadata = task_dict.get("metadata", {})
-        from_id = metadata.get("fromAgentId", "")
-        to_id = metadata.get("toAgentId", "")
-
-        from_ok = (
-            session.execute(
-                select(Agent.agent_id).where(
-                    Agent.agent_id == from_id,
-                    Agent.session_id == session_id,
-                )
-            ).first()
-            is not None
-        )
-        to_ok = (
-            session.execute(
-                select(Agent.agent_id).where(
-                    Agent.agent_id == to_id,
-                    Agent.session_id == session_id,
-                )
-            ).first()
-            is not None
-        )
-
-        if not from_ok and not to_ok:
+        endpoint_ids = [
+            aid
+            for aid in (metadata.get("fromAgentId", ""), metadata.get("toAgentId", ""))
+            if aid
+        ]
+        in_session = session.execute(
+            select(Agent.agent_id).where(
+                Agent.agent_id.in_(endpoint_ids),
+                Agent.session_id == session_id,
+            )
+        ).first()
+        if in_session is None:
             raise ValueError(f"Task {task_id} not found")
 
     return {"task": task_dict}
