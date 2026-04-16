@@ -220,6 +220,14 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`) — `.format()` collapses each `{{` / `}}` pair to a single literal brace and, critically, does not attempt placeholder substitution on the inner tokens. This matters for prompts that embed JSON snippets, shell expansions, or other content with literal curly braces. Pre-substituting the dynamic values in shell does NOT exempt the prompt from this rule — even a placeholder-free prompt is still passed through `str.format()`, so any literal braces must still be doubled or removed.
 
+**Pane title**: for `--coding-agent claude`, the `--name` flag is forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the tmux pane title (`#{pane_title}`) shows the member name and persists across prompt replies. Operators can locate a specific member's pane by filtering the pane-title listing:
+
+```bash
+tmux list-panes -a -F "#{pane_id} #{pane_title}" | grep Drafter
+```
+
+For `--coding-agent codex`, no display-name flag exists today; the pane title stays on the auto-derived default.
+
 If the tmux `split-window` fails, the registered agent is rolled back. If the placement PATCH fails, the pane is `/exit`'d and the agent rolled back.
 
 Output (text):

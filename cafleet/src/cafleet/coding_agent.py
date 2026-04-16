@@ -16,9 +16,15 @@ class CodingAgentConfig:
     binary: str
     extra_args: tuple[str, ...] = ()
     default_prompt_template: str = ""
+    display_name_args: tuple[str, ...] = ()
 
-    def build_command(self, prompt: str) -> list[str]:
-        return [self.binary, *self.extra_args, prompt]
+    def build_command(
+        self, prompt: str, *, display_name: str | None = None
+    ) -> list[str]:
+        name_args: tuple[str, ...] = ()
+        if display_name and self.display_name_args:
+            name_args = (*self.display_name_args, display_name)
+        return [self.binary, *self.extra_args, *name_args, prompt]
 
     def ensure_available(self) -> None:
         if shutil.which(self.binary) is None:
@@ -35,6 +41,7 @@ CLAUDE = CodingAgentConfig(
         "Wait for instructions via "
         "`cafleet --session-id {session_id} poll --agent-id {agent_id}`."
     ),
+    display_name_args=("--name",),
 )
 
 CODEX = CodingAgentConfig(

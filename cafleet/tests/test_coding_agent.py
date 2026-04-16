@@ -127,6 +127,85 @@ class TestBuildCommand:
         result = CODEX.build_command("Hello world")
         assert result == ["codex", "--approval-mode", "auto-edit", "Hello world"]
 
+    # -------------------------------------------------------------------------
+    # Design doc 0000029 Step 4 — display_name kwarg plumbing
+    # -------------------------------------------------------------------------
+
+    def test_display_name_kwarg_injects_for_claude(self):
+        """``CLAUDE.build_command("p", display_name="Drafter")`` produces the
+        exact argv shape ``["claude", "--name", "Drafter", "p"]``.
+
+        Design doc 0000029 §A: the display-name flag is injected between
+        ``extra_args`` and the positional prompt — verified by the manual
+        proof carried out on 2026-04-15.
+        """
+        from cafleet.coding_agent import CLAUDE
+
+        result = CLAUDE.build_command("p", display_name="Drafter")
+        assert result == ["claude", "--name", "Drafter", "p"], (
+            f"CLAUDE must emit [binary, --name, <display_name>, <prompt>] "
+            f"with the flag before the positional prompt. got: {result!r}"
+        )
+
+    def test_display_name_kwarg_no_op_for_codex(self):
+        """``CODEX.build_command("p", display_name="Drafter")`` is byte-identical
+        to the no-kwarg call — codex has no ``--name`` equivalent today, so
+        ``display_name_args=()`` guards the injection.
+
+        Design doc 0000029 §A table: ``CODEX.display_name_args = ()``.
+        """
+        from cafleet.coding_agent import CODEX
+
+        result = CODEX.build_command("p", display_name="Drafter")
+        assert result == ["codex", "--approval-mode", "auto-edit", "p"], (
+            f"CODEX must ignore display_name (display_name_args=()). got: {result!r}"
+        )
+
+    def test_display_name_none_matches_default(self):
+        """``display_name=None`` (or omitted) is byte-identical to not passing
+        the kwarg — preserves backward compatibility with every existing
+        positional caller.
+        """
+        from cafleet.coding_agent import CLAUDE, CODEX
+
+        assert CLAUDE.build_command("p", display_name=None) == CLAUDE.build_command(
+            "p"
+        ), "CLAUDE: display_name=None must match no-kwarg call"
+        assert CODEX.build_command("p", display_name=None) == CODEX.build_command(
+            "p"
+        ), "CODEX: display_name=None must match no-kwarg call"
+
+    def test_display_name_with_spaces_preserved(self):
+        """Whitespace inside ``display_name`` is preserved as a single list element.
+
+        Design doc 0000029 §C: ``subprocess`` receives a ``list[str]`` so
+        embedded spaces never get re-tokenised.
+        """
+        from cafleet.coding_agent import CLAUDE
+
+        result = CLAUDE.build_command("p", display_name="Code Reviewer")
+        assert result == ["claude", "--name", "Code Reviewer", "p"], (
+            f"'Code Reviewer' must be one list element, not split on the space. "
+            f"got: {result!r}"
+        )
+
+    def test_display_name_args_field_default_empty_tuple(self):
+        """A ``CodingAgentConfig`` built without ``display_name_args`` exposes ``()``.
+
+        Design doc 0000029 §A: the new field defaults to empty tuple so
+        existing configs and tests don't need updating.
+        """
+        from cafleet.coding_agent import CodingAgentConfig
+
+        config = CodingAgentConfig(name="test", binary="test-bin")
+        assert config.display_name_args == (), (
+            f"display_name_args must default to (). got: {config.display_name_args!r}"
+        )
+        assert isinstance(config.display_name_args, tuple), (
+            f"display_name_args must be a tuple (frozen-dataclass immutability). "
+            f"got: {type(config.display_name_args).__name__}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # ensure_available

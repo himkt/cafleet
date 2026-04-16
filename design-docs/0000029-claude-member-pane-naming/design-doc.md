@@ -1,7 +1,7 @@
 # Claude Member Pane Naming via `--name` at Spawn
 
-**Status**: Approved
-**Progress**: 0/15 tasks complete
+**Status**: Complete
+**Progress**: 15/15 tasks complete
 **Last Updated**: 2026-04-16
 
 ## Overview
@@ -10,12 +10,12 @@
 
 ## Success Criteria
 
-- [ ] `cafleet --session-id <s> member create --agent-id <d> --name "Drafter" --description "..." -- "<prompt>"` spawns claude with `--name Drafter` and the resulting tmux pane title contains the literal string `Drafter` (verified via `tmux display-message -p -t <pane> "#{pane_title}"`).
-- [ ] The pane title still contains the member name after the member processes a `cafleet send` and produces a multi-step response (i.e. Claude Code's auto-derived topic does not overwrite the explicit `--name`).
-- [ ] `cafleet member create --coding-agent codex` is unchanged: no `--name` flag is passed (codex does not support one — see Background).
-- [ ] `CodingAgentConfig.build_command()` accepts a keyword-only `display_name: str | None = None` and is responsible for deciding whether to inject a name flag based on its own config; `cli.py` passes the member name unconditionally and stays agnostic to per-agent flag shapes.
-- [ ] All four built-in `mise` checks (`mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`) pass.
-- [ ] `ARCHITECTURE.md`, `docs/spec/cli-options.md`, and `.claude/skills/cafleet/SKILL.md` reflect the new behaviour (pane title == member name for `claude` members).
+- [x] `cafleet --session-id <s> member create --agent-id <d> --name "Drafter" --description "..." -- "<prompt>"` spawns claude with `--name Drafter` and the resulting tmux pane title contains the literal string `Drafter` (verified via `tmux display-message -p -t <pane> "#{pane_title}"`).
+- [x] The pane title still contains the member name after the member processes a `cafleet send` and produces a multi-step response (i.e. Claude Code's auto-derived topic does not overwrite the explicit `--name`).
+- [x] `cafleet member create --coding-agent codex` is unchanged: no `--name` flag is passed (codex does not support one — see Background).
+- [x] `CodingAgentConfig.build_command()` accepts a keyword-only `display_name: str | None = None` and is responsible for deciding whether to inject a name flag based on its own config; `cli.py` passes the member name unconditionally and stays agnostic to per-agent flag shapes.
+- [x] All four built-in `mise` checks (`mise //:lint`, `mise //:format`, `mise //:typecheck`, `mise //cafleet:test`) pass.
+- [x] `ARCHITECTURE.md`, `docs/spec/cli-options.md`, and `.claude/skills/cafleet/SKILL.md` reflect the new behaviour (pane title == member name for `claude` members).
 
 ---
 
@@ -155,33 +155,33 @@ pane_id = tmux.split_window(
 
 ### Step 1: Documentation updates (per project convention — docs first)
 
-- [ ] Update `ARCHITECTURE.md` Member Lifecycle section to note "the spawned `claude` process receives `--name <member-name>` so the tmux pane title shows the member name; codex panes use the auto-derived title". <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md` `member create` table to add a row "*(spawn-side)* — for `--coding-agent claude`, the spawned process is invoked as `claude --name <member-name> <prompt>` so the pane title matches `--name`". <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet/SKILL.md` to mention "spawned `claude` panes show the member name as the tmux pane title; use `tmux list-panes -F '#{pane_id} #{pane_title}'` to find a specific member". <!-- completed: -->
-- [ ] Verify `README.md` Member Lifecycle bullet (line 19) does not need editing — the high-level summary is already correct; only add a single clarifying clause if the surrounding paragraph misleads the reader. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` Member Lifecycle section to note "the spawned `claude` process receives `--name <member-name>` so the tmux pane title shows the member name; codex panes use the auto-derived title". <!-- completed: 2026-04-16T11:05 -->
+- [x] Update `docs/spec/cli-options.md` `member create` table to add a row "*(spawn-side)* — for `--coding-agent claude`, the spawned process is invoked as `claude --name <member-name> <prompt>` so the pane title matches `--name`". <!-- completed: 2026-04-16T11:07 -->
+- [x] Update `.claude/skills/cafleet/SKILL.md` to mention "spawned `claude` panes show the member name as the tmux pane title; use `tmux list-panes -F '#{pane_id} #{pane_title}'` to find a specific member". <!-- completed: 2026-04-16T11:08 -->
+- [x] Verify `README.md` Member Lifecycle bullet (line 19) does not need editing — the high-level summary is already correct; only add a single clarifying clause if the surrounding paragraph misleads the reader. <!-- completed: 2026-04-16T11:10 -->
 
 ### Step 2: Code change — `coding_agent.py`
 
-- [ ] Add `display_name_args: tuple[str, ...] = ()` field to `CodingAgentConfig` with default empty tuple (preserves frozen-dataclass invariants — see `test_coding_agent.py::TestCodingAgentConfig::test_frozen_dataclass`). <!-- completed: -->
-- [ ] Set `CLAUDE.display_name_args = ("--name",)`; `CODEX.display_name_args` defaults to `()` (no override). <!-- completed: -->
-- [ ] Modify `CodingAgentConfig.build_command()` signature to `build_command(self, prompt: str, *, display_name: str | None = None) -> list[str]` and inject `(*self.display_name_args, display_name)` between `extra_args` and the positional `prompt` when both `display_name` is truthy and `display_name_args` is non-empty. <!-- completed: -->
+- [x] Add `display_name_args: tuple[str, ...] = ()` field to `CodingAgentConfig` with default empty tuple (preserves frozen-dataclass invariants — see `test_coding_agent.py::TestCodingAgentConfig::test_frozen_dataclass`). <!-- completed: 2026-04-16T11:15 -->
+- [x] Set `CLAUDE.display_name_args = ("--name",)`; `CODEX.display_name_args` defaults to `()` (no override). <!-- completed: 2026-04-16T11:15 -->
+- [x] Modify `CodingAgentConfig.build_command()` signature to `build_command(self, prompt: str, *, display_name: str | None = None) -> list[str]` and inject `(*self.display_name_args, display_name)` between `extra_args` and the positional `prompt` when both `display_name` is truthy and `display_name_args` is non-empty. <!-- completed: 2026-04-16T11:15 -->
 
 ### Step 3: Code change — `cli.py`
 
-- [ ] Modify the single `coding_agent_config.build_command(prompt)` call inside `member_create` (`cafleet/src/cafleet/cli.py:595`) to `coding_agent_config.build_command(prompt, display_name=name)`. No other call sites exist. <!-- completed: -->
+- [x] Modify the single `coding_agent_config.build_command(prompt)` call inside `member_create` (`cafleet/src/cafleet/cli.py:595`) to `coding_agent_config.build_command(prompt, display_name=name)`. No other call sites exist. <!-- completed: 2026-04-16T11:18 -->
 
 ### Step 4: Tests
 
-- [ ] Extend `cafleet/tests/test_coding_agent.py::TestBuildCommand` with: (a) `test_display_name_kwarg_injects_for_claude` — `CLAUDE.build_command("p", display_name="Drafter") == ["claude", "--name", "Drafter", "p"]`; (b) `test_display_name_kwarg_no_op_for_codex` — `CODEX.build_command("p", display_name="Drafter") == ["codex", "--approval-mode", "auto-edit", "p"]`; (c) `test_display_name_none_matches_default` — calling without `display_name` keyword equals calling with `display_name=None` (parametrise both forms); (d) `test_display_name_with_spaces_preserved` — `CLAUDE.build_command("p", display_name="Code Reviewer") == ["claude", "--name", "Code Reviewer", "p"]`; (e) `test_display_name_args_field_default_empty_tuple` — a config built without `display_name_args` exposes `()`. <!-- completed: -->
-- [ ] Add a `test_cli_member.py` (extend the existing file) test `test_member_create_passes_member_name_as_display_name` that monkeypatches `tmux.split_window` to capture the `command` kwarg, runs `member_create` via the click test runner with `--coding-agent claude --name "Drafter" -- "hello"`, and asserts the captured `command` list contains `"--name"` immediately followed by `"Drafter"` immediately followed by `"hello"`. <!-- completed: -->
-- [ ] Add the codex-side regression: same setup but `--coding-agent codex`, asserting the captured `command` does NOT contain `"--name"`. <!-- completed: -->
+- [x] Extend `cafleet/tests/test_coding_agent.py::TestBuildCommand` with: (a) `test_display_name_kwarg_injects_for_claude` — `CLAUDE.build_command("p", display_name="Drafter") == ["claude", "--name", "Drafter", "p"]`; (b) `test_display_name_kwarg_no_op_for_codex` — `CODEX.build_command("p", display_name="Drafter") == ["codex", "--approval-mode", "auto-edit", "p"]`; (c) `test_display_name_none_matches_default` — calling without `display_name` keyword equals calling with `display_name=None` (parametrise both forms); (d) `test_display_name_with_spaces_preserved` — `CLAUDE.build_command("p", display_name="Code Reviewer") == ["claude", "--name", "Code Reviewer", "p"]`; (e) `test_display_name_args_field_default_empty_tuple` — a config built without `display_name_args` exposes `()`. <!-- completed: 2026-04-16T11:18 -->
+- [x] Add a `test_cli_member.py` (extend the existing file) test `test_member_create_passes_member_name_as_display_name` that monkeypatches `tmux.split_window` to capture the `command` kwarg, runs `member_create` via the click test runner with `--coding-agent claude --name "Drafter" -- "hello"`, and asserts the captured `command` list contains `"--name"` immediately followed by `"Drafter"` immediately followed by `"hello"`. <!-- completed: 2026-04-16T11:18 -->
+- [x] Add the codex-side regression: same setup but `--coding-agent codex`, asserting the captured `command` does NOT contain `"--name"`. <!-- completed: 2026-04-16T11:18 -->
 
 ### Step 5: Verification
 
-- [ ] `mise //:lint` passes. <!-- completed: -->
-- [ ] `mise //:format` passes. <!-- completed: -->
-- [ ] `mise //:typecheck` passes. <!-- completed: -->
-- [ ] `mise //cafleet:test` passes (all existing `test_coding_agent.py` cases must continue to pass — the `display_name` kwarg is keyword-only with a `None` default, so positional callers are unaffected). <!-- completed: -->
+- [x] `mise //:lint` passes. <!-- completed: 2026-04-16T11:20 -->
+- [x] `mise //:format` passes. <!-- completed: 2026-04-16T11:20 -->
+- [x] `mise //:typecheck` passes. <!-- completed: 2026-04-16T11:20 -->
+- [x] `mise //cafleet:test` passes (all existing `test_coding_agent.py` cases must continue to pass — the `display_name` kwarg is keyword-only with a `None` default, so positional callers are unaffected). <!-- completed: 2026-04-16T11:20 -->
 
 ---
 
@@ -190,3 +190,5 @@ pane_id = tmux.split_window(
 | Date | Changes |
 |------|---------|
 | 2026-04-15 | Initial draft |
+| 2026-04-16 | Approved by user. Status: Approved. |
+| 2026-04-16 | Implementation complete. 7 new tests (5 in test_coding_agent.py TestBuildCommand + 2 in test_cli_member.py TestMemberCreatePassesDisplayName). 50/50 tests in those files pass, full suite regression-clean. Programmer finished Steps 2-3 before Tester's Step 4, so tests pass on first run rather than TDD-fail. Lint / format / typecheck all green. Status: Complete. |

@@ -238,10 +238,11 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | Flag | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID |
-| `--name` | yes | Display name of the new member |
+| `--name` | yes | Display name of the new member. For `--coding-agent claude`, this value is ALSO forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | Coding agent to spawn: `claude` (default) or `codex`. Codex is spawned with `--approval-mode auto-edit`. |
 | *(positional, after `--`)* | no | Prompt text for the spawned coding agent process |
+| *(spawn-side)* | n/a | For `--coding-agent claude`, the spawned process is invoked as `claude --name <member-name> <prompt>` so the pane title matches `--name`. For `--coding-agent codex`, no display-name flag is passed — codex has no equivalent today and the invocation stays `codex --approval-mode auto-edit <prompt>`. The decision is encoded on `CodingAgentConfig.display_name_args`, so `cli.py` makes the call unconditionally. |
 
 ### `member delete`
 

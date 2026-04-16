@@ -309,3 +309,210 @@ class TestCustomPromptMalformedRaisesUsageError:
         assert "{{" in message and "}}" in message, (
             f"error message must hint at brace doubling. got: {message!r}"
         )
+
+
+# ===========================================================================
+# Design doc 0000029 Step 4 — cli wires member name through as --name
+# ===========================================================================
+
+from click.testing import CliRunner  # noqa: E402
+
+from cafleet import config  # noqa: E402
+from cafleet.cli import cli  # noqa: E402
+from cafleet.db import engine as engine_mod  # noqa: E402
+from cafleet.tmux import DirectorContext  # noqa: E402
+
+
+_CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
+
+
+@pytest.fixture
+def _reset_engine():
+    engine_mod._sync_engine = None
+    engine_mod._sync_sessionmaker = None
+    yield
+    engine_mod._sync_engine = None
+    engine_mod._sync_sessionmaker = None
+
+
+@pytest.fixture
+def bootstrapped_session(tmp_path, monkeypatch, _reset_engine):
+    """Create a real session and return ``(session_id, director_agent_id, runner)``.
+
+    Spins up a fresh SQLite DB, runs ``cafleet db init`` + ``cafleet session
+    create --json``, and returns the three values every ``member create``
+    invocation needs. ``tmux.ensure_tmux_available`` / ``director_context``
+    are stubbed so ``session create`` (which demands a tmux context) succeeds.
+    """
+    db_file = tmp_path / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+    monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
+    monkeypatch.setattr("cafleet.tmux.director_context", lambda: _CLI_FAKE_DIRECTOR_CTX)
+
+    runner = CliRunner()
+    init = runner.invoke(cli, ["db", "init"])
+    assert init.exit_code == 0, (
+        f"db init failed during test setup. output: {init.output!r}"
+    )
+    create = runner.invoke(cli, ["session", "create", "--json"])
+    assert create.exit_code == 0, (
+        f"session create failed during test setup. "
+        f"output: {create.output!r}, exception: {create.exception!r}"
+    )
+    import json
+
+    data = json.loads(create.output)
+    return data["session_id"], data["director"]["agent_id"], runner
+
+
+@pytest.fixture
+def split_window_recorder(monkeypatch):
+    """Monkeypatch ``tmux.split_window`` to capture its kwargs and return a pane."""
+    calls: list[dict] = []
+
+    def fake_split_window(**kwargs):
+        calls.append(kwargs)
+        return "%42"
+
+    monkeypatch.setattr("cafleet.tmux.split_window", fake_split_window)
+    # ``select_layout`` / ``send_exit`` are best-effort; stub them too so
+    # nothing reaches a real tmux.
+    monkeypatch.setattr("cafleet.tmux.select_layout", lambda **_: None)
+    monkeypatch.setattr("cafleet.tmux.send_exit", lambda **_: None, raising=False)
+    return calls
+
+
+@pytest.fixture
+def stub_coding_agent_binaries(monkeypatch):
+    """Pretend every coding-agent binary is on PATH.
+
+    ``coding_agent_config.ensure_available()`` calls ``shutil.which(self.binary)``;
+    patching it module-wide is the narrowest monkeypatch that keeps both
+    ``claude`` and ``codex`` spawns alive without a real binary.
+    """
+    monkeypatch.setattr("cafleet.coding_agent.shutil.which", lambda _: "/usr/bin/stub")
+
+
+class TestMemberCreatePassesDisplayName:
+    """Design doc 0000029 Step 4(f),(g): ``cli.py`` threads ``--name`` as
+    ``display_name`` into ``coding_agent_config.build_command()``, which
+    means the ``command`` kwarg handed to ``tmux.split_window`` contains
+    ``"--name"`` + the member name for ``claude`` spawns and does NOT
+    contain ``"--name"`` for ``codex`` spawns.
+    """
+
+    def test_member_create_passes_member_name_as_display_name(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--coding-agent",
+                "claude",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 0, (
+            f"member create (claude) must succeed. exit_code={result.exit_code}, "
+            f"output: {result.output!r}, exception: {result.exception!r}"
+        )
+        assert len(split_window_recorder) == 1, (
+            f"tmux.split_window must be called exactly once. "
+            f"got {len(split_window_recorder)}: {split_window_recorder!r}"
+        )
+        command = split_window_recorder[0].get("command")
+        assert command is not None, (
+            f"split_window must receive a `command` kwarg. "
+            f"got kwargs: {split_window_recorder[0]!r}"
+        )
+        assert isinstance(command, list), (
+            f"`command` must be a list[str]. got: {type(command).__name__}"
+        )
+        assert "--name" in command, (
+            f"claude command must contain '--name'. got: {command!r}"
+        )
+        name_index = command.index("--name")
+        assert command[name_index + 1] == "Drafter", (
+            f"the arg immediately after --name must be 'Drafter'. got: {command!r}"
+        )
+        assert command[name_index + 2] == "hello", (
+            f"the prompt 'hello' must immediately follow the name value. "
+            f"got: {command!r}"
+        )
+        assert command[0] == "claude", (
+            f"command must start with the claude binary. got: {command!r}"
+        )
+
+    def test_member_create_codex_does_not_pass_name_flag(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        """Codex regression: ``codex`` has no ``--name`` equivalent today, so
+        ``display_name_args=()`` must elide the flag even when ``--name``
+        is supplied to ``cafleet member create`` (it is always required
+        at the CLI level — ``click.Option --name required=True``).
+        """
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--coding-agent",
+                "codex",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 0, (
+            f"member create (codex) must succeed. exit_code={result.exit_code}, "
+            f"output: {result.output!r}, exception: {result.exception!r}"
+        )
+        assert len(split_window_recorder) == 1, (
+            f"tmux.split_window must be called exactly once. "
+            f"got {len(split_window_recorder)}: {split_window_recorder!r}"
+        )
+        command = split_window_recorder[0].get("command")
+        assert command is not None, (
+            f"split_window must receive a `command` kwarg. "
+            f"got kwargs: {split_window_recorder[0]!r}"
+        )
+        assert "--name" not in command, (
+            f"codex command must NOT contain '--name' (codex has no such flag; "
+            f"display_name_args=() elides it). got: {command!r}"
+        )
+        assert command[0] == "codex", (
+            f"command must start with the codex binary. got: {command!r}"
+        )
+        assert "--approval-mode" in command and "auto-edit" in command, (
+            f"codex command must preserve its existing extra_args. got: {command!r}"
+        )

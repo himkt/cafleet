@@ -664,7 +664,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         pane_id = tmux.split_window(
             target_window_id=director_ctx.window_id,
             env=fwd_env,
-            command=coding_agent_config.build_command(prompt),
+            command=coding_agent_config.build_command(prompt, display_name=name),
         )
     except tmux.TmuxError as exc:
         _rollback_register(
