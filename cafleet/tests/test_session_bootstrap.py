@@ -1,0 +1,643 @@
+"""Tests for broker-level session bootstrap (design doc 0000026).
+
+Covers the 5-step transactional bootstrap performed by ``broker.create_session``:
+
+  1. INSERT sessions (with deleted_at=NULL, director_agent_id=NULL)
+  2. INSERT agents (the root Director, name="director")
+  3. INSERT agent_placements (director_agent_id=NULL, coding_agent="unknown")
+  4. UPDATE sessions SET director_agent_id=<director agent_id>
+  5. INSERT agents (the built-in Administrator, carried over from design 0000025)
+
+Also covers:
+  * rollback when a step mid-transaction fails;
+  * ``delete_session`` soft-delete cascade + idempotency;
+  * ``register_agent`` soft-delete rejection;
+  * ``list_sessions`` filtering out soft-deleted rows;
+  * ``deregister_agent`` refusing to deregister the root Director;
+  * Member → Director notification wiring via ``tmux.send_poll_trigger``.
+
+Test isolation strategy:
+  Each test gets a fresh in-memory SQLite database via the ``broker_session``
+  autouse fixture, mirroring ``test_broker_registry.py`` / ``test_broker_messaging.py``.
+  ``broker.get_sync_sessionmaker`` is monkeypatched to return a sessionmaker
+  bound to this ephemeral engine. ``tmux.director_context()`` is never invoked
+  at the broker layer (the CLI resolves it and passes in a ``DirectorContext``),
+  so we construct ``DirectorContext`` directly in-test.
+"""
+
+import uuid
+from unittest.mock import Mock
+
+import click
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
+from cafleet.db.models import Base
+from cafleet.tmux import DirectorContext
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sync_sessionmaker():
+    """Create a sync in-memory SQLite engine with all tables."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    return sessionmaker(engine, expire_on_commit=False)
+
+
+@pytest.fixture
+def _patch_broker(sync_sessionmaker, monkeypatch):
+    """Monkeypatch broker.get_sync_sessionmaker to use the test engine."""
+    from cafleet import broker
+
+    monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
+
+
+@pytest.fixture(autouse=True)
+def broker_session(sync_sessionmaker, _patch_broker):
+    """Autouse fixture that sets up broker with a test DB for every test."""
+    return sync_sessionmaker
+
+
+@pytest.fixture
+def director_context():
+    """A fake tmux DirectorContext used by broker.create_session tests."""
+    return DirectorContext(session="main", window_id="@1", pane_id="%0")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _bootstrap(label: str | None = None, ctx: DirectorContext | None = None) -> dict:
+    """Call the new ``broker.create_session(label, director_context)`` API."""
+    from cafleet import broker
+
+    return broker.create_session(
+        label=label,
+        director_context=ctx
+        or DirectorContext(session="main", window_id="@1", pane_id="%0"),
+    )
+
+
+# ===========================================================================
+# 5-step transactional bootstrap — success path
+# ===========================================================================
+
+
+class TestCreateSessionBootstrap:
+    """``broker.create_session`` writes session + Director + placement + Admin."""
+
+    def test_returns_nested_dict_with_required_top_level_keys(self, director_context):
+        result = _bootstrap(label="bootstrap-1", ctx=director_context)
+        assert isinstance(result, dict)
+        for key in (
+            "session_id",
+            "label",
+            "created_at",
+            "administrator_agent_id",
+            "director",
+        ):
+            assert key in result, f"missing top-level key {key!r} in {result!r}"
+
+    def test_director_sub_dict_has_required_keys(self, director_context):
+        result = _bootstrap(ctx=director_context)
+        director = result["director"]
+        for key in ("agent_id", "name", "description", "registered_at", "placement"):
+            assert key in director, f"missing director key {key!r} in {director!r}"
+
+    def test_director_name_and_description_are_hardcoded(self, director_context):
+        result = _bootstrap(ctx=director_context)
+        assert result["director"]["name"] == "director"
+        assert result["director"]["description"] == "Root Director for this session"
+
+    def test_placement_sub_dict_matches_director_context_and_unknown_coding_agent(
+        self, director_context
+    ):
+        result = _bootstrap(ctx=director_context)
+        placement = result["director"]["placement"]
+        assert placement["director_agent_id"] is None
+        assert placement["tmux_session"] == director_context.session
+        assert placement["tmux_window_id"] == director_context.window_id
+        assert placement["tmux_pane_id"] == director_context.pane_id
+        assert placement["coding_agent"] == "unknown"
+        assert "created_at" in placement
+
+    def test_writes_exactly_one_session_row(self, broker_session, director_context):
+        from cafleet.db.models import Session as SessionModel
+
+        result = _bootstrap(ctx=director_context)
+        with broker_session() as s:
+            rows = s.query(SessionModel).all()
+        assert len(rows) == 1
+        assert rows[0].session_id == result["session_id"]
+
+    def test_writes_two_agent_rows_director_and_administrator(
+        self, broker_session, director_context
+    ):
+        """After bootstrap: one Director row and one Administrator row, both active."""
+        from cafleet.broker import _is_administrator_card
+        from cafleet.db.models import Agent
+
+        result = _bootstrap(ctx=director_context)
+        sid = result["session_id"]
+
+        with broker_session() as s:
+            rows = s.query(Agent).filter(Agent.session_id == sid).all()
+
+        assert len(rows) == 2, (
+            f"expected 2 agent rows (Director + Administrator), got {len(rows)}"
+        )
+        by_name = {r.name: r for r in rows}
+        assert "director" in by_name, (
+            f"missing root Director with name='director' in {list(by_name)}"
+        )
+        assert "Administrator" in by_name, (
+            f"missing built-in Administrator (design 0000025) in {list(by_name)}"
+        )
+
+        director_row = by_name["director"]
+        admin_row = by_name["Administrator"]
+        assert director_row.status == "active"
+        assert admin_row.status == "active"
+        assert director_row.agent_id == result["director"]["agent_id"]
+        assert admin_row.agent_id == result["administrator_agent_id"]
+        # Administrator card carries the "builtin-administrator" kind.
+        assert _is_administrator_card(admin_row.agent_card_json)
+        # Director card does NOT carry the "builtin-administrator" kind.
+        assert not _is_administrator_card(director_row.agent_card_json)
+
+    def test_writes_one_placement_row_for_the_director_only(
+        self, broker_session, director_context
+    ):
+        """Only the Director gets a placement row; the Administrator does not."""
+        from cafleet.db.models import AgentPlacement
+
+        result = _bootstrap(ctx=director_context)
+        director_id = result["director"]["agent_id"]
+
+        with broker_session() as s:
+            placements = s.query(AgentPlacement).all()
+
+        assert len(placements) == 1, (
+            f"expected exactly 1 placement row for the Director, got {len(placements)}"
+        )
+        placement = placements[0]
+        assert placement.agent_id == director_id
+        assert placement.director_agent_id is None, (
+            "root Director's placement.director_agent_id must be NULL "
+            "(root has no parent)"
+        )
+        assert placement.tmux_session == director_context.session
+        assert placement.tmux_window_id == director_context.window_id
+        assert placement.tmux_pane_id == director_context.pane_id
+        assert placement.coding_agent == "unknown"
+
+    def test_sessions_director_agent_id_is_set_to_the_director(
+        self, broker_session, director_context
+    ):
+        """After bootstrap, sessions.director_agent_id points at the Director."""
+        from cafleet.db.models import Session as SessionModel
+
+        result = _bootstrap(ctx=director_context)
+        sid = result["session_id"]
+        director_id = result["director"]["agent_id"]
+
+        with broker_session() as s:
+            row = s.query(SessionModel).filter(SessionModel.session_id == sid).one()
+
+        assert row.director_agent_id == director_id, (
+            f"sessions.director_agent_id must equal the Director's agent_id; "
+            f"got {row.director_agent_id!r}, expected {director_id!r}"
+        )
+
+    def test_administrator_registered_at_equals_session_created_at(
+        self, broker_session, director_context
+    ):
+        """Design 0000025 invariant preserved by the 5-step bootstrap."""
+        from cafleet.db.models import Agent, Session as SessionModel
+
+        result = _bootstrap(ctx=director_context)
+        sid = result["session_id"]
+        admin_id = result["administrator_agent_id"]
+
+        with broker_session() as s:
+            session_row = (
+                s.query(SessionModel).filter(SessionModel.session_id == sid).one()
+            )
+            admin_row = s.query(Agent).filter(Agent.agent_id == admin_id).one()
+
+        assert admin_row.registered_at == session_row.created_at
+
+    def test_sessions_deleted_at_is_null_after_bootstrap(
+        self, broker_session, director_context
+    ):
+        from cafleet.db.models import Session as SessionModel
+
+        result = _bootstrap(ctx=director_context)
+        with broker_session() as s:
+            row = (
+                s.query(SessionModel)
+                .filter(SessionModel.session_id == result["session_id"])
+                .one()
+            )
+        assert row.deleted_at is None
+
+    def test_label_is_preserved(self, director_context):
+        result = _bootstrap(label="hello-world", ctx=director_context)
+        assert result["label"] == "hello-world"
+
+    def test_label_may_be_none(self, director_context):
+        result = _bootstrap(label=None, ctx=director_context)
+        assert result["label"] is None
+
+    def test_each_call_mints_unique_ids(self, director_context):
+        a = _bootstrap(ctx=director_context)
+        b = _bootstrap(ctx=director_context)
+        assert a["session_id"] != b["session_id"]
+        assert a["director"]["agent_id"] != b["director"]["agent_id"]
+        assert a["administrator_agent_id"] != b["administrator_agent_id"]
+
+
+# ===========================================================================
+# Transaction rollback on mid-bootstrap failure
+# ===========================================================================
+
+
+class TestCreateSessionRollback:
+    """Any exception during the 5-step bootstrap rolls back the whole transaction."""
+
+    def test_rollback_when_placement_insert_fails_leaves_no_rows(
+        self, broker_session, director_context, monkeypatch
+    ):
+        """Inject an exception after step 2 (INSERT agents) by making the
+        ``AgentPlacement`` constructor raise. The ``with session.begin():``
+        wrapper must roll back the prior ``sessions`` and ``agents`` INSERTs.
+        """
+        from cafleet import broker
+        from cafleet.db.models import Agent, AgentPlacement, Session as SessionModel
+
+        class _BoomPlacement:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("injected failure after INSERT agents")
+
+        # Patch the reference the broker module looks up during create_session.
+        monkeypatch.setattr(broker, "AgentPlacement", _BoomPlacement)
+
+        with pytest.raises(RuntimeError, match="injected failure"):
+            broker.create_session(label="rollback", director_context=director_context)
+
+        with broker_session() as s:
+            sessions = s.query(SessionModel).count()
+            agents = s.query(Agent).count()
+            placements = s.query(AgentPlacement).count()
+
+        assert sessions == 0, (
+            f"rollback must not leave any sessions row; got {sessions}"
+        )
+        assert agents == 0, f"rollback must not leave any agents row; got {agents}"
+        assert placements == 0, (
+            f"rollback must not leave any agent_placements row; got {placements}"
+        )
+
+
+# ===========================================================================
+# delete_session — soft-delete cascade + idempotency
+# ===========================================================================
+
+
+class TestDeleteSessionCascade:
+    """``broker.delete_session`` logically deletes + deregisters + keeps tasks."""
+
+    def test_sets_sessions_deleted_at_and_returns_count_including_director(
+        self, broker_session, director_context
+    ):
+        """N in the output counts every active agent at the moment of delete,
+        which for a freshly-bootstrapped session is Director + Administrator (=2).
+        """
+        from cafleet import broker
+        from cafleet.db.models import Session as SessionModel
+
+        result = _bootstrap(ctx=director_context)
+        sid = result["session_id"]
+
+        ret = broker.delete_session(sid)
+
+        assert isinstance(ret, dict)
+        assert ret.get("deregistered_count") == 2, (
+            f"first delete must deregister both Director and Administrator "
+            f"(count=2), got {ret.get('deregistered_count')}"
+        )
+
+        with broker_session() as s:
+            row = s.query(SessionModel).filter(SessionModel.session_id == sid).one()
+        assert row.deleted_at is not None, (
+            "sessions.deleted_at must be set after delete_session"
+        )
+
+    def test_deregisters_all_active_agents_in_the_session(
+        self, broker_session, director_context
+    ):
+        """Every active agent in the session is flipped to status='deregistered'."""
+        from cafleet import broker
+        from cafleet.db.models import Agent
+
+        result = _bootstrap(ctx=director_context)
+        sid = result["session_id"]
+
+        broker.delete_session(sid)
+
+        with broker_session() as s:
+            statuses = {
+                r.name: r.status
+                for r in s.query(Agent).filter(Agent.session_id == sid).all()
+            }
+        assert statuses["director"] == "deregistered"
+        assert statuses["Administrator"] == "deregistered"
+
+    def test_deletes_placement_rows_in_the_session(
+        self, broker_session, director_context
+    ):
+        from cafleet import broker
+        from cafleet.db.models import AgentPlacement
+
+        result = _bootstrap(ctx=director_context)
+        sid = result["session_id"]
+
+        # Before delete there is exactly one placement (the Director's).
+        with broker_session() as s:
+            assert s.query(AgentPlacement).count() == 1
+
+        broker.delete_session(sid)
+
+        with broker_session() as s:
+            assert s.query(AgentPlacement).count() == 0, (
+                "delete_session must physically remove all placement rows"
+            )
+
+    def test_tasks_are_preserved_after_soft_delete(
+        self, broker_session, director_context
+    ):
+        """A task sent before delete must still be retrievable after delete."""
+        from cafleet import broker
+        from cafleet.db.models import Task
+
+        result = _bootstrap(ctx=director_context)
+        sid = result["session_id"]
+        admin_id = result["administrator_agent_id"]
+        director_id = result["director"]["agent_id"]
+
+        # Send a task so there's an audit row to preserve.
+        sent = broker.send_message(sid, admin_id, director_id, "audit me")
+        task_id = sent["task"]["id"]
+
+        broker.delete_session(sid)
+
+        with broker_session() as s:
+            tasks = s.query(Task).all()
+        assert any(t.task_id == task_id for t in tasks), (
+            "tasks rows must NOT be deleted by delete_session — "
+            "the cascade only touches sessions/agents/placements"
+        )
+
+    def test_idempotent_rerun_returns_zero_deregistered(self, director_context):
+        """A second delete_session is a no-op (count=0) and does NOT raise."""
+        from cafleet import broker
+
+        result = _bootstrap(ctx=director_context)
+        sid = result["session_id"]
+
+        first = broker.delete_session(sid)
+        second = broker.delete_session(sid)
+
+        assert first.get("deregistered_count") == 2
+        assert second.get("deregistered_count") == 0, (
+            f"second delete must be a no-op that reports 0 deregistrations, "
+            f"got {second.get('deregistered_count')}"
+        )
+
+    def test_unknown_session_raises_usage_error(self):
+        """Deleting a session that was never created raises not-found."""
+        from cafleet import broker
+
+        fake_sid = str(uuid.uuid4())
+        with pytest.raises(click.UsageError) as exc_info:
+            broker.delete_session(fake_sid)
+        msg = str(exc_info.value)
+        assert "not found" in msg.lower()
+        assert fake_sid in msg
+
+
+# ===========================================================================
+# register_agent rejects soft-deleted sessions
+# ===========================================================================
+
+
+class TestRegisterAgentOnSoftDeletedSession:
+    """Registration into a soft-deleted session fails with a specific message."""
+
+    def test_rejects_soft_deleted_session_with_expected_error_string(
+        self, director_context
+    ):
+        from cafleet import broker
+
+        result = _bootstrap(ctx=director_context)
+        sid = result["session_id"]
+        broker.delete_session(sid)
+
+        with pytest.raises(click.UsageError) as exc_info:
+            broker.register_agent(
+                session_id=sid,
+                name="late-comer",
+                description="registering after soft delete",
+            )
+        msg = str(exc_info.value)
+        # Design doc exact wording: "session X is deleted"
+        assert "is deleted" in msg
+        assert sid in msg
+        # Must NOT use the "not found" path — the row still exists.
+        assert "not found" not in msg.lower()
+
+    def test_unknown_session_still_says_not_found(self):
+        """Make sure the soft-delete guard did not replace the not-found path."""
+        from cafleet import broker
+
+        with pytest.raises(click.UsageError) as exc_info:
+            broker.register_agent(
+                session_id=str(uuid.uuid4()),
+                name="stranger",
+                description="no such session",
+            )
+        assert "not found" in str(exc_info.value).lower()
+
+
+# ===========================================================================
+# list_sessions filters out soft-deleted rows
+# ===========================================================================
+
+
+class TestListSessionsFiltersSoftDeleted:
+    def test_hides_soft_deleted_sessions(self, director_context):
+        from cafleet import broker
+
+        alive = _bootstrap(label="alive", ctx=director_context)
+        dead = _bootstrap(label="dead", ctx=director_context)
+        broker.delete_session(dead["session_id"])
+
+        sessions = broker.list_sessions()
+        ids = {s["session_id"] for s in sessions}
+
+        assert alive["session_id"] in ids
+        assert dead["session_id"] not in ids, (
+            "list_sessions must hide rows with non-NULL deleted_at"
+        )
+
+    def test_get_session_still_returns_soft_deleted_row(self, director_context):
+        """Design intent: get_session is unchanged — it returns the row
+        regardless of deleted_at. list_sessions is the only listing that filters.
+        """
+        from cafleet import broker
+
+        result = _bootstrap(label="dead-but-visible", ctx=director_context)
+        sid = result["session_id"]
+        broker.delete_session(sid)
+
+        row = broker.get_session(sid)
+        assert row is not None, "get_session must not filter soft-deleted sessions"
+        assert row.get("deleted_at") is not None, (
+            "get_session must expose deleted_at so callers can gate their own "
+            "behavior (e.g. register_agent)"
+        )
+
+
+# ===========================================================================
+# deregister_agent refuses the root Director
+# ===========================================================================
+
+
+class TestDeregisterAgentRootDirector:
+    def test_rejects_root_director_with_specific_error(self, director_context):
+        """Deregistering the root Director must fail with the exact error text."""
+        from cafleet import broker
+
+        result = _bootstrap(ctx=director_context)
+        director_id = result["director"]["agent_id"]
+
+        with pytest.raises(click.UsageError) as exc_info:
+            broker.deregister_agent(director_id)
+
+        msg = str(exc_info.value)
+        # Design doc text (substring match to tolerate quoting differences).
+        assert "cannot deregister the root Director" in msg
+        assert "cafleet session delete" in msg
+
+    def test_state_unchanged_after_rejection(self, broker_session, director_context):
+        """The failed deregister must not flip the Director's status or clear
+        its placement — the row state must be byte-for-byte unchanged.
+        """
+        from cafleet import broker
+        from cafleet.db.models import Agent, AgentPlacement, Session as SessionModel
+
+        result = _bootstrap(ctx=director_context)
+        director_id = result["director"]["agent_id"]
+        sid = result["session_id"]
+
+        with pytest.raises(click.UsageError):
+            broker.deregister_agent(director_id)
+
+        with broker_session() as s:
+            d_row = s.query(Agent).filter(Agent.agent_id == director_id).one()
+            p_row = (
+                s.query(AgentPlacement)
+                .filter(AgentPlacement.agent_id == director_id)
+                .one()
+            )
+            sess_row = (
+                s.query(SessionModel).filter(SessionModel.session_id == sid).one()
+            )
+
+        assert d_row.status == "active"
+        assert d_row.deregistered_at is None
+        assert p_row.tmux_pane_id == director_context.pane_id
+        assert sess_row.director_agent_id == director_id
+
+    def test_non_root_director_agent_can_still_be_deregistered(self, director_context):
+        """The guard only fires for the *root* Director — regular user agents
+        (and even the Administrator? no, Administrator has its own guard)
+        stay deregister-able.
+        """
+        from cafleet import broker
+
+        result = _bootstrap(ctx=director_context)
+        sid = result["session_id"]
+
+        member = broker.register_agent(
+            session_id=sid,
+            name="regular-member",
+            description="regular member",
+        )
+
+        assert broker.deregister_agent(member["agent_id"]) is True
+
+
+# ===========================================================================
+# Member → Director notification path
+# ===========================================================================
+
+
+class TestMemberToDirectorNotification:
+    """After bootstrap, sending to the root Director triggers a tmux push."""
+
+    def test_send_message_invokes_send_poll_trigger_with_director_pane(
+        self, director_context, monkeypatch
+    ):
+        from cafleet import broker
+
+        mock_trigger = Mock(return_value=True)
+        monkeypatch.setattr("cafleet.tmux.send_poll_trigger", mock_trigger)
+
+        result = broker.create_session(
+            label="notify", director_context=director_context
+        )
+        sid = result["session_id"]
+        root_director_id = result["director"]["agent_id"]
+
+        member = broker.register_agent(
+            session_id=sid,
+            name="member",
+            description="member under the root Director",
+            placement={
+                "director_agent_id": root_director_id,
+                "tmux_session": "main",
+                "tmux_window_id": "@1",
+                "tmux_pane_id": "%1",
+                "coding_agent": "claude",
+            },
+        )
+
+        response = broker.send_message(
+            sid, member["agent_id"], to=root_director_id, text="hi director"
+        )
+
+        assert response["notification_sent"] is True, (
+            "Member→root-Director send must return notification_sent=True "
+            "because the root Director now has a placement with a pane_id"
+        )
+        assert mock_trigger.call_count == 1, (
+            f"send_poll_trigger must be called exactly once, got "
+            f"{mock_trigger.call_count}"
+        )
+        kwargs = mock_trigger.call_args.kwargs
+        assert kwargs["target_pane_id"] == director_context.pane_id, (
+            f"notification must target the root Director's pane "
+            f"({director_context.pane_id!r}), got {kwargs.get('target_pane_id')!r}"
+        )
+        assert kwargs["session_id"] == sid
+        assert kwargs["agent_id"] == root_director_id
