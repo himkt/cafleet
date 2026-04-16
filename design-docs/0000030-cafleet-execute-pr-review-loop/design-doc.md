@@ -1,8 +1,8 @@
 # `cafleet-design-doc-execute` PR & Copilot Review Loop
 
-**Status**: Approved
-**Progress**: 0/22 tasks complete
-**Last Updated**: 2026-04-15
+**Status**: Complete
+**Progress**: 22/22 tasks complete
+**Last Updated**: 2026-04-16
 
 ## Overview
 
@@ -10,16 +10,16 @@ Extend `/cafleet-design-doc-execute` so that, after user approval, the Director 
 
 ## Success Criteria
 
-- [ ] After the user selects "Approve" in Step 5, the Director performs `git push -u origin <branch>` (if unpushed) and `gh pr create --fill` without further prompting, and records the resulting PR number literally for all subsequent `gh` calls (no shell variables).
-- [ ] Immediately after `gh pr create` succeeds, the Director runs `gh pr edit <pr-number> --add-reviewer @copilot` and verifies the request via `gh api repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers`.
-- [ ] The Director replaces the team-health `/loop` with an augmented one that additionally polls PR review state (`gh pr view <pr-number> --json reviews` + `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments`) each tick, and the swap happens create-before-delete on entry to Step 7 (start augmented `/loop` first, then `CronDelete` the old team-health cron ID) to avoid a monitoring gap.
-- [ ] When a new Copilot review arrives (`submittedAt` from `gh pr view --json reviews` or `created_at` from `gh api .../comments` > `last_push_ts`, AND the corresponding login field — `author.login` for `gh pr view` reviews, `user.login` for `gh api` inline comments — matches `^copilot` case-insensitive), the Director classifies each inline comment by file path (source → Programmer, test → Tester, design-doc → Director-direct) and dispatches via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id>`; no user prompt is required for routine routing.
-- [ ] After each fix the Director commits, runs `git push`, and re-requests Copilot review via `gh pr edit <pr-number> --add-reviewer @copilot`, incrementing `round` and updating `last_push_ts` to the post-push timestamp.
-- [ ] The loop exits when any of these hold: (a) the latest entry in `gh pr view --json reviews` whose `author.login` matches `^copilot` has `state == "APPROVED"`, (b) 5 consecutive loop ticks have elapsed since `last_push_ts` with no new Copilot review or inline comment (Copilot's first pass can take several minutes — 5 ticks gives comfortable slack), or (c) `round >= 5` in which case the Director escalates to the user via `AskUserQuestion`. `reviewDecision` at PR level is NOT used as the exit signal because Copilot is often not a required reviewer, so that field does not reliably flip to APPROVED on Copilot-only approvals.
-- [ ] Step 8 (renamed from old Step 6: Finalize & Clean Up) runs only after Step 7 exits, writes `docs: mark design doc as complete`, pushes the commit whenever `git rev-parse --abbrev-ref <branch-name>@{upstream}` succeeds (i.e. the branch is already tracked on origin), then cancels the `/loop`, deletes members, and deregisters — in that order.
-- [ ] When `gh auth status` fails, the current branch equals the default branch, or `gh pr create` fails, the Director aborts Steps 6 and 7 with a user-visible error message and proceeds directly to Step 8 (finalize locally) without creating a PR.
-- [ ] `.claude/skills/cafleet-design-doc-execute/SKILL.md` and `roles/director.md` document the new Steps 6, 7, 8 verbatim, including the commit-message table, the loop prompt template, the classification rules, and the exit conditions.
-- [ ] The existing Agent Teams `/design-doc-execute` skill is NOT modified (scope: CAFleet variant only).
+- [x] After the user selects "Approve" in Step 5, the Director performs `git push -u origin <branch>` (if unpushed) and `gh pr create --fill` without further prompting, and records the resulting PR number literally for all subsequent `gh` calls (no shell variables).
+- [x] Immediately after `gh pr create` succeeds, the Director runs `gh pr edit <pr-number> --add-reviewer @copilot` and verifies the request via `gh api repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers`.
+- [x] The Director replaces the team-health `/loop` with an augmented one that additionally polls PR review state (`gh pr view <pr-number> --json reviews` + `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments`) each tick, and the swap happens create-before-delete on entry to Step 7 (start augmented `/loop` first, then `CronDelete` the old team-health cron ID) to avoid a monitoring gap.
+- [x] When a new Copilot review arrives (`submittedAt` from `gh pr view --json reviews` or `created_at` from `gh api .../comments` > `last_push_ts`, AND the corresponding login field — `author.login` for `gh pr view` reviews, `user.login` for `gh api` inline comments — matches `^copilot` case-insensitive), the Director classifies each inline comment by file path (source → Programmer, test → Tester, design-doc → Director-direct) and dispatches via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id>`; no user prompt is required for routine routing.
+- [x] After each fix the Director commits, runs `git push`, and re-requests Copilot review via `gh pr edit <pr-number> --add-reviewer @copilot`, incrementing `round` and updating `last_push_ts` to the post-push timestamp.
+- [x] The loop exits when any of these hold: (a) the latest entry in `gh pr view --json reviews` whose `author.login` matches `^copilot` has `state == "APPROVED"`, (b) 5 consecutive loop ticks have elapsed since `last_push_ts` with no new Copilot review or inline comment (Copilot's first pass can take several minutes — 5 ticks gives comfortable slack), or (c) `round >= 5` in which case the Director escalates to the user via `AskUserQuestion`. `reviewDecision` at PR level is NOT used as the exit signal because Copilot is often not a required reviewer, so that field does not reliably flip to APPROVED on Copilot-only approvals.
+- [x] Step 8 (renamed from old Step 6: Finalize & Clean Up) runs only after Step 7 exits, writes `docs: mark design doc as complete`, pushes the commit whenever `git rev-parse --abbrev-ref <branch-name>@{upstream}` succeeds (i.e. the branch is already tracked on origin), then cancels the `/loop`, deletes members, and deregisters — in that order.
+- [x] When `gh auth status` fails, the current branch equals the default branch, or `gh pr create` fails, the Director aborts Steps 6 and 7 with a user-visible error message and proceeds directly to Step 8 (finalize locally) without creating a PR.
+- [x] `.claude/skills/cafleet-design-doc-execute/SKILL.md` and `roles/director.md` document the new Steps 6, 7, 8 verbatim, including the commit-message table, the loop prompt template, the classification rules, and the exit conditions.
+- [x] The existing Agent Teams `/design-doc-execute` skill is NOT modified (scope: CAFleet variant only).
 
 ---
 
@@ -261,46 +261,46 @@ It does NOT touch:
 
 ### Step 1: SKILL.md — Step 5 approval semantic extension
 
-- [ ] Update the Step 5 option table in `.claude/skills/cafleet-design-doc-execute/SKILL.md` so Option 1 (Approve) says "Proceed with push, PR creation, Copilot review loop, then finalize" and references Steps 6 → 7 → 8 <!-- completed: -->
-- [ ] Add an explicit "approve-local" branch to the Step 5 "Other" intent-judgment description (skip Steps 6 + 7, go to Step 8) <!-- completed: -->
+- [x] Update the Step 5 option table in `.claude/skills/cafleet-design-doc-execute/SKILL.md` so Option 1 (Approve) says "Proceed with push, PR creation, Copilot review loop, then finalize" and references Steps 6 → 7 → 8 <!-- completed: 2026-04-16T12:05 -->
+- [x] Add an explicit "approve-local" branch to the Step 5 "Other" intent-judgment description (skip Steps 6 + 7, go to Step 8) <!-- completed: 2026-04-16T12:05 -->
 
 ### Step 2: SKILL.md — Step 6 Push & Create PR
 
-- [ ] Insert a new "Step 6: Push & Create PR" section after Step 5 and before the old Step 6 <!-- completed: -->
-- [ ] Include the preconditions table (gh auth / default branch / commits-beyond-base) with explicit fallthrough to Step 8 local-finalize <!-- completed: -->
-- [ ] Document the 6-step procedure (push → check/create PR → record number literal → add @copilot → verify → capture `last_push_ts`), including the "no shell variables, literal PR number" rule <!-- completed: -->
+- [x] Insert a new "Step 6: Push & Create PR" section after Step 5 and before the old Step 6 <!-- completed: 2026-04-16T12:10 -->
+- [x] Include the preconditions table (gh auth / default branch / commits-beyond-base) with explicit fallthrough to Step 8 local-finalize <!-- completed: 2026-04-16T12:10 -->
+- [x] Document the 6-step procedure (push → check/create PR → record number literal → add @copilot → verify → capture `last_push_ts`), including the "no shell variables, literal PR number" rule <!-- completed: 2026-04-16T12:10 -->
 
 ### Step 3: SKILL.md — Step 7 Copilot Review Loop
 
-- [ ] Insert a new "Step 7: Copilot Review Loop" section <!-- completed: -->
-- [ ] Document 7a (loop replacement via create-before-delete: start augmented `/loop` first, then `CronDelete` the team-health cron ID), 7b (per-tick procedure including the filter table and the 5-tick quiescence rule), 7c (classification & routing table including review-level comment judgment), 7d (fix/commit/push/re-request), 7e (round limit escalation with AskUserQuestion) <!-- completed: -->
-- [ ] Embed the augmented loop prompt template, the "Error Handling" table, and the "User Interjection During Step 7" subsection verbatim inside Step 7 of the SKILL.md <!-- completed: -->
+- [x] Insert a new "Step 7: Copilot Review Loop" section <!-- completed: 2026-04-16T12:15 -->
+- [x] Document 7a (loop replacement via create-before-delete: start augmented `/loop` first, then `CronDelete` the team-health cron ID), 7b (per-tick procedure including the filter table and the 5-tick quiescence rule), 7c (classification & routing table including review-level comment judgment), 7d (fix/commit/push/re-request), 7e (round limit escalation with AskUserQuestion) <!-- completed: 2026-04-16T12:15 -->
+- [x] Embed the augmented loop prompt template, the "Error Handling" table, and the "User Interjection During Step 7" subsection verbatim inside Step 7 of the SKILL.md <!-- completed: 2026-04-16T12:15 -->
 
 ### Step 4: SKILL.md — Step 8 Finalize & Clean Up
 
-- [ ] Rename the old "Step 6: Finalize & Clean Up" section to "Step 8: Finalize & Clean Up" and update the numbering references throughout the file <!-- completed: -->
-- [ ] Add the `git push` sub-step between the commit and `CronDelete` steps, with the conditional "only if Step 6 succeeded" note <!-- completed: -->
-- [ ] Update the user-facing end-of-run report to include the PR URL and review-round summary when Step 6 ran <!-- completed: -->
+- [x] Rename the old "Step 6: Finalize & Clean Up" section to "Step 8: Finalize & Clean Up" and update the numbering references throughout the file <!-- completed: 2026-04-16T12:20 -->
+- [x] Add the `git push` sub-step between the commit and `CronDelete` steps, with the conditional "only if Step 6 succeeded" note <!-- completed: 2026-04-16T12:20 -->
+- [x] Update the user-facing end-of-run report to include the PR URL and review-round summary when Step 6 ran <!-- completed: 2026-04-16T12:20 -->
 
 ### Step 5: SKILL.md — cross-cutting updates
 
-- [ ] Update the opening summary paragraph and the "## Process" ToC-style numbering to reflect Steps 1 – 8 <!-- completed: -->
-- [ ] Update the Prerequisites section if applicable (no new prerequisites beyond `gh auth status`; keep the tmux requirement) <!-- completed: -->
-- [ ] Add a "PR Review Loop State" sub-section near Step 7 documenting the three in-context variables (`last_push_ts`, `ticks_since_last_new_review`, `round`) <!-- completed: -->
+- [x] Update the opening summary paragraph and the "## Process" ToC-style numbering to reflect Steps 1 – 8 <!-- completed: 2026-04-16T12:25 -->
+- [x] Update the Prerequisites section if applicable (no new prerequisites beyond `gh auth status`; keep the tmux requirement) <!-- completed: 2026-04-16T12:25 -->
+- [x] Add a "PR Review Loop State" sub-section near Step 7 documenting the three in-context variables (`last_push_ts`, `ticks_since_last_new_review`, `round`) <!-- completed: 2026-04-16T12:25 -->
 
 ### Step 6: roles/director.md
 
-- [ ] Add a new "PR & Copilot Review" bullet to "Your Accountability" covering: open PR, request @copilot, run augmented monitoring, classify + route, fix + push + re-request, exit on quiescence/approval/round-limit, then finalize <!-- completed: -->
-- [ ] Extend the "Commit Protocol Summary" table with the three new rows (`fix: address Copilot review - …`, `fix: address Copilot test review - …`, `docs: address Copilot review - …`) <!-- completed: -->
-- [ ] Extend the "Progress Monitoring" milestones table with a new "PR Review" phase row (expected event: Copilot posts review; stall indicator: no new Copilot activity in 3 ticks; Director action: evaluate exit conditions vs route new comments) <!-- completed: -->
-- [ ] Update the "Shutdown Protocol" to note that the `CronDelete` target is whichever loop is active (team-health in Step 3–6, augmented in Step 7), and that shutdown runs only after Step 8's final push <!-- completed: -->
+- [x] Add a new "PR & Copilot Review" bullet to "Your Accountability" covering: open PR, request @copilot, run augmented monitoring, classify + route, fix + push + re-request, exit on quiescence/approval/round-limit, then finalize <!-- completed: 2026-04-16T12:30 -->
+- [x] Extend the "Commit Protocol Summary" table with the three new rows (`fix: address Copilot review - …`, `fix: address Copilot test review - …`, `docs: address Copilot review - …`) <!-- completed: 2026-04-16T12:30 -->
+- [x] Extend the "Progress Monitoring" milestones table with a new "PR Review" phase row (expected event: Copilot posts review; stall indicator: no new Copilot activity in 3 ticks; Director action: evaluate exit conditions vs route new comments) <!-- completed: 2026-04-16T12:30 -->
+- [x] Update the "Shutdown Protocol" to note that the `CronDelete` target is whichever loop is active (team-health in Step 3–6, augmented in Step 7), and that shutdown runs only after Step 8's final push <!-- completed: 2026-04-16T12:30 -->
 
 ### Step 7: Verification
 
-- [ ] Re-read the edited SKILL.md end-to-end and confirm every `--session-id <session-id>`, `--agent-id <…-agent-id>`, and `<pr-number>` reference uses the literal-placeholder convention (no `$VAR` or `${VAR}` forms outside of quoted prose examples) <!-- completed: -->
-- [ ] Grep for stale "Step 6" / "Step 7" references elsewhere in the skill tree (`.claude/skills/cafleet-design-doc-execute/`) and update or explain each hit <!-- completed: -->
-- [ ] Cross-check `roles/director.md` commit table matches the SKILL.md commit-message formats verbatim <!-- completed: -->
-- [ ] Verify that `cafleet-monitoring` SKILL.md's original loop prompt is NOT modified (the augmented version lives only in `cafleet-design-doc-execute` SKILL.md) <!-- completed: -->
+- [x] Re-read the edited SKILL.md end-to-end and confirm every `--session-id <session-id>`, `--agent-id <…-agent-id>`, and `<pr-number>` reference uses the literal-placeholder convention (no `$VAR` or `${VAR}` forms outside of quoted prose examples) <!-- completed: 2026-04-16T12:35 -->
+- [x] Grep for stale "Step 6" / "Step 7" references elsewhere in the skill tree (`.claude/skills/cafleet-design-doc-execute/`) and update or explain each hit <!-- completed: 2026-04-16T12:35 -->
+- [x] Cross-check `roles/director.md` commit table matches the SKILL.md commit-message formats verbatim <!-- completed: 2026-04-16T12:35 -->
+- [x] Verify that `cafleet-monitoring` SKILL.md's original loop prompt is NOT modified (the augmented version lives only in `cafleet-design-doc-execute` SKILL.md) <!-- completed: 2026-04-16T12:35 -->
 
 ---
 
@@ -309,3 +309,5 @@ It does NOT touch:
 | Date | Changes |
 |------|---------|
 | 2026-04-15 | Initial draft |
+| 2026-04-16 | Approved by user. Status: Approved. |
+| 2026-04-16 | Implementation complete. Pure-documentation change to `.claude/skills/cafleet-design-doc-execute/SKILL.md` and `roles/director.md` — adds Steps 6 (Push & Create PR), 7 (Copilot Review Loop with exit conditions and round limit), and renames the old Step 6 Finalize to Step 8. Extends Abort Flow and Step 5 "Other" intent to include approve-local. No code, no tests. Lint and format both green. Status: Complete. |

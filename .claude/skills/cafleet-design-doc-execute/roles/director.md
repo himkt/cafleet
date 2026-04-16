@@ -25,6 +25,7 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-
 - **Run Phase D verification (if Verifier was spawned).** After all TDD steps complete, assign the Verifier to perform E2E/integration testing. Route failures to the appropriate member. Skip this phase if the Verifier was not spawned.
 - **Verify Success Criteria before user approval.** Read the design document's `## Success Criteria` section, verify each criterion is satisfied by the implementation, and check them off (`- [ ]` → `- [x]`). If any criterion is not met, resolve it before proceeding to user approval. This step is mandatory.
 - **Obtain user approval before finalizing.** Present the implementation to the user and process their feedback through the approval interaction.
+- **Run the PR & Copilot Review loop after Approve.** When the user selects Approve, the Director moves through Steps 6 → 7 → 8 without further prompting. Step 6 pushes the branch, runs `gh pr create --fill` (re-using an existing PR on the branch if one is present), records the PR number literally (no shell variables), requests `@copilot` via `gh pr edit <pr-number> --add-reviewer @copilot`, verifies the request with `gh api repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers`, and captures `last_push_ts`. Step 7 swaps the team-health `/loop` for an augmented loop (create-before-delete order — start the new cron, then `CronDelete` the old one), classifies each new Copilot inline comment by file path (design doc → Director direct, test file → Tester via `cafleet send`, other source → Programmer via `cafleet send`), waits for the routed member's completion report, commits per scope with the Copilot-review commit messages, `git push`es, increments `round`, and re-requests `@copilot`. The loop exits on Copilot APPROVED, 5 quiescent ticks, or `round >= 5` (escalate to the user via AskUserQuestion). Only after Step 7 exits does the Director mark the doc Complete and run Step 8 (commit + conditional `git push` when the branch is tracked on origin, then `CronDelete` + member deletes + `cafleet session delete`). When `gh auth status` fails, the branch equals the default branch, there are no commits beyond base, `git push`/`gh pr create` fails, or the user expresses approve-local intent under "Other", skip Steps 6 + 7 and proceed directly to Step 8 local-finalize.
 - **Clean up when done.** Final commit updating status to "Complete", then delete each member via `cafleet member delete`, and tear down the session via `cafleet session delete <session-id>`. The root Director cannot be deregistered with `cafleet deregister` — `session delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
 
 ## Communication Protocol
@@ -73,6 +74,9 @@ Commit test fixes separately: `git add <test-file>` then `git commit -m "fix: co
 | Implementation passes tests | `feat: [description of what was implemented]` |
 | Test fix after escalation | `fix: correct tests for [description]` |
 | Post-approval fix | `fix: address review feedback - [description]` |
+| Fix routed to Programmer (Copilot review) | `fix: address Copilot review - <short summary>` |
+| Fix routed to Tester (Copilot review) | `fix: address Copilot test review - <short summary>` |
+| Design-doc fix by Director (Copilot review) | `docs: address Copilot review - <short summary>` |
 | Aborted by user | `docs: mark design doc as aborted` |
 | All steps complete | `docs: mark design doc as complete` |
 
@@ -119,11 +123,14 @@ Track team progress via the `Skill(cafleet-monitoring)` `/loop` (1-minute interv
 | Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <tester-agent-id> --text "Please complete the tests for the current step and report back."` |
 | Implementation (Phase B) | Programmer implements code and runs tests | Programmer goes idle without reporting implementation result | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <programmer-agent-id> --text "Please complete the implementation for the current step and run the tests."` |
 | Verification (Phase D) | Verifier performs E2E testing | Verifier goes idle without reporting verification result | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <verifier-agent-id> --text "Please complete the E2E verification and report your findings."` |
+| PR Review (Step 7) | Copilot posts a review or inline comment on `<pr-number>` | No new Copilot-authored entry (login matching `^copilot`, timestamp > `last_push_ts`) for 3 consecutive ticks | Evaluate exit conditions (`reviews[*].state == "APPROVED"` from the most recent Copilot entry, or `ticks_since_last_new_review >= 5`). Otherwise, classify any new inline comments by file path and route via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`. |
 | Escalation | Member responds to escalation | Escalation recipient goes idle without responding | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id> --text "Please respond to the escalation regarding [specific issue]."` |
 
 ## Shutdown Protocol
 
-1. Cancel the `/loop` monitor (`CronDelete` on the cron ID recorded when the loop was created).
+Shutdown runs as Step 8's tail — only AFTER Step 8's doc-complete commit (and the conditional `git push` when the branch is tracked on origin) has landed. The `CronDelete` target depends on how far execution reached: the team-health loop (cron ID recorded in Step 3c) if Step 6 was skipped, or the augmented loop (cron ID recorded in Step 7a) if Step 7 ran. Use whichever cron ID is currently active — do not assume which one.
+
+1. Cancel the currently active `/loop` monitor (`CronDelete` on the team-health cron ID from Step 3c when Step 6 was skipped, or the augmented cron ID from Step 7a otherwise).
 2. Delete each member:
    ```bash
    cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <programmer-agent-id>
