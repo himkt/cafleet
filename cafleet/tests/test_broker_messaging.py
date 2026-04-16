@@ -124,13 +124,12 @@ class TestSendMessage:
     def test_artifact_contains_message_text(self):
         sid, sender, recipient = _setup_two_agents()
         result = broker.send_message(sid, sender, recipient, "Did the API change?")
-        task = result["task"]
-        # Extract text from artifacts
-        texts = []
-        for artifact in task.get("artifacts", []):
-            for part in artifact.get("parts", []):
-                if isinstance(part, dict) and "text" in part:
-                    texts.append(part["text"])
+        texts = [
+            part["text"]
+            for artifact in result["task"].get("artifacts", [])
+            for part in artifact.get("parts", [])
+            if isinstance(part, dict) and "text" in part
+        ]
         assert "Did the API change?" in texts
 
     def test_validates_destination_is_valid_uuid(self):
@@ -170,12 +169,13 @@ class TestSendMessage:
 
         tasks = broker.poll_tasks(recipient)
         assert len(tasks) >= 1
-        texts = []
-        for t in tasks:
-            for a in t.get("artifacts", []):
-                for p in a.get("parts", []):
-                    if isinstance(p, dict) and "text" in p:
-                        texts.append(p["text"])
+        texts = [
+            p["text"]
+            for t in tasks
+            for a in t.get("artifacts", [])
+            for p in a.get("parts", [])
+            if isinstance(p, dict) and "text" in p
+        ]
         assert "persisted?" in texts
 
 
@@ -263,12 +263,13 @@ class TestBroadcastMessage:
         broker.broadcast_message(sid, sender, "Important update")
 
         b_tasks = broker.poll_tasks(b_id)
-        texts = []
-        for t in b_tasks:
-            for a in t.get("artifacts", []):
-                for p in a.get("parts", []):
-                    if isinstance(p, dict) and "text" in p:
-                        texts.append(p["text"])
+        texts = [
+            p["text"]
+            for t in b_tasks
+            for a in t.get("artifacts", [])
+            for p in a.get("parts", [])
+            if isinstance(p, dict) and "text" in p
+        ]
         assert "Important update" in texts
 
 

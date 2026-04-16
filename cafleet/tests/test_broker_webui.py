@@ -276,7 +276,7 @@ class TestListInbox:
 
     def test_filters_out_broadcast_summary(self):
         """broadcast_summary tasks do not appear in inbox."""
-        sid, sender, b_id, _ = _setup_three_agents()
+        sid, sender, _b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
         # Sender's inbox should not have the broadcast_summary
@@ -336,7 +336,7 @@ class TestListSent:
 
     def test_filters_out_broadcast_summary(self):
         """broadcast_summary tasks do not appear in sent list."""
-        sid, sender, b_id, _ = _setup_three_agents()
+        sid, sender, _b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
         sent = broker.list_sent(sender)
@@ -403,7 +403,7 @@ class TestListTimeline:
 
     def test_filters_broadcast_summary(self):
         """broadcast_summary tasks do not appear in timeline."""
-        sid, sender, b_id, c_id = _setup_three_agents()
+        sid, sender, _b_id, _c_id = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
         result = broker.list_timeline(sid)
@@ -444,7 +444,7 @@ class TestListTimeline:
 
     def test_includes_broadcast_delivery_tasks(self):
         """Individual broadcast delivery tasks (type=unicast) appear in timeline."""
-        sid, sender, b_id, c_id = _setup_three_agents()
+        sid, sender, _b_id, _c_id = _setup_three_agents()
         broker.broadcast_message(sid, sender, "Hello all")
 
         result = broker.list_timeline(sid)
