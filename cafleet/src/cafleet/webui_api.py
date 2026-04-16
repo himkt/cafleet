@@ -47,9 +47,9 @@ def _build_message(
     return {
         "task_id": task_id,
         "from_agent_id": from_id,
-        "from_agent_name": agent_names.get(from_id, "") if from_id else "",
+        "from_agent_name": agent_names.get(from_id, ""),
         "to_agent_id": to_id,
-        "to_agent_name": agent_names.get(to_id, "") if to_id else "",
+        "to_agent_name": agent_names.get(to_id, ""),
         "type": type_,
         "status": status,
         "created_at": created_at,
