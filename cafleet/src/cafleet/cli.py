@@ -732,10 +732,12 @@ def member_delete(ctx, agent_id, member_id):
     # Step 1 — fetch the target agent + placement.
     try:
         target = broker.get_agent(member_id, session_id)
-        if target is None:
-            raise ValueError(f"Agent {member_id} not found")
     except Exception as exc:
         click.echo(f"Error: failed to fetch member: {exc}", err=True)
+        ctx.exit(1)
+        return
+    if target is None:
+        click.echo(f"Error: Agent {member_id} not found", err=True)
         ctx.exit(1)
         return
 
@@ -847,10 +849,12 @@ def member_capture(ctx, agent_id, member_id, lines):
     # Fetch the target's agent + placement.
     try:
         target = broker.get_agent(member_id, session_id)
-        if target is None:
-            raise ValueError(f"Agent {member_id} not found")
     except Exception as exc:
         click.echo(f"Error: failed to fetch member: {exc}", err=True)
+        ctx.exit(1)
+        return
+    if target is None:
+        click.echo(f"Error: Agent {member_id} not found", err=True)
         ctx.exit(1)
         return
 

@@ -212,12 +212,54 @@ class TestAuthorizationBoundary:
             f"missing agent must exit 1. exit_code={result.exit_code}, "
             f"output: {result.output!r}"
         )
-        assert MEMBER_ID in (result.output or ""), (
-            f"error must reference the missing member_id. got: {result.output!r}"
+        out = result.output or ""
+        assert MEMBER_ID in out, (
+            f"error must reference the missing member_id. got: {out!r}"
+        )
+        # Pre-fix the CLI raised a ValueError inside the get_agent try/except
+        # so the user saw "Error: failed to fetch member: Agent X not found" —
+        # misleading because the fetch actually succeeded (it returned None).
+        # The fix separates the "fetch threw" path (stays wrapped) from the
+        # "fetch returned None" path (emits a direct "Error: Agent X not found").
+        assert "failed to fetch member" not in out, (
+            f"not-found path must NOT use 'failed to fetch member' wording "
+            f"(the fetch succeeded and returned None). got: {out!r}"
+        )
+        assert f"Error: Agent {MEMBER_ID} not found" in out, (
+            f"not-found path must emit the direct 'Error: Agent X not found' "
+            f"message. got: {out!r}"
         )
         assert deregister_recorder == [], (
             f"broker.deregister_agent must NOT be called when the agent is "
             f"missing. got: {deregister_recorder!r}"
+        )
+
+    def test_fetch_db_error_surfaces_failed_to_fetch_wording(
+        self, runner, session_id, monkeypatch, deregister_recorder
+    ):
+        """When ``broker.get_agent`` itself raises (e.g. DB connection failure),
+        the wrapper's ``failed to fetch member`` wording is appropriate —
+        that's precisely the case where the fetch did fail. Symmetric guard
+        for the fix above: the wrapper stays in place for real exceptions.
+        """
+
+        def boom(*_a, **_kw):
+            raise RuntimeError("db connection lost")
+
+        monkeypatch.setattr(broker, "get_agent", boom)
+        result = _invoke(runner, session_id)
+        assert result.exit_code == 1
+        out = result.output or ""
+        assert "failed to fetch member" in out, (
+            f"real fetch failures must still use 'failed to fetch member' "
+            f"wording. got: {out!r}"
+        )
+        assert "db connection lost" in out, (
+            f"underlying exception message must be surfaced. got: {out!r}"
+        )
+        assert deregister_recorder == [], (
+            f"broker.deregister_agent must not run when the fetch fails. "
+            f"got: {deregister_recorder!r}"
         )
 
     def test_placement_none_exits_one_with_deregister_hint(
