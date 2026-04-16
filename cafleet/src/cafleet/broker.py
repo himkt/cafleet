@@ -67,6 +67,19 @@ def _placement_dict(row, *, created_at_attr: str = "created_at") -> dict:
     }
 
 
+def _agent_is_active_in_session(session, agent_id: str, session_id: str) -> bool:
+    return (
+        session.execute(
+            select(Agent.agent_id).where(
+                Agent.agent_id == agent_id,
+                Agent.session_id == session_id,
+                Agent.status == "active",
+            )
+        ).first()
+        is not None
+    )
+
+
 def _try_notify_recipient(
     session, *, session_id: str, recipient_id: str, sender_id: str
 ) -> bool:
@@ -329,19 +342,19 @@ def register_agent(
     with sm() as session, session.begin():
         if placement is not None:
             director_id = placement["director_agent_id"]
-            director = session.execute(
-                select(Agent).where(
+            director_card = session.execute(
+                select(Agent.agent_card_json).where(
                     Agent.agent_id == director_id,
                     Agent.session_id == session_id,
                     Agent.status == "active",
                 )
             ).scalar_one_or_none()
-            if director is None:
+            if director_card is None:
                 raise click.UsageError(
                     f"Director agent '{director_id}' not found or not active "
                     f"in session '{session_id}'."
                 )
-            if _is_administrator_card(director.agent_card_json):
+            if _is_administrator_card(director_card):
                 raise AdministratorProtectedError("Administrator cannot be a director")
 
         session.add(
@@ -636,27 +649,20 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
 
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        sender_agent = session.execute(
-            select(Agent).where(
-                Agent.agent_id == agent_id,
-                Agent.session_id == session_id,
-                Agent.status == "active",
-            )
-        ).scalar_one_or_none()
-        if sender_agent is None:
+        if not _agent_is_active_in_session(session, agent_id, session_id):
             raise ValueError(
                 f"Sender agent not found or not active in session: {agent_id}"
             )
 
-        dest_agent = session.execute(
-            select(Agent).where(
+        dest_session = session.execute(
+            select(Agent.session_id).where(
                 Agent.agent_id == to,
                 Agent.status == "active",
             )
         ).scalar_one_or_none()
-        if dest_agent is None:
+        if dest_session is None:
             raise ValueError(f"Destination agent not found: {to}")
-        if dest_agent.session_id != session_id:
+        if dest_session != session_id:
             raise ValueError(f"Destination agent not in session: {to}")
 
         task_dict = _unicast_task_dict(
@@ -687,31 +693,25 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
 
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        sender_agent = session.execute(
-            select(Agent).where(
-                Agent.agent_id == agent_id,
-                Agent.session_id == session_id,
-                Agent.status == "active",
-            )
-        ).scalar_one_or_none()
-        if sender_agent is None:
+        if not _agent_is_active_in_session(session, agent_id, session_id):
             raise ValueError(
                 f"Sender agent not found or not active in session: {agent_id}"
             )
 
-        rows = session.execute(
-            select(Agent.agent_id).where(
-                Agent.session_id == session_id,
-                Agent.status == "active",
-                Agent.agent_id != agent_id,
-                func.coalesce(
-                    func.json_extract(Agent.agent_card_json, "$.cafleet.kind"),
-                    "",
+        recipient_ids = list(
+            session.execute(
+                select(Agent.agent_id).where(
+                    Agent.session_id == session_id,
+                    Agent.status == "active",
+                    Agent.agent_id != agent_id,
+                    func.coalesce(
+                        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"),
+                        "",
+                    )
+                    != ADMINISTRATOR_KIND,
                 )
-                != ADMINISTRATOR_KIND,
-            )
-        ).all()
-        recipient_ids = [aid for (aid,) in rows]
+            ).scalars()
+        )
 
         for recipient_id in recipient_ids:
             delivery_dict = _unicast_task_dict(
@@ -724,7 +724,6 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
             _save_task(session, delivery_dict)
 
         now = _now_iso()
-        notifications_sent_count = 0
         summary_dict = {
             "id": summary_task_id,
             "contextId": agent_id,
@@ -754,14 +753,15 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
         }
         _save_task(session, summary_dict)
 
-        for recipient_id in recipient_ids:
-            if _try_notify_recipient(
+        notifications_sent_count = sum(
+            _try_notify_recipient(
                 session,
                 session_id=session_id,
                 recipient_id=recipient_id,
                 sender_id=agent_id,
-            ):
-                notifications_sent_count += 1
+            )
+            for recipient_id in recipient_ids
+        )
 
     summary_dict["metadata"]["notificationsSentCount"] = notifications_sent_count
     return [
