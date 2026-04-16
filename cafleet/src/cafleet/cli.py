@@ -264,33 +264,25 @@ def server(host: str, port: int) -> None:
 def register(ctx, name, description, skills):
     """Register a new agent with the broker."""
     _require_session_id(ctx)
-    session_id = ctx.obj["session_id"]
 
     parsed_skills = None
     if skills is not None:
         try:
             parsed_skills = json.loads(skills)
         except json.JSONDecodeError as exc:
-            click.echo(f"Error: Invalid JSON in --skills: {exc}", err=True)
-            ctx.exit(1)
-            return
+            raise click.ClickException(f"Invalid JSON in --skills: {exc}") from exc
 
-    try:
+    with _handle_broker_errors(ctx):
         result = broker.register_agent(
-            session_id,
+            ctx.obj["session_id"],
             name,
             description,
             skills=parsed_skills,
         )
-    except Exception as exc:
-        click.echo(f"Error: {exc}", err=True)
-        ctx.exit(1)
-        return
-
-    if ctx.obj["json_output"]:
-        click.echo(output.format_json(result))
-    else:
-        click.echo(output.format_register(result))
+        if ctx.obj["json_output"]:
+            click.echo(output.format_json(result))
+        else:
+            click.echo(output.format_register(result))
 
 
 @cli.command()
