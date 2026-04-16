@@ -1,48 +1,12 @@
-"""Unit tests for ``tmux.send_choice_key`` and ``tmux.send_freetext_and_submit``.
-
-Design doc 0000027 Step 3 — two new helpers alongside the existing
-``send_exit`` / ``send_poll_trigger`` / ``capture_pane`` functions in
-``cafleet/src/cafleet/tmux.py``. Both are thin wrappers around ``_run``
-so every test here monkeypatches ``tmux._run`` and asserts on the exact
-``["tmux", "send-keys", ...]`` argv — no real tmux subprocess is ever
-invoked.
-
-Contracts pinned:
-
-  - ``send_choice_key(digit=N)`` with ``N in {1,2,3}`` issues exactly one
-    ``tmux send-keys -t <pane> <N>`` call (no Enter)
-  - ``send_choice_key(digit=N)`` with ``N not in {1,2,3}`` raises
-    ``TmuxError`` BEFORE any ``_run`` call
-  - ``send_freetext_and_submit(text=T)`` with newline-free ``T`` issues
-    three ``_run`` calls in strict order: ``<pane> 4``, ``<pane> -l <T>``,
-    ``<pane> Enter`` — three calls because tmux's ``-l`` flag is
-    per-invocation and cannot mix literal text with the Enter key name
-  - ``send_freetext_and_submit`` with ``"\n"`` or ``"\r"`` in the text
-    raises ``TmuxError`` BEFORE any ``_run`` call
-  - Empty-string text is accepted and the second call carries ``-l ""``
-  - Shell-meta / multi-byte / key-name-lookalike text passes through to
-    the helper unchanged (the literal-flag contract is on the tmux side;
-    the helper's job is to record the exact argv)
-"""
+"""Unit tests for ``tmux.send_choice_key`` / ``send_freetext_and_submit``."""
 
 import pytest
 
 from cafleet import tmux
 
 
-# ---------------------------------------------------------------------------
-# Shared fixture
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def run_recorder(monkeypatch):
-    """Record every argv list passed to ``tmux._run``.
-
-    ``_run``'s real signature is ``_run(args, *, timeout=None)``. The fake
-    accepts ``**kwargs`` so callers that pass ``timeout=`` still work, and
-    records both ``args`` and ``kwargs`` for inspection.
-    """
     calls: list[dict] = []
 
     def fake_run(args, **kwargs):
