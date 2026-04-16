@@ -158,16 +158,22 @@ class TestSessionIdFlagFlowsIntoBroker:
         def fake_send_message(*args, **kwargs):
             captured["args"] = args
             captured["kwargs"] = kwargs
+            sender = args[1] if len(args) > 1 else kwargs.get("agent_id")
+            recipient = args[2] if len(args) > 2 else kwargs.get("to")
             return {
                 "task": {
                     "id": "tttttttt-tttt-tttt-tttt-tttttttttttt",
-                    "contextId": args[2] if len(args) > 2 else kwargs.get("to"),
+                    "contextId": recipient,
                     "status": {
                         "state": "input_required",
                         "timestamp": "2026-01-01T00:00:00+00:00",
                     },
                     "artifacts": [],
-                    "metadata": {},
+                    "metadata": {
+                        "fromAgentId": sender,
+                        "toAgentId": recipient,
+                        "type": "unicast",
+                    },
                 }
             }
 

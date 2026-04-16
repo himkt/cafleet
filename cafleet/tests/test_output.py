@@ -3,60 +3,30 @@
 from cafleet.output import format_member, format_member_list
 
 
+def _member(**placement_overrides) -> dict:
+    placement = {
+        "tmux_pane_id": "%7",
+        "tmux_window_id": "@3",
+        "coding_agent": "claude",
+    }
+    placement.update(placement_overrides)
+    return {
+        "agent_id": "agent-001",
+        "name": "Claude-B",
+        "placement": placement,
+    }
+
+
 class TestFormatMember:
     def test_includes_backend_line(self):
-        """format_member() output includes a 'backend:' line."""
-        data = {
-            "agent_id": "agent-001",
-            "name": "Claude-B",
-            "placement": {
-                "tmux_pane_id": "%7",
-                "tmux_window_id": "@3",
-                "coding_agent": "claude",
-            },
-        }
-        result = format_member(data)
-        assert "backend:" in result
+        assert "backend:" in format_member(_member())
 
     def test_backend_shows_codex(self):
-        """format_member() shows 'codex' when coding_agent is 'codex'."""
-        data = {
-            "agent_id": "agent-001",
-            "name": "Codex-B",
-            "placement": {
-                "tmux_pane_id": "%7",
-                "tmux_window_id": "@3",
-                "coding_agent": "codex",
-            },
-        }
-        result = format_member(data)
+        result = format_member(_member(coding_agent="codex"))
         assert "codex" in result
 
     def test_backend_shows_claude(self):
-        """format_member() shows 'claude' when coding_agent is 'claude'."""
-        data = {
-            "agent_id": "agent-001",
-            "name": "Claude-B",
-            "placement": {
-                "tmux_pane_id": "%7",
-                "tmux_window_id": "@3",
-                "coding_agent": "claude",
-            },
-        }
-        result = format_member(data)
-        assert "claude" in result
-
-    def test_backend_defaults_to_claude_when_missing(self):
-        """format_member() defaults to 'claude' when coding_agent key is absent."""
-        data = {
-            "agent_id": "agent-001",
-            "name": "Claude-B",
-            "placement": {
-                "tmux_pane_id": "%7",
-                "tmux_window_id": "@3",
-            },
-        }
-        result = format_member(data)
+        result = format_member(_member())
         assert "claude" in result
 
 
@@ -128,29 +98,6 @@ class TestFormatMemberList:
         result = format_member_list(members)
         lines = result.split("\n")
         data_lines = [line for line in lines if "Claude-B" in line]
-        assert len(data_lines) == 1
-        assert "claude" in data_lines[0]
-
-    def test_defaults_to_claude_when_coding_agent_missing(self):
-        """When placement has no coding_agent key, row defaults to 'claude'."""
-        members = [
-            {
-                "agent_id": "agent-001",
-                "name": "Legacy-B",
-                "status": "active",
-                "registered_at": "2026-04-12T10:15:00Z",
-                "placement": {
-                    "director_agent_id": "dir-001",
-                    "tmux_session": "main",
-                    "tmux_window_id": "@3",
-                    "tmux_pane_id": "%7",
-                    "created_at": "2026-04-12T10:15:00Z",
-                },
-            }
-        ]
-        result = format_member_list(members)
-        lines = result.split("\n")
-        data_lines = [line for line in lines if "Legacy-B" in line]
         assert len(data_lines) == 1
         assert "claude" in data_lines[0]
 

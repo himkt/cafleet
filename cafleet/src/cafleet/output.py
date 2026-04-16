@@ -10,7 +10,7 @@ def format_register(data: dict) -> str:
     lines = [
         "Agent registered successfully!",
         f"  agent_id:  {data['agent_id']}",
-        f"  name:      {data.get('name', '')}",
+        f"  name:      {data['name']}",
     ]
     return "\n".join(lines)
 
@@ -18,7 +18,7 @@ def format_register(data: dict) -> str:
 def format_task(task: dict) -> str:
     if "task" in task:
         task = task["task"]
-    metadata = task.get("metadata", {})
+    metadata = task["metadata"]
     text = next(
         (
             part["text"]
@@ -29,12 +29,15 @@ def format_task(task: dict) -> str:
         "",
     )
     lines = [
-        f"  id:    {task.get('id', '?')}",
-        f"  state: {task.get('status', {}).get('state', '?')}",
-        f"  from:  {metadata.get('fromAgentId', '?')}",
-        f"  to:    {metadata.get('toAgentId', '?')}",
-        f"  type:  {metadata.get('type', '?')}",
+        f"  id:    {task['id']}",
+        f"  state: {task['status']['state']}",
+        f"  from:  {metadata['fromAgentId']}",
     ]
+    # ``toAgentId`` is absent on broadcast_summary tasks; elide the line
+    # rather than rendering a "?" placeholder that hides the distinction.
+    if "toAgentId" in metadata:
+        lines.append(f"  to:    {metadata['toAgentId']}")
+    lines.append(f"  type:  {metadata['type']}")
     if text:
         lines.append(f"  text:  {text}")
     return "\n".join(lines)
@@ -52,10 +55,10 @@ def format_task_list(tasks: list) -> str:
 
 def format_agent(agent: dict) -> str:
     lines = [
-        f"  agent_id:    {agent.get('agent_id', '?')}",
-        f"  name:        {agent.get('name', '?')}",
-        f"  description: {agent.get('description', '?')}",
-        f"  status:      {agent.get('status', 'active')}",
+        f"  agent_id:    {agent['agent_id']}",
+        f"  name:        {agent['name']}",
+        f"  description: {agent['description']}",
+        f"  status:      {agent['status']}",
     ]
     return "\n".join(lines)
 
@@ -76,34 +79,34 @@ def format_session_create(data: dict) -> str:
     Line 1 is the session_id so script consumers that only parse the first
     line keep working; line 2 is the root Director's agent_id.
     """
-    director = data.get("director", {}) or {}
-    placement = director.get("placement", {}) or {}
+    director = data["director"]
+    placement = director["placement"]
     pane = (
-        f"{placement.get('tmux_session', '?')}:"
-        f"{placement.get('tmux_window_id', '?')}:"
-        f"{placement.get('tmux_pane_id', '?')}"
+        f"{placement['tmux_session']}:"
+        f"{placement['tmux_window_id']}:"
+        f"{placement['tmux_pane_id']}"
     )
     lines = [
-        data.get("session_id", "?"),
-        director.get("agent_id", "?"),
-        f"label:            {data.get('label') or ''}",
-        f"created_at:       {data.get('created_at', '')}",
-        f"director_name:    {director.get('name', '')}",
+        data["session_id"],
+        director["agent_id"],
+        f"label:            {data['label'] or ''}",
+        f"created_at:       {data['created_at']}",
+        f"director_name:    {director['name']}",
         f"pane:             {pane}",
-        f"administrator:    {data.get('administrator_agent_id', '')}",
+        f"administrator:    {data['administrator_agent_id']}",
     ]
     return "\n".join(lines)
 
 
 def format_member(data: dict) -> str:
-    placement = data.get("placement", {}) or {}
+    placement = data["placement"]
     lines = [
         "Member registered and spawned.",
-        f"  agent_id:  {data.get('agent_id', '?')}",
-        f"  name:      {data.get('name', '?')}",
-        f"  backend:   {placement.get('coding_agent', 'claude')}",
-        f"  pane_id:   {placement.get('tmux_pane_id', '?')}",
-        f"  window_id: {placement.get('tmux_window_id', '?')}",
+        f"  agent_id:  {data['agent_id']}",
+        f"  name:      {data['name']}",
+        f"  backend:   {placement['coding_agent']}",
+        f"  pane_id:   {placement['tmux_pane_id']}",
+        f"  window_id: {placement['tmux_window_id']}",
     ]
     return "\n".join(lines)
 
@@ -124,19 +127,19 @@ def format_member_list(members: list) -> str:
     lines.append(header)
     lines.append(sep)
     for m in members:
-        placement = m.get("placement", {}) or {}
-        pane_id = placement.get("tmux_pane_id")
+        placement = m["placement"]
+        pane_id = placement["tmux_pane_id"]
         pane_display = pane_id if pane_id is not None else "(pending)"
-        agent_id = m.get("agent_id", "?")
+        agent_id = m["agent_id"]
         if len(agent_id) > _AGENT_ID_COLUMN_WIDTH:
             agent_id = agent_id[: _AGENT_ID_COLUMN_WIDTH - 2] + "…"
         lines.append(
-            f"  {agent_id:<{_AGENT_ID_COLUMN_WIDTH}}  {m.get('name', '?'):<8}  "
-            f"{m.get('status', 'active'):<6}  "
-            f"{placement.get('coding_agent', 'claude'):<7}  "
-            f"{placement.get('tmux_session', '?'):<7}  "
-            f"{placement.get('tmux_window_id', '?'):<9}  "
+            f"  {agent_id:<{_AGENT_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
+            f"{m['status']:<6}  "
+            f"{placement['coding_agent']:<7}  "
+            f"{placement['tmux_session']:<7}  "
+            f"{placement['tmux_window_id']:<9}  "
             f"{pane_display:<7}  "
-            f"{placement.get('created_at', m.get('registered_at', '?'))}"
+            f"{placement['created_at']}"
         )
     return "\n".join(lines)
