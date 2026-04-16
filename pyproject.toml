@@ -34,7 +34,7 @@ allowed-unresolved-imports = [
 ]
 
 [tool.ruff.lint]
-extend-select = ["I", "UP", "SIM", "B", "PERF", "RET", "N", "C4", "ERA", "PT", "PIE", "PTH"]
+extend-select = ["I", "UP", "SIM", "B", "PERF", "RET", "N", "C4", "ERA", "PT", "PIE", "PTH", "TCH"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["cafleet"]
