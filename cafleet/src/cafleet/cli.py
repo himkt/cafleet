@@ -22,12 +22,10 @@ from cafleet.config import settings
 
 def _require_session_id(ctx: click.Context) -> None:
     if not ctx.obj.get("session_id"):
-        click.echo(
-            "Error: --session-id <uuid> is required for this subcommand. "
-            "Create a session with 'cafleet session create' and pass its id.",
-            err=True,
+        raise click.ClickException(
+            "--session-id <uuid> is required for this subcommand. "
+            "Create a session with 'cafleet session create' and pass its id."
         )
-        ctx.exit(1)
 
 
 @contextlib.contextmanager
