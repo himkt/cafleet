@@ -47,11 +47,6 @@ def _bootstrap(label: str | None = None, ctx: DirectorContext | None = None) -> 
     )
 
 
-# ===========================================================================
-# 5-step transactional bootstrap — success path
-# ===========================================================================
-
-
 class TestCreateSessionBootstrap:
     """``broker.create_session`` writes session + Director + placement + Admin."""
 
@@ -226,11 +221,6 @@ class TestCreateSessionBootstrap:
         assert a["administrator_agent_id"] != b["administrator_agent_id"]
 
 
-# ===========================================================================
-# Transaction rollback on mid-bootstrap failure
-# ===========================================================================
-
-
 class TestCreateSessionRollback:
     """Any exception during the 5-step bootstrap rolls back the whole transaction."""
 
@@ -266,11 +256,6 @@ class TestCreateSessionRollback:
         assert placements == 0, (
             f"rollback must not leave any agent_placements row; got {placements}"
         )
-
-
-# ===========================================================================
-# delete_session — soft-delete cascade + idempotency
-# ===========================================================================
 
 
 class TestDeleteSessionCascade:
@@ -402,11 +387,6 @@ class TestDeleteSessionCascade:
         assert fake_sid in msg
 
 
-# ===========================================================================
-# register_agent rejects soft-deleted sessions
-# ===========================================================================
-
-
 class TestRegisterAgentOnSoftDeletedSession:
     """Registration into a soft-deleted session fails with a specific message."""
 
@@ -445,11 +425,6 @@ class TestRegisterAgentOnSoftDeletedSession:
         assert "not found" in str(exc_info.value).lower()
 
 
-# ===========================================================================
-# list_sessions filters out soft-deleted rows
-# ===========================================================================
-
-
 class TestListSessionsFiltersSoftDeleted:
     def test_hides_soft_deleted_sessions(self, director_context):
         from cafleet import broker
@@ -482,11 +457,6 @@ class TestListSessionsFiltersSoftDeleted:
             "get_session must expose deleted_at so callers can gate their own "
             "behavior (e.g. register_agent)"
         )
-
-
-# ===========================================================================
-# deregister_agent refuses the root Director
-# ===========================================================================
 
 
 class TestDeregisterAgentRootDirector:
@@ -552,11 +522,6 @@ class TestDeregisterAgentRootDirector:
         )
 
         assert broker.deregister_agent(member["agent_id"]) is True
-
-
-# ===========================================================================
-# Member → Director notification path
-# ===========================================================================
 
 
 class TestMemberToDirectorNotification:

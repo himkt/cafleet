@@ -73,11 +73,6 @@ def mock_get_agent(monkeypatch):
     return fake_get_agent
 
 
-# ===========================================================================
-# (a) default path substitutes all template placeholders
-# ===========================================================================
-
-
 class TestDefaultPromptSubstitution:
     """Design doc 2.2(a): empty prompt_argv → CLAUDE template filled in."""
 
@@ -124,18 +119,8 @@ class TestDefaultPromptSubstitution:
         )
 
 
-# ===========================================================================
-# (b) custom prompt with {agent_id} placeholder gets substituted
-# ===========================================================================
-
-
 class TestCustomPromptPlaceholderSubstitution:
-    """Design doc 2.2(b): custom prompt uses the same format kwargs as default.
-
-    Against pre-fix code this test FAILS because ``_resolve_prompt`` returns
-    ``" ".join(prompt_argv)`` before reaching ``.format``. That is expected
-    (TDD) — the Programmer's task 2.1 fix makes it pass.
-    """
+    """Design doc 2.2(b): custom prompts share the same format kwargs as the default."""
 
     def test_custom_prompt_with_agent_id_placeholder_substitutes(
         self,
@@ -155,11 +140,6 @@ class TestCustomPromptPlaceholderSubstitution:
             f"custom prompt must substitute {{agent_id}} with {new_agent_id!r}. "
             f"got: {result!r}"
         )
-
-
-# ===========================================================================
-# (c) custom prompt with no placeholders passes through unchanged
-# ===========================================================================
 
 
 class TestCustomPromptNoPlaceholderPassThrough:
@@ -185,16 +165,10 @@ class TestCustomPromptNoPlaceholderPassThrough:
         )
 
 
-# ===========================================================================
-# (d) doubled-brace escape collapses to single literal braces
-# ===========================================================================
-
-
 class TestCustomPromptDoubledBraceEscape:
     """Design doc 2.2(d): ``{{...}}`` collapses to ``{...}`` without substitution.
 
-    The risk-row mitigation for literal-brace JSON snippets: callers who
-    need a literal ``{`` / ``}`` in a custom prompt must double them, and
+    Callers embedding literal JSON snippets must double their braces, and
     ``.format`` then collapses each pair to a single literal brace.
     No placeholder substitution is attempted on the inner tokens.
 
@@ -230,17 +204,11 @@ class TestCustomPromptDoubledBraceEscape:
         )
 
 
-# ===========================================================================
-# (e) malformed custom prompts surface as click.UsageError, not KeyError /
-#     ValueError, so member_create's rollback path runs.
-# ===========================================================================
-
-
 class TestCustomPromptMalformedRaisesUsageError:
-    """PR #25 review feedback: ``str.format`` failures must convert to
-    ``click.UsageError`` so ``member_create``'s rollback path (which only
-    catches ``UsageError``) reliably runs and the just-registered agent
-    does not get orphaned in the registry.
+    """``str.format`` errors must convert to ``click.UsageError``.
+
+    ``member_create``'s rollback path only catches ``UsageError``, so a raw
+    ``KeyError`` / ``ValueError`` would orphan the just-registered agent.
     """
 
     def test_unknown_placeholder_raises_usage_error(
@@ -311,9 +279,7 @@ class TestCustomPromptMalformedRaisesUsageError:
         )
 
 
-# ===========================================================================
-# Design doc 0000029 Step 4 — cli wires member name through as --name
-# ===========================================================================
+# Below: design doc 0000029 Step 4 — CLI threads --name through to the claude binary.
 
 from click.testing import CliRunner  # noqa: E402
 

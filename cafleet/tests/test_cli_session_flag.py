@@ -83,11 +83,6 @@ def db_runner(tmp_path, monkeypatch):
     return runner
 
 
-# ===========================================================================
-# (a) missing --session-id on a client subcommand exits 1 with new error
-# ===========================================================================
-
-
 class TestMissingSessionIdFailsClientSubcommands:
     """Design doc Step 6(a): client subcommands without --session-id exit 1."""
 
@@ -146,11 +141,6 @@ class TestMissingSessionIdFailsClientSubcommands:
             f"poll without --session-id should exit 1. "
             f"exit_code={result.exit_code}, output: {result.output}"
         )
-
-
-# ===========================================================================
-# (b) --session-id <uuid> flows into broker.register_agent correctly
-# ===========================================================================
 
 
 class TestSessionIdFlagFlowsIntoBroker:
@@ -262,11 +252,6 @@ class TestSessionIdFlagFlowsIntoBroker:
         )
 
 
-# ===========================================================================
-# (c) db init / session create succeed without --session-id
-# ===========================================================================
-
-
 class TestSubcommandsThatDoNotRequireSessionId:
     """Design doc Step 6(c): ``db init`` and ``session create`` never gate."""
 
@@ -306,11 +291,6 @@ class TestSubcommandsThatDoNotRequireSessionId:
         )
 
 
-# ===========================================================================
-# (d) cafleet env subcommand no longer exists
-# ===========================================================================
-
-
 class TestCafleetEnvSubcommandRemoved:
     """Design doc Step 6(d): ``cafleet env`` is deleted as part of this cycle."""
 
@@ -342,11 +322,6 @@ class TestCafleetEnvSubcommandRemoved:
             assert stripped != "env", (
                 f"help output still lists 'env' as a subcommand: {line!r}"
             )
-
-
-# ===========================================================================
-# (e) --session-id supplied where not required is silently accepted
-# ===========================================================================
 
 
 class TestSessionIdSilentlyAcceptedWhereNotRequired:
@@ -387,11 +362,6 @@ class TestSessionIdSilentlyAcceptedWhereNotRequired:
             f"exit_code={result.exit_code}, output: {result.output}, "
             f"exception: {result.exception}"
         )
-
-
-# ===========================================================================
-# Design doc 0000025 §D — Administrator cannot be deregistered via the CLI
-# ===========================================================================
 
 
 def _create_session_via_cli(runner: CliRunner) -> tuple[str, str]:

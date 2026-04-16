@@ -53,11 +53,6 @@ def run_recorder(monkeypatch):
     return calls
 
 
-# ===========================================================================
-# TestTmuxHelpers — send_choice_key
-# ===========================================================================
-
-
 class TestTmuxHelpers:
     """Design doc 0000027 Specification § "``tmux.py`` additions"."""
 

@@ -96,11 +96,6 @@ def _agent_rows(db_path) -> list[tuple]:
         conn.close()
 
 
-# ===========================================================================
-# session create — text output
-# ===========================================================================
-
-
 class TestSessionCreateTextOutput:
     """``cafleet session create`` text output has the 6-line shape in §3."""
 
@@ -212,11 +207,6 @@ class TestSessionCreateTextOutput:
         )
 
 
-# ===========================================================================
-# session create --json
-# ===========================================================================
-
-
 class TestSessionCreateJsonOutput:
     """--json emits the nested {session, director{placement{...}}} shape."""
 
@@ -294,11 +284,6 @@ class TestSessionCreateJsonOutput:
         assert data["administrator_agent_id"] != data["director"]["agent_id"]
 
 
-# ===========================================================================
-# session create outside tmux — must fail cleanly, no DB write
-# ===========================================================================
-
-
 class TestSessionCreateOutsideTmux:
     """Without a usable tmux, session create aborts before touching the DB."""
 
@@ -330,11 +315,6 @@ class TestSessionCreateOutsideTmux:
             f"session create must not write any rows when tmux is unavailable; "
             f"before={before!r}, after={after!r}"
         )
-
-
-# ===========================================================================
-# session list — hides soft-deleted sessions
-# ===========================================================================
 
 
 class TestSessionListHidesSoftDeleted:
@@ -389,11 +369,6 @@ class TestSessionListHidesSoftDeleted:
             "(exit 2) in this revision; "
             f"got exit_code={result.exit_code}, output={result.output!r}"
         )
-
-
-# ===========================================================================
-# session delete — unknown id + idempotency
-# ===========================================================================
 
 
 class TestSessionDeleteUnknownAndIdempotent:
