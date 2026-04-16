@@ -1,27 +1,4 @@
-"""Tests for the ``cafleet --session-id <uuid>`` global CLI flag.
-
-Design doc 0000023: ``CAFLEET_SESSION_ID`` env var is replaced by a global
-``--session-id`` click option on the root group. These tests cover the
-behavioural contract defined in Step 6 task 4 of the design doc:
-
-  (a) missing ``--session-id`` on a client subcommand exits 1 with the
-      new error message
-  (b) ``--session-id <uuid>`` flows into ``broker.register_agent`` as the
-      session_id argument
-  (c) ``db init`` and ``session create`` succeed without ``--session-id``
-  (d) ``cafleet env`` no longer exists (exit != 0 with ``No such command``)
-  (e) ``--session-id`` supplied to ``db init`` is silently accepted
-      (Spec's "Provided but not required" rule)
-
-Design doc 0000025 (appended): the ``cafleet deregister`` subcommand
-catches ``AdministratorProtectedError`` from the broker and maps it to
-a non-zero exit with a user-visible error message. Administrators
-cannot be deregistered from the CLI.
-
-Test isolation mirrors ``test_session_cli.py``: a fresh ``tmp_path`` DB,
-``config.settings.database_url`` monkeypatched, and broker engine
-singletons reset between tests.
-"""
+"""Tests for the ``cafleet --session-id <uuid>`` global CLI flag (design 0000023)."""
 
 import json
 import sqlite3
@@ -38,7 +15,6 @@ from cafleet.tmux import DirectorContext
 
 @pytest.fixture(autouse=True)
 def _reset_engine_singletons():
-    """Reset broker engine singletons so each test gets a fresh engine."""
     engine_mod._sync_engine = None
     engine_mod._sync_sessionmaker = None
     yield
@@ -48,12 +24,7 @@ def _reset_engine_singletons():
 
 @pytest.fixture(autouse=True)
 def _mock_tmux_for_session_create(monkeypatch):
-    """Stub tmux so ``session create`` invoked through CliRunner succeeds.
-
-    Design 0000026 introduces a tmux precondition on ``session create``.
-    Pre-existing tests in this file were written before that change, so
-    install a module-wide no-op + deterministic fake ``DirectorContext``.
-    """
+    """Let CliRunner-driven ``session create`` succeed without a real tmux pane."""
     from cafleet import cli as cli_mod
 
     ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
@@ -67,7 +38,6 @@ def _mock_tmux_for_session_create(monkeypatch):
 
 @pytest.fixture
 def db_runner(tmp_path, monkeypatch):
-    """CliRunner pointed at a fresh initialised SQLite DB in ``tmp_path``."""
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,
