@@ -462,10 +462,13 @@ def deregister_agent(agent_id: str) -> bool:
     """
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        root_director_hit = session.execute(
-            select(Session.session_id).where(Session.director_agent_id == agent_id)
-        ).first()
-        if root_director_hit is not None:
+        is_root_director = (
+            session.execute(
+                select(Session.session_id).where(Session.director_agent_id == agent_id)
+            ).first()
+            is not None
+        )
+        if is_root_director:
             raise click.UsageError(
                 "cannot deregister the root Director; "
                 "use 'cafleet session delete' instead"
