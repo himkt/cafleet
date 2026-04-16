@@ -1,5 +1,6 @@
 """Tests for ``broker`` session + registry operations."""
 
+import json
 import uuid
 
 import pytest
@@ -7,7 +8,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
-from cafleet.db.models import Base
+from cafleet import broker
+from cafleet.broker import ADMINISTRATOR_KIND
+from cafleet.db.models import Agent, Base, Session as SessionModel
+from cafleet.tmux import DirectorContext
 
 
 @pytest.fixture
@@ -19,8 +23,6 @@ def sync_sessionmaker():
 
 @pytest.fixture
 def _patch_broker(sync_sessionmaker, monkeypatch):
-    from cafleet import broker
-
     monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
 
 
@@ -30,9 +32,6 @@ def broker_session(sync_sessionmaker, _patch_broker):
 
 
 def _create_session(label: str | None = None) -> dict:
-    from cafleet import broker
-    from cafleet.tmux import DirectorContext
-
     return broker.create_session(
         label=label,
         director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
@@ -46,8 +45,6 @@ def _register_agent(
     skills: list[dict] | None = None,
     placement: dict | None = None,
 ) -> dict:
-    from cafleet import broker
-
     return broker.register_agent(
         session_id=session_id,
         name=name,
@@ -117,15 +114,9 @@ class TestCreateSessionAdministratorSeed:
         the same transaction, so two active agents exist — we pick the
         Administrator out by ``name == 'Administrator'``.
         """
-        import json
-
-        from cafleet.broker import ADMINISTRATOR_KIND
-
         result = _create_session()
         sid = result["session_id"]
         admin_id = result["administrator_agent_id"]
-
-        from cafleet.db.models import Agent
 
         with broker_session() as s:
             rows = (
@@ -147,8 +138,6 @@ class TestCreateSessionAdministratorSeed:
         self, broker_session
     ):
         """Per design §A: Administrator.registered_at == sessions.created_at."""
-        from cafleet.db.models import Agent, Session as SessionModel
-
         result = _create_session()
         sid = result["session_id"]
         admin_id = result["administrator_agent_id"]
@@ -166,9 +155,6 @@ class TestCreateSessionAdministratorSeed:
         auto-seeded Administrator has ``kind == 'builtin-administrator'``
         and is the only such entry. The root Director is ``kind == 'user'``.
         """
-        from cafleet import broker
-        from cafleet.broker import ADMINISTRATOR_KIND
-
         result = _create_session()
         sid = result["session_id"]
 
@@ -201,14 +187,10 @@ class TestListSessions:
     """broker.list_sessions() → list of dicts with agent_count."""
 
     def test_empty_returns_empty_list(self):
-        from cafleet import broker
-
         result = broker.list_sessions()
         assert result == []
 
     def test_returns_created_sessions(self):
-        from cafleet import broker
-
         _create_session(label="session-a")
         _create_session(label="session-b")
 
@@ -220,8 +202,6 @@ class TestListSessions:
 
     def test_includes_agent_count(self):
         """Count includes the root Director, auto-seeded Administrator, and user agents."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
 
@@ -240,8 +220,6 @@ class TestListSessions:
         (design 0000026), so the count floors at 2 for a session with
         no live user agents.
         """
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
 
@@ -255,8 +233,6 @@ class TestListSessions:
 
     def test_session_with_only_bootstrap_agents_has_count_two(self):
         """A freshly-bootstrapped session has exactly the Director + Administrator."""
-        from cafleet import broker
-
         _create_session()
 
         result = broker.list_sessions()
@@ -264,8 +240,6 @@ class TestListSessions:
         assert result[0]["agent_count"] == 2
 
     def test_result_contains_required_keys(self):
-        from cafleet import broker
-
         _create_session(label="test")
 
         result = broker.list_sessions()
@@ -280,8 +254,6 @@ class TestGetSession:
     """broker.get_session(session_id) → dict or None."""
 
     def test_returns_dict_for_existing_session(self):
-        from cafleet import broker
-
         created = _create_session(label="find-me")
         result = broker.get_session(created["session_id"])
 
@@ -291,8 +263,6 @@ class TestGetSession:
         assert "created_at" in result
 
     def test_returns_none_for_nonexistent_session(self):
-        from cafleet import broker
-
         result = broker.get_session(str(uuid.uuid4()))
         assert result is None
 
@@ -334,8 +304,6 @@ class TestRegisterAgent:
 
     def test_validates_session_exists(self):
         """Registering with a non-existent session_id should raise an error."""
-        from cafleet import broker
-
         fake_sid = str(uuid.uuid4())
         with pytest.raises(Exception):
             broker.register_agent(
@@ -352,8 +320,6 @@ class TestRegisterAgent:
 
     def test_register_with_placement(self):
         """When placement is provided, validates director and stores placement."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
 
@@ -413,8 +379,6 @@ class TestRegisterAgent:
 
     def test_placement_validates_director_is_active(self):
         """Deregistered director should not accept new placements."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
 
@@ -432,8 +396,6 @@ class TestRegisterAgent:
 
     def test_register_without_placement(self):
         """Agent without placement has no placement row."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
 
@@ -447,8 +409,6 @@ class TestGetAgent:
     """broker.get_agent(agent_id, session_id) → dict or None."""
 
     def test_returns_agent_dict(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         agent = _register_agent(sid, name="visible", description="test desc")
@@ -462,8 +422,6 @@ class TestGetAgent:
         assert "registered_at" in result
 
     def test_includes_placement_when_present(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         director = _register_agent(sid, name="director")
@@ -481,15 +439,11 @@ class TestGetAgent:
         assert result["placement"]["director_agent_id"] == director["agent_id"]
 
     def test_returns_none_for_nonexistent_agent(self):
-        from cafleet import broker
-
         session = _create_session()
         result = broker.get_agent(str(uuid.uuid4()), session["session_id"])
         assert result is None
 
     def test_excludes_deregistered_agents(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         agent = _register_agent(sid, name="temp")
@@ -500,8 +454,6 @@ class TestGetAgent:
 
     def test_filters_by_session(self):
         """Agent in session A is not visible when querying session B."""
-        from cafleet import broker
-
         session_a = _create_session()
         session_b = _create_session()
         agent = _register_agent(session_a["session_id"], name="scoped")
@@ -515,8 +467,6 @@ class TestListAgents:
 
     def test_returns_active_agents_only(self):
         """list_agents returns all active agents including the bootstrap pair."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
 
@@ -537,8 +487,6 @@ class TestListAgents:
 
     def test_newly_created_session_lists_bootstrap_agents(self):
         """A freshly created session has exactly the root Director + Administrator."""
-        from cafleet import broker
-
         session = _create_session()
         result = broker.list_agents(session["session_id"])
         assert len(result) == 2
@@ -549,8 +497,6 @@ class TestListAgents:
         """Agents from other sessions are not included. Each session has its own
         bootstrap pair (root Director + Administrator).
         """
-        from cafleet import broker
-
         session_a = _create_session()
         session_b = _create_session()
 
@@ -567,8 +513,6 @@ class TestListAgents:
         assert "agent-b" not in names_a
 
     def test_result_contains_required_keys(self):
-        from cafleet import broker
-
         session = _create_session()
         _register_agent(session["session_id"], name="keyed")
 
@@ -585,8 +529,6 @@ class TestVerifyAgentSession:
     """broker.verify_agent_session(agent_id, session_id) → bool."""
 
     def test_returns_true_for_agent_in_session(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         agent = _register_agent(sid, name="here")
@@ -594,8 +536,6 @@ class TestVerifyAgentSession:
         assert broker.verify_agent_session(agent["agent_id"], sid) is True
 
     def test_returns_false_for_agent_in_different_session(self):
-        from cafleet import broker
-
         session_a = _create_session()
         session_b = _create_session()
         agent = _register_agent(session_a["session_id"], name="there")
@@ -606,8 +546,6 @@ class TestVerifyAgentSession:
         )
 
     def test_returns_false_for_nonexistent_agent(self):
-        from cafleet import broker
-
         session = _create_session()
         assert (
             broker.verify_agent_session(str(uuid.uuid4()), session["session_id"])
@@ -620,8 +558,6 @@ class TestDeregisterAgent:
 
     def test_returns_true_and_deregisters_active_agent(self):
         """Deregistering a user agent leaves the bootstrap pair intact."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         agent = _register_agent(sid, name="retiring")
@@ -636,8 +572,6 @@ class TestDeregisterAgent:
 
     def test_sets_deregistered_status_and_timestamp(self):
         """After deregistering, status is 'deregistered' and deregistered_at is set."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         agent = _register_agent(sid, name="retiring")
@@ -650,8 +584,6 @@ class TestDeregisterAgent:
         assert broker.verify_agent_session(agent["agent_id"], sid) is True
 
     def test_deletes_placement_on_deregister(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         director = _register_agent(sid, name="director")
@@ -670,8 +602,6 @@ class TestDeregisterAgent:
         assert result is None
 
     def test_returns_false_for_already_deregistered(self):
-        from cafleet import broker
-
         session = _create_session()
         agent = _register_agent(session["session_id"], name="double-dereg")
 
@@ -680,8 +610,6 @@ class TestDeregisterAgent:
         assert result is False
 
     def test_returns_false_for_nonexistent_agent(self):
-        from cafleet import broker
-
         result = broker.deregister_agent(str(uuid.uuid4()))
         assert result is False
 
@@ -690,8 +618,6 @@ class TestUpdatePlacementPaneId:
     """broker.update_placement_pane_id(agent_id, pane_id) → dict or None."""
 
     def test_updates_pane_id_returns_placement(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         director = _register_agent(sid, name="director")
@@ -708,8 +634,6 @@ class TestUpdatePlacementPaneId:
         assert result["tmux_pane_id"] == "%42"
 
     def test_returns_none_when_no_placement(self):
-        from cafleet import broker
-
         session = _create_session()
         agent = _register_agent(session["session_id"], name="no-placement")
 
@@ -717,15 +641,11 @@ class TestUpdatePlacementPaneId:
         assert result is None
 
     def test_returns_none_for_nonexistent_agent(self):
-        from cafleet import broker
-
         result = broker.update_placement_pane_id(str(uuid.uuid4()), "%1")
         assert result is None
 
     def test_pane_id_persists_after_update(self):
         """After updating pane_id, get_agent should reflect it."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         director = _register_agent(sid, name="director")
@@ -748,8 +668,6 @@ class TestListMembers:
     """broker.list_members(session_id, director_agent_id) → list with placement."""
 
     def test_returns_members_for_director(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         director = _register_agent(sid, name="director")
@@ -771,8 +689,6 @@ class TestListMembers:
         assert "member-2" in names
 
     def test_includes_placement_info(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         director = _register_agent(sid, name="director")
@@ -796,8 +712,6 @@ class TestListMembers:
         assert member["placement"]["director_agent_id"] == did
 
     def test_returns_empty_list_when_no_members(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         director = _register_agent(sid, name="lonely-director")
@@ -806,8 +720,6 @@ class TestListMembers:
         assert result == []
 
     def test_excludes_members_of_other_directors(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         dir1 = _register_agent(sid, name="director-1")
@@ -833,8 +745,6 @@ class TestListMembers:
         assert result[0]["name"] == "m1-of-d1"
 
     def test_includes_agent_status(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         director = _register_agent(sid, name="director")
