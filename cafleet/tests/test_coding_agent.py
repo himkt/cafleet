@@ -1,19 +1,6 @@
-"""Tests for cafleet.coding_agent module.
-
-Covers: CodingAgentConfig dataclass, CLAUDE/CODEX built-in configs,
-CODING_AGENTS registry, get_coding_agent() helper.
-
-Design doc 0000018 Step 2: CodingAgentConfig encapsulates agent-specific
-details — binary name, extra args, default prompt template — and provides
-build_command() and ensure_available() methods.
-"""
+"""Tests for ``cafleet.coding_agent`` (design doc 0000018 Step 2)."""
 
 import pytest
-
-
-# ---------------------------------------------------------------------------
-# CodingAgentConfig dataclass
-# ---------------------------------------------------------------------------
 
 
 class TestCodingAgentConfig:
@@ -62,11 +49,6 @@ class TestCodingAgentConfig:
 
         config = CodingAgentConfig(name="test", binary="test-bin")
         assert isinstance(config.extra_args, tuple)
-
-
-# ---------------------------------------------------------------------------
-# build_command
-# ---------------------------------------------------------------------------
 
 
 class TestBuildCommand:
@@ -207,11 +189,6 @@ class TestBuildCommand:
         )
 
 
-# ---------------------------------------------------------------------------
-# ensure_available
-# ---------------------------------------------------------------------------
-
-
 class TestEnsureAvailable:
     """Tests for CodingAgentConfig.ensure_available()."""
 
@@ -257,11 +234,6 @@ class TestEnsureAvailable:
         config = CodingAgentConfig(name="test", binary="my-special-agent")
         with pytest.raises(RuntimeError, match="my-special-agent"):
             config.ensure_available()
-
-
-# ---------------------------------------------------------------------------
-# Built-in configs: CLAUDE and CODEX
-# ---------------------------------------------------------------------------
 
 
 class TestClaudeConfig:
@@ -394,11 +366,6 @@ class TestCodexConfig:
         )
 
 
-# ---------------------------------------------------------------------------
-# CODING_AGENTS registry
-# ---------------------------------------------------------------------------
-
-
 class TestCodingAgentsRegistry:
     """Tests for the CODING_AGENTS dict registry."""
 
@@ -419,11 +386,6 @@ class TestCodingAgentsRegistry:
         from cafleet.coding_agent import CODING_AGENTS
 
         assert set(CODING_AGENTS.keys()) == {"claude", "codex"}
-
-
-# ---------------------------------------------------------------------------
-# get_coding_agent
-# ---------------------------------------------------------------------------
 
 
 class TestGetCodingAgent:

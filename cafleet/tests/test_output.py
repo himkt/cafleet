@@ -1,15 +1,6 @@
-"""Tests for cafleet.output — output formatting functions.
-
-Design doc 0000018 Step 7: format_member() and format_member_list()
-include coding_agent (displayed as 'backend').
-"""
+"""Tests for ``cafleet.output`` formatting helpers."""
 
 from cafleet.output import format_member, format_member_list
-
-
-# ---------------------------------------------------------------------------
-# format_member
-# ---------------------------------------------------------------------------
 
 
 class TestFormatMember:
@@ -67,11 +58,6 @@ class TestFormatMember:
         }
         result = format_member(data)
         assert "claude" in result
-
-
-# ---------------------------------------------------------------------------
-# format_member_list
-# ---------------------------------------------------------------------------
 
 
 class TestFormatMemberList:
