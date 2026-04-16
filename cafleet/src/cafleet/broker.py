@@ -555,13 +555,15 @@ def verify_agent_session(agent_id: str, session_id: str) -> bool:
     """Return True iff the agent belongs to the session (any status)."""
     sm = get_sync_sessionmaker()
     with sm() as session:
-        result = session.execute(
-            select(Agent.agent_id).where(
-                Agent.agent_id == agent_id,
-                Agent.session_id == session_id,
-            )
+        return (
+            session.execute(
+                select(Agent.agent_id).where(
+                    Agent.agent_id == agent_id,
+                    Agent.session_id == session_id,
+                )
+            ).first()
+            is not None
         )
-        return result.first() is not None
 
 
 def _save_task(session, task_dict: dict) -> None:
