@@ -755,8 +755,8 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
     # 1. Validate destination UUID
     try:
         uuid.UUID(to)
-    except ValueError:
-        raise ValueError(f"Invalid destination format: {to}")
+    except ValueError as exc:
+        raise ValueError(f"Invalid destination format: {to}") from exc
 
     sm = get_sync_sessionmaker()
     with sm() as session:

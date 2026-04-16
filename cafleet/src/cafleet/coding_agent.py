@@ -73,8 +73,8 @@ def get_coding_agent(name: str) -> CodingAgentConfig:
     """
     try:
         return CODING_AGENTS[name]
-    except KeyError:
+    except KeyError as exc:
         raise ValueError(
             f"Unknown coding agent '{name}'. "
             f"Available: {', '.join(sorted(CODING_AGENTS))}"
-        )
+        ) from exc
