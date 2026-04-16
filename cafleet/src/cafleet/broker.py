@@ -589,10 +589,12 @@ def _save_task(session, task_dict: dict) -> None:
 
 
 def _read_task(session, task_id: str) -> dict | None:
-    row = session.execute(select(Task.task_json).where(Task.task_id == task_id)).first()
-    if row is None:
+    task_json = session.execute(
+        select(Task.task_json).where(Task.task_id == task_id)
+    ).scalar_one_or_none()
+    if task_json is None:
         return None
-    return json.loads(row[0])
+    return json.loads(task_json)
 
 
 def _unicast_task_dict(
