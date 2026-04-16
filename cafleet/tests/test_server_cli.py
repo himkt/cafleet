@@ -1,22 +1,4 @@
-"""Tests for the ``cafleet server`` CLI subcommand (design doc 0000028).
-
-The subcommand launches the admin WebUI FastAPI app via uvicorn.  These tests
-cover the five behavioural contracts from the design doc Specification, Tests
-subsection and run as part of the standard ``mise //cafleet:test`` suite:
-
-  1. ``cafleet server --help`` exits 0 and shows both ``--host`` / ``--port``.
-  2. With ``uvicorn.run`` monkey-patched, flag parsing threads defaults from
-     ``settings.broker_host`` / ``settings.broker_port`` and explicit flag
-     values override them.
-  3. ``cafleet server`` does NOT require ``--session-id``.  Supplying one is
-     silently accepted (matches the ``db init`` / ``session *`` pattern).
-  4. ``create_app()`` emits the missing-WebUI-dist warning to stderr when the
-     default path does not exist; an explicit ``webui_dist_dir`` override
-     suppresses the warning (proving the ``webui_dist_dir is None`` gate).
-  5. ``Settings().broker_host`` default is ``"127.0.0.1"`` (flipped from
-     ``"0.0.0.0"`` to match CAFleet's local-only stance) and the
-     ``CAFLEET_BROKER_HOST`` / ``CAFLEET_BROKER_PORT`` aliases are wired.
-"""
+"""Tests for the ``cafleet server`` CLI subcommand (design doc 0000028)."""
 
 import uuid
 
@@ -26,11 +8,6 @@ from click.testing import CliRunner
 from cafleet import server as server_mod
 from cafleet.cli import cli
 from cafleet.config import Settings
-
-
-# ---------------------------------------------------------------------------
-# (1) --help
-# ---------------------------------------------------------------------------
 
 
 class TestServerCommandHelp:
@@ -57,11 +34,6 @@ class TestServerCommandHelp:
         assert "--port" in result.output, (
             f"help must mention --port flag. got: {result.output!r}"
         )
-
-
-# ---------------------------------------------------------------------------
-# (2) flag parsing threads into uvicorn.run
-# ---------------------------------------------------------------------------
 
 
 class TestServerCommandFlagParsing:
@@ -160,14 +132,8 @@ class TestServerCommandFlagParsing:
         )
 
 
-# ---------------------------------------------------------------------------
-# (3) session-id is NOT required (and silently accepted if supplied)
-# ---------------------------------------------------------------------------
-
-
 class TestServerDoesNotRequireSessionId:
-    """Design doc Session-id gating: ``server`` joins the 'does NOT require
-    --session-id' list alongside ``db init`` and ``session *``.
+    """Design doc Session-id gating: ``server`` is exempt from ``--session-id``.
 
     Uses ``--help`` so ``uvicorn.run`` is never called and tests do not
     need to monkey-patch it.
@@ -229,17 +195,9 @@ class TestServerDoesNotRequireSessionId:
         )
 
 
-# ---------------------------------------------------------------------------
-# (4) missing WebUI dist warning fires from create_app()
-# ---------------------------------------------------------------------------
-
-
 class TestWebUIDistWarning:
-    """Design doc ``server.py`` changes: ``create_app()`` emits the missing-
-    WebUI-dist warning gated on ``webui_dist_dir is None`` so every real
-    startup path (``cafleet server``, ``mise //cafleet:dev``, direct
-    ``uv run uvicorn``) sees it while tests with explicit overrides stay
-    quiet.
+    """``create_app()`` emits the missing-WebUI-dist warning only when the
+    default path is used; explicit overrides must stay quiet.
     """
 
     _WARNING_PREFIX = "warning: admin WebUI is not built"
@@ -302,16 +260,9 @@ class TestWebUIDistWarning:
         )
 
 
-# ---------------------------------------------------------------------------
-# (5) Settings.broker_host default + CAFLEET_* env var aliases
-# ---------------------------------------------------------------------------
-
-
 class TestBrokerHostDefault:
-    """Design doc Success Criteria: ``Settings.broker_host`` default flipped to
-    ``"127.0.0.1"`` (was ``"0.0.0.0"``) and ``broker_host`` / ``broker_port``
-    gained ``validation_alias`` wiring for ``CAFLEET_BROKER_HOST`` /
-    ``CAFLEET_BROKER_PORT``.
+    """``Settings`` defaults host to ``127.0.0.1`` and reads ``CAFLEET_BROKER_*``
+    env vars via ``validation_alias``.
     """
 
     def test_broker_host_default_is_loopback(self, monkeypatch):

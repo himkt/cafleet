@@ -69,13 +69,7 @@ def mock_tmux_unavailable(monkeypatch):
         monkeypatch.setattr(cli_mod, "ensure_tmux_available", _raise)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _session_rows(db_path) -> list[tuple]:
-    """Read all session rows including deleted_at so tests can assert on it."""
     conn = sqlite3.connect(str(db_path))
     try:
         return conn.execute(
