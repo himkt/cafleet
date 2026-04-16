@@ -1,35 +1,17 @@
-"""Tests for ``_resolve_prompt`` in ``cafleet.cli``.
+"""Tests for ``_resolve_prompt`` and ``cafleet member create`` (design doc 0000024)."""
 
-Design doc 0000024 task 2.2 — pin the contract that both the default
-prompt template AND a user-supplied ``prompt_argv`` get the same
-``{session_id}`` / ``{agent_id}`` / ``{director_name}`` /
-``{director_agent_id}`` substitutions via ``str.format``.
-
-Four cases:
-
-  (a) default path (empty ``prompt_argv``) substitutes all UUIDs into
-      the CLAUDE template — existing behaviour, must keep passing
-  (b) custom prompt containing ``{agent_id}`` gets substituted — new
-      behaviour pinned here, regression for R1 (task 2.1)
-  (c) custom prompt with no placeholders passes through unchanged
-  (d) custom prompt with doubled ``{{...}}`` braces collapses to single
-      literal braces and does NOT attempt placeholder substitution on
-      the inner tokens — risk-row mitigation for literal-brace JSON
-      snippets in custom prompts
-
-Cases (b) and (d) fail against pre-fix code because today's
-``_resolve_prompt`` returns early for non-empty ``prompt_argv`` without
-calling ``.format``. That failure is expected and drives the TDD loop.
-"""
-
+import json
 import uuid
 
 import click
 import pytest
+from click.testing import CliRunner
 
-from cafleet import broker
-from cafleet.cli import _resolve_prompt
+from cafleet import broker, config
+from cafleet.cli import _resolve_prompt, cli
 from cafleet.coding_agent import CLAUDE
+from cafleet.db import engine as engine_mod
+from cafleet.tmux import DirectorContext
 
 
 @pytest.fixture
@@ -279,16 +261,6 @@ class TestCustomPromptMalformedRaisesUsageError:
         )
 
 
-# Below: design doc 0000029 Step 4 — CLI threads --name through to the claude binary.
-
-from click.testing import CliRunner  # noqa: E402
-
-from cafleet import config  # noqa: E402
-from cafleet.cli import cli  # noqa: E402
-from cafleet.db import engine as engine_mod  # noqa: E402
-from cafleet.tmux import DirectorContext  # noqa: E402
-
-
 _CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 
@@ -329,8 +301,6 @@ def bootstrapped_session(tmp_path, monkeypatch, _reset_engine):
         f"session create failed during test setup. "
         f"output: {create.output!r}, exception: {create.exception!r}"
     )
-    import json
-
     data = json.loads(create.output)
     return data["session_id"], data["director"]["agent_id"], runner
 
