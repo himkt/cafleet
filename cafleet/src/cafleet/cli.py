@@ -530,6 +530,48 @@ def member():
     """Manage tmux-backed member agents (Director only)."""
 
 
+def _load_authorized_member(
+    session_id: str,
+    director_agent_id: str,
+    member_id: str,
+    *,
+    placement_missing_msg: str,
+) -> tuple[dict, dict]:
+    """Fetch a member's agent + placement, enforcing the cross-Director boundary.
+
+    Raises ``click.ClickException`` (exit 1) on every failure path with the
+    message Click will print as ``Error: <msg>`` to stderr:
+
+      - fetch raised → ``failed to fetch member: <exc>``
+      - agent not found in this session → ``Agent <member_id> not found``
+      - placement row absent → ``placement_missing_msg`` (caller chooses the
+        follow-up command to suggest: ``cafleet deregister`` for delete,
+        ``cafleet member create`` for capture / send-input)
+      - placement exists but belongs to a different Director in the same
+        session → ``agent <member_id> is not a member of your team
+        (director_agent_id=<other>).``
+
+    Pane-id presence is NOT checked — callers that require a live pane must
+    validate ``placement["tmux_pane_id"]`` themselves with their own wording
+    (delete tolerates a pending placement; capture / send-input do not).
+    """
+    try:
+        target = broker.get_agent(member_id, session_id)
+    except Exception as exc:
+        raise click.ClickException(f"failed to fetch member: {exc}") from exc
+    if target is None:
+        raise click.ClickException(f"Agent {member_id} not found")
+    placement = target.get("placement")
+    if placement is None:
+        raise click.ClickException(placement_missing_msg)
+    if placement["director_agent_id"] != director_agent_id:
+        raise click.ClickException(
+            f"agent {member_id} is not a member of your team "
+            f"(director_agent_id={placement['director_agent_id']})."
+        )
+    return target, placement
+
+
 def _resolve_prompt(
     ctx: click.Context,
     director_agent_id: str,
@@ -725,35 +767,15 @@ def member_delete(ctx, agent_id, member_id):
         ctx.exit(1)
         return
 
-    # Step 1 — fetch the target agent + placement.
-    try:
-        target = broker.get_agent(member_id, session_id)
-    except Exception as exc:
-        click.echo(f"Error: failed to fetch member: {exc}", err=True)
-        ctx.exit(1)
-        return
-    if target is None:
-        click.echo(f"Error: Agent {member_id} not found", err=True)
-        ctx.exit(1)
-        return
-
-    placement = target.get("placement")
-    if placement is None:
-        click.echo(
-            f"Error: agent {member_id} has no placement; use `cafleet deregister` instead",
-            err=True,
-        )
-        ctx.exit(1)
-        return
-    if placement["director_agent_id"] != agent_id:
-        click.echo(
-            f"Error: agent {member_id} is not a member of your team "
-            f"(director_agent_id={placement['director_agent_id']}).",
-            err=True,
-        )
-        ctx.exit(1)
-        return
-
+    # Step 1 — fetch the target agent + placement with auth-boundary checks.
+    target, placement = _load_authorized_member(
+        session_id,
+        agent_id,
+        member_id,
+        placement_missing_msg=(
+            f"agent {member_id} has no placement; use `cafleet deregister` instead"
+        ),
+    )
     pane_id = placement.get("tmux_pane_id")
 
     # Step 2 — deregister the member (BEFORE closing pane).
@@ -840,35 +862,16 @@ def member_capture(ctx, agent_id, member_id, lines):
         ctx.exit(1)
         return
 
-    # Fetch the target's agent + placement.
-    try:
-        target = broker.get_agent(member_id, session_id)
-    except Exception as exc:
-        click.echo(f"Error: failed to fetch member: {exc}", err=True)
-        ctx.exit(1)
-        return
-    if target is None:
-        click.echo(f"Error: Agent {member_id} not found", err=True)
-        ctx.exit(1)
-        return
-
-    placement = target.get("placement")
-    if placement is None:
-        click.echo(
-            f"Error: agent {member_id} has no placement row; it was not "
-            f"spawned via `cafleet member create`.",
-            err=True,
-        )
-        ctx.exit(1)
-        return
-    if placement["director_agent_id"] != agent_id:
-        click.echo(
-            f"Error: agent {member_id} is not a member of your team "
-            f"(director_agent_id={placement['director_agent_id']}).",
-            err=True,
-        )
-        ctx.exit(1)
-        return
+    # Fetch the target's agent + placement with auth-boundary checks.
+    _target, placement = _load_authorized_member(
+        session_id,
+        agent_id,
+        member_id,
+        placement_missing_msg=(
+            f"agent {member_id} has no placement row; it was not "
+            f"spawned via `cafleet member create`."
+        ),
+    )
     if placement.get("tmux_pane_id") is None:
         click.echo(
             f"Error: member {member_id} has no pane yet (pending placement) "
@@ -943,29 +946,15 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
         ctx.exit(1)
         return
 
-    target = broker.get_agent(member_id, session_id)
-    if target is None:
-        click.echo(f"Error: Agent {member_id} not found", err=True)
-        ctx.exit(1)
-        return
-
-    placement = target.get("placement")
-    if placement is None:
-        click.echo(
-            f"Error: agent {member_id} has no placement row; it was not "
-            f"spawned via `cafleet member create`.",
-            err=True,
-        )
-        ctx.exit(1)
-        return
-    if placement["director_agent_id"] != agent_id:
-        click.echo(
-            f"Error: agent {member_id} is not a member of your team "
-            f"(director_agent_id={placement['director_agent_id']}).",
-            err=True,
-        )
-        ctx.exit(1)
-        return
+    target, placement = _load_authorized_member(
+        session_id,
+        agent_id,
+        member_id,
+        placement_missing_msg=(
+            f"agent {member_id} has no placement row; it was not "
+            f"spawned via `cafleet member create`."
+        ),
+    )
     pane_id = placement.get("tmux_pane_id")
     if pane_id is None:
         click.echo(
