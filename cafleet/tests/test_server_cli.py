@@ -114,7 +114,11 @@ class TestServerCommandFlagParsing:
             f"output: {result.output}, exception: {result.exception}"
         )
         args = captured.get("args", ())
-        assert args and args[0] == "cafleet.server:app", (
+        assert args, (
+            f"uvicorn.run must receive at least one positional arg. "
+            f"got args: {args!r}, kwargs: {captured.get('kwargs')!r}"
+        )
+        assert args[0] == "cafleet.server:app", (
             f"uvicorn.run must receive 'cafleet.server:app' as first arg. "
             f"got args: {args!r}, kwargs: {captured.get('kwargs')!r}"
         )

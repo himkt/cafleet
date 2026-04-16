@@ -212,8 +212,11 @@ class TestCustomPromptMalformedRaisesUsageError:
         assert "foo" in message, (
             f"error message must name the unknown placeholder. got: {message!r}"
         )
-        assert "{session_id}" in message and "{agent_id}" in message, (
-            f"error message must list supported placeholders. got: {message!r}"
+        assert "{session_id}" in message, (
+            f"error message must list {{session_id}}. got: {message!r}"
+        )
+        assert "{agent_id}" in message, (
+            f"error message must list {{agent_id}}. got: {message!r}"
         )
 
     def test_unmatched_brace_raises_usage_error(
@@ -232,8 +235,11 @@ class TestCustomPromptMalformedRaisesUsageError:
                 coding_agent_config=CLAUDE,
             )
         message = str(exc_info.value)
-        assert "{{" in message and "}}" in message, (
-            f"error message must hint at brace doubling. got: {message!r}"
+        assert "{{" in message, (
+            f"error message must hint at opening brace doubling. got: {message!r}"
+        )
+        assert "}}" in message, (
+            f"error message must hint at closing brace doubling. got: {message!r}"
         )
 
     def test_attribute_access_raises_usage_error(
@@ -256,8 +262,11 @@ class TestCustomPromptMalformedRaisesUsageError:
                 coding_agent_config=CLAUDE,
             )
         message = str(exc_info.value)
-        assert "{{" in message and "}}" in message, (
-            f"error message must hint at brace doubling. got: {message!r}"
+        assert "{{" in message, (
+            f"error message must hint at opening brace doubling. got: {message!r}"
+        )
+        assert "}}" in message, (
+            f"error message must hint at closing brace doubling. got: {message!r}"
         )
 
 
@@ -449,6 +458,9 @@ class TestMemberCreatePassesDisplayName:
         assert command[0] == "codex", (
             f"command must start with the codex binary. got: {command!r}"
         )
-        assert "--approval-mode" in command and "auto-edit" in command, (
-            f"codex command must preserve its existing extra_args. got: {command!r}"
+        assert "--approval-mode" in command, (
+            f"codex command must preserve '--approval-mode'. got: {command!r}"
+        )
+        assert "auto-edit" in command, (
+            f"codex command must preserve 'auto-edit' value. got: {command!r}"
         )

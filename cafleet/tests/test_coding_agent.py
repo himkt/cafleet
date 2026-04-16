@@ -333,12 +333,12 @@ class TestGetCodingAgent:
 
     def test_raises_valueerror_for_unknown_name(self):
         """Raises ValueError for a name not in CODING_AGENTS."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown coding agent"):
             get_coding_agent("unknown-agent")
 
     def test_raises_valueerror_for_empty_string(self):
         """Raises ValueError for an empty string."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown coding agent"):
             get_coding_agent("")
 
     def test_error_message_includes_unknown_name(self):
