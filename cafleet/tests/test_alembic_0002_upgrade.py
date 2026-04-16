@@ -1,26 +1,4 @@
-"""Tests for Alembic migration ``0002_local_simplification``.
-
-Verifies the upgrade path from the 0001 schema (with ``api_keys`` + ``agents.tenant_id``)
-to the 0002 schema (with ``sessions`` + ``agents.session_id``):
-
-  1. ``sessions`` table is created and seeded from ``api_keys`` rows —
-     each ``api_key_hash`` becomes a ``session_id`` verbatim.
-  2. ``agents.tenant_id`` is renamed to ``session_id`` and its FK retargets
-     ``sessions.session_id``.
-  3. ``api_keys`` table is dropped entirely.
-  4. Index ``idx_agents_tenant_status`` is replaced by ``idx_agents_session_status``.
-  5. ``downgrade()`` raises ``NotImplementedError`` — this is a one-way migration.
-
-Design doc reference: design-docs/0000015-remove-auth0-local-session-model/design-doc.md
-Specification §2 (Alembic Migration ``0002_local_simplification``).
-
-Test isolation strategy:
-
-  Each test creates its own temporary DB file and runs Alembic migrations
-  via ``command.upgrade``. The DB is initialized to the ``0001`` revision
-  first, then test data is inserted, and the upgrade to ``0002_local_simplification``
-  is applied. This ensures the migration works against a realistic schema state.
-"""
+"""Tests for Alembic migration ``0002_local_simplification`` (design 0000015)."""
 
 import importlib.resources
 from datetime import UTC, datetime
@@ -31,13 +9,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _make_alembic_cfg(db_path) -> Config:
-    """Create an Alembic Config pointing at the given SQLite DB file."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet") / "alembic.ini"
     ) as ini_path:
@@ -50,27 +22,13 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def db_at_0001(tmp_path):
-    """Create a DB at Alembic revision 0001 and return the path.
-
-    Uses ``command.upgrade(cfg, "0001")`` to reach the base schema with
-    ``api_keys`` and ``agents.tenant_id`` columns in place.
-    """
+    """Upgrade a fresh DB to revision ``0001`` and return its path."""
     db_path = tmp_path / "upgrade_test.db"
     cfg = _make_alembic_cfg(db_path)
     command.upgrade(cfg, "0001")
     return db_path
-
-
-# ---------------------------------------------------------------------------
-# Migration upgrade tests
-# ---------------------------------------------------------------------------
 
 
 class TestMigration0002Upgrade:
@@ -370,11 +328,6 @@ class TestMigration0002Upgrade:
             assert rows[0][0] == "0002_local_simplification"
         finally:
             engine.dispose()
-
-
-# ---------------------------------------------------------------------------
-# Downgrade test
-# ---------------------------------------------------------------------------
 
 
 class TestMigration0002Downgrade:

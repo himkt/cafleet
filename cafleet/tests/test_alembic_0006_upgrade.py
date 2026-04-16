@@ -1,30 +1,4 @@
-"""Tests for Alembic migration ``0006_seed_administrator_agent``.
-
-Design doc 0000025 §C: the 0006 data migration backfills a built-in
-Administrator agent into every pre-existing session.
-
-The migration is:
-
-- Idempotent: running ``upgrade`` a second time detects the existing
-  Administrator via ``json_extract`` on ``agent_card_json`` and skips the
-  INSERT, so there is always exactly one Administrator per session.
-- Generates UUIDs in Python inside the script (``uuid.uuid4()``), matching
-  the broker's idiom.
-- Sets ``registered_at`` equal to the owning session's ``created_at``.
-- ``downgrade`` deletes Administrator rows via ``json_extract``. Treated as
-  forward-only in practice — the non-empty case (sessions with tasks
-  addressed to or from the Administrator) would fail on SQLite's
-  ``ON DELETE RESTRICT`` for ``tasks.context_id``. Only the empty-session
-  downgrade smoke is exercised here.
-
-Test isolation strategy:
-
-  Each test creates its own temporary DB file and runs Alembic migrations
-  via ``command.upgrade``. The DB is first brought to revision ``0005``
-  (pre-seed state), test data is inserted via raw ``text()`` SQL, then
-  ``upgrade`` to ``0006`` is applied and the resulting ``agents`` table
-  is inspected.
-"""
+"""Tests for Alembic migration ``0006_seed_administrator_agent`` (design 0000025 §C)."""
 
 import importlib.resources
 import json
@@ -37,13 +11,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _make_alembic_cfg(db_path) -> Config:
-    """Create an Alembic Config pointing at the given SQLite DB file."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet") / "alembic.ini"
     ) as ini_path:
@@ -59,7 +27,6 @@ def _now_iso() -> str:
 def _seed_session(
     engine, *, session_id: str, created_at: str, label: str | None = None
 ):
-    """INSERT a session row via raw SQL at the 0005 schema level."""
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -129,28 +96,13 @@ def _fetch_administrator_rows(engine, session_id: str) -> list[dict]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def db_at_0005(tmp_path):
-    """Create a DB at Alembic revision 0005 and return the path.
-
-    Uses ``command.upgrade(cfg, "0005")`` so all pre-seed tables
-    (``sessions``, ``agents``, ``agent_placements``, ``tasks``) and
-    indexes are in place with the schema that exists just before 0006.
-    """
+    """Upgrade a fresh DB to revision ``0005`` (pre-seed state) and return its path."""
     db_path = tmp_path / "upgrade_0006_test.db"
     cfg = _make_alembic_cfg(db_path)
     command.upgrade(cfg, "0005")
     return db_path
-
-
-# ---------------------------------------------------------------------------
-# Upgrade — seeding the Administrator into pre-existing sessions
-# ---------------------------------------------------------------------------
 
 
 class TestMigration0006UpgradeSeed:
@@ -280,11 +232,6 @@ class TestMigration0006UpgradeSeed:
             engine.dispose()
 
 
-# ---------------------------------------------------------------------------
-# Idempotency — re-running upgrade never duplicates
-# ---------------------------------------------------------------------------
-
-
 class TestMigration0006UpgradeIdempotent:
     """Test 2 — running upgrade twice back-to-back still yields one Admin per session."""
 
@@ -360,13 +307,8 @@ class TestMigration0006UpgradeIdempotent:
             engine.dispose()
 
 
-# ---------------------------------------------------------------------------
-# Downgrade smoke (empty session only)
-# ---------------------------------------------------------------------------
-
-
 class TestMigration0006DowngradeSmoke:
-    """Test 3 — downgrade on a session with no tasks removes the Administrator.
+    """Downgrade on an empty session removes the Administrator.
 
     The non-empty case is deliberately out of scope: ``tasks.context_id``
     uses ``ON DELETE RESTRICT``, so any session with at least one task
