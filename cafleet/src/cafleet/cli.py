@@ -4,7 +4,6 @@ import contextlib
 import importlib.resources
 import json
 import os
-import sys
 from pathlib import Path
 
 import click
@@ -78,8 +77,7 @@ def init() -> None:
     sync_url = _sync_db_url()
     db_file_str = make_url(sync_url).database
     if not db_file_str:
-        click.echo("ERROR: database URL has no file path", err=True)
-        sys.exit(1)
+        raise click.ClickException("database URL has no file path")
     db_file = Path(db_file_str)
 
     db_file.parent.mkdir(parents=True, exist_ok=True)
@@ -108,13 +106,11 @@ def init() -> None:
                     current_rev = ctx.get_current_revision()
 
             if non_alembic_tables and not has_alembic_version:
-                click.echo(
-                    "ERROR: DB has existing tables but no alembic_version. "
+                raise click.ClickException(
+                    "DB has existing tables but no alembic_version. "
                     "Run `alembic stamp head` manually if you are sure the "
-                    "schema matches.",
-                    err=True,
+                    "schema matches."
                 )
-                sys.exit(1)
 
             script = ScriptDirectory.from_config(cfg)
             head_rev = script.get_current_head()
@@ -122,13 +118,11 @@ def init() -> None:
             if current_rev is not None:
                 known_revisions = {rev.revision for rev in script.walk_revisions()}
                 if current_rev not in known_revisions:
-                    click.echo(
-                        f"ERROR: DB schema is at revision {current_rev} which "
+                    raise click.ClickException(
+                        f"DB schema is at revision {current_rev} which "
                         f"is unknown to this version of cafleet. "
-                        f"Refusing to downgrade automatically.",
-                        err=True,
+                        f"Refusing to downgrade automatically."
                     )
-                    sys.exit(1)
 
             if current_rev == head_rev:
                 click.echo(f"Already at head ({head_rev}); nothing to do.")
