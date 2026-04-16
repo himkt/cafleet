@@ -98,21 +98,15 @@ def _try_notify_recipient(
 
 def create_session(
     label: str | None = None,
-    director_context: DirectorContext | None = None,
+    *,
+    director_context: DirectorContext,
 ) -> dict:
     """Atomically bootstrap a session with its root Director and Administrator.
 
-    Design 0000026. The session row is written first with
-    ``director_agent_id=NULL`` and back-filled once the Director's agent row
-    exists, so ``sessions.director_agent_id`` is DB-nullable even though the
-    post-bootstrap invariant is NOT NULL.
+    The session row is written first with ``director_agent_id=NULL`` and
+    back-filled once the Director's agent row exists, so the column is
+    DB-nullable even though the post-bootstrap invariant is NOT NULL.
     """
-    if director_context is None:
-        raise TypeError(
-            "broker.create_session requires a director_context "
-            "(resolve it via tmux.director_context() before calling)"
-        )
-
     session_id = str(uuid.uuid4())
     created_at = _now_iso()
     director_agent_id = str(uuid.uuid4())
