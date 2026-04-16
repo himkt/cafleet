@@ -1,29 +1,4 @@
-"""Tests for broker-level session bootstrap (design doc 0000026).
-
-Covers the 5-step transactional bootstrap performed by ``broker.create_session``:
-
-  1. INSERT sessions (with deleted_at=NULL, director_agent_id=NULL)
-  2. INSERT agents (the root Director, name="director")
-  3. INSERT agent_placements (director_agent_id=NULL, coding_agent="unknown")
-  4. UPDATE sessions SET director_agent_id=<director agent_id>
-  5. INSERT agents (the built-in Administrator, carried over from design 0000025)
-
-Also covers:
-  * rollback when a step mid-transaction fails;
-  * ``delete_session`` soft-delete cascade + idempotency;
-  * ``register_agent`` soft-delete rejection;
-  * ``list_sessions`` filtering out soft-deleted rows;
-  * ``deregister_agent`` refusing to deregister the root Director;
-  * Member → Director notification wiring via ``tmux.send_poll_trigger``.
-
-Test isolation strategy:
-  Each test gets a fresh in-memory SQLite database via the ``broker_session``
-  autouse fixture, mirroring ``test_broker_registry.py`` / ``test_broker_messaging.py``.
-  ``broker.get_sync_sessionmaker`` is monkeypatched to return a sessionmaker
-  bound to this ephemeral engine. ``tmux.director_context()`` is never invoked
-  at the broker layer (the CLI resolves it and passes in a ``DirectorContext``),
-  so we construct ``DirectorContext`` directly in-test.
-"""
+"""Broker-level session bootstrap tests (design doc 0000026)."""
 
 import uuid
 from unittest.mock import Mock
@@ -38,14 +13,8 @@ from cafleet.db.models import Base
 from cafleet.tmux import DirectorContext
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def sync_sessionmaker():
-    """Create a sync in-memory SQLite engine with all tables."""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)
@@ -53,7 +22,6 @@ def sync_sessionmaker():
 
 @pytest.fixture
 def _patch_broker(sync_sessionmaker, monkeypatch):
-    """Monkeypatch broker.get_sync_sessionmaker to use the test engine."""
     from cafleet import broker
 
     monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
@@ -61,23 +29,15 @@ def _patch_broker(sync_sessionmaker, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def broker_session(sync_sessionmaker, _patch_broker):
-    """Autouse fixture that sets up broker with a test DB for every test."""
     return sync_sessionmaker
 
 
 @pytest.fixture
 def director_context():
-    """A fake tmux DirectorContext used by broker.create_session tests."""
     return DirectorContext(session="main", window_id="@1", pane_id="%0")
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _bootstrap(label: str | None = None, ctx: DirectorContext | None = None) -> dict:
-    """Call the new ``broker.create_session(label, director_context)`` API."""
     from cafleet import broker
 
     return broker.create_session(
