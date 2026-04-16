@@ -362,7 +362,11 @@ class TestSessionCreateOutsideTmux:
         runner = CliRunner()
         before = _session_rows(db_file)
         result = runner.invoke(cli, ["session", "create"])
-        assert result.exit_code != 0
+        assert result.exit_code == 1, (
+            f"session create outside tmux must exit 1 per design 0000026 "
+            f"(Error Handling table); got exit_code={result.exit_code}, "
+            f"output={result.output!r}"
+        )
         after = _session_rows(db_file)
         assert before == after, (
             f"session create must not write any rows when tmux is unavailable; "
@@ -421,9 +425,10 @@ class TestSessionListHidesSoftDeleted:
         """Design 0000026 explicitly removes/omits an ``--all`` flag."""
         runner = CliRunner()
         result = runner.invoke(cli, ["session", "list", "--all"])
-        # Click rejects unknown options with a non-zero exit code.
-        assert result.exit_code != 0, (
-            "session list must NOT accept an --all flag in this revision; "
+        # Click rejects unknown options with exit code 2 ("No such option").
+        assert result.exit_code == 2, (
+            "session list must reject --all via click's unknown-option handler "
+            "(exit 2) in this revision; "
             f"got exit_code={result.exit_code}, output={result.output!r}"
         )
 

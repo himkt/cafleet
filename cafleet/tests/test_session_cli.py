@@ -560,14 +560,14 @@ class TestSessionShow:
         fake_id = str(uuid.uuid4())
         result = runner.invoke(cli, ["session", "show", fake_id])
 
-        assert result.exit_code != 0, (
-            f"session show should exit non-zero for missing session. "
-            f"exit_code={result.exit_code}, output: {result.output}"
+        assert result.exit_code == 1, (
+            f"session show must exit 1 for missing session (sys.exit(1) in "
+            f"cli.session_show). got exit_code={result.exit_code}, "
+            f"output: {result.output}"
         )
         output_lower = result.output.lower()
-        assert "not found" in output_lower or "error" in output_lower, (
-            f"error message should mention 'not found' or 'error'. "
-            f"got: {result.output!r}"
+        assert "not found" in output_lower, (
+            f"error message must mention 'not found'. got: {result.output!r}"
         )
 
 
