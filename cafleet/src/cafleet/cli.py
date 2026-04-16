@@ -782,17 +782,10 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
     session_id = ctx.obj["session_id"]
 
     if (choice is None) == (freetext is None):
-        click.echo(
-            "Error: Must supply exactly one of --choice or --freetext.",
-            err=True,
-        )
-        ctx.exit(2)
-        return
+        raise click.UsageError("Must supply exactly one of --choice or --freetext.")
 
     if freetext is not None and ("\n" in freetext or "\r" in freetext):
-        click.echo("Error: free text may not contain newlines.", err=True)
-        ctx.exit(2)
-        return
+        raise click.UsageError("free text may not contain newlines.")
 
     try:
         tmux.ensure_tmux_available()
