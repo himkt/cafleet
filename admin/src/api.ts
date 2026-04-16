@@ -11,10 +11,6 @@ export function setSessionId(id: string | null): void {
   sessionId = id;
 }
 
-export function getSessionId(): string | null {
-  return sessionId;
-}
-
 async function request<T>(
   path: string,
   options: RequestInit = {},
