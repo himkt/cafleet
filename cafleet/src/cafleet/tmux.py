@@ -10,13 +10,12 @@ class TmuxError(Exception):
 
 @dataclass(frozen=True)
 class DirectorContext:
-    session: str  # e.g. 'main'
-    window_id: str  # e.g. '@3'
-    pane_id: str  # e.g. '%0' — the Director's own pane
+    session: str
+    window_id: str
+    pane_id: str
 
 
 def ensure_tmux_available() -> None:
-    """Raise TmuxError if the `tmux` binary is not on PATH or TMUX is unset."""
     if shutil.which("tmux") is None:
         raise TmuxError("tmux binary not found on PATH")
     if not os.environ.get("TMUX"):
@@ -24,11 +23,10 @@ def ensure_tmux_available() -> None:
 
 
 def director_context() -> DirectorContext:
-    """Resolve the Director's own tmux session, window_id, and pane_id.
+    """Resolve the tmux session/window/pane of the calling pane.
 
-    Uses the TMUX_PANE env var as the anchor and queries tmux for the
-    containing window. Works regardless of which window the user is
-    currently focused on.
+    Anchored on ``$TMUX_PANE`` so it works regardless of which window the
+    user is currently focused on.
     """
     tmux_pane = os.environ.get("TMUX_PANE")
     if not tmux_pane:
@@ -56,10 +54,7 @@ def split_window(
     env: dict[str, str],
     command: list[str],
 ) -> str:
-    """Spawn a coding agent in a new pane in `target_window_id`.
-
-    Returns the new pane_id (e.g. '%7'). Forwards env as `-e KEY=VAL` flags.
-    """
+    """Split the target window with ``command`` and return the new pane id."""
     args = ["tmux", "split-window", "-t", target_window_id, "-P", "-F", "#{pane_id}"]
     for k, v in env.items():
         args += ["-e", f"{k}={v}"]
@@ -75,12 +70,7 @@ _PANE_GONE_MARKERS = ("can't find pane", "no such pane")
 
 
 def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
-    """Send '/exit' + Enter to the given pane.
-
-    If `ignore_missing=True` and tmux reports the pane no longer exists
-    (matched against _PANE_GONE_MARKERS), return silently instead of raising.
-    Any other tmux failure raises `TmuxError`.
-    """
+    """Send ``/exit`` + Enter, swallowing pane-gone errors when requested."""
     try:
         _run(["tmux", "send-keys", "-t", target_pane_id, "/exit", "Enter"])
     except TmuxError as exc:
@@ -90,15 +80,11 @@ def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
 
 
 def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) -> bool:
-    """Send a cafleet poll trigger to the given tmux pane.
+    """Best-effort ``cafleet poll`` trigger for the recipient's pane.
 
-    Emits ``cafleet --session-id <session_id> poll --agent-id <agent_id>`` so
-    the recipient's ``permissions.allow`` can match it as a literal string.
-    ``--session-id`` is global (before the subcommand); ``--agent-id`` is a
-    per-subcommand option (after the subcommand name).
-    Returns True on success, False if tmux is unavailable or the pane
-    no longer exists. Never raises — internally calls _run() and catches
-    TmuxError, returning False on any failure.
+    The command string is sent literally so the recipient's
+    ``permissions.allow`` can match it. Returns False on any tmux failure
+    or when the binary is missing, never raising.
     """
     if shutil.which("tmux") is None:
         return False
@@ -120,20 +106,18 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
 
 
 def send_choice_key(*, target_pane_id: str, digit: int) -> None:
-    """Send a single digit key (1, 2, or 3) to a tmux pane. No Enter."""
+    """Send a single digit key in {1, 2, 3} to the pane (no Enter)."""
     if digit not in (1, 2, 3):
         raise TmuxError(f"send_choice_key: digit must be 1, 2, or 3 (got {digit})")
     _run(["tmux", "send-keys", "-t", target_pane_id, str(digit)])
 
 
 def send_freetext_and_submit(*, target_pane_id: str, text: str) -> None:
-    """Send "4" + literal text + Enter to a tmux pane.
+    """Send ``4`` + literal ``text`` + Enter as three separate send-keys calls.
 
-    Three separate send-keys invocations because tmux's -l (literal) flag
-    is per-invocation: one call cannot mix literal characters with the
-    Enter key name. Splitting the sequence guarantees the literal text is
-    delivered as plain characters (no shell-meta interpretation, no key
-    name confusion for "Enter" / "C-c" / "Esc" embedded in the text).
+    tmux's ``-l`` (literal) flag is per-invocation, so a single call cannot
+    mix literal characters with the ``Enter`` key name. Splitting also means
+    embedded ``Enter`` / ``C-c`` / ``Esc`` in ``text`` land as plain chars.
     """
     if "\n" in text or "\r" in text:
         raise TmuxError("send_freetext_and_submit: text may not contain newlines")
@@ -143,14 +127,7 @@ def send_freetext_and_submit(*, target_pane_id: str, text: str) -> None:
 
 
 def capture_pane(*, target_pane_id: str, lines: int = 80) -> str:
-    """Capture the last `lines` lines of the target pane's terminal buffer.
-
-    Invokes `tmux capture-pane -p -t <pane_id> -S -<lines>`. Returns the
-    raw captured string as tmux emitted it (bytes decoded via text=True).
-    Raises `TmuxError` on failure — the caller should surface "can't find
-    pane" errors to the user rather than swallowing them, since the whole
-    point of capture is to inspect a live pane.
-    """
+    """Return the last ``lines`` lines of the pane's terminal buffer."""
     if lines <= 0:
         raise TmuxError(f"capture_pane: lines must be positive, got {lines}")
     return _run(["tmux", "capture-pane", "-p", "-t", target_pane_id, "-S", f"-{lines}"])
