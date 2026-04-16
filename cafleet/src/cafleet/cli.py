@@ -416,11 +416,9 @@ def deregister(ctx, agent_id):
         deregistered = broker.deregister_agent(agent_id)
 
     if not deregistered:
-        click.echo(
-            f"Error: agent {agent_id} not found or already deregistered.",
-            err=True,
+        raise click.ClickException(
+            f"agent {agent_id} not found or already deregistered."
         )
-        ctx.exit(1)
 
     if ctx.obj["json_output"]:
         click.echo(output.format_json({"status": "deregistered"}))
