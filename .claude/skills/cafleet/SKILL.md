@@ -179,7 +179,20 @@ Remove this agent's registration from the broker.
 cafleet --session-id <session-id> deregister --agent-id <my-agent-id>
 ```
 
+> **Root Director cannot be deregistered**. The agent created by `cafleet session create` (the session's `sessions.director_agent_id`) is protected — `cafleet deregister --agent-id <root-director-id>` exits 1 with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` This guard exists because removing the root Director would orphan `sessions.director_agent_id`, break Member → Director push notifications, and leave no supported teardown path. Use `cafleet session delete <session-id>` for session teardown — it deregisters the root Director along with every member and Administrator as part of its cascade.
+
 > **Administrator cannot be deregistered**. Passing the built-in Administrator's `agent_id` to `cafleet deregister` exits with status 1 and prints `Error: Administrator cannot be deregistered` to stderr — the broker raises `AdministratorProtectedError` and the CLI handles it by printing the error and calling `ctx.exit(1)`. The Administrator row stays `active`; there is no override flag. The same guard applies to `member create` — the built-in Administrator cannot be used as a Director (its `agent_id` cannot appear in `placement.director_agent_id`). Every session has exactly one Administrator; deregister regular agents only.
+
+### Session Delete
+
+```bash
+cafleet session delete <session-id>
+# → Deleted session <session-id>. Deregistered N agents.
+```
+
+Soft-deletes a session in a single transaction: stamps `sessions.deleted_at`, deregisters every active agent in the session (root Director + Administrator + any remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. The command is idempotent — re-running against an already-deleted session prints `Deregistered 0 agents.` and exits 0.
+
+After soft-delete, the session is hidden from `cafleet session list` and further `cafleet register --session-id <deleted>` calls fail with `Error: session <id> is deleted`. Surviving member `claude` / `codex` processes are **not** automatically closed — call `cafleet member delete` per member **before** `cafleet session delete` for a clean teardown. Any lingering panes can be closed manually with `tmux kill-pane`.
 
 ### Member Create
 
@@ -353,12 +366,58 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 
 ## Typical Workflow
 
-1. **Create a session** (if one does not already exist):
+1. **Create a session** (if one does not already exist). `cafleet session create` must be run inside a tmux session — it atomically inserts the session row, registers a hardcoded root Director, writes a placement row for the Director pointing at the current tmux pane, back-fills `sessions.director_agent_id`, and seeds the built-in Administrator (per design 0000025) — all in one transaction:
+
    ```bash
    cafleet session create --label "my-project"
-   # → prints the session_id, e.g. 550e8400-e29b-41d4-a716-446655440000
    ```
-   Capture the printed UUID and substitute it for `<session-id>` in every command below.
+
+   Text output: line 1 is the `session_id`, line 2 is the root Director's `agent_id`, then a human-readable block:
+
+   ```
+   550e8400-e29b-41d4-a716-446655440000
+   7ba91234-5678-90ab-cdef-112233445566
+   label:            my-project
+   created_at:       2026-04-16T08:50:00+00:00
+   director_name:    director
+   pane:             main:@3:%0
+   administrator:    3c4d5e6f-7890-1234-5678-90abcdef1234
+   ```
+
+   JSON output (nested, with `administrator_agent_id` at the top level alongside the `director` sub-object):
+
+   ```bash
+   cafleet session create --label "my-project" --json
+   ```
+
+   ```json
+   {
+     "session_id": "550e8400-e29b-41d4-a716-446655440000",
+     "label": "my-project",
+     "created_at": "2026-04-16T08:50:00+00:00",
+     "administrator_agent_id": "3c4d5e6f-7890-1234-5678-90abcdef1234",
+     "director": {
+       "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
+       "name": "director",
+       "description": "Root Director for this session",
+       "registered_at": "2026-04-16T08:50:00+00:00",
+       "placement": {
+         "director_agent_id": null,
+         "tmux_session": "main",
+         "tmux_window_id": "@3",
+         "tmux_pane_id": "%0",
+         "coding_agent": "unknown",
+         "created_at": "2026-04-16T08:50:00+00:00"
+       }
+     }
+   }
+   ```
+
+   `placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is literally `"unknown"` — auto-detection from `$CLAUDECODE` / `$CLAUDE_CODE_ENTRYPOINT` / codex env vars is deferred.
+
+   Outside tmux the command fails fast with `Error: cafleet session create must be run inside a tmux session` and exit 1 — nothing is written to the DB.
+
+   Capture the printed `session_id` and substitute it for `<session-id>` in every command below. The root Director's `agent_id` is also available on line 2 of the text output, or as `director.agent_id` in the JSON response — an Admin or the Director itself may need it. Because the root Director already has a placement row, Member → Director tmux push notifications work immediately.
 
 2. **Register** with the broker:
    ```bash
@@ -434,11 +493,14 @@ cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
 
 The command deregisters the agent first (so a failure preserves the pane for retry), then sends `/exit` to the pane, then rebalances the layout.
 
-After every member is shut down, the Director deregisters itself and stops the `/loop` monitor:
+After every member is shut down, the Director stops the `/loop` monitor and tears down the session:
 
 ```bash
-cafleet --session-id <session-id> deregister --agent-id <director-agent-id>
+cafleet session delete <session-id>
+# → Deleted session <session-id>. Deregistered N agents.
 ```
+
+`session delete` does not require `--session-id` (the `session_id` is passed as a positional argument). It runs the root-Director deregister + Administrator cleanup + any surviving member sweep in one transaction. Plain `cafleet --session-id <session-id> deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` — always use `session delete` for the final teardown step.
 
 ## Message Lifecycle
 

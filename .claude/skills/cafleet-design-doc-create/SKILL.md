@@ -43,12 +43,12 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 
 | Agent Teams primitive | CAFleet equivalent |
 |---|---|
-| `TeamCreate(name="create-{slug}")` | CAFleet session (pre-existing or `cafleet session create`) + `cafleet --session-id <session-id> register` (Director) |
+| `TeamCreate(name="create-{slug}")` | CAFleet session created via `cafleet session create` — it bootstraps the session + root Director + placement + Administrator in one transaction (no separate `cafleet register` call needed for the Director) |
 | `Agent(team_name=..., subagent_type=...)` | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
 | `SendMessage(to="Drafter")` | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from member) | `cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
 | `agent-team-supervision` `/loop` | `Skill(cafleet-monitoring)` `/loop` |
-| `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id>` for each member + `cafleet --session-id <session-id> deregister --agent-id <director-agent-id>` |
+| `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` for each member, then `cafleet session delete <session-id>` (soft-deletes the session, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet deregister` — `session delete` is the only supported teardown. |
 | Auto message delivery | Push notification injects `cafleet --session-id <session-id> poll --agent-id <recipient-agent-id>` into member's tmux pane |
 
 ## Process
@@ -77,26 +77,30 @@ Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt.
 
 Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`.
 
-#### 1a. Establish a CAFleet session
+#### 1a. Establish a CAFleet session and capture the root Director's `agent_id`
 
-If you do not already have a session UUID for this run, create one:
-
-```bash
-cafleet session create --label "design-doc-create-{slug}"
-# → prints <session-id>, e.g. 550e8400-e29b-41d4-a716-446655440000
-```
-
-Capture the printed UUID and substitute it for `<session-id>` in every subsequent command. **Do not store it in a shell variable** — `permissions.allow` matches command strings literally, so every command must carry the literal UUID. Reuse the same UUID across the entire run.
-
-#### 1b. Register the Director
+`cafleet session create` (which must be run inside a tmux session) atomically creates the session and registers a root Director bound to the current tmux pane — there is no separate `cafleet register` step for the Director. Use `--json` so both IDs are machine-parseable:
 
 ```bash
-cafleet --session-id <session-id> --json register \
-  --name "Director" \
-  --description "Design doc create orchestration director"
+cafleet session create --label "design-doc-create-{slug}" --json
+# → {
+#     "session_id": "550e8400-e29b-41d4-a716-446655440000",
+#     "label": "design-doc-create-{slug}",
+#     "created_at": "…",
+#     "administrator_agent_id": "…",
+#     "director": {
+#       "agent_id": "7ba91234-…",
+#       "name": "director",
+#       "description": "Root Director for this session",
+#       "registered_at": "…",
+#       "placement": { "director_agent_id": null, "tmux_session": "…", "tmux_window_id": "…", "tmux_pane_id": "…", "coding_agent": "unknown", "created_at": "…" }
+#     }
+#   }
 ```
 
-Parse `agent_id` from the JSON response and substitute it for `<director-agent-id>` in every subsequent command for the remainder of the session.
+Capture `session_id` and `director.agent_id` from the JSON response. Substitute them for `<session-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal UUIDs.
+
+If you already have a running session (e.g. an outer orchestration), reuse its `session_id` and its root Director's `agent_id` instead of creating a new session. Do **not** attempt to register a second Director with `cafleet register --name Director` — the root Director from `session create` is the team lead; a second registration would just create an unrelated agent with no placement row.
 
 #### 1c. Start the monitoring `/loop`
 
@@ -313,9 +317,10 @@ No round limit — loop continues until approved or aborted.
    cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <reviewer-agent-id>
    ```
 
-4. Deregister the Director:
+4. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
    ```bash
-   cafleet --session-id <session-id> deregister --agent-id <director-agent-id>
+   cafleet session delete <session-id>
+   # → Deleted session <session-id>. Deregistered N agents.
    ```
 
-No `TeamDelete` equivalent is needed — the CAFleet session persists for audit purposes so the message history remains inspectable in the admin WebUI.
+`session delete` soft-deletes the `sessions` row and physically deletes every associated `agent_placements` row while preserving all `tasks` rows for audit — the message history remains inspectable in the admin WebUI (subject to the WebUI's soft-delete filtering behavior).

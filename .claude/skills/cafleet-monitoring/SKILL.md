@@ -15,12 +15,12 @@ Members spawned via `cafleet member create` do not act autonomously. They respon
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet session create` and `cafleet register` directly into the command. Do **not** introduce shell variables for agent or session IDs — `permissions.allow` matches command strings literally, and shell expansion breaks that matching.
+Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet session create` (which returns both the session UUID and the root Director's `agent_id` — see the skill's `Typical Workflow` section for the exact output shape) directly into the command. Do **not** introduce shell variables for agent or session IDs — `permissions.allow` matches command strings literally, and shell expansion breaks that matching.
 
 **Flag placement**: `--session-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --session-id <session-id> poll --agent-id <director-agent-id>`.
 
-- `<session-id>` — the session UUID printed by `cafleet session create` (a single value reused across every command in this Director's run)
-- `<director-agent-id>` — the Director's agent UUID returned by `cafleet ... register`
+- `<session-id>` — the session UUID printed on line 1 of `cafleet session create` text output (or the `session_id` field in `--json` output)
+- `<director-agent-id>` — the root Director's UUID printed on line 2 of `cafleet session create` text output (or `director.agent_id` in `--json` output). `cafleet session create` inside a tmux session now auto-bootstraps the root Director with its placement row — no separate `cafleet register` call is needed to obtain the Director's `agent_id`.
 - `<member-agent-id>` — a target member's agent UUID (from `member create` / `member list`)
 
 ## Monitoring Mandate
@@ -35,7 +35,7 @@ Before spawning **any** member, start a `/loop` monitor with a **1-minute interv
 | 4 | Based on findings, `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` to any stalled or idle member with a specific instruction | Drive the team forward |
 | 5 | When all members have reported completion (via messages or visible in terminal output), report to the user: "All deliverables are ready for review." | Signal completion to user |
 
-**Lifecycle rule:** The loop MUST stay active from the first `member create` until the final shutdown cleanup step. Keep it running through all phases: research, compilation, review, revision, and user approval, and only stop it after deleting members with `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` and then deregistering the Director with `cafleet --session-id <session-id> deregister --agent-id <director-agent-id>`.
+**Lifecycle rule:** The loop MUST stay active from the first `member create` until the final shutdown cleanup step. Keep it running through all phases: research, compilation, review, revision, and user approval, and only stop it after deleting members with `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` and then tearing down the session with `cafleet session delete <session-id>`. Do **not** attempt `cafleet deregister --agent-id <director-agent-id>` on the root Director — it is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`; `session delete` is the only supported teardown path and performs the Director deregister atomically.
 
 ## Spawn Protocol
 

@@ -15,8 +15,26 @@ Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the ru
 | `session_id` | `TEXT` | `PRIMARY KEY` | Opaque string. New sessions receive a UUIDv4; migrated sessions reuse the original `api_key_hash` value (64-char hex). |
 | `label` | `TEXT` | nullable | Optional free-form text for human bookkeeping (e.g. `"PR-42 review"`). |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
+| `deleted_at` | `TEXT` | nullable | `NULL` = active; non-NULL ISO-8601 timestamp = soft-deleted. Written by `broker.delete_session`; never cleared. |
+| `director_agent_id` | `TEXT` | nullable (DB), app-enforced NOT NULL after bootstrap; `REFERENCES agents(agent_id) ON DELETE RESTRICT` | Points at the session's root Director (the agent auto-registered by `cafleet session create`). DB-nullable so the 4-step bootstrap can INSERT `sessions` before the Director's `agents` row exists; post-bootstrap every non-deleted session has a non-NULL value. |
 
-No `status` column. No soft-revoke. Deletion is the only removal path and is rejected while agents still reference the session (FK `ondelete="RESTRICT"`).
+Session deletion is a **soft-delete**: `broker.delete_session` sets `deleted_at=now`, then deregisters every active agent in the session (including the root Director) and physically deletes their `agent_placements` rows in the same transaction. Tasks are preserved. Re-running `session delete` on an already-soft-deleted session is a no-op that reports `Deregistered 0 agents.` because the initial `UPDATE` guard `WHERE deleted_at IS NULL` short-circuits the cascade.
+
+`broker.get_session` always returns the row (regardless of `deleted_at`) and exposes the field so callers can decide; `broker.list_sessions` filters `WHERE deleted_at IS NULL`, so `cafleet session list` hides soft-deleted sessions (no `--all` flag in v1). `broker.register_agent` inspects `get_session(...)["deleted_at"]` and rejects a soft-deleted session with `Error: session X is deleted` (distinct from the `Session 'X' not found.` path).
+
+#### Root Director bootstrap
+
+`cafleet session create` executes a single transaction that performs five ordered operations — all-or-nothing:
+
+1. `INSERT INTO sessions (...)` with `deleted_at=NULL`, `director_agent_id=NULL`.
+2. `INSERT INTO agents (...)` for the hardcoded root Director (`name='director'`, `description='Root Director for this session'`, `status='active'`).
+3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` (the root has no parent Director) and `coding_agent='unknown'` (auto-detection is deferred via a `FIXME(claude)` comment).
+4. `UPDATE sessions SET director_agent_id = <director's agent_id> WHERE session_id = <new>`.
+5. `INSERT INTO agents (...)` for the built-in `Administrator` (per design 0000025) with `agent_card_json.cafleet.kind == 'builtin-administrator'`. The Administrator never gets an `agent_placements` row.
+
+The `tmux` context (`session`, `window_id`, `pane_id`) is read **before** the transaction opens, so any tmux failure surfaces as `Error: cafleet session create must be run inside a tmux session` and exit 1 without touching the DB. Rollback covers all five operations — a failure in any step leaves the DB unchanged.
+
+`broker.deregister_agent` refuses to deregister an agent whose `agent_id` matches any `sessions.director_agent_id` and raises `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` (exit 1). `session delete` remains the only supported teardown path for the root Director.
 
 ### `agents`
 
@@ -58,7 +76,7 @@ The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned 
 
 **Creation paths**:
 
-- `broker.create_session(label)` inserts the Administrator row in the same transaction as the `sessions` row; `registered_at` matches `sessions.created_at` exactly. The result dict exposes `administrator_agent_id` for the caller.
+- `broker.create_session(label, director_context)` inserts the Administrator row as the final operation of the 5-step root-Director bootstrap transaction (see "Root Director bootstrap" under the `sessions` table above); `registered_at` matches `sessions.created_at` exactly. The result dict exposes `administrator_agent_id` alongside the `director` sub-object for the caller.
 - Alembic revision `0006_seed_administrator_agent.py` backfills one Administrator into each pre-existing session. The migration generates `agent_id = str(uuid.uuid4())` in Python (matching the broker's idiom — no SQL-side `gen_random_uuid()`), probes for an existing Administrator via `json_extract(agent_card_json, '$.cafleet.kind') = 'builtin-administrator'`, and is idempotent by construction (a second `upgrade` finds the existing row and skips the INSERT). Downgrade is provided for empty sessions only and is forward-only in practice — `tasks.context_id` uses `ON DELETE RESTRICT`, so downgrading a session that has tasks addressed to or from the Administrator raises `IntegrityError`. (`agent_placements.agent_id` uses `ON DELETE CASCADE`, but Administrators never receive a placement anyway.)
 
 **Invariant**: Every session has exactly one active `Administrator` agent. Both `broker.list_session_agents` and `broker.get_agent` surface a derived `kind` field (`"builtin-administrator"` | `"user"`) so the WebUI can locate the Administrator without matching on the name. `list_session_agents` derives the discriminator in SQL via `json_extract(agent_card_json, '$.cafleet.kind')` and never fetches the full card blob; `get_agent` already loads the full ORM row and computes the discriminator via `_is_administrator_card`.
@@ -101,7 +119,7 @@ Indexes:
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `agent_id` | `TEXT` | `PRIMARY KEY`, `REFERENCES agents(agent_id) ON DELETE CASCADE` | The member agent. CASCADE ensures hard-delete of an agent (if any future path adds one) also removes the placement. |
-| `director_agent_id` | `TEXT` | `NOT NULL`, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The Director that spawned this member. RESTRICT prevents hard-deleting a Director with live placements. |
+| `director_agent_id` | `TEXT` | nullable, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The Director that spawned this member. RESTRICT prevents hard-deleting a Director with live placements. **NULL** for the session's root Director (it has no parent), set by `broker.create_session` at bootstrap time. Member placements always have a non-NULL value. |
 | `tmux_session` | `TEXT` | `NOT NULL` | e.g. `'main'`, from `tmux display-message '#{session_name}'`. |
 | `tmux_window_id` | `TEXT` | `NOT NULL` | e.g. `'@3'`, from `#{window_id}`. |
 | `tmux_pane_id` | `TEXT` | nullable | e.g. `'%7'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set via `PATCH /api/v1/agents/{id}/placement` after `tmux split-window` succeeds. |
@@ -122,7 +140,7 @@ If a user kills a pane manually without going through `cafleet member delete`, t
 
 SQLite ignores foreign key declarations unless `PRAGMA foreign_keys=ON` is issued on every connection. The registry installs a SQLAlchemy engine `connect` event listener that runs the PRAGMA on every new DBAPI connection. A regression test verifies the PRAGMA is active on a fresh connection.
 
-The two foreign keys (`agents.session_id → sessions.session_id`, `tasks.context_id → agents.agent_id`) both use `ON DELETE RESTRICT`. There is no path in v1 that physically deletes an agent — deregistration is a soft-status flip — so RESTRICT is the safest default. Session deletion is rejected while agents still reference the session.
+The two foreign keys (`agents.session_id → sessions.session_id`, `tasks.context_id → agents.agent_id`) both use `ON DELETE RESTRICT`. There is no path in v1 that physically deletes an agent — deregistration is a soft-status flip — so RESTRICT is the safest default. The added `sessions.director_agent_id → agents.agent_id` FK also uses `ON DELETE RESTRICT` for the same reason: it should never point at a row that can vanish. Session deletion uses a soft-delete (`deleted_at`) — it never physically removes rows, so the RESTRICTs are never triggered by the delete path.
 
 ## Operation mapping
 
@@ -165,11 +183,15 @@ Stores receive an `async_sessionmaker[AsyncSession]` at construction time, **not
 
 ## Session Lifecycle
 
-Sessions are created via `cafleet session create` (direct SQLite write, no HTTP). The `sessions` row is the source of truth for session existence. Agents join a session by registering with the `session_id`.
+Sessions are created via `cafleet session create` (direct SQLite write, no HTTP; must be run inside a tmux session). `create_session` performs the 5-step transactional bootstrap described above — the session row, the root Director agent + placement, the `director_agent_id` back-reference, and the built-in Administrator are written atomically.
 
-When all agents in a session deregister, the session remains valid — new agents can still register using the session_id.
+When member agents in a session deregister, the session remains valid — new members can still be spawned.
 
-Deleting a session (via `cafleet session delete <id>`) is rejected while any agents (active or deregistered) still reference it (FK `RESTRICT`). There is no cascade delete and no soft-delete for sessions.
+Deleting a session (via `cafleet session delete <id>`) is a **soft-delete**. `broker.delete_session` runs a single transaction that stamps `sessions.deleted_at = now`, deregisters every `status='active'` agent in the session (root Director included), and physically deletes every associated `agent_placements` row. `tasks` rows are preserved — the message history remains queryable. Re-running on an already-soft-deleted session is a no-op that reports `Deregistered 0 agents.` because the initial `UPDATE sessions SET deleted_at = now WHERE session_id = X AND deleted_at IS NULL` short-circuits the cascade. There is no `--force` flag, no un-delete path, and no cascade into `tasks`.
+
+Soft-deleted sessions are hidden from `cafleet session list` (`broker.list_sessions` filters `WHERE deleted_at IS NULL`) and new registrations are rejected by `broker.register_agent` with `Error: session X is deleted`. `broker.get_session` always returns the row regardless of `deleted_at` and exposes the field so callers can distinguish "not found" vs. "soft-deleted".
+
+`broker.deregister_agent` refuses to deregister the root Director (detected by a match on `sessions.director_agent_id`). Use `session delete` for teardown.
 
 ## Task Visibility Rules
 

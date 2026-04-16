@@ -10,6 +10,8 @@ CAFleet enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 
 - **Agent Registry** -- Register, discover, and deregister agents via CLI
 - **Session Isolation** -- A `session_id` defines a session boundary; cross-session agents are fully invisible to each other
+- **Auto-bootstrap root Director on session create** -- `cafleet session create` runs a single transaction that inserts the session row, registers a hardcoded root Director (`name="director"`) with an `agent_placements` row pointing at the current tmux pane, back-fills `sessions.director_agent_id`, and seeds the built-in Administrator. Must be run inside a tmux session — the CLI fails fast with `Error: cafleet session create must be run inside a tmux session` (exit 1) otherwise. The root Director's placement has `director_agent_id=NULL` to indicate "no parent"; this is what allows Member → Director tmux push notifications to work out of the box. `cafleet deregister` refuses the root Director (use `cafleet session delete` instead)
+- **Soft-delete sessions** -- `cafleet session delete <id>` is a single-transaction logical delete: stamps `sessions.deleted_at`, sweeps every active agent in the session (root Director included) to `status='deregistered'`, and physically deletes their `agent_placements` rows. Tasks are preserved (audit trail). Idempotent — re-running against an already-deleted session prints `Deregistered 0 agents.` and exits 0. Soft-deleted sessions are hidden from `cafleet session list` and rejected by `cafleet register` with `Error: session <id> is deleted`. Surviving member tmux panes are intentionally orphaned — call `cafleet member delete` per member first for a clean teardown
 - **Built-in Administrator agent** -- `cafleet session create` auto-seeds exactly one built-in `Administrator` agent per session (marked via `agent_card_json.cafleet.kind == "builtin-administrator"`); the Admin WebUI always sends from this identity. The broker rejects deregister and placement operations targeting an Administrator (`AdministratorProtectedError` currently surfaces as `Error: ...` + exit 1 in the CLI; WebUI HTTP 409 mapping is reserved for a future deregister endpoint/handler) and filters Administrators out of broadcast recipient sets so they are write-only identities. Alembic revision `0006` backfills one Administrator into each pre-existing session on `cafleet db init`
 - **Unicast Messaging** -- Send messages to a specific agent by ID (same-session only)
 - **Broadcast Messaging** -- Send messages to all agents in the same session
@@ -41,7 +43,7 @@ Key design decisions:
 - The `session_id` is the session boundary. Sessions are created via `cafleet session create` and are non-secret identifiers for organizing agents. All agents registered with the same session form one session.
 - The `contextId` field is set to the recipient's agent ID on every delivery task, enabling inbox discovery via `broker.poll_tasks(agent_id=myAgentId)`.
 - Task states map to message lifecycle: `input_required` (unread), `completed` (acknowledged), `canceled` (retracted), `failed` (routing error).
-- Sessions are created via `cafleet session create`. Deleting a session is rejected while agents still reference it (FK `RESTRICT`). An empty session (no agents) remains valid indefinitely.
+- Sessions are created via `cafleet session create`, which must be run inside a tmux session and atomically bootstraps the session + root Director + placement + Administrator in one transaction. Deleting a session via `cafleet session delete` is a soft-delete: the row is stamped with `deleted_at`, all agents are deregistered, and their placements are physically removed — tasks are preserved.
 - The WebUI requires no login. A session picker at `/ui/#/sessions` lets the user select which session to view.
 - **Storage layer**: All data is persisted in a single SQLite file (`~/.local/share/cafleet/registry.db` by default). Indexed fields are columns; task payloads are stored as JSON blobs. `PRAGMA busy_timeout=5000` handles concurrent access. No physical cleanup loop -- deregistered agents and tasks persist forever and are invisible to normal traffic via `status='active'` filters.
 - **tmux push notifications**: After persisting a message, the broker looks up the recipient's `agent_placements` row and, if a tmux pane is available, injects `cafleet --session-id <session-id> poll --agent-id <recipient-agent-id>` via `tmux send-keys`. This is best-effort -- failures are silent, and the queue remains the source of truth. Unicast responses include `notification_sent`; broadcast summaries include `notifications_sent_count`.
@@ -66,23 +68,71 @@ This command is idempotent -- running it on a database that is already at head i
 
 ### Create a Session
 
-Before registering any agents, create at least one session:
+Before spawning any members, create a session. The command **must be run inside a tmux session** — it reads the caller's tmux context (`session`, `window_id`, `pane_id`) and bakes it into the root Director's placement row so the Director can receive Member → Director tmux push notifications.
 
 ```bash
 cafleet session create --label "my-project"
-# → prints: 550e8400-e29b-41d4-a716-446655440000
 ```
 
-Capture the printed UUID and pass it as `--session-id <session-id>` (a global flag, placed before the subcommand) on every subsequent command. CLI commands access SQLite directly -- no server needed. Start `cafleet server` (or `mise //cafleet:dev` from a repo clone) only if you want the admin WebUI.
+Non-JSON output (line 1 is the `session_id`, line 2 is the root Director's `agent_id`):
 
-Each new session is auto-seeded with a single built-in `Administrator` agent in the same transaction. The Admin WebUI always sends from this identity; the broker rejects deregister and placement operations targeting it. `cafleet session create --json` additionally returns `administrator_agent_id` for callers that need the UUID:
+```
+550e8400-e29b-41d4-a716-446655440000
+7ba91234-5678-90ab-cdef-112233445566
+label:            my-project
+created_at:       2026-04-16T08:50:00+00:00
+director_name:    director
+pane:             main:@3:%0
+administrator:    3c4d5e6f-7890-1234-5678-90abcdef1234
+```
+
+JSON output:
 
 ```bash
 cafleet session create --label "my-project" --json
-# → {"session_id": "...", "label": "my-project", "created_at": "...", "administrator_agent_id": "..."}
 ```
 
-Pre-existing sessions are backfilled on `cafleet db init` via Alembic revision `0006`.
+```json
+{
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "label": "my-project",
+  "created_at": "2026-04-16T08:50:00+00:00",
+  "administrator_agent_id": "3c4d5e6f-7890-1234-5678-90abcdef1234",
+  "director": {
+    "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
+    "name": "director",
+    "description": "Root Director for this session",
+    "registered_at": "2026-04-16T08:50:00+00:00",
+    "placement": {
+      "director_agent_id": null,
+      "tmux_session": "main",
+      "tmux_window_id": "@3",
+      "tmux_pane_id": "%0",
+      "coding_agent": "unknown",
+      "created_at": "2026-04-16T08:50:00+00:00"
+    }
+  }
+}
+```
+
+Outside tmux the command fails fast with `Error: cafleet session create must be run inside a tmux session` and exit 1 — no DB rows are written. All five writes (session, Director agent, Director placement, back-fill `sessions.director_agent_id`, Administrator agent) run in a single `with session.begin():` block, so any failure rolls back the whole thing.
+
+Capture the printed `session_id` and pass it as `--session-id <session-id>` (a global flag, placed before the subcommand) on every subsequent command. CLI commands access SQLite directly — no server needed. Start `cafleet server` (or `mise //cafleet:dev` from a repo clone) only if you want the admin WebUI.
+
+The root Director is the session's built-in team lead: `cafleet deregister --agent-id <director_agent_id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`. Use `cafleet session delete` when you want to tear down the session.
+
+The built-in `Administrator` agent is seeded in the same transaction. The Admin WebUI always sends from this identity; the broker rejects deregister and placement operations targeting it. Pre-existing sessions are backfilled on `cafleet db init` via Alembic revision `0006`.
+
+### Delete a Session
+
+```bash
+cafleet session delete 550e8400-e29b-41d4-a716-446655440000
+# → Deleted session 550e8400-e29b-41d4-a716-446655440000. Deregistered 3 agents.
+```
+
+`session delete` is a single-transaction logical delete that stamps `deleted_at`, deregisters every active agent (root Director included), and physically deletes every associated `agent_placements` row. Tasks are preserved (audit trail). The command is idempotent — re-running against an already-deleted session prints `Deregistered 0 agents.` and exits 0.
+
+Member tmux panes that were spawned via `cafleet member create` are **not** automatically closed by `session delete`. For a clean teardown, call `cafleet member delete` on each member first (which sends `/exit`), then call `session delete`. Surviving `claude` / `codex` processes can be terminated manually with `tmux kill-pane`.
 
 > **Why a literal flag, not an env var?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. Passing `--session-id <literal-uuid>` lets a single allow-list pattern match every subcommand for that session; shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — do not introduce shell variables to hold them.
 
@@ -154,10 +204,10 @@ The `--agent-id` option is a per-subcommand option required by most agent comman
 | Command | Description |
 |---|---|
 | `cafleet db init` | Apply Alembic migrations to bring the schema to head (idempotent) |
-| `cafleet session create [--label TEXT]` | Create a new session; prints the session_id |
-| `cafleet session list` | List all sessions with agent counts |
+| `cafleet session create [--label TEXT] [--json]` | Create a new session + bootstrap the root Director + Administrator in one transaction (must run inside tmux); prints the session_id, the Director's agent_id, and the Administrator's agent_id |
+| `cafleet session list` | List non-soft-deleted sessions with agent counts |
 | `cafleet session show <id>` | Show details of a single session |
-| `cafleet session delete <id>` | Delete a session (fails if agents still reference it) |
+| `cafleet session delete <id>` | Soft-delete a session (stamps `deleted_at`, deregisters all agents, removes placements; tasks preserved; idempotent) |
 
 `cafleet db init` must be run once before the server starts. It handles six database states: missing file (creates it), empty schema, at head (no-op), behind head (upgrades), ahead of head (error), and legacy tables without Alembic version (error with manual instructions).
 

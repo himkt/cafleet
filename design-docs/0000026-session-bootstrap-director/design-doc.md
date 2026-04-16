@@ -1,8 +1,8 @@
 # Auto-bootstrap root Director on session create
 
 **Status**: Approved
-**Progress**: 0/35 tasks complete
-**Last Updated**: 2026-04-15
+**Progress**: 6/35 tasks complete
+**Last Updated**: 2026-04-16
 
 ## Overview
 
@@ -35,7 +35,7 @@ See [design-doc 0000020](../0000020-tmux-push-notification/design-doc.md) for th
 
 ## Specification
 
-### Schema changes (migration 0006)
+### Schema changes (migration 0007)
 
 | Table | Change | Nullable | Default | Notes |
 |---|---|---|---|---|
@@ -87,6 +87,7 @@ Return shape (matches Q6 JSON spec exactly):
   "session_id": "…",
   "label": "…",
   "created_at": "…",
+  "administrator_agent_id": "…",
   "director": {
     "agent_id": "…",
     "name": "director",
@@ -106,6 +107,8 @@ Return shape (matches Q6 JSON spec exactly):
 
 Note: `agent_placements.coding_agent` has `server_default="claude"`. The INSERT must explicitly set `coding_agent="unknown"` to override that default for the root Director.
 
+Note: `administrator_agent_id` is preserved from design 0000025 (built-in Administrator seeded per session). The Administrator seeding step runs inside the same transaction after the Director bootstrap — the 4-step transactional contract becomes a 5-step one: (1) INSERT sessions, (2) INSERT Director agent, (3) INSERT Director placement, (4) UPDATE sessions.director_agent_id, (5) INSERT Administrator agent with `agent_card_json.cafleet.kind == "builtin-administrator"`. Rollback covers all five steps.
+
 ### CLI surface — `cafleet session create`
 
 ```
@@ -124,13 +127,14 @@ Text (non-JSON) output:
 ```
 <session_id>
 <director_agent_id>
-label:           <label or empty>
-created_at:      <iso8601>
-director_name:   director
-pane:            <tmux_session>:<tmux_window_id>:<tmux_pane_id>
+label:            <label or empty>
+created_at:       <iso8601>
+director_name:    director
+pane:             <tmux_session>:<tmux_window_id>:<tmux_pane_id>
+administrator:    <administrator_agent_id>
 ```
 
-Line 1 is `session_id` (preserves backward-compatible script usage that parses only the first line). Line 2 is the Director's `agent_id`.
+Line 1 is `session_id` (preserves backward-compatible script usage that parses only the first line). Line 2 is the Director's `agent_id`. The `administrator:` line exposes the built-in Administrator's `agent_id` (seeded per 0000025) so callers can address the Administrator without a second `cafleet agents` call.
 
 ### CLI surface — `cafleet session delete`
 
@@ -239,7 +243,7 @@ After this change, the broker's existing `_try_notify_recipient` ([broker.py:35-
 
 - Auto-detection of `coding_agent` at session create (deferred to a future change via `FIXME(claude)` comment)
 - Non-tmux session creation (CI / WebUI)
-- Backward compatibility with the developer-local `registry.db`. Migration 0006 is **structural only**: it adds columns but does not backfill `sessions.director_agent_id` for pre-existing rows. Any pre-existing sessions row would violate the app-level NOT NULL invariant on `director_agent_id`. Developers MUST remove the local registry database (`rm ~/.local/share/cafleet/registry.db`, or whatever path `CAFLEET_DATABASE_URL` points at) before running `cafleet db init` against the new migration. This is a manual step, not automated.
+- Backward compatibility with the developer-local `registry.db`. Migration 0007 is **structural only**: it adds columns but does not backfill `sessions.director_agent_id` for pre-existing rows. Any pre-existing sessions row would violate the app-level NOT NULL invariant on `director_agent_id`. Developers MUST remove the local registry database (`rm ~/.local/share/cafleet/registry.db`, or whatever path `CAFLEET_DATABASE_URL` points at) before running `cafleet db init` against the new migration. This is a manual step, not automated.
 - `--force` flag on `session delete`
 - Resurrection / un-deletion of soft-deleted sessions
 - Multiple Directors per session or moving the root Director's pane after creation
@@ -254,16 +258,16 @@ After this change, the broker's existing `_try_notify_recipient` ([broker.py:35-
 
 ### Step 1: Documentation (must complete before code)
 
-- [ ] Update `ARCHITECTURE.md` to describe the 4-step transactional session bootstrap and the logical-delete session model <!-- completed: -->
-- [ ] Update `README.md` `cafleet session create` / `cafleet session delete` usage and output examples to reflect the new JSON/text shapes <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md` with the new CLI surface (no `--name` / `--description`, Director hardcoded) <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md` with `sessions.deleted_at`, `sessions.director_agent_id`, and the relaxed `agent_placements.director_agent_id` nullability <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet/SKILL.md` `session create` example to show the new nested JSON output (with `director` + `placement` sub-objects) and document the soft-delete semantics on `session delete` <!-- completed: -->
-- [ ] Scan `.claude/skills/cafleet-monitoring/SKILL.md`, `.claude/skills/cafleet-design-doc-create/SKILL.md`, `.claude/skills/cafleet-design-doc-execute/SKILL.md`, and their `roles/*.md` for any `session create` / `session delete` examples and update them to match the new output <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` to describe the 4-step transactional session bootstrap and the logical-delete session model <!-- completed: 2026-04-16T09:10 -->
+- [x] Update `README.md` `cafleet session create` / `cafleet session delete` usage and output examples to reflect the new JSON/text shapes <!-- completed: 2026-04-16T09:15 -->
+- [x] Update `docs/spec/cli-options.md` with the new CLI surface (no `--name` / `--description`, Director hardcoded) <!-- completed: 2026-04-16T09:20 -->
+- [x] Update `docs/spec/data-model.md` with `sessions.deleted_at`, `sessions.director_agent_id`, and the relaxed `agent_placements.director_agent_id` nullability <!-- completed: 2026-04-16T09:05 -->
+- [x] Update `.claude/skills/cafleet/SKILL.md` `session create` example to show the new nested JSON output (with `director` + `placement` sub-objects) and document the soft-delete semantics on `session delete` <!-- completed: 2026-04-16T09:25 -->
+- [x] Scan `.claude/skills/cafleet-monitoring/SKILL.md`, `.claude/skills/cafleet-design-doc-create/SKILL.md`, `.claude/skills/cafleet-design-doc-execute/SKILL.md`, and their `roles/*.md` for any `session create` / `session delete` examples and update them to match the new output <!-- completed: 2026-04-16T09:35 -->
 
-### Step 2: Migration 0006
+### Step 2: Migration 0007
 
-- [ ] Create `cafleet/src/cafleet/alembic/versions/0006_session_bootstrap_director.py` with `revision="0006"`, `down_revision="0005"` <!-- completed: -->
+- [ ] Create `cafleet/src/cafleet/alembic/versions/0007_session_bootstrap_director.py` with `revision="0007"`, `down_revision="0006"` <!-- completed: -->
 - [ ] In `upgrade()` use `op.batch_alter_table("sessions")` to add `deleted_at` (String, nullable) and `director_agent_id` (String, nullable, FK to `agents.agent_id`, `ondelete="RESTRICT"`) <!-- completed: -->
 - [ ] In `upgrade()` use `op.batch_alter_table("agent_placements")` to set `director_agent_id` nullable=True <!-- completed: -->
 - [ ] Implement `downgrade()` reversing the two `batch_alter_table` calls <!-- completed: -->
@@ -276,7 +280,7 @@ After this change, the broker's existing `_try_notify_recipient` ([broker.py:35-
 ### Step 4: Broker bootstrap logic (`cafleet/src/cafleet/broker.py`)
 
 - [ ] Add module-level constants `_DIRECTOR_NAME = "director"`, `_DIRECTOR_DESCRIPTION = "Root Director for this session"`, `_ROOT_DIRECTOR_CODING_AGENT = "unknown"` with the FIXME(claude) comment next to the coding-agent constant <!-- completed: -->
-- [ ] Rewrite `create_session(label, director_context)` to perform the 4-step transactional bootstrap and return the nested `{session, director, placement}` dict shape <!-- completed: -->
+- [ ] Rewrite `create_session(label, director_context)` to perform the 5-step transactional bootstrap (INSERT sessions, INSERT Director agent, INSERT Director placement, UPDATE sessions.director_agent_id, INSERT built-in Administrator agent per 0000025) and return the nested `{session_id, label, created_at, administrator_agent_id, director: {…, placement: {…}}}` dict shape <!-- completed: -->
 - [ ] Extend `get_session` to include `deleted_at` in its returned dict (do NOT add a `WHERE deleted_at IS NULL` filter — callers must inspect the field themselves) <!-- completed: -->
 - [ ] Update `list_sessions` to filter `WHERE sessions.deleted_at IS NULL` <!-- completed: -->
 - [ ] Update `register_agent` to inspect `get_session(...)["deleted_at"]` and reject soft-deleted sessions with `session X is deleted` while keeping the `Session 'X' not found.` path intact <!-- completed: -->
@@ -291,11 +295,11 @@ After this change, the broker's existing `_try_notify_recipient` ([broker.py:35-
 
 ### Step 6: Output helpers (`cafleet/src/cafleet/output.py`)
 
-- [ ] Add / update formatter(s) for the new `session create` text shape (session_id, director agent_id, label, created_at, director_name, pane) <!-- completed: -->
+- [ ] Add / update formatter(s) for the new `session create` text shape (session_id, director agent_id, label, created_at, director_name, pane, administrator) <!-- completed: -->
 
 ### Step 7: Tests
 
-- [ ] New file `cafleet/tests/test_session_bootstrap.py`: mock `tmux.director_context()` and verify a successful `broker.create_session` writes one session row, one agent row, one placement row, and updates `sessions.director_agent_id` — all in one transaction <!-- completed: -->
+- [ ] New file `cafleet/tests/test_session_bootstrap.py`: mock `tmux.director_context()` and verify a successful `broker.create_session` writes one session row, two agent rows (Director + built-in Administrator), one Director placement row, and updates `sessions.director_agent_id` — all in one transaction <!-- completed: -->
 - [ ] In the same file: verify partial-failure rollback by injecting an exception after step 2 (INSERT agents) and confirming no sessions/agents/placement rows persist <!-- completed: -->
 - [ ] In the same file: verify `broker.delete_session` marks `deleted_at`, deregisters all active agents (including the root Director), deletes their placements, preserves tasks, and is idempotent on re-run <!-- completed: -->
 - [ ] In the same file: verify `broker.register_agent` rejects a soft-deleted session with the exact `session X is deleted` error string <!-- completed: -->
@@ -303,7 +307,7 @@ After this change, the broker's existing `_try_notify_recipient` ([broker.py:35-
 - [ ] In the same file: verify `broker.deregister_agent` on the root-Director `agent_id` raises the `cannot deregister the root Director` error and leaves all rows unchanged <!-- completed: -->
 - [ ] In the same file: Member → Director notification path — bootstrap a session, register a member with a placement (pane_id set), call `broker.send_message(session_id, member_agent_id, to=root_director_agent_id, text="hi")` with `tmux.send_poll_trigger` patched to a `Mock(return_value=True)`, assert the response's `notification_sent` is `True` and `send_poll_trigger` was called with the root Director's `tmux_pane_id` <!-- completed: -->
 - [ ] Extend `cafleet/tests/test_cli.py` (or `test_cli_session.py` if already present): `session create` text output — line 1 == `session_id`, line 2 == director `agent_id`, subsequent lines contain `label:`, `director_name: director`, `pane:` <!-- completed: -->
-- [ ] `session create --json` produces the nested `{session_id, label, created_at, director: {agent_id, name, description, registered_at, placement: {...}}}` shape with `placement.director_agent_id` null and `placement.coding_agent` == `"unknown"` <!-- completed: -->
+- [ ] `session create --json` produces the nested `{session_id, label, created_at, administrator_agent_id, director: {agent_id, name, description, registered_at, placement: {...}}}` shape with `placement.director_agent_id` null, `placement.coding_agent` == `"unknown"`, and `administrator_agent_id` non-null and matching the seeded Administrator's `agent_id` <!-- completed: -->
 - [ ] `session list` hides rows whose `deleted_at IS NOT NULL` by default (no `--all` flag is accepted) <!-- completed: -->
 - [ ] `session create` outside tmux (unset `TMUX`) exits 1 with `Error: cafleet session create must be run inside a tmux session` and writes nothing to the DB <!-- completed: -->
 - [ ] `session delete` on an unknown `session_id` exits 1 with `Error: session 'X' not found.` <!-- completed: -->
@@ -317,3 +321,4 @@ After this change, the broker's existing `_try_notify_recipient` ([broker.py:35-
 | 2026-04-15 | Initial draft |
 | 2026-04-15 | Reviewer round 1: fix register_agent pseudocode (I1), add root-Director deregister rejection (G3), specify member-pane orphaning (G4), clarify tmux error translation (G5), clarify developer-local DB wipe (U1), clarify `N` in session-delete output includes root Director (U2), confirm `coding_agent="unknown"` has no validator on the bootstrap path (U3), add tests for Member→Director notification (G1), `list_sessions` filtering, `session delete` not-found, and split the CLI test bucket (G2, IM4). Added idempotency Success Criteria (IM1). Note to script authors: the `session create` text output now contains content on line 2+ (director `agent_id`, label, created_at, director name, pane); scripts that parse only line 1 remain compatible. |
 | 2026-04-15 | Approved by user. Status: Approved. |
+| 2026-04-16 | Director: bump migration slot from 0006 to 0007 (0006 is taken by 0006_seed_administrator_agent from design 0000025). Preserve administrator_agent_id from 0000025 additively in both JSON and text output of session create. create_session is now a 5-step transactional bootstrap (adds INSERT built-in Administrator). Step 7 tests updated accordingly. |

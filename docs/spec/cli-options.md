@@ -87,22 +87,58 @@ The `cafleet session` subgroup manages sessions. These commands write directly t
 | `--label` | no | Free-form text label for the session |
 | `--json` | no | Output as JSON |
 
-Creates a new session with a UUIDv4 identifier and auto-seeds the session's built-in `Administrator` agent in the same transaction. The Administrator is an ordinary `agents` row marked via `agent_card_json.cafleet.kind == "builtin-administrator"`; every session has exactly one.
+There are no `--name` / `--description` flags. The root Director's name and description are hardcoded (`name="director"`, `description="Root Director for this session"`).
 
-**Non-JSON output** (unchanged): prints the `session_id` only.
+Creates a new session with a UUIDv4 identifier. **Must be run inside a tmux session** — outside tmux the command exits 1 with `Error: cafleet session create must be run inside a tmux session` and writes nothing to the DB. The command atomically performs five writes in a single transaction:
 
-**`--json` output**: includes an additional `administrator_agent_id` field holding the UUID of the auto-seeded Administrator row. Example:
+1. `INSERT INTO sessions (...)` with `deleted_at=NULL`, `director_agent_id=NULL`.
+2. `INSERT INTO agents (...)` for the hardcoded root Director.
+3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` and `coding_agent="unknown"`.
+4. `UPDATE sessions SET director_agent_id = <director_agent_id>`.
+5. `INSERT INTO agents (...)` for the built-in `Administrator` (see [data-model.md](./data-model.md) for the Administrator's distinguishing `agent_card_json.cafleet.kind` flag).
+
+Any exception inside the transaction rolls back all five writes.
+
+**Non-JSON output** — line 1 is `session_id` (preserves backward-compatible scripts that parse only the first line), line 2 is the root Director's `agent_id`:
+
+```
+<session_id>
+<director_agent_id>
+label:            <label or empty>
+created_at:       <iso8601>
+director_name:    director
+pane:             <tmux_session>:<tmux_window_id>:<tmux_pane_id>
+administrator:    <administrator_agent_id>
+```
+
+**`--json` output** — nested shape with `administrator_agent_id` at the top level alongside `director`:
 
 ```json
 {
   "session_id": "550e8400-e29b-41d4-a716-446655440000",
   "label": "my-project",
   "created_at": "2026-04-15T10:00:00+00:00",
-  "administrator_agent_id": "7ba91234-5678-90ab-cdef-112233445566"
+  "administrator_agent_id": "3c4d5e6f-7890-1234-5678-90abcdef1234",
+  "director": {
+    "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
+    "name": "director",
+    "description": "Root Director for this session",
+    "registered_at": "2026-04-15T10:00:00+00:00",
+    "placement": {
+      "director_agent_id": null,
+      "tmux_session": "main",
+      "tmux_window_id": "@3",
+      "tmux_pane_id": "%0",
+      "coding_agent": "unknown",
+      "created_at": "2026-04-15T10:00:00+00:00"
+    }
+  }
 }
 ```
 
-Attempting `cafleet --session-id <session_id> deregister --agent-id <administrator_id>` exits non-zero (code 1) with `Error: Administrator cannot be deregistered` on stderr: the broker raises `AdministratorProtectedError`, which the CLI catches and turns into a plain error message + `ctx.exit(1)`.
+`placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is the string `"unknown"` — auto-detection of the actual coding agent binary at bootstrap time is deferred (tracked via a `FIXME(claude)` comment in `broker.py`).
+
+Attempting `cafleet --session-id <session_id> deregister --agent-id <director_agent_id>` is rejected by the broker with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` and exits 1. Attempting `cafleet --session-id <session_id> deregister --agent-id <administrator_agent_id>` is rejected with `Error: Administrator cannot be deregistered` (exit 1) via the `AdministratorProtectedError` path from design 0000025.
 
 ### `session list`
 
@@ -110,7 +146,7 @@ Attempting `cafleet --session-id <session_id> deregister --agent-id <administrat
 |---|---|---|
 | `--json` | no | Output as JSON |
 
-Lists all sessions with their label, created_at, and active agent count.
+Lists all **non-soft-deleted** sessions with their label, created_at, and active agent count. There is no `--all` flag in this revision — soft-deleted sessions (`sessions.deleted_at IS NOT NULL`) are hidden.
 
 ### `session show`
 
@@ -127,7 +163,23 @@ Shows details of a single session. Exits non-zero if the session does not exist.
 |---|---|---|
 | `session_id` | yes | The session to delete |
 
-Deletes a session. Fails with a friendly error if agents still reference the session (FK RESTRICT violation).
+Soft-deletes a session. All three operations run in one transaction:
+
+1. `UPDATE sessions SET deleted_at = now WHERE session_id = X AND deleted_at IS NULL`.
+2. `UPDATE agents SET status = 'deregistered', deregistered_at = now WHERE session_id = X AND status = 'active'` (sweeps every active agent in the session — root Director included).
+3. `DELETE FROM agent_placements WHERE agent_id IN (SELECT agent_id FROM agents WHERE session_id = X)`.
+
+Tasks are untouched — the message history remains queryable. Output:
+
+```
+Deleted session <session_id>. Deregistered N agents.
+```
+
+`N` counts every agent that was active at the moment of deletion (root Director included). On re-run against an already-deleted session, the `WHERE deleted_at IS NULL` guard on step 1 short-circuits the cascade and the command prints `Deleted session <session_id>. Deregistered 0 agents.` and exits 0 — the command is idempotent.
+
+There is no `--force` flag. Calling `session delete` on an unknown `session_id` exits 1 with `Error: session 'X' not found.`.
+
+Member tmux panes spawned by `cafleet member create` are **not** automatically closed by `session delete`. For a clean teardown, call `cafleet member delete` per member first (which sends `/exit` to the pane). Any surviving `claude` / `codex` processes with orphaned placements can be terminated manually with `tmux kill-pane`.
 
 ## `cafleet server` — Admin WebUI Server
 
@@ -217,3 +269,8 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 |---|---|
 | Missing `--session-id` on a client/member subcommand | `Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id.` |
 | Missing `--agent-id` | `Error: Missing option '--agent-id'.` (Click built-in) |
+| `session create` run outside a tmux session | `Error: cafleet session create must be run inside a tmux session` (exit 1; no DB writes) |
+| `session delete` on unknown session_id | `Error: session 'X' not found.` (exit 1) |
+| `register` into a soft-deleted session | `Error: session X is deleted` (exit 1) |
+| `deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` (exit 1) |
+| `deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
