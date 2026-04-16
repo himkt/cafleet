@@ -1,6 +1,6 @@
 # Auto-bootstrap root Director on session create
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 35/35 tasks complete
 **Last Updated**: 2026-04-16
 
@@ -10,16 +10,16 @@ Make `cafleet session create` atomically create the session, register a root Dir
 
 ## Success Criteria
 
-- [ ] `cafleet session create` completes 4 operations (INSERT sessions, INSERT agents, INSERT agent_placements, UPDATE sessions.director_agent_id) in one DB transaction
-- [ ] Failure in any step rolls back the whole transaction — no partial session/agent/placement rows persist
-- [ ] Root Director's placement has `director_agent_id IS NULL`
-- [ ] Running `cafleet session create` outside tmux fails with `Error: cafleet session create must be run inside a tmux session` and exit code 1 (no DB changes)
-- [ ] After `cafleet session create`, sending a message from a member to the root Director triggers a tmux push notification to the Director's pane
-- [ ] `cafleet session delete` logically deletes the session, deregisters all active agents in it (including the root Director), and physically deletes their placement rows — tasks are preserved
-- [ ] `cafleet session delete` is idempotent: re-running on an already-deleted session is a no-op that prints `Deregistered 0 agents.` and exits 0
-- [ ] `cafleet register` on a soft-deleted session fails with `Error: session <id> is deleted`
-- [ ] `cafleet session list` hides soft-deleted sessions
-- [ ] `cafleet deregister` against the root Director agent_id fails with an explicit error (see G3 resolution in Specification)
+- [x] `cafleet session create` completes 4 operations (INSERT sessions, INSERT agents, INSERT agent_placements, UPDATE sessions.director_agent_id) in one DB transaction (now 5 including built-in Administrator seed from 0000025)
+- [x] Failure in any step rolls back the whole transaction — no partial session/agent/placement rows persist
+- [x] Root Director's placement has `director_agent_id IS NULL`
+- [x] Running `cafleet session create` outside tmux fails with `Error: cafleet session create must be run inside a tmux session` and exit code 1 (no DB changes)
+- [x] After `cafleet session create`, sending a message from a member to the root Director triggers a tmux push notification to the Director's pane
+- [x] `cafleet session delete` logically deletes the session, deregisters all active agents in it (including the root Director), and physically deletes their placement rows — tasks are preserved
+- [x] `cafleet session delete` is idempotent: re-running on an already-deleted session is a no-op that prints `Deregistered 0 agents.` and exits 0
+- [x] `cafleet register` on a soft-deleted session fails with `Error: session <id> is deleted`
+- [x] `cafleet session list` hides soft-deleted sessions
+- [x] `cafleet deregister` against the root Director agent_id fails with an explicit error (see G3 resolution in Specification)
 
 ---
 
@@ -322,3 +322,4 @@ After this change, the broker's existing `_try_notify_recipient` ([broker.py:35-
 | 2026-04-15 | Reviewer round 1: fix register_agent pseudocode (I1), add root-Director deregister rejection (G3), specify member-pane orphaning (G4), clarify tmux error translation (G5), clarify developer-local DB wipe (U1), clarify `N` in session-delete output includes root Director (U2), confirm `coding_agent="unknown"` has no validator on the bootstrap path (U3), add tests for Member→Director notification (G1), `list_sessions` filtering, `session delete` not-found, and split the CLI test bucket (G2, IM4). Added idempotency Success Criteria (IM1). Note to script authors: the `session create` text output now contains content on line 2+ (director `agent_id`, label, created_at, director name, pane); scripts that parse only line 1 remain compatible. |
 | 2026-04-15 | Approved by user. Status: Approved. |
 | 2026-04-16 | Director: bump migration slot from 0006 to 0007 (0006 is taken by 0006_seed_administrator_agent from design 0000025). Preserve administrator_agent_id from 0000025 additively in both JSON and text output of session create. create_session is now a 5-step transactional bootstrap (adds INSERT built-in Administrator). Step 7 tests updated accordingly. |
+| 2026-04-16 | Implementation complete. 43 new tests + 17 updated legacy tests; 388 total tests passing. Migration 0007 uses raw `ALTER TABLE sessions ADD COLUMN director_agent_id VARCHAR REFERENCES agents(agent_id) ON DELETE RESTRICT` instead of `op.batch_alter_table("sessions")` because the batch approach triggers a DROP TABLE on a non-empty sessions table while `agents.session_id` FK (ON DELETE RESTRICT) blocks it. Schema outcome identical to spec. Tester deleted/rewrote 3 legacy test classes that asserted physical-delete semantics or the old single-line `session create` output (replaced by equivalent new tests in test_session_bootstrap.py / test_cli_session_bootstrap.py). Status: Complete. |
