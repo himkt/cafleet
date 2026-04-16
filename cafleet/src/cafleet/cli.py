@@ -561,8 +561,6 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         raise click.ClickException(f"register failed: {exc}") from exc
     new_agent_id = result["agent_id"]
 
-    # Prompt resolution needs the new member's literal ``agent_id``, which
-    # only exists after the registration above.
     try:
         prompt = _resolve_prompt(
             ctx, agent_id, new_agent_id, prompt_argv, coding_agent_config
