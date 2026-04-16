@@ -218,7 +218,7 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
         click.echo(f"session_id: {result['session_id']}")
         click.echo(f"label:      {result['label'] or ''}")
         click.echo(f"created_at: {result['created_at']}")
-        if result.get("deleted_at") is not None:
+        if result["deleted_at"] is not None:
             click.echo(f"deleted_at: {result['deleted_at']}")
 
 
@@ -466,7 +466,7 @@ def _load_authorized_member(
         raise click.ClickException(f"failed to fetch member: {exc}") from exc
     if target is None:
         raise click.ClickException(f"Agent {member_id} not found")
-    placement = target.get("placement")
+    placement = target["placement"]
     if placement is None:
         raise click.ClickException(placement_missing_msg)
     if placement["director_agent_id"] != director_agent_id:
@@ -671,7 +671,7 @@ def member_delete(ctx, agent_id, member_id):
             f"agent {member_id} has no placement; use `cafleet deregister` instead"
         ),
     )
-    pane_id = placement.get("tmux_pane_id")
+    pane_id = placement["tmux_pane_id"]
 
     # Deregister the registry row first so a send-keys failure leaves a
     # queryable intent ("already gone") rather than a dangling placement.
@@ -756,7 +756,8 @@ def member_capture(ctx, agent_id, member_id, lines):
             f"spawned via `cafleet member create`."
         ),
     )
-    if placement.get("tmux_pane_id") is None:
+    pane_id = placement["tmux_pane_id"]
+    if pane_id is None:
         click.echo(
             f"Error: member {member_id} has no pane yet (pending placement) "
             f"— nothing to capture.",
@@ -766,9 +767,7 @@ def member_capture(ctx, agent_id, member_id, lines):
         return
 
     try:
-        content = tmux.capture_pane(
-            target_pane_id=placement["tmux_pane_id"], lines=lines
-        )
+        content = tmux.capture_pane(target_pane_id=pane_id, lines=lines)
     except tmux.TmuxError as exc:
         click.echo(f"Error: capture failed: {exc}", err=True)
         ctx.exit(1)
@@ -779,7 +778,7 @@ def member_capture(ctx, agent_id, member_id, lines):
             output.format_json(
                 {
                     "member_agent_id": member_id,
-                    "pane_id": placement["tmux_pane_id"],
+                    "pane_id": pane_id,
                     "lines": lines,
                     "content": content,
                 }
@@ -839,7 +838,7 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
             f"spawned via `cafleet member create`."
         ),
     )
-    pane_id = placement.get("tmux_pane_id")
+    pane_id = placement["tmux_pane_id"]
     if pane_id is None:
         click.echo(
             f"Error: member {member_id} has no pane yet (pending placement) "
