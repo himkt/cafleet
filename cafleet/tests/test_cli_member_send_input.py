@@ -1,26 +1,4 @@
-"""Tests for ``cafleet member send-input`` CLI subcommand.
-
-Design doc 0000027 (Step 5) — executable specification for the restricted
-tmux-send-keys wrapper. Tests pin the following contracts:
-
-  - Flag validation: exactly one of ``--choice`` / ``--freetext``; digit in
-    {1,2,3}; free text rejects newlines
-  - Authorization boundary: missing agent / no placement / cross-Director /
-    pending pane all exit 1 with the exact error wording from the design
-  - Dispatch: ``--choice N`` calls ``tmux.send_choice_key`` with the digit
-    and the resolved pane; ``--freetext TEXT`` calls
-    ``tmux.send_freetext_and_submit`` with the exact bytes (shell meta,
-    multi-byte, empty string) — no shell expansion
-  - Output: text = ``Sent choice <N> to member <name> (<pane>).`` /
-    ``Sent free text to member <name> (<pane>).``; JSON carries the four
-    documented keys (``member_agent_id``, ``pane_id``, ``action``, ``value``)
-
-Every test uses ``CliRunner`` with ``--session-id`` threaded through the
-root group, and monkeypatches ``broker.get_agent`` + the two ``tmux``
-helpers so no real tmux subprocess is ever invoked. Tests MUST fail until
-the Programmer implements ``tmux.send_choice_key``,
-``tmux.send_freetext_and_submit``, and ``@member.command("send-input")``.
-"""
+"""CLI tests for ``cafleet member send-input`` (design doc 0000027)."""
 
 import json
 import uuid
@@ -30,11 +8,6 @@ from click.testing import CliRunner
 
 from cafleet import broker, tmux
 from cafleet.cli import cli
-
-
-# ---------------------------------------------------------------------------
-# Shared fixtures
-# ---------------------------------------------------------------------------
 
 
 DIRECTOR_ID = "11111111-1111-1111-1111-111111111111"
@@ -165,11 +138,6 @@ def _invoke(runner, session_id, *extra_args, **invoke_kwargs):
     )
 
 
-# ===========================================================================
-# TestFlagValidation
-# ===========================================================================
-
-
 class TestFlagValidation:
     """Design doc 0000027 Specification § "Validation rules"."""
 
@@ -255,11 +223,6 @@ class TestFlagValidation:
             f"empty free text must pass through as empty string. "
             f"got: {freetext_recorder[0]!r}"
         )
-
-
-# ===========================================================================
-# TestAuthorizationBoundary
-# ===========================================================================
 
 
 class TestAuthorizationBoundary:
@@ -357,11 +320,6 @@ class TestAuthorizationBoundary:
         )
 
 
-# ===========================================================================
-# TestChoiceDispatch
-# ===========================================================================
-
-
 class TestChoiceDispatch:
     """``--choice N`` dispatches to ``tmux.send_choice_key`` once with the
     resolved pane + the matching digit, and does NOT touch
@@ -398,11 +356,6 @@ class TestChoiceDispatch:
             f"--choice must NOT call send_freetext_and_submit. "
             f"got: {freetext_recorder!r}"
         )
-
-
-# ===========================================================================
-# TestFreetextDispatch
-# ===========================================================================
 
 
 class TestFreetextDispatch:
@@ -494,11 +447,6 @@ class TestFreetextDispatch:
             f"key-name-lookalike text must be delivered verbatim. "
             f"expected: {payload!r}, got: {freetext_recorder[0]!r}"
         )
-
-
-# ===========================================================================
-# TestOutputFormat
-# ===========================================================================
 
 
 class TestOutputFormat:
