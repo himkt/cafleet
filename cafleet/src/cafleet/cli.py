@@ -30,6 +30,23 @@ def _require_session_id(ctx: click.Context) -> None:
         ctx.exit(1)
 
 
+@contextlib.contextmanager
+def _handle_broker_errors(ctx: click.Context):
+    """Convert unexpected broker exceptions to ``Error: ...`` + exit 1.
+
+    ``ClickException`` / ``Exit`` pass through so Click's main loop handles
+    them (``ClickException`` formats its own message; ``Exit`` is the signal
+    already in flight from e.g. ``_require_session_id``).
+    """
+    try:
+        yield
+    except (click.ClickException, click.exceptions.Exit):
+        raise
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        ctx.exit(1)
+
+
 def _sync_db_url() -> str:
     return str(make_url(settings.database_url).set(drivername="sqlite"))
 
@@ -284,22 +301,18 @@ def register(ctx, name, description, skills):
 def send(ctx, agent_id, to, text):
     """Send a unicast message to another agent."""
     _require_session_id(ctx)
-    try:
+    with _handle_broker_errors(ctx):
         result = broker.send_message(
             ctx.obj["session_id"],
             agent_id,
             to,
             text,
         )
-
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
         else:
             click.echo("Message sent.")
             click.echo(output.format_task(result))
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(1)
 
 
 @cli.command()
@@ -309,21 +322,17 @@ def send(ctx, agent_id, to, text):
 def broadcast(ctx, agent_id, text):
     """Broadcast a message to all agents."""
     _require_session_id(ctx)
-    try:
+    with _handle_broker_errors(ctx):
         result = broker.broadcast_message(
             ctx.obj["session_id"],
             agent_id,
             text,
         )
-
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
         else:
             click.echo("Broadcast sent.")
             click.echo(output.format_task_list(result))
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(1)
 
 
 @cli.command()
@@ -334,20 +343,16 @@ def broadcast(ctx, agent_id, text):
 def poll(ctx, agent_id, since, page_size):
     """Poll inbox for messages."""
     _require_session_id(ctx)
-    try:
+    with _handle_broker_errors(ctx):
         result = broker.poll_tasks(
             agent_id,
             since=since,
             page_size=page_size,
         )
-
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
         else:
             click.echo(output.format_task_list(result))
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(1)
 
 
 @cli.command()
@@ -357,17 +362,13 @@ def poll(ctx, agent_id, since, page_size):
 def ack(ctx, agent_id, task_id):
     """Acknowledge receipt of a message."""
     _require_session_id(ctx)
-    try:
+    with _handle_broker_errors(ctx):
         result = broker.ack_task(agent_id, task_id)
-
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
         else:
             click.echo("Message acknowledged.")
             click.echo(output.format_task(result))
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(1)
 
 
 @cli.command()
@@ -377,17 +378,13 @@ def ack(ctx, agent_id, task_id):
 def cancel(ctx, agent_id, task_id):
     """Cancel (retract) a sent message."""
     _require_session_id(ctx)
-    try:
+    with _handle_broker_errors(ctx):
         result = broker.cancel_task(agent_id, task_id)
-
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
         else:
             click.echo("Task canceled.")
             click.echo(output.format_task(result))
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(1)
 
 
 @cli.command("get-task")
@@ -397,16 +394,12 @@ def cancel(ctx, agent_id, task_id):
 def get_task(ctx, agent_id, task_id):
     """Get details of a specific task."""
     _require_session_id(ctx)
-    try:
+    with _handle_broker_errors(ctx):
         result = broker.get_task(ctx.obj["session_id"], task_id)
-
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
         else:
             click.echo(output.format_task(result))
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(1)
 
 
 @cli.command()
@@ -416,7 +409,7 @@ def get_task(ctx, agent_id, task_id):
 def agents(ctx, agent_id, detail_id):
     """List registered agents or get agent detail."""
     _require_session_id(ctx)
-    try:
+    with _handle_broker_errors(ctx):
         if detail_id:
             result = broker.get_agent(detail_id, ctx.obj["session_id"])
             if result is None:
@@ -426,14 +419,11 @@ def agents(ctx, agent_id, detail_id):
             else:
                 click.echo(output.format_agent(result))
         else:
-            result = broker.list_agents(ctx.obj["session_id"])
+            agent_list = broker.list_agents(ctx.obj["session_id"])
             if ctx.obj["json_output"]:
-                click.echo(output.format_json(result))
+                click.echo(output.format_json(agent_list))
             else:
-                click.echo(output.format_agent_list(result))
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(1)
+                click.echo(output.format_agent_list(agent_list))
 
 
 @cli.command()
@@ -442,14 +432,8 @@ def agents(ctx, agent_id, detail_id):
 def deregister(ctx, agent_id):
     """Deregister this agent from the broker."""
     _require_session_id(ctx)
-    try:
+    with _handle_broker_errors(ctx):
         deregistered = broker.deregister_agent(agent_id)
-    except broker.AdministratorProtectedError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        ctx.exit(1)
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(1)
 
     if not deregistered:
         click.echo(
@@ -740,16 +724,12 @@ def member_delete(ctx, agent_id, member_id):
 def member_list(ctx, agent_id):
     """List member agents managed by this Director."""
     _require_session_id(ctx)
-    try:
+    with _handle_broker_errors(ctx):
         members = broker.list_members(ctx.obj["session_id"], agent_id)
-
         if ctx.obj["json_output"]:
             click.echo(output.format_json(members))
         else:
             click.echo(output.format_member_list(members))
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        ctx.exit(1)
 
 
 @member.command("capture")
