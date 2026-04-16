@@ -745,6 +745,14 @@ def member_delete(ctx, agent_id, member_id):
         )
         ctx.exit(1)
         return
+    if placement["director_agent_id"] != agent_id:
+        click.echo(
+            f"Error: agent {member_id} is not a member of your team "
+            f"(director_agent_id={placement['director_agent_id']}).",
+            err=True,
+        )
+        ctx.exit(1)
+        return
 
     pane_id = placement.get("tmux_pane_id")
 
