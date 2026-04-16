@@ -597,6 +597,14 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
             session_id=session_id,
             reason=f"placement update failed: {exc}",
         )
+    if placement_view is None:
+        with contextlib.suppress(tmux.TmuxError):
+            tmux.send_exit(target_pane_id=pane_id, ignore_missing=True)
+        _rollback_register(
+            new_agent_id,
+            session_id=session_id,
+            reason="placement row vanished before pane-id patch",
+        )
 
     try:
         tmux.select_layout(target_window_id=director_ctx.window_id)
