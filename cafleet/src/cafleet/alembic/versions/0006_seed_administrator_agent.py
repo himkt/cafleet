@@ -31,7 +31,7 @@ Forward-only in practice:
 
 import json
 import uuid
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 from sqlalchemy import text
@@ -39,9 +39,9 @@ from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision: str = "0006"
-down_revision: Union[str, None] = "0005"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "0005"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 ADMINISTRATOR_KIND = "builtin-administrator"
