@@ -569,10 +569,8 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         )
 
     try:
-        fwd_env: dict[str, str] = {}
         db_url = os.environ.get("CAFLEET_DATABASE_URL")
-        if db_url:
-            fwd_env["CAFLEET_DATABASE_URL"] = db_url
+        fwd_env = {"CAFLEET_DATABASE_URL": db_url} if db_url else {}
         pane_id = tmux.split_window(
             target_window_id=director_ctx.window_id,
             env=fwd_env,

@@ -320,7 +320,7 @@ def register_agent(
     sess = get_session(session_id)
     if sess is None:
         raise click.UsageError(f"Session '{session_id}' not found.")
-    if sess.get("deleted_at") is not None:
+    if sess["deleted_at"] is not None:
         raise click.UsageError(f"session {session_id} is deleted")
 
     agent_id = str(uuid.uuid4())
