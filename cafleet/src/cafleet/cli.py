@@ -1,13 +1,4 @@
-"""cafleet CLI — unified command-line interface.
-
-Subgroups:
-  - ``db``      — Database schema management (init, etc.)
-  - ``session`` — Session CRUD (create, list, show, delete)
-  - ``member``  — Manage tmux-backed member agents (Director only)
-
-Top-level commands:
-  register, send, broadcast, poll, ack, cancel, get-task, agents, deregister
-"""
+"""cafleet CLI."""
 
 import contextlib
 import importlib.resources
@@ -29,13 +20,7 @@ from cafleet.coding_agent import CodingAgentConfig, get_coding_agent
 from cafleet.config import settings
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _require_session_id(ctx: click.Context) -> None:
-    """Validate that --session-id was provided on the root group."""
     if not ctx.obj.get("session_id"):
         click.echo(
             "Error: --session-id <uuid> is required for this subcommand. "
@@ -47,11 +32,6 @@ def _require_session_id(ctx: click.Context) -> None:
 
 def _sync_db_url() -> str:
     return str(make_url(settings.database_url).set(drivername="sqlite"))
-
-
-# ---------------------------------------------------------------------------
-# Root group
-# ---------------------------------------------------------------------------
 
 
 @click.group()
@@ -72,11 +52,6 @@ def cli(ctx, json_output, session_id):
     ctx.obj["json_output"] = json_output
 
 
-# ---------------------------------------------------------------------------
-# db subgroup
-# ---------------------------------------------------------------------------
-
-
 @cli.group()
 def db() -> None:
     """Database schema management commands."""
@@ -84,16 +59,7 @@ def db() -> None:
 
 @db.command("init")
 def init() -> None:
-    """Initialize or migrate the registry database schema to head.
-
-    Idempotent across six states:
-      1. DB file missing      -> create parent dirs, upgrade
-      2. Empty schema         -> upgrade
-      3. At head              -> no-op
-      4. Behind head          -> upgrade to head
-      5. Ahead of head        -> error (refuse to downgrade)
-      6. Legacy (no version)  -> error (require manual stamp)
-    """
+    """Initialize or migrate the registry database to the head revision."""
     sync_url = _sync_db_url()
     db_file_str = make_url(sync_url).database
     if not db_file_str:
@@ -103,12 +69,10 @@ def init() -> None:
 
     db_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # ``importlib.resources.as_file`` guarantees a real filesystem path
-    # even when ``cafleet`` is imported from a zipped wheel,
-    # where ``files(...)`` would otherwise return a virtual ``Traversable``
-    # that Alembic cannot open. The context manager is held open for the
-    # entire ``command.upgrade`` call so the extracted file is not
-    # cleaned up prematurely.
+    # ``as_file`` materializes the bundled ``alembic.ini`` to a real path
+    # because when cafleet is installed from a zipped wheel ``files(...)``
+    # returns a Traversable that Alembic cannot open. Hold the context
+    # open across ``command.upgrade`` so the extracted file survives.
     with importlib.resources.as_file(
         importlib.resources.files("cafleet") / "alembic.ini"
     ) as ini_path:
@@ -182,12 +146,7 @@ def session() -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
 def session_create(ctx: click.Context, label: str | None, as_json: bool) -> None:
-    """Create a new session (must be run inside a tmux session).
-
-    Atomically bootstraps the session, registers the root Director with a
-    placement pointing at the current tmux pane, and seeds the built-in
-    Administrator — all in one transaction (design 0000026).
-    """
+    """Create a new session (must be run inside a tmux session)."""
     try:
         tmux.ensure_tmux_available()
         director_ctx = tmux.director_context()
@@ -260,11 +219,6 @@ def session_delete(session_id: str) -> None:
     click.echo(f"Deleted session {session_id}. Deregistered {n} agents.")
 
 
-# ---------------------------------------------------------------------------
-# server (does NOT require --session-id; supplying one is silently accepted)
-# ---------------------------------------------------------------------------
-
-
 @cli.command("server")
 @click.option(
     "--host",
@@ -288,11 +242,6 @@ def server(host: str, port: int) -> None:
         host=host,
         port=port,
     )
-
-
-# ---------------------------------------------------------------------------
-# Client commands (require --session-id)
-# ---------------------------------------------------------------------------
 
 
 @cli.command()
@@ -536,23 +485,13 @@ def _load_authorized_member(
     *,
     placement_missing_msg: str,
 ) -> tuple[dict, dict]:
-    """Fetch a member's agent + placement, enforcing the cross-Director boundary.
+    """Load a member's agent + placement, enforcing the cross-Director boundary.
 
-    Raises ``click.ClickException`` (exit 1) on every failure path with the
-    message Click will print as ``Error: <msg>`` to stderr:
-
-      - fetch raised → ``failed to fetch member: <exc>``
-      - agent not found in this session → ``Agent <member_id> not found``
-      - placement row absent → ``placement_missing_msg`` (caller chooses the
-        follow-up command to suggest: ``cafleet deregister`` for delete,
-        ``cafleet member create`` for capture / send-input)
-      - placement exists but belongs to a different Director in the same
-        session → ``agent <member_id> is not a member of your team
-        (director_agent_id=<other>).``
-
-    Pane-id presence is NOT checked — callers that require a live pane must
-    validate ``placement["tmux_pane_id"]`` themselves with their own wording
-    (delete tolerates a pending placement; capture / send-input do not).
+    ``placement_missing_msg`` is the full error body for the "no placement"
+    path, because each caller points users at a different follow-up command
+    (``cafleet deregister`` from delete; ``cafleet member create`` from
+    capture / send-input). Pane-id presence is NOT checked here — delete
+    tolerates a pending placement while the others reject it.
     """
     try:
         target = broker.get_agent(member_id, session_id)
@@ -578,15 +517,11 @@ def _resolve_prompt(
     prompt_argv: tuple[str, ...],
     coding_agent_config: CodingAgentConfig,
 ) -> str:
-    """Resolve the spawn prompt for a new member agent.
+    """Substitute ``session_id`` / ``agent_id`` / ``director_*`` into the spawn prompt.
 
-    Joins a user-supplied ``prompt_argv`` (or falls back to the coding
-    agent's default template) and runs ``str.format`` on the result with
-    ``session_id`` / ``agent_id`` / ``director_name`` / ``director_agent_id``
-    as kwargs. Applies to BOTH the default template and custom prompts, so
-    callers may embed those placeholders in custom prompts. Literal ``{``
-    or ``}`` characters in a custom prompt must be doubled (``{{`` / ``}}``)
-    to survive ``.format``.
+    Runs ``str.format`` on both the coding-agent default template and any
+    user-supplied ``prompt_argv``, so custom prompts must double literal
+    braces (``{{`` / ``}}``) to survive the substitution.
     """
     session_id = ctx.obj["session_id"]
     director = broker.get_agent(director_agent_id, session_id)
@@ -619,7 +554,7 @@ def _resolve_prompt(
 
 
 def _rollback_register(new_agent_id, *, session_id, reason):
-    """Best-effort rollback: deregister the just-created agent."""
+    """Best-effort rollback of a just-created agent registration."""
     click.echo(
         f"Error: {reason}. Rolling back registration of {new_agent_id}.",
         err=True,
@@ -655,7 +590,6 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
     session_id = ctx.obj["session_id"]
     coding_agent_config = get_coding_agent(coding_agent)
 
-    # Pre-flight: must be running inside a tmux session.
     try:
         tmux.ensure_tmux_available()
         coding_agent_config.ensure_available()
@@ -665,7 +599,6 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         ctx.exit(1)
         return
 
-    # Step 1 — register member with pending placement (tmux_pane_id=null).
     try:
         result = broker.register_agent(
             session_id,
@@ -685,8 +618,8 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         return
     new_agent_id = result["agent_id"]
 
-    # Resolve the prompt now that we know the new member's agent_id so the
-    # template can bake the literal UUIDs for session_id and agent_id.
+    # Prompt resolution needs the new member's literal ``agent_id``, which
+    # only exists after the registration above.
     try:
         prompt = _resolve_prompt(
             ctx, agent_id, new_agent_id, prompt_argv, coding_agent_config
@@ -700,7 +633,6 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         ctx.exit(1)
         return
 
-    # Step 2 — split-window, forwarding only CAFLEET_DATABASE_URL when set.
     try:
         fwd_env: dict[str, str] = {}
         db_url = os.environ.get("CAFLEET_DATABASE_URL")
@@ -720,11 +652,11 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         ctx.exit(1)
         return
 
-    # Step 3 — update the pending placement with the real pane_id.
     try:
         placement_view = broker.update_placement_pane_id(new_agent_id, pane_id)
     except Exception as exc:
-        # Placement update failed: pane is alive but dangling. /exit it, then roll back.
+        # Pane is alive but the registration row is dangling; /exit the pane
+        # and roll back the agent so the caller can retry cleanly.
         with contextlib.suppress(tmux.TmuxError):
             tmux.send_exit(target_pane_id=pane_id, ignore_missing=True)
         _rollback_register(
@@ -735,7 +667,6 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         ctx.exit(1)
         return
 
-    # Step 4 — rebalance layout (best-effort, non-fatal).
     try:
         tmux.select_layout(target_window_id=director_ctx.window_id)
     except tmux.TmuxError as exc:
@@ -765,7 +696,6 @@ def member_delete(ctx, agent_id, member_id):
         ctx.exit(1)
         return
 
-    # Step 1 — fetch the target agent + placement with auth-boundary checks.
     _target, placement = _load_authorized_member(
         session_id,
         agent_id,
@@ -776,7 +706,8 @@ def member_delete(ctx, agent_id, member_id):
     )
     pane_id = placement.get("tmux_pane_id")
 
-    # Step 2 — deregister the member (BEFORE closing pane).
+    # Deregister the registry row first so a send-keys failure leaves a
+    # queryable intent ("already gone") rather than a dangling placement.
     try:
         broker.deregister_agent(member_id)
     except Exception as exc:
@@ -784,7 +715,6 @@ def member_delete(ctx, agent_id, member_id):
         ctx.exit(1)
         return
 
-    # Step 3 — send /exit to the pane (skip if pending placement).
     pane_status = ""
     if pane_id is not None:
         try:
@@ -800,10 +730,6 @@ def member_delete(ctx, agent_id, member_id):
     else:
         pane_status = "(pending — no pane)"
 
-    # Step 4 — rebalance layout (skip if pending placement).
-    # The member's window is always populated by broker.register_agent (the
-    # column is NOT NULL), so we can trust placement["tmux_window_id"] here
-    # without a director_context fallback.
     if pane_id is not None:
         try:
             tmux.select_layout(target_window_id=placement["tmux_window_id"])
@@ -861,7 +787,6 @@ def member_capture(ctx, agent_id, member_id, lines):
         ctx.exit(1)
         return
 
-    # Fetch the target's agent + placement with auth-boundary checks.
     _target, placement = _load_authorized_member(
         session_id,
         agent_id,
