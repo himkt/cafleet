@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import type { Agent } from "../types";
 import { sendMessage } from "../api";
 
@@ -127,7 +127,7 @@ export default function MessageInput({
 
   const disabled = disabledProp || !senderId || activeAgents.length === 0;
 
-  const candidates: MentionCandidate[] = (() => {
+  const candidates: MentionCandidate[] = useMemo(() => {
     if (mention === null) return [];
     const q = mention.query.toLowerCase();
     const list: MentionCandidate[] = [];
@@ -137,11 +137,9 @@ export default function MessageInput({
     const matchedAgents = userAgents
       .filter((a) => slugify(a.name).startsWith(q))
       .sort((a, b) => a.name.localeCompare(b.name));
-    for (const a of matchedAgents) {
-      list.push({ kind: "agent", agent: a });
-    }
+    list.push(...matchedAgents.map((agent) => ({ kind: "agent" as const, agent })));
     return list.slice(0, 6);
-  })();
+  }, [mention, userAgents]);
 
   const popoverOpen = mention !== null && candidates.length > 0;
 
