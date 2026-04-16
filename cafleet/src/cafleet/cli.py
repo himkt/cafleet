@@ -16,7 +16,7 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.url import make_url
 
 from cafleet import broker, output, tmux
-from cafleet.coding_agent import CodingAgentConfig, get_coding_agent
+from cafleet.coding_agent import CODING_AGENTS, CodingAgentConfig, get_coding_agent
 from cafleet.config import settings
 
 
@@ -544,7 +544,7 @@ def _rollback_register(new_agent_id, *, session_id, reason):
 @click.option("--description", required=True, help="Member description")
 @click.option(
     "--coding-agent",
-    type=click.Choice(["claude", "codex"]),
+    type=click.Choice(list(CODING_AGENTS)),
     default="claude",
     show_default=True,
     help="Coding agent to spawn in the tmux pane",
