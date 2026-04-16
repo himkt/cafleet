@@ -892,5 +892,109 @@ def member_capture(ctx, agent_id, member_id, lines):
         click.echo(content, nl=False)
 
 
+@member.command("send-input")
+@click.option("--agent-id", required=True, help="Director's agent ID")
+@click.option("--member-id", required=True, help="Target member's agent ID")
+@click.option(
+    "--choice",
+    type=click.IntRange(1, 3),
+    default=None,
+    help="Select option 1, 2, or 3. Mutually exclusive with --freetext.",
+)
+@click.option(
+    "--freetext",
+    type=str,
+    default=None,
+    help='Send "4" + literal text + Enter. Mutually exclusive with --choice.',
+)
+@click.pass_context
+def member_send_input(ctx, agent_id, member_id, choice, freetext):
+    """Safely forward a restricted keystroke to a member pane."""
+    from cafleet import tmux
+
+    _require_session_id(ctx)
+    session_id = ctx.obj["session_id"]
+
+    if (choice is None) == (freetext is None):
+        click.echo(
+            "Error: Must supply exactly one of --choice or --freetext.",
+            err=True,
+        )
+        ctx.exit(2)
+        return
+
+    if freetext is not None and ("\n" in freetext or "\r" in freetext):
+        click.echo("Error: free text may not contain newlines.", err=True)
+        ctx.exit(2)
+        return
+
+    try:
+        tmux.ensure_tmux_available()
+    except tmux.TmuxError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        ctx.exit(1)
+        return
+
+    target = broker.get_agent(member_id, session_id)
+    if target is None:
+        click.echo(f"Error: Agent {member_id} not found", err=True)
+        ctx.exit(1)
+        return
+
+    placement = target.get("placement")
+    if placement is None:
+        click.echo(
+            f"Error: agent {member_id} has no placement row; it was not "
+            f"spawned via `cafleet member create`.",
+            err=True,
+        )
+        ctx.exit(1)
+        return
+    if placement["director_agent_id"] != agent_id:
+        click.echo(
+            f"Error: agent {member_id} is not a member of your team "
+            f"(director_agent_id={placement['director_agent_id']}).",
+            err=True,
+        )
+        ctx.exit(1)
+        return
+    pane_id = placement.get("tmux_pane_id")
+    if pane_id is None:
+        click.echo(
+            f"Error: member {member_id} has no pane yet (pending placement) "
+            f"— nothing to send.",
+            err=True,
+        )
+        ctx.exit(1)
+        return
+
+    try:
+        if choice is not None:
+            tmux.send_choice_key(target_pane_id=pane_id, digit=choice)
+            action, value = "choice", str(choice)
+        else:
+            tmux.send_freetext_and_submit(target_pane_id=pane_id, text=freetext)
+            action, value = "freetext", freetext
+    except tmux.TmuxError as exc:
+        click.echo(f"Error: send failed: {exc}", err=True)
+        ctx.exit(1)
+        return
+
+    if ctx.obj["json_output"]:
+        click.echo(
+            output.format_json(
+                {
+                    "member_agent_id": member_id,
+                    "pane_id": pane_id,
+                    "action": action,
+                    "value": value,
+                }
+            )
+        )
+    else:
+        label = f"choice {value}" if action == "choice" else "free text"
+        click.echo(f"Sent {label} to member {target['name']} ({pane_id}).")
+
+
 if __name__ == "__main__":
     cli()

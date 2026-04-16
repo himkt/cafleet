@@ -44,6 +44,12 @@ PANE_ID = "%7"
 MEMBER_NAME = "Claude-B"
 
 
+# Sentinel for ``_agent(placement=...)`` so callers can pass explicit None
+# (meaning "no placement row, exercise the missing-placement branch") without
+# being silently coerced back to a default valid placement.
+_UNSET: object = object()
+
+
 def _placement(
     *,
     director_agent_id: str = DIRECTOR_ID,
@@ -64,8 +70,16 @@ def _agent(
     *,
     agent_id: str = MEMBER_ID,
     name: str = MEMBER_NAME,
-    placement: dict | None = None,
+    placement: dict | None | object = _UNSET,
 ) -> dict:
+    """Build a fake broker.get_agent result.
+
+    ``placement`` uses the ``_UNSET`` sentinel so the default (no kwarg) path
+    installs a valid placement while an explicit ``placement=None`` from a
+    caller passes through verbatim — the latter is required to exercise the
+    "no placement row" branch of the CLI handler.
+    """
+    resolved_placement = _placement() if placement is _UNSET else placement
     return {
         "agent_id": agent_id,
         "name": name,
@@ -73,7 +87,7 @@ def _agent(
         "status": "active",
         "registered_at": "2026-04-16T08:00:00+00:00",
         "kind": "user",
-        "placement": placement if placement is not None else _placement(),
+        "placement": resolved_placement,
     }
 
 

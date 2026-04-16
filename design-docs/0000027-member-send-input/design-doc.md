@@ -1,7 +1,7 @@
 # Add `cafleet member send-input` — safe `tmux send-keys` wrapper for member panes
 
 **Status**: Approved
-**Progress**: 5/18 tasks complete
+**Progress**: 9/18 tasks complete
 **Last Updated**: 2026-04-16
 
 ## Overview
@@ -357,13 +357,13 @@ Every test uses `CliRunner` with `ctx.obj["session_id"]` set (reuse the pattern 
 
 ### Step 3: Code — tmux helpers
 
-- [ ] Add `send_choice_key(*, target_pane_id: str, digit: int) -> None` to `cafleet/src/cafleet/tmux.py` with the digit-range check. <!-- completed: -->
-- [ ] Add `send_freetext_and_submit(*, target_pane_id: str, text: str) -> None` to the same file with the newline check and three `_run` calls. <!-- completed: -->
+- [x] Add `send_choice_key(*, target_pane_id: str, digit: int) -> None` to `cafleet/src/cafleet/tmux.py` with the digit-range check. <!-- completed: 2026-04-16T10:05 -->
+- [x] Add `send_freetext_and_submit(*, target_pane_id: str, text: str) -> None` to the same file with the newline check and three `_run` calls. <!-- completed: 2026-04-16T10:05 -->
 
 ### Step 4: Code — CLI subcommand
 
-- [ ] Add `@member.command("send-input")` in `cafleet/src/cafleet/cli.py`, immediately after `member_capture`. Follow the Click sketch in the Specification. Lazy-import `cafleet.tmux` inside the handler to keep CLI startup cheap. <!-- completed: -->
-- [ ] Verify `_require_session_id(ctx)` is called as the first line after kwargs are unpacked (every other `member *` command follows this pattern). <!-- completed: -->
+- [x] Add `@member.command("send-input")` in `cafleet/src/cafleet/cli.py`, immediately after `member_capture`. Follow the Click sketch in the Specification. Lazy-import `cafleet.tmux` inside the handler to keep CLI startup cheap. <!-- completed: 2026-04-16T10:25 -->
+- [x] Verify `_require_session_id(ctx)` is called as the first line after kwargs are unpacked (every other `member *` command follows this pattern). <!-- completed: 2026-04-16T10:25 -->
 
 ### Step 5: Tests
 

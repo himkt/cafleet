@@ -119,6 +119,29 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
     return True
 
 
+def send_choice_key(*, target_pane_id: str, digit: int) -> None:
+    """Send a single digit key (1, 2, or 3) to a tmux pane. No Enter."""
+    if digit not in (1, 2, 3):
+        raise TmuxError(f"send_choice_key: digit must be 1, 2, or 3 (got {digit})")
+    _run(["tmux", "send-keys", "-t", target_pane_id, str(digit)])
+
+
+def send_freetext_and_submit(*, target_pane_id: str, text: str) -> None:
+    """Send "4" + literal text + Enter to a tmux pane.
+
+    Three separate send-keys invocations because tmux's -l (literal) flag
+    is per-invocation: one call cannot mix literal characters with the
+    Enter key name. Splitting the sequence guarantees the literal text is
+    delivered as plain characters (no shell-meta interpretation, no key
+    name confusion for "Enter" / "C-c" / "Esc" embedded in the text).
+    """
+    if "\n" in text or "\r" in text:
+        raise TmuxError("send_freetext_and_submit: text may not contain newlines")
+    _run(["tmux", "send-keys", "-t", target_pane_id, "4"])
+    _run(["tmux", "send-keys", "-t", target_pane_id, "-l", text])
+    _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
+
+
 def capture_pane(*, target_pane_id: str, lines: int = 80) -> str:
     """Capture the last `lines` lines of the target pane's terminal buffer.
 
