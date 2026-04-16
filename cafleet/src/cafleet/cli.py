@@ -768,7 +768,7 @@ def member_delete(ctx, agent_id, member_id):
         return
 
     # Step 1 — fetch the target agent + placement with auth-boundary checks.
-    target, placement = _load_authorized_member(
+    _target, placement = _load_authorized_member(
         session_id,
         agent_id,
         member_id,
