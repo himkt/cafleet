@@ -606,6 +606,36 @@ def _read_task(session, task_id: str) -> dict | None:
     return json.loads(row[0])
 
 
+def _unicast_task_dict(
+    *,
+    recipient_id: str,
+    sender_id: str,
+    text: str,
+    now: str,
+    origin_task_id: str | None = None,
+) -> dict:
+    metadata: dict = {
+        "fromAgentId": sender_id,
+        "toAgentId": recipient_id,
+        "type": "unicast",
+    }
+    if origin_task_id is not None:
+        metadata["originTaskId"] = origin_task_id
+    return {
+        "id": str(uuid.uuid4()),
+        "contextId": recipient_id,
+        "status": {"state": "input_required", "timestamp": now},
+        "artifacts": [
+            {
+                "artifactId": str(uuid.uuid4()),
+                "parts": [{"kind": "text", "text": text}],
+            }
+        ],
+        "metadata": metadata,
+        "history": [],
+    }
+
+
 def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
     """Create a unicast task addressed to ``to`` and best-effort notify it."""
     try:
@@ -638,28 +668,12 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
         if dest_agent.session_id != session_id:
             raise ValueError(f"Destination agent not in session: {to}")
 
-        now = _now_iso()
-        task_dict = {
-            "id": str(uuid.uuid4()),
-            "contextId": to,
-            "status": {
-                "state": "input_required",
-                "timestamp": now,
-            },
-            "artifacts": [
-                {
-                    "artifactId": str(uuid.uuid4()),
-                    "parts": [{"kind": "text", "text": text}],
-                }
-            ],
-            "metadata": {
-                "fromAgentId": agent_id,
-                "toAgentId": to,
-                "type": "unicast",
-            },
-            "history": [],
-        }
-
+        task_dict = _unicast_task_dict(
+            recipient_id=to,
+            sender_id=agent_id,
+            text=text,
+            now=_now_iso(),
+        )
         _save_task(session, task_dict)
         notification_sent = _try_notify_recipient(
             session,
@@ -709,28 +723,13 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
         recipient_ids = [aid for (aid,) in rows]
 
         for recipient_id in recipient_ids:
-            now = _now_iso()
-            delivery_dict = {
-                "id": str(uuid.uuid4()),
-                "contextId": recipient_id,
-                "status": {
-                    "state": "input_required",
-                    "timestamp": now,
-                },
-                "artifacts": [
-                    {
-                        "artifactId": str(uuid.uuid4()),
-                        "parts": [{"kind": "text", "text": text}],
-                    }
-                ],
-                "metadata": {
-                    "fromAgentId": agent_id,
-                    "toAgentId": recipient_id,
-                    "type": "unicast",
-                    "originTaskId": summary_task_id,
-                },
-                "history": [],
-            }
+            delivery_dict = _unicast_task_dict(
+                recipient_id=recipient_id,
+                sender_id=agent_id,
+                text=text,
+                now=_now_iso(),
+                origin_task_id=summary_task_id,
+            )
             _save_task(session, delivery_dict)
 
         now = _now_iso()
