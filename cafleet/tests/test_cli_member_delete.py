@@ -1,28 +1,4 @@
-"""Tests for ``cafleet member delete`` CLI subcommand.
-
-Pre-existing gap: ``cafleet member delete`` had no test coverage at all and
-was missing the cross-Director authorization check that ``member capture`` and
-``member send-input`` enforce. These tests pin:
-
-  - Happy path: fetches agent, deregisters broker-side, sends ``/exit`` to
-    the pane, rebalances layout, prints both lines of the text summary.
-  - Missing agent → exit 1.
-  - No placement row → exit 1 with the exact "use `cafleet deregister` instead"
-    hint (member delete's placement-none wording differs from capture/send-input
-    on purpose: the caller's intent is "delete this member", so the helpful
-    redirect is ``cafleet deregister`` rather than ``cafleet member create``).
-  - Cross-Director same-session deletion is REJECTED with exit 1 and the
-    same "is not a member of your team" wording as ``member capture`` /
-    ``member send-input``. This is the regression guard for the
-    authorization gap fixed in this iteration.
-  - Pending placement (``tmux_pane_id is None``) still deregisters but skips
-    the ``/exit`` call and reports ``(pending — no pane)``.
-  - ``tmux.send_exit`` failure is surfaced as a warning — the deregister is
-    already committed, so the command still exits 0 (the user's registry state
-    matches the intent; they can kill the pane manually).
-
-All tests monkeypatch ``broker`` / ``tmux`` — no real tmux subprocess runs.
-"""
+"""CLI tests for ``cafleet member delete`` (cross-Director guard regression)."""
 
 import uuid
 
