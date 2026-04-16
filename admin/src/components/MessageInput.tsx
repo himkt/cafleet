@@ -13,14 +13,16 @@ function slugify(name: string): string {
   return name.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase();
 }
 
-function parseInput(
-  raw: string,
-  activeAgents: Agent[],
-): { to: string; body: string; error: string | null } {
-  const trimmed = raw.trimStart();
+type ParseResult = { to: string; body: string; error: string | null };
+
+function parseError(error: string): ParseResult {
+  return { to: "", body: "", error };
+}
+
+function parseInput(raw: string, activeAgents: Agent[]): ParseResult {
   const mentionRe = /^@([A-Za-z0-9_-]+)(?:\s|$)/;
   const mentions: string[] = [];
-  let rest = trimmed;
+  let rest = raw.trimStart();
 
   while (true) {
     const match = rest.match(mentionRe);
@@ -30,29 +32,27 @@ function parseInput(
   }
 
   if (mentions.length === 0) {
-    return { to: "", body: "", error: "Start the message with @<agent> or @all" };
+    return parseError("Start the message with @<agent> or @all");
   }
 
   const hasAll = mentions.some((m) => m.toLowerCase() === "all");
   const nonAll = mentions.filter((m) => m.toLowerCase() !== "all");
 
   if (hasAll && nonAll.length > 0) {
-    return { to: "", body: "", error: "@all cannot be combined with other mentions" };
+    return parseError("@all cannot be combined with other mentions");
   }
 
+  const body = rest.trim();
+
   if (hasAll) {
-    const body = rest.trim();
-    if (!body) return { to: "", body: "", error: "Message body is empty" };
+    if (!body) return parseError("Message body is empty");
     return { to: "*", body, error: null };
   }
 
   if (nonAll.length > 1) {
-    return {
-      to: "",
-      body: "",
-      error:
-        "Multi-recipient unicast not supported in first cut; use @all for broadcast",
-    };
+    return parseError(
+      "Multi-recipient unicast not supported in first cut; use @all for broadcast",
+    );
   }
 
   const slug = nonAll[0];
@@ -61,15 +61,12 @@ function parseInput(
   );
 
   if (matched.length === 0) {
-    return { to: "", body: "", error: `No active agent named '@${slug}'` };
+    return parseError(`No active agent named '@${slug}'`);
   }
-
   if (matched.length > 1) {
-    return { to: "", body: "", error: `Ambiguous mention '@${slug}'` };
+    return parseError(`Ambiguous mention '@${slug}'`);
   }
-
-  const body = rest.trim();
-  if (!body) return { to: "", body: "", error: "Message body is empty" };
+  if (!body) return parseError("Message body is empty");
 
   return { to: matched[0].agent_id, body, error: null };
 }
