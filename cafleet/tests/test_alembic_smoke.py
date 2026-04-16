@@ -191,10 +191,17 @@ def test_agent_placements_table_created_by_migration(alembic_upgraded_db):
             "a pending placement before the pane is spawned"
         )
 
+        # director_agent_id must be nullable after migration 0007 — NULL
+        # signals "this placement is for a root Director (no parent)"
+        # per design doc 0000026.
+        assert cols["director_agent_id"]["nullable"] is True, (
+            "agent_placements.director_agent_id must be nullable after "
+            "migration 0007 — NULL marks the root Director's own placement"
+        )
+
         # All other columns must be NOT NULL
         for name in (
             "agent_id",
-            "director_agent_id",
             "tmux_session",
             "tmux_window_id",
             "created_at",

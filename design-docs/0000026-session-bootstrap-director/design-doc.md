@@ -1,7 +1,7 @@
 # Auto-bootstrap root Director on session create
 
 **Status**: Approved
-**Progress**: 6/35 tasks complete
+**Progress**: 35/35 tasks complete
 **Last Updated**: 2026-04-16
 
 ## Overview
@@ -267,50 +267,50 @@ After this change, the broker's existing `_try_notify_recipient` ([broker.py:35-
 
 ### Step 2: Migration 0007
 
-- [ ] Create `cafleet/src/cafleet/alembic/versions/0007_session_bootstrap_director.py` with `revision="0007"`, `down_revision="0006"` <!-- completed: -->
-- [ ] In `upgrade()` use `op.batch_alter_table("sessions")` to add `deleted_at` (String, nullable) and `director_agent_id` (String, nullable, FK to `agents.agent_id`, `ondelete="RESTRICT"`) <!-- completed: -->
-- [ ] In `upgrade()` use `op.batch_alter_table("agent_placements")` to set `director_agent_id` nullable=True <!-- completed: -->
-- [ ] Implement `downgrade()` reversing the two `batch_alter_table` calls <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/alembic/versions/0007_session_bootstrap_director.py` with `revision="0007"`, `down_revision="0006"` <!-- completed: 2026-04-16T10:05 -->
+- [x] In `upgrade()` use `op.batch_alter_table("sessions")` to add `deleted_at` (String, nullable) and `director_agent_id` (String, nullable, FK to `agents.agent_id`, `ondelete="RESTRICT"`) <!-- completed: 2026-04-16T10:10 -->
+- [x] In `upgrade()` use `op.batch_alter_table("agent_placements")` to set `director_agent_id` nullable=True <!-- completed: 2026-04-16T10:10 -->
+- [x] Implement `downgrade()` reversing the two `batch_alter_table` calls <!-- completed: 2026-04-16T10:15 -->
 
 ### Step 3: SQLAlchemy models (`cafleet/src/cafleet/db/models.py`)
 
-- [ ] `Session`: add `deleted_at: Mapped[str | None]` and `director_agent_id: Mapped[str | None]` (ForeignKey `agents.agent_id`, `ondelete="RESTRICT"`) <!-- completed: -->
-- [ ] `AgentPlacement`: change `director_agent_id` to `Mapped[str | None]` (nullable) <!-- completed: -->
+- [x] `Session`: add `deleted_at: Mapped[str | None]` and `director_agent_id: Mapped[str | None]` (ForeignKey `agents.agent_id`, `ondelete="RESTRICT"`) <!-- completed: 2026-04-16T10:20 -->
+- [x] `AgentPlacement`: change `director_agent_id` to `Mapped[str | None]` (nullable) <!-- completed: 2026-04-16T10:20 -->
 
 ### Step 4: Broker bootstrap logic (`cafleet/src/cafleet/broker.py`)
 
-- [ ] Add module-level constants `_DIRECTOR_NAME = "director"`, `_DIRECTOR_DESCRIPTION = "Root Director for this session"`, `_ROOT_DIRECTOR_CODING_AGENT = "unknown"` with the FIXME(claude) comment next to the coding-agent constant <!-- completed: -->
-- [ ] Rewrite `create_session(label, director_context)` to perform the 5-step transactional bootstrap (INSERT sessions, INSERT Director agent, INSERT Director placement, UPDATE sessions.director_agent_id, INSERT built-in Administrator agent per 0000025) and return the nested `{session_id, label, created_at, administrator_agent_id, director: {…, placement: {…}}}` dict shape <!-- completed: -->
-- [ ] Extend `get_session` to include `deleted_at` in its returned dict (do NOT add a `WHERE deleted_at IS NULL` filter — callers must inspect the field themselves) <!-- completed: -->
-- [ ] Update `list_sessions` to filter `WHERE sessions.deleted_at IS NULL` <!-- completed: -->
-- [ ] Update `register_agent` to inspect `get_session(...)["deleted_at"]` and reject soft-deleted sessions with `session X is deleted` while keeping the `Session 'X' not found.` path intact <!-- completed: -->
-- [ ] Update `deregister_agent` to reject the root-Director case with `cannot deregister the root Director; use 'cafleet session delete' instead` (detect via `Session.director_agent_id == agent_id`) <!-- completed: -->
-- [ ] Rewrite `delete_session` to perform the 3-step logical-delete cascade (UPDATE sessions SET deleted_at, UPDATE agents SET status=deregistered, DELETE placements) in one transaction, returning `{"deregistered_count": N}` (N counts the root Director too) for the CLI to render <!-- completed: -->
+- [x] Add module-level constants `_DIRECTOR_NAME = "director"`, `_DIRECTOR_DESCRIPTION = "Root Director for this session"`, `_ROOT_DIRECTOR_CODING_AGENT = "unknown"` with the FIXME(claude) comment next to the coding-agent constant <!-- completed: 2026-04-16T10:25 -->
+- [x] Rewrite `create_session(label, director_context)` to perform the 5-step transactional bootstrap (INSERT sessions, INSERT Director agent, INSERT Director placement, UPDATE sessions.director_agent_id, INSERT built-in Administrator agent per 0000025) and return the nested `{session_id, label, created_at, administrator_agent_id, director: {…, placement: {…}}}` dict shape <!-- completed: 2026-04-16T10:30 -->
+- [x] Extend `get_session` to include `deleted_at` in its returned dict (do NOT add a `WHERE deleted_at IS NULL` filter — callers must inspect the field themselves) <!-- completed: 2026-04-16T10:32 -->
+- [x] Update `list_sessions` to filter `WHERE sessions.deleted_at IS NULL` <!-- completed: 2026-04-16T10:33 -->
+- [x] Update `register_agent` to inspect `get_session(...)["deleted_at"]` and reject soft-deleted sessions with `session X is deleted` while keeping the `Session 'X' not found.` path intact <!-- completed: 2026-04-16T10:40 -->
+- [x] Update `deregister_agent` to reject the root-Director case with `cannot deregister the root Director; use 'cafleet session delete' instead` (detect via `Session.director_agent_id == agent_id`) <!-- completed: 2026-04-16T10:42 -->
+- [x] Rewrite `delete_session` to perform the 3-step logical-delete cascade (UPDATE sessions SET deleted_at, UPDATE agents SET status=deregistered, DELETE placements) in one transaction, returning `{"deregistered_count": N}` (N counts the root Director too) for the CLI to render <!-- completed: 2026-04-16T10:38 -->
 
 ### Step 5: CLI (`cafleet/src/cafleet/cli.py`)
 
-- [ ] `session_create`: call `tmux.ensure_tmux_available()` and `tmux.director_context()` before broker call. On any `TmuxError` print `Error: cafleet session create must be run inside a tmux session` and exit 1 <!-- completed: -->
-- [ ] `session_create`: call the new `broker.create_session(label, director_context)` and render the 2-line + human-friendly text output (or JSON when `--json` is set) <!-- completed: -->
-- [ ] `session_delete`: render `Deleted session X. Deregistered N agents.` using the broker return value <!-- completed: -->
+- [x] `session_create`: call `tmux.ensure_tmux_available()` and `tmux.director_context()` before broker call. On any `TmuxError` print `Error: cafleet session create must be run inside a tmux session` and exit 1 <!-- completed: 2026-04-16T10:45 -->
+- [x] `session_create`: call the new `broker.create_session(label, director_context)` and render the 2-line + human-friendly text output (or JSON when `--json` is set) <!-- completed: 2026-04-16T10:48 -->
+- [x] `session_delete`: render `Deleted session X. Deregistered N agents.` using the broker return value <!-- completed: 2026-04-16T10:50 -->
 
 ### Step 6: Output helpers (`cafleet/src/cafleet/output.py`)
 
-- [ ] Add / update formatter(s) for the new `session create` text shape (session_id, director agent_id, label, created_at, director_name, pane, administrator) <!-- completed: -->
+- [x] Add / update formatter(s) for the new `session create` text shape (session_id, director agent_id, label, created_at, director_name, pane, administrator) <!-- completed: 2026-04-16T10:52 -->
 
 ### Step 7: Tests
 
-- [ ] New file `cafleet/tests/test_session_bootstrap.py`: mock `tmux.director_context()` and verify a successful `broker.create_session` writes one session row, two agent rows (Director + built-in Administrator), one Director placement row, and updates `sessions.director_agent_id` — all in one transaction <!-- completed: -->
-- [ ] In the same file: verify partial-failure rollback by injecting an exception after step 2 (INSERT agents) and confirming no sessions/agents/placement rows persist <!-- completed: -->
-- [ ] In the same file: verify `broker.delete_session` marks `deleted_at`, deregisters all active agents (including the root Director), deletes their placements, preserves tasks, and is idempotent on re-run <!-- completed: -->
-- [ ] In the same file: verify `broker.register_agent` rejects a soft-deleted session with the exact `session X is deleted` error string <!-- completed: -->
-- [ ] In the same file: verify `broker.list_sessions` filters out rows with non-NULL `deleted_at` <!-- completed: -->
-- [ ] In the same file: verify `broker.deregister_agent` on the root-Director `agent_id` raises the `cannot deregister the root Director` error and leaves all rows unchanged <!-- completed: -->
-- [ ] In the same file: Member → Director notification path — bootstrap a session, register a member with a placement (pane_id set), call `broker.send_message(session_id, member_agent_id, to=root_director_agent_id, text="hi")` with `tmux.send_poll_trigger` patched to a `Mock(return_value=True)`, assert the response's `notification_sent` is `True` and `send_poll_trigger` was called with the root Director's `tmux_pane_id` <!-- completed: -->
-- [ ] Extend `cafleet/tests/test_cli.py` (or `test_cli_session.py` if already present): `session create` text output — line 1 == `session_id`, line 2 == director `agent_id`, subsequent lines contain `label:`, `director_name: director`, `pane:` <!-- completed: -->
-- [ ] `session create --json` produces the nested `{session_id, label, created_at, administrator_agent_id, director: {agent_id, name, description, registered_at, placement: {...}}}` shape with `placement.director_agent_id` null, `placement.coding_agent` == `"unknown"`, and `administrator_agent_id` non-null and matching the seeded Administrator's `agent_id` <!-- completed: -->
-- [ ] `session list` hides rows whose `deleted_at IS NOT NULL` by default (no `--all` flag is accepted) <!-- completed: -->
-- [ ] `session create` outside tmux (unset `TMUX`) exits 1 with `Error: cafleet session create must be run inside a tmux session` and writes nothing to the DB <!-- completed: -->
-- [ ] `session delete` on an unknown `session_id` exits 1 with `Error: session 'X' not found.` <!-- completed: -->
+- [x] New file `cafleet/tests/test_session_bootstrap.py`: mock `tmux.director_context()` and verify a successful `broker.create_session` writes one session row, two agent rows (Director + built-in Administrator), one Director placement row, and updates `sessions.director_agent_id` — all in one transaction <!-- completed: 2026-04-16T18:39 -->
+- [x] In the same file: verify partial-failure rollback by injecting an exception after step 2 (INSERT agents) and confirming no sessions/agents/placement rows persist <!-- completed: 2026-04-16T18:39 -->
+- [x] In the same file: verify `broker.delete_session` marks `deleted_at`, deregisters all active agents (including the root Director), deletes their placements, preserves tasks, and is idempotent on re-run <!-- completed: 2026-04-16T18:39 -->
+- [x] In the same file: verify `broker.register_agent` rejects a soft-deleted session with the exact `session X is deleted` error string <!-- completed: 2026-04-16T18:39 -->
+- [x] In the same file: verify `broker.list_sessions` filters out rows with non-NULL `deleted_at` <!-- completed: 2026-04-16T18:39 -->
+- [x] In the same file: verify `broker.deregister_agent` on the root-Director `agent_id` raises the `cannot deregister the root Director` error and leaves all rows unchanged <!-- completed: 2026-04-16T18:39 -->
+- [x] In the same file: Member → Director notification path — bootstrap a session, register a member with a placement (pane_id set), call `broker.send_message(session_id, member_agent_id, to=root_director_agent_id, text="hi")` with `tmux.send_poll_trigger` patched to a `Mock(return_value=True)`, assert the response's `notification_sent` is `True` and `send_poll_trigger` was called with the root Director's `tmux_pane_id` <!-- completed: 2026-04-16T18:39 -->
+- [x] Extend `cafleet/tests/test_cli.py` (or `test_cli_session.py` if already present): `session create` text output — line 1 == `session_id`, line 2 == director `agent_id`, subsequent lines contain `label:`, `director_name: director`, `pane:` <!-- completed: 2026-04-16T18:39 -->
+- [x] `session create --json` produces the nested `{session_id, label, created_at, administrator_agent_id, director: {agent_id, name, description, registered_at, placement: {...}}}` shape with `placement.director_agent_id` null, `placement.coding_agent` == `"unknown"`, and `administrator_agent_id` non-null and matching the seeded Administrator's `agent_id` <!-- completed: 2026-04-16T18:39 -->
+- [x] `session list` hides rows whose `deleted_at IS NOT NULL` by default (no `--all` flag is accepted) <!-- completed: 2026-04-16T18:39 -->
+- [x] `session create` outside tmux (unset `TMUX`) exits 1 with `Error: cafleet session create must be run inside a tmux session` and writes nothing to the DB <!-- completed: 2026-04-16T18:39 -->
+- [x] `session delete` on an unknown `session_id` exits 1 with `Error: session 'X' not found.` <!-- completed: 2026-04-16T18:39 -->
 
 ---
 

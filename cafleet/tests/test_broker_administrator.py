@@ -26,6 +26,23 @@ from sqlalchemy.orm import sessionmaker
 
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet.db.models import Base
+from cafleet.tmux import DirectorContext
+
+
+# Fake tmux context used when calling broker.create_session at the
+# broker layer (the CLI layer resolves this via tmux.director_context()).
+_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
+
+
+def _create_session_with_ctx():
+    """Call broker.create_session with a fake DirectorContext.
+
+    Design 0000026 adds a required ``director_context`` arg; this helper
+    keeps the boilerplate in one place for every admin-guard test below.
+    """
+    from cafleet import broker
+
+    return broker.create_session(director_context=_FAKE_DIRECTOR_CTX)
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +313,7 @@ class TestDeregisterAdministratorGuard:
         from cafleet import broker
         from cafleet.broker import AdministratorProtectedError
 
-        session = broker.create_session()
+        session = _create_session_with_ctx()
         admin_id = session["administrator_agent_id"]
 
         with pytest.raises(AdministratorProtectedError) as exc_info:
@@ -310,7 +327,7 @@ class TestDeregisterAdministratorGuard:
         from cafleet.broker import AdministratorProtectedError
         from cafleet.db.models import Agent
 
-        session = broker.create_session()
+        session = _create_session_with_ctx()
         admin_id = session["administrator_agent_id"]
 
         with pytest.raises(AdministratorProtectedError):
@@ -325,7 +342,7 @@ class TestDeregisterAdministratorGuard:
         """Regression guard: user agents can still be deregistered normally."""
         from cafleet import broker
 
-        session = broker.create_session()
+        session = _create_session_with_ctx()
         sid = session["session_id"]
         user = broker.register_agent(
             session_id=sid, name="user", description="A test user"
@@ -334,10 +351,10 @@ class TestDeregisterAdministratorGuard:
         result = broker.deregister_agent(user["agent_id"])
         assert result is True
 
-        # The Administrator remains untouched.
-        agents = broker.list_agents(sid)
-        assert len(agents) == 1
-        assert agents[0]["name"] == "Administrator"
+        # The root Director and Administrator seeded at bootstrap (design
+        # 0000026) both remain; only the user agent was deregistered.
+        names = {a["name"] for a in broker.list_agents(sid)}
+        assert names == {"director", "Administrator"}
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +374,7 @@ class TestRegisterAgentPlacementAdministratorGuard:
         from cafleet import broker
         from cafleet.broker import AdministratorProtectedError
 
-        session = broker.create_session()
+        session = _create_session_with_ctx()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
 
@@ -382,7 +399,7 @@ class TestRegisterAgentPlacementAdministratorGuard:
         from cafleet import broker
         from cafleet.broker import AdministratorProtectedError
 
-        session = broker.create_session()
+        session = _create_session_with_ctx()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
 
@@ -402,14 +419,15 @@ class TestRegisterAgentPlacementAdministratorGuard:
 
         names = {a["name"] for a in broker.list_agents(sid)}
         assert "rejected-member" not in names
-        # Only the Administrator should remain.
-        assert names == {"Administrator"}
+        # Only the bootstrapped agents (Director + Administrator per design
+        # 0000026) should remain.
+        assert names == {"director", "Administrator"}
 
     def test_placement_with_user_agent_director_still_works(self, broker_db):
         """Regression guard: normal user-agent directors still accept placements."""
         from cafleet import broker
 
-        session = broker.create_session()
+        session = _create_session_with_ctx()
         sid = session["session_id"]
 
         director = broker.register_agent(

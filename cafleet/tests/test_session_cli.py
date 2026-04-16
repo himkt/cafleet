@@ -30,6 +30,7 @@ from click.testing import CliRunner
 from cafleet import config
 from cafleet.cli import cli
 from cafleet.db import engine as engine_mod
+from cafleet.tmux import DirectorContext
 
 
 @pytest.fixture(autouse=True)
@@ -40,6 +41,29 @@ def _reset_engine_singletons():
     yield
     engine_mod._sync_engine = None
     engine_mod._sync_sessionmaker = None
+
+
+@pytest.fixture(autouse=True)
+def _mock_tmux_for_session_create(monkeypatch):
+    """Stub out tmux so ``session create`` works inside CliRunner.
+
+    Design 0000026 makes ``cafleet session create`` resolve a
+    ``DirectorContext`` from tmux before calling the broker. Pre-existing
+    tests in this file were written before that dependency existed, so
+    we install a module-wide no-op + deterministic fake context here.
+    Tests that want to exercise the outside-tmux failure path (covered
+    in ``test_cli_session_bootstrap.py``) override these directly.
+    """
+    from cafleet import cli as cli_mod
+
+    ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
+    monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
+    monkeypatch.setattr("cafleet.tmux.director_context", lambda: ctx)
+    # Cover the ``from cafleet.tmux import …`` import style too.
+    if hasattr(cli_mod, "ensure_tmux_available"):
+        monkeypatch.setattr(cli_mod, "ensure_tmux_available", lambda: None)
+    if hasattr(cli_mod, "director_context"):
+        monkeypatch.setattr(cli_mod, "director_context", lambda: ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +128,18 @@ def _session_rows(db_path) -> list[tuple]:
         ).fetchall()
     finally:
         conn.close()
+
+
+def _session_deleted_at(db_path, session_id: str) -> str | None:
+    """Return the ``deleted_at`` value for a session row (or None if unset)."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT deleted_at FROM sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return None if row is None else row[0]
 
 
 # ===========================================================================
@@ -310,39 +346,13 @@ class TestSessionCreate:
         card = json.loads(row_card_json)
         assert card.get("cafleet", {}).get("kind") == "builtin-administrator"
 
-    def test_non_json_output_unchanged_single_uuid_line(self, tmp_path, monkeypatch):
-        """Per design §B: the non-JSON path is unchanged — prints session_id only.
-
-        This guard ensures we do not accidentally leak ``administrator_agent_id``
-        into the legacy text output.
-        """
-        db_file = tmp_path / "registry.db"
-        monkeypatch.setattr(
-            config.settings,
-            "database_url",
-            f"sqlite+aiosqlite:///{db_file}",
-        )
-        runner = CliRunner()
-        _init_db(runner)
-
-        result = runner.invoke(cli, ["session", "create"])
-        assert result.exit_code == 0, (
-            f"session create failed.\noutput: {result.output}\n"
-            f"exception: {result.exception}"
-        )
-
-        output = result.output.strip()
-        lines = [line for line in output.splitlines() if line.strip()]
-        # Exactly one non-empty line — the session_id.
-        assert len(lines) == 1, (
-            f"non-JSON session create should print a single line, got lines={lines!r}"
-        )
-        # That line must parse as a UUID.
-        uuid.UUID(lines[0].strip())
-        # And must NOT mention administrator_agent_id.
-        assert "administrator_agent_id" not in output.lower(), (
-            "non-JSON output must not expose administrator_agent_id"
-        )
+    # NOTE: the former ``test_non_json_output_unchanged_single_uuid_line``
+    # (design 0000025 §B guard that the text path prints exactly one line)
+    # is deliberately removed here. Design 0000026 §CLI-surface supersedes
+    # that contract with a 7-line text shape (session_id, director
+    # agent_id, label, created_at, director_name, pane, administrator).
+    # The equivalent assertions for the NEW shape live in
+    # ``test_cli_session_bootstrap.py::TestSessionCreateTextOutput``.
 
 
 # ===========================================================================
@@ -589,11 +599,16 @@ class TestSessionDelete:
             f"session delete failed.\noutput: {result.output}\n"
             f"exception: {result.exception}"
         )
-        # Verify the session was removed
+        # Design 0000026: delete_session is a SOFT delete. The row stays but
+        # its ``deleted_at`` is set, and ``list_sessions`` hides it.
         rows = _session_rows(db_file)
         session_ids = [r[0] for r in rows]
-        assert sid not in session_ids, (
-            f"session {sid} should have been deleted from the DB"
+        assert sid in session_ids, (
+            f"session {sid} should remain in the DB after soft delete, "
+            f"got session_ids={session_ids!r}"
+        )
+        assert _session_deleted_at(db_file, sid) is not None, (
+            f"session {sid}.deleted_at should be set after soft delete"
         )
         # Output should mention "Deleted"
         assert "deleted" in result.output.lower(), (
@@ -626,13 +641,13 @@ class TestSessionDelete:
         )
 
     def test_delete_session_with_active_agents_succeeds(self, tmp_path, monkeypatch):
-        """Sessions with agents but no tasks are deletable.
+        """Session with active agents soft-deletes successfully and flips them
+        to ``deregistered``.
 
-        Design 0000025 §B auto-seeds an Administrator into every session,
-        so ``delete_session`` cascade-deletes agent rows in the same
-        transaction before deleting the session itself; without that the
-        ``ON DELETE RESTRICT`` on ``agents.session_id`` would lock every
-        session forever.
+        Design 0000026: ``session delete`` is a soft delete that deregisters
+        every active agent in the session (including the root Director and
+        the Administrator) in the same transaction. The session row stays
+        but gains a ``deleted_at`` timestamp.
         """
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
@@ -654,14 +669,14 @@ class TestSessionDelete:
             f"session delete should succeed for a task-free session. "
             f"exit_code={result.exit_code}, output: {result.output}"
         )
-        rows = _session_rows(db_file)
-        session_ids = [r[0] for r in rows]
-        assert sid not in session_ids, "session should be removed after delete"
+        assert _session_deleted_at(db_file, sid) is not None, (
+            "session.deleted_at should be set after soft delete"
+        )
 
     def test_delete_session_with_deregistered_agents_succeeds(
         self, tmp_path, monkeypatch
     ):
-        """Deregistered agents are also cleared by the cascade delete."""
+        """Deregistered agents are a no-op for the cascade; soft delete still works."""
         db_file = tmp_path / "registry.db"
         monkeypatch.setattr(
             config.settings,
@@ -681,9 +696,9 @@ class TestSessionDelete:
             f"session delete should succeed even with deregistered agents. "
             f"exit_code={result.exit_code}, output: {result.output}"
         )
-        rows = _session_rows(db_file)
-        session_ids = [r[0] for r in rows]
-        assert sid not in session_ids
+        assert _session_deleted_at(db_file, sid) is not None, (
+            "session.deleted_at should be set after soft delete"
+        )
 
 
 # ===========================================================================

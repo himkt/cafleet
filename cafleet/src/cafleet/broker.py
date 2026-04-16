@@ -17,10 +17,21 @@ import click
 from sqlalchemy import and_, delete, exists, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.exc import IntegrityError
 
 from cafleet.db.engine import get_sync_sessionmaker
 from cafleet.db.models import Agent, AgentPlacement, Session, Task
+from cafleet.tmux import DirectorContext
+
+
+# ---------------------------------------------------------------------------
+# Root Director bootstrap constants (design 0000026)
+# ---------------------------------------------------------------------------
+
+
+_DIRECTOR_NAME = "director"
+_DIRECTOR_DESCRIPTION = "Root Director for this session"
+# FIXME(claude): auto-detect from $CLAUDECODE / $CLAUDE_CODE_ENTRYPOINT / codex env vars.
+_ROOT_DIRECTOR_CODING_AGENT = "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -105,28 +116,108 @@ def _try_notify_recipient(
 # ---------------------------------------------------------------------------
 
 
-def create_session(label: str | None = None) -> dict:
-    """INSERT sessions + auto-seeded Administrator agent in one transaction.
+def create_session(
+    label: str | None = None,
+    director_context: DirectorContext | None = None,
+) -> dict:
+    """Atomically bootstrap a session + root Director + Administrator.
 
-    Returns ``{"session_id", "label", "created_at", "administrator_agent_id"}``.
-    Per design 0000025 §B, every new session owns exactly one built-in
-    Administrator whose ``registered_at`` matches the session's ``created_at``.
+    Design doc 0000026. Runs 5 ordered operations inside a single
+    ``with session.begin():`` block:
+
+      1. INSERT sessions (deleted_at=NULL, director_agent_id=NULL).
+      2. INSERT agents (the hardcoded root Director).
+      3. INSERT agent_placements (director_agent_id=NULL, coding_agent="unknown").
+      4. UPDATE sessions SET director_agent_id=<director agent_id>.
+      5. INSERT agents (the built-in Administrator, per design 0000025).
+
+    Any exception inside the block triggers SQLAlchemy rollback — no partial
+    rows persist. ``director_context`` MUST be read from tmux BEFORE calling
+    this function (the CLI layer owns that resolution); a missing context is
+    a programmer error.
+
+    Returns the nested shape::
+
+        {
+          "session_id", "label", "created_at", "administrator_agent_id",
+          "director": {
+            "agent_id", "name", "description", "registered_at",
+            "placement": {
+              "director_agent_id", "tmux_session", "tmux_window_id",
+              "tmux_pane_id", "coding_agent", "created_at",
+            },
+          },
+        }
     """
+    if director_context is None:
+        raise TypeError(
+            "broker.create_session requires a director_context "
+            "(resolve it via tmux.director_context() before calling)"
+        )
+
     session_id = str(uuid.uuid4())
     created_at = _now_iso()
+    director_agent_id = str(uuid.uuid4())
     administrator_agent_id = str(uuid.uuid4())
     administrator_card = _administrator_agent_card(session_id)
+    director_card = {
+        "name": _DIRECTOR_NAME,
+        "description": _DIRECTOR_DESCRIPTION,
+        "skills": [],
+    }
+
     sm = get_sync_sessionmaker()
     with sm() as session:
         with session.begin():
+            # 1. INSERT sessions
             session.add(
                 Session(
                     session_id=session_id,
                     label=label,
                     created_at=created_at,
+                    deleted_at=None,
+                    director_agent_id=None,
                 )
             )
             session.flush()
+
+            # 2. INSERT root Director agent
+            session.add(
+                Agent(
+                    agent_id=director_agent_id,
+                    session_id=session_id,
+                    name=_DIRECTOR_NAME,
+                    description=_DIRECTOR_DESCRIPTION,
+                    status="active",
+                    registered_at=created_at,
+                    deregistered_at=None,
+                    agent_card_json=json.dumps(director_card),
+                )
+            )
+            session.flush()
+
+            # 3. INSERT Director placement (director_agent_id=NULL, no parent)
+            session.add(
+                AgentPlacement(
+                    agent_id=director_agent_id,
+                    director_agent_id=None,
+                    tmux_session=director_context.session,
+                    tmux_window_id=director_context.window_id,
+                    tmux_pane_id=director_context.pane_id,
+                    coding_agent=_ROOT_DIRECTOR_CODING_AGENT,
+                    created_at=created_at,
+                )
+            )
+            session.flush()
+
+            # 4. UPDATE sessions.director_agent_id
+            session.execute(
+                update(Session)
+                .where(Session.session_id == session_id)
+                .values(director_agent_id=director_agent_id)
+            )
+
+            # 5. INSERT built-in Administrator (per design 0000025)
             session.add(
                 Agent(
                     agent_id=administrator_agent_id,
@@ -139,16 +230,31 @@ def create_session(label: str | None = None) -> dict:
                     agent_card_json=json.dumps(administrator_card),
                 )
             )
+
     return {
         "session_id": session_id,
         "label": label,
         "created_at": created_at,
         "administrator_agent_id": administrator_agent_id,
+        "director": {
+            "agent_id": director_agent_id,
+            "name": _DIRECTOR_NAME,
+            "description": _DIRECTOR_DESCRIPTION,
+            "registered_at": created_at,
+            "placement": {
+                "director_agent_id": None,
+                "tmux_session": director_context.session,
+                "tmux_window_id": director_context.window_id,
+                "tmux_pane_id": director_context.pane_id,
+                "coding_agent": _ROOT_DIRECTOR_CODING_AGENT,
+                "created_at": created_at,
+            },
+        },
     }
 
 
 def list_sessions() -> list[dict]:
-    """SELECT sessions with active agent count."""
+    """SELECT non-soft-deleted sessions with active agent count."""
     stmt = (
         select(
             Session.session_id,
@@ -164,6 +270,7 @@ def list_sessions() -> list[dict]:
                 Agent.status == "active",
             ),
         )
+        .where(Session.deleted_at.is_(None))
         .group_by(Session.session_id)
         .order_by(Session.created_at)
     )
@@ -182,7 +289,11 @@ def list_sessions() -> list[dict]:
 
 
 def get_session(session_id: str) -> dict | None:
-    """SELECT single session. Returns dict or None."""
+    """SELECT single session. Returns dict or None (no ``deleted_at`` filter).
+
+    The returned dict exposes ``deleted_at`` so callers can distinguish between
+    a missing session and a soft-deleted one (``register_agent`` relies on this).
+    """
     sm = get_sync_sessionmaker()
     with sm() as session:
         result = session.execute(
@@ -195,66 +306,79 @@ def get_session(session_id: str) -> dict | None:
         "session_id": row.session_id,
         "label": row.label,
         "created_at": row.created_at,
+        "deleted_at": row.deleted_at,
+        "director_agent_id": row.director_agent_id,
     }
 
 
-def delete_session(session_id: str) -> None:
-    """DELETE placements + agents in the session, then DELETE the session.
+def delete_session(session_id: str) -> dict:
+    """Soft-delete cascade (design 0000026). Returns ``{"deregistered_count": N}``.
 
-    Because ``create_session`` always auto-seeds an Administrator agent
-    (design 0000025 §B), no session is agent-free at the point the user
-    calls delete. ``agents.session_id`` is ``ON DELETE RESTRICT``, so we
-    must clear agent rows first in the same transaction. Two FKs from
-    ``agent_placements`` complicate that: ``agent_placements.agent_id``
-    cascades on agent delete but ``agent_placements.director_agent_id``
-    is ``ON DELETE RESTRICT``, so deleting a director while a sibling
-    placement still points at it fails. We sidestep the ordering by
-    explicitly deleting all placements that reference any agent in this
-    session first. If ``tasks.context_id`` (``ON DELETE RESTRICT``) then
-    blocks the agent delete, we raise ``click.UsageError``.
+    All three operations run in a single transaction:
+
+      1. UPDATE sessions SET deleted_at = now WHERE session_id=X AND deleted_at IS NULL.
+      2. UPDATE agents SET status='deregistered', deregistered_at=now
+         WHERE session_id=X AND status='active' — this is the N that we return.
+      3. DELETE FROM agent_placements WHERE agent_id IN (<agents in session>).
+
+    Tasks are untouched (audit history preserved). Idempotent: the initial
+    ``WHERE deleted_at IS NULL`` guard on step 1 short-circuits the cascade on
+    re-run, so step 2 reports 0 rows and the call is a no-op.
     """
+    now = _now_iso()
     sm = get_sync_sessionmaker()
     with sm() as session:
         with session.begin():
+            # Check the session exists at all first so we can distinguish
+            # "not found" from "already soft-deleted".
+            exists_row = session.execute(
+                select(Session.session_id).where(Session.session_id == session_id)
+            ).first()
+            if exists_row is None:
+                raise click.UsageError(f"session '{session_id}' not found.")
+
+            # 1. Soft-delete the session row (idempotent via deleted_at IS NULL).
+            step1 = cast(
+                CursorResult,
+                session.execute(
+                    update(Session)
+                    .where(
+                        Session.session_id == session_id,
+                        Session.deleted_at.is_(None),
+                    )
+                    .values(deleted_at=now)
+                ),
+            )
+
+            if step1.rowcount == 0:
+                # Session exists but was already soft-deleted. Short-circuit the cascade.
+                return {"deregistered_count": 0}
+
+            # 2. Deregister every active agent in the session and count them.
+            step2 = cast(
+                CursorResult,
+                session.execute(
+                    update(Agent)
+                    .where(
+                        Agent.session_id == session_id,
+                        Agent.status == "active",
+                    )
+                    .values(status="deregistered", deregistered_at=now)
+                ),
+            )
+            deregistered_count = step2.rowcount
+
+            # 3. Drop every placement whose agent belongs to this session.
             agents_in_session = select(Agent.agent_id).where(
                 Agent.session_id == session_id
             )
-            # Clear placements that point at any agent in this session via
-            # either side of the FK pair: ``agent_id`` (the placed member)
-            # or ``director_agent_id`` (RESTRICT). Filtering only by
-            # ``agent_id`` would leave a placement whose director is in
-            # this session intact and the next ``DELETE FROM agents`` would
-            # then surface an IntegrityError that gets misreported as a
-            # task-FK violation.
             session.execute(
                 delete(AgentPlacement).where(
-                    or_(
-                        AgentPlacement.agent_id.in_(agents_in_session),
-                        AgentPlacement.director_agent_id.in_(agents_in_session),
-                    )
+                    AgentPlacement.agent_id.in_(agents_in_session)
                 )
             )
-            try:
-                session.execute(delete(Agent).where(Agent.session_id == session_id))
-            except IntegrityError:
-                # The transaction is now in a failed state — any further
-                # query on the same session would raise PendingRollbackError
-                # and mask the click.UsageError below. Raising directly lets
-                # the surrounding `with session.begin()` block roll back
-                # cleanly via its own __exit__ handler.
-                raise click.UsageError(
-                    f"Cannot delete session {session_id}: "
-                    f"its agent(s) are still referenced by tasks "
-                    f"(tasks.context_id ON DELETE RESTRICT)."
-                )
-            result = cast(
-                CursorResult,
-                session.execute(
-                    delete(Session).where(Session.session_id == session_id)
-                ),
-            )
-        if result.rowcount == 0:
-            raise click.UsageError(f"session '{session_id}' not found.")
+
+    return {"deregistered_count": deregistered_count}
 
 
 # ---------------------------------------------------------------------------
@@ -272,12 +396,15 @@ def register_agent(
     """INSERT into agents [+ agent_placements].
 
     Returns {"agent_id": ..., "name": ..., "registered_at": ...}.
-    Validates session_id exists. When placement is provided, validates director
-    exists and is active in the same session.
+    Validates session_id exists and is not soft-deleted. When placement is
+    provided, validates director exists and is active in the same session.
     """
-    # Validate session exists
-    if get_session(session_id) is None:
+    # Validate session exists and is not soft-deleted (design 0000026).
+    sess = get_session(session_id)
+    if sess is None:
         raise click.UsageError(f"Session '{session_id}' not found.")
+    if sess.get("deleted_at") is not None:
+        raise click.UsageError(f"session {session_id} is deleted")
 
     agent_id = str(uuid.uuid4())
     registered_at = _now_iso()
@@ -421,10 +548,24 @@ def deregister_agent(agent_id: str) -> bool:
     Returns True if agent was active and got deregistered.
     Raises ``AdministratorProtectedError`` when the target is the built-in
     Administrator agent (design 0000025 §D).
+    Raises ``click.UsageError`` when the target is the root Director of any
+    session (design 0000026): use ``cafleet session delete`` instead.
     """
     sm = get_sync_sessionmaker()
     with sm() as session:
         with session.begin():
+            # Root-Director guard (design 0000026). A session's root Director
+            # is the agent referenced by ``sessions.director_agent_id`` — if
+            # any session points at this agent_id, refuse.
+            root_director_hit = session.execute(
+                select(Session.session_id).where(Session.director_agent_id == agent_id)
+            ).first()
+            if root_director_hit is not None:
+                raise click.UsageError(
+                    "cannot deregister the root Director; "
+                    "use 'cafleet session delete' instead"
+                )
+
             card_json = session.execute(
                 select(Agent.agent_card_json).where(Agent.agent_id == agent_id)
             ).scalar_one_or_none()

@@ -73,6 +73,32 @@ def format_agent_list(agents: list) -> str:
     return "\n".join(parts)
 
 
+def format_session_create(data: dict) -> str:
+    """Human-friendly ``session create`` text (design 0000026).
+
+    Line 1 is the ``session_id`` (preserves backward-compatible script usage
+    that parses only the first line). Line 2 is the root Director's ``agent_id``.
+    The remaining lines are key-value pairs.
+    """
+    director = data.get("director", {}) or {}
+    placement = director.get("placement", {}) or {}
+    pane = (
+        f"{placement.get('tmux_session', '?')}:"
+        f"{placement.get('tmux_window_id', '?')}:"
+        f"{placement.get('tmux_pane_id', '?')}"
+    )
+    lines = [
+        data.get("session_id", "?"),
+        director.get("agent_id", "?"),
+        f"label:            {data.get('label') or ''}",
+        f"created_at:       {data.get('created_at', '')}",
+        f"director_name:    {director.get('name', '')}",
+        f"pane:             {pane}",
+        f"administrator:    {data.get('administrator_agent_id', '')}",
+    ]
+    return "\n".join(lines)
+
+
 def format_member(data: dict) -> str:
     placement = data.get("placement", {}) or {}
     lines = [

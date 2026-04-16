@@ -21,6 +21,12 @@ class Session(Base):
     session_id: Mapped[str] = mapped_column(String, primary_key=True)
     label: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
+    deleted_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    director_agent_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("agents.agent_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
 
 
 class Agent(Base):
@@ -50,10 +56,10 @@ class AgentPlacement(Base):
         ForeignKey("agents.agent_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    director_agent_id: Mapped[str] = mapped_column(
+    director_agent_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("agents.agent_id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     tmux_session: Mapped[str] = mapped_column(String, nullable=False)
     tmux_window_id: Mapped[str] = mapped_column(String, nullable=False)

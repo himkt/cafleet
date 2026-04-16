@@ -23,9 +23,10 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.url import make_url
 
-from cafleet import broker, output
+from cafleet import broker, output, tmux
 from cafleet.coding_agent import CodingAgentConfig, get_coding_agent
 from cafleet.config import settings
+from cafleet.tmux import TmuxError
 
 
 # ---------------------------------------------------------------------------
@@ -179,14 +180,31 @@ def session() -> None:
 @session.command("create")
 @click.option("--label", default=None, help="Optional human-readable label.")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-def session_create(label: str | None, as_json: bool) -> None:
-    """Create a new session."""
-    result = broker.create_session(label=label)
+@click.pass_context
+def session_create(ctx: click.Context, label: str | None, as_json: bool) -> None:
+    """Create a new session (must be run inside a tmux session).
+
+    Atomically bootstraps the session, registers the root Director with a
+    placement pointing at the current tmux pane, and seeds the built-in
+    Administrator — all in one transaction (design 0000026).
+    """
+    try:
+        tmux.ensure_tmux_available()
+        director_ctx = tmux.director_context()
+    except TmuxError:
+        click.echo(
+            "Error: cafleet session create must be run inside a tmux session",
+            err=True,
+        )
+        ctx.exit(1)
+        return
+
+    result = broker.create_session(label=label, director_context=director_ctx)
 
     if as_json:
         click.echo(json.dumps(result))
     else:
-        click.echo(result["session_id"])
+        click.echo(output.format_session_create(result))
 
 
 @session.command("list")
@@ -231,9 +249,10 @@ def session_show(session_id: str, as_json: bool) -> None:
 @session.command("delete")
 @click.argument("session_id")
 def session_delete(session_id: str) -> None:
-    """Delete a session."""
-    broker.delete_session(session_id)
-    click.echo(f"Deleted session {session_id}.")
+    """Soft-delete a session and deregister every active agent (idempotent)."""
+    result = broker.delete_session(session_id)
+    n = result["deregistered_count"]
+    click.echo(f"Deleted session {session_id}. Deregistered {n} agents.")
 
 
 # ---------------------------------------------------------------------------

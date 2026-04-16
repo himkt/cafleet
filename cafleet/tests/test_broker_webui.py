@@ -63,8 +63,12 @@ def broker_session(sync_sessionmaker, _patch_broker):
 
 def _create_session(label: str | None = None) -> dict:
     from cafleet import broker
+    from cafleet.tmux import DirectorContext
 
-    return broker.create_session(label=label)
+    return broker.create_session(
+        label=label,
+        director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
+    )
 
 
 def _register_agent(
@@ -109,7 +113,7 @@ class TestListSessionAgents:
     """broker.list_session_agents(session_id) → active + deregistered with tasks."""
 
     def test_returns_active_agents(self):
-        """Returned list includes both user agents and the auto-seeded Administrator."""
+        """Returned list includes user agents + bootstrap pair (design 0000026)."""
         from cafleet import broker
 
         session = _create_session()
@@ -118,11 +122,12 @@ class TestListSessionAgents:
         _register_agent(sid, name="active-2")
 
         result = broker.list_session_agents(sid)
-        # 2 user agents + 1 Administrator.
-        assert len(result) == 3
+        # 2 user agents + root Director + Administrator.
+        assert len(result) == 4
         names = {a["name"] for a in result}
         assert "active-1" in names
         assert "active-2" in names
+        assert "director" in names
         assert "Administrator" in names
 
     def test_active_agents_have_active_status(self):
@@ -165,14 +170,17 @@ class TestListSessionAgents:
         agent_ids = {a["agent_id"] for a in result}
         assert agent["agent_id"] not in agent_ids
 
-    def test_newly_created_session_returns_only_administrator(self):
-        """A freshly created session always surfaces its auto-seeded Administrator."""
+    def test_newly_created_session_returns_bootstrap_pair(self):
+        """A freshly created session has exactly the root Director + Administrator."""
         from cafleet import broker
 
         session = _create_session()
         result = broker.list_session_agents(session["session_id"])
-        assert len(result) == 1
-        assert result[0]["name"] == "Administrator"
+        # Design 0000026: bootstrap seeds both the root Director and the
+        # Administrator in the same transaction.
+        assert len(result) == 2
+        names = {a["name"] for a in result}
+        assert names == {"director", "Administrator"}
 
     def test_result_contains_required_keys(self):
         from cafleet import broker
@@ -190,7 +198,9 @@ class TestListSessionAgents:
         assert "registered_at" in agent
 
     def test_scoped_to_session(self):
-        """Agents from other sessions are not included (each session has its own Admin)."""
+        """Agents from other sessions are not included. Each session has its own
+        bootstrap pair (root Director + Administrator).
+        """
         from cafleet import broker
 
         session_a = _create_session()
@@ -199,10 +209,11 @@ class TestListSessionAgents:
         _register_agent(session_b["session_id"], name="in-b")
 
         result = broker.list_session_agents(session_a["session_id"])
-        # Administrator (for session A) + in-a.
-        assert len(result) == 2
+        # Director (A) + Administrator (A) + in-a.
+        assert len(result) == 3
         names = {a["name"] for a in result}
         assert "in-a" in names
+        assert "director" in names
         assert "Administrator" in names
         assert "in-b" not in names
 
@@ -255,12 +266,14 @@ class TestListSessionAgentsKind:
         assert admins[0]["name"] == "Administrator"
         assert admins[0]["agent_id"] == session["administrator_agent_id"]
 
-        # The two user agents carry kind='user'.
-        assert len(users) == 2, (
-            f"expected 2 user-kind entries, got {len(users)}: {users!r}"
+        # The two user agents + the root Director all carry kind='user'
+        # (design 0000026 bootstraps the Director alongside the Administrator).
+        assert len(users) == 3, (
+            f"expected 3 user-kind entries (director + user-a + user-b), "
+            f"got {len(users)}: {users!r}"
         )
         user_names = {e["name"] for e in users}
-        assert user_names == {"user-a", "user-b"}
+        assert user_names == {"director", "user-a", "user-b"}
 
     def test_kind_values_are_restricted_to_known_set(self):
         """No entry carries a kind outside the documented set."""

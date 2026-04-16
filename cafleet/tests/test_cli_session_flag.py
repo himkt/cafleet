@@ -33,6 +33,7 @@ from click.testing import CliRunner
 from cafleet import broker, config
 from cafleet.cli import cli
 from cafleet.db import engine as engine_mod
+from cafleet.tmux import DirectorContext
 
 
 @pytest.fixture(autouse=True)
@@ -43,6 +44,25 @@ def _reset_engine_singletons():
     yield
     engine_mod._sync_engine = None
     engine_mod._sync_sessionmaker = None
+
+
+@pytest.fixture(autouse=True)
+def _mock_tmux_for_session_create(monkeypatch):
+    """Stub tmux so ``session create`` invoked through CliRunner succeeds.
+
+    Design 0000026 introduces a tmux precondition on ``session create``.
+    Pre-existing tests in this file were written before that change, so
+    install a module-wide no-op + deterministic fake ``DirectorContext``.
+    """
+    from cafleet import cli as cli_mod
+
+    ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
+    monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
+    monkeypatch.setattr("cafleet.tmux.director_context", lambda: ctx)
+    if hasattr(cli_mod, "ensure_tmux_available"):
+        monkeypatch.setattr(cli_mod, "ensure_tmux_available", lambda: None)
+    if hasattr(cli_mod, "director_context"):
+        monkeypatch.setattr(cli_mod, "director_context", lambda: ctx)
 
 
 @pytest.fixture

@@ -63,8 +63,12 @@ def broker_session(sync_sessionmaker, _patch_broker):
 
 def _create_session(label: str | None = None) -> dict:
     from cafleet import broker
+    from cafleet.tmux import DirectorContext
 
-    return broker.create_session(label=label)
+    return broker.create_session(
+        label=label,
+        director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
+    )
 
 
 def _register_agent(
@@ -427,28 +431,36 @@ class TestBroadcastAdministratorExclusion:
         )
 
     def test_summary_count_reflects_post_exclusion_recipients(self):
-        """Summary artifact says 'Broadcast sent to 2 recipients' (NOT 3 w/ Admin)."""
+        """Summary counts user agents + root Director, excludes Admin + sender.
+
+        Design 0000026 bootstraps a root Director alongside the Administrator,
+        so the broadcast now sees: {sender, user-a, user-b, director, admin}.
+        After sender-self and Administrator exclusion, recipients are
+        {user-a, user-b, director} = 3.
+        """
         from cafleet import broker
 
         session = _create_session()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
+        director_id = session["director"]["agent_id"]
 
         sender = _register_agent(sid, name="sender")
-        _register_agent(sid, name="user-a")
-        _register_agent(sid, name="user-b")
+        user_a = _register_agent(sid, name="user-a")
+        user_b = _register_agent(sid, name="user-b")
 
         result = broker.broadcast_message(sid, sender["agent_id"], "hey")
 
         # Artifact text must use the post-exclusion count.
         text = _get_summary_artifact_text(result)
-        assert text == "Broadcast sent to 2 recipients", (
-            f"summary text must reflect post-exclusion count (2), got {text!r}"
+        assert text == "Broadcast sent to 3 recipients", (
+            f"summary text must reflect post-exclusion count (3 = 2 users + "
+            f"root Director), got {text!r}"
         )
 
         summary_metadata = result[0]["task"].get("metadata", {})
-        assert summary_metadata.get("recipientCount") == 2, (
-            f"summary metadata.recipientCount must be 2, "
+        assert summary_metadata.get("recipientCount") == 3, (
+            f"summary metadata.recipientCount must be 3, "
             f"got {summary_metadata.get('recipientCount')!r}"
         )
 
@@ -457,68 +469,80 @@ class TestBroadcastAdministratorExclusion:
             f"Administrator must not appear in summary.recipientIds, "
             f"got {recipient_ids!r}"
         )
-        assert len(recipient_ids) == 2, (
-            f"summary.recipientIds should list 2 user agents, got {recipient_ids!r}"
+        assert set(recipient_ids) == {
+            user_a["agent_id"],
+            user_b["agent_id"],
+            director_id,
+        }, (
+            f"summary.recipientIds should be the user pair + Director, got {recipient_ids!r}"
         )
 
     def test_broadcast_from_administrator_delivers_to_all_user_agents(self):
-        """The Admin may send broadcasts; recipients are the other user agents."""
-        from cafleet import broker
-
-        session = _create_session()
-        sid = session["session_id"]
-        admin_id = session["administrator_agent_id"]
-
-        user_a = _register_agent(sid, name="user-a")
-        user_b = _register_agent(sid, name="user-b")
-
-        result = broker.broadcast_message(sid, admin_id, "hello from admin")
-
-        # Both user agents receive one delivery task.
-        a_tasks = broker.poll_tasks(user_a["agent_id"])
-        b_tasks = broker.poll_tasks(user_b["agent_id"])
-        assert len(a_tasks) == 1
-        assert len(b_tasks) == 1
-
-        # Summary count matches the two user recipients.
-        text = _get_summary_artifact_text(result)
-        assert text == "Broadcast sent to 2 recipients", (
-            f"Admin-origin broadcast must still reflect the 2 user recipients, "
-            f"got {text!r}"
-        )
-
-        summary_metadata = result[0]["task"].get("metadata", {})
-        recipient_ids = summary_metadata.get("recipientIds", [])
-        assert set(recipient_ids) == {user_a["agent_id"], user_b["agent_id"]}, (
-            f"summary.recipientIds should be exactly the two user agents, "
-            f"got {recipient_ids!r}"
-        )
-
-    def test_broadcast_with_only_administrator_session_is_zero_recipients(self):
-        """Broadcasting in a session with no user agents yields 0 delivery tasks.
-
-        The Administrator itself is both the only potential sender and
-        the only potential recipient. After ``Agent.agent_id != agent_id``
-        and the Administrator-exclusion filter, the recipient set is empty.
+        """Admin-origin broadcast reaches every non-Admin active agent,
+        including the bootstrap root Director (design 0000026).
         """
         from cafleet import broker
 
         session = _create_session()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
+        director_id = session["director"]["agent_id"]
 
-        # Session has ONLY the Administrator. Let Admin broadcast.
-        result = broker.broadcast_message(sid, admin_id, "anybody?")
+        user_a = _register_agent(sid, name="user-a")
+        user_b = _register_agent(sid, name="user-b")
 
+        result = broker.broadcast_message(sid, admin_id, "hello from admin")
+
+        # User agents receive one delivery task each.
+        a_tasks = broker.poll_tasks(user_a["agent_id"])
+        b_tasks = broker.poll_tasks(user_b["agent_id"])
+        assert len(a_tasks) == 1
+        assert len(b_tasks) == 1
+
+        # Summary count is 3 = 2 user agents + root Director.
         text = _get_summary_artifact_text(result)
-        assert text == "Broadcast sent to 0 recipients", (
-            f"summary text for empty-recipients broadcast must say "
-            f"'Broadcast sent to 0 recipients', got {text!r}"
+        assert text == "Broadcast sent to 3 recipients", (
+            f"Admin-origin broadcast must include the root Director, got {text!r}"
         )
 
         summary_metadata = result[0]["task"].get("metadata", {})
-        assert summary_metadata.get("recipientCount") == 0
-        assert summary_metadata.get("recipientIds") == []
+        recipient_ids = summary_metadata.get("recipientIds", [])
+        assert set(recipient_ids) == {
+            user_a["agent_id"],
+            user_b["agent_id"],
+            director_id,
+        }, (
+            f"summary.recipientIds should be user-a, user-b, and the Director, "
+            f"got {recipient_ids!r}"
+        )
+
+    def test_admin_broadcast_in_bootstrap_only_session_reaches_only_director(self):
+        """In a freshly-bootstrapped session (Director + Administrator only),
+        an Admin-origin broadcast reaches exactly the root Director.
+
+        After ``Agent.agent_id != agent_id`` (excludes sender=Admin) and the
+        Administrator-exclusion filter, the only remaining recipient is the
+        root Director seeded by design 0000026.
+        """
+        from cafleet import broker
+
+        session = _create_session()
+        sid = session["session_id"]
+        admin_id = session["administrator_agent_id"]
+        director_id = session["director"]["agent_id"]
+
+        # Session has the bootstrap pair. Let Admin broadcast.
+        result = broker.broadcast_message(sid, admin_id, "anybody?")
+
+        text = _get_summary_artifact_text(result)
+        assert text == "Broadcast sent to 1 recipients", (
+            f"Admin broadcast in a bootstrap-only session must reach just the "
+            f"root Director (1 recipient), got {text!r}"
+        )
+
+        summary_metadata = result[0]["task"].get("metadata", {})
+        assert summary_metadata.get("recipientCount") == 1
+        assert summary_metadata.get("recipientIds") == [director_id]
 
 
 # ===========================================================================

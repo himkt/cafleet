@@ -27,7 +27,6 @@ Coverage map:
 
 import uuid
 
-import click
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -71,8 +70,12 @@ def broker_session(sync_sessionmaker, _patch_broker):
 def _create_session(label: str | None = None) -> dict:
     """Create a session via broker and return the result dict."""
     from cafleet import broker
+    from cafleet.tmux import DirectorContext
 
-    return broker.create_session(label=label)
+    return broker.create_session(
+        label=label,
+        director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
+    )
 
 
 def _register_agent(
@@ -154,6 +157,10 @@ class TestCreateSessionAdministratorSeed:
     def test_administrator_row_exists_in_db_and_is_active(self, broker_session):
         """After create_session, exactly one active Administrator agent exists
         for that session in the agents table.
+
+        Design 0000026 also bootstraps a root Director (name='director') in
+        the same transaction, so two active agents exist — we pick the
+        Administrator out by ``name == 'Administrator'``.
         """
         import json
 
@@ -172,11 +179,12 @@ class TestCreateSessionAdministratorSeed:
                 .all()
             )
 
-        # Exactly one active agent (the auto-seeded Administrator).
-        assert len(rows) == 1
-        row = rows[0]
+        # Two active agents: the root Director and the Administrator.
+        assert len(rows) == 2
+        admins = [r for r in rows if r.name == "Administrator"]
+        assert len(admins) == 1
+        row = admins[0]
         assert row.agent_id == admin_id
-        assert row.name == "Administrator"
         card = json.loads(row.agent_card_json)
         assert card.get("cafleet", {}).get("kind") == ADMINISTRATOR_KIND
 
@@ -201,7 +209,7 @@ class TestCreateSessionAdministratorSeed:
     def test_list_session_agents_marks_administrator_kind(self):
         """broker.list_session_agents exposes ``kind`` per agent; the
         auto-seeded Administrator has ``kind == 'builtin-administrator'``
-        and is the only such entry.
+        and is the only such entry. The root Director is ``kind == 'user'``.
         """
         from cafleet import broker
         from cafleet.broker import ADMINISTRATOR_KIND
@@ -213,15 +221,19 @@ class TestCreateSessionAdministratorSeed:
         _register_agent(sid, name="user-agent")
 
         entries = broker.list_session_agents(sid)
-        # Should have exactly two entries: the Administrator + the user-agent.
-        assert len(entries) == 2
+        # Three entries: root Director + Administrator + user-agent (design 0000026).
+        assert len(entries) == 3
 
         admin_entries = [e for e in entries if e.get("kind") == ADMINISTRATOR_KIND]
         user_entries = [e for e in entries if e.get("kind") == "user"]
+        # Exactly one Administrator, two user-kind (director + user-agent).
         assert len(admin_entries) == 1
-        assert len(user_entries) == 1
+        assert len(user_entries) == 2
         assert admin_entries[0]["name"] == "Administrator"
         assert admin_entries[0]["agent_id"] == result["administrator_agent_id"]
+        user_names = {e["name"] for e in user_entries}
+        assert "director" in user_names
+        assert "user-agent" in user_names
 
     def test_each_session_gets_its_own_administrator(self):
         """Two calls to create_session produce two distinct Administrators."""
@@ -252,7 +264,7 @@ class TestListSessions:
         assert "session-b" in labels
 
     def test_includes_agent_count(self):
-        """Count includes the auto-seeded Administrator plus user agents."""
+        """Count includes the root Director, auto-seeded Administrator, and user agents."""
         from cafleet import broker
 
         session = _create_session()
@@ -263,11 +275,16 @@ class TestListSessions:
 
         result = broker.list_sessions()
         assert len(result) == 1
-        # 2 user agents + 1 Administrator.
-        assert result[0]["agent_count"] == 3
+        # 2 user agents + 1 root Director + 1 Administrator (design 0000026).
+        assert result[0]["agent_count"] == 4
 
     def test_agent_count_excludes_deregistered(self):
-        """Deregistered user agents are excluded, but the Administrator is always active."""
+        """Deregistered user agents are excluded.
+
+        Root Director and Administrator remain active after bootstrap
+        (design 0000026), so the count floors at 2 for a session with
+        no live user agents.
+        """
         from cafleet import broker
 
         session = _create_session()
@@ -278,17 +295,18 @@ class TestListSessions:
         broker.deregister_agent(agent2["agent_id"])
 
         result = broker.list_sessions()
-        # 1 active user agent + 1 Administrator (dead-agent is deregistered).
-        assert result[0]["agent_count"] == 2
+        # 1 active user agent + 1 root Director + 1 Administrator.
+        assert result[0]["agent_count"] == 3
 
-    def test_session_with_only_administrator_has_count_one(self):
-        """A session with no user-added agents still counts the Administrator."""
+    def test_session_with_only_bootstrap_agents_has_count_two(self):
+        """A freshly-bootstrapped session has exactly the Director + Administrator."""
         from cafleet import broker
 
         _create_session()
 
         result = broker.list_sessions()
-        assert result[0]["agent_count"] == 1
+        # Root Director + Administrator seeded by create_session (design 0000026).
+        assert result[0]["agent_count"] == 2
 
     def test_result_contains_required_keys(self):
         from cafleet import broker
@@ -324,119 +342,17 @@ class TestGetSession:
         assert result is None
 
 
-class TestDeleteSession:
-    """broker.delete_session(session_id) → None. Raises click.UsageError on FK violation."""
-
-    def test_deletes_empty_session(self, broker_session):
-        """Can delete a session when no agent rows remain.
-
-        Since ``create_session`` now auto-seeds an Administrator, we first
-        purge the Administrator row directly via the ORM to get back to the
-        pre-seed "truly empty" state. ``deregister_agent`` wouldn't help
-        here because it sets status='deregistered' but keeps the row, and
-        ``delete_session``'s FK RESTRICT blocks on any row — active or not.
-        """
-        from cafleet import broker
-        from cafleet.db.models import Agent
-
-        created = _create_session()
-        sid = created["session_id"]
-
-        with broker_session() as s:
-            s.query(Agent).filter(Agent.session_id == sid).delete()
-            s.commit()
-
-        broker.delete_session(sid)
-
-        assert broker.get_session(sid) is None
-
-    def test_cascade_deletes_agents_when_present(self):
-        """delete_session removes all agents in the session before the
-        session row itself, so a task-free session with user agents
-        deletes successfully (regression check for design 0000025 §B —
-        the auto-seeded Administrator otherwise locks every session)."""
-        from cafleet import broker
-
-        created = _create_session()
-        sid = created["session_id"]
-        _register_agent(sid, name="blocker")
-
-        broker.delete_session(sid)
-
-        assert broker.get_session(sid) is None
-
-    def test_cascade_deletes_deregistered_agents(self):
-        """Deregistered agents are also cleared by the cascade delete."""
-        from cafleet import broker
-
-        created = _create_session()
-        sid = created["session_id"]
-        agent = _register_agent(sid, name="temp-agent")
-        broker.deregister_agent(agent["agent_id"])
-
-        broker.delete_session(sid)
-
-        assert broker.get_session(sid) is None
-
-    def test_raises_usage_error_when_tasks_reference_an_agent(self):
-        """``tasks.context_id`` ON DELETE RESTRICT blocks the cascade.
-
-        Once a unicast send creates a task whose ``context_id`` points at
-        the recipient agent, deleting the session must fail with a clear
-        ``click.UsageError`` (not a raw IntegrityError or
-        PendingRollbackError) and the session row must remain.
-        """
-        from cafleet import broker
-
-        created = _create_session()
-        sid = created["session_id"]
-        sender = _register_agent(sid, name="sender")
-        recipient = _register_agent(sid, name="recipient")
-        broker.send_message(sid, sender["agent_id"], recipient["agent_id"], "hello")
-
-        with pytest.raises(click.UsageError) as exc_info:
-            broker.delete_session(sid)
-        assert "still referenced by tasks" in str(exc_info.value)
-        assert broker.get_session(sid) is not None
-
-    def test_cascade_deletes_session_with_member_placements(self, broker_session):
-        """``agent_placements.agent_id`` is ON DELETE CASCADE, so deleting
-        the agent in ``delete_session`` should sweep its placement away
-        and then the session itself should be removed."""
-        from cafleet import broker
-        from cafleet.db.models import Agent, AgentPlacement
-
-        created = _create_session()
-        sid = created["session_id"]
-        director = _register_agent(sid, name="director-agent")
-        member = _register_agent(sid, name="member-agent")
-
-        with broker_session() as s:
-            s.add(
-                AgentPlacement(
-                    agent_id=member["agent_id"],
-                    director_agent_id=director["agent_id"],
-                    tmux_session="main",
-                    tmux_window_id="@1",
-                    tmux_pane_id="%1",
-                    coding_agent="claude",
-                    created_at=created["created_at"],
-                )
-            )
-            s.commit()
-
-        broker.delete_session(sid)
-
-        assert broker.get_session(sid) is None
-        with broker_session() as s:
-            remaining_agents = s.query(Agent).filter(Agent.session_id == sid).count()
-            remaining_placements = (
-                s.query(AgentPlacement)
-                .filter(AgentPlacement.agent_id == member["agent_id"])
-                .count()
-            )
-        assert remaining_agents == 0
-        assert remaining_placements == 0
+# NOTE: The former ``TestDeleteSession`` class is removed in this file.
+# Design 0000026 §CLI-surface / §delete_session replaces the old physical-
+# delete semantics with a SOFT delete (sets ``sessions.deleted_at``,
+# deregisters active agents, deletes placements, preserves tasks). Every
+# test that used to live here asserted the OLD contract (``get_session``
+# returning ``None`` after delete, UsageError on tasks-FK references, etc.)
+# which is no longer true. The NEW contract — including the Director +
+# Administrator both being counted in the ``deregistered_count`` return,
+# the soft-delete idempotency, tasks preservation, and the not-found error
+# path — is covered comprehensively by
+# ``tests/test_session_bootstrap.py::TestDeleteSessionCascade``.
 
 
 # ===========================================================================
@@ -648,7 +564,7 @@ class TestListAgents:
     """broker.list_agents(session_id) → list of active agents."""
 
     def test_returns_active_agents_only(self):
-        """list_agents returns all active agents including the auto-seeded Admin."""
+        """list_agents returns all active agents including the bootstrap pair."""
         from cafleet import broker
 
         session = _create_session()
@@ -660,25 +576,29 @@ class TestListAgents:
         broker.deregister_agent(dead["agent_id"])
 
         result = broker.list_agents(sid)
-        # 2 active user agents + 1 Administrator (dead-agent is filtered out).
-        assert len(result) == 3
+        # 2 active user agents + root Director + Administrator (design 0000026).
+        assert len(result) == 4
         names = {a["name"] for a in result}
         assert "active-1" in names
         assert "active-2" in names
+        assert "director" in names
         assert "Administrator" in names
         assert "dead-agent" not in names
 
-    def test_newly_created_session_lists_only_administrator(self):
-        """A freshly created session has a single active agent — the Administrator."""
+    def test_newly_created_session_lists_bootstrap_agents(self):
+        """A freshly created session has exactly the root Director + Administrator."""
         from cafleet import broker
 
         session = _create_session()
         result = broker.list_agents(session["session_id"])
-        assert len(result) == 1
-        assert result[0]["name"] == "Administrator"
+        assert len(result) == 2
+        names = {a["name"] for a in result}
+        assert names == {"director", "Administrator"}
 
     def test_agents_scoped_to_session(self):
-        """Agents from other sessions are not included (each session has its own Admin)."""
+        """Agents from other sessions are not included. Each session has its own
+        bootstrap pair (root Director + Administrator).
+        """
         from cafleet import broker
 
         session_a = _create_session()
@@ -688,10 +608,11 @@ class TestListAgents:
         _register_agent(session_b["session_id"], name="agent-b")
 
         result_a = broker.list_agents(session_a["session_id"])
-        # Administrator (for session A) + agent-a.
-        assert len(result_a) == 2
+        # Director (A) + Administrator (A) + agent-a.
+        assert len(result_a) == 3
         names_a = {a["name"] for a in result_a}
         assert "agent-a" in names_a
+        assert "director" in names_a
         assert "Administrator" in names_a
         assert "agent-b" not in names_a
 
@@ -748,7 +669,7 @@ class TestDeregisterAgent:
     """broker.deregister_agent(agent_id) → bool."""
 
     def test_returns_true_and_deregisters_active_agent(self):
-        """Deregistering a user agent leaves only the auto-seeded Administrator."""
+        """Deregistering a user agent leaves the bootstrap pair intact."""
         from cafleet import broker
 
         session = _create_session()
@@ -758,10 +679,10 @@ class TestDeregisterAgent:
         result = broker.deregister_agent(agent["agent_id"])
         assert result is True
 
-        # The retiring user agent is gone, but the Administrator remains.
-        agents = broker.list_agents(sid)
-        assert len(agents) == 1
-        assert agents[0]["name"] == "Administrator"
+        # The retiring user agent is gone; the bootstrap Director and
+        # Administrator remain (design 0000026).
+        names = {a["name"] for a in broker.list_agents(sid)}
+        assert names == {"director", "Administrator"}
 
     def test_sets_deregistered_status_and_timestamp(self):
         """After deregistering, status is 'deregistered' and deregistered_at is set."""
