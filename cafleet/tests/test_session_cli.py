@@ -30,15 +30,9 @@ def _mock_tmux_for_session_create(monkeypatch):
     so a blanket stub is applied here; the outside-tmux failure path is
     covered explicitly in ``test_cli_session_bootstrap.py``.
     """
-    from cafleet import cli as cli_mod
-
     ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
     monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
     monkeypatch.setattr("cafleet.tmux.director_context", lambda: ctx)
-    if hasattr(cli_mod, "ensure_tmux_available"):
-        monkeypatch.setattr(cli_mod, "ensure_tmux_available", lambda: None)
-    if hasattr(cli_mod, "director_context"):
-        monkeypatch.setattr(cli_mod, "director_context", lambda: ctx)
 
 
 def _init_db(runner: CliRunner) -> None:

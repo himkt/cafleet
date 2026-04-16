@@ -3,12 +3,10 @@
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import cast
 
 import click
 from sqlalchemy import and_, delete, exists, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.engine import CursorResult
 
 from cafleet.db.engine import get_sync_sessionmaker
 from cafleet.db.models import Agent, AgentPlacement, Session, Task
@@ -276,32 +274,28 @@ def delete_session(session_id: str) -> dict:
             # would print a Usage: banner + exit 2, wrong for a runtime miss.
             raise click.ClickException(f"session '{session_id}' not found.")
 
-        soft_delete = cast(
-            CursorResult,
-            session.execute(
-                update(Session)
-                .where(
-                    Session.session_id == session_id,
-                    Session.deleted_at.is_(None),
-                )
-                .values(deleted_at=now)
-            ),
-        )
-        if soft_delete.rowcount == 0:
+        soft_deleted = session.execute(
+            update(Session)
+            .where(
+                Session.session_id == session_id,
+                Session.deleted_at.is_(None),
+            )
+            .values(deleted_at=now)
+            .returning(Session.session_id)
+        ).all()
+        if not soft_deleted:
             return {"deregistered_count": 0}
 
-        deregister = cast(
-            CursorResult,
-            session.execute(
-                update(Agent)
-                .where(
-                    Agent.session_id == session_id,
-                    Agent.status == "active",
-                )
-                .values(status="deregistered", deregistered_at=now)
-            ),
-        )
-        deregistered_count = deregister.rowcount
+        deregistered = session.execute(
+            update(Agent)
+            .where(
+                Agent.session_id == session_id,
+                Agent.status == "active",
+            )
+            .values(status="deregistered", deregistered_at=now)
+            .returning(Agent.agent_id)
+        ).all()
+        deregistered_count = len(deregistered)
         agents_in_session = select(Agent.agent_id).where(Agent.session_id == session_id)
         session.execute(
             delete(AgentPlacement).where(AgentPlacement.agent_id.in_(agents_in_session))
@@ -479,40 +473,36 @@ def deregister_agent(agent_id: str) -> bool:
         ).scalar_one_or_none()
         if card_json is not None and _is_administrator_card(card_json):
             raise AdministratorProtectedError("Administrator cannot be deregistered")
-        result = cast(
-            CursorResult,
-            session.execute(
-                update(Agent)
-                .where(
-                    Agent.agent_id == agent_id,
-                    Agent.status == "active",
-                )
-                .values(
-                    status="deregistered",
-                    deregistered_at=_now_iso(),
-                )
-            ),
-        )
-        if result.rowcount > 0:
+        deregistered = session.execute(
+            update(Agent)
+            .where(
+                Agent.agent_id == agent_id,
+                Agent.status == "active",
+            )
+            .values(
+                status="deregistered",
+                deregistered_at=_now_iso(),
+            )
+            .returning(Agent.agent_id)
+        ).all()
+        if deregistered:
             session.execute(
                 delete(AgentPlacement).where(AgentPlacement.agent_id == agent_id)
             )
-    return result.rowcount > 0
+    return bool(deregistered)
 
 
 def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
     """Patch the pane id of an existing placement and return the new row."""
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        result = cast(
-            CursorResult,
-            session.execute(
-                update(AgentPlacement)
-                .where(AgentPlacement.agent_id == agent_id)
-                .values(tmux_pane_id=pane_id)
-            ),
-        )
-        if result.rowcount == 0:
+        updated = session.execute(
+            update(AgentPlacement)
+            .where(AgentPlacement.agent_id == agent_id)
+            .values(tmux_pane_id=pane_id)
+            .returning(AgentPlacement.agent_id)
+        ).first()
+        if updated is None:
             return None
         row = session.execute(
             select(AgentPlacement).where(AgentPlacement.agent_id == agent_id)

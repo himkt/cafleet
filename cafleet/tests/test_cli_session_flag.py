@@ -25,15 +25,9 @@ def _reset_engine_singletons():
 @pytest.fixture(autouse=True)
 def _mock_tmux_for_session_create(monkeypatch):
     """Let CliRunner-driven ``session create`` succeed without a real tmux pane."""
-    from cafleet import cli as cli_mod
-
     ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
     monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
     monkeypatch.setattr("cafleet.tmux.director_context", lambda: ctx)
-    if hasattr(cli_mod, "ensure_tmux_available"):
-        monkeypatch.setattr(cli_mod, "ensure_tmux_available", lambda: None)
-    if hasattr(cli_mod, "director_context"):
-        monkeypatch.setattr(cli_mod, "director_context", lambda: ctx)
 
 
 @pytest.fixture
