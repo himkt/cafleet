@@ -241,9 +241,10 @@ def test_db_init_legacy_errors(tmp_path, monkeypatch):
     runner = CliRunner()
     result = runner.invoke(cli, ["db", "init"])
 
-    assert result.exit_code != 0, (
-        f"db init should error on a legacy schema (tables but no "
-        f"alembic_version), got exit_code={result.exit_code}.\n"
+    assert result.exit_code == 1, (
+        f"db init should error with exit 1 on a legacy schema (tables but "
+        f"no alembic_version) — cli.py uses sys.exit(1) in this branch. "
+        f"got exit_code={result.exit_code}.\n"
         f"output: {result.output}"
     )
     assert "alembic stamp head" in result.output, (
@@ -310,8 +311,9 @@ def test_db_init_ahead_errors(tmp_path, monkeypatch):
     runner = CliRunner()
     result = runner.invoke(cli, ["db", "init"])
 
-    assert result.exit_code != 0, (
-        f"db init should refuse an ahead-of-head DB, "
+    assert result.exit_code == 1, (
+        f"db init should refuse an ahead-of-head DB with exit 1 "
+        f"(cli.py uses sys.exit(1) in this branch per design doc state #5). "
         f"got exit_code={result.exit_code}.\n"
         f"output: {result.output}"
     )

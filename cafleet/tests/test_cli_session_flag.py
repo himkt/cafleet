@@ -316,9 +316,10 @@ class TestCafleetEnvSubcommandRemoved:
 
     def test_env_subcommand_is_gone(self, db_runner):
         result = db_runner.invoke(cli, ["env"])
-        assert result.exit_code != 0, (
-            f"'cafleet env' must no longer exist. "
-            f"exit_code={result.exit_code}, output: {result.output}"
+        assert result.exit_code == 2, (
+            f"'cafleet env' must be rejected by Click with exit 2 (unknown "
+            f"command is a UsageError). exit_code={result.exit_code}, "
+            f"output: {result.output}"
         )
 
     def test_env_subcommand_reports_no_such_command(self, db_runner):
@@ -444,9 +445,11 @@ class TestDeregisterAdministratorCliGuard:
             cli,
             ["--session-id", session_id, "deregister", "--agent-id", admin_id],
         )
-        assert result.exit_code != 0, (
-            f"cafleet deregister on an Administrator must exit non-zero. "
-            f"exit_code={result.exit_code}, output: {result.output}"
+        assert result.exit_code == 1, (
+            f"cafleet deregister on an Administrator must exit 1 "
+            f"(AdministratorProtectedError → ctx.exit(1), per docs/spec/"
+            f"cli-options.md error table). exit_code={result.exit_code}, "
+            f"output: {result.output}"
         )
 
     def test_cli_deregister_admin_message_is_user_friendly(self, tmp_path, monkeypatch):
@@ -500,9 +503,11 @@ class TestDeregisterAdministratorCliGuard:
             cli,
             ["--session-id", session_id, "deregister", "--agent-id", bogus_agent_id],
         )
-        assert result.exit_code != 0, (
-            f"deregister of an unknown agent must exit non-zero. "
-            f"exit_code={result.exit_code}, output: {result.output}"
+        assert result.exit_code == 1, (
+            f"deregister of an unknown agent must exit 1 (the CLI falls "
+            f"through to 'not deregistered' → ctx.exit(1), not a Click "
+            f"usage error). exit_code={result.exit_code}, "
+            f"output: {result.output}"
         )
         assert "not found or already deregistered" in (result.output or ""), (
             f"error output must mention the missing/deregistered state. "

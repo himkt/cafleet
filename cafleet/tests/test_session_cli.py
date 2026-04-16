@@ -847,5 +847,10 @@ class TestSessionGroupStructure:
         runner = CliRunner()
         result = runner.invoke(cli, ["db", "session", "create"])
 
-        # Should fail — "session" is not a subcommand of "db"
-        assert result.exit_code != 0, "session should be a sibling of db, not a child"
+        # Should fail with exit 2 — "session" is not a subcommand of "db",
+        # so Click emits a UsageError (exit 2), not a runtime error (exit 1).
+        assert result.exit_code == 2, (
+            f"`db session` must be rejected by Click with exit 2 (unknown "
+            f"subcommand is a UsageError). exit_code={result.exit_code}, "
+            f"output: {result.output!r}"
+        )

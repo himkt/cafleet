@@ -153,8 +153,9 @@ class TestServerCommandFlagParsing:
         """--port foo → click's built-in int validation exits 2."""
         runner = CliRunner()
         result = runner.invoke(cli, ["server", "--port", "not-a-port"])
-        assert result.exit_code != 0, (
-            f"non-integer --port must be rejected by click. "
+        assert result.exit_code == 2, (
+            f"non-integer --port must be rejected by click's int validator "
+            f"with exit 2 (UsageError), not a runtime error. "
             f"exit_code={result.exit_code}, output: {result.output}"
         )
 
