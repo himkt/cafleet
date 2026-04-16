@@ -1,17 +1,8 @@
-"""Tests for cafleet.tmux module.
-
-All tmux interaction is mocked via monkeypatch.setattr — no test requires
-a real tmux server.
-"""
+"""Tests for ``cafleet.tmux`` (all subprocesses mocked)."""
 
 import pytest
 
 from cafleet import tmux
-
-
-# ---------------------------------------------------------------------------
-# ensure_tmux_available
-# ---------------------------------------------------------------------------
 
 
 class TestEnsureTmuxAvailable:
@@ -28,11 +19,6 @@ class TestEnsureTmuxAvailable:
         monkeypatch.delenv("TMUX", raising=False)
         with pytest.raises(tmux.TmuxError, match="must be run inside a tmux session"):
             tmux.ensure_tmux_available()
-
-
-# ---------------------------------------------------------------------------
-# director_context
-# ---------------------------------------------------------------------------
 
 
 class TestDirectorContext:
@@ -62,11 +48,6 @@ class TestDirectorContext:
         monkeypatch.delenv("TMUX_PANE", raising=False)
         with pytest.raises(tmux.TmuxError, match="TMUX_PANE is not set"):
             tmux.director_context()
-
-
-# ---------------------------------------------------------------------------
-# split_window
-# ---------------------------------------------------------------------------
 
 
 class TestSplitWindow:
@@ -211,11 +192,6 @@ class TestSplitWindow:
         assert "-e" not in captured_args
 
 
-# ---------------------------------------------------------------------------
-# send_exit
-# ---------------------------------------------------------------------------
-
-
 class TestSendExit:
     def test_raises_tmuxerror_on_failure(self, monkeypatch):
         """Raises TmuxError when tmux send-keys fails (non-pane-gone error)."""
@@ -251,11 +227,6 @@ class TestSendExit:
             tmux.send_exit(target_pane_id="%7", ignore_missing=True)
 
 
-# ---------------------------------------------------------------------------
-# capture_pane
-# ---------------------------------------------------------------------------
-
-
 class TestCapturPane:
     def test_invokes_correct_args(self, monkeypatch):
         """Verifies argv is exactly the expected tmux capture-pane command."""
@@ -289,11 +260,6 @@ class TestCapturPane:
             tmux.capture_pane(target_pane_id="%7", lines=0)
         with pytest.raises(tmux.TmuxError, match="lines must be positive, got -1"):
             tmux.capture_pane(target_pane_id="%7", lines=-1)
-
-
-# ---------------------------------------------------------------------------
-# send_poll_trigger
-# ---------------------------------------------------------------------------
 
 
 class TestSendPollTrigger:
