@@ -27,7 +27,6 @@ from sqlalchemy.engine.url import make_url
 from cafleet import broker, output, tmux
 from cafleet.coding_agent import CodingAgentConfig, get_coding_agent
 from cafleet.config import settings
-from cafleet.tmux import TmuxError
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +191,7 @@ def session_create(ctx: click.Context, label: str | None, as_json: bool) -> None
     try:
         tmux.ensure_tmux_available()
         director_ctx = tmux.director_context()
-    except TmuxError:
+    except tmux.TmuxError:
         click.echo(
             "Error: cafleet session create must be run inside a tmux session",
             err=True,
