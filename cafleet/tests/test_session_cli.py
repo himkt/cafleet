@@ -339,7 +339,7 @@ class TestSessionCreate:
         assert len(rows) == 1, (
             f"expected one agents row matching administrator_agent_id {admin_id}"
         )
-        row_agent_id, row_session_id, row_name, row_status, row_card_json = rows[0]
+        _row_agent_id, row_session_id, row_name, row_status, row_card_json = rows[0]
         assert row_session_id == sid
         assert row_name == "Administrator"
         assert row_status == "active"

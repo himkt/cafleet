@@ -603,7 +603,7 @@ class TestPollTasks:
         """broadcast_summary tasks do not appear in poll results."""
         from cafleet import broker
 
-        sid, sender, b_id, _ = _setup_three_agents()
+        sid, sender, _b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
         # Sender's poll should not show the broadcast_summary
