@@ -117,6 +117,14 @@ def create_session(
         "description": _DIRECTOR_DESCRIPTION,
         "skills": [],
     }
+    director_placement = {
+        "director_agent_id": None,
+        "tmux_session": director_context.session,
+        "tmux_window_id": director_context.window_id,
+        "tmux_pane_id": director_context.pane_id,
+        "coding_agent": _ROOT_DIRECTOR_CODING_AGENT,
+        "created_at": created_at,
+    }
 
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
@@ -143,17 +151,7 @@ def create_session(
             )
         )
         session.flush()
-        session.add(
-            AgentPlacement(
-                agent_id=director_agent_id,
-                director_agent_id=None,
-                tmux_session=director_context.session,
-                tmux_window_id=director_context.window_id,
-                tmux_pane_id=director_context.pane_id,
-                coding_agent=_ROOT_DIRECTOR_CODING_AGENT,
-                created_at=created_at,
-            )
-        )
+        session.add(AgentPlacement(agent_id=director_agent_id, **director_placement))
         session.flush()
         session.execute(
             update(Session)
@@ -183,14 +181,7 @@ def create_session(
             "name": _DIRECTOR_NAME,
             "description": _DIRECTOR_DESCRIPTION,
             "registered_at": created_at,
-            "placement": {
-                "director_agent_id": None,
-                "tmux_session": director_context.session,
-                "tmux_window_id": director_context.window_id,
-                "tmux_pane_id": director_context.pane_id,
-                "coding_agent": _ROOT_DIRECTOR_CODING_AGENT,
-                "created_at": created_at,
-            },
+            "placement": director_placement,
         },
     }
 
