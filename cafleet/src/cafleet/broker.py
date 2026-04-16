@@ -85,6 +85,8 @@ def _try_notify_recipient(
     ).first()
     if row is None or row[0] is None:
         return False
+    # Local import so tests that monkeypatch ``cafleet.tmux.send_poll_trigger``
+    # get picked up on every call rather than bound once at broker import.
     from cafleet.tmux import send_poll_trigger
 
     return send_poll_trigger(
