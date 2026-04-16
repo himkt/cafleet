@@ -7,7 +7,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
+from cafleet import broker
 from cafleet.db.models import Base
+from cafleet.tmux import DirectorContext
 
 
 @pytest.fixture
@@ -19,8 +21,6 @@ def sync_sessionmaker():
 
 @pytest.fixture
 def _patch_broker(sync_sessionmaker, monkeypatch):
-    from cafleet import broker
-
     monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
 
 
@@ -30,9 +30,6 @@ def broker_session(sync_sessionmaker, _patch_broker):
 
 
 def _create_session(label: str | None = None) -> dict:
-    from cafleet import broker
-    from cafleet.tmux import DirectorContext
-
     return broker.create_session(
         label=label,
         director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
@@ -74,16 +71,12 @@ class TestSendMessage:
     """broker.send_message(session_id, agent_id, to, text) → {"task": <dict>}."""
 
     def test_returns_dict_with_task_key(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result = broker.send_message(sid, sender, recipient, "Hello")
         assert isinstance(result, dict)
         assert "task" in result
 
     def test_task_has_camel_case_keys(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result = broker.send_message(sid, sender, recipient, "Hello")
         task = result["task"]
@@ -94,29 +87,21 @@ class TestSendMessage:
         assert "metadata" in task
 
     def test_task_id_is_valid_uuid(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result = broker.send_message(sid, sender, recipient, "Hello")
         uuid.UUID(result["task"]["id"])
 
     def test_context_id_is_recipient(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result = broker.send_message(sid, sender, recipient, "Hello")
         assert result["task"]["contextId"] == recipient
 
     def test_status_state_is_input_required(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result = broker.send_message(sid, sender, recipient, "Hello")
         assert result["task"]["status"]["state"] == "input_required"
 
     def test_status_has_timestamp(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result = broker.send_message(sid, sender, recipient, "Hello")
         ts = result["task"]["status"]["timestamp"]
@@ -124,29 +109,21 @@ class TestSendMessage:
         assert "T" in ts
 
     def test_metadata_from_agent_id(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result = broker.send_message(sid, sender, recipient, "Hello")
         assert result["task"]["metadata"]["fromAgentId"] == sender
 
     def test_metadata_to_agent_id(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result = broker.send_message(sid, sender, recipient, "Hello")
         assert result["task"]["metadata"]["toAgentId"] == recipient
 
     def test_metadata_type_is_unicast(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result = broker.send_message(sid, sender, recipient, "Hello")
         assert result["task"]["metadata"]["type"] == "unicast"
 
     def test_artifact_contains_message_text(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result = broker.send_message(sid, sender, recipient, "Did the API change?")
         task = result["task"]
@@ -159,31 +136,23 @@ class TestSendMessage:
         assert "Did the API change?" in texts
 
     def test_validates_destination_is_valid_uuid(self):
-        from cafleet import broker
-
         sid, sender, _ = _setup_two_agents()
         with pytest.raises(Exception):
             broker.send_message(sid, sender, "not-a-uuid", "Hello")
 
     def test_validates_destination_agent_exists(self):
-        from cafleet import broker
-
         sid, sender, _ = _setup_two_agents()
         fake_agent = str(uuid.uuid4())
         with pytest.raises(Exception):
             broker.send_message(sid, sender, fake_agent, "Hello")
 
     def test_validates_destination_agent_is_active(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.deregister_agent(recipient)
         with pytest.raises(Exception):
             broker.send_message(sid, sender, recipient, "Hello")
 
     def test_validates_destination_in_same_session(self):
-        from cafleet import broker
-
         session_a = _create_session()
         session_b = _create_session()
         sender = _register_agent(session_a["session_id"], name="sender")
@@ -198,8 +167,6 @@ class TestSendMessage:
 
     def test_task_persisted_to_db(self):
         """Sent task can be retrieved via poll_tasks."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "persisted?")
 
@@ -218,8 +185,6 @@ class TestBroadcastMessage:
     """broker.broadcast_message(session_id, agent_id, text) → [{"task": <summary>}]."""
 
     def test_returns_list_with_summary(self):
-        from cafleet import broker
-
         sid, sender, _, _ = _setup_three_agents()
         result = broker.broadcast_message(sid, sender, "Attention all")
         assert isinstance(result, list)
@@ -227,16 +192,12 @@ class TestBroadcastMessage:
         assert "task" in result[0]
 
     def test_summary_type_is_broadcast_summary(self):
-        from cafleet import broker
-
         sid, sender, _, _ = _setup_three_agents()
         result = broker.broadcast_message(sid, sender, "Attention all")
         summary = result[0]["task"]
         assert summary["metadata"]["type"] == "broadcast_summary"
 
     def test_summary_context_id_is_sender(self):
-        from cafleet import broker
-
         sid, sender, _, _ = _setup_three_agents()
         result = broker.broadcast_message(sid, sender, "Attention all")
         summary = result[0]["task"]
@@ -244,8 +205,6 @@ class TestBroadcastMessage:
 
     def test_creates_delivery_tasks_for_each_recipient(self):
         """Each non-sender agent gets a delivery task."""
-        from cafleet import broker
-
         sid, sender, b_id, c_id = _setup_three_agents()
         broker.broadcast_message(sid, sender, "Hello everyone")
 
@@ -257,8 +216,6 @@ class TestBroadcastMessage:
 
     def test_delivery_tasks_have_origin_task_id(self):
         """Delivery tasks reference the summary via originTaskId."""
-        from cafleet import broker
-
         sid, sender, b_id, _ = _setup_three_agents()
         result = broker.broadcast_message(sid, sender, "Hello")
         summary_id = result[0]["task"]["id"]
@@ -270,8 +227,6 @@ class TestBroadcastMessage:
 
     def test_delivery_tasks_type_is_unicast(self):
         """Individual delivery tasks have type='unicast'."""
-        from cafleet import broker
-
         sid, sender, b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "Hello")
 
@@ -281,8 +236,6 @@ class TestBroadcastMessage:
 
     def test_excludes_sender_from_recipients(self):
         """Sender does not receive a delivery task in their inbox."""
-        from cafleet import broker
-
         sid, sender, _, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "Hello")
 
@@ -296,8 +249,6 @@ class TestBroadcastMessage:
 
     def test_broadcast_with_no_other_agents(self):
         """Broadcast when sender is the only agent: no delivery tasks, still returns summary."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         lone_agent = _register_agent(sid, name="lonely")
@@ -310,8 +261,6 @@ class TestBroadcastMessage:
         assert summary["metadata"]["type"] == "broadcast_summary"
 
     def test_delivery_task_contains_message_text(self):
-        from cafleet import broker
-
         sid, sender, b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "Important update")
 
@@ -349,8 +298,6 @@ class TestBroadcastAdministratorExclusion:
 
     def test_broadcast_from_user_excludes_administrator_from_recipients(self):
         """A user-agent broadcast does not create a delivery task for the Admin."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
@@ -389,8 +336,6 @@ class TestBroadcastAdministratorExclusion:
         After sender-self and Administrator exclusion, recipients are
         {user-a, user-b, director} = 3.
         """
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
@@ -432,8 +377,6 @@ class TestBroadcastAdministratorExclusion:
         """Admin-origin broadcast reaches every non-Admin active agent,
         including the bootstrap root Director (design 0000026).
         """
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
@@ -475,8 +418,6 @@ class TestBroadcastAdministratorExclusion:
         Administrator-exclusion filter, the only remaining recipient is the
         root Director seeded by design 0000026.
         """
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
@@ -500,16 +441,12 @@ class TestPollTasks:
     """broker.poll_tasks(agent_id, since, page_size, status) → list of task dicts."""
 
     def test_returns_empty_list_when_no_tasks(self):
-        from cafleet import broker
-
         session = _create_session()
         agent = _register_agent(session["session_id"], name="idle")
         result = broker.poll_tasks(agent["agent_id"])
         assert result == []
 
     def test_returns_tasks_for_agent(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "msg1")
         broker.send_message(sid, sender, recipient, "msg2")
@@ -518,8 +455,6 @@ class TestPollTasks:
         assert len(result) == 2
 
     def test_returns_camel_case_task_dicts(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "Hello")
 
@@ -533,8 +468,6 @@ class TestPollTasks:
 
     def test_ordered_by_status_timestamp_desc(self):
         """Most recent tasks first."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "first")
         broker.send_message(sid, sender, recipient, "second")
@@ -547,8 +480,6 @@ class TestPollTasks:
 
     def test_filters_out_broadcast_summary(self):
         """broadcast_summary tasks do not appear in poll results."""
-        from cafleet import broker
-
         sid, sender, _b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
@@ -563,8 +494,6 @@ class TestPollTasks:
 
     def test_only_returns_tasks_for_specified_agent(self):
         """Tasks for other agents are not returned."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "for-recipient")
 
@@ -574,8 +503,6 @@ class TestPollTasks:
 
     def test_status_filter(self):
         """Filter tasks by status state."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result1 = broker.send_message(sid, sender, recipient, "msg1")
         broker.send_message(sid, sender, recipient, "msg2")
@@ -592,8 +519,6 @@ class TestPollTasks:
 
     def test_page_size_limits_results(self):
         """page_size limits the number of returned tasks."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "msg1")
         broker.send_message(sid, sender, recipient, "msg2")
@@ -604,8 +529,6 @@ class TestPollTasks:
 
     def test_since_filter(self):
         """since filters tasks by timestamp."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         result1 = broker.send_message(sid, sender, recipient, "early")
         ts = result1["task"]["status"]["timestamp"]
@@ -622,8 +545,6 @@ class TestAckTask:
     """broker.ack_task(agent_id, task_id) → {"task": <updated dict>}."""
 
     def test_returns_dict_with_task_key(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Please ack")
         task_id = sent["task"]["id"]
@@ -633,8 +554,6 @@ class TestAckTask:
         assert "task" in result
 
     def test_transitions_to_completed(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Ack me")
         task_id = sent["task"]["id"]
@@ -643,8 +562,6 @@ class TestAckTask:
         assert result["task"]["status"]["state"] == "completed"
 
     def test_updates_timestamp(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Ack me")
         task_id = sent["task"]["id"]
@@ -655,8 +572,6 @@ class TestAckTask:
 
     def test_verifies_context_id_matches_agent(self):
         """Only the recipient (context_id) can ACK."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Ack me")
         task_id = sent["task"]["id"]
@@ -667,8 +582,6 @@ class TestAckTask:
 
     def test_verifies_state_is_input_required(self):
         """Cannot ACK a task that is already completed."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Ack me")
         task_id = sent["task"]["id"]
@@ -680,8 +593,6 @@ class TestAckTask:
 
     def test_cannot_ack_canceled_task(self):
         """Cannot ACK a task that has been canceled."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Cancel me")
         task_id = sent["task"]["id"]
@@ -692,8 +603,6 @@ class TestAckTask:
 
     def test_ack_persists_state(self):
         """After ACK, polling shows the task as completed."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Ack me")
         task_id = sent["task"]["id"]
@@ -710,8 +619,6 @@ class TestCancelTask:
     """broker.cancel_task(agent_id, task_id) → {"task": <updated dict>}."""
 
     def test_returns_dict_with_task_key(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Cancel me")
         task_id = sent["task"]["id"]
@@ -721,8 +628,6 @@ class TestCancelTask:
         assert "task" in result
 
     def test_transitions_to_canceled(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Cancel me")
         task_id = sent["task"]["id"]
@@ -731,8 +636,6 @@ class TestCancelTask:
         assert result["task"]["status"]["state"] == "canceled"
 
     def test_updates_timestamp(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Cancel me")
         task_id = sent["task"]["id"]
@@ -743,8 +646,6 @@ class TestCancelTask:
 
     def test_verifies_from_agent_id_matches(self):
         """Only the sender (metadata.fromAgentId) can cancel."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Cancel me")
         task_id = sent["task"]["id"]
@@ -755,8 +656,6 @@ class TestCancelTask:
 
     def test_verifies_state_is_input_required(self):
         """Cannot cancel a task that is already completed."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Ack then cancel")
         task_id = sent["task"]["id"]
@@ -767,8 +666,6 @@ class TestCancelTask:
 
     def test_cannot_cancel_already_canceled(self):
         """Cannot cancel a task that is already canceled."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Cancel me twice")
         task_id = sent["task"]["id"]
@@ -779,8 +676,6 @@ class TestCancelTask:
 
     def test_cancel_persists_state(self):
         """After cancel, polling shows the task as canceled."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Cancel me")
         task_id = sent["task"]["id"]
@@ -797,8 +692,6 @@ class TestGetTask:
     """broker.get_task(session_id, task_id) → {"task": <dict>}."""
 
     def test_returns_dict_with_task_key(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Get me")
         task_id = sent["task"]["id"]
@@ -808,8 +701,6 @@ class TestGetTask:
         assert "task" in result
 
     def test_returns_correct_task(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Specific task")
         task_id = sent["task"]["id"]
@@ -818,8 +709,6 @@ class TestGetTask:
         assert result["task"]["id"] == task_id
 
     def test_task_has_full_structure(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "Full structure")
         task_id = sent["task"]["id"]
@@ -834,8 +723,6 @@ class TestGetTask:
 
     def test_verifies_agent_belongs_to_session(self):
         """get_task verifies fromAgentId or toAgentId belongs to the given session."""
-        from cafleet import broker
-
         session_a = _create_session()
         session_b = _create_session()
         sid_a = session_a["session_id"]
@@ -858,16 +745,12 @@ class TestGetTask:
             broker.get_task(sid_b, task_id)
 
     def test_nonexistent_task_raises(self):
-        from cafleet import broker
-
         session = _create_session()
         with pytest.raises(Exception):
             broker.get_task(session["session_id"], str(uuid.uuid4()))
 
     def test_sender_can_get_task(self):
         """Sender (fromAgentId) can retrieve the task."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "sender gets")
         task_id = sent["task"]["id"]
@@ -877,8 +760,6 @@ class TestGetTask:
 
     def test_recipient_can_get_task(self):
         """Recipient (toAgentId/contextId) can retrieve the task."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "recipient gets")
         task_id = sent["task"]["id"]

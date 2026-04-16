@@ -7,7 +7,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
+from cafleet import broker
 from cafleet.db.models import Base
+from cafleet.tmux import DirectorContext
 
 
 @pytest.fixture
@@ -19,8 +21,6 @@ def sync_sessionmaker():
 
 @pytest.fixture
 def _patch_broker(sync_sessionmaker, monkeypatch):
-    from cafleet import broker
-
     monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
 
 
@@ -30,9 +30,6 @@ def broker_session(sync_sessionmaker, _patch_broker):
 
 
 def _create_session(label: str | None = None) -> dict:
-    from cafleet import broker
-    from cafleet.tmux import DirectorContext
-
     return broker.create_session(
         label=label,
         director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
@@ -44,8 +41,6 @@ def _register_agent(
     name: str = "test-agent",
     description: str = "A test agent",
 ) -> dict:
-    from cafleet import broker
-
     return broker.register_agent(
         session_id=session_id,
         name=name,
@@ -75,8 +70,6 @@ class TestListSessionAgents:
 
     def test_returns_active_agents(self):
         """Returned list includes user agents + bootstrap pair (design 0000026)."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         _register_agent(sid, name="active-1")
@@ -92,8 +85,6 @@ class TestListSessionAgents:
         assert "Administrator" in names
 
     def test_active_agents_have_active_status(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         _register_agent(sid, name="agent")
@@ -103,8 +94,6 @@ class TestListSessionAgents:
 
     def test_includes_deregistered_agents_with_tasks(self):
         """Deregistered agents that have tasks should still appear."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
 
         # Send a message to recipient, then deregister recipient
@@ -120,8 +109,6 @@ class TestListSessionAgents:
 
     def test_excludes_deregistered_agents_without_tasks(self):
         """Deregistered agents with no tasks should NOT appear."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         agent = _register_agent(sid, name="ghost")
@@ -133,8 +120,6 @@ class TestListSessionAgents:
 
     def test_newly_created_session_returns_bootstrap_pair(self):
         """A freshly created session has exactly the root Director + Administrator."""
-        from cafleet import broker
-
         session = _create_session()
         result = broker.list_session_agents(session["session_id"])
         # Design 0000026: bootstrap seeds both the root Director and the
@@ -144,8 +129,6 @@ class TestListSessionAgents:
         assert names == {"director", "Administrator"}
 
     def test_result_contains_required_keys(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         _register_agent(sid, name="keyed")
@@ -162,8 +145,6 @@ class TestListSessionAgents:
         """Agents from other sessions are not included. Each session has its own
         bootstrap pair (root Director + Administrator).
         """
-        from cafleet import broker
-
         session_a = _create_session()
         session_b = _create_session()
         _register_agent(session_a["session_id"], name="in-a")
@@ -189,8 +170,6 @@ class TestListSessionAgentsKind:
     """
 
     def test_entries_include_kind_field(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         _register_agent(sid, name="user-a")
@@ -265,8 +244,6 @@ class TestGetAgentKind:
         assert result["kind"] == ADMINISTRATOR_KIND
 
     def test_get_agent_for_user_returns_user_kind(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         user = _register_agent(sid, name="regular")
@@ -281,8 +258,6 @@ class TestListInbox:
     """broker.list_inbox(agent_id) → inbox tasks as raw dicts."""
 
     def test_returns_inbox_tasks(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "msg1")
         broker.send_message(sid, sender, recipient, "msg2")
@@ -291,16 +266,12 @@ class TestListInbox:
         assert len(result) == 2
 
     def test_returns_empty_when_no_tasks(self):
-        from cafleet import broker
-
         session = _create_session()
         agent = _register_agent(session["session_id"], name="idle")
         result = broker.list_inbox(agent["agent_id"])
         assert result == []
 
     def test_ordered_by_status_timestamp_desc(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "first")
         broker.send_message(sid, sender, recipient, "second")
@@ -313,8 +284,6 @@ class TestListInbox:
 
     def test_filters_out_broadcast_summary(self):
         """broadcast_summary tasks do not appear in inbox."""
-        from cafleet import broker
-
         sid, sender, b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
@@ -325,8 +294,6 @@ class TestListInbox:
 
     def test_only_returns_tasks_where_context_id_matches(self):
         """Only tasks addressed to the agent appear."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "for-recipient")
 
@@ -335,8 +302,6 @@ class TestListInbox:
 
     def test_returns_raw_dicts(self):
         """list_inbox returns raw dict rows, not wrapped in {"task": ...}."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "raw")
 
@@ -353,8 +318,6 @@ class TestListSent:
     """broker.list_sent(agent_id) → sent tasks as raw dicts."""
 
     def test_returns_sent_tasks(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "sent1")
         broker.send_message(sid, sender, recipient, "sent2")
@@ -363,16 +326,12 @@ class TestListSent:
         assert len(result) == 2
 
     def test_returns_empty_when_no_sent_tasks(self):
-        from cafleet import broker
-
         session = _create_session()
         agent = _register_agent(session["session_id"], name="quiet")
         result = broker.list_sent(agent["agent_id"])
         assert result == []
 
     def test_ordered_by_status_timestamp_desc(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "first")
         broker.send_message(sid, sender, recipient, "second")
@@ -385,8 +344,6 @@ class TestListSent:
 
     def test_filters_out_broadcast_summary(self):
         """broadcast_summary tasks do not appear in sent list."""
-        from cafleet import broker
-
         sid, sender, b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
@@ -396,8 +353,6 @@ class TestListSent:
 
     def test_only_returns_tasks_from_agent(self):
         """Only tasks sent by the agent appear."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "from-sender")
 
@@ -405,8 +360,6 @@ class TestListSent:
         assert len(recipient_sent) == 0
 
     def test_returns_raw_dicts(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "raw")
 
@@ -421,8 +374,6 @@ class TestListTimeline:
     """broker.list_timeline(session_id, limit=200) → session-wide timeline."""
 
     def test_returns_timeline_entries(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "timeline entry")
 
@@ -430,15 +381,11 @@ class TestListTimeline:
         assert len(result) >= 1
 
     def test_returns_empty_for_no_tasks(self):
-        from cafleet import broker
-
         session = _create_session()
         result = broker.list_timeline(session["session_id"])
         assert result == []
 
     def test_entry_has_required_keys(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "structured")
 
@@ -449,8 +396,6 @@ class TestListTimeline:
         assert "origin_task_id" in entry or "created_at" in entry
 
     def test_ordered_by_status_timestamp_desc(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "first")
         broker.send_message(sid, sender, recipient, "second")
@@ -466,8 +411,6 @@ class TestListTimeline:
 
     def test_filters_broadcast_summary(self):
         """broadcast_summary tasks do not appear in timeline."""
-        from cafleet import broker
-
         sid, sender, b_id, c_id = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
@@ -479,8 +422,6 @@ class TestListTimeline:
 
     def test_scoped_to_session(self):
         """Only tasks from agents in the given session appear."""
-        from cafleet import broker
-
         session_a = _create_session()
         session_b = _create_session()
         sid_a = session_a["session_id"]
@@ -501,8 +442,6 @@ class TestListTimeline:
 
     def test_limit_parameter(self):
         """limit caps the number of returned entries."""
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "msg1")
         broker.send_message(sid, sender, recipient, "msg2")
@@ -513,8 +452,6 @@ class TestListTimeline:
 
     def test_includes_broadcast_delivery_tasks(self):
         """Individual broadcast delivery tasks (type=unicast) appear in timeline."""
-        from cafleet import broker
-
         sid, sender, b_id, c_id = _setup_three_agents()
         broker.broadcast_message(sid, sender, "Hello all")
 
@@ -527,8 +464,6 @@ class TestGetAgentNames:
     """broker.get_agent_names(agent_ids) → {agent_id: name}."""
 
     def test_returns_name_mapping(self):
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         a1 = _register_agent(sid, name="alpha")
@@ -540,14 +475,10 @@ class TestGetAgentNames:
         assert result[a2["agent_id"]] == "beta"
 
     def test_empty_input_returns_empty_dict(self):
-        from cafleet import broker
-
         result = broker.get_agent_names([])
         assert result == {}
 
     def test_nonexistent_agent_id_absent_from_result(self):
-        from cafleet import broker
-
         session = _create_session()
         agent = _register_agent(session["session_id"], name="real")
         fake_id = str(uuid.uuid4())
@@ -558,8 +489,6 @@ class TestGetAgentNames:
 
     def test_includes_deregistered_agents(self):
         """Deregistered agents still have names and should be returned."""
-        from cafleet import broker
-
         session = _create_session()
         sid = session["session_id"]
         agent = _register_agent(sid, name="departed")
@@ -569,8 +498,6 @@ class TestGetAgentNames:
         assert result[agent["agent_id"]] == "departed"
 
     def test_single_agent(self):
-        from cafleet import broker
-
         session = _create_session()
         agent = _register_agent(session["session_id"], name="solo")
 
@@ -583,8 +510,6 @@ class TestGetTaskCreatedAts:
     """broker.get_task_created_ats(task_ids) → {task_id: created_at}."""
 
     def test_returns_created_at_mapping(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent1 = broker.send_message(sid, sender, recipient, "first")
         sent2 = broker.send_message(sid, sender, recipient, "second")
@@ -602,14 +527,10 @@ class TestGetTaskCreatedAts:
         assert len(result[tid2]) > 0
 
     def test_empty_input_returns_empty_dict(self):
-        from cafleet import broker
-
         result = broker.get_task_created_ats([])
         assert result == {}
 
     def test_nonexistent_task_id_absent_from_result(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "real")
         tid = sent["task"]["id"]
@@ -620,8 +541,6 @@ class TestGetTaskCreatedAts:
         assert fake_id not in result
 
     def test_single_task(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "one")
         tid = sent["task"]["id"]
@@ -631,8 +550,6 @@ class TestGetTaskCreatedAts:
         assert tid in result
 
     def test_created_at_is_iso8601(self):
-        from cafleet import broker
-
         sid, sender, recipient = _setup_two_agents()
         sent = broker.send_message(sid, sender, recipient, "timestamped")
         tid = sent["task"]["id"]
