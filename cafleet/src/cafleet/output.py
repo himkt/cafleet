@@ -74,11 +74,10 @@ def format_agent_list(agents: list) -> str:
 
 
 def format_session_create(data: dict) -> str:
-    """Human-friendly ``session create`` text (design 0000026).
+    """Render the ``session create`` text block.
 
-    Line 1 is the ``session_id`` (preserves backward-compatible script usage
-    that parses only the first line). Line 2 is the root Director's ``agent_id``.
-    The remaining lines are key-value pairs.
+    Line 1 is the session_id so script consumers that only parse the first
+    line keep working; line 2 is the root Director's agent_id.
     """
     director = data.get("director", {}) or {}
     placement = director.get("placement", {}) or {}

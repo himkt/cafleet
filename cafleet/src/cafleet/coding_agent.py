@@ -1,17 +1,11 @@
-"""Coding agent configuration for multi-runner support.
+"""Coding-agent registry: parameterizes tmux spawn per backend."""
 
-Encapsulates agent-specific details — binary name, extra args, default prompt
-template — so that tmux pane spawning is parameterized by agent type.
-"""
-
-from dataclasses import dataclass
 import shutil
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class CodingAgentConfig:
-    """Configuration for a coding agent binary that runs inside a tmux pane."""
-
     name: str
     binary: str
     extra_args: tuple[str, ...] = ()
@@ -67,10 +61,6 @@ CODING_AGENTS: dict[str, CodingAgentConfig] = {
 
 
 def get_coding_agent(name: str) -> CodingAgentConfig:
-    """Return the CodingAgentConfig for the given name.
-
-    Raises ValueError if the name is not in the registry.
-    """
     try:
         return CODING_AGENTS[name]
     except KeyError as exc:

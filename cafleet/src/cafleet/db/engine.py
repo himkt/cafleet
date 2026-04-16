@@ -1,11 +1,9 @@
-"""Sync SQLAlchemy engine + sessionmaker singletons for the broker.
+"""Sync SQLAlchemy engine + sessionmaker singletons.
 
-The module-level ``event.listens_for(Engine, "connect")`` callback registers
-globally on import. Every engine constructed in this process — including
-ad-hoc ones built by tests — will issue ``PRAGMA foreign_keys=ON`` and
-``PRAGMA busy_timeout=5000`` on every new raw ``sqlite3`` DBAPI connection.
-The listener short-circuits for non-SQLite DBAPIs so unrelated engines
-(e.g. in third-party libraries) are not perturbed.
+Importing this module registers a global ``Engine.connect`` listener that
+applies ``PRAGMA foreign_keys=ON`` and ``busy_timeout=5000`` on every new
+SQLite DBAPI connection — including ad-hoc engines built by tests. The
+listener short-circuits on non-SQLite DBAPIs.
 """
 
 import sqlite3

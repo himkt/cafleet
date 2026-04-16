@@ -1,8 +1,4 @@
-"""WebUI API endpoints for the CAFleet message viewer.
-
-All endpoints call ``broker`` directly (sync). FastAPI runs sync handlers
-in a thread pool automatically.
-"""
+"""FastAPI endpoints backing the admin WebUI."""
 
 import json
 
@@ -14,16 +10,8 @@ from cafleet import broker
 webui_router = APIRouter(prefix="/ui/api")
 
 
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
-
 def get_webui_session(request: Request) -> str:
-    """Extract and validate X-Session-Id header.
-
-    Returns session_id. Raises 400 if missing, 404 if session not found.
-    """
+    """Return ``X-Session-Id``; 400 if missing, 404 if the row is gone."""
     session_id = request.headers.get("x-session-id")
     if not session_id:
         raise HTTPException(status_code=400, detail="X-Session-Id header required")
@@ -36,7 +24,6 @@ def get_webui_session(request: Request) -> str:
 
 
 def _extract_body(task_dict: dict) -> str:
-    """Extract text body from a camelCase task dict."""
     for artifact in task_dict.get("artifacts", []):
         for part in artifact.get("parts", []):
             if part.get("text"):
@@ -45,7 +32,6 @@ def _extract_body(task_dict: dict) -> str:
 
 
 def _format_raw_tasks(rows: list[dict]) -> list[dict]:
-    """Format raw task row dicts (from list_inbox/list_sent) into WebUI messages."""
     if not rows:
         return []
 
@@ -81,7 +67,6 @@ def _format_raw_tasks(rows: list[dict]) -> list[dict]:
 
 
 def _format_timeline_entries(entries: list[dict]) -> list[dict]:
-    """Format timeline entries (from list_timeline) into WebUI messages."""
     if not entries:
         return []
 
@@ -121,20 +106,10 @@ def _format_timeline_entries(entries: list[dict]) -> list[dict]:
     return messages
 
 
-# ---------------------------------------------------------------------------
-# Request model
-# ---------------------------------------------------------------------------
-
-
 class SendMessageRequest(BaseModel):
     from_agent_id: str
     to_agent_id: str
     text: str
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @webui_router.get("/sessions")
