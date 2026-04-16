@@ -26,7 +26,7 @@ Placed **before** the subcommand:
 
 ### Subcommands that require `--session-id`
 
-`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member create`, `member delete`, `member list`, `member capture`.
+`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member create`, `member delete`, `member list`, `member capture`, `member send-input`.
 
 ### Subcommands that do NOT require `--session-id`
 
@@ -71,6 +71,7 @@ These removals keep secrets out of shell history and let `permissions.allow` pat
 - `member delete` — Deregister a member and close its pane (Director only)
 - `member list` — List members spawned by this Director
 - `member capture` — Capture the last N lines of a member's pane (Director only)
+- `member send-input` — Forward a restricted keystroke (digit 1/2/3 or free text) to a member's pane (Director only)
 
 ### Commands that do NOT require `--agent-id`
 
@@ -263,6 +264,93 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `--member-id` | yes | Target member's agent ID |
 | `--lines` | no | Number of trailing lines to capture (default: 80) |
 
+### `member send-input`
+
+Forwards a restricted keystroke to a member's tmux pane. Designed for answering an `AskUserQuestion` prompt (or any prompt with the same 3-choices + "Type something" shape) rendered in the member's Claude Code / Codex pane. Exactly one of `--choice` or `--freetext` must be supplied. Works identically for `claude` and `codex` backends — the CLI never inspects `placement.coding_agent`.
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
+| `--member-id` | yes | Target member's agent ID |
+| `--choice` | one-of | Integer `1`, `2`, or `3`. Sends the matching digit key to the pane (no Enter). Validated via `click.IntRange(1, 3)`. |
+| `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. |
+
+Exactly one of `--choice` / `--freetext` must appear. Supplying neither or both exits 2 with `Error: Must supply exactly one of --choice or --freetext.`.
+
+#### Key sequence sent to the pane
+
+| Invocation | tmux calls issued in order |
+|---|---|
+| `--choice 1` | `tmux send-keys -t <pane> 1` |
+| `--choice 2` | `tmux send-keys -t <pane> 2` |
+| `--choice 3` | `tmux send-keys -t <pane> 3` |
+| `--freetext "X"` | `tmux send-keys -t <pane> 4` → `tmux send-keys -t <pane> -l "X"` → `tmux send-keys -t <pane> Enter` |
+
+Three separate tmux invocations for `--freetext` because tmux's `-l` (literal) flag is per-invocation: every key in a single `send-keys` call is either literal or key-name interpreted, never a mix. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters in the user's text are delivered as plain characters. Because the CLI uses `subprocess.run([...], shell=False)`, no shell ever evaluates the text.
+
+#### Validation rules
+
+| Input | Result |
+|---|---|
+| Neither `--choice` nor `--freetext` | Exit 2 with `Error: Must supply exactly one of --choice or --freetext.` |
+| Both `--choice` and `--freetext` | Exit 2 with the same message |
+| `--choice 0` / `--choice 4` / `--choice a` | Exit 2 via click's built-in `IntRange(1, 3)` validator |
+| `--freetext ""` (empty) | Allowed — sends `4` + empty literal + `Enter` (submits an empty answer; AskUserQuestion's own UI decides whether to accept it) |
+| `--freetext` containing `\n` or `\r` | Exit 2 with `Error: free text may not contain newlines.` (single-action contract — one prompt submission per call) |
+| Any input with tmux unavailable | Exit 1 via `tmux.ensure_tmux_available()` (same surface as `member capture`) |
+
+#### Authorization boundary
+
+Mirrors `cafleet member capture` step-for-step:
+
+1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+2. If `target["placement"]` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
+3. If `placement["director_agent_id"] != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
+4. If `placement["tmux_pane_id"]` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
+
+Cross-Director write attempts are rejected before any tmux call is made. The error message shapes are reused verbatim from `member capture` so operator muscle memory transfers.
+
+#### Output format
+
+Text:
+
+```
+Sent choice 1 to member Claude-B (%7).
+Sent free text to member Claude-B (%7).
+```
+
+JSON (`cafleet --json ... member send-input ...`):
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "action": "choice",
+  "value": "1"
+}
+```
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "action": "freetext",
+  "value": "<user text as-sent>"
+}
+```
+
+#### Typical Director workflow
+
+The CLI is deliberately one-shot — the surrounding choose-and-answer loop stays in the Director's control:
+
+1. `cafleet --session-id <s> member capture --agent-id <d> --member-id <m> --lines 120` — read the current prompt options off the pane.
+2. Ask the end user (for example via `AskUserQuestion`) with the observed labels.
+3. Based on the answer, either:
+   - Option 1 / 2 / 3 → `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --choice N`
+   - Free-text → `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --freetext "<user text>"`
+
+Capture parsing is intentionally left manual because prompt layouts differ across Claude Code / Codex versions. The CLI's job is to *send* restricted keystrokes safely; reading and presenting options belongs to the Director.
+
 ## Error Messages
 
 | Situation | Error Message |
@@ -274,3 +362,8 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `register` into a soft-deleted session | `Error: session X is deleted` (exit 1) |
 | `deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` (exit 1) |
 | `deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
+| `member send-input` with neither or both of `--choice` / `--freetext` | `Error: Must supply exactly one of --choice or --freetext.` (exit 2) |
+| `member send-input --choice` outside `1..3` | Click `IntRange(1, 3)` built-in (exit 2) |
+| `member send-input --freetext` with `\n` or `\r` | `Error: free text may not contain newlines.` (exit 2) |
+| `member send-input` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
+| `member send-input` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |

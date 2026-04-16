@@ -19,12 +19,12 @@ CAFleet enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 - **Message Lifecycle** -- Acknowledge, cancel (retract), and track message status
 - **Session-Based Routing** -- `session_id` + `agent_id` (identity) parameters on all operations; no authentication or bearer tokens
 - **WebUI** -- Browser-based dashboard; session picker at `/ui/#/sessions`, then a Discord-style unified timeline per session (sidebar of active/deregistered agents, message timeline with broadcasts collapsed to one entry + per-recipient ACK reactions on hover, and a multi-line `@<agent>` / `@all` textarea input with Discord-style autocomplete popover). Every message is sent as the built-in Administrator — a fixed read-only `Sending as Administrator` label replaces the old sender dropdown. Typing `@` opens a popover of matching active agents (plus virtual `@all`); ArrowUp/Down navigate, Enter/Tab insert, Esc dismisses. Enter sends, Shift+Enter inserts a newline, and IME composition (Japanese/Chinese candidates) never triggers an accidental submit. Newlines in message bodies are preserved end-to-end and rendered on multiple lines in the timeline
-- **Member Lifecycle** -- `cafleet member create/delete/list/capture` commands wrap tmux pane spawning + agent registration into atomic operations; the `agent_placements` table persists the agent-to-pane mapping in the registry
+- **Member Lifecycle** -- `cafleet member create/delete/list/capture/send-input` commands wrap tmux pane spawning + agent registration into atomic operations; the `agent_placements` table persists the agent-to-pane mapping in the registry. `member send-input` is a safe `tmux send-keys` wrapper for answering an `AskUserQuestion` prompt (digit 1/2/3 or free text) that mirrors the `capture` authorization boundary
 - **Multi-Runner Support** -- `--coding-agent claude|codex` flag on `member create` selects which coding agent to spawn; defaults to `claude` for backward compatibility. Codex runs with `--approval-mode auto-edit`
 - **tmux Push Notifications** -- After persisting a message, the broker injects a `cafleet poll` command into each recipient's tmux pane via `tmux send-keys` for near-instant delivery. Best-effort: self-sends are skipped, missing/dead panes fail silently, and the message queue remains the source of truth
 - **Director Monitoring Skill** -- `.claude/skills/cafleet-monitoring/SKILL.md` defines mandatory supervision protocol for Directors: 2-stage health check (poll inbox → capture terminal), spawn protocol, stall response, and a `/loop` prompt template
 - **Design Document Orchestration Skills** -- `.claude/skills/cafleet-design-doc-create/` and `.claude/skills/cafleet-design-doc-execute/` replicate the global `/design-doc-create` and `/design-doc-execute` workflows using CAFleet primitives (register + `cafleet send` + `cafleet member create`). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. A plugin-local `cafleet-design-doc` template skill (copy of the global `/design-doc`) keeps the plugin self-contained. Exposed as `/cafleet:cafleet-design-doc-create` and `/cafleet:cafleet-design-doc-execute` to other projects via the `cafleet` plugin
-- **Unified CLI** -- Single `cafleet` command for all operations: server admin (`db init`, `session`), agent messaging (`register`, `send`, `poll`, `ack`), and member lifecycle (`member create/delete/list/capture`)
+- **Unified CLI** -- Single `cafleet` command for all operations: server admin (`db init`, `session`), agent messaging (`register`, `send`, `poll`, `ack`), and member lifecycle (`member create/delete/list/capture/send-input`)
 - **SQLite Storage** -- Single-file database; no daemon required. Schema managed by Alembic via `cafleet db init`
 
 ## Architecture
@@ -230,6 +230,7 @@ All commands below require the global `--session-id <uuid>` flag (placed before 
 | `cafleet --session-id <id> member delete --agent-id <id>` | Required | Deregister a member and close its pane (Director only) |
 | `cafleet --session-id <id> member list --agent-id <id>` | Required | List members spawned by this Director |
 | `cafleet --session-id <id> member capture --agent-id <id>` | Required | Capture the last N lines of a member's pane (Director only) |
+| `cafleet --session-id <id> member send-input --agent-id <id>` | Required | Forward a restricted keystroke (`--choice {1,2,3}` or `--freetext "<text>"`) to a member's pane (Director only); see [docs/spec/cli-options.md](docs/spec/cli-options.md#member-send-input) |
 
 ## API Overview
 

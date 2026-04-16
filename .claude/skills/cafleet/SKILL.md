@@ -342,6 +342,61 @@ Output (`--json`):
 
 **Note**: Projects using CAFleet use `Skill(cafleet-monitoring)` instead of the generic `agent-team-supervision` skill. The cafleet-monitoring skill uses `cafleet member capture` exclusively (no raw `tmux capture-pane`), enforcing the cross-Director boundary.
 
+### Member Send-Input
+
+Safely forward a restricted keystroke to a member's tmux pane. This is the write-path companion to `member capture` — designed for answering an `AskUserQuestion` prompt (or any prompt with the same "3 choices + Type something" shape) rendered in a member's Claude Code / Codex pane. Exactly one of `--choice` / `--freetext` must be supplied.
+
+```bash
+cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
+  --member-id <member-agent-id> --choice 1
+
+cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
+  --member-id <member-agent-id> --freetext "please prioritize correctness"
+
+cafleet --session-id <session-id> --json member send-input --agent-id <director-agent-id> \
+  --member-id <member-agent-id> --choice 2
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
+| `--member-id` | yes | The target member's agent ID |
+| `--choice` | one-of | Integer `1`, `2`, or `3`. Sends the matching digit key to the pane (no Enter). Validated via `click.IntRange(1, 3)`. |
+| `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. Newlines are rejected. |
+
+Cross-Director send is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before making any tmux call (same wording as `member capture`). A missing placement row, a pending pane (`tmux_pane_id is None`), or an unavailable `tmux` binary each exit 1 with a dedicated message.
+
+**Why three tmux calls for `--freetext`**: tmux's `-l` (literal) flag is per-invocation — one `send-keys` call cannot mix literal characters with the `Enter` key name. Splitting the sequence into three calls (`4` → `-l "<text>"` → `Enter`) guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the text (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are all delivered as plain characters. The CLI calls `subprocess.run([...], shell=False)`, so no shell ever interprets the text. Newlines in `--freetext` are rejected with `Error: free text may not contain newlines.` (exit 2) because a literal newline would submit a second prompt without a following Enter — the single-action contract is "one CLI call = one prompt submission."
+
+Backend-agnostic: works identically for `claude` and `codex` member panes (the CLI never inspects `placement.coding_agent`).
+
+Output (text):
+
+```
+Sent choice 1 to member Claude-B (%7).
+Sent free text to member Claude-B (%7).
+```
+
+Output (`--json`):
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "action": "choice",
+  "value": "1"
+}
+```
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "action": "freetext",
+  "value": "<user text as-sent>"
+}
+```
+
 ### Server
 
 Start the admin WebUI FastAPI app via uvicorn. The server is only needed for the admin WebUI at `/ui/` and the `/ui/api/*` endpoints — every other `cafleet` subcommand accesses SQLite directly and does not require the server to be running.
@@ -501,6 +556,26 @@ cafleet session delete <session-id>
 ```
 
 `session delete` does not require `--session-id` (the `session_id` is passed as a positional argument). It runs the root-Director deregister + Administrator cleanup + any surviving member sweep in one transaction. Plain `cafleet --session-id <session-id> deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` — always use `session delete` for the final teardown step.
+
+### Answer a member's AskUserQuestion prompt
+
+When a member pauses on an `AskUserQuestion` prompt (or any prompt rendered as "1. …", "2. …", "3. …", "4. Type something"), the Director can forward the operator's choice without exiting tmux or typing raw `tmux send-keys`. The CLI is deliberately one-shot — the surrounding choose-and-answer loop stays in the Director's control:
+
+1. **Inspect the prompt** with `member capture` — this is non-intrusive and shows the exact labels rendered in the pane:
+
+   ```bash
+   cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
+     --member-id <member-agent-id> --lines 120
+   ```
+
+2. **Ask the end user** (for example via `AskUserQuestion`) with the observed labels so they pick an option.
+
+3. **Forward the answer** via `member send-input`:
+
+   - Option 1 / 2 / 3 → `cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> --member-id <member-agent-id> --choice N`
+   - Free-text → `cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> --member-id <member-agent-id> --freetext "<user text>"`
+
+The CLI validates the input (`--choice` is an `IntRange(1, 3)`; `--freetext` rejects newlines to preserve the one-call-one-submission contract), enforces the same cross-Director authorization boundary as `member capture`, and issues three separate `tmux send-keys` invocations for `--freetext` (`4` → `-l "<text>"` → `Enter`) so shell meta, key names, and multi-byte characters all pass through as literal input.
 
 ## Message Lifecycle
 

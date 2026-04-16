@@ -64,7 +64,7 @@ The post-bootstrap invariant is that every non-deleted `sessions` row has a non-
 | `webui_api.py` | `cafleet/src/cafleet/` | WebUI API router (`/ui/api/*`) — calls `broker` for all data access |
 | `output.py` | `cafleet/src/cafleet/` | CLI output formatting (tables + JSON) |
 | `coding_agent.py` | `cafleet/src/cafleet/` | `CodingAgentConfig` dataclass, `CLAUDE`/`CODEX` built-in configs, `CODING_AGENTS` registry, `get_coding_agent()` helper |
-| `tmux.py` | `cafleet/src/cafleet/` | tmux subprocess helper: `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit`, `capture_pane` |
+| `tmux.py` | `cafleet/src/cafleet/` | tmux subprocess helper: `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit`, `capture_pane`, `send_choice_key`, `send_freetext_and_submit` |
 | `admin/` | Project root | WebUI SPA (Vite + React + TypeScript + Tailwind CSS) |
 
 ## Operation Mapping
@@ -83,6 +83,7 @@ All operations go through `broker.py` (sync SQLAlchemy). No HTTP server is invol
 | `agents` (list) | `broker.list_agents()` → SELECT agents WHERE active |
 | `agents --id` | `broker.get_agent()` → SELECT agent + placement |
 | `deregister` | `broker.deregister_agent()` → UPDATE status + DELETE placement |
+| `member send-input` | `broker.get_agent()` → authorization check + `tmux.send_choice_key` / `tmux.send_freetext_and_submit` |
 | `db init` | Alembic `upgrade head` |
 
 ## Storage Layer
@@ -157,7 +158,9 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 **Multi-runner support**: The `--coding-agent` option on `member create` selects which coding agent binary to spawn (`claude` or `codex`, default: `claude`). Agent-specific configuration (binary name, extra args, default prompt template) is encapsulated in `CodingAgentConfig` dataclasses in `cafleet/src/cafleet/coding_agent.py`. The `agent_placements` table tracks which coding agent was spawned via a `coding_agent` column (default: `"claude"`). The `tmux.split_window()` function accepts a generic `command: list[str]` instead of a hardcoded Claude prompt, making it agent-agnostic.
 
-**Commands**: `member create`, `member delete`, `member list`, `member capture`. All require `--agent-id` (the Director's ID). The tmux helper module (`cafleet/src/cafleet/tmux.py`) isolates all subprocess interaction with tmux.
+**Commands**: `member create`, `member delete`, `member list`, `member capture`, `member send-input`. All require `--agent-id` (the Director's ID). The tmux helper module (`cafleet/src/cafleet/tmux.py`) isolates all subprocess interaction with tmux.
+
+**Write-path authorization mirrors the read path**: `cafleet member send-input` — a safe `tmux send-keys` wrapper for answering an `AskUserQuestion` prompt rendered in a member's pane — reuses the exact `member capture` authorization boundary (`placement.director_agent_id == --agent-id`, non-null `tmux_pane_id`, placement row present). The CLI accepts either `--choice {1,2,3}` (sends the matching digit key) or `--freetext "<text>"` (sends `4`, the literal text via tmux's `-l` flag, then `Enter` — three separate `tmux send-keys` invocations because `-l` is per-invocation). Newlines in `--freetext` are rejected at both the CLI layer and the `tmux.send_freetext_and_submit` helper so each call is exactly one prompt submission. The helper never invokes a shell (`subprocess.run([...], shell=False)`), so shell meta, backticks, `$VAR`, and multi-byte characters pass through as literal input.
 
 **Supervision skill**: The Director's monitoring obligations are defined in `.claude/skills/cafleet-monitoring/SKILL.md`. This skill must be loaded (`Skill(cafleet-monitoring)`) before spawning any members. It provides a 2-stage health check protocol (message poll then terminal capture) and a ready-to-use `/loop` prompt template.
 

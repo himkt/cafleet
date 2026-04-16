@@ -31,7 +31,7 @@ Before spawning **any** member, start a `/loop` monitor with a **1-minute interv
 |---|---|---|
 | 1 | `cafleet --session-id <session-id> member list --agent-id <director-agent-id>` | Enumerate all live members and their pane status |
 | 2 | `cafleet --session-id <session-id> poll --agent-id <director-agent-id>` | Check inbox for progress reports or help requests from members |
-| 3 | For each member with no recent message: `cafleet --session-id <session-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id>` | Terminal capture fallback -- inspect what the member is doing when it has not reported in |
+| 3 | For each member with no recent message: `cafleet --session-id <session-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id>` | Terminal capture fallback -- inspect what the member is doing when it has not reported in. If the capture shows an `AskUserQuestion`-style prompt, see Stage 2 below for the `member send-input` escape hatch. |
 | 4 | Based on findings, `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` to any stalled or idle member with a specific instruction | Drive the team forward |
 | 5 | When all members have reported completion (via messages or visible in terminal output), report to the user: "All deliverables are ready for review." | Signal completion to user |
 
@@ -69,6 +69,8 @@ cafleet --session-id <session-id> member capture --agent-id <director-agent-id> 
 
 If `cafleet poll` shows no recent messages from the member, fall back to capturing the terminal buffer. This is non-intrusive (read-only inspection that works even when the member is mid-task) and replaces raw `tmux capture-pane`.
 
+If the terminal buffer shows the member paused on an `AskUserQuestion` prompt (a list of "1. …", "2. …", "3. …", "4. Type something" rows), the correct unblock is `cafleet member send-input` — never raw `tmux send-keys`. The send-input wrapper validates the keystrokes (`--choice 1|2|3` or `--freetext "<text>"`), enforces the same cross-Director authorization boundary as `capture`, and issues the three-invocation `-l` literal sequence required by tmux for free-text submissions. See the cafleet skill's "Member Send-Input" section for the full flag reference and the capture → ask user → send-input workflow.
+
 ### Escalation
 
 If a member is still unresponsive after 2 nudges via `cafleet send` AND `cafleet member capture` shows no forward progress in the terminal buffer, escalate to the user.
@@ -78,6 +80,7 @@ If a member is still unresponsive after 2 nudges via `cafleet send` AND `cafleet
 | `cafleet ... poll --agent-id <director-agent-id>` | Non-intrusive, message-based | First -- check if the member has reported in |
 | `cafleet ... member capture --agent-id <director-agent-id>` | Non-intrusive, terminal snapshot | Second -- when no messages, inspect what the member is doing |
 | `cafleet ... send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` | Interactive, authoritative | Third -- send a specific instruction to unstick the member (push notification triggers the member's pane to poll) |
+| `cafleet ... member send-input --agent-id <director-agent-id> --member-id <member-agent-id> (--choice N \| --freetext "<text>")` | Interactive, restricted keystroke | When `capture` shows the member is paused on an `AskUserQuestion`-shaped prompt — forward the operator's answer without exiting tmux or typing raw `tmux send-keys`. Same authorization boundary as `capture`. |
 | Escalate to user | Last resort | After 2 nudges + no progress in terminal |
 
 ## `/loop` Prompt Template

@@ -1,7 +1,7 @@
 # Add `cafleet member send-input` — safe `tmux send-keys` wrapper for member panes
 
 **Status**: Approved
-**Progress**: 0/18 tasks complete
+**Progress**: 5/18 tasks complete
 **Last Updated**: 2026-04-16
 
 ## Overview
@@ -346,14 +346,14 @@ Every test uses `CliRunner` with `ctx.obj["session_id"]` set (reuse the pattern 
 
 ### Step 1: Documentation — top-level docs
 
-- [ ] Update `ARCHITECTURE.md`: add `send-input` to the member-command enumeration and note it shares the `capture` authorization boundary. <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md`: add a `cafleet member send-input` subsection (flag table, validation rules, authorization boundary, text + JSON output samples). <!-- completed: -->
-- [ ] Update `README.md`: add the one-line bullet under member commands and link to the spec section. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md`: add `send-input` to the member-command enumeration and note it shares the `capture` authorization boundary. <!-- completed: 2026-04-16T09:15 -->
+- [x] Update `docs/spec/cli-options.md`: add a `cafleet member send-input` subsection (flag table, validation rules, authorization boundary, text + JSON output samples). <!-- completed: 2026-04-16T09:20 -->
+- [x] Update `README.md`: add the one-line bullet under member commands and link to the spec section. <!-- completed: 2026-04-16T09:22 -->
 
 ### Step 2: Documentation — skills
 
-- [ ] Update `.claude/skills/cafleet/SKILL.md`: add `### Member Send-Input` with both invocation forms, flag table, output samples, the "why three tmux calls" note, and the capture → AskUserQuestion → send-input workflow. <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet-monitoring/SKILL.md`: add `send-input` to the Stall Response channels table and mention the AskUserQuestion case in the 2-stage health check. <!-- completed: -->
+- [x] Update `.claude/skills/cafleet/SKILL.md`: add `### Member Send-Input` with both invocation forms, flag table, output samples, the "why three tmux calls" note, and the capture → AskUserQuestion → send-input workflow. <!-- completed: 2026-04-16T09:28 -->
+- [x] Update `.claude/skills/cafleet-monitoring/SKILL.md`: add `send-input` to the Stall Response channels table and mention the AskUserQuestion case in the 2-stage health check. <!-- completed: 2026-04-16T09:30 -->
 
 ### Step 3: Code — tmux helpers
 
