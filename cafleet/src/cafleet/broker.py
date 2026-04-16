@@ -56,6 +56,17 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _placement_dict(row, *, created_at_attr: str = "created_at") -> dict:
+    return {
+        "director_agent_id": row.director_agent_id,
+        "tmux_session": row.tmux_session,
+        "tmux_window_id": row.tmux_window_id,
+        "tmux_pane_id": row.tmux_pane_id,
+        "coding_agent": row.coding_agent,
+        "created_at": getattr(row, created_at_attr),
+    }
+
+
 def _try_notify_recipient(
     session, *, session_id: str, recipient_id: str, sender_id: str
 ) -> bool:
@@ -410,14 +421,7 @@ def get_agent(agent_id: str, session_id: str) -> dict | None:
         "placement": None,
     }
     if placement_row is not None:
-        result["placement"] = {
-            "director_agent_id": placement_row.director_agent_id,
-            "tmux_session": placement_row.tmux_session,
-            "tmux_window_id": placement_row.tmux_window_id,
-            "tmux_pane_id": placement_row.tmux_pane_id,
-            "coding_agent": placement_row.coding_agent,
-            "created_at": placement_row.created_at,
-        }
+        result["placement"] = _placement_dict(placement_row)
     return result
 
 
@@ -513,14 +517,7 @@ def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
 
     if row is None:
         return None
-    return {
-        "director_agent_id": row.director_agent_id,
-        "tmux_session": row.tmux_session,
-        "tmux_window_id": row.tmux_window_id,
-        "tmux_pane_id": row.tmux_pane_id,
-        "coding_agent": row.coding_agent,
-        "created_at": row.created_at,
-    }
+    return _placement_dict(row)
 
 
 def list_members(session_id: str, director_agent_id: str) -> list[dict]:
@@ -556,14 +553,7 @@ def list_members(session_id: str, director_agent_id: str) -> list[dict]:
             "description": row.description,
             "status": row.status,
             "registered_at": row.registered_at,
-            "placement": {
-                "director_agent_id": row.director_agent_id,
-                "tmux_session": row.tmux_session,
-                "tmux_window_id": row.tmux_window_id,
-                "tmux_pane_id": row.tmux_pane_id,
-                "coding_agent": row.coding_agent,
-                "created_at": row.placement_created_at,
-            },
+            "placement": _placement_dict(row, created_at_attr="placement_created_at"),
         }
         for row in rows
     ]
