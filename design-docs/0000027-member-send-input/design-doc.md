@@ -1,8 +1,8 @@
 # Add `cafleet member send-input` — safe `tmux send-keys` wrapper for member panes
 
-**Status**: Draft
+**Status**: Approved
 **Progress**: 0/18 tasks complete
-**Last Updated**: 2026-04-15
+**Last Updated**: 2026-04-16
 
 ## Overview
 

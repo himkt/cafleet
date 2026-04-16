@@ -1,8 +1,8 @@
 # Claude Member Pane Naming via `--name` at Spawn
 
-**Status**: Draft
+**Status**: Approved
 **Progress**: 0/15 tasks complete
-**Last Updated**: 2026-04-15
+**Last Updated**: 2026-04-16
 
 ## Overview
 
