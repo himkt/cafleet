@@ -160,13 +160,10 @@ def session_create(ctx: click.Context, label: str | None, as_json: bool) -> None
     try:
         tmux.ensure_tmux_available()
         director_ctx = tmux.director_context()
-    except tmux.TmuxError:
-        click.echo(
-            "Error: cafleet session create must be run inside a tmux session",
-            err=True,
-        )
-        ctx.exit(1)
-        return
+    except tmux.TmuxError as exc:
+        raise click.ClickException(
+            "cafleet session create must be run inside a tmux session"
+        ) from exc
 
     result = broker.create_session(label=label, director_context=director_ctx)
 
@@ -204,11 +201,8 @@ def session_list(ctx: click.Context, as_json: bool) -> None:
 def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
     """Show details of a single session."""
     result = broker.get_session(session_id)
-
     if result is None:
-        click.echo(f"Error: session '{session_id}' not found.", err=True)
-        ctx.exit(1)
-        return
+        raise click.ClickException(f"session '{session_id}' not found.")
 
     if as_json or ctx.obj.get("json_output"):
         click.echo(output.format_json(result))
