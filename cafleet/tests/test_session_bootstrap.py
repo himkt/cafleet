@@ -15,8 +15,10 @@ from cafleet.db.models import (
     Agent,
     AgentPlacement,
     Base,
-    Session as SessionModel,
     Task,
+)
+from cafleet.db.models import (
+    Session as SessionModel,
 )
 from cafleet.tmux import DirectorContext
 

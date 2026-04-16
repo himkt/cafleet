@@ -135,19 +135,19 @@ class TestSendMessage:
 
     def test_validates_destination_is_valid_uuid(self):
         sid, sender, _ = _setup_two_agents()
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="Invalid destination format"):
             broker.send_message(sid, sender, "not-a-uuid", "Hello")
 
     def test_validates_destination_agent_exists(self):
         sid, sender, _ = _setup_two_agents()
         fake_agent = str(uuid.uuid4())
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="Destination agent not found"):
             broker.send_message(sid, sender, fake_agent, "Hello")
 
     def test_validates_destination_agent_is_active(self):
         sid, sender, recipient = _setup_two_agents()
         broker.deregister_agent(recipient)
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="Destination agent not found"):
             broker.send_message(sid, sender, recipient, "Hello")
 
     def test_validates_destination_in_same_session(self):
@@ -155,7 +155,7 @@ class TestSendMessage:
         session_b = _create_session()
         sender = _register_agent(session_a["session_id"], name="sender")
         recipient = _register_agent(session_b["session_id"], name="recipient")
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="Destination agent not in session"):
             broker.send_message(
                 session_a["session_id"],
                 sender["agent_id"],
@@ -575,7 +575,7 @@ class TestAckTask:
         task_id = sent["task"]["id"]
 
         # Sender should not be able to ACK
-        with pytest.raises(Exception):
+        with pytest.raises(PermissionError):
             broker.ack_task(sender, task_id)
 
     def test_verifies_state_is_input_required(self):
@@ -586,7 +586,7 @@ class TestAckTask:
 
         broker.ack_task(recipient, task_id)
         # Second ACK should fail
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="Cannot ACK"):
             broker.ack_task(recipient, task_id)
 
     def test_cannot_ack_canceled_task(self):
@@ -596,7 +596,7 @@ class TestAckTask:
         task_id = sent["task"]["id"]
 
         broker.cancel_task(sender, task_id)
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="Cannot ACK"):
             broker.ack_task(recipient, task_id)
 
     def test_ack_persists_state(self):
@@ -649,7 +649,7 @@ class TestCancelTask:
         task_id = sent["task"]["id"]
 
         # Recipient should not be able to cancel
-        with pytest.raises(Exception):
+        with pytest.raises(PermissionError):
             broker.cancel_task(recipient, task_id)
 
     def test_verifies_state_is_input_required(self):
@@ -659,7 +659,7 @@ class TestCancelTask:
         task_id = sent["task"]["id"]
 
         broker.ack_task(recipient, task_id)
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="Cannot cancel"):
             broker.cancel_task(sender, task_id)
 
     def test_cannot_cancel_already_canceled(self):
@@ -669,7 +669,7 @@ class TestCancelTask:
         task_id = sent["task"]["id"]
 
         broker.cancel_task(sender, task_id)
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="Cannot cancel"):
             broker.cancel_task(sender, task_id)
 
     def test_cancel_persists_state(self):
@@ -739,12 +739,12 @@ class TestGetTask:
         assert result["task"]["id"] == task_id
 
         # Should fail with a different session
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="not found"):
             broker.get_task(sid_b, task_id)
 
     def test_nonexistent_task_raises(self):
         session = _create_session()
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="not found"):
             broker.get_task(session["session_id"], str(uuid.uuid4()))
 
     def test_sender_can_get_task(self):

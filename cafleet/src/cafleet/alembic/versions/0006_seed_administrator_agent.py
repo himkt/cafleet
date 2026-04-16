@@ -36,7 +36,6 @@ from collections.abc import Sequence
 from alembic import op
 from sqlalchemy import text
 
-
 # revision identifiers, used by Alembic.
 revision: str = "0006"
 down_revision: str | None = "0005"

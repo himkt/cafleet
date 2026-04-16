@@ -343,5 +343,5 @@ class TestMigration0002Downgrade:
         cfg = _make_alembic_cfg(db_at_0001)
         command.upgrade(cfg, "0002_local_simplification")
 
-        with pytest.raises(Exception):
+        with pytest.raises(NotImplementedError, match="one-way migration"):
             command.downgrade(cfg, "0001")

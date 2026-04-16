@@ -3,6 +3,7 @@
 import json
 import uuid
 
+import click
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -10,7 +11,8 @@ from sqlalchemy.orm import sessionmaker
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet import broker
 from cafleet.broker import ADMINISTRATOR_KIND
-from cafleet.db.models import Agent, Base, Session as SessionModel
+from cafleet.db.models import Agent, Base
+from cafleet.db.models import Session as SessionModel
 from cafleet.tmux import DirectorContext
 
 
@@ -305,7 +307,7 @@ class TestRegisterAgent:
     def test_validates_session_exists(self):
         """Registering with a non-existent session_id should raise an error."""
         fake_sid = str(uuid.uuid4())
-        with pytest.raises(Exception):
+        with pytest.raises(click.UsageError, match="not found"):
             broker.register_agent(
                 session_id=fake_sid,
                 name="orphan",
@@ -354,7 +356,7 @@ class TestRegisterAgent:
             "tmux_window_id": "@1",
             "coding_agent": "claude",
         }
-        with pytest.raises(Exception):
+        with pytest.raises(click.UsageError, match="Director agent"):
             _register_agent(sid, name="orphan-member", placement=placement)
 
     def test_placement_validates_director_active_in_same_session(self):
@@ -372,7 +374,7 @@ class TestRegisterAgent:
             "tmux_window_id": "@1",
             "coding_agent": "claude",
         }
-        with pytest.raises(Exception):
+        with pytest.raises(click.UsageError, match="Director agent"):
             _register_agent(
                 session2["session_id"], name="cross-session-member", placement=placement
             )
@@ -391,7 +393,7 @@ class TestRegisterAgent:
             "tmux_window_id": "@1",
             "coding_agent": "claude",
         }
-        with pytest.raises(Exception):
+        with pytest.raises(click.UsageError, match="not active"):
             _register_agent(sid, name="late-member", placement=placement)
 
     def test_register_without_placement(self):

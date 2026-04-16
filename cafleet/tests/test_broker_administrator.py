@@ -18,7 +18,6 @@ from cafleet.broker import (
 from cafleet.db.models import Agent, Base
 from cafleet.tmux import DirectorContext
 
-
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 

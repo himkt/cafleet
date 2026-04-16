@@ -12,7 +12,6 @@ from cafleet.cli import cli
 from cafleet.db import engine as engine_mod
 from cafleet.tmux import DirectorContext, TmuxError
 
-
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 
