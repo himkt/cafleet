@@ -570,13 +570,15 @@ def verify_agent_session(agent_id: str, session_id: str) -> bool:
 
 def _save_task(session, task_dict: dict) -> None:
     """UPSERT the task, promoting indexed fields from the metadata blob."""
-    metadata = task_dict.get("metadata", {})
+    metadata = task_dict["metadata"]
     stmt = sqlite_insert(Task).values(
         task_id=task_dict["id"],
         context_id=task_dict["contextId"],
-        from_agent_id=metadata.get("fromAgentId", ""),
+        from_agent_id=metadata["fromAgentId"],
+        # ``broadcast_summary`` has no recipient; store empty so the NOT NULL
+        # column stays satisfied and the row still shows up in sender queries.
         to_agent_id=metadata.get("toAgentId", ""),
-        type=metadata.get("type", ""),
+        type=metadata["type"],
         created_at=_now_iso(),
         status_state=task_dict["status"]["state"],
         status_timestamp=task_dict["status"]["timestamp"],
@@ -837,8 +839,7 @@ def cancel_task(agent_id: str, task_id: str) -> dict:
         if task_dict is None:
             raise ValueError(f"Task {task_id} not found")
 
-        metadata = task_dict.get("metadata", {})
-        if metadata.get("fromAgentId") != agent_id:
+        if task_dict["metadata"]["fromAgentId"] != agent_id:
             raise PermissionError("Only the sender can cancel a task")
 
         if task_dict["status"]["state"] != "input_required":
@@ -1016,10 +1017,10 @@ def get_task(session_id: str, task_id: str) -> dict:
         if task_dict is None:
             raise ValueError(f"Task {task_id} not found")
 
-        metadata = task_dict.get("metadata", {})
+        metadata = task_dict["metadata"]
         endpoint_ids = [
             aid
-            for aid in (metadata.get("fromAgentId", ""), metadata.get("toAgentId", ""))
+            for aid in (metadata["fromAgentId"], metadata.get("toAgentId", ""))
             if aid
         ]
         in_session = session.execute(

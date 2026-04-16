@@ -86,23 +86,25 @@ def _format_raw_tasks(rows: list[dict]) -> list[dict]:
 def _format_timeline_entries(entries: list[dict]) -> list[dict]:
     if not entries:
         return []
-    metas = [(entry, entry["task"].get("metadata", {})) for entry in entries]
+    # ``list_timeline`` filters out ``broadcast_summary`` rows, so every task
+    # here is a unicast/delivery with both endpoints present in metadata.
+    metas = [(entry, entry["task"]["metadata"]) for entry in entries]
     agent_ids = {
         aid
         for _, meta in metas
-        for aid in (meta.get("fromAgentId", ""), meta.get("toAgentId", ""))
+        for aid in (meta["fromAgentId"], meta["toAgentId"])
         if aid
     }
     agent_names = broker.get_agent_names(list(agent_ids))
     return [
         _build_message(
             task_id=entry["task"]["id"],
-            from_id=meta.get("fromAgentId", ""),
-            to_id=meta.get("toAgentId", ""),
-            type_=meta.get("type", ""),
-            status=entry["task"].get("status", {}).get("state", ""),
+            from_id=meta["fromAgentId"],
+            to_id=meta["toAgentId"],
+            type_=meta["type"],
+            status=entry["task"]["status"]["state"],
             created_at=entry["created_at"],
-            status_timestamp=entry["task"].get("status", {}).get("timestamp", ""),
+            status_timestamp=entry["task"]["status"]["timestamp"],
             origin_task_id=entry["origin_task_id"],
             body=_extract_body(entry["task"]),
             agent_names=agent_names,
