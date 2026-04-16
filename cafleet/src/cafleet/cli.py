@@ -9,6 +9,7 @@ Top-level commands:
   register, send, broadcast, poll, ack, cancel, get-task, agents, deregister
 """
 
+import contextlib
 import importlib.resources
 import json
 import os
@@ -608,8 +609,6 @@ def _rollback_register(new_agent_id, *, session_id, reason):
 @click.pass_context
 def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
     """Register a new member and spawn its coding agent pane in the Director's window."""
-    from cafleet import tmux
-
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
     coding_agent_config = get_coding_agent(coding_agent)
@@ -684,10 +683,8 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         placement_view = broker.update_placement_pane_id(new_agent_id, pane_id)
     except Exception as exc:
         # Placement update failed: pane is alive but dangling. /exit it, then roll back.
-        try:
+        with contextlib.suppress(tmux.TmuxError):
             tmux.send_exit(target_pane_id=pane_id, ignore_missing=True)
-        except tmux.TmuxError:
-            pass
         _rollback_register(
             new_agent_id,
             session_id=session_id,
@@ -716,8 +713,6 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
 @click.pass_context
 def member_delete(ctx, agent_id, member_id):
     """Deregister a member agent and close its tmux pane."""
-    from cafleet import tmux
-
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
@@ -834,8 +829,6 @@ def member_list(ctx, agent_id):
 @click.pass_context
 def member_capture(ctx, agent_id, member_id, lines):
     """Capture the last N lines of a member pane's terminal buffer."""
-    from cafleet import tmux
-
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
@@ -926,8 +919,6 @@ def member_capture(ctx, agent_id, member_id, lines):
 @click.pass_context
 def member_send_input(ctx, agent_id, member_id, choice, freetext):
     """Safely forward a restricted keystroke to a member pane."""
-    from cafleet import tmux
-
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
