@@ -156,7 +156,18 @@ Lists all **non-soft-deleted** sessions with their label, created_at, and active
 | `session_id` | yes | The session to show |
 | `--json` | no | Output as JSON |
 
-Shows details of a single session. Exits non-zero if the session does not exist.
+Shows details of a single session. Exits 1 with `Error: session 'X' not found.` if the row does not exist at all.
+
+`broker.get_session` intentionally returns soft-deleted rows (to keep audit info reachable), so `session show` succeeds on a soft-deleted session. When the row's `deleted_at` is non-NULL, the text output adds a `deleted_at:` line so callers can distinguish a soft-deleted session from an active one without parsing JSON:
+
+```
+session_id: <uuid>
+label:      example
+created_at: 2026-04-16T09:00:00+00:00
+deleted_at: 2026-04-16T10:00:00+00:00
+```
+
+The `--json` output always includes `deleted_at` (null when active).
 
 ### `session delete`
 
@@ -248,8 +259,10 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Director's agent ID |
+| `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | Target member's agent ID |
+
+Cross-Director delete is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before calling `broker.deregister_agent` or sending `/exit` to the pane. An attempt to delete another Director's member in the same session exits 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other-director>).` (mirrors `member capture` / `member send-input`).
 
 ### `member list`
 

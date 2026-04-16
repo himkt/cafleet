@@ -268,8 +268,10 @@ cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | The Director's agent ID |
+| `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | The target member's agent ID |
+
+Cross-Director delete is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before calling `broker.deregister_agent` or sending `/exit` to the pane. An attempt to delete another Director's member in the same session exits 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other-director>).` (mirrors `member capture` / `member send-input`).
 
 Output (text):
 ```
