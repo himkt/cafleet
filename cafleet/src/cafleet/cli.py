@@ -173,7 +173,7 @@ def session_create(ctx: click.Context, label: str | None, as_json: bool) -> None
     result = broker.create_session(label=label, director_context=director_ctx)
 
     if as_json or ctx.obj.get("json_output"):
-        click.echo(json.dumps(result))
+        click.echo(output.format_json(result))
     else:
         click.echo(output.format_session_create(result))
 
@@ -186,7 +186,7 @@ def session_list(ctx: click.Context, as_json: bool) -> None:
     rows = broker.list_sessions()
 
     if as_json or ctx.obj.get("json_output"):
-        click.echo(json.dumps(rows))
+        click.echo(output.format_json(rows))
     else:
         if not rows:
             click.echo("No sessions found.")
@@ -213,13 +213,9 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
         return
 
     if as_json or ctx.obj.get("json_output"):
-        click.echo(json.dumps(result))
+        click.echo(output.format_json(result))
     else:
-        click.echo(f"session_id: {result['session_id']}")
-        click.echo(f"label:      {result['label'] or ''}")
-        click.echo(f"created_at: {result['created_at']}")
-        if result["deleted_at"] is not None:
-            click.echo(f"deleted_at: {result['deleted_at']}")
+        click.echo(output.format_session_show(result))
 
 
 @session.command("delete")

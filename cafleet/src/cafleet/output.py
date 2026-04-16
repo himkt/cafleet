@@ -98,6 +98,17 @@ def format_session_create(data: dict) -> str:
     return "\n".join(lines)
 
 
+def format_session_show(data: dict) -> str:
+    lines = [
+        f"session_id: {data['session_id']}",
+        f"label:      {data['label'] or ''}",
+        f"created_at: {data['created_at']}",
+    ]
+    if data["deleted_at"] is not None:
+        lines.append(f"deleted_at: {data['deleted_at']}")
+    return "\n".join(lines)
+
+
 def format_member(data: dict) -> str:
     placement = data["placement"]
     lines = [
