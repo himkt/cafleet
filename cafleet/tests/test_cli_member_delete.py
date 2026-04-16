@@ -1,5 +1,6 @@
 """CLI tests for ``cafleet member delete`` (cross-Director guard regression)."""
 
+import json
 import uuid
 
 import pytest
@@ -67,7 +68,6 @@ def runner():
 
 @pytest.fixture(autouse=True)
 def _stub_tmux_entrypoints(monkeypatch):
-    """Every test runs with ``tmux`` side-effects stubbed to no-op."""
     monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
     monkeypatch.setattr(tmux, "director_context", lambda: _DIRECTOR_CTX)
     monkeypatch.setattr(tmux, "send_exit", lambda **_: None)
@@ -76,7 +76,6 @@ def _stub_tmux_entrypoints(monkeypatch):
 
 @pytest.fixture
 def deregister_recorder(monkeypatch):
-    """Record every ``broker.deregister_agent`` invocation. Returns True by default."""
     calls: list[str] = []
 
     def fake(member_id):
@@ -89,7 +88,6 @@ def deregister_recorder(monkeypatch):
 
 @pytest.fixture
 def send_exit_recorder(monkeypatch):
-    """Record every ``tmux.send_exit`` invocation."""
     calls: list[dict] = []
 
     def fake(**kwargs):
@@ -169,8 +167,6 @@ class TestHappyPath:
             f"--json happy path must exit 0. exit_code={result.exit_code}, "
             f"output: {result.output!r}, exception: {result.exception!r}"
         )
-        import json
-
         data = json.loads(result.output)
         assert data == {
             "agent_id": MEMBER_ID,
@@ -192,11 +188,6 @@ class TestAuthorizationBoundary:
         assert MEMBER_ID in out, (
             f"error must reference the missing member_id. got: {out!r}"
         )
-        # Pre-fix the CLI raised a ValueError inside the get_agent try/except
-        # so the user saw "Error: failed to fetch member: Agent X not found" —
-        # misleading because the fetch actually succeeded (it returned None).
-        # The fix separates the "fetch threw" path (stays wrapped) from the
-        # "fetch returned None" path (emits a direct "Error: Agent X not found").
         assert "failed to fetch member" not in out, (
             f"not-found path must NOT use 'failed to fetch member' wording "
             f"(the fetch succeeded and returned None). got: {out!r}"
@@ -213,11 +204,7 @@ class TestAuthorizationBoundary:
     def test_fetch_db_error_surfaces_failed_to_fetch_wording(
         self, runner, session_id, monkeypatch, deregister_recorder
     ):
-        """When ``broker.get_agent`` itself raises (e.g. DB connection failure),
-        the wrapper's ``failed to fetch member`` wording is appropriate —
-        that's precisely the case where the fetch did fail. Symmetric guard
-        for the fix above: the wrapper stays in place for real exceptions.
-        """
+        """Symmetric guard: real ``get_agent`` failures keep the wrapper wording."""
 
         def boom(*_a, **_kw):
             raise RuntimeError("db connection lost")
@@ -268,12 +255,7 @@ class TestAuthorizationBoundary:
     def test_cross_director_same_session_is_rejected(
         self, runner, session_id, monkeypatch, deregister_recorder, send_exit_recorder
     ):
-        """Regression guard: before this fix, Director A could delete
-        Director X's member in the same session because ``member_delete``
-        skipped the placement.director_agent_id check that ``member capture``
-        and ``member send-input`` both enforce. The fix adds the same guard,
-        and this test pins it.
-        """
+        """Regression guard for the cross-Director auth gap in ``member_delete``."""
         monkeypatch.setattr(
             broker,
             "get_agent",
@@ -312,10 +294,7 @@ class TestPendingPlacement:
     def test_pending_pane_id_skips_send_exit(
         self, runner, session_id, monkeypatch, deregister_recorder, send_exit_recorder
     ):
-        """A placement without a pane_id means split-window never completed.
-        The broker row still exists, so we should still deregister — but there
-        is no pane to ``/exit``, and the summary line flags that.
-        """
+        """Pending placements still deregister but skip the pane ``/exit``."""
         monkeypatch.setattr(
             broker,
             "get_agent",
@@ -343,11 +322,7 @@ class TestTmuxErrorOnSendExit:
     def test_send_exit_failure_is_surfaced_as_warning(
         self, runner, session_id, monkeypatch, deregister_recorder
     ):
-        """If ``tmux send-keys`` fails after we already deregistered the agent,
-        the deregister is NOT rolled back — that would leave the caller's
-        intent violated. Instead, print a warning and exit 0. The user can
-        ``tmux kill-pane`` manually per the hint.
-        """
+        """``send_exit`` failure after deregister must warn and still exit 0."""
         monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
 
         def fake_send_exit(**_kw):
