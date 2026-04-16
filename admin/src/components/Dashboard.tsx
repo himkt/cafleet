@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import type { Agent } from "../types";
 import { getAgents } from "../api";
 import Sidebar from "./Sidebar";
@@ -18,10 +18,6 @@ export default function Dashboard({
 }: DashboardProps) {
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
   const [refreshKey, setRefreshKey] = useState(0);
-
-  useEffect(() => {
-    localStorage.removeItem(`cafleet.sender.${sessionId}`);
-  }, [sessionId]);
 
   const refreshAll = useCallback(async () => {
     try {

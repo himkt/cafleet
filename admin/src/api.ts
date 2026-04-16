@@ -47,11 +47,7 @@ async function request<T>(
 }
 
 export async function listSessions(): Promise<SessionListItem[]> {
-  const resp = await fetch("/ui/api/sessions");
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}`);
-  }
-  return resp.json() as Promise<SessionListItem[]>;
+  return request<SessionListItem[]>("/sessions");
 }
 
 export async function getAgents(): Promise<AgentsResponse> {

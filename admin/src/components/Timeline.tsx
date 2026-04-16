@@ -8,6 +8,16 @@ interface TimelineProps {
   refreshKey: number;
 }
 
+function entrySortKey(entry: TimelineEntry): string {
+  return entry.kind === "unicast" ? entry.message.created_at : entry.sortKey;
+}
+
+function entryKey(entry: TimelineEntry): string {
+  return entry.kind === "unicast"
+    ? entry.message.task_id
+    : `bcast:${entry.rows[0].origin_task_id ?? entry.rows[0].task_id}`;
+}
+
 function groupMessages(msgs: TimelineMessage[]): TimelineEntry[] {
   const groups = new Map<string, TimelineMessage[]>();
   const singletons: TimelineEntry[] = [];
@@ -31,16 +41,9 @@ function groupMessages(msgs: TimelineMessage[]): TimelineEntry[] {
     ),
   }));
 
-  const all = [...singletons, ...broadcasts];
-  all.sort((a, b) => {
-    const aKey =
-      a.kind === "unicast" ? a.message.created_at : a.sortKey;
-    const bKey =
-      b.kind === "unicast" ? b.message.created_at : b.sortKey;
-    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
-  });
-
-  return all;
+  return [...singletons, ...broadcasts].sort((a, b) =>
+    entrySortKey(a).localeCompare(entrySortKey(b)),
+  );
 }
 
 export default function Timeline({ agents, refreshKey }: TimelineProps) {
@@ -86,8 +89,12 @@ export default function Timeline({ agents, refreshKey }: TimelineProps) {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="divide-y divide-gray-100">
-        {entries.map((entry, i) => (
-          <TimelineMessageComponent key={i} entry={entry} agents={agents} />
+        {entries.map((entry) => (
+          <TimelineMessageComponent
+            key={entryKey(entry)}
+            entry={entry}
+            agents={agents}
+          />
         ))}
       </div>
       <div ref={bottomRef} />

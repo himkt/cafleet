@@ -4,21 +4,17 @@ interface SidebarProps {
   agents: Agent[];
 }
 
+function byRegisteredAt(a: Agent, b: Agent): number {
+  return a.registered_at.localeCompare(b.registered_at);
+}
+
 export default function Sidebar({ agents }: SidebarProps) {
   const active = agents
     .filter((a) => a.status === "active")
-    .sort(
-      (a, b) =>
-        new Date(a.registered_at).getTime() -
-        new Date(b.registered_at).getTime(),
-    );
+    .sort(byRegisteredAt);
   const deregistered = agents
     .filter((a) => a.status === "deregistered")
-    .sort(
-      (a, b) =>
-        new Date(a.registered_at).getTime() -
-        new Date(b.registered_at).getTime(),
-    );
+    .sort(byRegisteredAt);
 
   return (
     <aside className="w-48 shrink-0 border-r border-gray-200 bg-gray-50 overflow-y-auto">
