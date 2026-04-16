@@ -78,19 +78,19 @@ def _try_notify_recipient(
     """
     if recipient_id == sender_id:
         return False
-    row = session.execute(
+    pane_id = session.execute(
         select(AgentPlacement.tmux_pane_id).where(
             AgentPlacement.agent_id == recipient_id
         )
-    ).first()
-    if row is None or row[0] is None:
+    ).scalar_one_or_none()
+    if pane_id is None:
         return False
     # Local import so tests that monkeypatch ``cafleet.tmux.send_poll_trigger``
     # get picked up on every call rather than bound once at broker import.
     from cafleet.tmux import send_poll_trigger
 
     return send_poll_trigger(
-        target_pane_id=row[0],
+        target_pane_id=pane_id,
         session_id=session_id,
         agent_id=recipient_id,
     )

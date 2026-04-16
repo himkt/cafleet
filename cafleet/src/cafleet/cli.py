@@ -706,8 +706,9 @@ def member_delete(ctx, agent_id, member_id):
         ctx.exit(1)
         return
 
-    pane_status = ""
-    if pane_id is not None:
+    if pane_id is None:
+        pane_status = "(pending — no pane)"
+    else:
         try:
             tmux.send_exit(target_pane_id=pane_id, ignore_missing=True)
             pane_status = f"{pane_id} (closed)"
@@ -718,10 +719,6 @@ def member_delete(ctx, agent_id, member_id):
                 err=True,
             )
             pane_status = f"{pane_id} (send_exit failed)"
-    else:
-        pane_status = "(pending — no pane)"
-
-    if pane_id is not None:
         try:
             tmux.select_layout(target_window_id=placement["tmux_window_id"])
         except tmux.TmuxError as exc:
