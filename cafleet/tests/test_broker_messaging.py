@@ -104,11 +104,6 @@ def _setup_three_agents() -> tuple[str, str, str, str]:
     return sid, a["agent_id"], b["agent_id"], c["agent_id"]
 
 
-# ===========================================================================
-# send_message
-# ===========================================================================
-
-
 class TestSendMessage:
     """broker.send_message(session_id, agent_id, to, text) → {"task": <dict>}."""
 
@@ -253,11 +248,6 @@ class TestSendMessage:
         assert "persisted?" in texts
 
 
-# ===========================================================================
-# broadcast_message
-# ===========================================================================
-
-
 class TestBroadcastMessage:
     """broker.broadcast_message(session_id, agent_id, text) → [{"task": <summary>}]."""
 
@@ -369,13 +359,8 @@ class TestBroadcastMessage:
         assert "Important update" in texts
 
 
-# ===========================================================================
-# broadcast — Administrator exclusion (design doc 0000025 §E)
-# ===========================================================================
-
-
 def _get_summary_artifact_text(result: list[dict]) -> str:
-    """Extract the text of the broadcast summary's first text artifact part."""
+    """Pull the first text part out of a broadcast summary (admin-exclusion tests)."""
     summary = result[0]["task"]
     artifacts = summary.get("artifacts", [])
     assert len(artifacts) >= 1, "summary must carry at least one artifact"
@@ -545,11 +530,6 @@ class TestBroadcastAdministratorExclusion:
         assert summary_metadata.get("recipientIds") == [director_id]
 
 
-# ===========================================================================
-# poll_tasks
-# ===========================================================================
-
-
 class TestPollTasks:
     """broker.poll_tasks(agent_id, since, page_size, status) → list of task dicts."""
 
@@ -672,11 +652,6 @@ class TestPollTasks:
         assert len(result) >= 1
 
 
-# ===========================================================================
-# ack_task
-# ===========================================================================
-
-
 class TestAckTask:
     """broker.ack_task(agent_id, task_id) → {"task": <updated dict>}."""
 
@@ -765,11 +740,6 @@ class TestAckTask:
         assert acked[0]["status"]["state"] == "completed"
 
 
-# ===========================================================================
-# cancel_task
-# ===========================================================================
-
-
 class TestCancelTask:
     """broker.cancel_task(agent_id, task_id) → {"task": <updated dict>}."""
 
@@ -855,11 +825,6 @@ class TestCancelTask:
         canceled = [t for t in tasks if t["id"] == task_id]
         assert len(canceled) == 1
         assert canceled[0]["status"]["state"] == "canceled"
-
-
-# ===========================================================================
-# get_task
-# ===========================================================================
 
 
 class TestGetTask:

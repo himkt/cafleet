@@ -97,11 +97,6 @@ def _register_agent(
     )
 
 
-# ===========================================================================
-# Session operations
-# ===========================================================================
-
-
 class TestCreateSession:
     """broker.create_session(label=None) → dict with session_id, label, created_at."""
 
@@ -353,11 +348,6 @@ class TestGetSession:
 # the soft-delete idempotency, tasks preservation, and the not-found error
 # path — is covered comprehensively by
 # ``tests/test_session_bootstrap.py::TestDeleteSessionCascade``.
-
-
-# ===========================================================================
-# Agent registry operations
-# ===========================================================================
 
 
 class TestRegisterAgent:

@@ -104,11 +104,6 @@ def _setup_three_agents() -> tuple[str, str, str, str]:
     return sid, a["agent_id"], b["agent_id"], c["agent_id"]
 
 
-# ===========================================================================
-# list_session_agents
-# ===========================================================================
-
-
 class TestListSessionAgents:
     """broker.list_session_agents(session_id) → active + deregistered with tasks."""
 
@@ -218,11 +213,6 @@ class TestListSessionAgents:
         assert "in-b" not in names
 
 
-# ===========================================================================
-# kind field on agents — design doc 0000025 §F
-# ===========================================================================
-
-
 class TestListSessionAgentsKind:
     """/ui/api/agents exposes ``kind`` per row via ``broker.list_session_agents``.
 
@@ -321,11 +311,6 @@ class TestGetAgentKind:
         assert result["kind"] == "user"
 
 
-# ===========================================================================
-# list_inbox
-# ===========================================================================
-
-
 class TestListInbox:
     """broker.list_inbox(agent_id) → inbox tasks as raw dicts."""
 
@@ -398,11 +383,6 @@ class TestListInbox:
         assert "task_id" in entry or "task_json" in entry
 
 
-# ===========================================================================
-# list_sent
-# ===========================================================================
-
-
 class TestListSent:
     """broker.list_sent(agent_id) → sent tasks as raw dicts."""
 
@@ -469,11 +449,6 @@ class TestListSent:
         entry = result[0]
         assert isinstance(entry, dict)
         assert "task_id" in entry or "task_json" in entry
-
-
-# ===========================================================================
-# list_timeline
-# ===========================================================================
 
 
 class TestListTimeline:
@@ -582,11 +557,6 @@ class TestListTimeline:
         assert len(result) >= 2
 
 
-# ===========================================================================
-# get_agent_names
-# ===========================================================================
-
-
 class TestGetAgentNames:
     """broker.get_agent_names(agent_ids) → {agent_id: name}."""
 
@@ -641,11 +611,6 @@ class TestGetAgentNames:
         result = broker.get_agent_names([agent["agent_id"]])
         assert len(result) == 1
         assert result[agent["agent_id"]] == "solo"
-
-
-# ===========================================================================
-# get_task_created_ats
-# ===========================================================================
 
 
 class TestGetTaskCreatedAts:
