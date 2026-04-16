@@ -18,25 +18,22 @@ def format_register(data: dict) -> str:
 def format_task(task: dict) -> str:
     if "task" in task:
         task = task["task"]
-    task_id = task.get("id", "?")
-    state = task.get("status", {}).get("state", "?")
-    from_agent = task.get("metadata", {}).get("fromAgentId", "?")
-    to_agent = task.get("metadata", {}).get("toAgentId", "?")
-    msg_type = task.get("metadata", {}).get("type", "?")
-    text = ""
-    for artifact in task.get("artifacts", []):
-        for part in artifact.get("parts", []):
-            if isinstance(part, dict) and part.get("text"):
-                text = part["text"]
-                break
-        if text:
-            break
+    metadata = task.get("metadata", {})
+    text = next(
+        (
+            part["text"]
+            for artifact in task.get("artifacts", [])
+            for part in artifact.get("parts", [])
+            if isinstance(part, dict) and part.get("text")
+        ),
+        "",
+    )
     lines = [
-        f"  id:    {task_id}",
-        f"  state: {state}",
-        f"  from:  {from_agent}",
-        f"  to:    {to_agent}",
-        f"  type:  {msg_type}",
+        f"  id:    {task.get('id', '?')}",
+        f"  state: {task.get('status', {}).get('state', '?')}",
+        f"  from:  {metadata.get('fromAgentId', '?')}",
+        f"  to:    {metadata.get('toAgentId', '?')}",
+        f"  type:  {metadata.get('type', '?')}",
     ]
     if text:
         lines.append(f"  text:  {text}")
