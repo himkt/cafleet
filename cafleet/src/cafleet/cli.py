@@ -201,7 +201,7 @@ def session_create(ctx: click.Context, label: str | None, as_json: bool) -> None
 
     result = broker.create_session(label=label, director_context=director_ctx)
 
-    if as_json:
+    if as_json or ctx.obj.get("json_output"):
         click.echo(json.dumps(result))
     else:
         click.echo(output.format_session_create(result))
@@ -209,11 +209,12 @@ def session_create(ctx: click.Context, label: str | None, as_json: bool) -> None
 
 @session.command("list")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-def session_list(as_json: bool) -> None:
+@click.pass_context
+def session_list(ctx: click.Context, as_json: bool) -> None:
     """List all sessions."""
     rows = broker.list_sessions()
 
-    if as_json:
+    if as_json or ctx.obj.get("json_output"):
         click.echo(json.dumps(rows))
     else:
         if not rows:
@@ -230,7 +231,8 @@ def session_list(as_json: bool) -> None:
 @session.command("show")
 @click.argument("session_id")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-def session_show(session_id: str, as_json: bool) -> None:
+@click.pass_context
+def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
     """Show details of a single session."""
     result = broker.get_session(session_id)
 
@@ -238,7 +240,7 @@ def session_show(session_id: str, as_json: bool) -> None:
         click.echo(f"Error: session '{session_id}' not found.", err=True)
         sys.exit(1)
 
-    if as_json:
+    if as_json or ctx.obj.get("json_output"):
         click.echo(json.dumps(result))
     else:
         click.echo(f"session_id: {result['session_id']}")
