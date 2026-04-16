@@ -550,9 +550,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         coding_agent_config.ensure_available()
         director_ctx = tmux.director_context()
     except (tmux.TmuxError, RuntimeError) as exc:
-        click.echo(f"Error: {exc}", err=True)
-        ctx.exit(1)
-        return
+        raise click.ClickException(str(exc)) from exc
 
     try:
         result = broker.register_agent(
@@ -568,9 +566,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
             },
         )
     except Exception as exc:
-        click.echo(f"Error: register failed: {exc}", err=True)
-        ctx.exit(1)
-        return
+        raise click.ClickException(f"register failed: {exc}") from exc
     new_agent_id = result["agent_id"]
 
     # Prompt resolution needs the new member's literal ``agent_id``, which
@@ -646,9 +642,7 @@ def member_delete(ctx, agent_id, member_id):
     try:
         tmux.ensure_tmux_available()
     except tmux.TmuxError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        ctx.exit(1)
-        return
+        raise click.ClickException(str(exc)) from exc
 
     _target, placement = _load_authorized_member(
         session_id,
@@ -665,9 +659,7 @@ def member_delete(ctx, agent_id, member_id):
     try:
         broker.deregister_agent(member_id)
     except Exception as exc:
-        click.echo(f"Error: deregister failed: {exc}", err=True)
-        ctx.exit(1)
-        return
+        raise click.ClickException(f"deregister failed: {exc}") from exc
 
     if pane_id is None:
         pane_status = "(pending — no pane)"
@@ -730,9 +722,7 @@ def member_capture(ctx, agent_id, member_id, lines):
     try:
         tmux.ensure_tmux_available()
     except tmux.TmuxError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        ctx.exit(1)
-        return
+        raise click.ClickException(str(exc)) from exc
 
     _target, placement = _load_authorized_member(
         session_id,
@@ -745,20 +735,15 @@ def member_capture(ctx, agent_id, member_id, lines):
     )
     pane_id = placement["tmux_pane_id"]
     if pane_id is None:
-        click.echo(
-            f"Error: member {member_id} has no pane yet (pending placement) "
-            f"— nothing to capture.",
-            err=True,
+        raise click.ClickException(
+            f"member {member_id} has no pane yet (pending placement) "
+            f"— nothing to capture."
         )
-        ctx.exit(1)
-        return
 
     try:
         content = tmux.capture_pane(target_pane_id=pane_id, lines=lines)
     except tmux.TmuxError as exc:
-        click.echo(f"Error: capture failed: {exc}", err=True)
-        ctx.exit(1)
-        return
+        raise click.ClickException(f"capture failed: {exc}") from exc
 
     if ctx.obj["json_output"]:
         click.echo(
@@ -812,9 +797,7 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
     try:
         tmux.ensure_tmux_available()
     except tmux.TmuxError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        ctx.exit(1)
-        return
+        raise click.ClickException(str(exc)) from exc
 
     target, placement = _load_authorized_member(
         session_id,
@@ -827,13 +810,9 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
     )
     pane_id = placement["tmux_pane_id"]
     if pane_id is None:
-        click.echo(
-            f"Error: member {member_id} has no pane yet (pending placement) "
-            f"— nothing to send.",
-            err=True,
+        raise click.ClickException(
+            f"member {member_id} has no pane yet (pending placement) — nothing to send."
         )
-        ctx.exit(1)
-        return
 
     try:
         if choice is not None:
@@ -843,9 +822,7 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
             tmux.send_freetext_and_submit(target_pane_id=pane_id, text=freetext)
             action, value = "freetext", freetext
     except tmux.TmuxError as exc:
-        click.echo(f"Error: send failed: {exc}", err=True)
-        ctx.exit(1)
-        return
+        raise click.ClickException(f"send failed: {exc}") from exc
 
     if ctx.obj["json_output"]:
         click.echo(
