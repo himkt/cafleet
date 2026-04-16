@@ -33,7 +33,6 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  // Validate dashboard session_id against the session list
   useEffect(() => {
     if (route.kind !== "dashboard" || !route.sessionId) {
       setLoading(false);
