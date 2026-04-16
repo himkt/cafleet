@@ -19,7 +19,7 @@ function parseError(error: string): ParseResult {
   return { to: "", body: "", error };
 }
 
-function parseInput(raw: string, activeAgents: Agent[]): ParseResult {
+function parseInput(raw: string, recipients: Agent[]): ParseResult {
   const mentionRe = /^@([A-Za-z0-9_-]+)(?:\s|$)/;
   const mentions: string[] = [];
   let rest = raw.trimStart();
@@ -56,7 +56,7 @@ function parseInput(raw: string, activeAgents: Agent[]): ParseResult {
   }
 
   const slug = nonAll[0];
-  const matched = activeAgents.filter(
+  const matched = recipients.filter(
     (a) => slugify(a.name) === slug.toLowerCase(),
   );
 
