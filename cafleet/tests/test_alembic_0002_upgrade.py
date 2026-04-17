@@ -32,10 +32,7 @@ def db_at_0001(tmp_path):
 
 
 class TestMigration0002Upgrade:
-    """Tests for the 0002_local_simplification upgrade path."""
-
     def test_sessions_table_created(self, db_at_0001):
-        """After upgrade, ``sessions`` table exists with expected columns."""
         cfg = _make_alembic_cfg(db_at_0001)
         command.upgrade(cfg, "0002_local_simplification")
 
@@ -51,7 +48,6 @@ class TestMigration0002Upgrade:
             engine.dispose()
 
     def test_api_keys_table_dropped(self, db_at_0001):
-        """After upgrade, ``api_keys`` table no longer exists."""
         cfg = _make_alembic_cfg(db_at_0001)
         command.upgrade(cfg, "0002_local_simplification")
 
@@ -64,7 +60,6 @@ class TestMigration0002Upgrade:
             engine.dispose()
 
     def test_agents_column_renamed_to_session_id(self, db_at_0001):
-        """After upgrade, ``agents`` has ``session_id`` and no ``tenant_id``."""
         cfg = _make_alembic_cfg(db_at_0001)
         command.upgrade(cfg, "0002_local_simplification")
 
@@ -72,22 +67,14 @@ class TestMigration0002Upgrade:
         try:
             insp = inspect(engine)
             cols = {col["name"] for col in insp.get_columns("agents")}
-            assert "session_id" in cols, (
-                "agents table does not have session_id column after migration"
-            )
-            assert "tenant_id" not in cols, (
-                "agents table still has tenant_id column after migration — "
-                "rename did not apply"
-            )
+            assert "session_id" in cols
+            assert "tenant_id" not in cols
         finally:
             engine.dispose()
 
     def test_session_seeded_from_api_key(self, db_at_0001):
-        """Migration seeds a session row per api_keys row, using api_key_hash
-        as the session_id."""
         engine = create_engine(f"sqlite:///{db_at_0001}")
         try:
-            # Insert an api_key at the 0001 schema level
             with engine.begin() as conn:
                 conn.execute(
                     text(
@@ -106,7 +93,6 @@ class TestMigration0002Upgrade:
         finally:
             engine.dispose()
 
-        # Run migration
         cfg = _make_alembic_cfg(db_at_0001)
         command.upgrade(cfg, "0002_local_simplification")
 
@@ -129,8 +115,6 @@ class TestMigration0002Upgrade:
             engine.dispose()
 
     def test_agent_fk_valid_after_upgrade(self, db_at_0001):
-        """An agent referencing an api_key via tenant_id has a valid
-        session_id FK after the migration."""
         api_key_hash = (
             "beef0000beef0000beef0000beef0000beef0000beef0000beef0000beef0000"
         )
@@ -180,7 +164,6 @@ class TestMigration0002Upgrade:
         engine = create_engine(f"sqlite:///{db_at_0001}")
         try:
             with engine.connect() as conn:
-                # Verify agent now has session_id = the old api_key_hash
                 row = conn.execute(
                     text("SELECT session_id FROM agents WHERE agent_id = :aid"),
                     {"aid": agent_id},
@@ -188,7 +171,6 @@ class TestMigration0002Upgrade:
                 assert row is not None
                 assert row[0] == api_key_hash
 
-                # Verify the FK is valid: session row exists
                 sess_row = conn.execute(
                     text("SELECT session_id FROM sessions WHERE session_id = :sid"),
                     {"sid": api_key_hash},
@@ -198,11 +180,8 @@ class TestMigration0002Upgrade:
             engine.dispose()
 
     def test_revoked_api_key_also_seeded(self, db_at_0001):
-        """Migration seeds sessions from ALL api_keys rows — including revoked ones.
-
-        This prevents FK violations for agents whose tenant_id referenced a
-        revoked key. See design doc §2 Note about seeding step.
-        """
+        """Revoked keys must also be seeded to prevent FK violations for agents
+        whose tenant_id referenced a revoked key."""
         active_hash = "aaaa0000" * 8
         revoked_hash = "bbbb0000" * 8
         now = _now_iso()
@@ -251,19 +230,12 @@ class TestMigration0002Upgrade:
                     text("SELECT session_id FROM sessions ORDER BY session_id")
                 ).fetchall()
             session_ids = {row[0] for row in rows}
-            assert active_hash in session_ids, (
-                "Active api_key was not seeded into sessions"
-            )
-            assert revoked_hash in session_ids, (
-                "Revoked api_key was not seeded into sessions — migration "
-                "must seed ALL api_keys rows to prevent FK violations"
-            )
+            assert active_hash in session_ids
+            assert revoked_hash in session_ids
         finally:
             engine.dispose()
 
     def test_fresh_db_upgrade_no_op_on_empty_api_keys(self, db_at_0001):
-        """On a fresh DB with zero api_keys rows, the INSERT ... SELECT is a
-        no-op and the migration still succeeds."""
         cfg = _make_alembic_cfg(db_at_0001)
         command.upgrade(cfg, "0002_local_simplification")
 
@@ -276,8 +248,6 @@ class TestMigration0002Upgrade:
             engine.dispose()
 
     def test_idx_agents_session_status_exists(self, db_at_0001):
-        """After upgrade, ``idx_agents_session_status`` index exists on
-        ``(session_id, status)``."""
         cfg = _make_alembic_cfg(db_at_0001)
         command.upgrade(cfg, "0002_local_simplification")
 
@@ -288,16 +258,13 @@ class TestMigration0002Upgrade:
             match = [
                 idx for idx in indexes if idx["name"] == "idx_agents_session_status"
             ]
-            assert len(match) == 1, (
-                f"expected idx_agents_session_status, got: {[i['name'] for i in indexes]}"
-            )
+            assert len(match) == 1
             assert "session_id" in match[0]["column_names"]
             assert "status" in match[0]["column_names"]
         finally:
             engine.dispose()
 
     def test_idx_agents_tenant_status_gone(self, db_at_0001):
-        """After upgrade, ``idx_agents_tenant_status`` no longer exists."""
         cfg = _make_alembic_cfg(db_at_0001)
         command.upgrade(cfg, "0002_local_simplification")
 
@@ -306,15 +273,11 @@ class TestMigration0002Upgrade:
             insp = inspect(engine)
             indexes = insp.get_indexes("agents")
             old = [idx for idx in indexes if idx["name"] == "idx_agents_tenant_status"]
-            assert len(old) == 0, (
-                "idx_agents_tenant_status still exists after migration — "
-                "batch_alter_table should have replaced it with idx_agents_session_status"
-            )
+            assert len(old) == 0
         finally:
             engine.dispose()
 
     def test_alembic_version_updated(self, db_at_0001):
-        """After upgrade, alembic_version row reflects 0002_local_simplification."""
         cfg = _make_alembic_cfg(db_at_0001)
         command.upgrade(cfg, "0002_local_simplification")
 
@@ -331,15 +294,7 @@ class TestMigration0002Upgrade:
 
 
 class TestMigration0002Downgrade:
-    """Tests for the 0002_local_simplification downgrade (must raise)."""
-
     def test_downgrade_raises_not_implemented(self, db_at_0001):
-        """Attempting to downgrade from 0002 raises an error.
-
-        The migration's downgrade() raises NotImplementedError. Alembic
-        surfaces this as a CommandError or similar failure — the key
-        assertion is that the downgrade does not succeed silently.
-        """
         cfg = _make_alembic_cfg(db_at_0001)
         command.upgrade(cfg, "0002_local_simplification")
 

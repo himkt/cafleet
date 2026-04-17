@@ -106,10 +106,7 @@ def db_at_0005(tmp_path):
 
 
 class TestMigration0006UpgradeSeed:
-    """Test 1 — upgrade seeds exactly one Administrator per pre-existing session."""
-
     def test_seeds_one_administrator_per_session(self, db_at_0005):
-        """After upgrade, every pre-existing session has exactly one Administrator."""
         from cafleet.broker import ADMINISTRATOR_KIND
 
         sid_a = str(uuid.uuid4())
@@ -119,7 +116,6 @@ class TestMigration0006UpgradeSeed:
 
         engine = create_engine(f"sqlite:///{db_at_0005}")
         try:
-            # Two pre-seed sessions with a mix of user agents.
             _seed_session(engine, session_id=sid_a, created_at=created_at_a, label="a")
             _seed_session(engine, session_id=sid_b, created_at=created_at_b, label="b")
             _seed_user_agent(
@@ -136,7 +132,7 @@ class TestMigration0006UpgradeSeed:
                 name="user-2",
                 registered_at=created_at_a,
             )
-            # Session B deliberately has no user agents — still must gain Admin.
+            # Session B has no user agents — it must still gain an Administrator.
         finally:
             engine.dispose()
 
@@ -148,12 +144,8 @@ class TestMigration0006UpgradeSeed:
             admins_a = _fetch_administrator_rows(engine, sid_a)
             admins_b = _fetch_administrator_rows(engine, sid_b)
 
-            assert len(admins_a) == 1, (
-                f"session A should gain exactly 1 Administrator, got {len(admins_a)}"
-            )
-            assert len(admins_b) == 1, (
-                f"session B should gain exactly 1 Administrator, got {len(admins_b)}"
-            )
+            assert len(admins_a) == 1
+            assert len(admins_b) == 1
 
             for admins, expected_created_at in (
                 (admins_a, created_at_a),
@@ -162,14 +154,8 @@ class TestMigration0006UpgradeSeed:
                 row = admins[0]
                 assert row["name"] == "Administrator"
                 assert row["status"] == "active"
-                # registered_at must equal the session.created_at
-                assert row["registered_at"] == expected_created_at, (
-                    f"Administrator.registered_at should match session.created_at"
-                    f" ({expected_created_at!r}), got {row['registered_at']!r}"
-                )
-                # agent_id must be a valid UUID
+                assert row["registered_at"] == expected_created_at
                 uuid.UUID(row["agent_id"])
-                # Card shape
                 card = json.loads(row["agent_card_json"])
                 assert card["cafleet"]["kind"] == ADMINISTRATOR_KIND
                 assert card["name"] == "Administrator"
@@ -178,7 +164,6 @@ class TestMigration0006UpgradeSeed:
             engine.dispose()
 
     def test_seed_preserves_existing_user_agents(self, db_at_0005):
-        """Pre-existing user agents are not touched by the migration."""
         sid = str(uuid.uuid4())
         created_at = "2026-01-01T00:00:00+00:00"
         user_id = str(uuid.uuid4())
@@ -213,7 +198,6 @@ class TestMigration0006UpgradeSeed:
             engine.dispose()
 
     def test_no_sessions_no_administrators(self, db_at_0005):
-        """Upgrading a DB with zero sessions inserts zero Administrator rows."""
         cfg = _make_alembic_cfg(db_at_0005)
         command.upgrade(cfg, "head")
 
@@ -233,10 +217,7 @@ class TestMigration0006UpgradeSeed:
 
 
 class TestMigration0006UpgradeIdempotent:
-    """Test 2 — running upgrade twice back-to-back still yields one Admin per session."""
-
     def test_double_upgrade_is_idempotent(self, db_at_0005):
-        """After two consecutive ``upgrade head`` calls, exactly one Admin per session."""
         sid_a = str(uuid.uuid4())
         sid_b = str(uuid.uuid4())
         created_at = "2026-03-03T03:03:03+00:00"
@@ -249,29 +230,19 @@ class TestMigration0006UpgradeIdempotent:
             engine.dispose()
 
         cfg = _make_alembic_cfg(db_at_0005)
-        # First upgrade: seed administrators.
         command.upgrade(cfg, "head")
-        # Second upgrade: must be a no-op for the seeded sessions
-        # (migration probes via json_extract before INSERTing).
         command.upgrade(cfg, "head")
 
         engine = create_engine(f"sqlite:///{db_at_0005}")
         try:
             admins_a = _fetch_administrator_rows(engine, sid_a)
             admins_b = _fetch_administrator_rows(engine, sid_b)
-            assert len(admins_a) == 1, (
-                f"idempotency: session A should still have 1 Administrator, "
-                f"got {len(admins_a)}"
-            )
-            assert len(admins_b) == 1, (
-                f"idempotency: session B should still have 1 Administrator, "
-                f"got {len(admins_b)}"
-            )
+            assert len(admins_a) == 1
+            assert len(admins_b) == 1
         finally:
             engine.dispose()
 
     def test_idempotent_preserves_original_administrator_id(self, db_at_0005):
-        """The Administrator's agent_id does not change across re-runs."""
         sid = str(uuid.uuid4())
         created_at = "2026-04-04T04:04:04+00:00"
 
@@ -292,33 +263,24 @@ class TestMigration0006UpgradeIdempotent:
         finally:
             engine.dispose()
 
-        # Re-run upgrade.
         command.upgrade(cfg, "head")
 
         engine = create_engine(f"sqlite:///{db_at_0005}")
         try:
             second_admins = _fetch_administrator_rows(engine, sid)
             assert len(second_admins) == 1
-            assert second_admins[0]["agent_id"] == first_id, (
-                "re-running upgrade must not regenerate the Administrator "
-                f"agent_id (was {first_id}, now {second_admins[0]['agent_id']})"
-            )
+            assert second_admins[0]["agent_id"] == first_id
         finally:
             engine.dispose()
 
 
 class TestMigration0006DowngradeSmoke:
-    """Downgrade on an empty session removes the Administrator.
-
-    The non-empty case is deliberately out of scope: ``tasks.context_id``
-    uses ``ON DELETE RESTRICT``, so any session with at least one task
-    referencing the Administrator would fail on downgrade — testing that
-    would be testing SQLite's FK enforcement, not our migration. The
-    design doc treats downgrade as forward-only in practice.
+    """Only tests task-free sessions. The non-empty case is out of scope:
+    ``tasks.context_id`` uses ``ON DELETE RESTRICT``, so downgrading with
+    existing task references would test SQLite FK enforcement, not our migration.
     """
 
     def test_downgrade_removes_administrator_on_empty_session(self, db_at_0005):
-        """Upgrade then downgrade on a task-free session leaves no Admin row."""
         sid = str(uuid.uuid4())
         created_at = "2026-05-05T05:05:05+00:00"
 
@@ -331,7 +293,6 @@ class TestMigration0006DowngradeSmoke:
         cfg = _make_alembic_cfg(db_at_0005)
         command.upgrade(cfg, "head")
 
-        # Confirm upgrade actually seeded the Administrator.
         engine = create_engine(f"sqlite:///{db_at_0005}")
         try:
             admins = _fetch_administrator_rows(engine, sid)
@@ -339,17 +300,13 @@ class TestMigration0006DowngradeSmoke:
         finally:
             engine.dispose()
 
-        # Now downgrade one step (back to 0005).
         command.downgrade(cfg, "0005")
 
         engine = create_engine(f"sqlite:///{db_at_0005}")
         try:
             admins = _fetch_administrator_rows(engine, sid)
-            assert len(admins) == 0, (
-                "downgrade must remove Administrator rows on empty sessions"
-            )
+            assert len(admins) == 0
 
-            # Alembic version must be back at 0005.
             with engine.connect() as conn:
                 (version,) = conn.execute(
                     text("SELECT version_num FROM alembic_version")
