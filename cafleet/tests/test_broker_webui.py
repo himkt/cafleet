@@ -394,12 +394,7 @@ class TestListTimeline:
 
         result = broker.list_timeline(sid)
         assert len(result) == 2
-        # Entries should be in descending timestamp order
-        ts0 = result[0].get("created_at", "") or ""
-        ts1 = result[1].get("created_at", "") or ""
-        # If created_at is present, verify ordering; otherwise trust the impl
-        if ts0 and ts1:
-            assert ts0 >= ts1
+        assert result[0]["created_at"] >= result[1]["created_at"]
 
     def test_filters_broadcast_summary(self):
         """broadcast_summary tasks do not appear in timeline."""
