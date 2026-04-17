@@ -492,7 +492,6 @@ def deregister_agent(agent_id: str) -> bool:
 
 
 def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
-    """Patch the pane id of an existing placement and return the new row."""
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
         updated = session.execute(
@@ -505,10 +504,7 @@ def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
             return None
         row = session.execute(
             select(AgentPlacement).where(AgentPlacement.agent_id == agent_id)
-        ).scalar_one_or_none()
-
-    if row is None:
-        return None
+        ).scalar_one()
     return _placement_dict(row)
 
 
@@ -599,9 +595,7 @@ def _read_task(session, task_id: str) -> dict | None:
     task_json = session.execute(
         select(Task.task_json).where(Task.task_id == task_id)
     ).scalar_one_or_none()
-    if task_json is None:
-        return None
-    return json.loads(task_json)
+    return json.loads(task_json) if task_json is not None else None
 
 
 def _unicast_task_dict(

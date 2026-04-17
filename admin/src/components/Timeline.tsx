@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { TimelineMessage, TimelineEntry, Agent } from "../types";
 import { fetchTimeline } from "../api";
 import TimelineMessageComponent from "./TimelineMessage";
@@ -56,20 +56,18 @@ export default function Timeline({ agents, refreshKey }: TimelineProps) {
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await fetchTimeline();
-      setEntries(groupMessages(data.messages));
-    } catch {
-      setEntries([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    load();
-  }, [load, refreshKey]);
+    (async () => {
+      try {
+        const data = await fetchTimeline();
+        setEntries(groupMessages(data.messages));
+      } catch {
+        setEntries([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [refreshKey]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "auto" });

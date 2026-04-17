@@ -77,7 +77,7 @@ type MentionCandidate =
 
 interface MentionState {
   query: string;
-  anchor: number; // index of the `@` character in the textarea value
+  anchor: number;
 }
 
 function detectMention(text: string, cursor: number): MentionState | null {
@@ -263,7 +263,7 @@ export default function MessageInput({
     }
     if (e.key === "Enter") {
       if (composing) return;
-      if (e.shiftKey) return; // default textarea newline
+      if (e.shiftKey) return;
       if (popoverOpen) {
         e.preventDefault();
         const candidate = candidates[selectedIndex];

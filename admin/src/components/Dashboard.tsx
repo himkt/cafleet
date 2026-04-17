@@ -24,7 +24,7 @@ export default function Dashboard({
       const data = await getAgents();
       setAgents(data.agents);
     } catch {
-      // keep current agents on error
+      /* preserve last-known agent list */
     }
     setRefreshKey((k) => k + 1);
   }, []);

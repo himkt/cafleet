@@ -1,4 +1,4 @@
-"""Tests for the Administrator agent helpers, constants, and broker guards (design 0000025)."""
+"""Tests for Administrator agent helpers, constants, and broker guards."""
 
 import json
 import uuid
@@ -26,14 +26,10 @@ def _create_session_with_ctx():
 
 
 class TestAdministratorKindConstant:
-    """Module-level ``ADMINISTRATOR_KIND`` constant in cafleet.broker."""
-
     def test_constant_exists_and_is_importable(self):
-        """ADMINISTRATOR_KIND must be importable directly from cafleet.broker."""
         assert ADMINISTRATOR_KIND is not None
 
     def test_constant_value_is_builtin_administrator(self):
-        """The canonical kind string is 'builtin-administrator'."""
         assert ADMINISTRATOR_KIND == "builtin-administrator"
 
     def test_constant_is_string(self):
@@ -41,8 +37,6 @@ class TestAdministratorKindConstant:
 
 
 class TestAdministratorAgentCard:
-    """``_administrator_agent_card(session_id)`` returns canonical card dict."""
-
     def test_returns_dict(self):
         session_id = str(uuid.uuid4())
         card = _administrator_agent_card(session_id)
@@ -54,7 +48,6 @@ class TestAdministratorAgentCard:
         assert card["name"] == "Administrator"
 
     def test_description_contains_session_id_first_8_chars(self):
-        """Per design §A, description includes the first 8 chars of session_id."""
         session_id = "3f9a1b2c-1234-5678-9abc-def012345678"
         card = _administrator_agent_card(session_id)
         assert "3f9a1b2c" in card["description"]
@@ -71,7 +64,6 @@ class TestAdministratorAgentCard:
         assert card["skills"] == []
 
     def test_cafleet_namespace_kind_matches_constant(self):
-        """card['cafleet']['kind'] must equal ADMINISTRATOR_KIND."""
         session_id = str(uuid.uuid4())
         card = _administrator_agent_card(session_id)
         assert "cafleet" in card
@@ -79,14 +71,12 @@ class TestAdministratorAgentCard:
         assert card["cafleet"]["kind"] == ADMINISTRATOR_KIND
 
     def test_card_is_json_serializable(self):
-        """The returned dict must be json.dumps()-able for storage in agent_card_json."""
         session_id = str(uuid.uuid4())
         card = _administrator_agent_card(session_id)
         serialized = json.dumps(card)
         assert isinstance(serialized, str)
 
     def test_different_session_ids_produce_different_descriptions(self):
-        """Because the description embeds the session-id prefix."""
         sid_a = "aaaaaaaa-1111-1111-1111-111111111111"
         sid_b = "bbbbbbbb-2222-2222-2222-222222222222"
         card_a = _administrator_agent_card(sid_a)
@@ -95,17 +85,13 @@ class TestAdministratorAgentCard:
 
 
 class TestIsAdministratorCard:
-    """``_is_administrator_card(agent_card_json)`` JSON-string predicate."""
-
     def test_returns_true_for_canonical_administrator_card(self):
-        """A card produced by _administrator_agent_card must round-trip as True."""
         session_id = str(uuid.uuid4())
         card = _administrator_agent_card(session_id)
         card_json = json.dumps(card)
         assert _is_administrator_card(card_json) is True
 
     def test_returns_true_for_hand_built_administrator_card(self):
-        """Any JSON payload with cafleet.kind == 'builtin-administrator' counts."""
         payload = {
             "name": "Administrator",
             "description": "anything",
@@ -115,7 +101,6 @@ class TestIsAdministratorCard:
         assert _is_administrator_card(json.dumps(payload)) is True
 
     def test_returns_false_for_normal_user_card(self):
-        """A typical agent card (no 'cafleet' key) must return False."""
         payload = {
             "name": "Claude-B",
             "description": "Reviewer",
@@ -124,12 +109,10 @@ class TestIsAdministratorCard:
         assert _is_administrator_card(json.dumps(payload)) is False
 
     def test_returns_false_when_cafleet_key_missing(self):
-        """Explicitly check a card that has other top-level keys but no 'cafleet'."""
         payload = {"name": "x", "description": "y", "skills": []}
         assert _is_administrator_card(json.dumps(payload)) is False
 
     def test_returns_false_when_cafleet_kind_missing(self):
-        """'cafleet' present but 'kind' subkey absent → False."""
         payload = {
             "name": "x",
             "description": "y",
@@ -139,7 +122,6 @@ class TestIsAdministratorCard:
         assert _is_administrator_card(json.dumps(payload)) is False
 
     def test_returns_false_when_cafleet_kind_is_different_value(self):
-        """'cafleet.kind' present but not the administrator sentinel → False."""
         payload = {
             "name": "x",
             "description": "y",
@@ -149,14 +131,12 @@ class TestIsAdministratorCard:
         assert _is_administrator_card(json.dumps(payload)) is False
 
     def test_returns_false_for_malformed_json(self):
-        """Non-JSON string input must not raise — returns False."""
         assert _is_administrator_card("{not valid json") is False
 
     def test_returns_false_for_empty_string(self):
         assert _is_administrator_card("") is False
 
     def test_returns_false_for_json_array(self):
-        """Well-formed JSON that is not an object → False (no cafleet.kind path)."""
         assert _is_administrator_card("[1, 2, 3]") is False
 
     def test_returns_false_for_json_null(self):
@@ -164,8 +144,6 @@ class TestIsAdministratorCard:
 
 
 class TestAdministratorProtectedError:
-    """Exception raised when an operation targets a built-in Administrator."""
-
     def test_class_is_importable(self):
         assert AdministratorProtectedError is not None
 
@@ -177,7 +155,6 @@ class TestAdministratorProtectedError:
             raise AdministratorProtectedError("Administrator cannot be deregistered")
 
     def test_preserves_message(self):
-        """Instantiation with a message must round-trip via str()."""
         msg = "Administrator cannot be a director"
         with pytest.raises(AdministratorProtectedError) as exc_info:
             raise AdministratorProtectedError(msg)
@@ -202,8 +179,6 @@ def broker_db(sync_sessionmaker, _patch_broker):
 
 
 class TestDeregisterAdministratorGuard:
-    """Design doc §D: deregister_agent refuses to touch the Administrator."""
-
     def test_raises_administrator_protected_error(self, broker_db):
         session = _create_session_with_ctx()
         admin_id = session["administrator_agent_id"]
@@ -214,8 +189,6 @@ class TestDeregisterAdministratorGuard:
         assert "Administrator cannot be deregistered" in str(exc_info.value)
 
     def test_admin_row_still_active_after_failed_deregister(self, broker_db):
-        """A failed deregister leaves the Administrator's status unchanged."""
-
         session = _create_session_with_ctx()
         admin_id = session["administrator_agent_id"]
 
@@ -228,8 +201,6 @@ class TestDeregisterAdministratorGuard:
         assert row.deregistered_at is None
 
     def test_deregistering_user_agent_still_works(self, broker_db):
-        """Regression guard: user agents can still be deregistered normally."""
-
         session = _create_session_with_ctx()
         sid = session["session_id"]
         user = broker.register_agent(
@@ -239,20 +210,11 @@ class TestDeregisterAdministratorGuard:
         result = broker.deregister_agent(user["agent_id"])
         assert result is True
 
-        # The root Director and Administrator seeded at bootstrap (design
-        # 0000026) both remain; only the user agent was deregistered.
         names = {a["name"] for a in broker.list_agents(sid)}
         assert names == {"director", "Administrator"}
 
 
 class TestRegisterAgentPlacementAdministratorGuard:
-    """Design doc §D: the Administrator must never be handed a tmux pane.
-
-    When ``register_agent`` is called with ``placement.director_agent_id``
-    pointing at an Administrator, the broker raises
-    ``AdministratorProtectedError``.
-    """
-
     def test_raises_when_director_is_administrator(self, broker_db):
         session = _create_session_with_ctx()
         sid = session["session_id"]
@@ -276,7 +238,6 @@ class TestRegisterAgentPlacementAdministratorGuard:
         assert "Administrator cannot be a director" in str(exc_info.value)
 
     def test_admin_director_rejection_does_not_create_member(self, broker_db):
-        """After the guard fires, no member agent row exists."""
         session = _create_session_with_ctx()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
@@ -298,13 +259,9 @@ class TestRegisterAgentPlacementAdministratorGuard:
 
         names = {a["name"] for a in broker.list_agents(sid)}
         assert "rejected-member" not in names
-        # Only the bootstrapped agents (Director + Administrator per design
-        # 0000026) should remain.
         assert names == {"director", "Administrator"}
 
     def test_placement_with_user_agent_director_still_works(self, broker_db):
-        """Regression guard: normal user-agent directors still accept placements."""
-
         session = _create_session_with_ctx()
         sid = session["session_id"]
 

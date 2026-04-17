@@ -74,25 +74,15 @@ def format_agent_list(agents: list) -> str:
 
 
 def format_session_create(data: dict) -> str:
-    """Render the ``session create`` text block.
-
-    Line 1 is the session_id so script consumers that only parse the first
-    line keep working; line 2 is the root Director's agent_id.
-    """
     director = data["director"]
     placement = director["placement"]
-    pane = (
-        f"{placement['tmux_session']}:"
-        f"{placement['tmux_window_id']}:"
-        f"{placement['tmux_pane_id']}"
-    )
     lines = [
         data["session_id"],
         director["agent_id"],
         f"label:            {data['label'] or ''}",
         f"created_at:       {data['created_at']}",
         f"director_name:    {director['name']}",
-        f"pane:             {pane}",
+        f"pane:             {placement['tmux_session']}:{placement['tmux_window_id']}:{placement['tmux_pane_id']}",
         f"administrator:    {data['administrator_agent_id']}",
     ]
     return "\n".join(lines)
@@ -139,8 +129,7 @@ def format_member_list(members: list) -> str:
     lines.append(sep)
     for m in members:
         placement = m["placement"]
-        pane_id = placement["tmux_pane_id"]
-        pane_display = pane_id if pane_id is not None else "(pending)"
+        pane_display = placement["tmux_pane_id"] or "(pending)"
         agent_id = m["agent_id"]
         if len(agent_id) > _AGENT_ID_COLUMN_WIDTH:
             agent_id = agent_id[: _AGENT_ID_COLUMN_WIDTH - 2] + "…"
