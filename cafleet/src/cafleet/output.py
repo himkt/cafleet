@@ -22,9 +22,9 @@ def format_task(task: dict) -> str:
     text = next(
         (
             part["text"]
-            for artifact in task.get("artifacts", [])
-            for part in artifact.get("parts", [])
-            if isinstance(part, dict) and part.get("text")
+            for artifact in task["artifacts"]
+            for part in artifact["parts"]
+            if part.get("text")
         ),
         "",
     )

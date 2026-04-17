@@ -369,7 +369,7 @@ def register_agent(
                     tmux_session=placement["tmux_session"],
                     tmux_window_id=placement["tmux_window_id"],
                     tmux_pane_id=placement.get("tmux_pane_id"),
-                    coding_agent=placement.get("coding_agent", "claude"),
+                    coding_agent=placement["coding_agent"],
                     created_at=registered_at,
                 )
             )
@@ -1005,11 +1005,10 @@ def get_task(session_id: str, task_id: str) -> dict:
             raise ValueError(f"Task {task_id} not found")
 
         metadata = task_dict["metadata"]
-        endpoint_ids = [
-            aid
-            for aid in (metadata["fromAgentId"], metadata.get("toAgentId", ""))
-            if aid
-        ]
+        endpoint_ids = [metadata["fromAgentId"]]
+        to_id = metadata.get("toAgentId")
+        if to_id:
+            endpoint_ids.append(to_id)
         in_session = session.execute(
             select(Agent.agent_id).where(
                 Agent.agent_id.in_(endpoint_ids),

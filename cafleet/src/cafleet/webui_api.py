@@ -47,9 +47,9 @@ def _build_message(
     return {
         "task_id": task_id,
         "from_agent_id": from_id,
-        "from_agent_name": agent_names.get(from_id, ""),
+        "from_agent_name": agent_names[from_id],
         "to_agent_id": to_id,
-        "to_agent_name": agent_names.get(to_id, ""),
+        "to_agent_name": agent_names[to_id],
         "type": type_,
         "status": status,
         "created_at": created_at,
@@ -63,7 +63,7 @@ def _format_raw_tasks(rows: list[dict]) -> list[dict]:
     if not rows:
         return []
     agent_ids = {
-        aid for row in rows for aid in (row["from_agent_id"], row["to_agent_id"]) if aid
+        aid for row in rows for aid in (row["from_agent_id"], row["to_agent_id"])
     }
     agent_names = broker.get_agent_names(list(agent_ids))
     return [
@@ -86,14 +86,9 @@ def _format_raw_tasks(rows: list[dict]) -> list[dict]:
 def _format_timeline_entries(entries: list[dict]) -> list[dict]:
     if not entries:
         return []
-    # ``list_timeline`` filters out ``broadcast_summary`` rows, so every task
-    # here is a unicast/delivery with both endpoints present in metadata.
     metas = [(entry, entry["task"]["metadata"]) for entry in entries]
     agent_ids = {
-        aid
-        for _, meta in metas
-        for aid in (meta["fromAgentId"], meta["toAgentId"])
-        if aid
+        aid for _, meta in metas for aid in (meta["fromAgentId"], meta["toAgentId"])
     }
     agent_names = broker.get_agent_names(list(agent_ids))
     return [
