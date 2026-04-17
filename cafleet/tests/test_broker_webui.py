@@ -67,17 +67,13 @@ def _setup_three_agents() -> tuple[str, str, str, str]:
 
 
 class TestListSessionAgents:
-    """broker.list_session_agents(session_id) → active + deregistered with tasks."""
-
     def test_returns_active_agents(self):
-        """Returned list includes user agents + bootstrap pair (design 0000026)."""
         session = _create_session()
         sid = session["session_id"]
         _register_agent(sid, name="active-1")
         _register_agent(sid, name="active-2")
 
         result = broker.list_session_agents(sid)
-        # 2 user agents + root Director + Administrator.
         assert len(result) == 4
         names = {a["name"] for a in result}
         assert "active-1" in names
@@ -94,10 +90,8 @@ class TestListSessionAgents:
         assert result[0]["status"] == "active"
 
     def test_includes_deregistered_agents_with_tasks(self):
-        """Deregistered agents that have tasks should still appear."""
         sid, sender, recipient = _setup_two_agents()
 
-        # Send a message to recipient, then deregister recipient
         broker.send_message(sid, sender, recipient, "keep me visible")
         broker.deregister_agent(recipient)
 
@@ -109,7 +103,6 @@ class TestListSessionAgents:
         assert deregistered[0]["status"] == "deregistered"
 
     def test_excludes_deregistered_agents_without_tasks(self):
-        """Deregistered agents with no tasks should NOT appear."""
         session = _create_session()
         sid = session["session_id"]
         agent = _register_agent(sid, name="ghost")
@@ -120,11 +113,8 @@ class TestListSessionAgents:
         assert agent["agent_id"] not in agent_ids
 
     def test_newly_created_session_returns_bootstrap_pair(self):
-        """A freshly created session has exactly the root Director + Administrator."""
         session = _create_session()
         result = broker.list_session_agents(session["session_id"])
-        # Design 0000026: bootstrap seeds both the root Director and the
-        # Administrator in the same transaction.
         assert len(result) == 2
         names = {a["name"] for a in result}
         assert names == {"director", "Administrator"}
@@ -143,16 +133,12 @@ class TestListSessionAgents:
         assert "registered_at" in agent
 
     def test_scoped_to_session(self):
-        """Agents from other sessions are not included. Each session has its own
-        bootstrap pair (root Director + Administrator).
-        """
         session_a = _create_session()
         session_b = _create_session()
         _register_agent(session_a["session_id"], name="in-a")
         _register_agent(session_b["session_id"], name="in-b")
 
         result = broker.list_session_agents(session_a["session_id"])
-        # Director (A) + Administrator (A) + in-a.
         assert len(result) == 3
         names = {a["name"] for a in result}
         assert "in-a" in names
@@ -162,12 +148,8 @@ class TestListSessionAgents:
 
 
 class TestListSessionAgentsKind:
-    """/ui/api/agents exposes ``kind`` per row via ``broker.list_session_agents``.
-
-    webui_api.py is a thin passthrough (`GET /ui/api/agents` simply wraps
-    ``broker.list_session_agents(session_id)`` and wraps the result as
-    ``{"agents": [...]}``), so testing at the broker layer covers the
-    public HTTP surface.
+    """Testing at the broker layer covers the public HTTP surface because
+    webui_api.py is a thin passthrough around broker.list_session_agents.
     """
 
     def test_entries_include_kind_field(self):
@@ -178,9 +160,7 @@ class TestListSessionAgentsKind:
 
         result = broker.list_session_agents(sid)
         for entry in result:
-            assert "kind" in entry, (
-                f"every agent entry must carry a 'kind' field, got entry={entry!r}"
-            )
+            assert "kind" in entry
 
     def test_administrator_marked_as_builtin_administrator(self):
         session = _create_session()
@@ -192,24 +172,15 @@ class TestListSessionAgentsKind:
         admins = [e for e in result if e["kind"] == ADMINISTRATOR_KIND]
         users = [e for e in result if e["kind"] == "user"]
 
-        # Exactly one Administrator entry, and its name matches.
-        assert len(admins) == 1, (
-            f"expected exactly one Administrator entry, got {len(admins)}: {admins!r}"
-        )
+        assert len(admins) == 1
         assert admins[0]["name"] == "Administrator"
         assert admins[0]["agent_id"] == session["administrator_agent_id"]
 
-        # The two user agents + the root Director all carry kind='user'
-        # (design 0000026 bootstraps the Director alongside the Administrator).
-        assert len(users) == 3, (
-            f"expected 3 user-kind entries (director + user-a + user-b), "
-            f"got {len(users)}: {users!r}"
-        )
+        assert len(users) == 3
         user_names = {e["name"] for e in users}
         assert user_names == {"director", "user-a", "user-b"}
 
     def test_kind_values_are_restricted_to_known_set(self):
-        """No entry carries a kind outside the documented set."""
         session = _create_session()
         sid = session["session_id"]
         _register_agent(sid, name="user-a")
@@ -221,8 +192,6 @@ class TestListSessionAgentsKind:
 
 
 class TestGetAgentKind:
-    """broker.get_agent returned dict includes ``kind`` per §F."""
-
     def test_get_agent_for_administrator_returns_builtin_administrator(self):
         session = _create_session()
         sid = session["session_id"]
@@ -245,8 +214,6 @@ class TestGetAgentKind:
 
 
 class TestListInbox:
-    """broker.list_inbox(agent_id) → inbox tasks as raw dicts."""
-
     def test_returns_inbox_tasks(self):
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "msg1")
@@ -281,7 +248,6 @@ class TestListInbox:
         assert len(summaries) == 0
 
     def test_only_returns_tasks_where_context_id_matches(self):
-        """Only tasks addressed to the agent appear."""
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "for-recipient")
 
@@ -289,22 +255,17 @@ class TestListInbox:
         assert len(sender_inbox) == 0
 
     def test_returns_raw_dicts(self):
-        """list_inbox returns raw dict rows, not wrapped in {"task": ...}."""
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "raw")
 
         result = broker.list_inbox(recipient)
         assert len(result) == 1
-        # Raw dict should not have a top-level "task" wrapper
         entry = result[0]
         assert isinstance(entry, dict)
-        # Should have task row fields
         assert "task_id" in entry or "task_json" in entry
 
 
 class TestListSent:
-    """broker.list_sent(agent_id) → sent tasks as raw dicts."""
-
     def test_returns_sent_tasks(self):
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "sent1")
@@ -339,7 +300,6 @@ class TestListSent:
         assert len(summaries) == 0
 
     def test_only_returns_tasks_from_agent(self):
-        """Only tasks sent by the agent appear."""
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "from-sender")
 
@@ -358,8 +318,6 @@ class TestListSent:
 
 
 class TestListTimeline:
-    """broker.list_timeline(session_id, limit=200) → session-wide timeline."""
-
     def test_returns_timeline_entries(self):
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "timeline entry")
@@ -400,7 +358,6 @@ class TestListTimeline:
             assert entry["task"]["metadata"]["type"] != "broadcast_summary"
 
     def test_scoped_to_session(self):
-        """Only tasks from agents in the given session appear."""
         session_a = _create_session()
         session_b = _create_session()
         sid_a = session_a["session_id"]
@@ -420,7 +377,6 @@ class TestListTimeline:
         assert len(result_b) == 1
 
     def test_limit_parameter(self):
-        """limit caps the number of returned entries."""
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "msg1")
         broker.send_message(sid, sender, recipient, "msg2")
@@ -438,8 +394,6 @@ class TestListTimeline:
 
 
 class TestGetAgentNames:
-    """broker.get_agent_names(agent_ids) → {agent_id: name}."""
-
     def test_returns_name_mapping(self):
         session = _create_session()
         sid = session["session_id"]
@@ -465,7 +419,6 @@ class TestGetAgentNames:
         assert fake_id not in result
 
     def test_includes_deregistered_agents(self):
-        """Deregistered agents still have names and should be returned."""
         session = _create_session()
         sid = session["session_id"]
         agent = _register_agent(sid, name="departed")
@@ -484,8 +437,6 @@ class TestGetAgentNames:
 
 
 class TestGetTaskCreatedAts:
-    """broker.get_task_created_ats(task_ids) → {task_id: created_at}."""
-
     def test_returns_created_at_mapping(self):
         sid, sender, recipient = _setup_two_agents()
         sent1 = broker.send_message(sid, sender, recipient, "first")
@@ -497,7 +448,6 @@ class TestGetTaskCreatedAts:
         assert isinstance(result, dict)
         assert tid1 in result
         assert tid2 in result
-        # created_at should be non-empty ISO strings
         assert isinstance(result[tid1], str)
         assert len(result[tid1]) > 0
         assert isinstance(result[tid2], str)
