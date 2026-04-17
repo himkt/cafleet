@@ -108,16 +108,10 @@ class TestCreateSessionBootstrap:
         with broker_session() as s:
             rows = s.query(Agent).filter(Agent.session_id == sid).all()
 
-        assert len(rows) == 2, (
-            f"expected 2 agent rows (Director + Administrator), got {len(rows)}"
-        )
+        assert len(rows) == 2
         by_name = {r.name: r for r in rows}
-        assert "director" in by_name, (
-            f"missing root Director with name='director' in {list(by_name)}"
-        )
-        assert "Administrator" in by_name, (
-            f"missing built-in Administrator (design 0000025) in {list(by_name)}"
-        )
+        assert "director" in by_name
+        assert "Administrator" in by_name
 
         director_row = by_name["director"]
         admin_row = by_name["Administrator"]
@@ -125,30 +119,22 @@ class TestCreateSessionBootstrap:
         assert admin_row.status == "active"
         assert director_row.agent_id == result["director"]["agent_id"]
         assert admin_row.agent_id == result["administrator_agent_id"]
-        # Administrator card carries the "builtin-administrator" kind.
         assert _is_administrator_card(admin_row.agent_card_json)
-        # Director card does NOT carry the "builtin-administrator" kind.
         assert not _is_administrator_card(director_row.agent_card_json)
 
     def test_writes_one_placement_row_for_the_director_only(
         self, broker_session, director_context
     ):
-        """Only the Director gets a placement row; the Administrator does not."""
         result = _bootstrap(ctx=director_context)
         director_id = result["director"]["agent_id"]
 
         with broker_session() as s:
             placements = s.query(AgentPlacement).all()
 
-        assert len(placements) == 1, (
-            f"expected exactly 1 placement row for the Director, got {len(placements)}"
-        )
+        assert len(placements) == 1
         placement = placements[0]
         assert placement.agent_id == director_id
-        assert placement.director_agent_id is None, (
-            "root Director's placement.director_agent_id must be NULL "
-            "(root has no parent)"
-        )
+        assert placement.director_agent_id is None
         assert placement.tmux_session == director_context.session
         assert placement.tmux_window_id == director_context.window_id
         assert placement.tmux_pane_id == director_context.pane_id
@@ -157,7 +143,6 @@ class TestCreateSessionBootstrap:
     def test_sessions_director_agent_id_is_set_to_the_director(
         self, broker_session, director_context
     ):
-        """After bootstrap, sessions.director_agent_id points at the Director."""
         result = _bootstrap(ctx=director_context)
         sid = result["session_id"]
         director_id = result["director"]["agent_id"]
@@ -165,15 +150,11 @@ class TestCreateSessionBootstrap:
         with broker_session() as s:
             row = s.query(SessionModel).filter(SessionModel.session_id == sid).one()
 
-        assert row.director_agent_id == director_id, (
-            f"sessions.director_agent_id must equal the Director's agent_id; "
-            f"got {row.director_agent_id!r}, expected {director_id!r}"
-        )
+        assert row.director_agent_id == director_id
 
     def test_administrator_registered_at_equals_session_created_at(
         self, broker_session, director_context
     ):
-        """Design 0000025 invariant preserved by the 5-step bootstrap."""
         result = _bootstrap(ctx=director_context)
         sid = result["session_id"]
         admin_id = result["administrator_agent_id"]
@@ -240,24 +221,15 @@ class TestCreateSessionRollback:
             agents = s.query(Agent).count()
             placements = s.query(AgentPlacement).count()
 
-        assert sessions == 0, (
-            f"rollback must not leave any sessions row; got {sessions}"
-        )
-        assert agents == 0, f"rollback must not leave any agents row; got {agents}"
-        assert placements == 0, (
-            f"rollback must not leave any agent_placements row; got {placements}"
-        )
+        assert sessions == 0
+        assert agents == 0
+        assert placements == 0
 
 
 class TestDeleteSessionCascade:
-    """``broker.delete_session`` logically deletes + deregisters + keeps tasks."""
-
     def test_sets_sessions_deleted_at_and_returns_count_including_director(
         self, broker_session, director_context
     ):
-        """N in the output counts every active agent at the moment of delete,
-        which for a freshly-bootstrapped session is Director + Administrator (=2).
-        """
         result = _bootstrap(ctx=director_context)
         sid = result["session_id"]
 
@@ -268,14 +240,11 @@ class TestDeleteSessionCascade:
 
         with broker_session() as s:
             row = s.query(SessionModel).filter(SessionModel.session_id == sid).one()
-        assert row.deleted_at is not None, (
-            "sessions.deleted_at must be set after delete_session"
-        )
+        assert row.deleted_at is not None
 
     def test_deregisters_all_active_agents_in_the_session(
         self, broker_session, director_context
     ):
-        """Every active agent in the session is flipped to status='deregistered'."""
         result = _bootstrap(ctx=director_context)
         sid = result["session_id"]
 
@@ -295,27 +264,22 @@ class TestDeleteSessionCascade:
         result = _bootstrap(ctx=director_context)
         sid = result["session_id"]
 
-        # Before delete there is exactly one placement (the Director's).
         with broker_session() as s:
             assert s.query(AgentPlacement).count() == 1
 
         broker.delete_session(sid)
 
         with broker_session() as s:
-            assert s.query(AgentPlacement).count() == 0, (
-                "delete_session must physically remove all placement rows"
-            )
+            assert s.query(AgentPlacement).count() == 0
 
     def test_tasks_are_preserved_after_soft_delete(
         self, broker_session, director_context
     ):
-        """A task sent before delete must still be retrievable after delete."""
         result = _bootstrap(ctx=director_context)
         sid = result["session_id"]
         admin_id = result["administrator_agent_id"]
         director_id = result["director"]["agent_id"]
 
-        # Send a task so there's an audit row to preserve.
         sent = broker.send_message(sid, admin_id, director_id, "audit me")
         task_id = sent["task"]["id"]
 
@@ -323,13 +287,9 @@ class TestDeleteSessionCascade:
 
         with broker_session() as s:
             tasks = s.query(Task).all()
-        assert any(t.task_id == task_id for t in tasks), (
-            "tasks rows must NOT be deleted by delete_session — "
-            "the cascade only touches sessions/agents/placements"
-        )
+        assert any(t.task_id == task_id for t in tasks)
 
     def test_idempotent_rerun_returns_zero_deregistered(self, director_context):
-        """A second delete_session is a no-op (count=0) and does NOT raise."""
         result = _bootstrap(ctx=director_context)
         sid = result["session_id"]
 
@@ -400,26 +360,20 @@ class TestListSessionsFiltersSoftDeleted:
         ids = {s["session_id"] for s in sessions}
 
         assert alive["session_id"] in ids
-        assert dead["session_id"] not in ids, (
-            "list_sessions must hide rows with non-NULL deleted_at"
-        )
+        assert dead["session_id"] not in ids
 
     def test_get_session_still_returns_soft_deleted_row(self, director_context):
-        """Design intent: get_session is unchanged — it returns the row
-        regardless of deleted_at. list_sessions is the only listing that filters.
-        """
         result = _bootstrap(label="dead-but-visible", ctx=director_context)
         sid = result["session_id"]
         broker.delete_session(sid)
 
         row = broker.get_session(sid)
-        assert row is not None, "get_session must not filter soft-deleted sessions"
+        assert row is not None
         assert row["deleted_at"] is not None
 
 
 class TestDeregisterAgentRootDirector:
     def test_rejects_root_director_with_specific_error(self, director_context):
-        """Deregistering the root Director must fail with the exact error text."""
         result = _bootstrap(ctx=director_context)
         director_id = result["director"]["agent_id"]
 
@@ -427,14 +381,10 @@ class TestDeregisterAgentRootDirector:
             broker.deregister_agent(director_id)
 
         msg = str(exc_info.value)
-        # Design doc text (substring match to tolerate quoting differences).
         assert "cannot deregister the root Director" in msg
         assert "cafleet session delete" in msg
 
     def test_state_unchanged_after_rejection(self, broker_session, director_context):
-        """The failed deregister must not flip the Director's status or clear
-        its placement — the row state must be byte-for-byte unchanged.
-        """
         result = _bootstrap(ctx=director_context)
         director_id = result["director"]["agent_id"]
         sid = result["session_id"]
@@ -459,10 +409,6 @@ class TestDeregisterAgentRootDirector:
         assert sess_row.director_agent_id == director_id
 
     def test_non_root_director_agent_can_still_be_deregistered(self, director_context):
-        """The guard only fires for the *root* Director — regular user agents
-        (and even the Administrator? no, Administrator has its own guard)
-        stay deregister-able.
-        """
         result = _bootstrap(ctx=director_context)
         sid = result["session_id"]
 
@@ -507,18 +453,9 @@ class TestMemberToDirectorNotification:
             sid, member["agent_id"], to=root_director_id, text="hi director"
         )
 
-        assert response["notification_sent"] is True, (
-            "Member→root-Director send must return notification_sent=True "
-            "because the root Director now has a placement with a pane_id"
-        )
-        assert mock_trigger.call_count == 1, (
-            f"send_poll_trigger must be called exactly once, got "
-            f"{mock_trigger.call_count}"
-        )
+        assert response["notification_sent"] is True
+        assert mock_trigger.call_count == 1
         kwargs = mock_trigger.call_args.kwargs
-        assert kwargs["target_pane_id"] == director_context.pane_id, (
-            f"notification must target the root Director's pane "
-            f"({director_context.pane_id!r}), got {kwargs['target_pane_id']!r}"
-        )
+        assert kwargs["target_pane_id"] == director_context.pane_id
         assert kwargs["session_id"] == sid
         assert kwargs["agent_id"] == root_director_id
