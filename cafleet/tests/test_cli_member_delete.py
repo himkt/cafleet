@@ -119,30 +119,15 @@ class TestHappyPath:
     ):
         monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
         result = _invoke(runner, session_id)
-        assert result.exit_code == 0, (
-            f"happy path must exit 0. exit_code={result.exit_code}, "
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
-        assert deregister_recorder == [MEMBER_ID], (
-            f"broker.deregister_agent must be called exactly once with member_id. "
-            f"got: {deregister_recorder!r}"
-        )
+        assert result.exit_code == 0, result.output
+        assert deregister_recorder == [MEMBER_ID]
         assert send_exit_recorder == [
             {"target_pane_id": PANE_ID, "ignore_missing": True}
-        ], (
-            f"tmux.send_exit must be called with ignore_missing=True and the pane. "
-            f"got: {send_exit_recorder!r}"
-        )
+        ]
         out = result.output
-        assert "Member deleted." in out, (
-            f"summary must include 'Member deleted.'. got: {out!r}"
-        )
-        assert MEMBER_ID in out, (
-            f"summary must include the deleted agent_id. got: {out!r}"
-        )
-        assert f"{PANE_ID} (closed)" in out, (
-            f"summary must report the pane as closed. got: {out!r}"
-        )
+        assert "Member deleted." in out
+        assert MEMBER_ID in out
+        assert f"{PANE_ID} (closed)" in out
 
     def test_json_output_returns_agent_id_and_pane_status(
         self, runner, session_id, monkeypatch, deregister_recorder
@@ -162,15 +147,12 @@ class TestHappyPath:
                 MEMBER_ID,
             ],
         )
-        assert result.exit_code == 0, (
-            f"--json happy path must exit 0. exit_code={result.exit_code}, "
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
+        assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data == {
             "agent_id": MEMBER_ID,
             "pane_status": f"{PANE_ID} (closed)",
-        }, f"JSON output shape mismatch. got: {data!r}"
+        }
 
 
 class TestAuthorizationBoundary:
@@ -179,26 +161,12 @@ class TestAuthorizationBoundary:
     ):
         monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
         result = _invoke(runner, session_id)
-        assert result.exit_code == 1, (
-            f"missing agent must exit 1. exit_code={result.exit_code}, "
-            f"output: {result.output!r}"
-        )
+        assert result.exit_code == 1, result.output
         out = result.output or ""
-        assert MEMBER_ID in out, (
-            f"error must reference the missing member_id. got: {out!r}"
-        )
-        assert "failed to fetch member" not in out, (
-            f"not-found path must NOT use 'failed to fetch member' wording "
-            f"(the fetch succeeded and returned None). got: {out!r}"
-        )
-        assert f"Error: Agent {MEMBER_ID} not found" in out, (
-            f"not-found path must emit the direct 'Error: Agent X not found' "
-            f"message. got: {out!r}"
-        )
-        assert deregister_recorder == [], (
-            f"broker.deregister_agent must NOT be called when the agent is "
-            f"missing. got: {deregister_recorder!r}"
-        )
+        assert MEMBER_ID in out
+        assert "failed to fetch member" not in out
+        assert f"Error: Agent {MEMBER_ID} not found" in out
+        assert deregister_recorder == []
 
     def test_fetch_db_error_surfaces_failed_to_fetch_wording(
         self, runner, session_id, monkeypatch, deregister_recorder
@@ -212,17 +180,9 @@ class TestAuthorizationBoundary:
         result = _invoke(runner, session_id)
         assert result.exit_code == 1
         out = result.output or ""
-        assert "failed to fetch member" in out, (
-            f"real fetch failures must still use 'failed to fetch member' "
-            f"wording. got: {out!r}"
-        )
-        assert "db connection lost" in out, (
-            f"underlying exception message must be surfaced. got: {out!r}"
-        )
-        assert deregister_recorder == [], (
-            f"broker.deregister_agent must not run when the fetch fails. "
-            f"got: {deregister_recorder!r}"
-        )
+        assert "failed to fetch member" in out
+        assert "db connection lost" in out
+        assert deregister_recorder == []
 
     def test_placement_none_exits_one_with_deregister_hint(
         self, runner, session_id, monkeypatch, deregister_recorder
@@ -231,25 +191,12 @@ class TestAuthorizationBoundary:
             broker, "get_agent", lambda *_a, **_kw: _agent(placement=None)
         )
         result = _invoke(runner, session_id)
-        assert result.exit_code == 1, (
-            f"placement None must exit 1. exit_code={result.exit_code}, "
-            f"output: {result.output!r}"
-        )
+        assert result.exit_code == 1, result.output
         out = result.output or ""
-        assert f"agent {MEMBER_ID}" in out, (
-            f"error must reference member_id. got: {out!r}"
-        )
-        assert "has no placement" in out, (
-            f"error must say 'has no placement'. got: {out!r}"
-        )
-        assert "cafleet deregister" in out, (
-            f"error must hint at 'cafleet deregister' (not 'member create', "
-            f"because this is a delete intent). got: {out!r}"
-        )
-        assert deregister_recorder == [], (
-            f"broker.deregister_agent must NOT be called when the placement "
-            f"is absent. got: {deregister_recorder!r}"
-        )
+        assert f"agent {MEMBER_ID}" in out
+        assert "has no placement" in out
+        assert "cafleet deregister" in out
+        assert deregister_recorder == []
 
     def test_cross_director_same_session_is_rejected(
         self, runner, session_id, monkeypatch, deregister_recorder, send_exit_recorder
@@ -263,30 +210,13 @@ class TestAuthorizationBoundary:
             ),
         )
         result = _invoke(runner, session_id)
-        assert result.exit_code == 1, (
-            f"cross-Director delete must exit 1. exit_code={result.exit_code}, "
-            f"output: {result.output!r}"
-        )
+        assert result.exit_code == 1, result.output
         out = result.output or ""
-        assert f"agent {MEMBER_ID}" in out, (
-            f"error must reference member_id. got: {out!r}"
-        )
-        assert "is not a member of your team" in out, (
-            f"error must mirror 'member capture' / 'member send-input' wording "
-            f"('is not a member of your team'). got: {out!r}"
-        )
-        assert OTHER_DIRECTOR_ID in out, (
-            f"error must disclose the actual director_agent_id "
-            f"{OTHER_DIRECTOR_ID!r}. got: {out!r}"
-        )
-        assert deregister_recorder == [], (
-            f"broker.deregister_agent must NOT be called across Directors. "
-            f"got: {deregister_recorder!r}"
-        )
-        assert send_exit_recorder == [], (
-            f"tmux.send_exit must NOT be called across Directors. "
-            f"got: {send_exit_recorder!r}"
-        )
+        assert f"agent {MEMBER_ID}" in out
+        assert "is not a member of your team" in out
+        assert OTHER_DIRECTOR_ID in out
+        assert deregister_recorder == []
+        assert send_exit_recorder == []
 
 
 class TestPendingPlacement:
@@ -300,21 +230,12 @@ class TestPendingPlacement:
             lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
         )
         result = _invoke(runner, session_id)
-        assert result.exit_code == 0, (
-            f"pending pane delete must still succeed. exit_code={result.exit_code}, "
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
-        assert deregister_recorder == [MEMBER_ID], (
-            f"broker.deregister_agent must still be called on pending "
-            f"placement. got: {deregister_recorder!r}"
-        )
-        assert send_exit_recorder == [], (
-            f"tmux.send_exit must NOT be called when pane_id is None. "
-            f"got: {send_exit_recorder!r}"
-        )
+        assert result.exit_code == 0, result.output
+        assert deregister_recorder == [MEMBER_ID]
+        assert send_exit_recorder == []
         out = result.output
-        assert "(pending" in out, f"summary must flag the pending state. got: {out!r}"
-        assert "no pane" in out, f"summary must mention 'no pane'. got: {out!r}"
+        assert "(pending" in out
+        assert "no pane" in out
 
 
 class TestTmuxErrorOnSendExit:
@@ -329,21 +250,9 @@ class TestTmuxErrorOnSendExit:
 
         monkeypatch.setattr(tmux, "send_exit", fake_send_exit)
         result = _invoke(runner, session_id)
-        assert result.exit_code == 0, (
-            f"send_exit failure AFTER deregister must still exit 0. "
-            f"exit_code={result.exit_code}, output: {result.output!r}"
-        )
-        assert deregister_recorder == [MEMBER_ID], (
-            f"broker.deregister_agent must have been called before the "
-            f"send_exit failure. got: {deregister_recorder!r}"
-        )
+        assert result.exit_code == 0, result.output
+        assert deregister_recorder == [MEMBER_ID]
         out = result.output
-        assert "Warning: send_exit failed" in out, (
-            f"output must include the send_exit warning. got: {out!r}"
-        )
-        assert f"tmux kill-pane -t {PANE_ID}" in out, (
-            f"warning must hint at manual kill-pane. got: {out!r}"
-        )
-        assert f"{PANE_ID} (send_exit failed)" in out, (
-            f"summary line must flag the send_exit-failed state. got: {out!r}"
-        )
+        assert "Warning: send_exit failed" in out
+        assert f"tmux kill-pane -t {PANE_ID}" in out
+        assert f"{PANE_ID} (send_exit failed)" in out

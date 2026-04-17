@@ -131,19 +131,14 @@ def _invoke(runner, session_id, *extra_args, **invoke_kwargs):
 
 
 class TestFlagValidation:
-    """Design doc 0000027 Specification § "Validation rules"."""
-
     def test_neither_choice_nor_freetext_exits_two(
         self, runner, session_id, happy_path_agent
     ):
         result = _invoke(runner, session_id)
-        assert result.exit_code == 2, (
-            f"neither flag → exit 2 (click UsageError). "
-            f"exit_code={result.exit_code}, output: {result.output!r}"
-        )
+        assert result.exit_code == 2, result.output
         assert "Must supply exactly one of --choice or --freetext" in (
             result.output or ""
-        ), f"error must mention the exactly-one rule. got: {result.output!r}"
+        )
 
     def test_both_choice_and_freetext_exits_two(
         self, runner, session_id, happy_path_agent
@@ -156,13 +151,10 @@ class TestFlagValidation:
             "--freetext",
             "hello",
         )
-        assert result.exit_code == 2, (
-            f"both flags → exit 2 (click UsageError). "
-            f"exit_code={result.exit_code}, output: {result.output!r}"
-        )
+        assert result.exit_code == 2, result.output
         assert "Must supply exactly one of --choice or --freetext" in (
             result.output or ""
-        ), f"error must mention the exactly-one rule. got: {result.output!r}"
+        )
 
     @pytest.mark.parametrize("bad_digit", ["0", "4", "5", "-1", "a"])
     def test_choice_out_of_range_exits_two(
@@ -170,11 +162,7 @@ class TestFlagValidation:
     ):
         """``click.IntRange(1, 3)`` rejects anything outside {1,2,3}."""
         result = _invoke(runner, session_id, "--choice", bad_digit)
-        assert result.exit_code == 2, (
-            f"--choice {bad_digit!r} must exit 2 via click's built-in "
-            f"IntRange validator. exit_code={result.exit_code}, "
-            f"output: {result.output!r}"
-        )
+        assert result.exit_code == 2, result.output
 
     @pytest.mark.parametrize(
         "bad_text",
@@ -190,50 +178,26 @@ class TestFlagValidation:
         self, runner, session_id, happy_path_agent, bad_text
     ):
         result = _invoke(runner, session_id, "--freetext", bad_text)
-        assert result.exit_code == 2, (
-            f"--freetext with newline → exit 2. exit_code={result.exit_code}, "
-            f"output: {result.output!r}"
-        )
-        assert "free text may not contain newlines" in (result.output or ""), (
-            f"error must mention the newline rule. got: {result.output!r}"
-        )
+        assert result.exit_code == 2, result.output
+        assert "free text may not contain newlines" in (result.output or "")
 
     def test_freetext_empty_string_is_accepted(
         self, runner, session_id, happy_path_agent, freetext_recorder
     ):
-        """Empty string is valid — submits an empty answer to the prompt."""
+        """Empty string is valid -- submits an empty answer to the prompt."""
         result = _invoke(runner, session_id, "--freetext", "")
-        assert result.exit_code == 0, (
-            f'--freetext "" must be accepted. exit_code={result.exit_code}, '
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
-        assert len(freetext_recorder) == 1, (
-            f"send_freetext_and_submit must be called exactly once. "
-            f"got {len(freetext_recorder)} calls: {freetext_recorder!r}"
-        )
-        assert freetext_recorder[0]["text"] == "", (
-            f"empty free text must pass through as empty string. "
-            f"got: {freetext_recorder[0]!r}"
-        )
+        assert result.exit_code == 0, result.output
+        assert len(freetext_recorder) == 1
+        assert freetext_recorder[0]["text"] == ""
 
 
 class TestAuthorizationBoundary:
-    """Design doc 0000027 Specification § "Authorization boundary"."""
-
     def test_missing_agent_exits_one(self, runner, session_id, monkeypatch):
         monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
         result = _invoke(runner, session_id, "--choice", "1")
-        assert result.exit_code == 1, (
-            f"missing agent must exit 1. exit_code={result.exit_code}, "
-            f"output: {result.output!r}"
-        )
-        assert MEMBER_ID in (result.output or ""), (
-            f"error must mention the missing member_id {MEMBER_ID!r}. "
-            f"got: {result.output!r}"
-        )
-        assert "not found" in (result.output or "").lower(), (
-            f"error must say 'not found'. got: {result.output!r}"
-        )
+        assert result.exit_code == 1, result.output
+        assert MEMBER_ID in (result.output or "")
+        assert "not found" in (result.output or "").lower()
 
     def test_placement_none_exits_one_with_exact_message(
         self, runner, session_id, monkeypatch
@@ -244,20 +208,11 @@ class TestAuthorizationBoundary:
             lambda *_a, **_kw: _agent(placement=None),
         )
         result = _invoke(runner, session_id, "--choice", "1")
-        assert result.exit_code == 1, (
-            f"placement None must exit 1. exit_code={result.exit_code}, "
-            f"output: {result.output!r}"
-        )
+        assert result.exit_code == 1, result.output
         out = result.output or ""
-        assert f"agent {MEMBER_ID}" in out, (
-            f"error must reference member_id. got: {out!r}"
-        )
-        assert "has no placement row" in out, (
-            f"error must say 'has no placement row'. got: {out!r}"
-        )
-        assert "cafleet member create" in out, (
-            f"error must hint at 'cafleet member create'. got: {out!r}"
-        )
+        assert f"agent {MEMBER_ID}" in out
+        assert "has no placement row" in out
+        assert "cafleet member create" in out
 
     def test_cross_director_exits_one_with_exact_message(
         self, runner, session_id, monkeypatch
@@ -270,22 +225,11 @@ class TestAuthorizationBoundary:
             ),
         )
         result = _invoke(runner, session_id, "--choice", "1")
-        assert result.exit_code == 1, (
-            f"cross-Director must exit 1. exit_code={result.exit_code}, "
-            f"output: {result.output!r}"
-        )
+        assert result.exit_code == 1, result.output
         out = result.output or ""
-        assert f"agent {MEMBER_ID}" in out, (
-            f"error must reference member_id. got: {out!r}"
-        )
-        assert "is not a member of your team" in out, (
-            f"error must mirror 'member capture' wording "
-            f"('is not a member of your team'). got: {out!r}"
-        )
-        assert OTHER_DIRECTOR_ID in out, (
-            f"error must disclose the actual director_agent_id "
-            f"{OTHER_DIRECTOR_ID!r}. got: {out!r}"
-        )
+        assert f"agent {MEMBER_ID}" in out
+        assert "is not a member of your team" in out
+        assert OTHER_DIRECTOR_ID in out
 
     def test_pending_pane_exits_one_with_exact_message(
         self, runner, session_id, monkeypatch
@@ -296,28 +240,14 @@ class TestAuthorizationBoundary:
             lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
         )
         result = _invoke(runner, session_id, "--choice", "1")
-        assert result.exit_code == 1, (
-            f"pending placement must exit 1. exit_code={result.exit_code}, "
-            f"output: {result.output!r}"
-        )
+        assert result.exit_code == 1, result.output
         out = result.output or ""
-        assert f"member {MEMBER_ID}" in out, (
-            f"error must reference member_id. got: {out!r}"
-        )
-        assert "has no pane yet" in out, (
-            f"error must say 'has no pane yet'. got: {out!r}"
-        )
-        assert "pending placement" in out, (
-            f"error must say 'pending placement'. got: {out!r}"
-        )
+        assert f"member {MEMBER_ID}" in out
+        assert "has no pane yet" in out
+        assert "pending placement" in out
 
 
 class TestChoiceDispatch:
-    """``--choice N`` dispatches to ``tmux.send_choice_key`` once with the
-    resolved pane + the matching digit, and does NOT touch
-    ``send_freetext_and_submit``.
-    """
-
     @pytest.mark.parametrize("digit", [1, 2, 3])
     def test_choice_dispatches_with_matching_digit_and_pane(
         self,
@@ -329,29 +259,15 @@ class TestChoiceDispatch:
         digit,
     ):
         result = _invoke(runner, session_id, "--choice", str(digit))
-        assert result.exit_code == 0, (
-            f"--choice {digit} must succeed. exit_code={result.exit_code}, "
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
-        assert len(choice_recorder) == 1, (
-            f"send_choice_key must be called exactly once. "
-            f"got {len(choice_recorder)} calls: {choice_recorder!r}"
-        )
+        assert result.exit_code == 0, result.output
+        assert len(choice_recorder) == 1
         call = choice_recorder[0]
         assert call["digit"] == digit
         assert call["target_pane_id"] == PANE_ID
-        assert len(freetext_recorder) == 0, (
-            f"--choice must NOT call send_freetext_and_submit. "
-            f"got: {freetext_recorder!r}"
-        )
+        assert len(freetext_recorder) == 0
 
 
 class TestFreetextDispatch:
-    """``--freetext TEXT`` dispatches to ``tmux.send_freetext_and_submit``
-    with the exact byte-for-byte text — no shell expansion, no key-name
-    interpretation, no multi-byte mangling.
-    """
-
     def test_freetext_plain_ascii_dispatches_exactly(
         self,
         runner,
@@ -361,19 +277,11 @@ class TestFreetextDispatch:
         choice_recorder,
     ):
         result = _invoke(runner, session_id, "--freetext", "hello")
-        assert result.exit_code == 0, (
-            f"--freetext 'hello' must succeed. exit_code={result.exit_code}, "
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
-        assert len(freetext_recorder) == 1, (
-            f"send_freetext_and_submit must be called exactly once. "
-            f"got {len(freetext_recorder)} calls: {freetext_recorder!r}"
-        )
+        assert result.exit_code == 0, result.output
+        assert len(freetext_recorder) == 1
         assert freetext_recorder[0]["text"] == "hello"
         assert freetext_recorder[0]["target_pane_id"] == PANE_ID
-        assert len(choice_recorder) == 0, (
-            f"--freetext must NOT call send_choice_key. got: {choice_recorder!r}"
-        )
+        assert len(choice_recorder) == 0
 
     def test_freetext_shell_meta_delivered_as_literal_no_expansion(
         self, runner, session_id, happy_path_agent, freetext_recorder
@@ -384,14 +292,8 @@ class TestFreetextDispatch:
         """
         payload = "$(echo pwn) `backticks` $VAR ;&&|"
         result = _invoke(runner, session_id, "--freetext", payload)
-        assert result.exit_code == 0, (
-            f"shell-meta free text must succeed. exit_code={result.exit_code}, "
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
-        assert len(freetext_recorder) == 1, (
-            f"send_freetext_and_submit must be called exactly once. "
-            f"got: {freetext_recorder!r}"
-        )
+        assert result.exit_code == 0, result.output
+        assert len(freetext_recorder) == 1
         assert freetext_recorder[0]["text"] == payload
 
     def test_freetext_multibyte_delivered_as_literal(
@@ -399,47 +301,32 @@ class TestFreetextDispatch:
     ):
         payload = "日本語 !@# テスト ✓"
         result = _invoke(runner, session_id, "--freetext", payload)
-        assert result.exit_code == 0, (
-            f"multi-byte free text must succeed. exit_code={result.exit_code}, "
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
+        assert result.exit_code == 0, result.output
         assert len(freetext_recorder) == 1
         assert freetext_recorder[0]["text"] == payload
 
     def test_freetext_key_name_lookalike_delivered_as_literal(
         self, runner, session_id, happy_path_agent, freetext_recorder
     ):
-        """Text that *looks* like a key name (``Enter``, ``C-c``, ``Esc``)
-        must be delivered as literal characters — the wrapper always uses
-        ``-l`` for the free-text step, per the design doc's key-sequence
-        table. (No special-case matching in the helper itself.)
+        """Key-name lookalikes (Enter, C-c, Esc) must be delivered as literal
+        characters because the wrapper always uses ``-l`` for the free-text
+        step, per the design doc's key-sequence table.
         """
         payload = "Enter C-c Esc"
         result = _invoke(runner, session_id, "--freetext", payload)
-        assert result.exit_code == 0, (
-            f"key-name-lookalike free text must succeed. "
-            f"exit_code={result.exit_code}, output: {result.output!r}"
-        )
+        assert result.exit_code == 0, result.output
         assert len(freetext_recorder) == 1
         assert freetext_recorder[0]["text"] == payload
 
 
 class TestOutputFormat:
-    """Text + JSON output contracts from the design doc."""
-
     def test_text_output_choice(
         self, runner, session_id, happy_path_agent, choice_recorder
     ):
         result = _invoke(runner, session_id, "--choice", "1")
-        assert result.exit_code == 0, (
-            f"expected success. exit_code={result.exit_code}, output: {result.output!r}"
-        )
+        assert result.exit_code == 0, result.output
         assert f"Sent choice 1 to member {MEMBER_NAME} ({PANE_ID})." in (
             result.output or ""
-        ), (
-            f"text output must match "
-            f"'Sent choice 1 to member {MEMBER_NAME} ({PANE_ID}).'. "
-            f"got: {result.output!r}"
         )
 
     @pytest.mark.parametrize("digit", [1, 2, 3])
@@ -452,24 +339,16 @@ class TestOutputFormat:
         digit,
     ):
         result = _invoke(runner, session_id, "--choice", str(digit))
-        assert result.exit_code == 0
-        assert f"Sent choice {digit} to member " in (result.output or ""), (
-            f"text output must embed the chosen digit. got: {result.output!r}"
-        )
+        assert result.exit_code == 0, result.output
+        assert f"Sent choice {digit} to member " in (result.output or "")
 
     def test_text_output_freetext(
         self, runner, session_id, happy_path_agent, freetext_recorder
     ):
         result = _invoke(runner, session_id, "--freetext", "hello")
-        assert result.exit_code == 0, (
-            f"expected success. exit_code={result.exit_code}, output: {result.output!r}"
-        )
+        assert result.exit_code == 0, result.output
         assert f"Sent free text to member {MEMBER_NAME} ({PANE_ID})." in (
             result.output or ""
-        ), (
-            f"text output must match "
-            f"'Sent free text to member {MEMBER_NAME} ({PANE_ID}).'. "
-            f"got: {result.output!r}"
         )
 
     def test_json_output_choice_has_four_keys(
@@ -491,26 +370,18 @@ class TestOutputFormat:
                 "2",
             ],
         )
-        assert result.exit_code == 0, (
-            f"--json --choice must succeed. exit_code={result.exit_code}, "
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
+        assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert set(data.keys()) == {
             "member_agent_id",
             "pane_id",
             "action",
             "value",
-        }, (
-            f"JSON output must contain exactly the four documented keys. "
-            f"got keys: {sorted(data.keys())!r}"
-        )
+        }
         assert data["member_agent_id"] == MEMBER_ID
         assert data["pane_id"] == PANE_ID
         assert data["action"] == "choice"
-        assert data["value"] == "2", (
-            f"value must be the string '2' (stringified digit). got: {data!r}"
-        )
+        assert data["value"] == "2"
 
     def test_json_output_freetext_has_four_keys(
         self, runner, session_id, happy_path_agent, freetext_recorder
@@ -532,23 +403,15 @@ class TestOutputFormat:
                 payload,
             ],
         )
-        assert result.exit_code == 0, (
-            f"--json --freetext must succeed. exit_code={result.exit_code}, "
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
+        assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert set(data.keys()) == {
             "member_agent_id",
             "pane_id",
             "action",
             "value",
-        }, (
-            f"JSON output must contain exactly the four documented keys. "
-            f"got keys: {sorted(data.keys())!r}"
-        )
+        }
         assert data["member_agent_id"] == MEMBER_ID
         assert data["pane_id"] == PANE_ID
         assert data["action"] == "freetext"
-        assert data["value"] == payload, (
-            f"value must be the text as sent. got: {data!r}"
-        )
+        assert data["value"] == payload

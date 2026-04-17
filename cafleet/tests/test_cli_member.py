@@ -56,8 +56,6 @@ def mock_get_agent(monkeypatch):
 
 
 class TestDefaultPromptSubstitution:
-    """Design doc 2.2(a): empty prompt_argv → CLAUDE template filled in."""
-
     def test_default_path_substitutes_all_placeholders(
         self,
         ctx,
@@ -73,37 +71,17 @@ class TestDefaultPromptSubstitution:
             prompt_argv=(),
             coding_agent_config=CLAUDE,
         )
-        assert session_id in result, (
-            f"default prompt must contain session_id={session_id!r}. got: {result!r}"
-        )
-        assert new_agent_id in result, (
-            f"default prompt must contain agent_id={new_agent_id!r}. got: {result!r}"
-        )
-        assert director_agent_id in result, (
-            f"default prompt must contain director_agent_id={director_agent_id!r}. "
-            f"got: {result!r}"
-        )
-        assert "Director-X" in result, (
-            f"default prompt must contain director_name 'Director-X'. got: {result!r}"
-        )
-        # Template placeholders must not leak through unsubstituted.
-        assert "{session_id}" not in result, (
-            f"{{session_id}} placeholder must be substituted. got: {result!r}"
-        )
-        assert "{agent_id}" not in result, (
-            f"{{agent_id}} placeholder must be substituted. got: {result!r}"
-        )
-        assert "{director_name}" not in result, (
-            f"{{director_name}} placeholder must be substituted. got: {result!r}"
-        )
-        assert "{director_agent_id}" not in result, (
-            f"{{director_agent_id}} placeholder must be substituted. got: {result!r}"
-        )
+        assert session_id in result
+        assert new_agent_id in result
+        assert director_agent_id in result
+        assert "Director-X" in result
+        assert "{session_id}" not in result
+        assert "{agent_id}" not in result
+        assert "{director_name}" not in result
+        assert "{director_agent_id}" not in result
 
 
 class TestCustomPromptPlaceholderSubstitution:
-    """Design doc 2.2(b): custom prompts share the same format kwargs as the default."""
-
     def test_custom_prompt_with_agent_id_placeholder_substitutes(
         self,
         ctx,
@@ -118,15 +96,10 @@ class TestCustomPromptPlaceholderSubstitution:
             prompt_argv=("message", "for", "{agent_id}"),
             coding_agent_config=CLAUDE,
         )
-        assert result == f"message for {new_agent_id}", (
-            f"custom prompt must substitute {{agent_id}} with {new_agent_id!r}. "
-            f"got: {result!r}"
-        )
+        assert result == f"message for {new_agent_id}"
 
 
 class TestCustomPromptNoPlaceholderPassThrough:
-    """Design doc 2.2(c): .format on a literal string is a no-op."""
-
     def test_custom_prompt_without_placeholders_unchanged(
         self,
         ctx,
@@ -141,10 +114,7 @@ class TestCustomPromptNoPlaceholderPassThrough:
             prompt_argv=("no", "placeholders", "here"),
             coding_agent_config=CLAUDE,
         )
-        assert result == "no placeholders here", (
-            f"custom prompt with no placeholders must pass through unchanged. "
-            f"got: {result!r}"
-        )
+        assert result == "no placeholders here"
 
 
 class TestCustomPromptDoubledBraceEscape:
@@ -172,18 +142,9 @@ class TestCustomPromptDoubledBraceEscape:
             prompt_argv=("data", "is", "{{not", "a", "placeholder}}", "closed"),
             coding_agent_config=CLAUDE,
         )
-        assert result == "data is {not a placeholder} closed", (
-            f"doubled braces must collapse to single braces and NOT substitute "
-            f"the inner tokens. got: {result!r}"
-        )
-        # Defensive: no UUID should leak in via accidental substitution.
-        assert new_agent_id not in result, (
-            f"doubled-brace escape must not substitute agent_id. got: {result!r}"
-        )
-        assert director_agent_id not in result, (
-            f"doubled-brace escape must not substitute director_agent_id. "
-            f"got: {result!r}"
-        )
+        assert result == "data is {not a placeholder} closed"
+        assert new_agent_id not in result
+        assert director_agent_id not in result
 
 
 class TestCustomPromptMalformedRaisesUsageError:
@@ -209,15 +170,9 @@ class TestCustomPromptMalformedRaisesUsageError:
                 coding_agent_config=CLAUDE,
             )
         message = str(exc_info.value)
-        assert "foo" in message, (
-            f"error message must name the unknown placeholder. got: {message!r}"
-        )
-        assert "{session_id}" in message, (
-            f"error message must list {{session_id}}. got: {message!r}"
-        )
-        assert "{agent_id}" in message, (
-            f"error message must list {{agent_id}}. got: {message!r}"
-        )
+        assert "foo" in message
+        assert "{session_id}" in message
+        assert "{agent_id}" in message
 
     def test_unmatched_brace_raises_usage_error(
         self,
@@ -235,12 +190,8 @@ class TestCustomPromptMalformedRaisesUsageError:
                 coding_agent_config=CLAUDE,
             )
         message = str(exc_info.value)
-        assert "{{" in message, (
-            f"error message must hint at opening brace doubling. got: {message!r}"
-        )
-        assert "}}" in message, (
-            f"error message must hint at closing brace doubling. got: {message!r}"
-        )
+        assert "{{" in message
+        assert "}}" in message
 
     def test_attribute_access_raises_usage_error(
         self,
@@ -262,12 +213,8 @@ class TestCustomPromptMalformedRaisesUsageError:
                 coding_agent_config=CLAUDE,
             )
         message = str(exc_info.value)
-        assert "{{" in message, (
-            f"error message must hint at opening brace doubling. got: {message!r}"
-        )
-        assert "}}" in message, (
-            f"error message must hint at closing brace doubling. got: {message!r}"
-        )
+        assert "{{" in message
+        assert "}}" in message
 
 
 _CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
@@ -302,14 +249,9 @@ def bootstrapped_session(tmp_path, monkeypatch, _reset_engine):
 
     runner = CliRunner()
     init = runner.invoke(cli, ["db", "init"])
-    assert init.exit_code == 0, (
-        f"db init failed during test setup. output: {init.output!r}"
-    )
+    assert init.exit_code == 0, init.output
     create = runner.invoke(cli, ["session", "create", "--json"])
-    assert create.exit_code == 0, (
-        f"session create failed during test setup. "
-        f"output: {create.output!r}, exception: {create.exception!r}"
-    )
+    assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     return data["session_id"], data["director"]["agent_id"], runner
 
@@ -376,32 +318,15 @@ class TestMemberCreatePassesDisplayName:
                 "hello",
             ],
         )
-        assert result.exit_code == 0, (
-            f"member create (claude) must succeed. exit_code={result.exit_code}, "
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
-        assert len(split_window_recorder) == 1, (
-            f"tmux.split_window must be called exactly once. "
-            f"got {len(split_window_recorder)}: {split_window_recorder!r}"
-        )
+        assert result.exit_code == 0, result.output
+        assert len(split_window_recorder) == 1
         command = split_window_recorder[0]["command"]
-        assert isinstance(command, list), (
-            f"`command` must be a list[str]. got: {type(command).__name__}"
-        )
-        assert "--name" in command, (
-            f"claude command must contain '--name'. got: {command!r}"
-        )
+        assert isinstance(command, list)
+        assert "--name" in command
         name_index = command.index("--name")
-        assert command[name_index + 1] == "Drafter", (
-            f"the arg immediately after --name must be 'Drafter'. got: {command!r}"
-        )
-        assert command[name_index + 2] == "hello", (
-            f"the prompt 'hello' must immediately follow the name value. "
-            f"got: {command!r}"
-        )
-        assert command[0] == "claude", (
-            f"command must start with the claude binary. got: {command!r}"
-        )
+        assert command[name_index + 1] == "Drafter"
+        assert command[name_index + 2] == "hello"
+        assert command[0] == "claude"
 
     def test_member_create_codex_does_not_pass_name_flag(
         self,
@@ -434,25 +359,10 @@ class TestMemberCreatePassesDisplayName:
                 "hello",
             ],
         )
-        assert result.exit_code == 0, (
-            f"member create (codex) must succeed. exit_code={result.exit_code}, "
-            f"output: {result.output!r}, exception: {result.exception!r}"
-        )
-        assert len(split_window_recorder) == 1, (
-            f"tmux.split_window must be called exactly once. "
-            f"got {len(split_window_recorder)}: {split_window_recorder!r}"
-        )
+        assert result.exit_code == 0, result.output
+        assert len(split_window_recorder) == 1
         command = split_window_recorder[0]["command"]
-        assert "--name" not in command, (
-            f"codex command must NOT contain '--name' (codex has no such flag; "
-            f"display_name_args=() elides it). got: {command!r}"
-        )
-        assert command[0] == "codex", (
-            f"command must start with the codex binary. got: {command!r}"
-        )
-        assert "--approval-mode" in command, (
-            f"codex command must preserve '--approval-mode'. got: {command!r}"
-        )
-        assert "auto-edit" in command, (
-            f"codex command must preserve 'auto-edit' value. got: {command!r}"
-        )
+        assert "--name" not in command
+        assert command[0] == "codex"
+        assert "--approval-mode" in command
+        assert "auto-edit" in command
