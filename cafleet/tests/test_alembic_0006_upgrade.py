@@ -171,9 +171,9 @@ class TestMigration0006UpgradeSeed:
                 uuid.UUID(row["agent_id"])
                 # Card shape
                 card = json.loads(row["agent_card_json"])
-                assert card.get("cafleet", {}).get("kind") == ADMINISTRATOR_KIND
-                assert card.get("name") == "Administrator"
-                assert card.get("skills") == []
+                assert card["cafleet"]["kind"] == ADMINISTRATOR_KIND
+                assert card["name"] == "Administrator"
+                assert card["skills"] == []
         finally:
             engine.dispose()
 

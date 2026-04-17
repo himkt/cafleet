@@ -135,15 +135,8 @@ class TestSessionIdFlagFlowsIntoBroker:
             f"exit_code={result.exit_code}, output: {result.output}, "
             f"exception: {result.exception}"
         )
-        # Collect every positional and keyword value the broker received.
-        all_values = list(captured.get("args", ())) + list(
-            captured.get("kwargs", {}).values()
-        )
-        assert sid in all_values, (
-            f"broker.register_agent must receive --session-id value {sid!r} "
-            f"as session_id argument. captured args={captured.get('args')}, "
-            f"kwargs={captured.get('kwargs')}"
-        )
+        all_values = list(captured["args"]) + list(captured["kwargs"].values())
+        assert sid in all_values
 
     def test_send_passes_session_id_to_broker(self, db_runner, monkeypatch):
         """send --text also threads session_id through to broker.send_message."""
@@ -196,13 +189,8 @@ class TestSessionIdFlagFlowsIntoBroker:
             f"exit_code={result.exit_code}, output: {result.output}, "
             f"exception: {result.exception}"
         )
-        all_values = list(captured.get("args", ())) + list(
-            captured.get("kwargs", {}).values()
-        )
-        assert sid in all_values, (
-            f"broker.send_message must receive session_id={sid!r}. "
-            f"captured args={captured.get('args')}, kwargs={captured.get('kwargs')}"
-        )
+        all_values = list(captured["args"]) + list(captured["kwargs"].values())
+        assert sid in all_values
 
     def test_session_id_not_read_from_environment(self, db_runner, monkeypatch):
         """Setting CAFLEET_SESSION_ID env var alone must no longer satisfy the gate.

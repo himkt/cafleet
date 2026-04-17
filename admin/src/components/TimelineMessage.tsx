@@ -49,7 +49,6 @@ function createdAt(entry: TimelineEntry): string {
 }
 
 function formatTime(iso: string): string {
-  if (!iso) return "";
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;

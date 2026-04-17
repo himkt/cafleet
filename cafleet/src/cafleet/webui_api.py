@@ -24,8 +24,8 @@ def get_webui_session(request: Request) -> str:
 
 
 def _extract_body(task_dict: dict) -> str:
-    for artifact in task_dict.get("artifacts", []):
-        for part in artifact.get("parts", []):
+    for artifact in task_dict["artifacts"]:
+        for part in artifact["parts"]:
             if part.get("text"):
                 return part["text"]
     return ""

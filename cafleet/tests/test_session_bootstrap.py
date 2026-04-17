@@ -264,10 +264,7 @@ class TestDeleteSessionCascade:
         ret = broker.delete_session(sid)
 
         assert isinstance(ret, dict)
-        assert ret.get("deregistered_count") == 2, (
-            f"first delete must deregister both Director and Administrator "
-            f"(count=2), got {ret.get('deregistered_count')}"
-        )
+        assert ret["deregistered_count"] == 2
 
         with broker_session() as s:
             row = s.query(SessionModel).filter(SessionModel.session_id == sid).one()
@@ -339,11 +336,8 @@ class TestDeleteSessionCascade:
         first = broker.delete_session(sid)
         second = broker.delete_session(sid)
 
-        assert first.get("deregistered_count") == 2
-        assert second.get("deregistered_count") == 0, (
-            f"second delete must be a no-op that reports 0 deregistrations, "
-            f"got {second.get('deregistered_count')}"
-        )
+        assert first["deregistered_count"] == 2
+        assert second["deregistered_count"] == 0
 
     def test_unknown_session_raises_click_exception(self):
         """Deleting a session that was never created raises not-found.
@@ -420,10 +414,7 @@ class TestListSessionsFiltersSoftDeleted:
 
         row = broker.get_session(sid)
         assert row is not None, "get_session must not filter soft-deleted sessions"
-        assert row.get("deleted_at") is not None, (
-            "get_session must expose deleted_at so callers can gate their own "
-            "behavior (e.g. register_agent)"
-        )
+        assert row["deleted_at"] is not None
 
 
 class TestDeregisterAgentRootDirector:
@@ -527,7 +518,7 @@ class TestMemberToDirectorNotification:
         kwargs = mock_trigger.call_args.kwargs
         assert kwargs["target_pane_id"] == director_context.pane_id, (
             f"notification must target the root Director's pane "
-            f"({director_context.pane_id!r}), got {kwargs.get('target_pane_id')!r}"
+            f"({director_context.pane_id!r}), got {kwargs['target_pane_id']!r}"
         )
         assert kwargs["session_id"] == sid
         assert kwargs["agent_id"] == root_director_id

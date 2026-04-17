@@ -195,7 +195,7 @@ export default function MessageInput({
     setMention(detectMention(value, cursor));
   };
 
-  const insertCandidate = (c: MentionCandidate) => {
+  const insertCandidate = (candidate: MentionCandidate) => {
     const ta = textareaRef.current;
     const value = ta?.value ?? input;
     const cursor = ta?.selectionStart ?? value.length;
@@ -204,7 +204,7 @@ export default function MessageInput({
       setMention(null);
       return;
     }
-    const slug = c.kind === "virtual" ? c.label : slugify(c.agent.name);
+    const slug = candidate.kind === "virtual" ? candidate.label : slugify(candidate.agent.name);
     const replacement = `@${slug} `;
     // Scan right from the `@` to find the actual end of the mention token
     // so a caret inside the token (e.g. `@al|x`) still rewrites the full
@@ -310,14 +310,14 @@ export default function MessageInput({
     >
       {popoverOpen && (
         <div className="absolute bottom-full left-3 right-3 mb-1 bg-white border border-gray-200 rounded-md shadow-lg overflow-hidden z-10">
-          {candidates.map((c, idx) => {
+          {candidates.map((candidate, idx) => {
             const key =
-              c.kind === "virtual"
-                ? `virtual:${c.label}`
-                : `agent:${c.agent.agent_id}`;
+              candidate.kind === "virtual"
+                ? `virtual:${candidate.label}`
+                : `agent:${candidate.agent.agent_id}`;
             const slug =
-              c.kind === "virtual" ? c.label : slugify(c.agent.name);
-            const display = c.kind === "virtual" ? c.label : c.agent.name;
+              candidate.kind === "virtual" ? candidate.label : slugify(candidate.agent.name);
+            const display = candidate.kind === "virtual" ? candidate.label : candidate.agent.name;
             const selected = idx === selectedIndex;
             return (
               <button
@@ -325,7 +325,7 @@ export default function MessageInput({
                 key={key}
                 onMouseDown={(ev) => {
                   ev.preventDefault();
-                  insertCandidate(c);
+                  insertCandidate(candidate);
                   textareaRef.current?.focus();
                 }}
                 onMouseEnter={() => setSelectedIndex(idx)}

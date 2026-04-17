@@ -44,13 +44,6 @@ def _agent(
     name: str = MEMBER_NAME,
     placement: dict | None | object = _UNSET,
 ) -> dict:
-    """Build a fake broker.get_agent result.
-
-    ``placement`` uses the ``_UNSET`` sentinel so the default (no kwarg) path
-    installs a valid placement while an explicit ``placement=None`` from a
-    caller passes through verbatim — the latter is required to exercise the
-    "no placement row" branch of the CLI handler.
-    """
     resolved_placement = _placement() if placement is _UNSET else placement
     return {
         "agent_id": agent_id,
@@ -345,12 +338,8 @@ class TestChoiceDispatch:
             f"got {len(choice_recorder)} calls: {choice_recorder!r}"
         )
         call = choice_recorder[0]
-        assert call.get("digit") == digit, (
-            f"send_choice_key must receive digit={digit}. got: {call!r}"
-        )
-        assert call.get("target_pane_id") == PANE_ID, (
-            f"send_choice_key must receive target_pane_id={PANE_ID!r}. got: {call!r}"
-        )
+        assert call["digit"] == digit
+        assert call["target_pane_id"] == PANE_ID
         assert len(freetext_recorder) == 0, (
             f"--choice must NOT call send_freetext_and_submit. "
             f"got: {freetext_recorder!r}"
@@ -380,12 +369,8 @@ class TestFreetextDispatch:
             f"send_freetext_and_submit must be called exactly once. "
             f"got {len(freetext_recorder)} calls: {freetext_recorder!r}"
         )
-        assert freetext_recorder[0].get("text") == "hello", (
-            f"text must be 'hello' verbatim. got: {freetext_recorder[0]!r}"
-        )
-        assert freetext_recorder[0].get("target_pane_id") == PANE_ID, (
-            f"pane_id must be {PANE_ID!r}. got: {freetext_recorder[0]!r}"
-        )
+        assert freetext_recorder[0]["text"] == "hello"
+        assert freetext_recorder[0]["target_pane_id"] == PANE_ID
         assert len(choice_recorder) == 0, (
             f"--freetext must NOT call send_choice_key. got: {choice_recorder!r}"
         )
@@ -407,10 +392,7 @@ class TestFreetextDispatch:
             f"send_freetext_and_submit must be called exactly once. "
             f"got: {freetext_recorder!r}"
         )
-        assert freetext_recorder[0].get("text") == payload, (
-            f"shell meta must be delivered verbatim. "
-            f"expected: {payload!r}, got: {freetext_recorder[0]!r}"
-        )
+        assert freetext_recorder[0]["text"] == payload
 
     def test_freetext_multibyte_delivered_as_literal(
         self, runner, session_id, happy_path_agent, freetext_recorder
@@ -422,10 +404,7 @@ class TestFreetextDispatch:
             f"output: {result.output!r}, exception: {result.exception!r}"
         )
         assert len(freetext_recorder) == 1
-        assert freetext_recorder[0].get("text") == payload, (
-            f"multi-byte text must be delivered verbatim. "
-            f"expected: {payload!r}, got: {freetext_recorder[0]!r}"
-        )
+        assert freetext_recorder[0]["text"] == payload
 
     def test_freetext_key_name_lookalike_delivered_as_literal(
         self, runner, session_id, happy_path_agent, freetext_recorder
@@ -442,10 +421,7 @@ class TestFreetextDispatch:
             f"exit_code={result.exit_code}, output: {result.output!r}"
         )
         assert len(freetext_recorder) == 1
-        assert freetext_recorder[0].get("text") == payload, (
-            f"key-name-lookalike text must be delivered verbatim. "
-            f"expected: {payload!r}, got: {freetext_recorder[0]!r}"
-        )
+        assert freetext_recorder[0]["text"] == payload
 
 
 class TestOutputFormat:

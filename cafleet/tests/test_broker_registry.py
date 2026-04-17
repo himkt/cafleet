@@ -134,7 +134,7 @@ class TestCreateSessionAdministratorSeed:
         row = admins[0]
         assert row.agent_id == admin_id
         card = json.loads(row.agent_card_json)
-        assert card.get("cafleet", {}).get("kind") == ADMINISTRATOR_KIND
+        assert card["cafleet"]["kind"] == ADMINISTRATOR_KIND
 
     def test_administrator_registered_at_equals_session_created_at(
         self, broker_session
@@ -167,8 +167,8 @@ class TestCreateSessionAdministratorSeed:
         # Three entries: root Director + Administrator + user-agent (design 0000026).
         assert len(entries) == 3
 
-        admin_entries = [e for e in entries if e.get("kind") == ADMINISTRATOR_KIND]
-        user_entries = [e for e in entries if e.get("kind") == "user"]
+        admin_entries = [e for e in entries if e["kind"] == ADMINISTRATOR_KIND]
+        user_entries = [e for e in entries if e["kind"] == "user"]
         # Exactly one Administrator, two user-kind (director + user-agent).
         assert len(admin_entries) == 1
         assert len(user_entries) == 2

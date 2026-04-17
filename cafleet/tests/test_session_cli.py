@@ -209,9 +209,7 @@ class TestSessionCreate:
         assert "session_id" in data, "JSON output should contain 'session_id'"
         # Validate it's a UUID
         uuid.UUID(data["session_id"])
-        assert data.get("label") == "test", (
-            f"JSON output label should be 'test', got {data.get('label')!r}"
-        )
+        assert data["label"] == "test"
 
     def test_each_create_mints_unique_id(self, tmp_path, monkeypatch):
         """Each invocation mints a fresh UUID — no idempotency."""
@@ -298,7 +296,7 @@ class TestSessionCreate:
         assert row_name == "Administrator"
         assert row_status == "active"
         card = json.loads(row_card_json)
-        assert card.get("cafleet", {}).get("kind") == "builtin-administrator"
+        assert card["cafleet"]["kind"] == "builtin-administrator"
 
     # NOTE: the former ``test_non_json_output_unchanged_single_uuid_line``
     # (design 0000025 §B guard that the text path prints exactly one line)
@@ -382,10 +380,7 @@ class TestSessionList:
         assert len(data) == 1
         assert data[0]["session_id"] == sid
         assert data[0]["label"] == "json-test"
-        assert data[0]["agent_count"] == 1, (
-            f"agent_count should be 1 (only active agents), "
-            f"got {data[0].get('agent_count')}"
-        )
+        assert data[0]["agent_count"] == 1
 
     def test_lists_multiple_sessions(self, tmp_path, monkeypatch):
         """Multiple sessions are all listed."""
@@ -433,9 +428,7 @@ class TestSessionList:
 
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert data[0]["agent_count"] == 1, (
-            f"only active agents should be counted; got {data[0].get('agent_count')}"
-        )
+        assert data[0]["agent_count"] == 1
 
 
 class TestSessionShow:

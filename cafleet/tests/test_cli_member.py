@@ -384,11 +384,7 @@ class TestMemberCreatePassesDisplayName:
             f"tmux.split_window must be called exactly once. "
             f"got {len(split_window_recorder)}: {split_window_recorder!r}"
         )
-        command = split_window_recorder[0].get("command")
-        assert command is not None, (
-            f"split_window must receive a `command` kwarg. "
-            f"got kwargs: {split_window_recorder[0]!r}"
-        )
+        command = split_window_recorder[0]["command"]
         assert isinstance(command, list), (
             f"`command` must be a list[str]. got: {type(command).__name__}"
         )
@@ -446,11 +442,7 @@ class TestMemberCreatePassesDisplayName:
             f"tmux.split_window must be called exactly once. "
             f"got {len(split_window_recorder)}: {split_window_recorder!r}"
         )
-        command = split_window_recorder[0].get("command")
-        assert command is not None, (
-            f"split_window must receive a `command` kwarg. "
-            f"got kwargs: {split_window_recorder[0]!r}"
-        )
+        command = split_window_recorder[0]["command"]
         assert "--name" not in command, (
             f"codex command must NOT contain '--name' (codex has no such flag; "
             f"display_name_args=() elides it). got: {command!r}"

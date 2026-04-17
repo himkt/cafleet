@@ -59,14 +59,8 @@ class TestServerCommandFlagParsing:
         )
         assert captured, "uvicorn.run was never called"
         kwargs = captured["kwargs"]
-        assert kwargs.get("host") == settings.broker_host, (
-            f"default host must equal settings.broker_host "
-            f"({settings.broker_host!r}). got: {kwargs.get('host')!r}"
-        )
-        assert kwargs.get("port") == settings.broker_port, (
-            f"default port must equal settings.broker_port "
-            f"({settings.broker_port!r}). got: {kwargs.get('port')!r}"
-        )
+        assert kwargs["host"] == settings.broker_host
+        assert kwargs["port"] == settings.broker_port
 
     def test_explicit_flags_override_defaults(self, monkeypatch):
         """--host 0.0.0.0 --port 9000 → uvicorn.run receives exactly those."""
@@ -89,13 +83,9 @@ class TestServerCommandFlagParsing:
             f"exit_code={result.exit_code}, output: {result.output}, "
             f"exception: {result.exception}"
         )
-        kwargs = captured.get("kwargs", {})
-        assert kwargs.get("host") == "0.0.0.0", (
-            f"--host 0.0.0.0 must pass host='0.0.0.0'. got: {kwargs.get('host')!r}"
-        )
-        assert kwargs.get("port") == 9000, (
-            f"--port 9000 must pass port=9000. got: {kwargs.get('port')!r}"
-        )
+        kwargs = captured["kwargs"]
+        assert kwargs["host"] == "0.0.0.0"
+        assert kwargs["port"] == 9000
 
     def test_app_import_string_passed_as_first_positional(self, monkeypatch):
         """uvicorn.run must receive 'cafleet.server:app' as the app spec."""
@@ -113,15 +103,9 @@ class TestServerCommandFlagParsing:
             f"'cafleet server' must exit 0 with patched uvicorn. "
             f"output: {result.output}, exception: {result.exception}"
         )
-        args = captured.get("args", ())
-        assert args, (
-            f"uvicorn.run must receive at least one positional arg. "
-            f"got args: {args!r}, kwargs: {captured.get('kwargs')!r}"
-        )
-        assert args[0] == "cafleet.server:app", (
-            f"uvicorn.run must receive 'cafleet.server:app' as first arg. "
-            f"got args: {args!r}, kwargs: {captured.get('kwargs')!r}"
-        )
+        args = captured["args"]
+        assert args
+        assert args[0] == "cafleet.server:app"
 
     def test_port_string_rejected_by_click_type_int(self):
         """--port foo → click's built-in int validation exits 2."""
@@ -191,10 +175,7 @@ class TestServerDoesNotRequireSessionId:
             f"exit_code={result.exit_code}, output: {result.output}, "
             f"exception: {result.exception}"
         )
-        assert captured.get("called") is True, (
-            f"server handler must reach uvicorn.run without --session-id. "
-            f"captured={captured!r}, output={result.output!r}"
-        )
+        assert captured["called"] is True
 
 
 class TestWebUIDistWarning:

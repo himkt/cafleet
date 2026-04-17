@@ -189,8 +189,8 @@ class TestListSessionAgentsKind:
         _register_agent(sid, name="user-b")
 
         result = broker.list_session_agents(sid)
-        admins = [e for e in result if e.get("kind") == ADMINISTRATOR_KIND]
-        users = [e for e in result if e.get("kind") == "user"]
+        admins = [e for e in result if e["kind"] == ADMINISTRATOR_KIND]
+        users = [e for e in result if e["kind"] == "user"]
 
         # Exactly one Administrator entry, and its name matches.
         assert len(admins) == 1, (
@@ -217,9 +217,7 @@ class TestListSessionAgentsKind:
         result = broker.list_session_agents(sid)
         valid_kinds = {ADMINISTRATOR_KIND, "user"}
         for entry in result:
-            assert entry.get("kind") in valid_kinds, (
-                f"kind must be one of {valid_kinds}, got {entry.get('kind')!r}"
-            )
+            assert entry["kind"] in valid_kinds
 
 
 class TestGetAgentKind:
@@ -275,13 +273,11 @@ class TestListInbox:
         assert ts0 >= ts1
 
     def test_filters_out_broadcast_summary(self):
-        """broadcast_summary tasks do not appear in inbox."""
         sid, sender, _b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
-        # Sender's inbox should not have the broadcast_summary
         sender_inbox = broker.list_inbox(sender)
-        summaries = [t for t in sender_inbox if t.get("type") == "broadcast_summary"]
+        summaries = [t for t in sender_inbox if t["type"] == "broadcast_summary"]
         assert len(summaries) == 0
 
     def test_only_returns_tasks_where_context_id_matches(self):
@@ -335,12 +331,11 @@ class TestListSent:
         assert ts0 >= ts1
 
     def test_filters_out_broadcast_summary(self):
-        """broadcast_summary tasks do not appear in sent list."""
         sid, sender, _b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
         sent = broker.list_sent(sender)
-        summaries = [t for t in sent if t.get("type") == "broadcast_summary"]
+        summaries = [t for t in sent if t["type"] == "broadcast_summary"]
         assert len(summaries) == 0
 
     def test_only_returns_tasks_from_agent(self):
@@ -370,7 +365,7 @@ class TestListTimeline:
         broker.send_message(sid, sender, recipient, "timeline entry")
 
         result = broker.list_timeline(sid)
-        assert len(result) >= 1
+        assert len(result) == 1
 
     def test_returns_empty_for_no_tasks(self):
         session = _create_session()
@@ -382,7 +377,7 @@ class TestListTimeline:
         broker.send_message(sid, sender, recipient, "structured")
 
         result = broker.list_timeline(sid)
-        assert len(result) >= 1
+        assert len(result) == 1
         entry = result[0]
         assert "task" in entry
         assert "origin_task_id" in entry or "created_at" in entry
@@ -397,15 +392,12 @@ class TestListTimeline:
         assert result[0]["created_at"] >= result[1]["created_at"]
 
     def test_filters_broadcast_summary(self):
-        """broadcast_summary tasks do not appear in timeline."""
         sid, sender, _b_id, _c_id = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
         result = broker.list_timeline(sid)
         for entry in result:
-            task = entry.get("task", {})
-            if isinstance(task, dict):
-                assert task.get("metadata", {}).get("type") != "broadcast_summary"
+            assert entry["task"]["metadata"]["type"] != "broadcast_summary"
 
     def test_scoped_to_session(self):
         """Only tasks from agents in the given session appear."""
@@ -438,12 +430,10 @@ class TestListTimeline:
         assert len(result) == 2
 
     def test_includes_broadcast_delivery_tasks(self):
-        """Individual broadcast delivery tasks (type=unicast) appear in timeline."""
         sid, sender, _b_id, _c_id = _setup_three_agents()
         broker.broadcast_message(sid, sender, "Hello all")
 
         result = broker.list_timeline(sid)
-        # Should have delivery tasks for b and c (2 unicast tasks)
         assert len(result) >= 2
 
 

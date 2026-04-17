@@ -34,8 +34,6 @@ export default function Dashboard({
   const senderId =
     administrator?.status === "active" ? administrator.agent_id : null;
 
-  const noAgents = agents.length === 0;
-
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       <header className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between shrink-0">
@@ -83,7 +81,7 @@ export default function Dashboard({
               will not re-seed it.
             </div>
           )}
-          {noAgents ? (
+          {agents.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
               <p className="text-gray-400 text-sm">
                 No agents registered in this session. Use the{" "}

@@ -126,9 +126,9 @@ class TestSendMessage:
         result = broker.send_message(sid, sender, recipient, "Did the API change?")
         texts = [
             part["text"]
-            for artifact in result["task"].get("artifacts", [])
-            for part in artifact.get("parts", [])
-            if isinstance(part, dict) and "text" in part
+            for artifact in result["task"]["artifacts"]
+            for part in artifact["parts"]
+            if "text" in part
         ]
         assert "Did the API change?" in texts
 
@@ -163,18 +163,17 @@ class TestSendMessage:
             )
 
     def test_task_persisted_to_db(self):
-        """Sent task can be retrieved via poll_tasks."""
         sid, sender, recipient = _setup_two_agents()
         broker.send_message(sid, sender, recipient, "persisted?")
 
         tasks = broker.poll_tasks(recipient)
-        assert len(tasks) >= 1
+        assert len(tasks) == 1
         texts = [
             p["text"]
             for t in tasks
-            for a in t.get("artifacts", [])
-            for p in a.get("parts", [])
-            if isinstance(p, dict) and "text" in p
+            for a in t["artifacts"]
+            for p in a["parts"]
+            if "text" in p
         ]
         assert "persisted?" in texts
 
@@ -186,7 +185,7 @@ class TestBroadcastMessage:
         sid, sender, _, _ = _setup_three_agents()
         result = broker.broadcast_message(sid, sender, "Attention all")
         assert isinstance(result, list)
-        assert len(result) >= 1
+        assert len(result) == 1
         assert "task" in result[0]
 
     def test_summary_type_is_broadcast_summary(self):
@@ -202,59 +201,47 @@ class TestBroadcastMessage:
         assert summary["contextId"] == sender
 
     def test_creates_delivery_tasks_for_each_recipient(self):
-        """Each non-sender agent gets a delivery task."""
         sid, sender, b_id, c_id = _setup_three_agents()
         broker.broadcast_message(sid, sender, "Hello everyone")
 
-        # Both b and c should have inbox tasks
         b_tasks = broker.poll_tasks(b_id)
         c_tasks = broker.poll_tasks(c_id)
-        assert len(b_tasks) >= 1
-        assert len(c_tasks) >= 1
+        assert len(b_tasks) == 1
+        assert len(c_tasks) == 1
 
     def test_delivery_tasks_have_origin_task_id(self):
-        """Delivery tasks reference the summary via originTaskId."""
         sid, sender, b_id, _ = _setup_three_agents()
         result = broker.broadcast_message(sid, sender, "Hello")
         summary_id = result[0]["task"]["id"]
 
         b_tasks = broker.poll_tasks(b_id)
-        assert len(b_tasks) >= 1
-        origin_ids = [t.get("metadata", {}).get("originTaskId") for t in b_tasks]
-        assert summary_id in origin_ids
+        assert len(b_tasks) == 1
+        assert b_tasks[0]["metadata"]["originTaskId"] == summary_id
 
     def test_delivery_tasks_type_is_unicast(self):
-        """Individual delivery tasks have type='unicast'."""
         sid, sender, b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "Hello")
 
         b_tasks = broker.poll_tasks(b_id)
-        assert len(b_tasks) >= 1
+        assert len(b_tasks) == 1
         assert b_tasks[0]["metadata"]["type"] == "unicast"
 
     def test_excludes_sender_from_recipients(self):
-        """Sender does not receive a delivery task in their inbox."""
         sid, sender, _, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "Hello")
 
-        # Sender's poll should not return delivery tasks (broadcast_summary
-        # is filtered out by poll_tasks)
         sender_tasks = broker.poll_tasks(sender)
-        delivery_tasks = [
-            t for t in sender_tasks if t.get("metadata", {}).get("type") == "unicast"
-        ]
+        delivery_tasks = [t for t in sender_tasks if t["metadata"]["type"] == "unicast"]
         assert len(delivery_tasks) == 0
 
     def test_broadcast_with_no_other_agents(self):
-        """Broadcast when sender is the only agent: no delivery tasks, still returns summary."""
         session = _create_session()
         sid = session["session_id"]
         lone_agent = _register_agent(sid, name="lonely")
 
         result = broker.broadcast_message(sid, lone_agent["agent_id"], "Anyone?")
         assert isinstance(result, list)
-        assert len(result) >= 1
-        # Summary should exist
+        assert len(result) == 1
         summary = result[0]["task"]
         assert summary["metadata"]["type"] == "broadcast_summary"
 
@@ -266,37 +253,25 @@ class TestBroadcastMessage:
         texts = [
             p["text"]
             for t in b_tasks
-            for a in t.get("artifacts", [])
-            for p in a.get("parts", [])
-            if isinstance(p, dict) and "text" in p
+            for a in t["artifacts"]
+            for p in a["parts"]
+            if "text" in p
         ]
         assert "Important update" in texts
 
 
 def _get_summary_artifact_text(result: list[dict]) -> str:
-    """Pull the first text part out of a broadcast summary (admin-exclusion tests)."""
     summary = result[0]["task"]
-    artifacts = summary.get("artifacts", [])
-    assert len(artifacts) >= 1, "summary must carry at least one artifact"
-    parts = artifacts[0].get("parts", [])
-    text_parts = [p.get("text") for p in parts if isinstance(p, dict) and "text" in p]
-    assert len(text_parts) >= 1, (
-        f"summary artifact must contain a text part, got parts={parts!r}"
-    )
+    artifacts = summary["artifacts"]
+    assert len(artifacts) == 1
+    parts = artifacts[0]["parts"]
+    text_parts = [p["text"] for p in parts if "text" in p]
+    assert len(text_parts) == 1
     return text_parts[0]
 
 
 class TestBroadcastAdministratorExclusion:
-    """broadcast_message excludes Administrator agents from the recipient set.
-
-    Reference: ``broker.broadcast_message`` at ``broker.py`` ~line 644.
-    Design doc 0000025 §E: the Administrator is write-only — it never
-    receives broadcasts, even when another agent broadcasts to "everyone"
-    in the session.
-    """
-
     def test_broadcast_from_user_excludes_administrator_from_recipients(self):
-        """A user-agent broadcast does not create a delivery task for the Admin."""
         session = _create_session()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
@@ -307,34 +282,16 @@ class TestBroadcastAdministratorExclusion:
 
         broker.broadcast_message(sid, sender["agent_id"], "Hi all")
 
-        # The Administrator must have no delivery tasks at all.
         admin_tasks = broker.poll_tasks(admin_id)
-        admin_unicasts = [
-            t for t in admin_tasks if t.get("metadata", {}).get("type") == "unicast"
-        ]
-        assert len(admin_unicasts) == 0, (
-            f"Administrator must not receive broadcast delivery tasks, "
-            f"got {admin_unicasts!r}"
-        )
+        admin_unicasts = [t for t in admin_tasks if t["metadata"]["type"] == "unicast"]
+        assert len(admin_unicasts) == 0
 
-        # Both user recipients DO receive a delivery task.
         a_tasks = broker.poll_tasks(user_a["agent_id"])
         b_tasks = broker.poll_tasks(user_b["agent_id"])
-        assert len(a_tasks) == 1, (
-            f"user-a should receive exactly 1 delivery task, got {len(a_tasks)}"
-        )
-        assert len(b_tasks) == 1, (
-            f"user-b should receive exactly 1 delivery task, got {len(b_tasks)}"
-        )
+        assert len(a_tasks) == 1
+        assert len(b_tasks) == 1
 
     def test_summary_count_reflects_post_exclusion_recipients(self):
-        """Summary counts user agents + root Director, excludes Admin + sender.
-
-        Design 0000026 bootstraps a root Director alongside the Administrator,
-        so the broadcast now sees: {sender, user-a, user-b, director, admin}.
-        After sender-self and Administrator exclusion, recipients are
-        {user-a, user-b, director} = 3.
-        """
         session = _create_session()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
@@ -346,36 +303,21 @@ class TestBroadcastAdministratorExclusion:
 
         result = broker.broadcast_message(sid, sender["agent_id"], "hey")
 
-        # Artifact text must use the post-exclusion count.
         text = _get_summary_artifact_text(result)
-        assert text == "Broadcast sent to 3 recipients", (
-            f"summary text must reflect post-exclusion count (3 = 2 users + "
-            f"root Director), got {text!r}"
-        )
+        assert text == "Broadcast sent to 3 recipients"
 
-        summary_metadata = result[0]["task"].get("metadata", {})
-        assert summary_metadata.get("recipientCount") == 3, (
-            f"summary metadata.recipientCount must be 3, "
-            f"got {summary_metadata.get('recipientCount')!r}"
-        )
+        summary_metadata = result[0]["task"]["metadata"]
+        assert summary_metadata["recipientCount"] == 3
 
-        recipient_ids = summary_metadata.get("recipientIds", [])
-        assert admin_id not in recipient_ids, (
-            f"Administrator must not appear in summary.recipientIds, "
-            f"got {recipient_ids!r}"
-        )
+        recipient_ids = summary_metadata["recipientIds"]
+        assert admin_id not in recipient_ids
         assert set(recipient_ids) == {
             user_a["agent_id"],
             user_b["agent_id"],
             director_id,
-        }, (
-            f"summary.recipientIds should be the user pair + Director, got {recipient_ids!r}"
-        )
+        }
 
     def test_broadcast_from_administrator_delivers_to_all_user_agents(self):
-        """Admin-origin broadcast reaches every non-Admin active agent,
-        including the bootstrap root Director (design 0000026).
-        """
         session = _create_session()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
@@ -386,54 +328,36 @@ class TestBroadcastAdministratorExclusion:
 
         result = broker.broadcast_message(sid, admin_id, "hello from admin")
 
-        # User agents receive one delivery task each.
         a_tasks = broker.poll_tasks(user_a["agent_id"])
         b_tasks = broker.poll_tasks(user_b["agent_id"])
         assert len(a_tasks) == 1
         assert len(b_tasks) == 1
 
-        # Summary count is 3 = 2 user agents + root Director.
         text = _get_summary_artifact_text(result)
-        assert text == "Broadcast sent to 3 recipients", (
-            f"Admin-origin broadcast must include the root Director, got {text!r}"
-        )
+        assert text == "Broadcast sent to 3 recipients"
 
-        summary_metadata = result[0]["task"].get("metadata", {})
-        recipient_ids = summary_metadata.get("recipientIds", [])
+        summary_metadata = result[0]["task"]["metadata"]
+        recipient_ids = summary_metadata["recipientIds"]
         assert set(recipient_ids) == {
             user_a["agent_id"],
             user_b["agent_id"],
             director_id,
-        }, (
-            f"summary.recipientIds should be user-a, user-b, and the Director, "
-            f"got {recipient_ids!r}"
-        )
+        }
 
     def test_admin_broadcast_in_bootstrap_only_session_reaches_only_director(self):
-        """In a freshly-bootstrapped session (Director + Administrator only),
-        an Admin-origin broadcast reaches exactly the root Director.
-
-        After ``Agent.agent_id != agent_id`` (excludes sender=Admin) and the
-        Administrator-exclusion filter, the only remaining recipient is the
-        root Director seeded by design 0000026.
-        """
         session = _create_session()
         sid = session["session_id"]
         admin_id = session["administrator_agent_id"]
         director_id = session["director"]["agent_id"]
 
-        # Session has the bootstrap pair. Let Admin broadcast.
         result = broker.broadcast_message(sid, admin_id, "anybody?")
 
         text = _get_summary_artifact_text(result)
-        assert text == "Broadcast sent to 1 recipients", (
-            f"Admin broadcast in a bootstrap-only session must reach just the "
-            f"root Director (1 recipient), got {text!r}"
-        )
+        assert text == "Broadcast sent to 1 recipients"
 
-        summary_metadata = result[0]["task"].get("metadata", {})
-        assert summary_metadata.get("recipientCount") == 1
-        assert summary_metadata.get("recipientIds") == [director_id]
+        summary_metadata = result[0]["task"]["metadata"]
+        assert summary_metadata["recipientCount"] == 1
+        assert summary_metadata["recipientIds"] == [director_id]
 
 
 class TestPollTasks:
@@ -478,16 +402,12 @@ class TestPollTasks:
         assert ts0 >= ts1  # DESC order
 
     def test_filters_out_broadcast_summary(self):
-        """broadcast_summary tasks do not appear in poll results."""
         sid, sender, _b_id, _ = _setup_three_agents()
         broker.broadcast_message(sid, sender, "broadcast")
 
-        # Sender's poll should not show the broadcast_summary
         sender_tasks = broker.poll_tasks(sender)
         summary_tasks = [
-            t
-            for t in sender_tasks
-            if t.get("metadata", {}).get("type") == "broadcast_summary"
+            t for t in sender_tasks if t["metadata"]["type"] == "broadcast_summary"
         ]
         assert len(summary_tasks) == 0
 
@@ -527,15 +447,12 @@ class TestPollTasks:
         assert len(result) == 2
 
     def test_since_filter(self):
-        """since filters tasks by timestamp."""
         sid, sender, recipient = _setup_two_agents()
         result1 = broker.send_message(sid, sender, recipient, "early")
         ts = result1["task"]["status"]["timestamp"]
 
         broker.send_message(sid, sender, recipient, "later")
 
-        # Filtering since the first message's timestamp should return
-        # at least the later message
         result = broker.poll_tasks(recipient, since=ts)
         assert len(result) >= 1
 

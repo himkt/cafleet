@@ -6,7 +6,6 @@ interface ReactionBarProps {
 }
 
 function formatIso(iso: string): string {
-  if (!iso) return "";
   return new Date(iso).toISOString();
 }
 

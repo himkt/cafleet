@@ -1,47 +1,4 @@
-"""Tests for the ``cafleet-registry db init`` CLI command.
-
-Covers four states from the design doc's CLI Specification behavior
-matrix (design-docs/0000010-sqlite-store-migration/design-doc.md
-section "db init behavior matrix"):
-
-  | # | State                          | Tested by                          |
-  |---|--------------------------------|------------------------------------|
-  | 1 | DB file does not exist         | ``test_db_init_creates_schema``    |
-  | 3 | At head                        | ``test_db_init_idempotent`` (2nd)  |
-  | 5 | Ahead of head                  | ``test_db_init_ahead_errors``      |
-  | 6 | Legacy (tables, no version)    | ``test_db_init_legacy_errors``     |
-
-States NOT exercised here (intentional, per the Step 4 Phase A scope):
-
-  - **State #2 "Empty schema"**: structurally identical to state #1
-    once parent-dir creation is verified — both call ``upgrade head``.
-    The state #1 happy-path test covers the only behaviorally distinct
-    branch (mkdir + apply).
-  - **State #4 "Behind head"**: physically unreachable in v1 because
-    only one migration script ships. Add a test in a follow-up when a
-    second migration lands.
-
-Test isolation strategy:
-
-  Each test crafts its own ``tmp_path`` layout, then monkeypatches
-  ``config.settings.database_url`` to point at that path BEFORE
-  importing the CLI. The CLI is imported INSIDE each test body so
-  any module-level reads of the database URL during ``cli`` import
-  see the patched value, not the user's real ``CAFLEET_DATABASE_URL``.
-
-  Why ``monkeypatch.setattr(config.settings, "database_url", ...)``
-  rather than ``monkeypatch.setenv("CAFLEET_DATABASE_URL", ...)``:
-  ``config.settings`` is a module-level singleton constructed at
-  ``cafleet.config`` import time. By the time any test
-  runs, the singleton has already been built — env-var changes
-  after that point would be ignored. Patching the attribute on the
-  existing singleton is the only reliable override.
-
-  Why per-test setup instead of a shared fixture: the four tests
-  exercise visibly different DB pre-states (missing file, missing
-  parent dir, legacy tables, future revision). Inlining the setup in
-  each test makes the precondition obvious at the call site.
-"""
+"""Tests for the ``cafleet db init`` CLI command."""
 
 import sqlite3
 
