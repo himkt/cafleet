@@ -333,6 +333,7 @@ class TestRegisterAgent:
             "director_agent_id": director["agent_id"],
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         member = _register_agent(sid, name="member", placement=placement)
@@ -354,6 +355,7 @@ class TestRegisterAgent:
             "director_agent_id": str(uuid.uuid4()),  # non-existent
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         with pytest.raises(click.UsageError, match="Director agent"):
@@ -372,6 +374,7 @@ class TestRegisterAgent:
             "director_agent_id": director["agent_id"],
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         with pytest.raises(click.UsageError, match="Director agent"):
@@ -391,6 +394,7 @@ class TestRegisterAgent:
             "director_agent_id": director["agent_id"],
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         with pytest.raises(click.UsageError, match="not active"):
@@ -431,6 +435,7 @@ class TestGetAgent:
             "director_agent_id": director["agent_id"],
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         member = _register_agent(sid, name="member", placement=placement)
@@ -593,6 +598,7 @@ class TestDeregisterAgent:
             "director_agent_id": director["agent_id"],
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         member = _register_agent(sid, name="member", placement=placement)
@@ -627,6 +633,7 @@ class TestUpdatePlacementPaneId:
             "director_agent_id": director["agent_id"],
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         member = _register_agent(sid, name="member", placement=placement)
@@ -655,6 +662,7 @@ class TestUpdatePlacementPaneId:
             "director_agent_id": director["agent_id"],
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         member = _register_agent(sid, name="member", placement=placement)
@@ -679,6 +687,7 @@ class TestListMembers:
             "director_agent_id": did,
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         _register_agent(sid, name="member-1", placement=placement)
@@ -700,6 +709,7 @@ class TestListMembers:
             "director_agent_id": did,
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         _register_agent(sid, name="member", placement=placement)
@@ -731,12 +741,14 @@ class TestListMembers:
             "director_agent_id": dir1["agent_id"],
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         placement2 = {
             "director_agent_id": dir2["agent_id"],
             "tmux_session": "main",
             "tmux_window_id": "@2",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         _register_agent(sid, name="m1-of-d1", placement=placement1)
@@ -756,6 +768,7 @@ class TestListMembers:
             "director_agent_id": did,
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         _register_agent(sid, name="member", placement=placement)

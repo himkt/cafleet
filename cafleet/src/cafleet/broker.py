@@ -368,7 +368,7 @@ def register_agent(
                     director_agent_id=placement["director_agent_id"],
                     tmux_session=placement["tmux_session"],
                     tmux_window_id=placement["tmux_window_id"],
-                    tmux_pane_id=placement.get("tmux_pane_id"),
+                    tmux_pane_id=placement["tmux_pane_id"],
                     coding_agent=placement["coding_agent"],
                     created_at=registered_at,
                 )

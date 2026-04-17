@@ -262,6 +262,7 @@ class TestRegisterAgentPlacementAdministratorGuard:
             "director_agent_id": admin_id,
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         with pytest.raises(AdministratorProtectedError) as exc_info:
@@ -284,6 +285,7 @@ class TestRegisterAgentPlacementAdministratorGuard:
             "director_agent_id": admin_id,
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         with pytest.raises(AdministratorProtectedError):
@@ -314,6 +316,7 @@ class TestRegisterAgentPlacementAdministratorGuard:
             "director_agent_id": director["agent_id"],
             "tmux_session": "main",
             "tmux_window_id": "@1",
+            "tmux_pane_id": None,
             "coding_agent": "claude",
         }
         member = broker.register_agent(
