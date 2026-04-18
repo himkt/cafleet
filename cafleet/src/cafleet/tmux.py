@@ -88,10 +88,10 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
 
     Split into two ``send-keys`` calls for the same reason as
     ``send_freetext_and_submit``: ``-l`` is per-invocation, so mixing
-    literal text with the ``Enter`` key name in one call makes the
-    ``Enter`` land as a literal newline inside prompts that consume
-    bracketed-paste (e.g. the Claude Code input box) instead of
-    submitting the command.
+    literal text with the ``Enter`` key name in one call means tmux
+    does not interpret ``Enter`` as the Enter key. It is sent literally
+    instead of producing the submit keypress that prompts such as the
+    Claude Code input box expect.
     """
     if shutil.which("tmux") is None:
         return False
