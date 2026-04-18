@@ -53,28 +53,27 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _placement_dict(row, *, created_at_attr: str = "created_at") -> dict:
+def _placement_dict(row) -> dict:
     return {
         "director_agent_id": row.director_agent_id,
         "tmux_session": row.tmux_session,
         "tmux_window_id": row.tmux_window_id,
         "tmux_pane_id": row.tmux_pane_id,
         "coding_agent": row.coding_agent,
-        "created_at": getattr(row, created_at_attr),
+        "created_at": row.created_at,
     }
 
 
 def _agent_is_active_in_session(session, agent_id: str, session_id: str) -> bool:
-    return (
-        session.execute(
-            select(Agent.agent_id).where(
+    return session.execute(
+        select(
+            exists().where(
                 Agent.agent_id == agent_id,
                 Agent.session_id == session_id,
                 Agent.status == "active",
             )
-        ).first()
-        is not None
-    )
+        )
+    ).scalar_one()
 
 
 def _try_notify_recipient(
@@ -265,10 +264,10 @@ def delete_session(session_id: str) -> dict:
     now = _now_iso()
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        exists_row = session.execute(
-            select(Session.session_id).where(Session.session_id == session_id)
-        ).first()
-        if exists_row is None:
+        session_exists = session.execute(
+            select(exists().where(Session.session_id == session_id))
+        ).scalar_one()
+        if not session_exists:
             # ClickException exits 1 (matching ``session show``); UsageError
             # would print a Usage: banner + exit 2, wrong for a runtime miss.
             raise click.ClickException(f"session '{session_id}' not found.")
@@ -455,12 +454,9 @@ def deregister_agent(agent_id: str) -> bool:
     """
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        is_root_director = (
-            session.execute(
-                select(Session.session_id).where(Session.director_agent_id == agent_id)
-            ).first()
-            is not None
-        )
+        is_root_director = session.execute(
+            select(exists().where(Session.director_agent_id == agent_id))
+        ).scalar_one()
         if is_root_director:
             raise click.UsageError(
                 "cannot deregister the root Director; "
@@ -522,7 +518,7 @@ def list_members(session_id: str, director_agent_id: str) -> list[dict]:
             AgentPlacement.tmux_window_id,
             AgentPlacement.tmux_pane_id,
             AgentPlacement.coding_agent,
-            AgentPlacement.created_at.label("placement_created_at"),
+            AgentPlacement.created_at,
         )
         .join(AgentPlacement, Agent.agent_id == AgentPlacement.agent_id)
         .where(
@@ -541,7 +537,7 @@ def list_members(session_id: str, director_agent_id: str) -> list[dict]:
             "description": row.description,
             "status": row.status,
             "registered_at": row.registered_at,
-            "placement": _placement_dict(row, created_at_attr="placement_created_at"),
+            "placement": _placement_dict(row),
         }
         for row in rows
     ]
@@ -551,15 +547,14 @@ def verify_agent_session(agent_id: str, session_id: str) -> bool:
     """Return True iff the agent belongs to the session (any status)."""
     sm = get_sync_sessionmaker()
     with sm() as session:
-        return (
-            session.execute(
-                select(Agent.agent_id).where(
+        return session.execute(
+            select(
+                exists().where(
                     Agent.agent_id == agent_id,
                     Agent.session_id == session_id,
                 )
-            ).first()
-            is not None
-        )
+            )
+        ).scalar_one()
 
 
 def _save_task(session, task_dict: dict) -> None:
@@ -1004,12 +999,14 @@ def get_task(session_id: str, task_id: str) -> dict:
         if to_id:
             endpoint_ids.append(to_id)
         in_session = session.execute(
-            select(Agent.agent_id).where(
-                Agent.agent_id.in_(endpoint_ids),
-                Agent.session_id == session_id,
+            select(
+                exists().where(
+                    Agent.agent_id.in_(endpoint_ids),
+                    Agent.session_id == session_id,
+                )
             )
-        ).first()
-        if in_session is None:
+        ).scalar_one()
+        if not in_session:
             raise ValueError(f"Task {task_id} not found")
 
     return {"task": task_dict}
