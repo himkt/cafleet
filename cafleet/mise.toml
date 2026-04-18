@@ -23,4 +23,4 @@ description = "Run ty type checker"
 
 [tasks.sync]
 run = "uv sync"
-description = "Sync workspace dependencies"
+description = "Sync cafleet project dependencies"

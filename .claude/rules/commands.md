@@ -7,7 +7,7 @@
 - Lint (admin): `mise //admin:lint`
 - Format: `mise //cafleet:format`
 - Type check: `mise //cafleet:typecheck`
-- Sync workspace: `mise //cafleet:sync`
+- Sync dependencies: `mise //cafleet:sync`
 - Start admin WebUI server: either `cafleet server` (packaged launcher; `--host` / `--port` flags, defaults `127.0.0.1:8000` from `settings.broker_host` / `settings.broker_port`, also honors `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`) **or** `mise //cafleet:dev` (runs `uv run uvicorn cafleet.server:app --host 127.0.0.1 --port 8000` directly; does NOT delegate to `cafleet server`). Both are independent entry points for the same FastAPI app and neither runs with `--reload` — contributors restart manually between edits. WebUI-only: CLI commands do not require a running server. Serves `/ui/` only after `mise //admin:build` has been run.
 - Start admin dev server: `mise //admin:dev`
 - Build admin: `mise //admin:build`

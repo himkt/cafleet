@@ -55,6 +55,7 @@ Key design decisions:
 - Python 3.12+
 - SQLite (built into Python; no daemon needed)
 - [uv](https://docs.astral.sh/uv/)
+- [mise](https://mise.jdx.dev/) (for the documented `mise //cafleet:*` workflow)
 
 ### Initialize the Schema (one-time)
 
