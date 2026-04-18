@@ -85,6 +85,13 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
     The command string is sent literally so the recipient's
     ``permissions.allow`` can match it. Returns False on any tmux failure
     or when the binary is missing, never raising.
+
+    Split into two ``send-keys`` calls for the same reason as
+    ``send_freetext_and_submit``: ``-l`` is per-invocation, so mixing
+    literal text with the ``Enter`` key name in one call means tmux
+    does not interpret ``Enter`` as the Enter key. It is sent literally
+    instead of producing the submit keypress that prompts such as the
+    Claude Code input box expect.
     """
     if shutil.which("tmux") is None:
         return False
@@ -95,9 +102,13 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
                 "send-keys",
                 "-t",
                 target_pane_id,
+                "-l",
                 f"cafleet --session-id {session_id} poll --agent-id {agent_id}",
-                "Enter",
             ],
+            timeout=5,
+        )
+        _run(
+            ["tmux", "send-keys", "-t", target_pane_id, "Enter"],
             timeout=5,
         )
     except TmuxError:

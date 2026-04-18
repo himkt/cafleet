@@ -258,7 +258,12 @@ class TestSendPollTrigger:
             "send-keys",
             "-t",
             "%7",
+            "-l",
             "cafleet --session-id sess-001 poll --agent-id agent-001",
+            "tmux",
+            "send-keys",
+            "-t",
+            "%7",
             "Enter",
         ]
 
