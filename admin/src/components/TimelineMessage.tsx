@@ -14,17 +14,12 @@ function MentionChip({ name }: { name: string }) {
   );
 }
 
-function displayName(name: string, agentId: string): string {
-  return name || agentId.slice(0, 8);
-}
-
 function firstRow(entry: TimelineEntry) {
   return entry.kind === "unicast" ? entry.message : entry.rows[0];
 }
 
 function senderName(entry: TimelineEntry): string {
-  const row = firstRow(entry);
-  return displayName(row.from_agent_name, row.from_agent_id);
+  return firstRow(entry).from_agent_name;
 }
 
 function body(entry: TimelineEntry): string {
@@ -38,9 +33,9 @@ function isCanceled(entry: TimelineEntry): boolean {
 
 function recipientNames(entry: TimelineEntry): string[] {
   if (entry.kind === "unicast") {
-    return [displayName(entry.message.to_agent_name, entry.message.to_agent_id)];
+    return [entry.message.to_agent_name];
   }
-  return entry.rows.map((r) => displayName(r.to_agent_name, r.to_agent_id));
+  return entry.rows.map((r) => r.to_agent_name);
 }
 
 function createdAt(entry: TimelineEntry): string {

@@ -55,14 +55,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("agent_placements") as batch_op:
-        batch_op.alter_column(
-            "director_agent_id", existing_type=sa.String(), nullable=False
-        )
-
-    # Use raw ``ALTER TABLE DROP COLUMN`` (SQLite 3.35+) for the same reason
-    # the upgrade uses raw ``ADD COLUMN``: ``batch_alter_table("sessions")``
-    # DROPs and recreates the table, which trips the
-    # ``agents.session_id -> sessions.session_id`` FK on non-empty DBs.
-    op.execute("ALTER TABLE sessions DROP COLUMN director_agent_id")
-    op.execute("ALTER TABLE sessions DROP COLUMN deleted_at")
+    raise NotImplementedError(
+        "Migration 0007 is forward-only: downgrading requires SQLite "
+        "'ALTER TABLE ... DROP COLUMN', which is not supported on older "
+        "SQLite versions, and rebuilding 'sessions' is unsafe because of "
+        "the existing agents.session_id -> sessions.session_id foreign key."
+    )

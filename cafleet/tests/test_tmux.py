@@ -200,7 +200,7 @@ class TestSendExit:
             tmux.send_exit(target_pane_id="%7", ignore_missing=True)
 
 
-class TestCapturPane:
+class TestCapturePane:
     def test_invokes_correct_args(self, monkeypatch):
         captured_args = []
 

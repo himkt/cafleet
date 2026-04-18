@@ -291,7 +291,7 @@ class TestMigration0006DowngradeSmoke:
             engine.dispose()
 
         cfg = _make_alembic_cfg(db_at_0005)
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "0006")
 
         engine = create_engine(f"sqlite:///{db_at_0005}")
         try:
