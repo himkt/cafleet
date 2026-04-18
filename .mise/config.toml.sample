@@ -1,3 +1,0 @@
-[env]
-NGROK_HOST = ""
-COMPOSE_PROFILES = "macos"

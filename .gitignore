@@ -6,8 +6,6 @@ cafleet/src/cafleet/webui/
 admin/node_modules/
 .vite
 
-.mise/config.toml
-
 !.claude
 !.claude/agents
 !.claude/rules
