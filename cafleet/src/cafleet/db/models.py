@@ -1,11 +1,4 @@
-"""SQLAlchemy declarative models for the cafleet registry SQLite store.
-
-Schema mirrors `docs/spec/data-model.md` exactly. The hybrid model promotes
-indexed/queried fields to columns and stores opaque A2A-inspired task +
-agent-card payloads as JSON TEXT (`AgentCard`, `Task`-shaped data) that the
-application layer serializes and deserializes as plain Python dicts via
-`json.dumps` / `json.loads`.
-"""
+"""SQLAlchemy declarative models; see ``docs/spec/data-model.md``."""
 
 from sqlalchemy import ForeignKey, Index, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -21,6 +14,12 @@ class Session(Base):
     session_id: Mapped[str] = mapped_column(String, primary_key=True)
     label: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
+    deleted_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    director_agent_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("agents.agent_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
 
 
 class Agent(Base):
@@ -50,10 +49,10 @@ class AgentPlacement(Base):
         ForeignKey("agents.agent_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    director_agent_id: Mapped[str] = mapped_column(
+    director_agent_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("agents.agent_id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     tmux_session: Mapped[str] = mapped_column(String, nullable=False)
     tmux_window_id: Mapped[str] = mapped_column(String, nullable=False)

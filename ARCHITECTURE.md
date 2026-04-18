@@ -31,9 +31,19 @@ The `session_id` serves as the session boundary. Sessions are created via `cafle
 
 No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret session identifier. Sessions are partitions for tidiness, not security boundaries.
 
-**Registration** requires a valid `session_id`. Sessions are created via `cafleet session create` before agents can register.
+**Registration** requires a valid, non-soft-deleted `session_id`. Sessions are created via `cafleet session create` before any members can be spawned.
 
 **Isolation rules**: Every operation that reads or writes agent/task data enforces session boundaries. Cross-session requests always produce "not found" errors indistinguishable from the resource not existing.
+
+**Session bootstrap (transactional)**: `cafleet session create` must be run inside a tmux session. It reads the caller's tmux context (`session`, `window_id`, `pane_id`) via `tmux.director_context()` **before** opening any DB work and then executes a single transaction with five ordered operations: (1) INSERT `sessions` with `deleted_at=NULL` and `director_agent_id=NULL`; (2) INSERT `agents` for the hardcoded root Director (`name="director"`, `description="Root Director for this session"`, `status="active"`); (3) INSERT `agent_placements` with `director_agent_id=NULL` (the root has no parent Director) and `coding_agent="unknown"` (auto-detection is deferred); (4) UPDATE `sessions.director_agent_id` to point at the newly inserted agent; (5) INSERT the built-in Administrator agent for the session. Any failure in the transaction rolls the whole thing back — no partial session/agent/placement rows can persist. Outside tmux the CLI fails with `Error: cafleet session create must be run inside a tmux session` and exit code 1 before touching the DB.
+
+The post-bootstrap invariant is that every non-deleted `sessions` row has a non-NULL `director_agent_id`. The column itself is DB-nullable because the 5-step insert order requires `sessions` to exist before the agent row it will eventually reference, so the NOT NULL constraint is enforced by the broker code path — not by the schema.
+
+**Session soft-delete**: `cafleet session delete <id>` runs a single transaction: (1) `UPDATE sessions SET deleted_at=now WHERE session_id=X AND deleted_at IS NULL`, (2) `UPDATE agents SET status='deregistered', deregistered_at=now WHERE session_id=X AND status='active'` (this sweeps the root Director and every member in one statement), (3) `DELETE FROM agent_placements WHERE agent_id IN (SELECT agent_id FROM agents WHERE session_id=X)`. Tasks are never touched — the message history remains queryable. The command is idempotent: re-running against an already-deleted session prints `Deleted session X. Deregistered 0 agents.` and exits 0 because step 1's `WHERE deleted_at IS NULL` clause short-circuits the cascade. It is **not** transactional with tmux: surviving member panes are orphaned intentionally. Directors that want a clean shutdown run `cafleet member delete` per member first (which does send `/exit`), then `session delete`.
+
+**Soft-delete visibility**: `broker.get_session` exposes the `deleted_at` field but otherwise returns the row regardless of its value; `broker.list_sessions` filters `WHERE deleted_at IS NULL` so the CLI's `session list` hides deleted rows. `broker.register_agent` inspects `get_session(...)["deleted_at"]` and rejects a soft-deleted session with `Error: session X is deleted` (distinct from the `Session 'X' not found.` path for an unknown ID).
+
+**Root Director protection**: `broker.deregister_agent` refuses to deregister the root Director (detected by `sessions.director_agent_id == agent_id`) and exits 1 with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`. This keeps `sessions.director_agent_id` from pointing at a deregistered, placement-less agent, which would otherwise silently break Member → Director tmux push notifications.
 
 **Built-in Administrator agent**: `cafleet session create` inserts a single `Administrator` agent into the new session in the same transaction as the session row. The Administrator is an ordinary `agents` row distinguished only by `agent_card_json.cafleet.kind == "builtin-administrator"` — no schema change, no separate table. Every session has exactly one Administrator, and Alembic revision `0006_seed_administrator_agent.py` backfills one into each pre-existing session on `cafleet db init` (idempotent via a `json_extract` probe). The Admin WebUI Send control always submits messages with `from_agent_id = administrator.agent_id`, so there is no sender dropdown. Protection lives entirely in `broker.py`: a single `AdministratorProtectedError` class is raised from `broker.deregister_agent` (preventing deregister) and from `broker.register_agent` (preventing `placement.director_agent_id` from pointing at an Administrator — the Administrator never receives a tmux pane). `broker.broadcast_message` filters Administrators out of the recipient set, so they are write-only identities. The CLI handles `AdministratorProtectedError` by printing `Error: ...` to stderr and exiting with status 1; any future WebUI deregister endpoint maps it to HTTP 409.
 
@@ -54,7 +64,7 @@ No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret sessio
 | `webui_api.py` | `cafleet/src/cafleet/` | WebUI API router (`/ui/api/*`) — calls `broker` for all data access |
 | `output.py` | `cafleet/src/cafleet/` | CLI output formatting (tables + JSON) |
 | `coding_agent.py` | `cafleet/src/cafleet/` | `CodingAgentConfig` dataclass, `CLAUDE`/`CODEX` built-in configs, `CODING_AGENTS` registry, `get_coding_agent()` helper |
-| `tmux.py` | `cafleet/src/cafleet/` | tmux subprocess helper: `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit`, `capture_pane` |
+| `tmux.py` | `cafleet/src/cafleet/` | tmux subprocess helper: `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit`, `capture_pane`, `send_choice_key`, `send_freetext_and_submit` |
 | `admin/` | Project root | WebUI SPA (Vite + React + TypeScript + Tailwind CSS) |
 
 ## Operation Mapping
@@ -73,6 +83,7 @@ All operations go through `broker.py` (sync SQLAlchemy). No HTTP server is invol
 | `agents` (list) | `broker.list_agents()` → SELECT agents WHERE active |
 | `agents --id` | `broker.get_agent()` → SELECT agent + placement |
 | `deregister` | `broker.deregister_agent()` → UPDATE status + DELETE placement |
+| `member send-input` | `broker.get_agent()` → authorization check + `tmux.send_choice_key` / `tmux.send_freetext_and_submit` |
 | `db init` | Alembic `upgrade head` |
 
 ## Storage Layer
@@ -94,7 +105,7 @@ Indexed fields are columns; A2A-inspired payloads (`AgentCard`-shaped, `Task`-sh
 | `sessions` | `session_id` (PK) | — |
 | `agents` | `agent_id` (PK), `session_id` (FK → `sessions`), `status` | `agent_card_json` |
 | `tasks` | `task_id` (PK), `context_id` (FK → `agents`), `from_agent_id`, `to_agent_id`, `status_state`, `status_timestamp` | `task_json` |
-| `agent_placements` | `agent_id` (PK, FK → `agents` CASCADE), `director_agent_id` (FK → `agents` RESTRICT), `tmux_session`, `tmux_window_id`, `tmux_pane_id` (nullable) | — |
+| `agent_placements` | `agent_id` (PK, FK → `agents` CASCADE), `director_agent_id` (nullable, FK → `agents` RESTRICT), `tmux_session`, `tmux_window_id`, `tmux_pane_id` (nullable) | — |
 
 Four indexes serve the hot read paths:
 
@@ -145,9 +156,13 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 **Delete ordering** (`cafleet member delete`): Deregister the agent first, THEN `/exit` the pane. This preserves the pane for retry if deregister fails.
 
-**Multi-runner support**: The `--coding-agent` option on `member create` selects which coding agent binary to spawn (`claude` or `codex`, default: `claude`). Agent-specific configuration (binary name, extra args, default prompt template) is encapsulated in `CodingAgentConfig` dataclasses in `cafleet/src/cafleet/coding_agent.py`. The `agent_placements` table tracks which coding agent was spawned via a `coding_agent` column (default: `"claude"`). The `tmux.split_window()` function accepts a generic `command: list[str]` instead of a hardcoded Claude prompt, making it agent-agnostic.
+**Multi-runner support**: The `--coding-agent` option on `member create` selects which coding agent binary to spawn (`claude` or `codex`, default: `claude`). Agent-specific configuration (binary name, extra args, default prompt template, display-name flag shape) is encapsulated in `CodingAgentConfig` dataclasses in `cafleet/src/cafleet/coding_agent.py`. The `agent_placements` table tracks which coding agent was spawned via a `coding_agent` column (default: `"claude"`). The `tmux.split_window()` function accepts a generic `command: list[str]` instead of a hardcoded Claude prompt, making it agent-agnostic.
 
-**Commands**: `member create`, `member delete`, `member list`, `member capture`. All require `--agent-id` (the Director's ID). The tmux helper module (`cafleet/src/cafleet/tmux.py`) isolates all subprocess interaction with tmux.
+**Pane display-name propagation**: `CodingAgentConfig` carries a `display_name_args: tuple[str, ...]` field that encodes which CLI flag (if any) the spawned coding agent accepts for a session display name. `CLAUDE.display_name_args = ("--name",)`; `CODEX.display_name_args = ()` because codex has no equivalent flag today. `member_create` calls `coding_agent_config.build_command(prompt, display_name=name)` unconditionally — the per-agent decision of whether to inject the flag lives on the dataclass, so `cli.py` stays agnostic. For `claude` members the spawned process becomes `claude --name <member-name> <prompt>`, and Claude Code re-emits the name via the terminal title escape sequence so `tmux display-message -p -t <pane> "#{pane_title}"` returns the member name for the lifetime of the pane. For `codex` members `display_name_args=()` makes the call a no-op and the spawn command is byte-identical to today.
+
+**Commands**: `member create`, `member delete`, `member list`, `member capture`, `member send-input`. All require `--agent-id` (the Director's ID). The tmux helper module (`cafleet/src/cafleet/tmux.py`) isolates all subprocess interaction with tmux.
+
+**Write-path authorization mirrors the read path**: `cafleet member send-input` — a safe `tmux send-keys` wrapper for answering an `AskUserQuestion` prompt rendered in a member's pane — reuses the exact `member capture` authorization boundary (`placement.director_agent_id == --agent-id`, non-null `tmux_pane_id`, placement row present). The CLI accepts either `--choice {1,2,3}` (sends the matching digit key) or `--freetext "<text>"` (sends `4`, the literal text via tmux's `-l` flag, then `Enter` — three separate `tmux send-keys` invocations because `-l` is per-invocation). Newlines in `--freetext` are rejected at both the CLI layer and the `tmux.send_freetext_and_submit` helper so each call is exactly one prompt submission. The helper never invokes a shell (`subprocess.run([...], shell=False)`), so shell meta, backticks, `$VAR`, and multi-byte characters pass through as literal input.
 
 **Supervision skill**: The Director's monitoring obligations are defined in `.claude/skills/cafleet-monitoring/SKILL.md`. This skill must be loaded (`Skill(cafleet-monitoring)`) before spawning any members. It provides a 2-stage health check protocol (message poll then terminal capture) and a ready-to-use `/loop` prompt template.
 
@@ -171,7 +186,7 @@ CAFleet ships CAFleet-native replicas of the global Agent Teams design document 
 
 CAFleet uses a pull-based delivery model by default: recipients discover messages via `cafleet poll`. To reduce latency, the broker can also push a poll trigger into a recipient's tmux pane immediately after persisting a message.
 
-After `broker` saves a delivery task, it looks up the recipient's `agent_placements` row. If the recipient has a non-null `tmux_pane_id` and is not the sender, the broker runs:
+After `broker` saves a delivery task, it looks up the recipient's `agent_placements` row. Every agent spawned by `cafleet member create` has a placement row, and every session's root Director also gets one at `cafleet session create` time (its placement carries `director_agent_id=NULL` to indicate "no parent"). Because `_try_notify_recipient` resolves a pane by `agent_id` alone, Member → Director notifications work automatically once the root Director has a placement row. If the recipient has a non-null `tmux_pane_id` and is not the sender, the broker runs:
 
 ```
 tmux send-keys -t <tmux_pane_id> "cafleet --session-id <session_id> poll --agent-id <recipient_agent_id>" Enter

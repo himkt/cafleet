@@ -1,24 +1,24 @@
-"""Coding agent configuration for multi-runner support.
+"""Coding-agent registry: parameterizes tmux spawn per backend."""
 
-Encapsulates agent-specific details — binary name, extra args, default prompt
-template — so that tmux pane spawning is parameterized by agent type.
-"""
-
-from dataclasses import dataclass
 import shutil
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class CodingAgentConfig:
-    """Configuration for a coding agent binary that runs inside a tmux pane."""
-
     name: str
     binary: str
     extra_args: tuple[str, ...] = ()
     default_prompt_template: str = ""
+    display_name_args: tuple[str, ...] = ()
 
-    def build_command(self, prompt: str) -> list[str]:
-        return [self.binary, *self.extra_args, prompt]
+    def build_command(
+        self, prompt: str, *, display_name: str | None = None
+    ) -> list[str]:
+        name_args: tuple[str, ...] = ()
+        if display_name and self.display_name_args:
+            name_args = (*self.display_name_args, display_name)
+        return [self.binary, *self.extra_args, *name_args, prompt]
 
     def ensure_available(self) -> None:
         if shutil.which(self.binary) is None:
@@ -35,6 +35,7 @@ CLAUDE = CodingAgentConfig(
         "Wait for instructions via "
         "`cafleet --session-id {session_id} poll --agent-id {agent_id}`."
     ),
+    display_name_args=("--name",),
 )
 
 CODEX = CodingAgentConfig(
@@ -60,14 +61,10 @@ CODING_AGENTS: dict[str, CodingAgentConfig] = {
 
 
 def get_coding_agent(name: str) -> CodingAgentConfig:
-    """Return the CodingAgentConfig for the given name.
-
-    Raises ValueError if the name is not in the registry.
-    """
     try:
         return CODING_AGENTS[name]
-    except KeyError:
+    except KeyError as exc:
         raise ValueError(
             f"Unknown coding agent '{name}'. "
             f"Available: {', '.join(sorted(CODING_AGENTS))}"
-        )
+        ) from exc

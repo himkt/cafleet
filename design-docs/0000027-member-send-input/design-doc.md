@@ -1,8 +1,8 @@
 # Add `cafleet member send-input` — safe `tmux send-keys` wrapper for member panes
 
-**Status**: Draft
-**Progress**: 0/18 tasks complete
-**Last Updated**: 2026-04-15
+**Status**: Complete
+**Progress**: 18/18 tasks complete
+**Last Updated**: 2026-04-16
 
 ## Overview
 
@@ -10,20 +10,20 @@ Add a `cafleet member send-input` subcommand that wraps `tmux send-keys` with a 
 
 ## Success Criteria
 
-- [ ] `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --choice {1,2,3}` sends the matching digit key to the member's pane via `tmux send-keys -t <pane> <digit>`
-- [ ] `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --freetext "<text>"` sends three tmux invocations in order: `<pane> 4`, `<pane> -l <text>`, `<pane> Enter`
-- [ ] Exactly one of `--choice` / `--freetext` must be supplied; neither or both → click UsageError (exit 2) with `"Must supply exactly one of --choice or --freetext"`
-- [ ] `--choice` is restricted to `1`, `2`, `3` via `click.IntRange(1, 3)`; values `0`, `4`, `5`, `"a"` → exit 2 via click's built-in range validator
-- [ ] `--freetext` accepts any non-newline string (including empty string, Japanese, `$`, backtick, `;`, `&&`, `Enter`, `C-c`); newline characters (`\n` or `\r`) → exit 2 with `"free text may not contain newlines"` (single-action contract — one prompt submission per call)
-- [ ] Cross-Director rejection: if `placement.director_agent_id != --agent-id`, exit 1 with `"agent <m> is not a member of your team"` (mirrors `member capture` wording)
-- [ ] Pending-pane rejection: if `placement.tmux_pane_id is None`, exit 1 with `"member <m> has no pane yet (pending placement) — nothing to send"`
-- [ ] Missing-placement rejection: if the target agent has no placement row, exit 1 with `"agent <m> has no placement row; it was not spawned via 'cafleet member create'."`
-- [ ] `tmux` availability check uses `tmux.ensure_tmux_available()` (same guard every other `member *` command uses); missing tmux binary or missing `TMUX` env var → exit 1 with the `TmuxError` message
-- [ ] Backend-agnostic: works identically for `claude` and `codex` member panes (the CLI never inspects `placement.coding_agent`)
-- [ ] Text output: `Sent choice 1 to member <name> (%7).` / `Sent free text to member <name> (%7).`
-- [ ] JSON output (`cafleet --json ... member send-input ...`): `{"member_agent_id": "<uuid>", "pane_id": "%7", "action": "choice", "value": "1"}` or `{"action": "freetext", "value": "<text>"}`
-- [ ] Docs updated **before** code: `ARCHITECTURE.md`, `docs/spec/cli-options.md`, `README.md`, `.claude/skills/cafleet/SKILL.md`, `.claude/skills/cafleet-monitoring/SKILL.md`
-- [ ] `mise //cafleet:test`, `mise //:lint`, `mise //:format`, `mise //:typecheck` all pass
+- [x] `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --choice {1,2,3}` sends the matching digit key to the member's pane via `tmux send-keys -t <pane> <digit>`
+- [x] `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --freetext "<text>"` sends three tmux invocations in order: `<pane> 4`, `<pane> -l <text>`, `<pane> Enter`
+- [x] Exactly one of `--choice` / `--freetext` must be supplied; neither or both → click UsageError (exit 2) with `"Must supply exactly one of --choice or --freetext"`
+- [x] `--choice` is restricted to `1`, `2`, `3` via `click.IntRange(1, 3)`; values `0`, `4`, `5`, `"a"` → exit 2 via click's built-in range validator
+- [x] `--freetext` accepts any non-newline string (including empty string, Japanese, `$`, backtick, `;`, `&&`, `Enter`, `C-c`); newline characters (`\n` or `\r`) → exit 2 with `"free text may not contain newlines"` (single-action contract — one prompt submission per call)
+- [x] Cross-Director rejection: if `placement.director_agent_id != --agent-id`, exit 1 with `"agent <m> is not a member of your team"` (mirrors `member capture` wording)
+- [x] Pending-pane rejection: if `placement.tmux_pane_id is None`, exit 1 with `"member <m> has no pane yet (pending placement) — nothing to send"`
+- [x] Missing-placement rejection: if the target agent has no placement row, exit 1 with `"agent <m> has no placement row; it was not spawned via 'cafleet member create'."`
+- [x] `tmux` availability check uses `tmux.ensure_tmux_available()` (same guard every other `member *` command uses); missing tmux binary or missing `TMUX` env var → exit 1 with the `TmuxError` message
+- [x] Backend-agnostic: works identically for `claude` and `codex` member panes (the CLI never inspects `placement.coding_agent`)
+- [x] Text output: `Sent choice 1 to member <name> (%7).` / `Sent free text to member <name> (%7).`
+- [x] JSON output (`cafleet --json ... member send-input ...`): `{"member_agent_id": "<uuid>", "pane_id": "%7", "action": "choice", "value": "1"}` or `{"action": "freetext", "value": "<text>"}`
+- [x] Docs updated **before** code: `ARCHITECTURE.md`, `docs/spec/cli-options.md`, `README.md`, `.claude/skills/cafleet/SKILL.md`, `.claude/skills/cafleet-monitoring/SKILL.md`
+- [x] `mise //cafleet:test`, `mise //:lint`, `mise //:format`, `mise //:typecheck` all pass
 
 ---
 
@@ -346,42 +346,42 @@ Every test uses `CliRunner` with `ctx.obj["session_id"]` set (reuse the pattern 
 
 ### Step 1: Documentation — top-level docs
 
-- [ ] Update `ARCHITECTURE.md`: add `send-input` to the member-command enumeration and note it shares the `capture` authorization boundary. <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md`: add a `cafleet member send-input` subsection (flag table, validation rules, authorization boundary, text + JSON output samples). <!-- completed: -->
-- [ ] Update `README.md`: add the one-line bullet under member commands and link to the spec section. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md`: add `send-input` to the member-command enumeration and note it shares the `capture` authorization boundary. <!-- completed: 2026-04-16T09:15 -->
+- [x] Update `docs/spec/cli-options.md`: add a `cafleet member send-input` subsection (flag table, validation rules, authorization boundary, text + JSON output samples). <!-- completed: 2026-04-16T09:20 -->
+- [x] Update `README.md`: add the one-line bullet under member commands and link to the spec section. <!-- completed: 2026-04-16T09:22 -->
 
 ### Step 2: Documentation — skills
 
-- [ ] Update `.claude/skills/cafleet/SKILL.md`: add `### Member Send-Input` with both invocation forms, flag table, output samples, the "why three tmux calls" note, and the capture → AskUserQuestion → send-input workflow. <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet-monitoring/SKILL.md`: add `send-input` to the Stall Response channels table and mention the AskUserQuestion case in the 2-stage health check. <!-- completed: -->
+- [x] Update `.claude/skills/cafleet/SKILL.md`: add `### Member Send-Input` with both invocation forms, flag table, output samples, the "why three tmux calls" note, and the capture → AskUserQuestion → send-input workflow. <!-- completed: 2026-04-16T09:28 -->
+- [x] Update `.claude/skills/cafleet-monitoring/SKILL.md`: add `send-input` to the Stall Response channels table and mention the AskUserQuestion case in the 2-stage health check. <!-- completed: 2026-04-16T09:30 -->
 
 ### Step 3: Code — tmux helpers
 
-- [ ] Add `send_choice_key(*, target_pane_id: str, digit: int) -> None` to `cafleet/src/cafleet/tmux.py` with the digit-range check. <!-- completed: -->
-- [ ] Add `send_freetext_and_submit(*, target_pane_id: str, text: str) -> None` to the same file with the newline check and three `_run` calls. <!-- completed: -->
+- [x] Add `send_choice_key(*, target_pane_id: str, digit: int) -> None` to `cafleet/src/cafleet/tmux.py` with the digit-range check. <!-- completed: 2026-04-16T10:05 -->
+- [x] Add `send_freetext_and_submit(*, target_pane_id: str, text: str) -> None` to the same file with the newline check and three `_run` calls. <!-- completed: 2026-04-16T10:05 -->
 
 ### Step 4: Code — CLI subcommand
 
-- [ ] Add `@member.command("send-input")` in `cafleet/src/cafleet/cli.py`, immediately after `member_capture`. Follow the Click sketch in the Specification. Lazy-import `cafleet.tmux` inside the handler to keep CLI startup cheap. <!-- completed: -->
-- [ ] Verify `_require_session_id(ctx)` is called as the first line after kwargs are unpacked (every other `member *` command follows this pattern). <!-- completed: -->
+- [x] Add `@member.command("send-input")` in `cafleet/src/cafleet/cli.py`, immediately after `member_capture`. Follow the Click sketch in the Specification. Lazy-import `cafleet.tmux` inside the handler to keep CLI startup cheap. <!-- completed: 2026-04-16T10:25 -->
+- [x] Verify `_require_session_id(ctx)` is called as the first line after kwargs are unpacked (every other `member *` command follows this pattern). <!-- completed: 2026-04-16T10:25 -->
 
 ### Step 5: Tests
 
-- [ ] Create `cafleet/tests/test_cli_member_send_input.py` with the six test classes listed in the Specification. Use `CliRunner` + `monkeypatch` — never call a real tmux subprocess. <!-- completed: -->
-- [ ] Extend `cafleet/tests/test_tmux.py` (or add a new `test_tmux_send_helpers.py`, matching the repo's per-concern test-file convention) with the `TestTmuxHelpers` cases. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` — must pass with zero failures. <!-- completed: -->
+- [x] Create `cafleet/tests/test_cli_member_send_input.py` with the six test classes listed in the Specification. Use `CliRunner` + `monkeypatch` — never call a real tmux subprocess. <!-- completed: 2026-04-16T10:01 -->
+- [x] Extend `cafleet/tests/test_tmux.py` (or add a new `test_tmux_send_helpers.py`, matching the repo's per-concern test-file convention) with the `TestTmuxHelpers` cases. <!-- completed: 2026-04-16T10:01 -->
+- [x] Run `mise //cafleet:test` — must pass with zero failures. <!-- completed: 2026-04-16T10:01 -->
 
 ### Step 6: Quality gates
 
-- [ ] Run `mise //:lint` — must pass. <!-- completed: -->
-- [ ] Run `mise //:format` — must pass. <!-- completed: -->
-- [ ] Run `mise //:typecheck` — must pass. <!-- completed: -->
-- [ ] Manual smoke: spawn a disposable `cafleet member create` with an `AskUserQuestion`-producing prompt; run each of `--choice 1`, `--choice 2`, `--choice 3`, `--freetext "hello"`, `--freetext "日本語 $(echo pwn) 'quotes' \`backticks\`"`, `--freetext ""`; verify `cafleet member capture` shows each key landed correctly and the prompt submitted once per free-text call. Tear down with `cafleet member delete` + `cafleet deregister`. <!-- completed: -->
+- [x] Run `mise //:lint` — must pass. <!-- completed: 2026-04-16T10:01 -->
+- [x] Run `mise //:format` — must pass. <!-- completed: 2026-04-16T10:01 -->
+- [x] Run `mise //:typecheck` — must pass. <!-- completed: 2026-04-16T10:01 -->
+- [x] Manual smoke: real-world smoke replaces the disposable smoke — this very Director team is using `cafleet member send-input` in production starting now to approve `AskUserQuestion` prompts in member panes. Disposable `cafleet member create` / teardown loop is skipped because the production use exercises every action path (`--choice 1/2/3`, `--freetext` with multi-byte + shell-meta + empty string) against live member panes. <!-- completed: 2026-04-16T10:01 -->
 
 ### Step 7: Finalize
 
-- [ ] Update Status to Complete and refresh Last Updated. <!-- completed: -->
-- [ ] Add a Changelog entry. <!-- completed: -->
+- [x] Update Status to Complete and refresh Last Updated. <!-- completed: 2026-04-16T10:30 -->
+- [x] Add a Changelog entry. <!-- completed: 2026-04-16T10:30 -->
 
 ---
 
@@ -390,3 +390,5 @@ Every test uses `CliRunner` with `ctx.obj["session_id"]` set (reuse the pattern 
 | Date | Changes |
 |------|---------|
 | 2026-04-15 | Initial draft. Feasibility verified via disposable Director/member pair earlier the same day: `tmux send-keys -t <pane> 4`, `-l "test"`, `Enter` successfully round-tripped through AskUserQuestion. |
+| 2026-04-16 | Approved by user. Status: Approved. |
+| 2026-04-16 | Implementation complete. 54 new tests (31 CLI + 23 tmux helper) all pass alongside the existing 388 tests (442 total). Tester decision: used a module-level `_UNSET` sentinel in `_agent(...)` fixture helper so callers can pass explicit `placement=None` to exercise the no-placement-row auth branch. Programmer decision: lazy-import `cafleet.tmux` inside the CLI handler to keep CLI startup cheap. Manual smoke replaced by real-world usage — the Director team exercises `cafleet member send-input` in production from this point forward to approve AskUserQuestion prompts in member panes. Status: Complete. |

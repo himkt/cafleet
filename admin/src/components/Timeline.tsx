@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { TimelineMessage, TimelineEntry, Agent } from "../types";
 import { fetchTimeline } from "../api";
 import TimelineMessageComponent from "./TimelineMessage";
@@ -8,39 +8,47 @@ interface TimelineProps {
   refreshKey: number;
 }
 
+function entrySortKey(entry: TimelineEntry): string {
+  return entry.kind === "unicast" ? entry.message.created_at : entry.sortKey;
+}
+
+function entryKey(entry: TimelineEntry): string {
+  return entry.kind === "unicast"
+    ? entry.message.task_id
+    : `bcast:${entry.rows[0].origin_task_id ?? entry.rows[0].task_id}`;
+}
+
 function groupMessages(msgs: TimelineMessage[]): TimelineEntry[] {
   const groups = new Map<string, TimelineMessage[]>();
   const singletons: TimelineEntry[] = [];
 
   for (const m of msgs) {
-    if (m.origin_task_id) {
-      const g = groups.get(m.origin_task_id) ?? [];
-      g.push(m);
-      groups.set(m.origin_task_id, g);
-    } else {
+    if (!m.origin_task_id) {
       singletons.push({ kind: "unicast", message: m });
+      continue;
+    }
+    const existing = groups.get(m.origin_task_id);
+    if (existing) {
+      existing.push(m);
+    } else {
+      groups.set(m.origin_task_id, [m]);
     }
   }
 
-  const broadcasts: TimelineEntry[] = [...groups.values()].map((rows) => ({
-    kind: "broadcast" as const,
-    rows,
-    sortKey: rows.reduce(
-      (min, r) => (r.created_at < min ? r.created_at : min),
-      rows[0].created_at,
-    ),
-  }));
+  const broadcasts = Array.from(
+    groups.values(),
+    (rows): TimelineEntry => ({
+      kind: "broadcast",
+      rows,
+      sortKey: rows.reduce((a, b) =>
+        a.created_at < b.created_at ? a : b,
+      ).created_at,
+    }),
+  );
 
-  const all = [...singletons, ...broadcasts];
-  all.sort((a, b) => {
-    const aKey =
-      a.kind === "unicast" ? a.message.created_at : a.sortKey;
-    const bKey =
-      b.kind === "unicast" ? b.message.created_at : b.sortKey;
-    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
-  });
-
-  return all;
+  return [...singletons, ...broadcasts].sort((a, b) =>
+    entrySortKey(a).localeCompare(entrySortKey(b)),
+  );
 }
 
 export default function Timeline({ agents, refreshKey }: TimelineProps) {
@@ -48,20 +56,18 @@ export default function Timeline({ agents, refreshKey }: TimelineProps) {
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await fetchTimeline();
-      setEntries(groupMessages(data.messages));
-    } catch {
-      setEntries([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    load();
-  }, [load, refreshKey]);
+    (async () => {
+      try {
+        const data = await fetchTimeline();
+        setEntries(groupMessages(data.messages));
+      } catch {
+        setEntries([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [refreshKey]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "auto" });
@@ -86,8 +92,12 @@ export default function Timeline({ agents, refreshKey }: TimelineProps) {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="divide-y divide-gray-100">
-        {entries.map((entry, i) => (
-          <TimelineMessageComponent key={i} entry={entry} agents={agents} />
+        {entries.map((entry) => (
+          <TimelineMessageComponent
+            key={entryKey(entry)}
+            entry={entry}
+            agents={agents}
+          />
         ))}
       </div>
       <div ref={bottomRef} />

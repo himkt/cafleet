@@ -22,7 +22,6 @@ class Settings(BaseSettings):
         default=8000,
         validation_alias="CAFLEET_BROKER_PORT",
     )
-    broker_base_url: str = "http://localhost:8000"
 
     model_config = {"env_prefix": "", "populate_by_name": True}
 

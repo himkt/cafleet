@@ -179,7 +179,20 @@ Remove this agent's registration from the broker.
 cafleet --session-id <session-id> deregister --agent-id <my-agent-id>
 ```
 
+> **Root Director cannot be deregistered**. The agent created by `cafleet session create` (the session's `sessions.director_agent_id`) is protected — `cafleet deregister --agent-id <root-director-id>` exits 1 with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` This guard exists because removing the root Director would orphan `sessions.director_agent_id`, break Member → Director push notifications, and leave no supported teardown path. Use `cafleet session delete <session-id>` for session teardown — it deregisters the root Director along with every member and Administrator as part of its cascade.
+
 > **Administrator cannot be deregistered**. Passing the built-in Administrator's `agent_id` to `cafleet deregister` exits with status 1 and prints `Error: Administrator cannot be deregistered` to stderr — the broker raises `AdministratorProtectedError` and the CLI handles it by printing the error and calling `ctx.exit(1)`. The Administrator row stays `active`; there is no override flag. The same guard applies to `member create` — the built-in Administrator cannot be used as a Director (its `agent_id` cannot appear in `placement.director_agent_id`). Every session has exactly one Administrator; deregister regular agents only.
+
+### Session Delete
+
+```bash
+cafleet session delete <session-id>
+# → Deleted session <session-id>. Deregistered N agents.
+```
+
+Soft-deletes a session in a single transaction: stamps `sessions.deleted_at`, deregisters every active agent in the session (root Director + Administrator + any remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. The command is idempotent — re-running against an already-deleted session prints `Deregistered 0 agents.` and exits 0.
+
+After soft-delete, the session is hidden from `cafleet session list` and further `cafleet register --session-id <deleted>` calls fail with `Error: session <id> is deleted`. Surviving member `claude` / `codex` processes are **not** automatically closed — call `cafleet member delete` per member **before** `cafleet session delete` for a clean teardown. Any lingering panes can be closed manually with `tmux kill-pane`.
 
 ### Member Create
 
@@ -206,6 +219,14 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 | *(positional, after `--`)* | no | Prompt for the spawned coding agent process. If omitted, a default prompt is generated (agent-specific). BOTH the default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_name` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`) — `.format()` collapses each `{{` / `}}` pair to a single literal brace and, critically, does not attempt placeholder substitution on the inner tokens. This matters for prompts that embed JSON snippets, shell expansions, or other content with literal curly braces. Pre-substituting the dynamic values in shell does NOT exempt the prompt from this rule — even a placeholder-free prompt is still passed through `str.format()`, so any literal braces must still be doubled or removed.
+
+**Pane title**: for `--coding-agent claude`, the `--name` flag is forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the tmux pane title (`#{pane_title}`) shows the member name and persists across prompt replies. Operators can locate a specific member's pane by filtering the pane-title listing:
+
+```bash
+tmux list-panes -a -F "#{pane_id} #{pane_title}" | grep Drafter
+```
+
+For `--coding-agent codex`, no display-name flag exists today; the pane title stays on the auto-derived default.
 
 If the tmux `split-window` fails, the registered agent is rolled back. If the placement PATCH fails, the pane is `/exit`'d and the agent rolled back.
 
@@ -247,8 +268,10 @@ cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | The Director's agent ID |
+| `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | The target member's agent ID |
+
+Cross-Director delete is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before calling `broker.deregister_agent` or sending `/exit` to the pane. An attempt to delete another Director's member in the same session exits 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other-director>).` (mirrors `member capture` / `member send-input`).
 
 Output (text):
 ```
@@ -329,6 +352,61 @@ Output (`--json`):
 
 **Note**: Projects using CAFleet use `Skill(cafleet-monitoring)` instead of the generic `agent-team-supervision` skill. The cafleet-monitoring skill uses `cafleet member capture` exclusively (no raw `tmux capture-pane`), enforcing the cross-Director boundary.
 
+### Member Send-Input
+
+Safely forward a restricted keystroke to a member's tmux pane. This is the write-path companion to `member capture` — designed for answering an `AskUserQuestion` prompt (or any prompt with the same "3 choices + Type something" shape) rendered in a member's Claude Code / Codex pane. Exactly one of `--choice` / `--freetext` must be supplied.
+
+```bash
+cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
+  --member-id <member-agent-id> --choice 1
+
+cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
+  --member-id <member-agent-id> --freetext "please prioritize correctness"
+
+cafleet --session-id <session-id> --json member send-input --agent-id <director-agent-id> \
+  --member-id <member-agent-id> --choice 2
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
+| `--member-id` | yes | The target member's agent ID |
+| `--choice` | one-of | Integer `1`, `2`, or `3`. Sends the matching digit key to the pane (no Enter). Validated via `click.IntRange(1, 3)`. |
+| `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. Newlines are rejected. |
+
+Cross-Director send is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before making any tmux call (same wording as `member capture`). A missing placement row, a pending pane (`tmux_pane_id is None`), or an unavailable `tmux` binary each exit 1 with a dedicated message.
+
+**Why three tmux calls for `--freetext`**: tmux's `-l` (literal) flag is per-invocation — one `send-keys` call cannot mix literal characters with the `Enter` key name. Splitting the sequence into three calls (`4` → `-l "<text>"` → `Enter`) guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the text (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are all delivered as plain characters. The CLI calls `subprocess.run([...], shell=False)`, so no shell ever interprets the text. Newlines in `--freetext` are rejected with `Error: free text may not contain newlines.` (exit 2) because a literal newline would submit a second prompt without a following Enter — the single-action contract is "one CLI call = one prompt submission."
+
+Backend-agnostic: works identically for `claude` and `codex` member panes (the CLI never inspects `placement.coding_agent`).
+
+Output (text):
+
+```
+Sent choice 1 to member Claude-B (%7).
+Sent free text to member Claude-B (%7).
+```
+
+Output (`--json`):
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "action": "choice",
+  "value": "1"
+}
+```
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "action": "freetext",
+  "value": "<user text as-sent>"
+}
+```
+
 ### Server
 
 Start the admin WebUI FastAPI app via uvicorn. The server is only needed for the admin WebUI at `/ui/` and the `/ui/api/*` endpoints — every other `cafleet` subcommand accesses SQLite directly and does not require the server to be running.
@@ -353,12 +431,58 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 
 ## Typical Workflow
 
-1. **Create a session** (if one does not already exist):
+1. **Create a session** (if one does not already exist). `cafleet session create` must be run inside a tmux session — it atomically inserts the session row, registers a hardcoded root Director, writes a placement row for the Director pointing at the current tmux pane, back-fills `sessions.director_agent_id`, and seeds the built-in Administrator (per design 0000025) — all in one transaction:
+
    ```bash
    cafleet session create --label "my-project"
-   # → prints the session_id, e.g. 550e8400-e29b-41d4-a716-446655440000
    ```
-   Capture the printed UUID and substitute it for `<session-id>` in every command below.
+
+   Text output: line 1 is the `session_id`, line 2 is the root Director's `agent_id`, then a human-readable block:
+
+   ```
+   550e8400-e29b-41d4-a716-446655440000
+   7ba91234-5678-90ab-cdef-112233445566
+   label:            my-project
+   created_at:       2026-04-16T08:50:00+00:00
+   director_name:    director
+   pane:             main:@3:%0
+   administrator:    3c4d5e6f-7890-1234-5678-90abcdef1234
+   ```
+
+   JSON output (nested, with `administrator_agent_id` at the top level alongside the `director` sub-object):
+
+   ```bash
+   cafleet session create --label "my-project" --json
+   ```
+
+   ```json
+   {
+     "session_id": "550e8400-e29b-41d4-a716-446655440000",
+     "label": "my-project",
+     "created_at": "2026-04-16T08:50:00+00:00",
+     "administrator_agent_id": "3c4d5e6f-7890-1234-5678-90abcdef1234",
+     "director": {
+       "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
+       "name": "director",
+       "description": "Root Director for this session",
+       "registered_at": "2026-04-16T08:50:00+00:00",
+       "placement": {
+         "director_agent_id": null,
+         "tmux_session": "main",
+         "tmux_window_id": "@3",
+         "tmux_pane_id": "%0",
+         "coding_agent": "unknown",
+         "created_at": "2026-04-16T08:50:00+00:00"
+       }
+     }
+   }
+   ```
+
+   `placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is literally `"unknown"` — auto-detection from `$CLAUDECODE` / `$CLAUDE_CODE_ENTRYPOINT` / codex env vars is deferred.
+
+   Outside tmux the command fails fast with `Error: cafleet session create must be run inside a tmux session` and exit 1 — nothing is written to the DB.
+
+   Capture the printed `session_id` and substitute it for `<session-id>` in every command below. The root Director's `agent_id` is also available on line 2 of the text output, or as `director.agent_id` in the JSON response — an Admin or the Director itself may need it. Because the root Director already has a placement row, Member → Director tmux push notifications work immediately.
 
 2. **Register** with the broker:
    ```bash
@@ -434,11 +558,34 @@ cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
 
 The command deregisters the agent first (so a failure preserves the pane for retry), then sends `/exit` to the pane, then rebalances the layout.
 
-After every member is shut down, the Director deregisters itself and stops the `/loop` monitor:
+After every member is shut down, the Director stops the `/loop` monitor and tears down the session:
 
 ```bash
-cafleet --session-id <session-id> deregister --agent-id <director-agent-id>
+cafleet session delete <session-id>
+# → Deleted session <session-id>. Deregistered N agents.
 ```
+
+`session delete` does not require `--session-id` (the `session_id` is passed as a positional argument). It runs the root-Director deregister + Administrator cleanup + any surviving member sweep in one transaction. Plain `cafleet --session-id <session-id> deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` — always use `session delete` for the final teardown step.
+
+### Answer a member's AskUserQuestion prompt
+
+When a member pauses on an `AskUserQuestion` prompt (or any prompt rendered as "1. …", "2. …", "3. …", "4. Type something"), the Director can forward the operator's choice without exiting tmux or typing raw `tmux send-keys`. The CLI is deliberately one-shot — the surrounding choose-and-answer loop stays in the Director's control:
+
+1. **Inspect the prompt** with `member capture` — this is non-intrusive and shows the exact labels rendered in the pane:
+
+   ```bash
+   cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
+     --member-id <member-agent-id> --lines 120
+   ```
+
+2. **Ask the end user** (for example via `AskUserQuestion`) with the observed labels so they pick an option.
+
+3. **Forward the answer** via `member send-input`:
+
+   - Option 1 / 2 / 3 → `cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> --member-id <member-agent-id> --choice N`
+   - Free-text → `cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> --member-id <member-agent-id> --freetext "<user text>"`
+
+The CLI validates the input (`--choice` is an `IntRange(1, 3)`; `--freetext` rejects newlines to preserve the one-call-one-submission contract), enforces the same cross-Director authorization boundary as `member capture`, and issues three separate `tmux send-keys` invocations for `--freetext` (`4` → `-l "<text>"` → `Enter`) so shell meta, key names, and multi-byte characters all pass through as literal input.
 
 ## Message Lifecycle
 

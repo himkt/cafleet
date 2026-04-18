@@ -1,13 +1,4 @@
-"""Alembic environment — sync driver against Base metadata.
-
-The application runtime uses ``sqlite+aiosqlite://...`` for async I/O, but
-Alembic migrations run synchronously, so we swap the driver to plain
-``sqlite://`` via ``make_url(...).set(drivername='sqlite')``.
-
-``~`` expansion is owned by ``config.py`` (constructed at settings load
-time), so ``settings.database_url`` is already absolute by the time env.py
-reads it.
-"""
+"""Alembic environment — swaps ``sqlite+aiosqlite://`` to sync ``sqlite://``."""
 
 from logging.config import fileConfig
 
@@ -27,8 +18,7 @@ target_metadata = Base.metadata
 
 
 def _sync_url() -> str:
-    cfg_url = config.get_main_option("sqlalchemy.url")
-    raw = cfg_url if cfg_url else settings.database_url
+    raw = config.get_main_option("sqlalchemy.url") or settings.database_url
     return str(make_url(raw).set(drivername="sqlite"))
 
 

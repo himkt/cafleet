@@ -1,35 +1,17 @@
-"""Tests for ``_resolve_prompt`` in ``cafleet.cli``.
+"""Tests for ``_resolve_prompt`` and ``cafleet member create`` (design doc 0000024)."""
 
-Design doc 0000024 task 2.2 — pin the contract that both the default
-prompt template AND a user-supplied ``prompt_argv`` get the same
-``{session_id}`` / ``{agent_id}`` / ``{director_name}`` /
-``{director_agent_id}`` substitutions via ``str.format``.
-
-Four cases:
-
-  (a) default path (empty ``prompt_argv``) substitutes all UUIDs into
-      the CLAUDE template — existing behaviour, must keep passing
-  (b) custom prompt containing ``{agent_id}`` gets substituted — new
-      behaviour pinned here, regression for R1 (task 2.1)
-  (c) custom prompt with no placeholders passes through unchanged
-  (d) custom prompt with doubled ``{{...}}`` braces collapses to single
-      literal braces and does NOT attempt placeholder substitution on
-      the inner tokens — risk-row mitigation for literal-brace JSON
-      snippets in custom prompts
-
-Cases (b) and (d) fail against pre-fix code because today's
-``_resolve_prompt`` returns early for non-empty ``prompt_argv`` without
-calling ``.format``. That failure is expected and drives the TDD loop.
-"""
-
+import json
 import uuid
 
 import click
 import pytest
+from click.testing import CliRunner
 
-from cafleet import broker
-from cafleet.cli import _resolve_prompt
+from cafleet import broker, config
+from cafleet.cli import _resolve_prompt, cli
 from cafleet.coding_agent import CLAUDE
+from cafleet.db import engine as engine_mod
+from cafleet.tmux import DirectorContext
 
 
 @pytest.fixture
@@ -73,14 +55,7 @@ def mock_get_agent(monkeypatch):
     return fake_get_agent
 
 
-# ===========================================================================
-# (a) default path substitutes all template placeholders
-# ===========================================================================
-
-
 class TestDefaultPromptSubstitution:
-    """Design doc 2.2(a): empty prompt_argv → CLAUDE template filled in."""
-
     def test_default_path_substitutes_all_placeholders(
         self,
         ctx,
@@ -96,47 +71,17 @@ class TestDefaultPromptSubstitution:
             prompt_argv=(),
             coding_agent_config=CLAUDE,
         )
-        assert session_id in result, (
-            f"default prompt must contain session_id={session_id!r}. got: {result!r}"
-        )
-        assert new_agent_id in result, (
-            f"default prompt must contain agent_id={new_agent_id!r}. got: {result!r}"
-        )
-        assert director_agent_id in result, (
-            f"default prompt must contain director_agent_id={director_agent_id!r}. "
-            f"got: {result!r}"
-        )
-        assert "Director-X" in result, (
-            f"default prompt must contain director_name 'Director-X'. got: {result!r}"
-        )
-        # Template placeholders must not leak through unsubstituted.
-        assert "{session_id}" not in result, (
-            f"{{session_id}} placeholder must be substituted. got: {result!r}"
-        )
-        assert "{agent_id}" not in result, (
-            f"{{agent_id}} placeholder must be substituted. got: {result!r}"
-        )
-        assert "{director_name}" not in result, (
-            f"{{director_name}} placeholder must be substituted. got: {result!r}"
-        )
-        assert "{director_agent_id}" not in result, (
-            f"{{director_agent_id}} placeholder must be substituted. got: {result!r}"
-        )
-
-
-# ===========================================================================
-# (b) custom prompt with {agent_id} placeholder gets substituted
-# ===========================================================================
+        assert session_id in result
+        assert new_agent_id in result
+        assert director_agent_id in result
+        assert "Director-X" in result
+        assert "{session_id}" not in result
+        assert "{agent_id}" not in result
+        assert "{director_name}" not in result
+        assert "{director_agent_id}" not in result
 
 
 class TestCustomPromptPlaceholderSubstitution:
-    """Design doc 2.2(b): custom prompt uses the same format kwargs as default.
-
-    Against pre-fix code this test FAILS because ``_resolve_prompt`` returns
-    ``" ".join(prompt_argv)`` before reaching ``.format``. That is expected
-    (TDD) — the Programmer's task 2.1 fix makes it pass.
-    """
-
     def test_custom_prompt_with_agent_id_placeholder_substitutes(
         self,
         ctx,
@@ -151,20 +96,10 @@ class TestCustomPromptPlaceholderSubstitution:
             prompt_argv=("message", "for", "{agent_id}"),
             coding_agent_config=CLAUDE,
         )
-        assert result == f"message for {new_agent_id}", (
-            f"custom prompt must substitute {{agent_id}} with {new_agent_id!r}. "
-            f"got: {result!r}"
-        )
-
-
-# ===========================================================================
-# (c) custom prompt with no placeholders passes through unchanged
-# ===========================================================================
+        assert result == f"message for {new_agent_id}"
 
 
 class TestCustomPromptNoPlaceholderPassThrough:
-    """Design doc 2.2(c): .format on a literal string is a no-op."""
-
     def test_custom_prompt_without_placeholders_unchanged(
         self,
         ctx,
@@ -179,22 +114,13 @@ class TestCustomPromptNoPlaceholderPassThrough:
             prompt_argv=("no", "placeholders", "here"),
             coding_agent_config=CLAUDE,
         )
-        assert result == "no placeholders here", (
-            f"custom prompt with no placeholders must pass through unchanged. "
-            f"got: {result!r}"
-        )
-
-
-# ===========================================================================
-# (d) doubled-brace escape collapses to single literal braces
-# ===========================================================================
+        assert result == "no placeholders here"
 
 
 class TestCustomPromptDoubledBraceEscape:
     """Design doc 2.2(d): ``{{...}}`` collapses to ``{...}`` without substitution.
 
-    The risk-row mitigation for literal-brace JSON snippets: callers who
-    need a literal ``{`` / ``}`` in a custom prompt must double them, and
+    Callers embedding literal JSON snippets must double their braces, and
     ``.format`` then collapses each pair to a single literal brace.
     No placeholder substitution is attempted on the inner tokens.
 
@@ -216,31 +142,16 @@ class TestCustomPromptDoubledBraceEscape:
             prompt_argv=("data", "is", "{{not", "a", "placeholder}}", "closed"),
             coding_agent_config=CLAUDE,
         )
-        assert result == "data is {not a placeholder} closed", (
-            f"doubled braces must collapse to single braces and NOT substitute "
-            f"the inner tokens. got: {result!r}"
-        )
-        # Defensive: no UUID should leak in via accidental substitution.
-        assert new_agent_id not in result, (
-            f"doubled-brace escape must not substitute agent_id. got: {result!r}"
-        )
-        assert director_agent_id not in result, (
-            f"doubled-brace escape must not substitute director_agent_id. "
-            f"got: {result!r}"
-        )
-
-
-# ===========================================================================
-# (e) malformed custom prompts surface as click.UsageError, not KeyError /
-#     ValueError, so member_create's rollback path runs.
-# ===========================================================================
+        assert result == "data is {not a placeholder} closed"
+        assert new_agent_id not in result
+        assert director_agent_id not in result
 
 
 class TestCustomPromptMalformedRaisesUsageError:
-    """PR #25 review feedback: ``str.format`` failures must convert to
-    ``click.UsageError`` so ``member_create``'s rollback path (which only
-    catches ``UsageError``) reliably runs and the just-registered agent
-    does not get orphaned in the registry.
+    """``str.format`` errors must convert to ``click.UsageError``.
+
+    ``member_create``'s rollback path only catches ``UsageError``, so a raw
+    ``KeyError`` / ``ValueError`` would orphan the just-registered agent.
     """
 
     def test_unknown_placeholder_raises_usage_error(
@@ -259,12 +170,9 @@ class TestCustomPromptMalformedRaisesUsageError:
                 coding_agent_config=CLAUDE,
             )
         message = str(exc_info.value)
-        assert "foo" in message, (
-            f"error message must name the unknown placeholder. got: {message!r}"
-        )
-        assert "{session_id}" in message and "{agent_id}" in message, (
-            f"error message must list supported placeholders. got: {message!r}"
-        )
+        assert "foo" in message
+        assert "{session_id}" in message
+        assert "{agent_id}" in message
 
     def test_unmatched_brace_raises_usage_error(
         self,
@@ -282,9 +190,8 @@ class TestCustomPromptMalformedRaisesUsageError:
                 coding_agent_config=CLAUDE,
             )
         message = str(exc_info.value)
-        assert "{{" in message and "}}" in message, (
-            f"error message must hint at brace doubling. got: {message!r}"
-        )
+        assert "{{" in message
+        assert "}}" in message
 
     def test_attribute_access_raises_usage_error(
         self,
@@ -306,6 +213,156 @@ class TestCustomPromptMalformedRaisesUsageError:
                 coding_agent_config=CLAUDE,
             )
         message = str(exc_info.value)
-        assert "{{" in message and "}}" in message, (
-            f"error message must hint at brace doubling. got: {message!r}"
+        assert "{{" in message
+        assert "}}" in message
+
+
+_CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
+
+
+@pytest.fixture
+def _reset_engine():
+    engine_mod._sync_engine = None
+    engine_mod._sync_sessionmaker = None
+    yield
+    engine_mod._sync_engine = None
+    engine_mod._sync_sessionmaker = None
+
+
+@pytest.fixture
+def bootstrapped_session(tmp_path, monkeypatch, _reset_engine):
+    """Create a real session and return ``(session_id, director_agent_id, runner)``.
+
+    Spins up a fresh SQLite DB, runs ``cafleet db init`` + ``cafleet session
+    create --json``, and returns the three values every ``member create``
+    invocation needs. ``tmux.ensure_tmux_available`` / ``director_context``
+    are stubbed so ``session create`` (which demands a tmux context) succeeds.
+    """
+    db_file = tmp_path / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+    monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
+    monkeypatch.setattr("cafleet.tmux.director_context", lambda: _CLI_FAKE_DIRECTOR_CTX)
+
+    runner = CliRunner()
+    init = runner.invoke(cli, ["db", "init"])
+    assert init.exit_code == 0, init.output
+    create = runner.invoke(cli, ["session", "create", "--json"])
+    assert create.exit_code == 0, create.output
+    data = json.loads(create.output)
+    return data["session_id"], data["director"]["agent_id"], runner
+
+
+@pytest.fixture
+def split_window_recorder(monkeypatch):
+    """Monkeypatch ``tmux.split_window`` to capture its kwargs and return a pane."""
+    calls: list[dict] = []
+
+    def fake_split_window(**kwargs):
+        calls.append(kwargs)
+        return "%42"
+
+    monkeypatch.setattr("cafleet.tmux.split_window", fake_split_window)
+    # ``select_layout`` / ``send_exit`` are best-effort; stub them too so
+    # nothing reaches a real tmux.
+    monkeypatch.setattr("cafleet.tmux.select_layout", lambda **_: None)
+    monkeypatch.setattr("cafleet.tmux.send_exit", lambda **_: None, raising=False)
+    return calls
+
+
+@pytest.fixture
+def stub_coding_agent_binaries(monkeypatch):
+    """Pretend every coding-agent binary is on PATH.
+
+    ``coding_agent_config.ensure_available()`` calls ``shutil.which(self.binary)``;
+    patching it module-wide is the narrowest monkeypatch that keeps both
+    ``claude`` and ``codex`` spawns alive without a real binary.
+    """
+    monkeypatch.setattr("cafleet.coding_agent.shutil.which", lambda _: "/usr/bin/stub")
+
+
+class TestMemberCreatePassesDisplayName:
+    """Design doc 0000029 Step 4(f),(g): ``cli.py`` threads ``--name`` as
+    ``display_name`` into ``coding_agent_config.build_command()``, which
+    means the ``command`` kwarg handed to ``tmux.split_window`` contains
+    ``"--name"`` + the member name for ``claude`` spawns and does NOT
+    contain ``"--name"`` for ``codex`` spawns.
+    """
+
+    def test_member_create_passes_member_name_as_display_name(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--coding-agent",
+                "claude",
+                "--",
+                "hello",
+            ],
         )
+        assert result.exit_code == 0, result.output
+        assert len(split_window_recorder) == 1
+        command = split_window_recorder[0]["command"]
+        assert isinstance(command, list)
+        assert "--name" in command
+        name_index = command.index("--name")
+        assert command[name_index + 1] == "Drafter"
+        assert command[name_index + 2] == "hello"
+        assert command[0] == "claude"
+
+    def test_member_create_codex_does_not_pass_name_flag(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        """Codex regression: ``codex`` has no ``--name`` equivalent today, so
+        ``display_name_args=()`` must elide the flag even when ``--name``
+        is supplied to ``cafleet member create`` (it is always required
+        at the CLI level — ``click.Option --name required=True``).
+        """
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--coding-agent",
+                "codex",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert len(split_window_recorder) == 1
+        command = split_window_recorder[0]["command"]
+        assert "--name" not in command
+        assert command[0] == "codex"
+        assert "--approval-mode" in command
+        assert "auto-edit" in command

@@ -14,14 +14,16 @@ function MentionChip({ name }: { name: string }) {
   );
 }
 
+function firstRow(entry: TimelineEntry) {
+  return entry.kind === "unicast" ? entry.message : entry.rows[0];
+}
+
 function senderName(entry: TimelineEntry): string {
-  if (entry.kind === "unicast") return entry.message.from_agent_name || "?";
-  return entry.rows[0]?.from_agent_name || "?";
+  return firstRow(entry).from_agent_name;
 }
 
 function body(entry: TimelineEntry): string {
-  if (entry.kind === "unicast") return entry.message.body;
-  return entry.rows[0]?.body || "";
+  return firstRow(entry).body;
 }
 
 function isCanceled(entry: TimelineEntry): boolean {
@@ -31,9 +33,9 @@ function isCanceled(entry: TimelineEntry): boolean {
 
 function recipientNames(entry: TimelineEntry): string[] {
   if (entry.kind === "unicast") {
-    return [entry.message.to_agent_name || "?"];
+    return [entry.message.to_agent_name];
   }
-  return entry.rows.map((r) => r.to_agent_name || "?");
+  return entry.rows.map((r) => r.to_agent_name);
 }
 
 function createdAt(entry: TimelineEntry): string {
@@ -42,7 +44,6 @@ function createdAt(entry: TimelineEntry): string {
 }
 
 function formatTime(iso: string): string {
-  if (!iso) return "";
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;

@@ -1,6 +1,5 @@
 import type {
   AgentsResponse,
-  MessagesResponse,
   TimelineResponse,
   SendMessageResponse,
   SessionListItem,
@@ -10,10 +9,6 @@ let sessionId: string | null = null;
 
 export function setSessionId(id: string | null): void {
   sessionId = id;
-}
-
-export function getSessionId(): string | null {
-  return sessionId;
 }
 
 async function request<T>(
@@ -47,23 +42,11 @@ async function request<T>(
 }
 
 export async function listSessions(): Promise<SessionListItem[]> {
-  const resp = await fetch("/ui/api/sessions");
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}`);
-  }
-  return resp.json() as Promise<SessionListItem[]>;
+  return request<SessionListItem[]>("/sessions");
 }
 
 export async function getAgents(): Promise<AgentsResponse> {
   return request<AgentsResponse>("/agents");
-}
-
-export async function getInbox(agentId: string): Promise<MessagesResponse> {
-  return request<MessagesResponse>(`/agents/${agentId}/inbox`);
-}
-
-export async function getSent(agentId: string): Promise<MessagesResponse> {
-  return request<MessagesResponse>(`/agents/${agentId}/sent`);
 }
 
 export async function fetchTimeline(): Promise<TimelineResponse> {

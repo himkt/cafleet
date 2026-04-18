@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import type { Agent } from "../types";
 import { sendMessage } from "../api";
 
@@ -13,14 +13,16 @@ function slugify(name: string): string {
   return name.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase();
 }
 
-function parseInput(
-  raw: string,
-  activeAgents: Agent[],
-): { to: string; body: string; error: string | null } {
-  const trimmed = raw.trimStart();
+type ParseResult = { to: string; body: string; error: string | null };
+
+function parseError(error: string): ParseResult {
+  return { to: "", body: "", error };
+}
+
+function parseInput(raw: string, recipients: Agent[]): ParseResult {
   const mentionRe = /^@([A-Za-z0-9_-]+)(?:\s|$)/;
   const mentions: string[] = [];
-  let rest = trimmed;
+  let rest = raw.trimStart();
 
   while (true) {
     const match = rest.match(mentionRe);
@@ -30,46 +32,41 @@ function parseInput(
   }
 
   if (mentions.length === 0) {
-    return { to: "", body: "", error: "Start the message with @<agent> or @all" };
+    return parseError("Start the message with @<agent> or @all");
   }
 
   const hasAll = mentions.some((m) => m.toLowerCase() === "all");
   const nonAll = mentions.filter((m) => m.toLowerCase() !== "all");
 
   if (hasAll && nonAll.length > 0) {
-    return { to: "", body: "", error: "@all cannot be combined with other mentions" };
+    return parseError("@all cannot be combined with other mentions");
   }
 
+  const body = rest.trim();
+
   if (hasAll) {
-    const body = rest.trim();
-    if (!body) return { to: "", body: "", error: "Message body is empty" };
+    if (!body) return parseError("Message body is empty");
     return { to: "*", body, error: null };
   }
 
   if (nonAll.length > 1) {
-    return {
-      to: "",
-      body: "",
-      error:
-        "Multi-recipient unicast not supported in first cut; use @all for broadcast",
-    };
+    return parseError(
+      "Multi-recipient unicast not supported in first cut; use @all for broadcast",
+    );
   }
 
   const slug = nonAll[0];
-  const matched = activeAgents.filter(
+  const matched = recipients.filter(
     (a) => slugify(a.name) === slug.toLowerCase(),
   );
 
   if (matched.length === 0) {
-    return { to: "", body: "", error: `No active agent named '@${slug}'` };
+    return parseError(`No active agent named '@${slug}'`);
   }
-
   if (matched.length > 1) {
-    return { to: "", body: "", error: `Ambiguous mention '@${slug}'` };
+    return parseError(`Ambiguous mention '@${slug}'`);
   }
-
-  const body = rest.trim();
-  if (!body) return { to: "", body: "", error: "Message body is empty" };
+  if (!body) return parseError("Message body is empty");
 
   return { to: matched[0].agent_id, body, error: null };
 }
@@ -80,7 +77,7 @@ type MentionCandidate =
 
 interface MentionState {
   query: string;
-  anchor: number; // index of the `@` character in the textarea value
+  anchor: number;
 }
 
 function detectMention(text: string, cursor: number): MentionState | null {
@@ -130,7 +127,7 @@ export default function MessageInput({
 
   const disabled = disabledProp || !senderId || activeAgents.length === 0;
 
-  const candidates: MentionCandidate[] = (() => {
+  const candidates: MentionCandidate[] = useMemo(() => {
     if (mention === null) return [];
     const q = mention.query.toLowerCase();
     const list: MentionCandidate[] = [];
@@ -140,11 +137,9 @@ export default function MessageInput({
     const matchedAgents = userAgents
       .filter((a) => slugify(a.name).startsWith(q))
       .sort((a, b) => a.name.localeCompare(b.name));
-    for (const a of matchedAgents) {
-      list.push({ kind: "agent", agent: a });
-    }
+    list.push(...matchedAgents.map((agent) => ({ kind: "agent" as const, agent })));
     return list.slice(0, 6);
-  })();
+  }, [mention, userAgents]);
 
   const popoverOpen = mention !== null && candidates.length > 0;
 
@@ -200,7 +195,7 @@ export default function MessageInput({
     setMention(detectMention(value, cursor));
   };
 
-  const insertCandidate = (c: MentionCandidate) => {
+  const insertCandidate = (candidate: MentionCandidate) => {
     const ta = textareaRef.current;
     const value = ta?.value ?? input;
     const cursor = ta?.selectionStart ?? value.length;
@@ -209,7 +204,7 @@ export default function MessageInput({
       setMention(null);
       return;
     }
-    const slug = c.kind === "virtual" ? c.label : slugify(c.agent.name);
+    const slug = candidate.kind === "virtual" ? candidate.label : slugify(candidate.agent.name);
     const replacement = `@${slug} `;
     // Scan right from the `@` to find the actual end of the mention token
     // so a caret inside the token (e.g. `@al|x`) still rewrites the full
@@ -268,7 +263,7 @@ export default function MessageInput({
     }
     if (e.key === "Enter") {
       if (composing) return;
-      if (e.shiftKey) return; // default textarea newline
+      if (e.shiftKey) return;
       if (popoverOpen) {
         e.preventDefault();
         const candidate = candidates[selectedIndex];
@@ -315,14 +310,14 @@ export default function MessageInput({
     >
       {popoverOpen && (
         <div className="absolute bottom-full left-3 right-3 mb-1 bg-white border border-gray-200 rounded-md shadow-lg overflow-hidden z-10">
-          {candidates.map((c, idx) => {
+          {candidates.map((candidate, idx) => {
             const key =
-              c.kind === "virtual"
-                ? `virtual:${c.label}`
-                : `agent:${c.agent.agent_id}`;
+              candidate.kind === "virtual"
+                ? `virtual:${candidate.label}`
+                : `agent:${candidate.agent.agent_id}`;
             const slug =
-              c.kind === "virtual" ? c.label : slugify(c.agent.name);
-            const display = c.kind === "virtual" ? c.label : c.agent.name;
+              candidate.kind === "virtual" ? candidate.label : slugify(candidate.agent.name);
+            const display = candidate.kind === "virtual" ? candidate.label : candidate.agent.name;
             const selected = idx === selectedIndex;
             return (
               <button
@@ -330,7 +325,7 @@ export default function MessageInput({
                 key={key}
                 onMouseDown={(ev) => {
                   ev.preventDefault();
-                  insertCandidate(c);
+                  insertCandidate(candidate);
                   textareaRef.current?.focus();
                 }}
                 onMouseEnter={() => setSelectedIndex(idx)}

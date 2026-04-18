@@ -1,9 +1,4 @@
-"""Minimal FastAPI app — Admin WebUI only.
-
-Serves the WebUI API endpoints and the SPA static files.
-CLI commands access SQLite directly through the ``broker`` module
-and do not require this server.
-"""
+"""FastAPI app for the admin WebUI (``/ui/``) and its ``/ui/api/*`` endpoints."""
 
 import sys
 from pathlib import Path

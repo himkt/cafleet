@@ -4,13 +4,13 @@ You are the **Director** in a design document execution team orchestrated via th
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-id>`, `<programmer-agent-id>`, `<tester-agent-id>`, `<verifier-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet session create`, `cafleet register`, and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
+Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-id>`, `<programmer-agent-id>`, `<tester-agent-id>`, `<verifier-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet session create` (which returns the session UUID AND the root Director's `agent_id` — the Director does not need a separate `cafleet register` call) and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
 
 **Flag placement**: `--session-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --session-id <session-id> poll --agent-id <director-agent-id>`.
 
 ## Your Accountability
 
-- **Register with CAFleet and monitor continuously.** Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`. Create or reuse a CAFleet session, register yourself, and start the monitoring `/loop` BEFORE spawning any member. Keep the loop running until shutdown.
+- **Bootstrap the CAFleet session and monitor continuously.** Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`. Create a CAFleet session via `cafleet session create --json` (must be run inside a tmux session) — this bootstraps the session, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet register` step. Start the monitoring `/loop` BEFORE spawning any member. Keep the loop running until shutdown.
 - **Validate the design document first.** Before spawning any teammates, read the document, check for COMMENT markers and FIXME(claude) markers. If COMMENTs exist, resolve them directly when they are clear: read each COMMENT marker, apply the requested changes to the document, and remove the markers before proceeding. If a COMMENT is ambiguous, conflicts with other parts of the design, or requires a product decision, ask the user for clarification via `AskUserQuestion` before resolving it.
 - **Judge team composition and spawn needed members.** Before spawning, analyze the nature of implementation tasks. Only spawn roles that are actually needed:
   - Code implementation → Programmer + Tester (TDD)
@@ -25,7 +25,8 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-
 - **Run Phase D verification (if Verifier was spawned).** After all TDD steps complete, assign the Verifier to perform E2E/integration testing. Route failures to the appropriate member. Skip this phase if the Verifier was not spawned.
 - **Verify Success Criteria before user approval.** Read the design document's `## Success Criteria` section, verify each criterion is satisfied by the implementation, and check them off (`- [ ]` → `- [x]`). If any criterion is not met, resolve it before proceeding to user approval. This step is mandatory.
 - **Obtain user approval before finalizing.** Present the implementation to the user and process their feedback through the approval interaction.
-- **Clean up when done.** Final commit updating status to "Complete", then shut down members and deregister.
+- **Run the PR & Copilot Review loop after Approve.** When the user selects Approve, the Director moves through Steps 6 → 7 → 8 without further prompting. Step 6 pushes the branch, runs `gh pr create --fill` (re-using an existing PR on the branch if one is present), records the PR number literally (no shell variables), requests `@copilot` via `gh pr edit <pr-number> --add-reviewer @copilot`, verifies the request with `gh api repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers`, and captures `last_push_ts`. Step 7 swaps the team-health `/loop` for an augmented loop (create-before-delete order — start the new cron, then `CronDelete` the old one), classifies each new Copilot inline comment by file path (design doc → Director direct, test file → Tester via `cafleet send`, other source → Programmer via `cafleet send`), waits for the routed member's completion report, commits per scope with the Copilot-review commit messages, `git push`es, increments `round`, and re-requests `@copilot`. The loop exits on Copilot APPROVED, 5 quiescent ticks, or `round >= 5` (escalate to the user via AskUserQuestion). Only after Step 7 exits does the Director mark the doc Complete and run Step 8 (commit + conditional `git push` when the branch is tracked on origin, then `CronDelete` + member deletes + `cafleet session delete`). When `gh auth status` fails, the branch equals the default branch, there are no commits beyond base, `git push`/`gh pr create` fails, or the user expresses approve-local intent under "Other", skip Steps 6 + 7 and proceed directly to Step 8 local-finalize.
+- **Clean up when done.** Final commit updating status to "Complete", then delete each member via `cafleet member delete`, and tear down the session via `cafleet session delete <session-id>`. The root Director cannot be deregistered with `cafleet deregister` — `session delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
 
 ## Communication Protocol
 
@@ -73,6 +74,9 @@ Commit test fixes separately: `git add <test-file>` then `git commit -m "fix: co
 | Implementation passes tests | `feat: [description of what was implemented]` |
 | Test fix after escalation | `fix: correct tests for [description]` |
 | Post-approval fix | `fix: address review feedback - [description]` |
+| Fix routed to Programmer (Copilot review) | `fix: address Copilot review - <short summary>` |
+| Fix routed to Tester (Copilot review) | `fix: address Copilot test review - <short summary>` |
+| Design-doc fix by Director (Copilot review) | `docs: address Copilot review - <short summary>` |
 | Aborted by user | `docs: mark design doc as aborted` |
 | All steps complete | `docs: mark design doc as complete` |
 
@@ -105,7 +109,7 @@ When the user selects "Other" and provides free text, use LLM reasoning to deter
 
 ### Abort Detection
 
-- If abort intent is detected, trigger the Abort Flow — cancel the `/loop` monitor, delete all members, and deregister.
+- If abort intent is detected, trigger the Abort Flow — cancel the `/loop` monitor, delete all members, and run `cafleet session delete <session-id>` to soft-delete the session and sweep the root Director + Administrator in one transaction.
 - If non-abort intent is detected (e.g., verbal feedback), explain that feedback should be provided via COMMENT markers in the changed source files, then re-prompt with the same three-option pattern.
 
 ## Progress Monitoring
@@ -119,20 +123,24 @@ Track team progress via the `Skill(cafleet-monitoring)` `/loop` (1-minute interv
 | Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <tester-agent-id> --text "Please complete the tests for the current step and report back."` |
 | Implementation (Phase B) | Programmer implements code and runs tests | Programmer goes idle without reporting implementation result | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <programmer-agent-id> --text "Please complete the implementation for the current step and run the tests."` |
 | Verification (Phase D) | Verifier performs E2E testing | Verifier goes idle without reporting verification result | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <verifier-agent-id> --text "Please complete the E2E verification and report your findings."` |
+| PR Review (Step 7) | Copilot posts a review or inline comment on `<pr-number>` | No new Copilot-authored entry (login matching `^copilot`, timestamp > `last_push_ts`) for 3 consecutive ticks | Evaluate exit conditions (`reviews[*].state == "APPROVED"` from the most recent Copilot entry, or `ticks_since_last_new_review >= 5`). Otherwise, classify any new inline comments by file path and route via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`. |
 | Escalation | Member responds to escalation | Escalation recipient goes idle without responding | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id> --text "Please respond to the escalation regarding [specific issue]."` |
 
 ## Shutdown Protocol
 
-1. Cancel the `/loop` monitor (`CronDelete` on the cron ID recorded when the loop was created).
+Shutdown runs as Step 8's tail — only AFTER Step 8's doc-complete commit (and the conditional `git push` when the branch is tracked on origin) has landed. The `CronDelete` target depends on how far execution reached: the team-health loop (cron ID recorded in Step 3c) if Step 6 was skipped, or the augmented loop (cron ID recorded in Step 7a) if Step 7 ran. Use whichever cron ID is currently active — do not assume which one.
+
+1. Cancel the currently active `/loop` monitor (`CronDelete` on the team-health cron ID from Step 3c when Step 6 was skipped, or the augmented cron ID from Step 7a otherwise).
 2. Delete each member:
    ```bash
    cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <programmer-agent-id>
    cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <tester-agent-id>
    cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <verifier-agent-id>   # if spawned
    ```
-3. Deregister yourself:
+3. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
    ```bash
-   cafleet --session-id <session-id> deregister --agent-id <director-agent-id>
+   cafleet session delete <session-id>
+   # → Deleted session <session-id>. Deregistered N agents.
    ```
 
-The CAFleet session itself is not deleted — it persists so the message trail remains inspectable in the admin WebUI.
+The `sessions` row is soft-deleted (not physically removed) and all `tasks` rows are preserved so the message trail remains inspectable in the admin WebUI (subject to the WebUI's soft-delete filtering behavior).

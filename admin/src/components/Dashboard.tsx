@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import type { Agent } from "../types";
 import { getAgents } from "../api";
 import Sidebar from "./Sidebar";
@@ -19,16 +19,12 @@ export default function Dashboard({
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  useEffect(() => {
-    localStorage.removeItem(`cafleet.sender.${sessionId}`);
-  }, [sessionId]);
-
   const refreshAll = useCallback(async () => {
     try {
       const data = await getAgents();
       setAgents(data.agents);
     } catch {
-      // keep current agents on error
+      /* preserve last-known agent list */
     }
     setRefreshKey((k) => k + 1);
   }, []);
@@ -37,8 +33,6 @@ export default function Dashboard({
     agents.find((a) => a.kind === "builtin-administrator") ?? null;
   const senderId =
     administrator?.status === "active" ? administrator.agent_id : null;
-
-  const noAgents = agents.length === 0;
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
@@ -87,7 +81,7 @@ export default function Dashboard({
               will not re-seed it.
             </div>
           )}
-          {noAgents ? (
+          {agents.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
               <p className="text-gray-400 text-sm">
                 No agents registered in this session. Use the{" "}

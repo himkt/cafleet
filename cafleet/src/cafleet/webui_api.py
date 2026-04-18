@@ -1,8 +1,4 @@
-"""WebUI API endpoints for the CAFleet message viewer.
-
-All endpoints call ``broker`` directly (sync). FastAPI runs sync handlers
-in a thread pool automatically.
-"""
+"""FastAPI endpoints backing the admin WebUI."""
 
 import json
 
@@ -14,16 +10,8 @@ from cafleet import broker
 webui_router = APIRouter(prefix="/ui/api")
 
 
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
-
 def get_webui_session(request: Request) -> str:
-    """Extract and validate X-Session-Id header.
-
-    Returns session_id. Raises 400 if missing, 404 if session not found.
-    """
+    """Return ``X-Session-Id``; 400 if missing, 404 if the row is gone."""
     session_id = request.headers.get("x-session-id")
     if not session_id:
         raise HTTPException(status_code=400, detail="X-Session-Id header required")
@@ -36,105 +24,94 @@ def get_webui_session(request: Request) -> str:
 
 
 def _extract_body(task_dict: dict) -> str:
-    """Extract text body from a camelCase task dict."""
-    for artifact in task_dict.get("artifacts", []):
-        for part in artifact.get("parts", []):
+    for artifact in task_dict["artifacts"]:
+        for part in artifact["parts"]:
             if part.get("text"):
                 return part["text"]
     return ""
 
 
+def _build_message(
+    *,
+    task_id: str,
+    from_id: str,
+    to_id: str,
+    type_: str,
+    status: str,
+    created_at: str,
+    status_timestamp: str,
+    origin_task_id: str | None,
+    body: str,
+    agent_names: dict[str, str],
+) -> dict:
+    return {
+        "task_id": task_id,
+        "from_agent_id": from_id,
+        "from_agent_name": agent_names[from_id],
+        "to_agent_id": to_id,
+        "to_agent_name": agent_names[to_id],
+        "type": type_,
+        "status": status,
+        "created_at": created_at,
+        "status_timestamp": status_timestamp,
+        "origin_task_id": origin_task_id,
+        "body": body,
+    }
+
+
 def _format_raw_tasks(rows: list[dict]) -> list[dict]:
-    """Format raw task row dicts (from list_inbox/list_sent) into WebUI messages."""
     if not rows:
         return []
-
-    agent_ids: set[str] = set()
-    for row in rows:
-        if row["from_agent_id"]:
-            agent_ids.add(row["from_agent_id"])
-        if row["to_agent_id"]:
-            agent_ids.add(row["to_agent_id"])
+    agent_ids = {
+        aid for row in rows for aid in (row["from_agent_id"], row["to_agent_id"])
+    }
     agent_names = broker.get_agent_names(list(agent_ids))
-
-    messages: list[dict] = []
-    for row in rows:
-        task_dict = json.loads(row["task_json"])
-        from_id = row["from_agent_id"]
-        to_id = row["to_agent_id"]
-        messages.append(
-            {
-                "task_id": row["task_id"],
-                "from_agent_id": from_id,
-                "from_agent_name": agent_names.get(from_id, "") if from_id else "",
-                "to_agent_id": to_id,
-                "to_agent_name": agent_names.get(to_id, "") if to_id else "",
-                "type": row["type"],
-                "status": row["status_state"],
-                "created_at": row["created_at"],
-                "status_timestamp": row["status_timestamp"],
-                "origin_task_id": row["origin_task_id"],
-                "body": _extract_body(task_dict),
-            }
+    return [
+        _build_message(
+            task_id=row["task_id"],
+            from_id=row["from_agent_id"],
+            to_id=row["to_agent_id"],
+            type_=row["type"],
+            status=row["status_state"],
+            created_at=row["created_at"],
+            status_timestamp=row["status_timestamp"],
+            origin_task_id=row["origin_task_id"],
+            body=_extract_body(json.loads(row["task_json"])),
+            agent_names=agent_names,
         )
-    return messages
+        for row in rows
+    ]
 
 
 def _format_timeline_entries(entries: list[dict]) -> list[dict]:
-    """Format timeline entries (from list_timeline) into WebUI messages."""
     if not entries:
         return []
-
-    agent_ids: set[str] = set()
-    for entry in entries:
-        task = entry["task"]
-        metadata = task.get("metadata", {})
-        from_id = metadata.get("fromAgentId", "")
-        to_id = metadata.get("toAgentId", "")
-        if from_id:
-            agent_ids.add(from_id)
-        if to_id:
-            agent_ids.add(to_id)
+    metas = [(entry, entry["task"]["metadata"]) for entry in entries]
+    agent_ids = {
+        aid for _, meta in metas for aid in (meta["fromAgentId"], meta["toAgentId"])
+    }
     agent_names = broker.get_agent_names(list(agent_ids))
-
-    messages: list[dict] = []
-    for entry in entries:
-        task = entry["task"]
-        metadata = task.get("metadata", {})
-        from_id = metadata.get("fromAgentId", "")
-        to_id = metadata.get("toAgentId", "")
-        messages.append(
-            {
-                "task_id": task["id"],
-                "from_agent_id": from_id,
-                "from_agent_name": agent_names.get(from_id, "") if from_id else "",
-                "to_agent_id": to_id,
-                "to_agent_name": agent_names.get(to_id, "") if to_id else "",
-                "type": metadata.get("type", ""),
-                "status": task.get("status", {}).get("state", ""),
-                "created_at": entry["created_at"],
-                "status_timestamp": task.get("status", {}).get("timestamp", ""),
-                "origin_task_id": entry["origin_task_id"],
-                "body": _extract_body(task),
-            }
+    return [
+        _build_message(
+            task_id=entry["task"]["id"],
+            from_id=meta["fromAgentId"],
+            to_id=meta["toAgentId"],
+            type_=meta["type"],
+            status=entry["task"]["status"]["state"],
+            created_at=entry["created_at"],
+            status_timestamp=entry["task"]["status"]["timestamp"],
+            origin_task_id=entry["origin_task_id"],
+            body=_extract_body(entry["task"]),
+            agent_names=agent_names,
         )
-    return messages
-
-
-# ---------------------------------------------------------------------------
-# Request model
-# ---------------------------------------------------------------------------
+        for entry, meta in metas
+    ]
 
 
 class SendMessageRequest(BaseModel):
     from_agent_id: str
     to_agent_id: str
     text: str
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @webui_router.get("/sessions")
@@ -188,8 +165,7 @@ def send_message(
     body: SendMessageRequest,
     session_id: str = Depends(get_webui_session),
 ):
-    from_agent = broker.get_agent(body.from_agent_id, session_id)
-    if from_agent is None:
+    if broker.get_agent(body.from_agent_id, session_id) is None:
         raise HTTPException(status_code=400, detail="from_agent not in session")
 
     if body.to_agent_id == "*":
@@ -197,8 +173,7 @@ def send_message(
         summary = result[0]["task"]
         return {"task_id": summary["id"], "status": summary["status"]["state"]}
 
-    to_agent = broker.get_agent(body.to_agent_id, session_id)
-    if to_agent is None:
+    if broker.get_agent(body.to_agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
     result = broker.send_message(
