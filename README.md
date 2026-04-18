@@ -249,7 +249,7 @@ The admin WebUI is available when the server is running (`cafleet server`, or `m
 
 ## Tech Stack
 
-- **Python 3.12+** with uv workspace
+- **Python 3.12+** managed with uv
 - **Server**: FastAPI + SQLAlchemy + Alembic + Pydantic + pydantic-settings (WebUI only)
 - **CLI**: click (direct SQLite via `broker` module)
 - **WebUI**: Vite + React 19 + TypeScript + Tailwind CSS 4
@@ -257,8 +257,7 @@ The admin WebUI is available when the server is running (`cafleet server`, or `m
 ## Project Structure
 
 ```
-cafleet/                    # Repository root (uv workspace)
-  pyproject.toml            # Workspace root (virtual, no [project] table)
+cafleet/                    # Repository root
   cafleet/                  # cafleet package (server + CLI)
     src/cafleet/
       broker.py             # Single data access layer (sync SQLAlchemy)
@@ -288,8 +287,8 @@ cafleet/                    # Repository root (uv workspace)
 git clone https://github.com/himkt/cafleet.git
 cd cafleet
 
-# Install all workspace dependencies
-uv sync
+# Install dependencies
+mise //cafleet:sync
 
 # Initialize the database schema (one-time)
 cafleet db init

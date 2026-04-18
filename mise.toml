@@ -5,18 +5,3 @@ config_roots = [
   "cafleet",
   "admin",
 ]
-
-[tasks.lint]
-run = [
-  "uv run ruff check .",
-  "uv run ruff format --check .",
-]
-description = "Run ruff linter"
-
-[tasks.format]
-run = "uv run ruff format ."
-description = "Format code with ruff"
-
-[tasks.typecheck]
-run = "uv run ty check"
-description = "Run ty type checker"

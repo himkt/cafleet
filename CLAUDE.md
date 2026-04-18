@@ -19,13 +19,13 @@ A2A-inspired message broker + agent registry for coding agents.
 - **Design document**: `design-docs/0000001-a2a-registry-broker/design-doc.md` (Status: Complete)
 - **Design document**: `design-docs/0000002-access-control/design-doc.md` — Access-control via shared API key (superseded by 0000015 session model) (Status: Complete)
 - **Design document**: `design-docs/0000010-sqlite-store-migration/design-doc.md` — SQLite + SQLAlchemy + Alembic store migration (Status: Complete)
-- **Single package** (uv workspace):
+- **Single package**:
   - `cafleet/` — `cafleet` (FastAPI + SQLAlchemy + Alembic + click)
 - **Unified CLI command**: `cafleet` (with `db init` for schema management, `session` for session CRUD, and all agent/messaging commands)
 
 ## Tech Stack
 
-- Python 3.12+ with uv workspace
+- Python 3.12+ managed with uv
 - Server: FastAPI + SQLAlchemy + Alembic
 - CLI: click (direct SQLite via broker module)
 
