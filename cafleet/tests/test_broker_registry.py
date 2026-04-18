@@ -112,7 +112,7 @@ class TestCreateSessionAdministratorSeed:
         """After create_session, exactly one active Administrator agent exists
         for that session in the agents table.
 
-        Design 0000026 also bootstraps a root Director (name='director') in
+        Design 0000026 also bootstraps a root Director (name='Director') in
         the same transaction, so two active agents exist — we pick the
         Administrator out by ``name == 'Administrator'``.
         """
@@ -175,7 +175,7 @@ class TestCreateSessionAdministratorSeed:
         assert admin_entries[0]["name"] == "Administrator"
         assert admin_entries[0]["agent_id"] == result["administrator_agent_id"]
         user_names = {e["name"] for e in user_entries}
-        assert "director" in user_names
+        assert "Director" in user_names
         assert "user-agent" in user_names
 
     def test_each_session_gets_its_own_administrator(self):
@@ -488,7 +488,7 @@ class TestListAgents:
         names = {a["name"] for a in result}
         assert "active-1" in names
         assert "active-2" in names
-        assert "director" in names
+        assert "Director" in names
         assert "Administrator" in names
         assert "dead-agent" not in names
 
@@ -498,7 +498,7 @@ class TestListAgents:
         result = broker.list_agents(session["session_id"])
         assert len(result) == 2
         names = {a["name"] for a in result}
-        assert names == {"director", "Administrator"}
+        assert names == {"Director", "Administrator"}
 
     def test_agents_scoped_to_session(self):
         """Agents from other sessions are not included. Each session has its own
@@ -515,7 +515,7 @@ class TestListAgents:
         assert len(result_a) == 3
         names_a = {a["name"] for a in result_a}
         assert "agent-a" in names_a
-        assert "director" in names_a
+        assert "Director" in names_a
         assert "Administrator" in names_a
         assert "agent-b" not in names_a
 
@@ -575,7 +575,7 @@ class TestDeregisterAgent:
         # The retiring user agent is gone; the bootstrap Director and
         # Administrator remain (design 0000026).
         names = {a["name"] for a in broker.list_agents(sid)}
-        assert names == {"director", "Administrator"}
+        assert names == {"Director", "Administrator"}
 
     def test_sets_deregistered_status_and_timestamp(self):
         """After deregistering, status is 'deregistered' and deregistered_at is set."""

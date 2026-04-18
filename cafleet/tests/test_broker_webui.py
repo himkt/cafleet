@@ -78,7 +78,7 @@ class TestListSessionAgents:
         names = {a["name"] for a in result}
         assert "active-1" in names
         assert "active-2" in names
-        assert "director" in names
+        assert "Director" in names
         assert "Administrator" in names
 
     def test_active_agents_have_active_status(self):
@@ -117,7 +117,7 @@ class TestListSessionAgents:
         result = broker.list_session_agents(session["session_id"])
         assert len(result) == 2
         names = {a["name"] for a in result}
-        assert names == {"director", "Administrator"}
+        assert names == {"Director", "Administrator"}
 
     def test_result_contains_required_keys(self):
         session = _create_session()
@@ -142,7 +142,7 @@ class TestListSessionAgents:
         assert len(result) == 3
         names = {a["name"] for a in result}
         assert "in-a" in names
-        assert "director" in names
+        assert "Director" in names
         assert "Administrator" in names
         assert "in-b" not in names
 
@@ -178,7 +178,7 @@ class TestListSessionAgentsKind:
 
         assert len(users) == 3
         user_names = {e["name"] for e in users}
-        assert user_names == {"director", "user-a", "user-b"}
+        assert user_names == {"Director", "user-a", "user-b"}
 
     def test_kind_values_are_restricted_to_known_set(self):
         session = _create_session()

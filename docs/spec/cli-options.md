@@ -88,7 +88,7 @@ The `cafleet session` subgroup manages sessions. These commands write directly t
 | `--label` | no | Free-form text label for the session |
 | `--json` | no | Output as JSON |
 
-There are no `--name` / `--description` flags. The root Director's name and description are hardcoded (`name="director"`, `description="Root Director for this session"`).
+There are no `--name` / `--description` flags. The root Director's name and description are hardcoded (`name="Director"`, `description="Root Director for this session"`).
 
 Creates a new session with a UUIDv4 identifier. **Must be run inside a tmux session** — outside tmux the command exits 1 with `Error: cafleet session create must be run inside a tmux session` and writes nothing to the DB. The command atomically performs five writes in a single transaction:
 
@@ -107,7 +107,7 @@ Any exception inside the transaction rolls back all five writes.
 <director_agent_id>
 label:            <label or empty>
 created_at:       <iso8601>
-director_name:    director
+director_name:    Director
 pane:             <tmux_session>:<tmux_window_id>:<tmux_pane_id>
 administrator:    <administrator_agent_id>
 ```
@@ -122,7 +122,7 @@ administrator:    <administrator_agent_id>
   "administrator_agent_id": "3c4d5e6f-7890-1234-5678-90abcdef1234",
   "director": {
     "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
-    "name": "director",
+    "name": "Director",
     "description": "Root Director for this session",
     "registered_at": "2026-04-15T10:00:00+00:00",
     "placement": {

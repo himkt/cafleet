@@ -76,7 +76,7 @@ class TestCreateSessionBootstrap:
 
     def test_director_name_and_description_are_hardcoded(self, director_context):
         result = _bootstrap(ctx=director_context)
-        assert result["director"]["name"] == "director"
+        assert result["director"]["name"] == "Director"
         assert result["director"]["description"] == "Root Director for this session"
 
     def test_placement_sub_dict_matches_director_context_and_unknown_coding_agent(
@@ -110,10 +110,10 @@ class TestCreateSessionBootstrap:
 
         assert len(rows) == 2
         by_name = {r.name: r for r in rows}
-        assert "director" in by_name
+        assert "Director" in by_name
         assert "Administrator" in by_name
 
-        director_row = by_name["director"]
+        director_row = by_name["Director"]
         admin_row = by_name["Administrator"]
         assert director_row.status == "active"
         assert admin_row.status == "active"
@@ -255,7 +255,7 @@ class TestDeleteSessionCascade:
                 r.name: r.status
                 for r in s.query(Agent).filter(Agent.session_id == sid).all()
             }
-        assert statuses["director"] == "deregistered"
+        assert statuses["Director"] == "deregistered"
         assert statuses["Administrator"] == "deregistered"
 
     def test_deletes_placement_rows_in_the_session(
