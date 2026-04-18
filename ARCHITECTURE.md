@@ -247,7 +247,7 @@ A browser-based dashboard served as a SPA at `/ui/`. No login is required. The f
 
 ## Package Structure
 
-A uv workspace with a single Python package and a frontend app:
+A single Python package and a frontend app:
 
 - **`cafleet/`** — `cafleet`: FastAPI + SQLAlchemy + Alembic + click (server + CLI). Ships the unified `cafleet` console script for all operations: `db init`, `session` management, agent registration, messaging, and member lifecycle. CLI commands access SQLite directly via `broker.py`; the FastAPI server is only needed for the admin WebUI.
 - **`admin/`** — WebUI SPA: Vite + React + TypeScript + Tailwind CSS

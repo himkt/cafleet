@@ -1,12 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(mise //:lint)",
-      "Bash(mise //:lint *)",
-      "Bash(mise //:format)",
-      "Bash(mise //:format *)",
-      "Bash(mise //:typecheck)",
-      "Bash(mise //:typecheck *)",
       "Bash(mise //admin*)",
       "Bash(mise //cafleet*)",
       "Bash(mise tasks)",

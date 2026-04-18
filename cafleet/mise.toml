@@ -8,15 +8,19 @@ description = "Run all tests"
 
 [tasks.lint]
 run = [
-  "uv --preview-features format format --diff",
-  "uvx ruff check",
-  "uv run mypy src",
+  "uv run ruff check .",
+  "uv run ruff format --check .",
 ]
-description = "Check formatting, lint, and type-check"
+description = "Run ruff linter and format check"
 
 [tasks.format]
-run = [
-  "uv --preview-features format format",
-  "uvx ruff check --fix",
-]
-description = "Auto-format and fix lint issues"
+run = "uv run ruff format ."
+description = "Format code with ruff"
+
+[tasks.typecheck]
+run = "uv run ty check"
+description = "Run ty type checker"
+
+[tasks.sync]
+run = "uv sync"
+description = "Sync cafleet project dependencies"
