@@ -256,7 +256,7 @@ def doctor(ctx) -> None:
 
     if ctx.obj["json_output"]:
         click.echo(
-            json.dumps(
+            output.format_json(
                 {
                     "tmux": {
                         "session_name": director_ctx.session,
@@ -693,12 +693,19 @@ def member_delete(ctx, agent_id, member_id, force):
             raise click.ClickException(f"deregister failed: {exc}") from exc
         pane_status = "(pending — no pane)"
         _emit_member_delete_output(
-            ctx, member_id, pane_status, force=force, header="Member deleted."
+            ctx, member_id, pane_status, header="Member deleted."
         )
         return
 
     if force:
-        tmux.kill_pane(target_pane_id=pane_id, ignore_missing=True)
+        try:
+            tmux.kill_pane(target_pane_id=pane_id, ignore_missing=True)
+        except tmux.TmuxError as exc:
+            raise click.ClickException(
+                f"kill_pane failed for pane {pane_id}: {exc}. "
+                f"The tmux server may be unreachable. Verify with 'cafleet doctor', "
+                f"then retry without --force."
+            ) from exc
         try:
             broker.deregister_agent(member_id)
         except Exception as exc:
@@ -709,7 +716,7 @@ def member_delete(ctx, agent_id, member_id, force):
             click.echo(f"Warning: select-layout failed: {exc}", err=True)
         pane_status = f"{pane_id} (killed)"
         _emit_member_delete_output(
-            ctx, member_id, pane_status, force=True, header="Member deleted (--force)."
+            ctx, member_id, pane_status, header="Member deleted (--force)."
         )
         return
 
@@ -743,16 +750,9 @@ def member_delete(ctx, agent_id, member_id, force):
             click.echo(f"Warning: select-layout failed: {exc}", err=True)
         pane_status = f"{pane_id} (closed)"
         _emit_member_delete_output(
-            ctx, member_id, pane_status, force=False, header="Member deleted."
+            ctx, member_id, pane_status, header="Member deleted."
         )
         return
-
-    pane_status = f"{pane_id} (timeout)"
-    if ctx.obj["json_output"]:
-        click.echo(
-            output.format_json({"agent_id": member_id, "pane_status": pane_status})
-        )
-        ctx.exit(2)
 
     try:
         tail = tmux.capture_pane(target_pane_id=pane_id, lines=80)
@@ -776,6 +776,12 @@ def member_delete(ctx, agent_id, member_id, force):
         "Or re-run with `--force` to skip the wait and kill the pane.",
         err=True,
     )
+
+    pane_status = f"{pane_id} (timeout)"
+    if ctx.obj["json_output"]:
+        click.echo(
+            output.format_json({"agent_id": member_id, "pane_status": pane_status})
+        )
     ctx.exit(2)
 
 
@@ -784,7 +790,6 @@ def _emit_member_delete_output(
     member_id: str,
     pane_status: str,
     *,
-    force: bool,
     header: str,
 ) -> None:
     if ctx.obj["json_output"]:
