@@ -423,6 +423,8 @@ JSON (`cafleet --json ... member send-input ...`):
 
 #### Typical Director workflow
 
+> **Note**: Superseded by the canonical **Director-side usage pattern** subsection below. The canonical pattern requires the Director to delegate the decision to the user via `AskUserQuestion` FIRST and then invoke the resolved `cafleet member send-input` via its own Bash tool — AskUserQuestion is required, not optional. This older subsection is retained for historical context only; new readers should follow the canonical pattern.
+
 The CLI is deliberately one-shot — the surrounding choose-and-answer loop stays in the Director's control:
 
 1. `cafleet --session-id <s> member capture --agent-id <d> --member-id <m> --lines 120` — read the current prompt options off the pane.

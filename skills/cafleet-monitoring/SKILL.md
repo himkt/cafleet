@@ -64,8 +64,10 @@ The `--since` flag accepts an ISO 8601 timestamp. If the member has sent a progr
 
 ```bash
 cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
-  --member-id <member-agent-id> --lines 200
+  --member-id <member-agent-id> --lines 120
 ```
+
+`--lines 120` is the recommended default (matches the cafleet skill). Re-run with `--lines 200` as a fallback only if the first capture is truncated above the AskUserQuestion frame (the `1. …`, `2. …`, `3. …`, `4. Type something` rows are not all visible).
 
 If `cafleet poll` shows no recent messages from the member, fall back to capturing the terminal buffer. This is non-intrusive (read-only inspection that works even when the member is mid-task) and replaces raw `tmux capture-pane`.
 
