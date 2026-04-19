@@ -50,7 +50,7 @@ In every example below, substitute the literal UUID strings printed by `cafleet 
 
 ## Global Options
 
-Only `--json` and `--session-id` are global (before the subcommand). `--agent-id` is a per-subcommand option and must appear **after** the subcommand name:
+Only `--json`, `--session-id`, and `--version` are global (before the subcommand). `--agent-id` is a per-subcommand option and must appear **after** the subcommand name:
 
 ```bash
 cafleet --session-id <session-id> --json register --name "My Agent" --description "..."
@@ -58,6 +58,10 @@ cafleet --session-id <session-id> --json agents --agent-id <my-agent-id>
 ```
 
 `cafleet agents --json` will fail with `No such option: --json`. Same for `--session-id` placed after the subcommand — keep it before. `--agent-id` must come **after** the subcommand, not before it.
+
+### `--version`
+
+`cafleet --version` prints `cafleet <version>` to stdout and exits 0. It works **without** `--session-id` — the option is registered eagerly, so Click runs its callback during option parsing and exits before the session-id guard on any subcommand is reached. The version string is sourced from the installed package metadata via `importlib.metadata.version("cafleet")`, so it stays in lock-step with `project.version` in `cafleet/pyproject.toml` with no manual bookkeeping. The flag does not honor `--json`; `cafleet --json --version` still prints the plain text form.
 
 ## Command Reference
 
