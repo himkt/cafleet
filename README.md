@@ -133,7 +133,7 @@ cafleet session delete 550e8400-e29b-41d4-a716-446655440000
 
 `session delete` is a single-transaction logical delete that stamps `deleted_at`, deregisters every active agent (root Director included), and physically deletes every associated `agent_placements` row. Tasks are preserved (audit trail). The command is idempotent — re-running against an already-deleted session prints `Deregistered 0 agents.` and exits 0.
 
-Member tmux panes that were spawned via `cafleet member create` are **not** automatically closed by `session delete`. For a clean teardown, call `cafleet member delete` on each member first (which sends `/exit`), then call `session delete`. Surviving `claude` / `codex` processes can be terminated manually with `tmux kill-pane`.
+Member tmux panes that were spawned via `cafleet member create` are **not** automatically closed by `session delete`. For a clean teardown, call `cafleet member delete` on each member first (which sends `/exit`), then call `session delete`. If a member pane refuses to close (e.g. blocked on a confirmation prompt), rerun `cafleet member delete` with `--force`, which kill-panes the target, sweeps the placement, and rebalances the layout.
 
 > **Why a literal flag, not an env var?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. Passing `--session-id <literal-uuid>` lets a single allow-list pattern match every subcommand for that session; shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — do not introduce shell variables to hold them.
 

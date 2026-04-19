@@ -238,6 +238,43 @@ def server(host: str, port: int) -> None:
     )
 
 
+@cli.command("doctor")
+@click.pass_context
+def doctor(ctx) -> None:
+    """Print the calling pane's tmux session/window/pane identifiers."""
+    try:
+        tmux.ensure_tmux_available()
+    except tmux.TmuxError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        director_ctx = tmux.director_context()
+    except tmux.TmuxError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    tmux_pane_env = os.environ["TMUX_PANE"]
+
+    if ctx.obj["json_output"]:
+        click.echo(
+            output.format_json(
+                {
+                    "tmux": {
+                        "session_name": director_ctx.session,
+                        "window_id": director_ctx.window_id,
+                        "pane_id": director_ctx.pane_id,
+                        "tmux_pane_env": tmux_pane_env,
+                    }
+                }
+            )
+        )
+    else:
+        click.echo("tmux:")
+        click.echo(f"  session_name:  {director_ctx.session}")
+        click.echo(f"  window_id:     {director_ctx.window_id}")
+        click.echo(f"  pane_id:       {director_ctx.pane_id}")
+        click.echo(f"  TMUX_PANE:     {tmux_pane_env}")
+
+
 @cli.command()
 @click.option("--name", required=True, help="Agent name")
 @click.option("--description", required=True, help="Agent description")
@@ -620,8 +657,16 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
 @member.command("delete")
 @click.option("--agent-id", required=True, help="Director's agent ID")
 @click.option("--member-id", required=True, help="Target member's agent ID")
+@click.option(
+    "--force",
+    "-f",
+    "force",
+    is_flag=True,
+    default=False,
+    help="Skip /exit and immediately kill-pane the target, then deregister.",
+)
 @click.pass_context
-def member_delete(ctx, agent_id, member_id):
+def member_delete(ctx, agent_id, member_id, force):
     """Deregister a member agent and close its tmux pane."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
@@ -641,37 +686,118 @@ def member_delete(ctx, agent_id, member_id):
     )
     pane_id = placement["tmux_pane_id"]
 
-    # Deregister the registry row first so a send-keys failure leaves a
-    # queryable intent ("already gone") rather than a dangling placement.
-    try:
-        broker.deregister_agent(member_id)
-    except Exception as exc:
-        raise click.ClickException(f"deregister failed: {exc}") from exc
-
     if pane_id is None:
-        pane_status = "(pending — no pane)"
-    else:
         try:
-            tmux.send_exit(target_pane_id=pane_id, ignore_missing=True)
-            pane_status = f"{pane_id} (closed)"
+            broker.deregister_agent(member_id)
+        except Exception as exc:
+            raise click.ClickException(f"deregister failed: {exc}") from exc
+        pane_status = "(pending — no pane)"
+        _emit_member_delete_output(
+            ctx, member_id, pane_status, header="Member deleted."
+        )
+        return
+
+    if force:
+        try:
+            tmux.kill_pane(target_pane_id=pane_id, ignore_missing=True)
         except tmux.TmuxError as exc:
-            click.echo(
-                f"Warning: send_exit failed for pane {pane_id}: {exc}. "
-                f"Kill it manually with `tmux kill-pane -t {pane_id}`.",
-                err=True,
-            )
-            pane_status = f"{pane_id} (send_exit failed)"
+            raise click.ClickException(
+                f"kill_pane failed for pane {pane_id}: {exc}. "
+                f"The tmux server may be unreachable. Verify with 'cafleet doctor', "
+                f"then re-run the command."
+            ) from exc
+        try:
+            broker.deregister_agent(member_id)
+        except Exception as exc:
+            raise click.ClickException(f"deregister failed: {exc}") from exc
         try:
             tmux.select_layout(target_window_id=placement["tmux_window_id"])
         except tmux.TmuxError as exc:
             click.echo(f"Warning: select-layout failed: {exc}", err=True)
+        pane_status = f"{pane_id} (killed)"
+        _emit_member_delete_output(
+            ctx, member_id, pane_status, header="Member deleted (--force)."
+        )
+        return
 
+    try:
+        tmux.send_exit(target_pane_id=pane_id, ignore_missing=True)
+    except tmux.TmuxError as exc:
+        raise click.ClickException(
+            f"send_exit failed for pane {pane_id}: {exc}. "
+            f"The tmux server may be unreachable. Verify with 'cafleet doctor', "
+            f"then re-run 'cafleet member delete', or use '--force' to kill the "
+            f"pane directly."
+        ) from exc
+
+    try:
+        gone = tmux.wait_for_pane_gone(
+            target_pane_id=pane_id, timeout=15.0, interval=0.5
+        )
+    except tmux.TmuxError as exc:
+        raise click.ClickException(
+            f"tmux call failed while waiting for pane {pane_id} to close: {exc}"
+        ) from exc
+
+    if gone:
+        try:
+            broker.deregister_agent(member_id)
+        except Exception as exc:
+            raise click.ClickException(f"deregister failed: {exc}") from exc
+        try:
+            tmux.select_layout(target_window_id=placement["tmux_window_id"])
+        except tmux.TmuxError as exc:
+            click.echo(f"Warning: select-layout failed: {exc}", err=True)
+        pane_status = f"{pane_id} (closed)"
+        _emit_member_delete_output(
+            ctx, member_id, pane_status, header="Member deleted."
+        )
+        return
+
+    try:
+        tail = tmux.capture_pane(target_pane_id=pane_id, lines=80)
+    except tmux.TmuxError as exc:
+        click.echo(
+            f"Warning: capture_pane failed during timeout handling: {exc}. "
+            f"The timeout error and recovery hint still print.",
+            err=True,
+        )
+        tail = ""
+
+    click.echo(
+        f"Error: pane {pane_id} did not close within 15.0s after /exit.", err=True
+    )
+    click.echo(f"--- pane {pane_id} tail (last 80 lines) ---", err=True)
+    click.echo(tail, err=True)
+    click.echo("---", err=True)
+    click.echo(
+        "Recovery: inspect with `cafleet member capture`, answer any prompt with "
+        "`cafleet member send-input`, then re-run `cafleet member delete`. "
+        "Or re-run with `--force` to skip the wait and kill the pane.",
+        err=True,
+    )
+
+    pane_status = f"{pane_id} (timeout)"
+    if ctx.obj["json_output"]:
+        click.echo(
+            output.format_json({"agent_id": member_id, "pane_status": pane_status})
+        )
+    ctx.exit(2)
+
+
+def _emit_member_delete_output(
+    ctx: click.Context,
+    member_id: str,
+    pane_status: str,
+    *,
+    header: str,
+) -> None:
     if ctx.obj["json_output"]:
         click.echo(
             output.format_json({"agent_id": member_id, "pane_status": pane_status})
         )
     else:
-        click.echo("Member deleted.")
+        click.echo(header)
         click.echo(f"  agent_id:  {member_id}")
         click.echo(f"  pane_id:   {pane_status}")
 

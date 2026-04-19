@@ -65,20 +65,30 @@ def runner():
     return CliRunner()
 
 
+@pytest.fixture
+def call_log() -> list[tuple]:
+    return []
+
+
 @pytest.fixture(autouse=True)
 def _stub_tmux_entrypoints(monkeypatch):
     monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
     monkeypatch.setattr(tmux, "director_context", lambda: _DIRECTOR_CTX)
     monkeypatch.setattr(tmux, "send_exit", lambda **_: None)
     monkeypatch.setattr(tmux, "select_layout", lambda **_: None)
+    monkeypatch.setattr(tmux, "kill_pane", lambda **_: None, raising=False)
+    monkeypatch.setattr(tmux, "wait_for_pane_gone", lambda **_: True, raising=False)
+    monkeypatch.setattr(tmux, "pane_exists", lambda **_: False, raising=False)
+    monkeypatch.setattr(tmux, "capture_pane", lambda **_: "", raising=False)
 
 
 @pytest.fixture
-def deregister_recorder(monkeypatch):
+def deregister_recorder(monkeypatch, call_log):
     calls: list[str] = []
 
     def fake(member_id):
         calls.append(member_id)
+        call_log.append(("deregister_agent", member_id))
         return True
 
     monkeypatch.setattr(broker, "deregister_agent", fake)
@@ -86,13 +96,75 @@ def deregister_recorder(monkeypatch):
 
 
 @pytest.fixture
-def send_exit_recorder(monkeypatch):
+def send_exit_recorder(monkeypatch, call_log):
     calls: list[dict] = []
 
     def fake(**kwargs):
         calls.append(kwargs)
+        call_log.append(("send_exit", kwargs))
 
     monkeypatch.setattr(tmux, "send_exit", fake)
+    return calls
+
+
+@pytest.fixture
+def select_layout_recorder(monkeypatch, call_log):
+    calls: list[dict] = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        call_log.append(("select_layout", kwargs))
+
+    monkeypatch.setattr(tmux, "select_layout", fake)
+    return calls
+
+
+@pytest.fixture
+def wait_for_pane_gone_recorder(monkeypatch, call_log):
+    """Recording stub with mutable return / side-effect via .state."""
+    state: dict = {"return_value": True, "side_effect": None}
+    calls: list[dict] = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        call_log.append(("wait_for_pane_gone", kwargs))
+        if state["side_effect"] is not None:
+            raise state["side_effect"]
+        return state["return_value"]
+
+    monkeypatch.setattr(tmux, "wait_for_pane_gone", fake, raising=False)
+    fake.calls = calls
+    fake.state = state
+    return fake
+
+
+@pytest.fixture
+def capture_pane_recorder(monkeypatch, call_log):
+    state: dict = {"return_value": "", "side_effect": None}
+    calls: list[dict] = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        call_log.append(("capture_pane", kwargs))
+        if state["side_effect"] is not None:
+            raise state["side_effect"]
+        return state["return_value"]
+
+    monkeypatch.setattr(tmux, "capture_pane", fake, raising=False)
+    fake.calls = calls
+    fake.state = state
+    return fake
+
+
+@pytest.fixture
+def kill_pane_recorder(monkeypatch, call_log):
+    calls: list[dict] = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        call_log.append(("kill_pane", kwargs))
+
+    monkeypatch.setattr(tmux, "kill_pane", fake, raising=False)
     return calls
 
 
@@ -113,46 +185,312 @@ def _invoke(runner, session_id, *extra_args):
     )
 
 
+def _invoke_json(runner, session_id, *extra_args):
+    return runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "--json",
+            "member",
+            "delete",
+            "--agent-id",
+            DIRECTOR_ID,
+            "--member-id",
+            MEMBER_ID,
+            *extra_args,
+        ],
+    )
+
+
 class TestHappyPath:
-    def test_deregisters_and_sends_exit_to_pane(
-        self, runner, session_id, monkeypatch, deregister_recorder, send_exit_recorder
+    def test_call_ordering_send_exit_then_wait_then_deregister_then_layout(
+        self,
+        runner,
+        session_id,
+        monkeypatch,
+        call_log,
+        deregister_recorder,
+        send_exit_recorder,
+        select_layout_recorder,
+        wait_for_pane_gone_recorder,
     ):
         monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+        wait_for_pane_gone_recorder.state["return_value"] = True
+
         result = _invoke(runner, session_id)
         assert result.exit_code == 0, result.output
-        assert deregister_recorder == [MEMBER_ID]
+
+        names = [name for (name, *_) in call_log]
+        assert names == [
+            "send_exit",
+            "wait_for_pane_gone",
+            "deregister_agent",
+            "select_layout",
+        ]
+
         assert send_exit_recorder == [
             {"target_pane_id": PANE_ID, "ignore_missing": True}
         ]
+        assert deregister_recorder == [MEMBER_ID]
+
         out = result.output
         assert "Member deleted." in out
         assert MEMBER_ID in out
         assert f"{PANE_ID} (closed)" in out
 
     def test_json_output_returns_agent_id_and_pane_status(
-        self, runner, session_id, monkeypatch, deregister_recorder
+        self,
+        runner,
+        session_id,
+        monkeypatch,
+        deregister_recorder,
+        wait_for_pane_gone_recorder,
     ):
         monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "--json",
-                "member",
-                "delete",
-                "--agent-id",
-                DIRECTOR_ID,
-                "--member-id",
-                MEMBER_ID,
-            ],
-        )
+        wait_for_pane_gone_recorder.state["return_value"] = True
+
+        result = _invoke_json(runner, session_id)
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert data == {
             "agent_id": MEMBER_ID,
             "pane_status": f"{PANE_ID} (closed)",
         }
+
+
+class TestPaneAlreadyGone:
+    def test_pane_already_gone_first_poll_yields_happy_path(
+        self,
+        runner,
+        session_id,
+        monkeypatch,
+        call_log,
+        deregister_recorder,
+        send_exit_recorder,
+        select_layout_recorder,
+        wait_for_pane_gone_recorder,
+        capture_pane_recorder,
+    ):
+        monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+        wait_for_pane_gone_recorder.state["return_value"] = True
+
+        result = _invoke(runner, session_id)
+        assert result.exit_code == 0, result.output
+
+        assert capture_pane_recorder.calls == []
+
+        names = [name for (name, *_) in call_log]
+        assert "capture_pane" not in names
+        assert names == [
+            "send_exit",
+            "wait_for_pane_gone",
+            "deregister_agent",
+            "select_layout",
+        ]
+
+        assert deregister_recorder == [MEMBER_ID]
+
+        out = result.output
+        assert "Member deleted." in out
+        assert "already gone" not in out
+        assert f"{PANE_ID} (closed)" in out
+
+
+class TestTimeout:
+    def test_timeout_exits_two_with_tail_and_recovery_hint(
+        self,
+        runner,
+        session_id,
+        monkeypatch,
+        call_log,
+        deregister_recorder,
+        send_exit_recorder,
+        select_layout_recorder,
+        wait_for_pane_gone_recorder,
+        capture_pane_recorder,
+    ):
+        monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+        wait_for_pane_gone_recorder.state["return_value"] = False
+        capture_pane_recorder.state["return_value"] = "STUCK_BUFFER_TAIL"
+
+        result = _invoke(runner, session_id)
+        assert result.exit_code == 2, (result.output, getattr(result, "stderr", ""))
+
+        combined = (result.output or "") + (getattr(result, "stderr", "") or "")
+        assert f"pane {PANE_ID} did not close within 15.0s" in combined
+        assert "STUCK_BUFFER_TAIL" in combined
+        assert "cafleet member capture" in combined
+        assert "cafleet member send-input" in combined
+        assert "--force" in combined
+
+        assert deregister_recorder == []
+        assert select_layout_recorder == []
+
+        names = [name for (name, *_) in call_log]
+        assert "deregister_agent" not in names
+        assert "select_layout" not in names
+        assert names == [
+            "send_exit",
+            "wait_for_pane_gone",
+            "capture_pane",
+        ]
+
+    def test_timeout_json_output_pane_status(
+        self,
+        runner,
+        session_id,
+        monkeypatch,
+        deregister_recorder,
+        wait_for_pane_gone_recorder,
+        capture_pane_recorder,
+    ):
+        monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+        wait_for_pane_gone_recorder.state["return_value"] = False
+        capture_pane_recorder.state["return_value"] = "STUCK_BUFFER_TAIL"
+
+        result = _invoke_json(runner, session_id)
+        assert result.exit_code == 2, result.output
+        data = json.loads(result.stdout)
+        assert data == {
+            "agent_id": MEMBER_ID,
+            "pane_status": f"{PANE_ID} (timeout)",
+        }
+
+    def test_capture_failure_still_exits_two(
+        self,
+        runner,
+        session_id,
+        monkeypatch,
+        deregister_recorder,
+        send_exit_recorder,
+        wait_for_pane_gone_recorder,
+        capture_pane_recorder,
+    ):
+        monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+        wait_for_pane_gone_recorder.state["return_value"] = False
+        capture_pane_recorder.state["side_effect"] = TmuxError(
+            "capture-pane failed: pane is dead"
+        )
+
+        result = _invoke(runner, session_id)
+        assert result.exit_code == 2, (result.output, getattr(result, "stderr", ""))
+
+        combined = (result.output or "") + (getattr(result, "stderr", "") or "")
+        assert "Warning: capture_pane failed during timeout handling" in combined
+        assert "timeout error and recovery hint still print" in combined
+        assert f"pane {PANE_ID} did not close within 15.0s" in combined
+        assert "cafleet member capture" in combined
+        assert "cafleet member send-input" in combined
+        assert "--force" in combined
+
+        assert deregister_recorder == []
+
+
+class TestForce:
+    def test_force_kills_pane_then_deregisters(
+        self,
+        runner,
+        session_id,
+        monkeypatch,
+        call_log,
+        deregister_recorder,
+        send_exit_recorder,
+        select_layout_recorder,
+        kill_pane_recorder,
+        wait_for_pane_gone_recorder,
+    ):
+        monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+
+        result = _invoke(runner, session_id, "--force")
+        assert result.exit_code == 0, result.output
+
+        assert send_exit_recorder == []
+        assert wait_for_pane_gone_recorder.calls == []
+
+        assert kill_pane_recorder == [
+            {"target_pane_id": PANE_ID, "ignore_missing": True}
+        ]
+        assert deregister_recorder == [MEMBER_ID]
+
+        names = [name for (name, *_) in call_log]
+        assert names == [
+            "kill_pane",
+            "deregister_agent",
+            "select_layout",
+        ]
+
+        out = result.output
+        assert "Member deleted (--force)." in out
+        assert f"{PANE_ID} (killed)" in out
+
+    def test_force_short_flag_works(
+        self,
+        runner,
+        session_id,
+        monkeypatch,
+        deregister_recorder,
+        send_exit_recorder,
+        kill_pane_recorder,
+    ):
+        monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+
+        result = _invoke(runner, session_id, "-f")
+        assert result.exit_code == 0, result.output
+        assert send_exit_recorder == []
+        assert kill_pane_recorder == [
+            {"target_pane_id": PANE_ID, "ignore_missing": True}
+        ]
+
+    def test_force_json_output_pane_status_killed(
+        self,
+        runner,
+        session_id,
+        monkeypatch,
+        deregister_recorder,
+        kill_pane_recorder,
+    ):
+        monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+
+        result = _invoke_json(runner, session_id, "--force")
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert data == {
+            "agent_id": MEMBER_ID,
+            "pane_status": f"{PANE_ID} (killed)",
+        }
+
+
+class TestPendingPlacementForce:
+    def test_force_with_pending_placement_skips_all_tmux(
+        self,
+        runner,
+        session_id,
+        monkeypatch,
+        call_log,
+        deregister_recorder,
+        send_exit_recorder,
+        select_layout_recorder,
+        kill_pane_recorder,
+        wait_for_pane_gone_recorder,
+    ):
+        monkeypatch.setattr(
+            broker,
+            "get_agent",
+            lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
+        )
+
+        result = _invoke(runner, session_id, "--force")
+        assert result.exit_code == 0, result.output
+
+        assert deregister_recorder == [MEMBER_ID]
+        assert send_exit_recorder == []
+        assert kill_pane_recorder == []
+        assert select_layout_recorder == []
+        assert wait_for_pane_gone_recorder.calls == []
+
+        names = [name for (name, *_) in call_log]
+        assert names == ["deregister_agent"]
 
 
 class TestAuthorizationBoundary:
@@ -239,10 +577,15 @@ class TestPendingPlacement:
 
 
 class TestTmuxErrorOnSendExit:
-    def test_send_exit_failure_is_surfaced_as_warning(
+    def test_send_exit_failure_now_exits_one_with_recovery_wording(
         self, runner, session_id, monkeypatch, deregister_recorder
     ):
-        """``send_exit`` failure after deregister must warn and still exit 0."""
+        """Under design 0000032 §3, send_exit TmuxError is a hard exit-1.
+
+        The old behavior was warning-and-continue with `tmux kill-pane -t <pane>`
+        in the warning text. The new wording points operators at `cafleet doctor`
+        and `--force` instead, with no raw tmux command exposed.
+        """
         monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
 
         def fake_send_exit(**_kw):
@@ -250,9 +593,13 @@ class TestTmuxErrorOnSendExit:
 
         monkeypatch.setattr(tmux, "send_exit", fake_send_exit)
         result = _invoke(runner, session_id)
-        assert result.exit_code == 0, result.output
-        assert deregister_recorder == [MEMBER_ID]
-        out = result.output
-        assert "Warning: send_exit failed" in out
-        assert f"tmux kill-pane -t {PANE_ID}" in out
-        assert f"{PANE_ID} (send_exit failed)" in out
+
+        assert result.exit_code == 1, (result.output, getattr(result, "stderr", ""))
+        combined = (result.output or "") + (getattr(result, "stderr", "") or "")
+        assert "send_exit failed" in combined
+        assert "tmux server may be unreachable" in combined
+        assert "cafleet doctor" in combined
+        assert "--force" in combined
+        assert "tmux kill-pane" not in combined
+
+        assert deregister_recorder == []

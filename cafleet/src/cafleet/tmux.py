@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 
 
@@ -142,6 +143,43 @@ def capture_pane(*, target_pane_id: str, lines: int = 80) -> str:
     if lines <= 0:
         raise TmuxError(f"capture_pane: lines must be positive, got {lines}")
     return _run(["tmux", "capture-pane", "-p", "-t", target_pane_id, "-S", f"-{lines}"])
+
+
+def pane_exists(*, target_pane_id: str) -> bool:
+    """Return True iff target_pane_id currently appears in the tmux server's pane list.
+
+    Uses ``tmux list-panes -a`` (all sessions on the server) so the check stays
+    correct even if the pane somehow migrated to a different window.
+    """
+    out = _run(["tmux", "list-panes", "-a", "-F", "#{pane_id}"])
+    return target_pane_id in out.split()
+
+
+def kill_pane(*, target_pane_id: str, ignore_missing: bool = False) -> None:
+    """Unconditionally kill the target pane. Swallows pane-gone errors when ignore_missing=True."""
+    try:
+        _run(["tmux", "kill-pane", "-t", target_pane_id])
+    except TmuxError as exc:
+        if ignore_missing and any(m in str(exc).lower() for m in _PANE_GONE_MARKERS):
+            return
+        raise
+
+
+def wait_for_pane_gone(
+    *, target_pane_id: str, timeout: float = 15.0, interval: float = 0.5
+) -> bool:
+    """Poll ``pane_exists`` until the pane is absent or the timeout elapses.
+
+    Returns True if the pane disappeared, False on timeout. Errors from
+    ``pane_exists`` propagate as TmuxError (caller decides).
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if not pane_exists(target_pane_id=target_pane_id):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
 
 
 def _run(args: list[str], *, timeout: float | None = None) -> str:
