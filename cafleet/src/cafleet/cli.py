@@ -704,7 +704,7 @@ def member_delete(ctx, agent_id, member_id, force):
             raise click.ClickException(
                 f"kill_pane failed for pane {pane_id}: {exc}. "
                 f"The tmux server may be unreachable. Verify with 'cafleet doctor', "
-                f"then retry without --force."
+                f"then re-run the command."
             ) from exc
         try:
             broker.deregister_agent(member_id)

@@ -238,7 +238,7 @@ Exit codes:
 | Exit | When |
 |---|---|
 | `0` | Success — all four fields printed. |
-| `1` | `TMUX` env var is unset (called outside a tmux session). |
+| `1` | Any tmux or environment failure: `TMUX` env var unset, `tmux` binary not on PATH, `TMUX_PANE` env var unset, or a tmux subprocess (e.g. `display-message`) failure. |
 
 ## `cafleet server` — Admin WebUI Server
 
