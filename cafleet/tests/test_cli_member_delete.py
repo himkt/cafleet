@@ -252,7 +252,7 @@ class TestHappyPath:
 
         result = _invoke_json(runner, session_id)
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert data == {
             "agent_id": MEMBER_ID,
             "pane_status": f"{PANE_ID} (closed)",
@@ -351,7 +351,7 @@ class TestTimeout:
 
         result = _invoke_json(runner, session_id)
         assert result.exit_code == 2, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert data == {
             "agent_id": MEMBER_ID,
             "pane_status": f"{PANE_ID} (timeout)",
@@ -454,7 +454,7 @@ class TestForce:
 
         result = _invoke_json(runner, session_id, "--force")
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert data == {
             "agent_id": MEMBER_ID,
             "pane_status": f"{PANE_ID} (killed)",
