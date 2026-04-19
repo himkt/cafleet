@@ -1,7 +1,7 @@
 # Director delegates member send-input choices via AskUserQuestion
 
 **Status**: Approved
-**Progress**: 2/16 tasks complete
+**Progress**: 4/16 tasks complete
 **Last Updated**: 2026-04-19
 
 ## Overview
@@ -109,8 +109,8 @@ Rewrite the section titled `Answer a member's AskUserQuestion prompt` so it spec
 
 Keep Stage 2 of the health check pointing at the same general mechanism, but update the short explanatory sentence and the escalation-table row for `send-input` so they reference the new `AskUserQuestion`-delegated pattern rather than implying the Director can forward a keystroke on its own judgment.
 
-- [ ] Update `~/.claude/skills/cafleet-monitoring/SKILL.md` — locate (a) the Stage 2 paragraph that introduces `send-input` as the unblock mechanism for AskUserQuestion-shaped pauses, and (b) the row of the escalation table whose command cell contains `member send-input`. Update both to reference the AskUserQuestion-delegated pattern and to cross-link the cafleet skill as canonical. Match by content, not line number. <!-- completed: -->
-- [ ] Update `/home/himkt/work/himkt/cafleet/skills/cafleet-monitoring/SKILL.md` — apply the same edits to the project copy. `diff` after edit to confirm parity of the changed regions. <!-- completed: -->
+- [x] Update `~/.claude/skills/cafleet-monitoring/SKILL.md` — locate (a) the Stage 2 paragraph that introduces `send-input` as the unblock mechanism for AskUserQuestion-shaped pauses, and (b) the row of the escalation table whose command cell contains `member send-input`. Update both to reference the AskUserQuestion-delegated pattern and to cross-link the cafleet skill as canonical. Match by content, not line number. <!-- completed: 2026-04-19T00:00 -->
+- [x] Update `/home/himkt/work/himkt/cafleet/skills/cafleet-monitoring/SKILL.md` — apply the same edits to the project copy. `diff` after edit to confirm parity of the changed regions. <!-- completed: 2026-04-19T00:00 -->
 
 ### Step 3: Update the Director role files for design-doc-create and design-doc-execute
 
