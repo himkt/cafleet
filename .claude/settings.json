@@ -6,9 +6,9 @@
       "Bash(mise tasks)",
       "Bash(mise tasks --all)",
       "Skill(update-readme)",
-      "Skill(cafleet-design-doc-create)",
-      "Skill(cafleet-design-doc-execute)",
-      "Skill(cafleet-design-doc)",
+      "Skill(design-doc-create)",
+      "Skill(design-doc-execute)",
+      "Skill(design-doc)",
       "Bash(cafleet *)",
       "Bash(git mv *)",
       "Bash(uv run cafleet *)"

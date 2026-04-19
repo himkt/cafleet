@@ -11,8 +11,8 @@
   "skills": [
     "./.claude/skills/cafleet",
     "./.claude/skills/cafleet-monitoring",
-    "./.claude/skills/cafleet-design-doc",
-    "./.claude/skills/cafleet-design-doc-create",
-    "./.claude/skills/cafleet-design-doc-execute"
+    "./.claude/skills/design-doc",
+    "./.claude/skills/design-doc-create",
+    "./.claude/skills/design-doc-execute"
   ]
 }

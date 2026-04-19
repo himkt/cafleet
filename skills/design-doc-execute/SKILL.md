@@ -1,5 +1,5 @@
 ---
-name: cafleet-design-doc-execute
+name: design-doc-execute
 description: Implement features based on a design document using CAFleet-native orchestration with TDD cycle. Use when the user asks to implement or execute a design document. Takes document path as argument. Do NOT implement a design document by reading it and coding manually — always invoke this skill instead.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch
 ---
@@ -17,8 +17,8 @@ Implement features based on a design document using up to four roles orchestrate
 
 ## Additional resources
 
-- For the document template, see: [../cafleet-design-doc/template.md](../cafleet-design-doc/template.md)
-- For section guidelines and quality standards, see: [../cafleet-design-doc/guidelines.md](../cafleet-design-doc/guidelines.md)
+- For the document template, see: [../design-doc/template.md](../design-doc/template.md)
+- For section guidelines and quality standards, see: [../design-doc/guidelines.md](../design-doc/guidelines.md)
 
 ## Architecture
 
@@ -210,9 +210,9 @@ Based on the design document steps (see [roles/director.md](roles/director.md) f
 
 Read the role files that will be embedded verbatim in spawn prompts:
 
-- `.claude/skills/cafleet-design-doc-execute/roles/programmer.md`
-- `.claude/skills/cafleet-design-doc-execute/roles/tester.md` (if Tester needed)
-- `.claude/skills/cafleet-design-doc-execute/roles/verifier.md` (if Verifier needed)
+- `.claude/skills/design-doc-execute/roles/programmer.md`
+- `.claude/skills/design-doc-execute/roles/tester.md` (if Tester needed)
+- `.claude/skills/design-doc-execute/roles/verifier.md` (if Verifier needed)
 
 #### 3f. Spawn each member via `cafleet member create`
 
@@ -227,7 +227,7 @@ You are the Programmer in a design document execution team (CAFleet-native).
 
 Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
-- Skill(cafleet-design-doc) — for template and guidelines
+- Skill(design-doc) — for template and guidelines
 
 SESSION ID: <session-id>
 DIRECTOR AGENT ID: <director-agent-id>
@@ -267,7 +267,7 @@ You are the Tester in a design document execution team (CAFleet-native).
 
 Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
-- Skill(cafleet-design-doc) — for template and guidelines
+- Skill(design-doc) — for template and guidelines
 
 SESSION ID: <session-id>
 DIRECTOR AGENT ID: <director-agent-id>
@@ -308,7 +308,7 @@ You are the Verifier in a design document execution team (CAFleet-native).
 
 Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
-- Skill(cafleet-design-doc) — for template and guidelines
+- Skill(design-doc) — for template and guidelines
 
 SESSION ID: <session-id>
 DIRECTOR AGENT ID: <director-agent-id>

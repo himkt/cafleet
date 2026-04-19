@@ -35,7 +35,7 @@ When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE 
 
 - `/cafleet` — Interact with the CAFleet A2A message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
 - `/cafleet-monitoring` — Mandatory supervision protocol for a Director managing member agents via CAFleet. Defines monitoring loop, spawn protocol, and stall response.
-- `/cafleet-design-doc` — Standardized design document format with template and guidelines. Load when writing or editing a design document.
-- `/cafleet-design-doc-create` — Create a new design document using CAFleet-native orchestration (Director / Drafter / Reviewer).
-- `/cafleet-design-doc-execute` — Implement features based on a design document using CAFleet-native orchestration with TDD cycle (Director / Programmer / Tester / optional Verifier).
+- `/design-doc` — Standardized design document format with template and guidelines. Load when writing or editing a design document.
+- `/design-doc-create` — Create a new design document using CAFleet-native orchestration (Director / Drafter / Reviewer).
+- `/design-doc-execute` — Implement features based on a design document using CAFleet-native orchestration with TDD cycle (Director / Programmer / Tester / optional Verifier).
 - `/update-readme` — Update README.md based on ARCHITECTURE.md and docs/ directory. Use when documentation sources change and README needs to reflect the latest state.
