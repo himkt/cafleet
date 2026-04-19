@@ -1,7 +1,7 @@
 # Robust member teardown: wait for real shutdown and close the remaining raw-tmux escape hatches
 
 **Status**: In Progress
-**Progress**: 18/46 tasks complete (Step 1 documentation done)
+**Progress**: 21/46 tasks complete (Step 1 documentation + Step 2 tmux primitives done)
 **Last Updated**: 2026-04-19
 
 ## Overview
@@ -367,9 +367,9 @@ Every file below must be updated BEFORE any code change, per `.claude/rules/desi
 
 ### Step 2: tmux primitives
 
-- [ ] Add `pane_exists(*, target_pane_id: str) -> bool` to `cafleet/src/cafleet/tmux.py`. Wraps `tmux list-panes -a -F "#{pane_id}"`. <!-- completed: -->
-- [ ] Add `kill_pane(*, target_pane_id: str, ignore_missing: bool = False) -> None` to `cafleet/src/cafleet/tmux.py`. Wraps `tmux kill-pane -t <pane>`. Reuse `_PANE_GONE_MARKERS` for `ignore_missing` handling. <!-- completed: -->
-- [ ] Add `wait_for_pane_gone(*, target_pane_id: str, timeout: float = 15.0, interval: float = 0.5) -> bool` to `cafleet/src/cafleet/tmux.py`. Use `time.monotonic()` + `time.sleep()` for monkeypatch-friendly tests. <!-- completed: -->
+- [x] Add `pane_exists(*, target_pane_id: str) -> bool` to `cafleet/src/cafleet/tmux.py`. Wraps `tmux list-panes -a -F "#{pane_id}"`. <!-- completed: 2026-04-19T08:02 -->
+- [x] Add `kill_pane(*, target_pane_id: str, ignore_missing: bool = False) -> None` to `cafleet/src/cafleet/tmux.py`. Wraps `tmux kill-pane -t <pane>`. Reuse `_PANE_GONE_MARKERS` for `ignore_missing` handling. <!-- completed: 2026-04-19T08:02 -->
+- [x] Add `wait_for_pane_gone(*, target_pane_id: str, timeout: float = 15.0, interval: float = 0.5) -> bool` to `cafleet/src/cafleet/tmux.py`. Use `time.monotonic()` + `time.sleep()` for monkeypatch-friendly tests. <!-- completed: 2026-04-19T08:02 -->
 
 ### Step 3: `cafleet doctor` subcommand
 

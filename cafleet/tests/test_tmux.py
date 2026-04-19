@@ -432,9 +432,7 @@ class TestWaitForPaneGone:
 
         monkeypatch.setattr(tmux, "pane_exists", fake_pane_exists)
 
-        result = tmux.wait_for_pane_gone(
-            target_pane_id="%7", timeout=2.0, interval=0.5
-        )
+        result = tmux.wait_for_pane_gone(target_pane_id="%7", timeout=2.0, interval=0.5)
         assert result is True
         assert poll_calls == ["%7"]
         assert clock.sleep_calls == []
@@ -453,9 +451,7 @@ class TestWaitForPaneGone:
 
         monkeypatch.setattr(tmux, "pane_exists", fake_pane_exists)
 
-        result = tmux.wait_for_pane_gone(
-            target_pane_id="%7", timeout=2.0, interval=0.5
-        )
+        result = tmux.wait_for_pane_gone(target_pane_id="%7", timeout=2.0, interval=0.5)
         assert result is True
         assert poll_calls == ["%7", "%7", "%7"]
         assert clock.sleep_calls == [0.5, 0.5]
@@ -474,9 +470,7 @@ class TestWaitForPaneGone:
 
         monkeypatch.setattr(tmux, "pane_exists", fake_pane_exists)
 
-        result = tmux.wait_for_pane_gone(
-            target_pane_id="%7", timeout=2.0, interval=0.5
-        )
+        result = tmux.wait_for_pane_gone(target_pane_id="%7", timeout=2.0, interval=0.5)
         assert result is False
         assert len(poll_calls) == 5
         assert clock.sleep_calls == [0.5, 0.5, 0.5, 0.5]
@@ -491,15 +485,11 @@ class TestWaitForPaneGone:
         def fake_pane_exists(*, target_pane_id):
             call_count["n"] += 1
             if call_count["n"] >= 2:
-                raise tmux.TmuxError(
-                    "tmux command failed: server exited unexpectedly"
-                )
+                raise tmux.TmuxError("tmux command failed: server exited unexpectedly")
             return True
 
         monkeypatch.setattr(tmux, "pane_exists", fake_pane_exists)
 
         with pytest.raises(tmux.TmuxError, match="server exited unexpectedly"):
-            tmux.wait_for_pane_gone(
-                target_pane_id="%7", timeout=2.0, interval=0.5
-            )
+            tmux.wait_for_pane_gone(target_pane_id="%7", timeout=2.0, interval=0.5)
         assert call_count["n"] == 2
