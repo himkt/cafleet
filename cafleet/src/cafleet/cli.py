@@ -238,6 +238,43 @@ def server(host: str, port: int) -> None:
     )
 
 
+@cli.command("doctor")
+@click.pass_context
+def doctor(ctx) -> None:
+    """Print the calling pane's tmux session/window/pane identifiers."""
+    try:
+        tmux.ensure_tmux_available()
+    except tmux.TmuxError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        director_ctx = tmux.director_context()
+    except tmux.TmuxError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    tmux_pane_env = os.environ["TMUX_PANE"]
+
+    if ctx.obj["json_output"]:
+        click.echo(
+            json.dumps(
+                {
+                    "tmux": {
+                        "session_name": director_ctx.session,
+                        "window_id": director_ctx.window_id,
+                        "pane_id": director_ctx.pane_id,
+                        "tmux_pane_env": tmux_pane_env,
+                    }
+                }
+            )
+        )
+    else:
+        click.echo("tmux:")
+        click.echo(f"  session_name:  {director_ctx.session}")
+        click.echo(f"  window_id:     {director_ctx.window_id}")
+        click.echo(f"  pane_id:       {director_ctx.pane_id}")
+        click.echo(f"  TMUX_PANE:     {tmux_pane_env}")
+
+
 @cli.command()
 @click.option("--name", required=True, help="Agent name")
 @click.option("--description", required=True, help="Agent description")

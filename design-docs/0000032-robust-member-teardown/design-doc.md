@@ -1,7 +1,7 @@
 # Robust member teardown: wait for real shutdown and close the remaining raw-tmux escape hatches
 
 **Status**: In Progress
-**Progress**: 21/46 tasks complete (Step 1 documentation + Step 2 tmux primitives done)
+**Progress**: 23/46 tasks complete (Step 1 documentation + Step 2 tmux primitives + Step 3 doctor subcommand done)
 **Last Updated**: 2026-04-19
 
 ## Overview
@@ -373,8 +373,8 @@ Every file below must be updated BEFORE any code change, per `.claude/rules/desi
 
 ### Step 3: `cafleet doctor` subcommand
 
-- [ ] Add `doctor` top-level click command to `cafleet/src/cafleet/cli.py`. Require TMUX via `tmux.ensure_tmux_available()`. Mark `doctor` as a no-session-id-required subcommand (same handling as `db init` / `session *` / `server`). <!-- completed: -->
-- [ ] Implement text and `--json` output per Specification §2 — session_name / window_id / pane_id from `tmux.director_context()`, TMUX_PANE from `os.environ`. <!-- completed: -->
+- [x] Add `doctor` top-level click command to `cafleet/src/cafleet/cli.py`. Require TMUX via `tmux.ensure_tmux_available()`. Mark `doctor` as a no-session-id-required subcommand (same handling as `db init` / `session *` / `server`). <!-- completed: 2026-04-19T08:18 -->
+- [x] Implement text and `--json` output per Specification §2 — session_name / window_id / pane_id from `tmux.director_context()`, TMUX_PANE from `os.environ`. <!-- completed: 2026-04-19T08:18 -->
 
 ### Step 4: `cafleet member delete` blocking + `--force`
 
