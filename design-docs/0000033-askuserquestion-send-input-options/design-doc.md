@@ -10,11 +10,11 @@ Replace the current "Director pre-guesses one `cafleet member send-input` messag
 
 ## Success Criteria
 
-- [ ] The Director never prints a "please run this command in your shell" instruction block for `member send-input`. All operator consent flows through Claude Code's Bash permission prompt instead.
-- [ ] Every canonical documentation source for the send-input workflow (global skills, project-local skill copies, project README/ARCHITECTURE/docs) describes the new three-beat shape: `member capture` → `AskUserQuestion` → direct Bash invocation of `cafleet member send-input`.
-- [ ] Both pane-prompt shapes are covered: open-ended AskUserQuestion (2–4 candidate bodies, submit via `--freetext`) and choice-routing AskUserQuestion (mirror the member's own labelled options, submit via `--choice N`). A third "Other shapes" row explicitly forbids using `send-input` outside the AskUserQuestion 4-option frame.
-- [ ] `AskUserQuestion` per-call limits (1–4 questions, 2–4 options each, built-in "Other" — no explicit "Write my own" option) are enforced in the written spec, and 5-or-more-body scenarios are explicitly handled by narrowing to 2–4 candidates BEFORE asking (not by paginating across sequential calls).
-- [ ] A grep across all updated files finds no remaining instruction to the Director to print a fenced `bash` block with `cafleet ... member send-input ...` for the user to copy-paste.
+- [x] The Director never prints a "please run this command in your shell" instruction block for `member send-input`. All operator consent flows through Claude Code's Bash permission prompt instead.
+- [x] Every canonical documentation source for the send-input workflow (global skills, project-local skill copies, project README/ARCHITECTURE/docs) describes the new three-beat shape: `member capture` → `AskUserQuestion` → direct Bash invocation of `cafleet member send-input`.
+- [x] Both pane-prompt shapes are covered: open-ended AskUserQuestion (2–4 candidate bodies, submit via `--freetext`) and choice-routing AskUserQuestion (mirror the member's own labelled options, submit via `--choice N`). A third "Other shapes" row explicitly forbids using `send-input` outside the AskUserQuestion 4-option frame.
+- [x] `AskUserQuestion` per-call limits (1–4 questions, 2–4 options each, built-in "Other" — no explicit "Write my own" option) are enforced in the written spec, and 5-or-more-body scenarios are explicitly handled by narrowing to 2–4 candidates BEFORE asking (not by paginating across sequential calls).
+- [x] A grep across all updated files finds no remaining instruction to the Director to print a fenced `bash` block with `cafleet ... member send-input ...` for the user to copy-paste.
 
 ---
 
