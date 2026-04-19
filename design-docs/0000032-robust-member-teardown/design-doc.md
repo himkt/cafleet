@@ -1,7 +1,7 @@
 # Robust member teardown: wait for real shutdown and close the remaining raw-tmux escape hatches
 
 **Status**: In Progress
-**Progress**: 38/46 tasks complete (Steps 1-4 done: documentation, tmux primitives, doctor subcommand, member_delete blocking + --force)
+**Progress**: 46/46 tasks complete (Steps 1-4 done: documentation, tmux primitives, doctor subcommand, member_delete blocking + --force)
 **Last Updated**: 2026-04-19
 
 ## Overview
@@ -10,15 +10,15 @@
 
 ## Success Criteria
 
-- [ ] `cafleet member delete` (default path) blocks until the target pane disappears from `tmux list-panes`, up to a 15 s timeout.
-- [ ] On timeout, `member delete` captures the pane buffer tail, prints it + a cafleet-native recovery hint on stderr, and exits with code **2** (distinct from the generic `1`).
-- [ ] `cafleet member delete --force` skips `/exit`, immediately kill-panes the target, deregisters the agent, rebalances the layout, and exits `0`.
-- [ ] `cafleet doctor` prints `session_name`, `window_id`, `pane_id`, and `TMUX_PANE` in both text and `--json` formats, requires `TMUX`, and does NOT require `--session-id`.
-- [ ] Every documented reference to raw `tmux kill-pane` (README.md, docs/spec/cli-options.md, cli.py warning text, skills/cafleet/SKILL.md) is replaced with the `--force` or capture+send-input recovery path.
-- [ ] Every documented reference to raw `tmux display-message` (skills/cafleet/SKILL.md "Rule: use cafleet primitives only" paragraph) is replaced with `cafleet doctor`.
-- [ ] New tmux primitives `pane_exists`, `kill_pane`, `wait_for_pane_gone` exist in `cafleet/src/cafleet/tmux.py` with unit tests.
-- [ ] All existing tests continue to pass; `test_cli_member_delete.TestTmuxErrorOnSendExit` is rewritten to assert the new wording; new tests cover happy-path-wait, timeout-with-capture, `--force`, and the pane-already-gone race.
-- [ ] `mise //cafleet:lint` / `:typecheck` / `:test` all pass.
+- [x] `cafleet member delete` (default path) blocks until the target pane disappears from `tmux list-panes`, up to a 15 s timeout.
+- [x] On timeout, `member delete` captures the pane buffer tail, prints it + a cafleet-native recovery hint on stderr, and exits with code **2** (distinct from the generic `1`). (Unit-level via TestTimeout; end-to-end smoke 4 unreproducible because claude /exit preempts cleanly.)
+- [x] `cafleet member delete --force` skips `/exit`, immediately kill-panes the target, deregisters the agent, rebalances the layout, and exits `0`.
+- [x] `cafleet doctor` prints `session_name`, `window_id`, `pane_id`, and `TMUX_PANE` in both text and `--json` formats, requires `TMUX`, and does NOT require `--session-id`.
+- [x] Every documented reference to raw `tmux kill-pane` (README.md, docs/spec/cli-options.md, cli.py warning text, skills/cafleet/SKILL.md) is replaced with the `--force` or capture+send-input recovery path.
+- [x] Every documented reference to raw `tmux display-message` (skills/cafleet/SKILL.md "Rule: use cafleet primitives only" paragraph) is replaced with `cafleet doctor`.
+- [x] New tmux primitives `pane_exists`, `kill_pane`, `wait_for_pane_gone` exist in `cafleet/src/cafleet/tmux.py` with unit tests.
+- [x] All existing tests continue to pass; `test_cli_member_delete.TestTmuxErrorOnSendExit` is rewritten to assert the new wording; new tests cover happy-path-wait, timeout-with-capture, `--force`, and the pane-already-gone race.
+- [x] `mise //cafleet:lint` / `:typecheck` / `:test` all pass.
 
 ---
 
@@ -402,14 +402,14 @@ Every file below must be updated BEFORE any code change, per `.claude/rules/desi
 
 ### Step 6: Verification
 
-- [ ] `mise //cafleet:lint` passes. <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` passes. <!-- completed: -->
-- [ ] `mise //cafleet:test` passes. <!-- completed: -->
-- [ ] `mise //cafleet:install` (editable reinstall so the `cafleet doctor` subcommand is on PATH for smoke tests). <!-- completed: -->
-- [ ] Smoke test: `cafleet doctor` inside tmux prints all four fields matching the current pane. <!-- completed: -->
-- [ ] Smoke test: happy-path `cafleet member delete` on a live member — blocks briefly, exits 0. <!-- completed: -->
-- [ ] Smoke test: stuck-pane `cafleet member delete` (member running `sleep 300`) — exits 2 with buffer tail on stderr. <!-- completed: -->
-- [ ] Smoke test: same stuck pane, `cafleet member delete --force` — exits 0 immediately, pane is gone. <!-- completed: -->
+- [x] `mise //cafleet:lint` passes. <!-- completed: 2026-04-19T08:35 -->
+- [x] `mise //cafleet:typecheck` passes. <!-- completed: 2026-04-19T08:35 -->
+- [x] `mise //cafleet:test` passes. <!-- completed: 2026-04-19T08:35 -->
+- [x] `mise //cafleet:install` (editable reinstall so the `cafleet doctor` subcommand is on PATH for smoke tests). <!-- completed: 2026-04-19T08:42 -->
+- [x] Smoke test: `cafleet doctor` inside tmux prints all four fields matching the current pane. <!-- completed: 2026-04-19T09:10 -->
+- [x] Smoke test: happy-path `cafleet member delete` on a live member — blocks briefly, exits 0. <!-- completed: 2026-04-19T09:13 -->
+- [x] Smoke test: stuck-pane `cafleet member delete` — UNREPRODUCIBLE end-to-end (claude /exit preempts its own thinking cleanly); authoritative coverage via `cafleet/tests/test_cli_member_delete.py::TestTimeout`. <!-- completed: 2026-04-19T09:14 -->
+- [x] Smoke test: same stuck pane, `cafleet member delete --force` — exits 0 immediately, pane is gone. <!-- completed: 2026-04-19T09:14 -->
 
 ---
 
@@ -422,3 +422,8 @@ Every file below must be updated BEFORE any code change, per `.claude/rules/desi
 | 2026-04-19 | Round-2 revision: Step 1 ARCHITECTURE.md task split into three distinct checkboxes (matches §5 rows); Progress header bumped to 0/46; §8 item 3 now also records the loss of `pane_status="(send_exit failed)"`. |
 | 2026-04-19 | Finalized: Status → Approved after user sign-off. |
 | 2026-04-19 | Step 1 implementation complete: 18 documentation edits applied across 8 files (ARCHITECTURE.md / README.md / docs/spec/cli-options.md / skills/cafleet/SKILL.md / skills/cafleet-monitoring/SKILL.md / skills/design-doc-create/SKILL.md / skills/design-doc-execute/SKILL.md). Partial crash mid-step: initial execute team's tmux panes died with a local laptop crash, Director completed the remaining 3 edits (cafleet-monitoring :78 --force row, design-doc-create Step 6 callout, design-doc-execute Step 6 callout) directly. Status bumped from Approved → In Progress; Progress header bumped to 18/46. A fresh execute team will pick up Step 2 (tmux primitives). |
+| 2026-04-19 | Step 2 complete: pane_exists / kill_pane / wait_for_pane_gone added to cafleet/src/cafleet/tmux.py with 11 unit tests. Progress 21/46. |
+| 2026-04-19 | Step 3 complete: cafleet doctor top-level subcommand added with 4 unit tests. Progress 23/46. |
+| 2026-04-19 | Step 4 complete: cafleet member delete rewritten per Spec §3 with blocking-until-pane-gone default path (15s timeout / 500ms interval) + --force/-f short-circuit that calls kill_pane immediately. Three-way exit code split (0/1/2). Option-(b) deregister-after-pane-gone ordering (overrides 0000014). 10 new/rewritten cli tests + 11 tmux tests all pass. Progress 28/46. |
+| 2026-04-19 | Step 5 complete: all 10 test checklist items ticked off (tests were committed during the TDD Phase A steps for Step 2/3/4). Progress 38/46. |
+| 2026-04-19 | Step 6 complete: mise //cafleet:lint / :typecheck / :test (487/487) / :install all pass. Smoke tests 1-3 and 5 PASS end-to-end. Smoke 4 (stuck-pane 15s timeout) UNREPRODUCIBLE via naive expensive-prompt injection — claude /exit preempts its own thinking cleanly. Authoritative coverage for the timeout path stands via unit test TestTimeout in cafleet/tests/test_cli_member_delete.py. Progress 46/46. |
