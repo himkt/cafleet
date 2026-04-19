@@ -116,6 +116,10 @@ When the user selects "Other" and provides free text, use LLM reasoning to deter
 
 Track team progress via the `Skill(cafleet-monitoring)` `/loop` (1-minute interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet send` about what you expect next.
 
+### User delegation for member send-input
+
+When a member pauses on an `AskUserQuestion`-shaped prompt, the Director MUST delegate the decision to the user via its own `AskUserQuestion` tool call and then invoke the resolved `cafleet member send-input` via its Bash tool — Claude Code's native per-call permission prompt is the user-consent surface. Never print a fenced `bash` block containing the resolved command for the user to copy-paste; see the cafleet skill's "Answer a member's AskUserQuestion prompt" section for the canonical three-beat workflow and pane-shapes table.
+
 ### Skill-specific milestones
 
 | Phase | Expected event | Stall indicator | Director action |
