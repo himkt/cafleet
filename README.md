@@ -292,7 +292,7 @@ cd cafleet
 mise //cafleet:sync
 
 # Install the `cafleet` CLI as an editable uv tool
-# Source edits under cafleet/src/cafleet/ then take effect with no second reinstall.
+# Source edits under cafleet/src/cafleet/ take effect with no second reinstall.
 # Re-run this task if you previously installed `cafleet` without `--editable`.
 mise //cafleet:install
 

@@ -117,7 +117,7 @@ class TestSessionCreateTextOutput:
         assert "pane:" in text
         assert "administrator:" in text
 
-        assert "director" in text
+        assert "Director" in text
         assert "bootstrap-check" in text
 
         assert (
