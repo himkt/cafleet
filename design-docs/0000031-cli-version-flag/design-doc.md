@@ -1,7 +1,7 @@
 # CLI `--version` Flag
 
 **Status**: Approved
-**Progress**: 4/11 tasks complete
+**Progress**: 8/11 tasks complete
 **Last Updated**: 2026-04-19
 
 ## Overview
@@ -178,13 +178,13 @@ Concrete row body to use everywhere (adapt column headers to each table's shape)
 
 ### Step 2: Code implementation
 
-- [ ] Add `@click.version_option(package_name="cafleet", message="cafleet %(version)s")` to the `cli` group in `cafleet/src/cafleet/cli.py`, placed between `@click.group()` and the first `@click.option` decorator (as shown in the Specification code block). <!-- completed: -->
-- [ ] Run `mise //cafleet:format` and `mise //cafleet:lint` to confirm the decorator addition does not trigger style issues. <!-- completed: -->
+- [x] Add `@click.version_option(package_name="cafleet", message="cafleet %(version)s")` to the `cli` group in `cafleet/src/cafleet/cli.py`, placed between `@click.group()` and the first `@click.option` decorator (as shown in the Specification code block). <!-- completed: 2026-04-19T03:50 -->
+- [x] Run `mise //cafleet:format` and `mise //cafleet:lint` to confirm the decorator addition does not trigger style issues. <!-- completed: 2026-04-19T03:50 -->
 
 ### Step 3: Tests
 
-- [ ] Create `cafleet/tests/test_cli_version.py` with the two test cases shown in the Specification. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` and confirm both tests pass alongside the existing suite. <!-- completed: -->
+- [x] Create `cafleet/tests/test_cli_version.py` with the two test cases shown in the Specification. <!-- completed: 2026-04-19T03:50 -->
+- [x] Run `mise //cafleet:test` and confirm both tests pass alongside the existing suite. <!-- completed: 2026-04-19T03:50 -->
 
 ### Step 4: Verification
 
