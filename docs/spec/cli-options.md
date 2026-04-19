@@ -194,7 +194,51 @@ Deleted session <session_id>. Deregistered N agents.
 
 There is no `--force` flag. Calling `session delete` on an unknown `session_id` exits 1 with `Error: session 'X' not found.`.
 
-Member tmux panes spawned by `cafleet member create` are **not** automatically closed by `session delete`. For a clean teardown, call `cafleet member delete` per member first (which sends `/exit` to the pane). Any surviving `claude` / `codex` processes with orphaned placements can be terminated manually with `tmux kill-pane`.
+Member tmux panes spawned by `cafleet member create` are **not** automatically closed by `session delete`. For a clean teardown, call `cafleet member delete` per member first (which sends `/exit` to the pane). If a member pane refuses to close (e.g. blocked on a confirmation prompt), rerun `cafleet member delete` with `--force`, which kill-panes the target, sweeps the placement, and rebalances the layout.
+
+## `cafleet doctor` — Placement Diagnostics
+
+Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE`) for operators diagnosing placement issues without reaching for raw tmux commands. Intended as the home for future health checks (DB connectivity, orphan-placement scans, etc.); today it covers tmux metadata only.
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--json` | no | Global `--json`, placed before the subcommand (same pattern as every other CLI command). |
+| `--session-id` | no | Silently accepted and ignored, matching `db init` / `session *` / `server`. |
+
+Environment requirements:
+
+- `TMUX` env var must be set — the command rejects otherwise with `Error: cafleet member commands must be run inside a tmux session` (reused verbatim from `tmux.ensure_tmux_available()`).
+- `TMUX_PANE` env var must be set — already required by `tmux.director_context()`.
+
+Text output:
+
+```
+tmux:
+  session_name:  main
+  window_id:     @3
+  pane_id:       %0
+  TMUX_PANE:     %0
+```
+
+JSON output:
+
+```json
+{
+  "tmux": {
+    "session_name": "main",
+    "window_id": "@3",
+    "pane_id": "%0",
+    "tmux_pane_env": "%0"
+  }
+}
+```
+
+Exit codes:
+
+| Exit | When |
+|---|---|
+| `0` | Success — all four fields printed. |
+| `1` | `TMUX` env var is unset (called outside a tmux session). |
 
 ## `cafleet server` — Admin WebUI Server
 
@@ -264,8 +308,29 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | Target member's agent ID |
+| `--force` / `-f` | no | Skip the `/exit` wait. Immediately kill-pane the target, then deregister, then rebalance layout. Exit 0 even if the pane was already gone. |
 
 Cross-Director delete is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before calling `broker.deregister_agent` or sending `/exit` to the pane. An attempt to delete another Director's member in the same session exits 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other-director>).` (mirrors `member capture` / `member send-input`).
+
+#### Polling contract (default path)
+
+The default path sends `/exit` via `tmux send-keys`, then polls `tmux list-panes -a -F "#{pane_id}"` for the target pane every **500 ms** until the pane disappears or a **15.0 s** timeout elapses. Typical `claude /exit` completes in 1–3 s; operators who need faster escalation pass `--force`. On timeout, the pane buffer tail (last 80 lines) is captured via `tmux capture-pane` and printed on stderr, followed by a recovery hint, and the command exits **2**. The timeout output shape:
+
+```
+Error: pane %7 did not close within 15.0s after /exit.
+--- pane %7 tail (last 80 lines) ---
+<captured terminal buffer>
+---
+Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet member send-input`, then re-run `cafleet member delete`. Or re-run with `--force` to skip the wait and kill the pane.
+```
+
+#### Exit codes
+
+| Exit | When |
+|---|---|
+| `0` | Success — default path pane-gone confirmed, `--force` pane killed, or pending-placement deregister. |
+| `1` | Any non-timeout failure: auth rejection, missing session, unknown member-id, `broker.deregister_agent` failure, `send_exit` tmux failure (pre-poll), `tmux.wait_for_pane_gone` raising TmuxError (server crash mid-poll). |
+| `2` | Default-path timeout — `/exit` was sent, the pane did not disappear within 15.0 s, buffer tail has been printed on stderr. |
 
 ### `member list`
 

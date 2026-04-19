@@ -110,6 +110,45 @@ Rules:
 - Non-`--json` output prints `Agent registered successfully!` followed by `  agent_id:  <uuid>` and `  name:      <name>`. Parse the `agent_id:` line if `--json` is not an option.
 - Call `cafleet --session-id <session-id> deregister --agent-id <my-agent-id>` at end of session so stale registrations do not accumulate.
 
+### Doctor
+
+Print the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE`) for operators diagnosing placement issues without reaching for raw tmux commands.
+
+```bash
+cafleet doctor
+cafleet --json doctor
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--json` | no | Global `--json`, placed before the subcommand. |
+| `--session-id` | no | Silently accepted and ignored, matching `db init` / `session *` / `server`. |
+
+Environment requirements: `TMUX` must be set (outside tmux the command exits 1 with `Error: cafleet member commands must be run inside a tmux session`), and `TMUX_PANE` must be set (already required by `tmux.director_context()`).
+
+Text output:
+
+```
+tmux:
+  session_name:  main
+  window_id:     @3
+  pane_id:       %0
+  TMUX_PANE:     %0
+```
+
+JSON output:
+
+```json
+{
+  "tmux": {
+    "session_name": "main",
+    "window_id": "@3",
+    "pane_id": "%0",
+    "tmux_pane_env": "%0"
+  }
+}
+```
+
 ### List Agents
 
 List all registered agents, or get detail for a specific agent.
@@ -196,7 +235,7 @@ cafleet session delete <session-id>
 
 Soft-deletes a session in a single transaction: stamps `sessions.deleted_at`, deregisters every active agent in the session (root Director + Administrator + any remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. The command is idempotent — re-running against an already-deleted session prints `Deregistered 0 agents.` and exits 0.
 
-After soft-delete, the session is hidden from `cafleet session list` and further `cafleet register --session-id <deleted>` calls fail with `Error: session <id> is deleted`. Surviving member `claude` / `codex` processes are **not** automatically closed — call `cafleet member delete` per member **before** `cafleet session delete` for a clean teardown. Any lingering panes can be closed manually with `tmux kill-pane`.
+After soft-delete, the session is hidden from `cafleet session list` and further `cafleet register --session-id <deleted>` calls fail with `Error: session <id> is deleted`. Surviving member `claude` / `codex` processes are **not** automatically closed — call `cafleet member delete` per member **before** `cafleet session delete` for a clean teardown. See the Shutdown Protocol under "Multi-Session Coordination" for the full ordering — raw `tmux` commands are NOT part of the recovery path.
 
 ### Member Create
 
@@ -224,11 +263,7 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`) — `.format()` collapses each `{{` / `}}` pair to a single literal brace and, critically, does not attempt placeholder substitution on the inner tokens. This matters for prompts that embed JSON snippets, shell expansions, or other content with literal curly braces. Pre-substituting the dynamic values in shell does NOT exempt the prompt from this rule — even a placeholder-free prompt is still passed through `str.format()`, so any literal braces must still be doubled or removed.
 
-**Pane title**: for `--coding-agent claude`, the `--name` flag is forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the tmux pane title (`#{pane_title}`) shows the member name and persists across prompt replies. Operators can locate a specific member's pane by filtering the pane-title listing:
-
-```bash
-tmux list-panes -a -F "#{pane_id} #{pane_title}" | grep Drafter
-```
+**Pane title**: for `--coding-agent claude`, the `--name` flag is forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the tmux pane title (`#{pane_title}`) shows the member name internally. Operators should locate a specific member's pane via `cafleet member list --agent-id <director-agent-id>` (the output column `pane_id` carries the same pane identifier without requiring any raw `tmux` command).
 
 For `--coding-agent codex`, no display-name flag exists today; the pane title stays on the auto-derived default.
 
@@ -263,25 +298,44 @@ Output (`--json`):
 
 ### Member Delete
 
-Deregister a member agent and close its tmux pane. The agent is deregistered FIRST, then `/exit` is sent to the pane — so a deregister failure leaves both intact for retry.
+The CLI sends `/exit`, polls `tmux list-panes` for the target `pane_id` until it disappears (15 s timeout), then deregisters the agent and rebalances the layout. On timeout, the pane buffer tail is captured and printed on stderr, and the command exits 2 without deregistering. Rerun with `--force` to skip `/exit` and kill the pane immediately.
 
 ```bash
 cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
   --member-id <member-agent-id>
+
+cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
+  --member-id <member-agent-id> --force
 ```
 
 | Flag | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | The target member's agent ID |
+| `--force` / `-f` | no | Skip the `/exit` wait. Immediately kill-pane the target, then deregister, then rebalance layout. Exit 0 even if the pane was already gone. |
+
+Exit codes:
+
+| Exit | When |
+|---|---|
+| `0` | Success — default path pane-gone confirmed, `--force` pane killed, or pending-placement deregister. |
+| `1` | Any non-timeout failure: auth rejection, missing session, unknown member-id, `broker.deregister_agent` failure, `send_exit` tmux failure (pre-poll), `tmux.wait_for_pane_gone` raising TmuxError (server crash mid-poll). |
+| `2` | Default-path timeout — `/exit` was sent, the pane did not disappear within 15.0 s, buffer tail has been printed on stderr. |
 
 Cross-Director delete is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before calling `broker.deregister_agent` or sending `/exit` to the pane. An attempt to delete another Director's member in the same session exits 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other-director>).` (mirrors `member capture` / `member send-input`).
 
-Output (text):
+Output (text, happy path):
 ```
 Member deleted.
   agent_id:  <target-uuid>
   pane_id:   %7 (closed)
+```
+
+Output (text, `--force`):
+```
+Member deleted (--force).
+  agent_id:  <target-uuid>
+  pane_id:   %7 (killed)
 ```
 
 ### Member List
@@ -560,16 +614,21 @@ cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
   --member-id <member-agent-id>
 ```
 
-The command deregisters the agent first (so a failure preserves the pane for retry), then sends `/exit` to the pane, then rebalances the layout.
+The CLI sends `/exit`, polls `tmux list-panes` for the target `pane_id` until it disappears (15 s timeout), then deregisters the agent and rebalances the layout. On timeout, the pane buffer tail is captured and printed on stderr, and the command exits 2 without deregistering. Rerun with `--force` to skip `/exit` and kill the pane immediately. See the Shutdown Protocol below for the full ordering — `member delete` is step 2, not step 1.
 
-After every member is shut down, the Director stops the `/loop` monitor and tears down the session:
+### Shutdown Protocol
 
-```bash
-cafleet session delete <session-id>
-# → Deleted session <session-id>. Deregistered N agents.
-```
+The teardown MUST run in this exact order. Skipping any step leaves crons firing against dead agents, or orphan `claude` / `codex` processes lingering in panes.
 
-`session delete` does not require `--session-id` (the `session_id` is passed as a positional argument). It runs the root-Director deregister + Administrator cleanup + any surviving member sweep in one transaction. Plain `cafleet --session-id <session-id> deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` — always use `session delete` for the final teardown step.
+**Rule: use cafleet primitives only.** All tmux interactions — write, inspect, and metadata — are encapsulated by cafleet commands. For tmux session/window/pane metadata at Director startup, use `cafleet doctor`. Never invoke `tmux send-keys`, `tmux kill-pane`, `tmux list-panes`, `tmux capture-pane`, or `tmux display-message` directly from the Director. If a workflow appears to need a raw tmux call, file a gap in `cafleet member *` or `cafleet doctor` — NOT a raw tmux invocation.
+
+1. **Stop every background `/loop` monitor FIRST.** Any `/loop` cron the Director started during the session must be cancelled with `CronDelete <job-id>` **before** members are deleted. A cron that keeps firing after members are gone will issue `cafleet member list` / `poll` against a tearing-down session, spam `Error: session is deleted`, and (worse) race with the member-delete path and nudge agents that are mid-`/exit`. Fixed-cadence `/loop`s (e.g. the 1-minute team-health monitor from `Skill(cafleet-monitoring)`) and any augmented loops you created (PR review loops, verifier loops, etc.) all fall under this rule. Stop them all.
+2. **Delete every member** via `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>`. This call now blocks until the target pane is actually gone (15 s default timeout). If the pane is stuck on a prompt, the command exits 2 with the pane buffer tail on stderr — inspect with `cafleet member capture`, answer the prompt with `cafleet member send-input --choice N` or `--freetext`, then re-run `cafleet member delete`. If the pane is truly wedged, escalate to `cafleet member delete --force`, which skips `/exit` and kill-panes immediately. Do NOT fall back to raw `tmux kill-pane`. Do this per member, not via `session delete` alone — `session delete` deregisters agents in the DB but does NOT send `/exit` to panes.
+3. **Verify every member is gone via cafleet.** Run `cafleet --session-id <session-id> member list --agent-id <director-agent-id>`. The team's member roster should be empty. Any agent still present means step 2 failed — re-run `cafleet member delete` on that member, inspect with `cafleet member capture` if needed, and report to the user if it still refuses to leave. Do NOT use raw tmux to "check" or "force" anything.
+4. **Run `cafleet session delete <session-id>`** (positional, no `--session-id` flag). This deregisters the root Director, deregisters the Administrator, sweeps any agent rows that survived step 2, and physically deletes every `agent_placements` row. Plain `cafleet --session-id <session-id> deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` — always use `session delete` for the final teardown step.
+5. **Confirm the session is closed.** Run `cafleet session list`; the current session should not appear (soft-deleted sessions are hidden). If it still appears with `active` agents, repeat steps 2–4 for that session. Any cross-conversation orphan session surfaced by this final check is also cleaned up via `cafleet session delete <its-session-id>` — never via tmux.
+
+Skipping step 1 is the single most common failure and the one that visibly leaks into the operator's view (recurring cron output in the Director's terminal). Skipping step 3 means you proceed to `session delete` without knowing whether members actually quit, leaving orphan `claude` / `codex` processes behind.
 
 ### Answer a member's AskUserQuestion prompt
 

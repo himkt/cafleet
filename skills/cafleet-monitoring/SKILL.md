@@ -11,7 +11,7 @@ description: Mandatory supervision protocol for a Director managing member agent
 
 Members spawned via `cafleet member create` do not act autonomously. They respond to your messages. If you are not actively monitoring and instructing, work halts silently.
 
-**Agent-agnostic monitoring**: This protocol works identically for all coding agent backends (Claude, Codex, etc.). `cafleet member capture` captures terminal output and `cafleet member delete` sends `/exit` regardless of which coding agent is running in the pane. The `--coding-agent` flag only affects `member create`; all other member commands are backend-agnostic.
+**Agent-agnostic monitoring**: This protocol works identically for all coding agent backends (Claude, Codex, etc.). `cafleet member capture` captures terminal output and `cafleet member delete` sends `/exit`, waits for the pane to close (15 s timeout), then deregisters — regardless of which coding agent is running in the pane. The `--coding-agent` flag only affects `member create`; all other member commands are backend-agnostic.
 
 ## Placeholder convention
 
@@ -35,7 +35,7 @@ Before spawning **any** member, start a `/loop` monitor with a **1-minute interv
 | 4 | Based on findings, `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` to any stalled or idle member with a specific instruction | Drive the team forward |
 | 5 | When all members have reported completion (via messages or visible in terminal output), report to the user: "All deliverables are ready for review." | Signal completion to user |
 
-**Lifecycle rule:** The loop MUST stay active from the first `member create` until the final shutdown cleanup step. Keep it running through all phases: research, compilation, review, revision, and user approval, and only stop it after deleting members with `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` and then tearing down the session with `cafleet session delete <session-id>`. Do **not** attempt `cafleet deregister --agent-id <director-agent-id>` on the root Director — it is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`; `session delete` is the only supported teardown path and performs the Director deregister atomically.
+**Lifecycle rule:** The loop MUST stay active from the first `member create` through every phase (research, compilation, review, revision, user approval). At teardown, **stop the loop BEFORE deleting members** — this is step 1 of the Shutdown Protocol in `Skill(cafleet)` and is non-negotiable. A loop that keeps firing after members are deleted spams `member list` / `poll` against a tearing-down session, can race with the member-delete path, and (most visibly) leaks cron output into the operator's terminal after the team is ostensibly gone. Full teardown order: `CronDelete` each `/loop` job → `cafleet member delete` each member → `cafleet member list` to verify the roster is empty → `cafleet session delete <session-id>` → `cafleet session list` sanity check. `cafleet member delete` now blocks until the pane is actually gone (15 s default timeout). On timeout (exit 2), inspect + answer the prompt via `member capture` + `send-input`, or escalate to `--force`. All verification is via cafleet primitives; raw `tmux` write or inspect commands are NOT used. See `Skill(cafleet)` → "Shutdown Protocol" for the authoritative procedure. Do **not** attempt `cafleet deregister --agent-id <director-agent-id>` on the root Director — it is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`. `session delete` is the only supported teardown path and performs the Director deregister atomically.
 
 ## Spawn Protocol
 
@@ -81,6 +81,7 @@ If a member is still unresponsive after 2 nudges via `cafleet send` AND `cafleet
 | `cafleet ... member capture --agent-id <director-agent-id>` | Non-intrusive, terminal snapshot | Second -- when no messages, inspect what the member is doing |
 | `cafleet ... send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` | Interactive, authoritative | Third -- send a specific instruction to unstick the member (push notification triggers the member's pane to poll) |
 | `cafleet ... member send-input --agent-id <director-agent-id> --member-id <member-agent-id> (--choice N \| --freetext "<text>")` | Interactive, restricted keystroke | When `capture` shows the member is paused on an `AskUserQuestion`-shaped prompt — forward the operator's answer without exiting tmux or typing raw `tmux send-keys`. Same authorization boundary as `capture`. |
+| `cafleet ... member delete --agent-id <director-agent-id> --member-id <member-agent-id> --force` | Interactive, destructive | When `member delete` has already exited 2 and `capture` + `send-input` have failed to unblock the pane — forces an atomic `kill_pane` + deregister + layout rebalance. Never fall back to raw `tmux kill-pane`. |
 | Escalate to user | Last resort | After 2 nudges + no progress in terminal |
 
 ## `/loop` Prompt Template
