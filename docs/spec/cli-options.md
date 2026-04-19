@@ -423,6 +423,8 @@ JSON (`cafleet --json ... member send-input ...`):
 
 #### Typical Director workflow
 
+> **Note**: Superseded by the canonical **Director-side usage pattern** subsection below. The canonical pattern requires the Director to delegate the decision to the user via `AskUserQuestion` FIRST and then invoke the resolved `cafleet member send-input` via its own Bash tool — AskUserQuestion is required, not optional. This older subsection is retained for historical context only; new readers should follow the canonical pattern.
+
 The CLI is deliberately one-shot — the surrounding choose-and-answer loop stays in the Director's control:
 
 1. `cafleet --session-id <s> member capture --agent-id <d> --member-id <m> --lines 120` — read the current prompt options off the pane.
@@ -432,6 +434,10 @@ The CLI is deliberately one-shot — the surrounding choose-and-answer loop stay
    - Free-text → `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --freetext "<user text>"`
 
 Capture parsing is intentionally left manual because prompt layouts differ across Claude Code / Codex versions. The CLI's job is to *send* restricted keystrokes safely; reading and presenting options belongs to the Director.
+
+#### Director-side usage pattern
+
+The canonical Director-side workflow is three-beat and AskUserQuestion-delegated: (1) `cafleet member capture` to inspect the pane, (2) the Director's own `AskUserQuestion` tool call — with shape-matched options per the pane-shapes table — to put the decision in front of the user, (3) the Director invokes the resolved `cafleet member send-input` via its Bash tool, where Claude Code's native per-call permission prompt is the user-consent surface (never a fenced `bash` block for the user to paste). The canonical three-beat workflow, pane-shapes table (choice-routing / open-ended / other shapes), AskUserQuestion constraints (1–4 questions, 2–4 options, built-in "Other"), and "MUST NOT do" rules live in [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) under "Answer a member's AskUserQuestion prompt" — that is canonical, and this CLI spec does not duplicate the table.
 
 ## Error Messages
 

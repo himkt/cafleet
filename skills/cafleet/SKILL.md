@@ -632,23 +632,45 @@ Skipping step 1 is the single most common failure and the one that visibly leaks
 
 ### Answer a member's AskUserQuestion prompt
 
-When a member pauses on an `AskUserQuestion` prompt (or any prompt rendered as "1. …", "2. …", "3. …", "4. Type something"), the Director can forward the operator's choice without exiting tmux or typing raw `tmux send-keys`. The CLI is deliberately one-shot — the surrounding choose-and-answer loop stays in the Director's control:
+When `cafleet member capture` reveals a member paused on an `AskUserQuestion`-shaped prompt (the 4-option frame `1. …`, `2. …`, `3. …`, `4. Type something`), the Director MUST delegate the decision to the user via the three-beat shape below. The Director never decides the body, the choice digit, or the custom free-text on the user's behalf — there is no "obvious enough to pick silently" exception.
 
-1. **Inspect the prompt** with `member capture` — this is non-intrusive and shows the exact labels rendered in the pane:
+The three beats:
 
-   ```bash
-   cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
-     --member-id <member-agent-id> --lines 120
-   ```
+1. **Capture** the member's pane with `cafleet --session-id <session-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id> --lines 120`. `120` is the recommended default. Re-run with `--lines 200` only if the first capture is truncated above the AskUserQuestion frame (the `1. …`, `2. …`, `3. …`, `4. Type something` rows are not all visible).
+2. **Ask the user via `AskUserQuestion`** with shape-appropriate options per the pane-shapes table below. The question text names the member and summarizes what it is paused on (e.g. `Drafter is paused on AskUserQuestion — which reply should I send?`). No preamble sentence above the question — the capture output the Director already printed this turn plus the question text carry all the context.
+3. **Invoke the resolved `cafleet member send-input` via the Director's own Bash tool**: `cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> --member-id <member-agent-id> (--choice N | --freetext "<text>")`. Claude Code's native per-call Bash permission prompt is the user-consent surface. Do NOT print a fenced `bash` block for the user to copy-paste, and do NOT add "please run this in your shell" instructions.
 
-2. **Ask the end user** (for example via `AskUserQuestion`) with the observed labels so they pick an option.
+#### Pane prompt shapes
 
-3. **Forward the answer** via `member send-input`:
+The pane is ALWAYS on the AskUserQuestion 4-option frame when `send-input` is appropriate — `--freetext` itself sends a literal `4` keystroke first to route into the "Type something" slot, so any pane that is not on that frame will be corrupted by a `send-input` call.
 
-   - Option 1 / 2 / 3 → `cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> --member-id <member-agent-id> --choice N`
-   - Free-text → `cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> --member-id <member-agent-id> --freetext "<user text>"`
+| Shape | Member pane looks like | Director's AskUserQuestion options | Resolved send-input call |
+|---|---|---|---|
+| **Choice-routing** | AskUserQuestion where the labelled options `1. …`, `2. …`, `3. …` ARE the decision point (option labels are meaningful to the user). | Mirror UP TO 3 of the member's labels as AskUserQuestion options. `label` holds the member's short label; `description` holds the member's description if visible in the capture. AskUserQuestion's built-in Other handles custom freetext — do NOT add an explicit 4th option, since `--choice` is `IntRange(1, 3)` and only the CLI's built-in 4-slot routes through `--freetext`. | If the user picked mirror option N (1, 2, or 3), `--choice N`. If the user picked built-in Other and typed a custom body, `--freetext "<typed>"`. |
+| **Open-ended** | AskUserQuestion where the labelled options `1. …`, `2. …`, `3. …` are NOT useful for this situation (the member is effectively waiting for free-form instruction). The 4-option frame itself still renders — that frame is exactly what `send-input --freetext` submits through. | 2–4 *complete candidate message bodies*. `label` is a short intent tag (≈12 chars, e.g. `Direct nudge`, `Soft check-in`, `Strict redirect`). `description` holds the FULL draft body so the user can compare wording side-by-side. Built-in Other is the typed-custom-body path. | `--freetext "<picked body>"` when the user picked one of the drafts, or `--freetext "<typed>"` when the user picked built-in Other. |
+| **Other shapes** | Pane is NOT on an AskUserQuestion — e.g. mid-command, Codex idle REPL, crashed, awaiting a yes/no confirmation, or mid tool-call. | Do NOT call AskUserQuestion and do NOT call `send-input`. The `send-input` CLI is validated only for the AskUserQuestion 4-option frame; sending a `1`, `2`, `3`, or `4` keystroke into any other shape will corrupt pane state. | None. Escalate to the user via a regular `cafleet send` nudge, or wait for the member to return to an AskUserQuestion prompt. |
 
-The CLI validates the input (`--choice` is an `IntRange(1, 3)`; `--freetext` rejects newlines to preserve the one-call-one-submission contract), enforces the same cross-Director authorization boundary as `member capture`, and issues three separate `tmux send-keys` invocations for `--freetext` (`4` → `-l "<text>"` → `Enter`) so shell meta, key names, and multi-byte characters all pass through as literal input.
+#### AskUserQuestion constraints
+
+| Rule | Value |
+|---|---|
+| Questions per call | 1–4 |
+| Options per question | 2–4 |
+| Built-in "Other" | Always exposed by the tool itself. DO NOT add an explicit "Write my own" / "Custom" option. |
+| ≥ 5 candidate bodies | Narrow to 2–4 BEFORE asking. Heuristic: drop duplicates and near-duplicates (same intent, different wording), then pick the highest-contrast subset spanning the decision axes (tone, specificity, action). Do NOT paginate across sequential AskUserQuestion calls — each call is a disjoint decision, not a page of a larger list. |
+| Preamble text above the question | None. Rely on the `cafleet member capture` output the Director already printed this turn, plus the `AskUserQuestion` question text, to carry all context. |
+
+#### What the Director MUST NOT do
+
+- Pre-draft a single body and tell the user to run the command themselves ("please paste this…").
+- Print a fenced `bash` code block containing the resolved `cafleet member send-input` invocation as an instruction for the user to execute.
+- Add a one-line preamble sentence above the `AskUserQuestion` (the capture output plus the question text is enough).
+- Add an explicit "Write my own" / "Custom" option to the `AskUserQuestion` payload (the built-in "Other" handles it).
+- Silently decide a `--choice` digit, even when the member's labels appear obvious.
+- Mix shapes: never send `--choice N` on an open-ended pane, and never default to `--freetext` on a choice-routing pane. The shape classification from `cafleet member capture` determines which flag to use — never invert.
+- Call `send-input` when the pane is on an "Other shapes" state per the table above. Escalate or wait instead — sending any keystroke would corrupt pane state.
+
+The CLI validates input (`--choice` is `IntRange(1, 3)`; `--freetext` rejects newlines to preserve the one-call-one-submission contract), enforces the same cross-Director authorization boundary as `member capture`, and issues three separate `tmux send-keys` invocations for `--freetext` (`4` → `-l "<text>"` → `Enter`) so shell meta, key names, and multi-byte characters all pass through as literal input.
 
 ## Message Lifecycle
 

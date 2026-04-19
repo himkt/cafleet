@@ -64,12 +64,14 @@ The `--since` flag accepts an ISO 8601 timestamp. If the member has sent a progr
 
 ```bash
 cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
-  --member-id <member-agent-id> --lines 200
+  --member-id <member-agent-id> --lines 120
 ```
+
+`--lines 120` is the recommended default (matches the cafleet skill). Re-run with `--lines 200` as a fallback only if the first capture is truncated above the AskUserQuestion frame (the `1. …`, `2. …`, `3. …`, `4. Type something` rows are not all visible).
 
 If `cafleet poll` shows no recent messages from the member, fall back to capturing the terminal buffer. This is non-intrusive (read-only inspection that works even when the member is mid-task) and replaces raw `tmux capture-pane`.
 
-If the terminal buffer shows the member paused on an `AskUserQuestion` prompt (a list of "1. …", "2. …", "3. …", "4. Type something" rows), the correct unblock is `cafleet member send-input` — never raw `tmux send-keys`. The send-input wrapper validates the keystrokes (`--choice 1|2|3` or `--freetext "<text>"`), enforces the same cross-Director authorization boundary as `capture`, and issues the three-invocation `-l` literal sequence required by tmux for free-text submissions. See the cafleet skill's "Member Send-Input" section for the full flag reference and the capture → ask user → send-input workflow.
+If the terminal buffer shows the member paused on an `AskUserQuestion` prompt (a list of "1. …", "2. …", "3. …", "4. Type something" rows), the correct unblock is `cafleet member send-input` — never raw `tmux send-keys` — and the Director MUST delegate the decision to the user via its own `AskUserQuestion` tool call BEFORE invoking the wrapper. The Director never picks the `--choice` digit or drafts the `--freetext` body on its own judgment. The full three-beat workflow (capture → Director-side `AskUserQuestion` with shape-matched options → direct Bash invocation of the resolved `cafleet member send-input`, gated by Claude Code's native per-call permission prompt) and the pane-shapes table live in the cafleet skill's "Answer a member's AskUserQuestion prompt" section — that is canonical; do not duplicate the table here.
 
 ### Escalation
 
@@ -80,7 +82,7 @@ If a member is still unresponsive after 2 nudges via `cafleet send` AND `cafleet
 | `cafleet ... poll --agent-id <director-agent-id>` | Non-intrusive, message-based | First -- check if the member has reported in |
 | `cafleet ... member capture --agent-id <director-agent-id>` | Non-intrusive, terminal snapshot | Second -- when no messages, inspect what the member is doing |
 | `cafleet ... send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` | Interactive, authoritative | Third -- send a specific instruction to unstick the member (push notification triggers the member's pane to poll) |
-| `cafleet ... member send-input --agent-id <director-agent-id> --member-id <member-agent-id> (--choice N \| --freetext "<text>")` | Interactive, restricted keystroke | When `capture` shows the member is paused on an `AskUserQuestion`-shaped prompt — forward the operator's answer without exiting tmux or typing raw `tmux send-keys`. Same authorization boundary as `capture`. |
+| `cafleet ... member send-input --agent-id <director-agent-id> --member-id <member-agent-id> (--choice N \| --freetext "<text>")` | Interactive, restricted keystroke | When `capture` shows the member is paused on an `AskUserQuestion`-shaped prompt — delegate the decision to the user via the Director's own `AskUserQuestion` tool call FIRST, then invoke the resolved command via the Director's Bash tool (Claude Code's native per-call permission prompt is the consent surface; never print a fenced `bash` block for the user to paste). See the cafleet skill's "Answer a member's AskUserQuestion prompt" section for the canonical three-beat workflow and pane-shapes table. Same authorization boundary as `capture`. |
 | `cafleet ... member delete --agent-id <director-agent-id> --member-id <member-agent-id> --force` | Interactive, destructive | When `member delete` has already exited 2 and `capture` + `send-input` have failed to unblock the pane — forces an atomic `kill_pane` + deregister + layout rebalance. Never fall back to raw `tmux kill-pane`. |
 | Escalate to user | Last resort | After 2 nudges + no progress in terminal |
 
