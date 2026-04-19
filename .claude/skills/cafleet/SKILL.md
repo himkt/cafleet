@@ -444,7 +444,7 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
    7ba91234-5678-90ab-cdef-112233445566
    label:            my-project
    created_at:       2026-04-16T08:50:00+00:00
-   director_name:    director
+   director_name:    Director
    pane:             main:@3:%0
    administrator:    3c4d5e6f-7890-1234-5678-90abcdef1234
    ```
@@ -463,7 +463,7 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
      "administrator_agent_id": "3c4d5e6f-7890-1234-5678-90abcdef1234",
      "director": {
        "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
-       "name": "director",
+       "name": "Director",
        "description": "Root Director for this session",
        "registered_at": "2026-04-16T08:50:00+00:00",
        "placement": {

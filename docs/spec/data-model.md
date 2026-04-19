@@ -27,7 +27,7 @@ Session deletion is a **soft-delete**: `broker.delete_session` sets `deleted_at=
 `cafleet session create` executes a single transaction that performs five ordered operations — all-or-nothing:
 
 1. `INSERT INTO sessions (...)` with `deleted_at=NULL`, `director_agent_id=NULL`.
-2. `INSERT INTO agents (...)` for the hardcoded root Director (`name='director'`, `description='Root Director for this session'`, `status='active'`).
+2. `INSERT INTO agents (...)` for the hardcoded root Director (`name='Director'`, `description='Root Director for this session'`, `status='active'`).
 3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` (the root has no parent Director) and `coding_agent='unknown'` (auto-detection is deferred via a `FIXME(claude)` comment).
 4. `UPDATE sessions SET director_agent_id = <director's agent_id> WHERE session_id = <new>`.
 5. `INSERT INTO agents (...)` for the built-in `Administrator` (per design 0000025) with `agent_card_json.cafleet.kind == 'builtin-administrator'`. The Administrator never gets an `agent_placements` row.

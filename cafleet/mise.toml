@@ -24,3 +24,7 @@ description = "Run ty type checker"
 [tasks.sync]
 run = "uv sync"
 description = "Sync cafleet project dependencies"
+
+[tasks.install]
+run = "uv tool install --reinstall --editable ."
+description = "Install the cafleet CLI as an editable uv tool (source edits take effect without a second reinstall)"

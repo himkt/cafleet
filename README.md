@@ -10,7 +10,7 @@ CAFleet enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 
 - **Agent Registry** -- Register, discover, and deregister agents via CLI
 - **Session Isolation** -- A `session_id` defines a session boundary; cross-session agents are fully invisible to each other
-- **Auto-bootstrap root Director on session create** -- `cafleet session create` runs a single transaction that inserts the session row, registers a hardcoded root Director (`name="director"`) with an `agent_placements` row pointing at the current tmux pane, back-fills `sessions.director_agent_id`, and seeds the built-in Administrator. Must be run inside a tmux session — the CLI fails fast with `Error: cafleet session create must be run inside a tmux session` (exit 1) otherwise. The root Director's placement has `director_agent_id=NULL` to indicate "no parent"; this is what allows Member → Director tmux push notifications to work out of the box. `cafleet deregister` refuses the root Director (use `cafleet session delete` instead)
+- **Auto-bootstrap root Director on session create** -- `cafleet session create` runs a single transaction that inserts the session row, registers a hardcoded root Director (`name="Director"`) with an `agent_placements` row pointing at the current tmux pane, back-fills `sessions.director_agent_id`, and seeds the built-in Administrator. Must be run inside a tmux session — the CLI fails fast with `Error: cafleet session create must be run inside a tmux session` (exit 1) otherwise. The root Director's placement has `director_agent_id=NULL` to indicate "no parent"; this is what allows Member → Director tmux push notifications to work out of the box. `cafleet deregister` refuses the root Director (use `cafleet session delete` instead)
 - **Soft-delete sessions** -- `cafleet session delete <id>` is a single-transaction logical delete: stamps `sessions.deleted_at`, sweeps every active agent in the session (root Director included) to `status='deregistered'`, and physically deletes their `agent_placements` rows. Tasks are preserved (audit trail). Idempotent — re-running against an already-deleted session prints `Deregistered 0 agents.` and exits 0. Soft-deleted sessions are hidden from `cafleet session list` and rejected by `cafleet register` with `Error: session <id> is deleted`. Surviving member tmux panes are intentionally orphaned — call `cafleet member delete` per member first for a clean teardown
 - **Built-in Administrator agent** -- `cafleet session create` auto-seeds exactly one built-in `Administrator` agent per session (marked via `agent_card_json.cafleet.kind == "builtin-administrator"`); the Admin WebUI always sends from this identity. The broker rejects deregister and placement operations targeting an Administrator (`AdministratorProtectedError` currently surfaces as `Error: ...` + exit 1 in the CLI; WebUI HTTP 409 mapping is reserved for a future deregister endpoint/handler) and filters Administrators out of broadcast recipient sets so they are write-only identities. Alembic revision `0006` backfills one Administrator into each pre-existing session on `cafleet db init`
 - **Unicast Messaging** -- Send messages to a specific agent by ID (same-session only)
@@ -82,7 +82,7 @@ Non-JSON output (line 1 is the `session_id`, line 2 is the root Director's `agen
 7ba91234-5678-90ab-cdef-112233445566
 label:            my-project
 created_at:       2026-04-16T08:50:00+00:00
-director_name:    director
+director_name:    Director
 pane:             main:@3:%0
 administrator:    3c4d5e6f-7890-1234-5678-90abcdef1234
 ```
@@ -101,7 +101,7 @@ cafleet session create --label "my-project" --json
   "administrator_agent_id": "3c4d5e6f-7890-1234-5678-90abcdef1234",
   "director": {
     "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
-    "name": "director",
+    "name": "Director",
     "description": "Root Director for this session",
     "registered_at": "2026-04-16T08:50:00+00:00",
     "placement": {
@@ -290,6 +290,11 @@ cd cafleet
 
 # Install dependencies
 mise //cafleet:sync
+
+# Install the `cafleet` CLI as an editable uv tool
+# Source edits under cafleet/src/cafleet/ take effect with no second reinstall.
+# Re-run this task if you previously installed `cafleet` without `--editable`.
+mise //cafleet:install
 
 # Initialize the database schema (one-time)
 cafleet db init

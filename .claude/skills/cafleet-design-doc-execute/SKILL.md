@@ -180,7 +180,7 @@ cafleet session create --label "design-doc-execute-{slug}" --json
 #     "administrator_agent_id": "…",
 #     "director": {
 #       "agent_id": "7ba91234-…",
-#       "name": "director",
+#       "name": "Director",
 #       "description": "Root Director for this session",
 #       "registered_at": "…",
 #       "placement": { "director_agent_id": null, "tmux_session": "…", "tmux_window_id": "…", "tmux_pane_id": "…", "coding_agent": "unknown", "created_at": "…" }

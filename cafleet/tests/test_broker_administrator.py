@@ -211,7 +211,7 @@ class TestDeregisterAdministratorGuard:
         assert result is True
 
         names = {a["name"] for a in broker.list_agents(sid)}
-        assert names == {"director", "Administrator"}
+        assert names == {"Director", "Administrator"}
 
 
 class TestRegisterAgentPlacementAdministratorGuard:
@@ -259,7 +259,7 @@ class TestRegisterAgentPlacementAdministratorGuard:
 
         names = {a["name"] for a in broker.list_agents(sid)}
         assert "rejected-member" not in names
-        assert names == {"director", "Administrator"}
+        assert names == {"Director", "Administrator"}
 
     def test_placement_with_user_agent_director_still_works(self, broker_db):
         session = _create_session_with_ctx()

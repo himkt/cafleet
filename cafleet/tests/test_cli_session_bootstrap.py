@@ -117,7 +117,7 @@ class TestSessionCreateTextOutput:
         assert "pane:" in text
         assert "administrator:" in text
 
-        assert "director" in text
+        assert "Director" in text
         assert "bootstrap-check" in text
 
         assert (
@@ -183,7 +183,7 @@ class TestSessionCreateJsonOutput:
         director = data["director"]
         for key in ("agent_id", "name", "description", "registered_at", "placement"):
             assert key in director
-        assert director["name"] == "director"
+        assert director["name"] == "Director"
         assert director["description"] == "Root Director for this session"
         uuid.UUID(director["agent_id"])
 
