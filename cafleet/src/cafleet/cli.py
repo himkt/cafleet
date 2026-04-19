@@ -48,6 +48,7 @@ def _sync_db_url() -> str:
 
 
 @click.group()
+@click.version_option(package_name="cafleet", message="cafleet %(version)s")
 @click.option(
     "--json", "json_output", is_flag=True, default=False, help="Output in JSON format"
 )

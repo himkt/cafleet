@@ -23,6 +23,7 @@ Placed **before** the subcommand:
 |---|---|---|
 | `--json` | no | Emit JSON output. |
 | `--session-id <id>` | yes for client + member subcommands; no for `db init` and `session *` | Session identifier (opaque string; new sessions get a UUIDv4, migrated sessions reuse a 64-char hex value). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
+| `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
 ### Subcommands that require `--session-id`
 
@@ -31,6 +32,8 @@ Placed **before** the subcommand:
 ### Subcommands that do NOT require `--session-id`
 
 `db init`, `db *`, `session create`, `session list`, `session show`, `session delete`, `server`.
+
+The top-level `--version` flag also short-circuits this check: it is an eager Click option whose callback runs during option parsing and exits before any subcommand (and the `_require_session_id` guard) is reached, so `cafleet --version` succeeds with no `--session-id`.
 
 Create a session first if you don't have one:
 
