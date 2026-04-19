@@ -1,7 +1,7 @@
 # Director delegates member send-input choices via AskUserQuestion
 
 **Status**: Approved
-**Progress**: 8/16 tasks complete
+**Progress**: 11/16 tasks complete
 **Last Updated**: 2026-04-19
 
 ## Overview
@@ -125,9 +125,9 @@ Add a short "User delegation for member send-input" note to each Director role f
 
 Only touch the places that already mention `member send-input`. The edits are small — a single sentence or bullet that says "Director-side workflow: AskUserQuestion delegation, then direct Bash invocation; see `skills/cafleet/SKILL.md` for the canonical table." No need to repeat the full table here.
 
-- [ ] Update `/home/himkt/work/himkt/cafleet/README.md` — locate (a) the Features-list bullet that introduces the `member send-input` command, and (b) the command-table row whose Command column contains `member send-input`. Extend each with a one-sentence pointer to the delegated-choice pattern. Match by content. <!-- completed: -->
-- [ ] Update `/home/himkt/work/himkt/cafleet/ARCHITECTURE.md` — locate (a) the CLI→broker mapping row whose Command column is `member send-input`, and (b) the member-commands paragraph that enumerates the member subcommands and mentions `send-input`. Add a one-sentence note on the Director-side delegation workflow to each. Match by content. <!-- completed: -->
-- [ ] Update `/home/himkt/work/himkt/cafleet/docs/spec/cli-options.md` — locate the subsection whose heading is `### member send-input` and append a new paragraph headed "Director-side usage pattern" that describes the three-beat shape (capture → AskUserQuestion → direct Bash invocation) and cross-links `skills/cafleet/SKILL.md` (by relative repo path) as canonical. Match by heading text. <!-- completed: -->
+- [x] Update `/home/himkt/work/himkt/cafleet/README.md` — locate (a) the Features-list bullet that introduces the `member send-input` command, and (b) the command-table row whose Command column contains `member send-input`. Extend each with a one-sentence pointer to the delegated-choice pattern. Match by content. <!-- completed: 2026-04-19T00:00 -->
+- [x] Update `/home/himkt/work/himkt/cafleet/ARCHITECTURE.md` — locate (a) the CLI→broker mapping row whose Command column is `member send-input`, and (b) the member-commands paragraph that enumerates the member subcommands and mentions `send-input`. Add a one-sentence note on the Director-side delegation workflow to each. Match by content. <!-- completed: 2026-04-19T00:00 -->
+- [x] Update `/home/himkt/work/himkt/cafleet/docs/spec/cli-options.md` — locate the subsection whose heading is `### member send-input` and append a new paragraph headed "Director-side usage pattern" that describes the three-beat shape (capture → AskUserQuestion → direct Bash invocation) and cross-links `skills/cafleet/SKILL.md` (by relative repo path) as canonical. Match by heading text. <!-- completed: 2026-04-19T00:00 -->
 
 ### Step 5: Verify and sign off
 
