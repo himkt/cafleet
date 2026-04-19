@@ -1,7 +1,7 @@
 # Director delegates member send-input choices via AskUserQuestion
 
 **Status**: Approved
-**Progress**: 4/16 tasks complete
+**Progress**: 8/16 tasks complete
 **Last Updated**: 2026-04-19
 
 ## Overview
@@ -116,10 +116,10 @@ Keep Stage 2 of the health check pointing at the same general mechanism, but upd
 
 Add a short "User delegation for member send-input" note to each Director role file under the existing Communication Protocol / Progress Monitoring section. Two sentences are enough: point at the cafleet skill as canonical, and reiterate the "never print a fenced command for the user to paste" rule so the Director doesn't backslide. Do NOT duplicate the full table — the cafleet skill is the canonical home.
 
-- [ ] Update `~/.claude/skills/design-doc-create/roles/director.md`. <!-- completed: -->
-- [ ] Update `~/.claude/skills/design-doc-execute/roles/director.md`. <!-- completed: -->
-- [ ] Update `/home/himkt/work/himkt/cafleet/skills/design-doc-create/roles/director.md` — mirror the global edit. <!-- completed: -->
-- [ ] Update `/home/himkt/work/himkt/cafleet/skills/design-doc-execute/roles/director.md` — mirror the global edit. <!-- completed: -->
+- [x] Update `~/.claude/skills/design-doc-create/roles/director.md`. <!-- completed: 2026-04-19T00:00 -->
+- [x] Update `~/.claude/skills/design-doc-execute/roles/director.md`. <!-- completed: 2026-04-19T00:00 -->
+- [x] Update `/home/himkt/work/himkt/cafleet/skills/design-doc-create/roles/director.md` — mirror the global edit. <!-- completed: 2026-04-19T00:00 -->
+- [x] Update `/home/himkt/work/himkt/cafleet/skills/design-doc-execute/roles/director.md` — mirror the global edit. <!-- completed: 2026-04-19T00:00 -->
 
 ### Step 4: Update project README, ARCHITECTURE, and CLI docs
 
