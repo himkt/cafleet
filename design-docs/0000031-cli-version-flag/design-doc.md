@@ -1,7 +1,7 @@
 # CLI `--version` Flag
 
-**Status**: Approved
-**Progress**: 10/11 tasks complete
+**Status**: Complete
+**Progress**: 11/11 tasks complete
 **Last Updated**: 2026-04-19
 
 ## Overview
@@ -190,7 +190,7 @@ Concrete row body to use everywhere (adapt column headers to each table's shape)
 
 - [x] Run `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test` — all must pass. <!-- completed: 2026-04-19T03:55 -->
 - [x] After reinstalling via `mise //cafleet:install`, manually verify `cafleet --version` prints `cafleet 0.1.0` and exits 0 (this step is optional for Claude Code, required for the human reviewer). <!-- completed: 2026-04-19T03:55 -->
-- [ ] Update this design doc's `Status` to `Complete` and `Progress` to `N/N` in the final commit. <!-- completed: -->
+- [x] Update this design doc's `Status` to `Complete` and `Progress` to `N/N` in the final commit. <!-- completed: 2026-04-19T04:00 -->
 
 ---
 
@@ -199,3 +199,4 @@ Concrete row body to use everywhere (adapt column headers to each table's shape)
 | Date | Changes |
 |------|---------|
 | 2026-04-19 | Initial draft |
+| 2026-04-19 | Implementation complete. PR #33 opened. |
