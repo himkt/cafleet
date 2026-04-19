@@ -1,7 +1,7 @@
 # CLI `--version` Flag
 
 **Status**: Approved
-**Progress**: 8/11 tasks complete
+**Progress**: 10/11 tasks complete
 **Last Updated**: 2026-04-19
 
 ## Overview
@@ -10,12 +10,12 @@ Add a top-level `cafleet --version` global flag that prints `cafleet <version>` 
 
 ## Success Criteria
 
-- [ ] `cafleet --version` exits 0 and prints exactly `cafleet <version>\n` (e.g. `cafleet 0.1.0`).
-- [ ] `cafleet --version` works **without** `--session-id`; no "session-id required" error is raised.
-- [ ] Version string equals `importlib.metadata.version("cafleet")` (i.e., matches `project.version` in `cafleet/pyproject.toml`).
-- [ ] `mise //cafleet:test` passes with two new test cases covering the above.
-- [ ] `mise //cafleet:lint`, `mise //cafleet:format` (check mode), and `mise //cafleet:typecheck` all pass.
-- [ ] README.md, `docs/spec/cli-options.md`, and `skills/cafleet/SKILL.md` list `--version` under their Global Options tables.
+- [x] `cafleet --version` exits 0 and prints exactly `cafleet <version>\n` (e.g. `cafleet 0.1.0`).
+- [x] `cafleet --version` works **without** `--session-id`; no "session-id required" error is raised.
+- [x] Version string equals `importlib.metadata.version("cafleet")` (i.e., matches `project.version` in `cafleet/pyproject.toml`).
+- [x] `mise //cafleet:test` passes with two new test cases covering the above.
+- [x] `mise //cafleet:lint`, `mise //cafleet:format` (check mode), and `mise //cafleet:typecheck` all pass.
+- [x] README.md, `docs/spec/cli-options.md`, and `skills/cafleet/SKILL.md` list `--version` under their Global Options tables.
 
 ---
 
@@ -188,8 +188,8 @@ Concrete row body to use everywhere (adapt column headers to each table's shape)
 
 ### Step 4: Verification
 
-- [ ] Run `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test` — all must pass. <!-- completed: -->
-- [ ] After reinstalling via `mise //cafleet:install`, manually verify `cafleet --version` prints `cafleet 0.1.0` and exits 0 (this step is optional for Claude Code, required for the human reviewer). <!-- completed: -->
+- [x] Run `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test` — all must pass. <!-- completed: 2026-04-19T03:55 -->
+- [x] After reinstalling via `mise //cafleet:install`, manually verify `cafleet --version` prints `cafleet 0.1.0` and exits 0 (this step is optional for Claude Code, required for the human reviewer). <!-- completed: 2026-04-19T03:55 -->
 - [ ] Update this design doc's `Status` to `Complete` and `Progress` to `N/N` in the final commit. <!-- completed: -->
 
 ---
