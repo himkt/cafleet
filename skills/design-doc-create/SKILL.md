@@ -1,5 +1,5 @@
 ---
-name: cafleet-design-doc-create
+name: design-doc-create
 description: Create a new design document using CAFleet-native orchestration. Use when user wants to create a specification or technical document with CAFleet message broker coordination. Do NOT use EnterPlanMode — always invoke this skill instead.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch
 ---
@@ -16,8 +16,8 @@ Create high-quality design documents using a three-role team orchestrated via th
 
 ## Additional resources
 
-- For the document template, see: [../cafleet-design-doc/template.md](../cafleet-design-doc/template.md)
-- For section guidelines and quality standards, see: [../cafleet-design-doc/guidelines.md](../cafleet-design-doc/guidelines.md)
+- For the document template, see: [../design-doc/template.md](../design-doc/template.md)
+- For section guidelines and quality standards, see: [../design-doc/guidelines.md](../design-doc/guidelines.md)
 
 ## Architecture
 
@@ -110,8 +110,8 @@ BEFORE spawning any member, follow `Skill(cafleet-monitoring)`'s Monitoring Mand
 
 Read the role files that will be embedded verbatim in spawn prompts:
 
-- `.claude/skills/cafleet-design-doc-create/roles/drafter.md`
-- `.claude/skills/cafleet-design-doc-create/roles/reviewer.md`
+- `.claude/skills/design-doc-create/roles/drafter.md`
+- `.claude/skills/design-doc-create/roles/reviewer.md`
 
 #### 1e. Spawn the Drafter
 
@@ -128,7 +128,7 @@ You are the Drafter in a design document creation team (CAFleet-native).
 
 Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
-- Skill(cafleet-design-doc) — for template and guidelines
+- Skill(design-doc) — for template and guidelines
 
 SESSION ID: <session-id>
 DIRECTOR AGENT ID: <director-agent-id>
@@ -160,7 +160,7 @@ You are the Drafter in a design document creation team (CAFleet-native, RESUME M
 
 Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
-- Skill(cafleet-design-doc) — for template and guidelines
+- Skill(design-doc) — for template and guidelines
 
 SESSION ID: <session-id>
 DIRECTOR AGENT ID: <director-agent-id>
@@ -201,7 +201,7 @@ You are the Reviewer in a design document creation team (CAFleet-native).
 
 Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
-- Skill(cafleet-design-doc) — for template and guidelines
+- Skill(design-doc) — for template and guidelines
 
 SESSION ID: <session-id>
 DIRECTOR AGENT ID: <director-agent-id>

@@ -172,9 +172,9 @@ CAFleet ships CAFleet-native replicas of the global Agent Teams design document 
 
 | Skill | Location | Purpose |
 |---|---|---|
-| `cafleet-design-doc` | `.claude/skills/cafleet-design-doc/` | Plugin-local copy of the global `/design-doc` skill (template + guidelines). Spawned members load this instead of the global skill so the plugin is self-contained. |
-| `cafleet-design-doc-create` | `.claude/skills/cafleet-design-doc-create/` | Create a design document through CAFleet-orchestrated Director / Drafter / Reviewer roles. Mirrors the process of `/design-doc-create`. |
-| `cafleet-design-doc-execute` | `.claude/skills/cafleet-design-doc-execute/` | Execute a design document through CAFleet-orchestrated Director / Programmer / Tester / (optional) Verifier roles with per-step TDD cycle. Mirrors the process of `/design-doc-execute`. |
+| `design-doc` | `.claude/skills/design-doc/` | Plugin-local copy of the global `/design-doc` skill (template + guidelines). Spawned members load this instead of the global skill so the plugin is self-contained. |
+| `design-doc-create` | `.claude/skills/design-doc-create/` | Create a design document through CAFleet-orchestrated Director / Drafter / Reviewer roles. Mirrors the process of `/design-doc-create`. |
+| `design-doc-execute` | `.claude/skills/design-doc-execute/` | Execute a design document through CAFleet-orchestrated Director / Programmer / Tester / (optional) Verifier roles with per-step TDD cycle. Mirrors the process of `/design-doc-execute`. |
 
 **Role files**: Each `*-create` and `*-execute` skill ships a `roles/` directory with one Markdown file per role. The Director reads the relevant role file and embeds its content verbatim in the `cafleet member create` spawn prompt.
 
