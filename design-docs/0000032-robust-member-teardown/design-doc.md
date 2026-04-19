@@ -1,7 +1,7 @@
 # Robust member teardown: wait for real shutdown and close the remaining raw-tmux escape hatches
 
 **Status**: In Progress
-**Progress**: 23/46 tasks complete (Step 1 documentation + Step 2 tmux primitives + Step 3 doctor subcommand done)
+**Progress**: 38/46 tasks complete (Steps 1-4 done: documentation, tmux primitives, doctor subcommand, member_delete blocking + --force)
 **Last Updated**: 2026-04-19
 
 ## Overview
@@ -378,27 +378,27 @@ Every file below must be updated BEFORE any code change, per `.claude/rules/desi
 
 ### Step 4: `cafleet member delete` blocking + `--force`
 
-- [ ] Add `--force / -f` click bool flag (default False) to `member_delete`. <!-- completed: -->
-- [ ] Rewrite `member_delete` body per Specification §3:
+- [x] Add `--force / -f` click bool flag (default False) to `member_delete`. <!-- completed: 2026-04-19T08:35 -->
+- [x] Rewrite `member_delete` body per Specification §3:
   - pane_id is None → deregister only, exit 0 (both default and `--force` branches share this path).
   - default path → `send_exit` → `wait_for_pane_gone` → on True: `deregister_agent` → `select_layout` → exit 0; on False: `capture_pane` → stderr error + tail + recovery → exit 2.
-  - `--force` path → `kill_pane(ignore_missing=True)` → `deregister_agent` → `select_layout` → exit 0. <!-- completed: -->
-- [ ] Remove the `# Deregister the registry row first so a send-keys failure leaves a queryable intent` comment at `cafleet/src/cafleet/cli.py:644`; do not replace with an equivalent inverse comment (new ordering is obvious from the adjacent `send_exit` → `wait_for_pane_gone` → `deregister_agent` call order, so no comment is needed). <!-- completed: -->
-- [ ] Convert the `send_exit` TmuxError branch at `cafleet/src/cafleet/cli.py:657-662` from warning-and-continue to a hard failure: raise `click.ClickException(f"send_exit failed for pane {pane_id}: {exc}. The tmux server may be unreachable. Verify with 'cafleet doctor', then re-run 'cafleet member delete', or use '--force' to kill the pane directly.")`. Remove the `pane_status = f"{pane_id} (send_exit failed)"` literal entirely. Under option-(b) ordering `broker.deregister_agent` has not yet run at this point, so no rollback is needed — just exit 1. <!-- completed: -->
-- [ ] Wire the three-way exit code split: rely on `click.ClickException` for exit 1 (all six causes in the §3 exit-1 table), emit an explicit `ctx.exit(2)` on the timeout branch. <!-- completed: -->
+  - `--force` path → `kill_pane(ignore_missing=True)` → `deregister_agent` → `select_layout` → exit 0. <!-- completed: 2026-04-19T08:35 -->
+- [x] Remove the `# Deregister the registry row first so a send-keys failure leaves a queryable intent` comment at `cafleet/src/cafleet/cli.py:644`; do not replace with an equivalent inverse comment (new ordering is obvious from the adjacent `send_exit` → `wait_for_pane_gone` → `deregister_agent` call order, so no comment is needed). <!-- completed: 2026-04-19T08:35 -->
+- [x] Convert the `send_exit` TmuxError branch at `cafleet/src/cafleet/cli.py:657-662` from warning-and-continue to a hard failure: raise `click.ClickException(f"send_exit failed for pane {pane_id}: {exc}. The tmux server may be unreachable. Verify with 'cafleet doctor', then re-run 'cafleet member delete', or use '--force' to kill the pane directly.")`. Remove the `pane_status = f"{pane_id} (send_exit failed)"` literal entirely. Under option-(b) ordering `broker.deregister_agent` has not yet run at this point, so no rollback is needed — just exit 1. <!-- completed: 2026-04-19T08:35 -->
+- [x] Wire the three-way exit code split: rely on `click.ClickException` for exit 1 (all six causes in the §3 exit-1 table), emit an explicit `ctx.exit(2)` on the timeout branch. <!-- completed: 2026-04-19T08:35 -->
 
 ### Step 5: Tests
 
-- [ ] Add `cafleet/tests/test_tmux.py::TestPaneExists` — pane present / absent / unrelated-error propagation (3 cases). <!-- completed: -->
-- [ ] Add `cafleet/tests/test_tmux.py::TestKillPane` — happy / ignore_missing-swallows / ignore_missing-propagates-other / default-raises (4 cases). <!-- completed: -->
-- [ ] Add `cafleet/tests/test_tmux.py::TestWaitForPaneGone` — first-poll-gone / mid-wait-gone / never-gone-times-out / TmuxError-propagates (4 cases; monkeypatch `time.monotonic` and `time.sleep`). <!-- completed: -->
-- [ ] Update `cafleet/tests/test_cli_member_delete.py::TestHappyPath` — stub pane_exists + wait_for_pane_gone; assert call ordering (send_exit → wait → deregister); JSON output has `"pane_status": "(closed)"`. <!-- completed: -->
-- [ ] Add `cafleet/tests/test_cli_member_delete.py::TestTimeout` — wait_for_pane_gone returns False, capture_pane returns buffer; assert exit 2, stderr contains timeout message + tail + recovery hint, deregister NOT called. <!-- completed: -->
-- [ ] Add `cafleet/tests/test_cli_member_delete.py::TestForce` — `--force` flag; assert kill_pane called, send_exit NOT called, deregister called after kill_pane; exit 0; output contains `(killed)`. <!-- completed: -->
-- [ ] Add `cafleet/tests/test_cli_member_delete.py::TestPaneAlreadyGone` — pane_exists False on first poll; exit 0 happy path; NO capture_pane call. <!-- completed: -->
-- [ ] Rewrite `cafleet/tests/test_cli_member_delete.py::TestTmuxErrorOnSendExit` — drop raw tmux kill-pane assertion; assert cafleet-native recovery wording present. <!-- completed: -->
-- [ ] Add `cafleet/tests/test_cli_member_delete.py::TestPendingPlacementForce` — `--force` with pane_id=None → deregister only, no tmux calls. <!-- completed: -->
-- [ ] Add `cafleet/tests/test_cli_doctor.py` — text output has all four fields; JSON output shape; outside-tmux exits 1 with expected wording; `--session-id` silently ignored. <!-- completed: -->
+- [x] Add `cafleet/tests/test_tmux.py::TestPaneExists` — pane present / absent / unrelated-error propagation (3 cases). <!-- completed: 2026-04-19T08:02 -->
+- [x] Add `cafleet/tests/test_tmux.py::TestKillPane` — happy / ignore_missing-swallows / ignore_missing-propagates-other / default-raises (4 cases). <!-- completed: 2026-04-19T08:02 -->
+- [x] Add `cafleet/tests/test_tmux.py::TestWaitForPaneGone` — first-poll-gone / mid-wait-gone / never-gone-times-out / TmuxError-propagates (4 cases; monkeypatch `time.monotonic` and `time.sleep`). <!-- completed: 2026-04-19T08:02 -->
+- [x] Update `cafleet/tests/test_cli_member_delete.py::TestHappyPath` — stub pane_exists + wait_for_pane_gone; assert call ordering (send_exit → wait → deregister); JSON output has `"pane_status": "(closed)"`. <!-- completed: 2026-04-19T08:35 -->
+- [x] Add `cafleet/tests/test_cli_member_delete.py::TestTimeout` — wait_for_pane_gone returns False, capture_pane returns buffer; assert exit 2, stderr contains timeout message + tail + recovery hint, deregister NOT called. <!-- completed: 2026-04-19T08:35 -->
+- [x] Add `cafleet/tests/test_cli_member_delete.py::TestForce` — `--force` flag; assert kill_pane called, send_exit NOT called, deregister called after kill_pane; exit 0; output contains `(killed)`. <!-- completed: 2026-04-19T08:35 -->
+- [x] Add `cafleet/tests/test_cli_member_delete.py::TestPaneAlreadyGone` — pane_exists False on first poll; exit 0 happy path; NO capture_pane call. <!-- completed: 2026-04-19T08:35 -->
+- [x] Rewrite `cafleet/tests/test_cli_member_delete.py::TestTmuxErrorOnSendExit` — drop raw tmux kill-pane assertion; assert cafleet-native recovery wording present. <!-- completed: 2026-04-19T08:35 -->
+- [x] Add `cafleet/tests/test_cli_member_delete.py::TestPendingPlacementForce` — `--force` with pane_id=None → deregister only, no tmux calls. <!-- completed: 2026-04-19T08:35 -->
+- [x] Add `cafleet/tests/test_cli_doctor.py` — text output has all four fields; JSON output shape; outside-tmux exits 1 with expected wording; `--session-id` silently ignored. <!-- completed: 2026-04-19T08:18 -->
 
 ### Step 6: Verification
 
