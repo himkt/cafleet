@@ -1,6 +1,6 @@
 # Robust member teardown: wait for real shutdown and close the remaining raw-tmux escape hatches
 
-**Status**: In Progress
+**Status**: Complete
 **Progress**: 46/46 tasks complete (Steps 1-4 done: documentation, tmux primitives, doctor subcommand, member_delete blocking + --force)
 **Last Updated**: 2026-04-19
 
