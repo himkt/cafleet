@@ -457,6 +457,132 @@ def deregister(ctx, agent_id):
         click.echo("Agent deregistered successfully.")
 
 
+_BASH_EXEC_TIMEOUT_CAP = 600
+_BASH_EXEC_OUTPUT_CAP = 65536
+
+
+def _truncate_stream(captured: str) -> str:
+    """Cap the stream at 64 KiB; append the design-spec marker on truncation."""
+    encoded = captured.encode("utf-8", errors="replace")
+    if len(encoded) <= _BASH_EXEC_OUTPUT_CAP:
+        return captured
+    last_bytes = encoded[-_BASH_EXEC_OUTPUT_CAP:]
+    body = last_bytes.decode("utf-8", errors="replace")
+    marker = (
+        f"\n[truncated: original was {len(encoded)} bytes; "
+        f"last {_BASH_EXEC_OUTPUT_CAP} bytes shown]\n"
+    )
+    return body + marker
+
+
+@cli.command("bash-exec")
+@click.option("--cmd", required=True, help="Shell command (single string).")
+@click.option("--cwd", default=None, help="Working directory (optional).")
+@click.option(
+    "--timeout",
+    type=int,
+    default=30,
+    show_default=True,
+    help="Wall-clock seconds; rejected if greater than 600.",
+)
+@click.option("--stdin", default=None, help="Stdin payload (UTF-8).")
+def bash_exec(cmd: str, cwd: str | None, timeout: int, stdin: str | None) -> None:
+    """Director-side helper: run one shell command with deterministic limits.
+
+    Prints exactly one JSON object to stdout and exits 0 for every payload
+    outcome (ran / denied / timeout). Click's UsageError on unknown flags is
+    the only non-zero exit. The dispatch / matcher / messaging logic lives
+    in the Director's prompt-side workflow, not here — this helper is a
+    pure subprocess-runner.
+    """
+    import subprocess
+    import time
+
+    if cmd == "":
+        click.echo(
+            json.dumps(
+                {
+                    "status": "denied",
+                    "exit_code": 126,
+                    "stdout": "",
+                    "stderr": "bash_request.cmd may not be empty.",
+                    "duration_ms": 0,
+                }
+            )
+        )
+        return
+    if timeout > _BASH_EXEC_TIMEOUT_CAP:
+        click.echo(
+            json.dumps(
+                {
+                    "status": "denied",
+                    "exit_code": 126,
+                    "stdout": "",
+                    "stderr": "bash_request.timeout exceeds 600s cap.",
+                    "duration_ms": 0,
+                }
+            )
+        )
+        return
+
+    start = time.monotonic()
+    try:
+        proc = subprocess.Popen(
+            ["bash", "-c", cmd],
+            cwd=cwd,
+            stdin=subprocess.PIPE if stdin is not None else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (FileNotFoundError, NotADirectoryError, OSError) as exc:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        click.echo(
+            json.dumps(
+                {
+                    "status": "ran",
+                    "exit_code": 1,
+                    "stdout": "",
+                    "stderr": f"no such cwd: {cwd}: {exc}" if cwd else str(exc),
+                    "duration_ms": duration_ms,
+                }
+            )
+        )
+        return
+
+    try:
+        stdout, stderr = proc.communicate(input=stdin, timeout=timeout)
+        duration_ms = int((time.monotonic() - start) * 1000)
+        payload = {
+            "status": "ran",
+            "exit_code": proc.returncode,
+            "stdout": _truncate_stream(stdout or ""),
+            "stderr": _truncate_stream(stderr or ""),
+            "duration_ms": duration_ms,
+        }
+    except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        try:
+            stdout, stderr = proc.communicate()
+        except Exception:
+            stdout, stderr = "", ""
+        duration_ms = int((time.monotonic() - start) * 1000)
+        partial_stdout = stdout or (exc.stdout if isinstance(exc.stdout, str) else "")
+        partial_stderr = stderr or (exc.stderr if isinstance(exc.stderr, str) else "")
+        marker = f"hard-killed at {timeout} seconds."
+        if partial_stderr and not partial_stderr.endswith("\n"):
+            partial_stderr += "\n"
+        payload = {
+            "status": "timeout",
+            "exit_code": 124,
+            "stdout": _truncate_stream(partial_stdout),
+            "stderr": _truncate_stream(partial_stderr + marker),
+            "duration_ms": duration_ms,
+        }
+
+    click.echo(json.dumps(payload))
+
+
 @cli.group()
 def member():
     """Manage tmux-backed member agents (Director only)."""
@@ -563,13 +689,38 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
     show_default=True,
     help="Coding agent to spawn in the tmux pane",
 )
+@click.option(
+    "--no-bash/--allow-bash",
+    "no_bash",
+    default=None,
+    help=(
+        "Deny / allow the spawned member's Bash tool. Defaults to --no-bash "
+        "for claude (route shell commands through the Director); --allow-bash "
+        "for codex (no --disallowedTools analog). --no-bash with codex is "
+        "rejected at the CLI."
+    ),
+)
 @click.argument("prompt_argv", nargs=-1)
 @click.pass_context
-def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
+def member_create(
+    ctx, agent_id, name, description, coding_agent, no_bash, prompt_argv
+):
     """Register a new member and spawn its coding agent pane in the Director's window."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
     coding_agent_config = get_coding_agent(coding_agent)
+
+    if coding_agent == "codex" and no_bash is True:
+        click.echo(
+            "Error: --no-bash with --coding-agent codex is not supported. "
+            "Codex has no --disallowedTools-equivalent flag. "
+            "Use --allow-bash, or pick claude. "
+            "(See design 0000034 §6 for the full rationale.)",
+            err=True,
+        )
+        ctx.exit(1)
+
+    deny_bash = no_bash if no_bash is not None else (coding_agent == "claude")
 
     try:
         tmux.ensure_tmux_available()
@@ -612,7 +763,9 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         pane_id = tmux.split_window(
             target_window_id=director_ctx.window_id,
             env=fwd_env,
-            command=coding_agent_config.build_command(prompt, display_name=name),
+            command=coding_agent_config.build_command(
+                prompt, display_name=name, deny_bash=deny_bash
+            ),
         )
     except tmux.TmuxError as exc:
         _rollback_register(
