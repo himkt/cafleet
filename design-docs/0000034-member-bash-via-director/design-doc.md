@@ -1,7 +1,7 @@
 # CAFleet CLI consolidation: Bash-via-Director, nested-only restructure, codex deprecation
 
 **Status**: Approved
-**Progress**: 43/63 tasks complete
+**Progress**: 56/63 tasks complete
 **Last Updated**: 2026-04-28
 
 ## Overview
@@ -676,7 +676,7 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
 
 - [x] Add `disallow_tools_args: tuple[str, ...] = ()` field to `CodingAgentConfig` in `cafleet/src/cafleet/coding_agent.py`. Set `CLAUDE.disallow_tools_args = ("--disallowedTools", "Bash")` and `CODEX.disallow_tools_args = ()`. (Round-5c-era state. CODEX deletion is owned by Step 13 task 1.) <!-- completed: 2026-04-28T16:10 -->
 - [x] Extend `CodingAgentConfig.build_command(...)` with a `deny_bash: bool = False` keyword. When `deny_bash=True` AND `disallow_tools_args` is non-empty, inject the tokens. Pinned argv ordering: `[binary, *extra_args, *deny_args, *name_args, prompt]` — deny_args BEFORE name_args. (Mirrors §1's snippet exactly.) <!-- completed: 2026-04-28T16:10 -->
-- [ ] Update `CLAUDE.default_prompt_template` to add the bash-routing reminder. New round-5c-era template (Step 12 task 6 renames the literal `cafleet poll` invocation to `cafleet message poll` as part of the round-6 nested-only restructure):
+- [x] Update `CLAUDE.default_prompt_template` to add the bash-routing reminder. New round-5c-era template (Step 12 task 6 renames the literal `cafleet poll` invocation to `cafleet message poll` as part of the round-6 nested-only restructure):
   ```
   Load Skill(cafleet). Your session_id is {session_id} and your agent_id is {agent_id}.
   You are a member of the team led by {director_name} ({director_agent_id}).
@@ -685,7 +685,7 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
   see Skill(cafleet) > Routing Bash via the Director for the bash_request JSON envelope.
   ```
   <!-- completed: 2026-04-28T16:10 -->
-- [ ] Update `CODEX.default_prompt_template` to add the same bash-routing reminder, inlined since codex has no skills to load. New round-5c-era template (Step 13 task 1 deletes the entire CODEX constant + this template as part of the round-6 codex deprecation; until then the template lives at parity with CLAUDE):
+- [x] Update `CODEX.default_prompt_template` to add the same bash-routing reminder, inlined since codex has no skills to load. New round-5c-era template (Step 13 task 1 deletes the entire CODEX constant + this template as part of the round-6 codex deprecation; until then the template lives at parity with CLAUDE):
   ```
   Your session_id is {session_id} and your agent_id is {agent_id}.
   You are a member of the team led by {director_name} ({director_agent_id}).
@@ -705,7 +705,7 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
 - [x] Add `--no-bash` / `--allow-bash` boolean flag pair to `member_create` in `cafleet/src/cafleet/cli.py:555`. Click pattern: `@click.option("--no-bash/--allow-bash", default=None)`. Resolve the per-coding-agent default in the handler body: `claude` → True if unset; `codex` → False if unset and reject if explicitly True with the verbatim error message in §6 round-5c text. Pass `deny_bash=resolved_no_bash` into `coding_agent_config.build_command(...)` at the existing `tmux.split_window(... command=...)` site. (Round-5c-era state. Step 13 task 2 removes the `--coding-agent` flag and the codex rejection branch as part of the round-6 codex deprecation.) <!-- completed: 2026-04-28T16:50 -->
 - [x] In the `member_create` handler body, after resolving `coding_agent_config`, reject `--no-bash --coding-agent codex` with the verbatim error message in §6 round-5c text. Exit 1 BEFORE the `register_agent` call so no broker rows are created. (Round-5c-era state. Step 13 task 2 removes this branch in round 6.) <!-- completed: 2026-04-28T16:50 -->
 - [x] Add a new top-level `cafleet bash-exec` click command in `cafleet/src/cafleet/cli.py` (round-5c-era name and placement; Step 12 task 2 renames it to `cafleet member exec` under the `member` group as part of the round-6 nested-only restructure). Flags: `--cmd` (required, accepts empty), `--cwd` (optional), `--timeout` (optional, default 30; the helper itself validates `1 <= timeout <= 600` rather than Click — see input-validation note below), `--stdin` (optional). Handler order: (1) **Input validation** — if `cmd == ""` OR `timeout > 600`, write a denied JSON object (`{"status": "denied", "exit_code": 126, "stdout": "", "stderr": "<reason>", "duration_ms": 0}`) to stdout and exit 0 (do NOT raise Click UsageError; the validation failure is a payload-level outcome, not a CLI-arg error). (2) **Run** — call `subprocess.run(["bash", "-c", cmd], cwd=cwd, input=stdin, timeout=timeout, capture_output=True)`. On `subprocess.TimeoutExpired`, hard-kill via `Popen.kill()` and emit `status: "timeout"` (exit_code internally `124`, but doc treats it as opaque per the canonical-status rule). Truncate stdout/stderr at 64 KiB with the exact marker spec. Print exactly one JSON object on stdout. Helper process exit code is 0 for every payload outcome (ran/denied/timeout); non-zero only for Click's own UsageError on unknown flags. Lazy-import `subprocess` inside the handler to keep CLI startup cheap. The command silently accepts and ignores `--session-id` (matches the `db init` / `session *` / `server` pattern). <!-- completed: 2026-04-28T16:50 -->
-- [ ] Add a `cafleet/src/cafleet/bash_routing.py` module exposing the three pinned-signature helpers below plus a `BashRequest` / `BashResult` dataclass pair (or TypedDicts) for type narrowing. Truncation-marker logic lives in the `cafleet member exec` helper's own output (§3 helper bullet 3); field-level validation lives in the helper too (§3 helper bullet 1). `parse_bash_request` is a pure JSON-shape parser; `format_bash_result` is a pure formatter that wraps the helper's already-truncated streams with the discriminator and audit fields.
+- [x] Add a `cafleet/src/cafleet/bash_routing.py` module exposing the three pinned-signature helpers below plus a `BashRequest` / `BashResult` dataclass pair (or TypedDicts) for type narrowing. Truncation-marker logic lives in the `cafleet member exec` helper's own output (§3 helper bullet 3); field-level validation lives in the helper too (§3 helper bullet 1). `parse_bash_request` is a pure JSON-shape parser; `format_bash_result` is a pure formatter that wraps the helper's already-truncated streams with the discriminator and audit fields.
 
   ```python
   def match_allow(
@@ -818,22 +818,22 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
 
 > **Atomic-landing instruction**: Step 14 lands atomically with Steps 12 and 13 (same PR). Without this step's invocation rewrites, Step 12's CLI renames break every existing CLI test; without this step's codex deletions, Step 13's CODEX import breakage cascades through test_coding_agent.py.
 
-- [ ] Rewrite every CLI test in `cafleet/tests/test_cli_*.py` to invoke commands in their new nested form (`cafleet agent register`, `cafleet message send`, `cafleet member exec`, etc.). Rename `cafleet/tests/test_cli_bash_exec.py` to `cafleet/tests/test_cli_member_exec.py` and rewrite every `cafleet bash-exec` invocation inside to `cafleet member exec`. Test logic is unchanged; only the CLI invocation strings + file name update. <!-- completed: -->
-- [ ] Add `TestFlatVerbsRejected` to `cafleet/tests/test_cli_restructure.py` (new file): assert each old flat-verb invocation fails with Click's default `Error: No such command '<name>'.`. Cases: `cafleet send`, `cafleet poll`, `cafleet ack`, `cafleet cancel`, `cafleet broadcast`, `cafleet register`, `cafleet deregister`, `cafleet agents`, `cafleet get-task`, `cafleet bash-exec`. Regression guard against any future contributor accidentally re-adding a Click alias. <!-- completed: -->
-- [ ] Add `TestSendPollTriggerKeystroke` to `cafleet/tests/test_tmux.py`: monkey-patch `tmux._run` to capture argv; call `tmux.send_poll_trigger(target_pane_id="%0", session_id="<uuid>", agent_id="<uuid>")` once and assert the captured keystroke string contains the literal `message poll` (not `poll`). Regression guard against any future revert of Step 12 task 5. <!-- completed: -->
-- [ ] Delete every codex-specific test case in `cafleet/tests/test_coding_agent.py` (`TestCodexBuildCommand`, `TestCodexDisplayName`, registry-lookup tests, codex sub-cases of `TestDisallowTools` / `TestPromptTemplates`). Round-5c's `TestPromptTemplates` shrinks to claude-only per §15. <!-- completed: -->
-- [ ] Delete the codex sub-cases of `TestNoBashFlag` in `cafleet/tests/test_cli_member.py` (the `--no-bash --coding-agent codex` rejection case and the `codex` default `--allow-bash` case). Round-5c's `TestNoBashFlag` shrinks from 4 sub-cases to 2 per §15. <!-- completed: -->
-- [ ] Add `TestCodingAgentFlagRemoved` to `cafleet/tests/test_cli_member.py`: `cafleet member create --coding-agent claude` fails with `Error: No such option: '--coding-agent'.` (Click default) — regression guard. <!-- completed: -->
-- [ ] Add `TestCodexConstantRemoved` to `cafleet/tests/test_coding_agent.py`: importing `CODEX`, `CODING_AGENTS`, `get_coding_agent` from `cafleet.coding_agent` each raise `ImportError` — regression guard. <!-- completed: -->
-- [ ] Drop codex-specific spawn-command tests in `cafleet/tests/test_tmux.py` if any are codex-specific (most tests are agent-agnostic via `_run` mocking). <!-- completed: -->
-- [ ] Drop codex backend strings from `cafleet/tests/test_output.py` format tests. <!-- completed: -->
+- [x] Rewrite every CLI test in `cafleet/tests/test_cli_*.py` to invoke commands in their new nested form (`cafleet agent register`, `cafleet message send`, `cafleet member exec`, etc.). Rename `cafleet/tests/test_cli_bash_exec.py` to `cafleet/tests/test_cli_member_exec.py` and rewrite every `cafleet bash-exec` invocation inside to `cafleet member exec`. Test logic is unchanged; only the CLI invocation strings + file name update. <!-- completed: 2026-04-28T20:00 -->
+- [x] Add `TestFlatVerbsRejected` to `cafleet/tests/test_cli_restructure.py` (new file): assert each old flat-verb invocation fails with Click's default `Error: No such command '<name>'.`. Cases: `cafleet send`, `cafleet poll`, `cafleet ack`, `cafleet cancel`, `cafleet broadcast`, `cafleet register`, `cafleet deregister`, `cafleet agents`, `cafleet get-task`, `cafleet bash-exec`. Regression guard against any future contributor accidentally re-adding a Click alias. <!-- completed: 2026-04-28T20:00 -->
+- [x] Add `TestSendPollTriggerKeystroke` to `cafleet/tests/test_tmux.py`: monkey-patch `tmux._run` to capture argv; call `tmux.send_poll_trigger(target_pane_id="%0", session_id="<uuid>", agent_id="<uuid>")` once and assert the captured keystroke string contains the literal `message poll` (not `poll`). Regression guard against any future revert of Step 12 task 5. <!-- completed: 2026-04-28T20:00 -->
+- [x] Delete every codex-specific test case in `cafleet/tests/test_coding_agent.py` (`TestCodexBuildCommand`, `TestCodexDisplayName`, registry-lookup tests, codex sub-cases of `TestDisallowTools` / `TestPromptTemplates`). Round-5c's `TestPromptTemplates` shrinks to claude-only per §15. <!-- completed: 2026-04-28T20:00 -->
+- [x] Delete the codex sub-cases of `TestNoBashFlag` in `cafleet/tests/test_cli_member.py` (the `--no-bash --coding-agent codex` rejection case and the `codex` default `--allow-bash` case). Round-5c's `TestNoBashFlag` shrinks from 4 sub-cases to 2 per §15. <!-- completed: 2026-04-28T20:00 -->
+- [x] Add `TestCodingAgentFlagRemoved` to `cafleet/tests/test_cli_member.py`: `cafleet member create --coding-agent claude` fails with `Error: No such option: '--coding-agent'.` (Click default) — regression guard. <!-- completed: 2026-04-28T20:00 -->
+- [x] Add `TestCodexConstantRemoved` to `cafleet/tests/test_coding_agent.py`: importing `CODEX`, `CODING_AGENTS`, `get_coding_agent` from `cafleet.coding_agent` each raise `ImportError` — regression guard. <!-- completed: 2026-04-28T20:00 -->
+- [x] Drop codex-specific spawn-command tests in `cafleet/tests/test_tmux.py` if any are codex-specific (most tests are agent-agnostic via `_run` mocking). <!-- completed: 2026-04-28T20:00 -->
+- [x] Drop codex backend strings from `cafleet/tests/test_output.py` format tests. <!-- completed: 2026-04-28T20:00 -->
 
 ### Step 15: Quality gates (round 6)
 
-- [ ] Run `mise //cafleet:test` — must pass with zero failures. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` — must pass. <!-- completed: -->
-- [ ] Run `mise //cafleet:format` — must pass. <!-- completed: -->
-- [ ] Run `mise //cafleet:typecheck` — must pass. <!-- completed: -->
+- [x] Run `mise //cafleet:test` — must pass with zero failures. <!-- completed: 2026-04-28T20:00 -->
+- [x] Run `mise //cafleet:lint` — must pass. <!-- completed: 2026-04-28T20:00 -->
+- [x] Run `mise //cafleet:format` — must pass. <!-- completed: 2026-04-28T20:00 -->
+- [x] Run `mise //cafleet:typecheck` — must pass. <!-- completed: 2026-04-28T20:00 -->
 
 ### Step 16: Real-world smoke (round 6)
 
