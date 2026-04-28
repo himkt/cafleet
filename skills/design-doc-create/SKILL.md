@@ -25,15 +25,15 @@ The Director registers with a CAFleet session and spawns both the Drafter and Re
 
 ```
 User
- +-- Director (main Claude -- cafleet register, cafleet member create, orchestrates cycle)
+ +-- Director (main Claude -- cafleet agent register, cafleet member create, orchestrates cycle)
       +-- Drafter (member agent -- spawned in tmux pane; writes the design document)
       +-- Reviewer (member agent -- spawned in tmux pane; critically reviews the draft)
 ```
 
 - **Director ↔ User**: `AskUserQuestion` (clarification relay, draft presentation, feedback collection)
-- **Director ↔ Drafter**: `cafleet send` (questions relay, user answers, reviewer feedback, drafting instructions)
-- **Director ↔ Reviewer**: `cafleet send` (draft review requests, review feedback)
-- Members receive messages via a push notification: the broker injects `cafleet --session-id <session-id> poll --agent-id <recipient-agent-id>` into the member's pane via `tmux send-keys` whenever a `cafleet send` is persisted. The literal `<session-id>` and `<recipient-agent-id>` UUIDs are the session and target member UUIDs the broker has in scope, baked into the injected command string. `--session-id` is global (before the subcommand); `--agent-id` is per-subcommand (after the subcommand name).
+- **Director ↔ Drafter**: `cafleet message send` (questions relay, user answers, reviewer feedback, drafting instructions)
+- **Director ↔ Reviewer**: `cafleet message send` (draft review requests, review feedback)
+- Members receive messages via a push notification: the broker injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into the member's pane via `tmux send-keys` whenever a `cafleet message send` is persisted. The literal `<session-id>` and `<recipient-agent-id>` UUIDs are the session and target member UUIDs the broker has in scope, baked into the injected command string. `--session-id` is global (before the subcommand); `--agent-id` is per-subcommand (after the subcommand name).
 
 ## Prerequisites
 
@@ -43,13 +43,13 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 
 | Agent Teams primitive | CAFleet equivalent |
 |---|---|
-| `TeamCreate(name="create-{slug}")` | CAFleet session created via `cafleet session create` — it bootstraps the session + root Director + placement + Administrator in one transaction (no separate `cafleet register` call needed for the Director) |
+| `TeamCreate(name="create-{slug}")` | CAFleet session created via `cafleet session create` — it bootstraps the session + root Director + placement + Administrator in one transaction (no separate `cafleet agent register` call needed for the Director) |
 | `Agent(team_name=..., subagent_type=...)` | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
 | `SendMessage(to="Drafter")` | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from member) | `cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
 | `agent-team-supervision` `/loop` | `Skill(cafleet-monitoring)` `/loop` |
-| `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` for each member, then `cafleet session delete <session-id>` (soft-deletes the session, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet deregister` — `session delete` is the only supported teardown. |
-| Auto message delivery | Push notification injects `cafleet --session-id <session-id> poll --agent-id <recipient-agent-id>` into member's tmux pane |
+| `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` for each member, then `cafleet session delete <session-id>` (soft-deletes the session, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `session delete` is the only supported teardown. |
+| Auto message delivery | Push notification injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into member's tmux pane |
 
 ## Process
 
@@ -70,7 +70,7 @@ Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt.
    - Use Grep to search for `COMMENT(` in the file.
    - **COMMENT markers found** → This is **resume mode**. Proceed to Step 1 with the resume-specific Drafter spawn prompt. Set an internal flag `SKIP_CLARIFICATION=true` so Step 2 (clarification) is skipped.
    - **No COMMENT markers found** → Inform the user: "No COMMENT markers found in the existing document." Use `AskUserQuestion` with two options:
-     - **"Run quality review"**: Set internal flags `SKIP_CLARIFICATION=true` and `QUALITY_REVIEW_ONLY=true`. Skip Step 2 entirely and enter Step 3 by immediately routing the existing `${DOC_PATH}` to the Reviewer via `cafleet send` (no new draft is produced; the Drafter is only involved later if the Reviewer requests revisions).
+     - **"Run quality review"**: Set internal flags `SKIP_CLARIFICATION=true` and `QUALITY_REVIEW_ONLY=true`. Skip Step 2 entirely and enter Step 3 by immediately routing the existing `${DOC_PATH}` to the Reviewer via `cafleet message send` (no new draft is produced; the Drafter is only involved later if the Reviewer requests revisions).
      - **"Start fresh"**: Treat as new creation, ignoring the existing file. Ensure `SKIP_CLARIFICATION` and `QUALITY_REVIEW_ONLY` are unset, then proceed to Step 1 as normal.
 
 ### Step 1: Register & Spawn Members (Director)
@@ -79,7 +79,7 @@ Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`.
 
 #### 1a. Establish a CAFleet session and capture the root Director's `agent_id`
 
-`cafleet session create` (which must be run inside a tmux session) atomically creates the session and registers a root Director bound to the current tmux pane — there is no separate `cafleet register` step for the Director. Use `--json` so both IDs are machine-parseable:
+`cafleet session create` (which must be run inside a tmux session) atomically creates the session and registers a root Director bound to the current tmux pane — there is no separate `cafleet agent register` step for the Director. Use `--json` so both IDs are machine-parseable:
 
 ```bash
 cafleet session create --label "design-doc-create-{slug}" --json
@@ -100,7 +100,7 @@ cafleet session create --label "design-doc-create-{slug}" --json
 
 Capture `session_id` and `director.agent_id` from the JSON response. Substitute them for `<session-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal UUIDs.
 
-If you already have a running session (e.g. an outer orchestration), reuse its `session_id` and its root Director's `agent_id` instead of creating a new session. Do **not** attempt to register a second Director with `cafleet register --name Director` — the root Director from `session create` is the team lead; a second registration would just create an unrelated agent with no placement row.
+If you already have a running session (e.g. an outer orchestration), reuse its `session_id` and its root Director's `agent_id` instead of creating a new session. Do **not** attempt to register a second Director with `cafleet agent register --name Director` — the root Director from `session create` is the team lead; a second registration would just create an unrelated agent with no placement row.
 
 #### 1c. Start the monitoring `/loop`
 
@@ -139,7 +139,7 @@ The user's request: [INSERT USER'S ORIGINAL REQUEST]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
-- When you see cafleet poll output with a message from the Director, act on those instructions.
+- When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.
 Send your questions to the Director who will relay them to the user.
@@ -169,7 +169,7 @@ DESIGN DOCUMENT: [INSERT ${DOC_PATH}]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
-- When you see cafleet poll output with a message from the Director, act on those instructions.
+- When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 This is a RESUME session. The document contains COMMENT markers from a previous
 interview. Follow the Resume Mode instructions in your role definition.
@@ -209,7 +209,7 @@ YOUR AGENT ID: <my-agent-id>
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
-- When you see cafleet poll output with a message from the Director, act on those instructions.
+- When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 Wait for the Director to assign a document for review. Read the document file and
 provide specific, actionable feedback. If the draft meets all quality standards,
@@ -239,7 +239,7 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 **Skip this step entirely when `SKIP_CLARIFICATION=true`** (set by Step 0 in resume mode or quality-review-only mode). Resume mode: the COMMENT markers serve as the clarification and the Drafter already has all the information needed. Quality-review-only mode: the Drafter is not producing a new draft at all — proceed directly to Step 3 by routing the existing `${DOC_PATH}` to the Reviewer.
 
-1. Wait for the Drafter's clarifying questions. The monitoring `/loop` and periodic `cafleet --session-id <session-id> poll --agent-id <director-agent-id>` will surface the Drafter's message once it arrives.
+1. Wait for the Drafter's clarifying questions. The monitoring `/loop` and periodic `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>` will surface the Drafter's message once it arrives.
 2. `cafleet --session-id <session-id> ack --agent-id <director-agent-id> --task-id <task-id>` each received message after reading it.
 3. Relay the questions to the user via `AskUserQuestion`. If the number of questions exceeds the per-call limit of `AskUserQuestion`, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter:
@@ -263,7 +263,7 @@ Enter this step after the Drafter reports a completed draft, **or immediately** 
    cafleet --session-id <session-id> send --agent-id <director-agent-id> \
      --to <reviewer-agent-id> --text "Please review the draft at ${DOC_PATH}. Provide feedback or signal APPROVED."
    ```
-2. **Wait** for the Reviewer's feedback via `cafleet --session-id <session-id> poll --agent-id <director-agent-id>`.
+2. **Wait** for the Reviewer's feedback via `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>`.
 3. **On feedback**: Route to Drafter for revision:
    ```bash
    cafleet --session-id <session-id> send --agent-id <director-agent-id> \
@@ -319,7 +319,7 @@ No round limit — loop continues until approved or aborted.
 
    Each `member delete` now blocks until the pane is actually gone (15 s default timeout). On exit 2 (stuck prompt), inspect with `cafleet member capture` and answer with `cafleet member send-input`, then retry — or rerun with `--force` to skip `/exit` and kill-pane immediately.
 
-4. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
+4. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet agent deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
    ```bash
    cafleet session delete <session-id>
    # → Deleted session <session-id>. Deregistered N agents.
