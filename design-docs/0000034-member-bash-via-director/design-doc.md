@@ -1,7 +1,7 @@
 # CAFleet CLI consolidation: Bash-via-Director, nested-only restructure, codex deprecation
 
 **Status**: Approved
-**Progress**: 3/63 tasks complete
+**Progress**: 7/63 tasks complete
 **Last Updated**: 2026-04-28
 
 ## Overview
@@ -667,10 +667,10 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
 
 ### Step 2: Documentation — project-local skills
 
-- [ ] Update `skills/cafleet/SKILL.md`: (a) extend the `### Member Create` subsection with `--no-bash` / `--allow-bash` flag rows. (b) Add a new top-level `## Routing Bash via the Director` section after `### Answer a member's AskUserQuestion prompt`. Include both payload schemas verbatim, the 3-option AskUserQuestion shape, the auto-allow path, the **required** `Bash(cafleet bash-exec *)` allow rule, the cross-Director rule, and the no-timeout note. (c) Add `### Bash Exec` to Command Reference, between `Member Send-Input` and `Server`. (Codex-related deletions and the `bash-exec` → `member exec` rename are owned by Step 10 task 1.) <!-- completed: -->
-- [ ] Update `skills/cafleet-monitoring/SKILL.md`: add a row to the Stall Response escalation table for the `bash_request` blocking case. Reference the new cafleet-skill section. <!-- completed: -->
-- [ ] Update `skills/design-doc-create/roles/director.md`: add a one-paragraph note pointing at the cafleet skill for the bash-routing workflow. <!-- completed: -->
-- [ ] Update `skills/design-doc-execute/roles/director.md`: same edit, mirrored. <!-- completed: -->
+- [x] Update `skills/cafleet/SKILL.md`: (a) extend the `### Member Create` subsection with `--no-bash` / `--allow-bash` flag rows. (b) Add a new top-level `## Routing Bash via the Director` section after `### Answer a member's AskUserQuestion prompt`. Include both payload schemas verbatim, the 3-option AskUserQuestion shape, the auto-allow path, the **required** `Bash(cafleet bash-exec *)` allow rule, the cross-Director rule, and the no-timeout note. (c) Add `### Bash Exec` to Command Reference, between `Member Send-Input` and `Server`. (Codex-related deletions and the `bash-exec` → `member exec` rename are owned by Step 10 task 1.) <!-- completed: 2026-04-28T15:40 -->
+- [x] Update `skills/cafleet-monitoring/SKILL.md`: add a row to the Stall Response escalation table for the `bash_request` blocking case. Reference the new cafleet-skill section. <!-- completed: 2026-04-28T15:40 -->
+- [x] Update `skills/design-doc-create/roles/director.md`: add a one-paragraph note pointing at the cafleet skill for the bash-routing workflow. <!-- completed: 2026-04-28T15:40 -->
+- [x] Update `skills/design-doc-execute/roles/director.md`: same edit, mirrored. <!-- completed: 2026-04-28T15:40 -->
 
 ### Step 3: Code — `CodingAgentConfig` extension and spawn-prompt amendments
 

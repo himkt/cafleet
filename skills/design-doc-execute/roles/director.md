@@ -120,6 +120,10 @@ Track team progress via the `Skill(cafleet-monitoring)` `/loop` (1-minute interv
 
 When a member pauses on an `AskUserQuestion`-shaped prompt, the Director MUST delegate the decision to the user via its own `AskUserQuestion` tool call and then invoke the resolved `cafleet member send-input` via its Bash tool — Claude Code's native per-call permission prompt is the user-consent surface. Never print a fenced `bash` block containing the resolved command for the user to copy-paste; see the cafleet skill's "Answer a member's AskUserQuestion prompt" section for the canonical three-beat workflow and pane-shapes table.
 
+### Routing member bash requests
+
+Programmer / Tester / Verifier members are spawned with `cafleet member create --no-bash` (the default), so their harnesses reject every Bash call. When a member needs a shell command, it sends a JSON `bash_request` envelope to the Director via `cafleet send`; the Director runs the command via `cafleet bash-exec` and replies with a `bash_result`. When the Director's `cafleet poll` surfaces an unresponded `bash_request`, the Director MUST process it BEFORE any other inbox item — the member is blocked waiting for the reply (no member-side timeout). Follow the 6-step dispatch (discriminate → match against `permissions.allow` → AskUserQuestion-on-miss → run via `cafleet bash-exec` → reply via `cafleet send`) documented in the cafleet skill's `## Routing Bash via the Director` section. Do NOT print fenced `bash` blocks for the user (carries forward the design 0000033 discipline — `AskUserQuestion` is the sole consent surface for non-allowlisted commands; the auto-allow path runs without any prompt at all).
+
 ### Skill-specific milestones
 
 | Phase | Expected event | Stall indicator | Director action |

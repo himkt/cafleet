@@ -259,6 +259,7 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | Coding agent to spawn: `claude` (default) or `codex`. Codex is spawned with `--approval-mode auto-edit`. |
+| `--no-bash` / `--allow-bash` | no | Enable / disable Bash tool denial at spawn time. Defaults to `--no-bash` for `--coding-agent claude` (the spawned process gains `--disallowedTools "Bash"` so the harness rejects every Bash call). The member is expected to route shell commands through its Director via the `bash_request` JSON envelope — see the new `## Routing Bash via the Director` section below. `--allow-bash` is the opt-out for one-off members that need direct Bash; the soft "route through the Director" discipline still applies but is no longer enforced by the harness. Codex defaults to `--allow-bash` because codex has no `--disallowedTools` analog today, and `--no-bash --coding-agent codex` is rejected at the CLI layer. |
 | *(positional, after `--`)* | no | Prompt for the spawned coding agent process. If omitted, a default prompt is generated (agent-specific). BOTH the default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_name` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`) — `.format()` collapses each `{{` / `}}` pair to a single literal brace and, critically, does not attempt placeholder substitution on the inner tokens. This matters for prompts that embed JSON snippets, shell expansions, or other content with literal curly braces. Pre-substituting the dynamic values in shell does NOT exempt the prompt from this rule — even a placeholder-free prompt is still passed through `str.format()`, so any literal braces must still be doubled or removed.
@@ -464,6 +465,64 @@ Output (`--json`):
   "value": "<user text as-sent>"
 }
 ```
+
+### Bash Exec
+
+Director-side helper that runs a single shell command with deterministic limits (64 KiB stdout/stderr caps, SIGKILL at the requested timeout) and prints exactly one JSON object on its own stdout. Invoked through the Director's own Bash tool when dispatching a `bash_request` from a member — see `## Routing Bash via the Director` above for the full dispatch flow.
+
+```bash
+cafleet bash-exec --cmd 'git log -1 --oneline'
+cafleet bash-exec --cmd 'mise //cafleet:test' --timeout 120
+cafleet bash-exec --cmd 'cat' --stdin 'hello'
+cafleet bash-exec --cmd 'echo $PWD' --cwd /tmp
+```
+
+The helper does NOT know about CAFleet messaging, `permissions.allow`, or the `bash_request` envelope. It is a pure subprocess-runner with deterministic limits and input validation. The matcher and dispatch logic live in the Director's prompt-side workflow.
+
+`cafleet bash-exec` does NOT require `--session-id` (consistent with `db init` / `session *` / `server`). Supplying `--session-id` is silently accepted and ignored, so a single `cafleet --session-id <id> *` allow pattern keeps matching every subcommand.
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--cmd <text>` | yes | Single-string shell command. Invoked via `subprocess.run(["bash", "-c", cmd], ...)` so pipes / `&&` / quoting work as the operator typed them. Empty string is rejected as a denied JSON output (input validation). |
+| `--cwd <path>` | no | Working directory. Defaults to the helper's own cwd when omitted. A nonexistent path surfaces through the runtime path: `status: "ran"`, non-zero `exit_code`, `stderr` contains `no such cwd: <path>`. |
+| `--timeout <int>` | no | Wall-clock seconds. Default 30. Capped at 600. Values above the cap are rejected as a denied JSON output. |
+| `--stdin <text>` | no | UTF-8 text passed on the subprocess's stdin. |
+
+Output schema (printed on stdout):
+
+```json
+{
+  "status": "ran",
+  "exit_code": 0,
+  "stdout": "abc1234 docs: mark design doc as complete\n",
+  "stderr": "",
+  "duration_ms": 47
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | `"ran" \| "denied" \| "timeout"` | Top-level outcome. **Sole source of truth.** Clients MUST switch on `status`, not on `exit_code`. |
+| `exit_code` | `int` | When `status == "ran"`: the subprocess's verbatim exit code. When `status == "denied"` or `"timeout"`: **opaque**. |
+| `stdout` | `string` | UTF-8, capped at 64 KiB. Truncation marker: `\n[truncated: original was N bytes; last 65536 bytes shown]\n`. |
+| `stderr` | `string` | Same shape as `stdout`. On `status: "denied"` carries the helper's input-validation message. On `status: "timeout"` carries `"hard-killed at <N> seconds."` plus any partial stderr captured before SIGKILL. |
+| `duration_ms` | `int` | Wall-clock duration in milliseconds. Zero on `status: "denied"`. |
+
+Input validation (helper rejects without invoking the subprocess):
+
+| Input | `stderr` reason |
+|---|---|
+| `--cmd ""` | `bash_request.cmd may not be empty.` |
+| `--timeout` greater than 600 | `bash_request.timeout exceeds 600s cap.` |
+
+Helper-process exit codes:
+
+| Helper-process exit | When |
+|---|---|
+| `0` | Every payload outcome — `status: "ran"`, `status: "denied"`, `status: "timeout"`. The Director never relies on the process exit code; it parses the JSON on stdout. |
+| `2` | Click's built-in `UsageError` for unknown CLI flags. |
+
+> **Required `permissions.allow` entry**: the operator MUST add `Bash(cafleet bash-exec *)` to the Director's `permissions.allow` for the single-consent-gate UX to hold — see `## Routing Bash via the Director` for setup details.
 
 ### Server
 
@@ -671,6 +730,134 @@ The pane is ALWAYS on the AskUserQuestion 4-option frame when `send-input` is ap
 - Call `send-input` when the pane is on an "Other shapes" state per the table above. Escalate or wait instead — sending any keystroke would corrupt pane state.
 
 The CLI validates input (`--choice` is `IntRange(1, 3)`; `--freetext` rejects newlines to preserve the one-call-one-submission contract), enforces the same cross-Director authorization boundary as `member capture`, and issues three separate `tmux send-keys` invocations for `--freetext` (`4` → `-l "<text>"` → `Enter`) so shell meta, key names, and multi-byte characters all pass through as literal input.
+
+## Routing Bash via the Director
+
+When a member is spawned via `cafleet member create --no-bash` (the default for claude), its harness rejects every Bash call. To run a shell command, the member sends a JSON `bash_request` envelope to its Director via `cafleet send`; the Director runs the command via `cafleet bash-exec` and replies with a `bash_result`. Every operator-consent prompt fires in the Director's pane — never scattered across N member panes.
+
+### `bash_request` (member → Director)
+
+The member uses **existing `cafleet send`** with a JSON-typed payload in the `--text` body. No new member-side subcommand. Send call shape (use `--json` so the broker's server-side `task_id` is machine-parseable; `--json` is global and goes BEFORE the subcommand):
+
+```bash
+cafleet --session-id <session-id> --json send --agent-id <my-agent-id> \
+  --to <director-agent-id> \
+  --text '{"type":"bash_request","cmd":"git log -1 --oneline","cwd":"/home/himkt/work/himkt/cafleet","reason":"verifying main before PR"}'
+```
+
+Payload schema:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `type` | `"bash_request"` | yes | Discriminator. Director dispatches on this exact string. |
+| `cmd` | `string` | yes | The shell command to run. Single string; `cafleet bash-exec` invokes it via `bash -c <cmd>` so pipes / `&&` / quoting work as the member typed them. |
+| `cwd` | `string \| null` | no | Working directory. Defaults to the Director's current cwd if `null` or omitted. |
+| `stdin` | `string \| null` | no | Stdin payload (UTF-8). Use sparingly — embedding large binaries here will hit the 64 KiB outbound truncation. |
+| `timeout` | `int \| null` | no | Seconds. Defaults to 30. Capped at 600 (10 min) — the helper rejects oversized `timeout` as a denied JSON output. |
+| `reason` | `string` | yes | Short justification (≤ 200 chars). Surfaced in the Director's `AskUserQuestion` so the operator knows *why* the command is being asked for. |
+
+### Cross-Director boundary
+
+The member always addresses the request to its own `placement.director_agent_id`. Sending a `bash_request` to any other agent ID in the session is undefined behavior — the recipient simply will not know the convention. Cross-session leakage is prevented by the broker's existing session boundary; the within-session "address only your own Director" rule is documentation-only in v1 (no CLI guard).
+
+### Reply correlation
+
+The broker assigns each delivered task a server-side `task_id`, surfaced in `cafleet --json poll` and `cafleet --json send`. The member captures the `task_id` from its own `cafleet --json send` response, holds it locally, and then waits for the broker's tmux push notification (which injects a `cafleet poll` keystroke into the member's pane when a `bash_result` arrives). The member polls (one-shot, not a loop), filters the polled messages by `in_reply_to == <captured-task-id>`, and resumes.
+
+If the poll returns messages in addition to the `bash_result` (or before it arrives), the member processes those messages as plain instructions per existing CAFleet semantics — the bash-routing continuation only resumes when a `bash_result` with the matching `in_reply_to` arrives.
+
+### `bash_result` (Director → member)
+
+```json
+{
+  "type": "bash_result",
+  "in_reply_to": "<request-task-id>",
+  "status": "ran",
+  "exit_code": 0,
+  "stdout": "abc1234 docs: mark design doc as complete\n",
+  "stderr": "",
+  "duration_ms": 47,
+  "note": "ran without operator prompt (matched allow rule: Bash(git *))"
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `type` | `"bash_result"` | yes | Discriminator. |
+| `in_reply_to` | `string` | yes | The originating `bash_request`'s `task_id`. |
+| `status` | `"ran" \| "denied" \| "timeout"` | yes | Top-level outcome. **Sole source of truth.** `ran` means the helper invoked the subprocess and it terminated normally. `denied` means the helper or operator denied the request (matched no allow + operator picked Deny, OR helper input-validation failed: empty `cmd`, oversized `timeout`). `timeout` means the helper hard-killed the subprocess at the configured `timeout`. |
+| `exit_code` | `int` | yes | When `status == "ran"`: the subprocess's verbatim exit code. When `status == "denied"` or `"timeout"`: **value is opaque — do not switch on it.** The helper internally uses `126` for denied and `124` for timeout for shell-legibility, but clients MUST use `status` for branching. |
+| `stdout` | `string` | yes | UTF-8, truncated to 64 KiB. Truncation marker: `\n[truncated: original was N bytes; last 65536 bytes shown]\n`. |
+| `stderr` | `string` | yes | Same shape as stdout. On `status: "denied"` it carries the operator's typed rejection reason or the helper's input-validation message. On `status: "timeout"` it carries `"hard-killed at <N> seconds."` plus any partial stderr captured before SIGKILL. |
+| `duration_ms` | `int` | yes | Wall-clock duration in milliseconds. Zero on `status: "denied"`. |
+| `note` | `string` | no | Optional human-readable note. Set on `status: "ran"` when auto-run via the allow-list path: `note: "ran without operator prompt (matched allow rule: <pattern>)"`. Set on `status: "ran"` when the operator edited the command: `note: "operator edited cmd before running. original: <verbatim original cmd>"`. Set on `status: "denied"` when the operator denied: `note: "operator denied: <reason>"`. Omitted otherwise. |
+
+> **Canonical-status rule**: `status` is the SOLE source of truth for the outcome. `exit_code` is meaningful **only when `status == "ran"`**, where it carries the subprocess's verbatim return code. For `status: "denied"` and `status: "timeout"` the field is present (so shell tooling that always reads it does not crash) but its value is **opaque** — clients MUST switch on `status`, not on `exit_code`.
+
+### Director-side dispatch (6 steps)
+
+When the Director's `cafleet poll` surfaces a message whose `text` parses as `{"type": "bash_request", ...}`:
+
+1. **Discriminator**. Parse the polled `text` body as JSON. If parsing fails, or the parsed object lacks `type`, or `type != "bash_request"`, treat the message as a plain instruction. End — no `bash_result` emitted. Otherwise continue.
+2. **Matcher**. Apply the project's resolved `permissions.allow` and `permissions.deny` (concatenated from `~/.claude/settings.json`, `<project>/.claude/settings.json`, and `<project>/.claude/settings.local.json`) using fnmatch-style `Bash(...)` glob patterns. The matcher returns `auto-run` (allow match AND no deny match) or `ask` (every other combination). There is no `auto-deny` outcome — `permissions.deny` only downgrades a would-be `auto-run` to `ask`.
+3. If `auto-run`: continue to step 5 with the original `cmd`. Set `note = "ran without operator prompt (matched allow rule: <pattern>)"`.
+4. If `ask`: present the 3-option `AskUserQuestion` (table below). Resolve the operator's choice and act per branch:
+   - `Approve as-is` → continue with the original `cmd`; do not set `note`.
+   - `Approve with edits` → continue with `<typed-cmd>` AND set `note = "operator edited cmd before running. original: <verbatim-original-cmd>"`.
+   - `Deny with reason` → skip the helper invocation; emit a denied `bash_result` directly with `status: "denied"`, `note: "operator denied: <reason>"`, `stderr: <reason or "Director denied the request.">`. Reply via step 6, end dispatch.
+5. **Run via `cafleet bash-exec`**. The Director's pane invokes the helper through its Bash tool: `cafleet bash-exec --cmd '<cmd>' [--cwd '<cwd>'] [--timeout <timeout>] [--stdin '<stdin>']`. Each optional flag is included only when the corresponding request field is present and non-null; otherwise the helper's defaults apply (cwd: pane cwd; timeout: 30 s; stdin: empty). The Director's native Bash-tool prompt does NOT fire because `Bash(cafleet bash-exec *)` is in the operator's `permissions.allow` (required setup, see § Required `permissions.allow` entry below). The `AskUserQuestion` (step 4) is the only consent surface in this flow. The helper handles deterministic limits (64 KiB caps, SIGKILL at timeout) AND input validation (`cmd != ""`, `timeout ≤ 600`); on input-validation failure the helper writes a denied JSON object to its own stdout (status `"denied"`) which the Director copies into `bash_result` exactly as it would for any other helper output.
+6. **Reply**. The Director's pane invokes `cafleet send --agent-id <director-id> --to <member-id> --text '<bash_result-json>'` via its Bash tool. The push notification injects a `cafleet poll` keystroke into the member's pane and the member resumes.
+
+### `AskUserQuestion` shape (step 4)
+
+| # | Label | Description holds | Resolves to |
+|---|---|---|---|
+| 1 | `Approve as-is` | The request's `reason` and the verbatim `cmd`. | `run-as-is(cmd)` |
+| 2 | `Approve with edits` | "Operator types the edited command body via Other." (built-in Other) | `run-edited(<typed-cmd>)` |
+| 3 | `Deny with reason` | "Operator types the rejection reason via Other." (built-in Other) | `deny(<typed-reason>)` |
+
+Constraints:
+
+- The 4th built-in "Other" slot routes to either edit-or-deny based on what the operator typed. The 3 explicit options exist precisely to disambiguate.
+- `AskUserQuestion`'s per-call limits (1 question per call, 2–4 options, built-in "Other" already exposed) are observed. No 5th option, no preamble sentence, no fenced-bash instruction blocks.
+- The question text names the member: `"<member-name> wants to run a Bash command. Approve, edit, or deny?"`
+
+### Auto-allow path (no operator prompt)
+
+When the matcher returns `auto-run`, the Director skips the `AskUserQuestion` entirely and invokes `cafleet bash-exec` directly. The reply carries a `note` field for audit:
+
+```json
+{
+  "type": "bash_result",
+  "in_reply_to": "<request-task-id>",
+  "status": "ran",
+  "exit_code": 0,
+  "stdout": "...",
+  "stderr": "",
+  "duration_ms": 47,
+  "note": "ran without operator prompt (matched allow rule: Bash(git *))"
+}
+```
+
+The auto-allow path is the entire reason this design exists — commands the operator already trusts at the project level run without interrupting the Director's pane, while everything else gates through the single `AskUserQuestion`.
+
+### Required `permissions.allow` entry
+
+The operator MUST add `Bash(cafleet bash-exec *)` to the Director's `permissions.allow` (project `.claude/settings.json` or user `~/.claude/settings.json`). Without this entry the Director's pane fires a duplicate native Bash-tool prompt for every command, defeating the single-consent-gate goal — `AskUserQuestion` is supposed to be the sole consent surface in this flow.
+
+This is operator-facing setup, not a programmatic guarantee. A Director that runs without the entry still works, just with worse UX (two prompts per non-allowlisted command). Order is irrelevant — adding the entry before or after the binary upgrade both work.
+
+### No member-side timeout
+
+Members do NOT have a timeout on `bash_result` replies. The member's loop is: send the request via `cafleet send`, capture the returned `task_id`, wait for the broker's tmux push notification (which injects a `cafleet poll` keystroke when the `bash_result` arrives), filter polled messages by `in_reply_to == task_id`, and resume.
+
+If the Director wedges (crashed pane, busy mid-tool-call, or the operator stepped away from the keyboard), the member sits idle. Recovery is operator-driven via existing CAFleet primitives:
+
+- `cafleet member capture` to inspect the wedged Director's pane.
+- `cafleet send` to nudge the Director directly (the bash_request task remains in the queue).
+- `cafleet cancel` to retract the original request if the operator wants the member to give up.
+
+This is consistent with every other CAFleet message-passing path — no built-in timeouts.
 
 ## Message Lifecycle
 
