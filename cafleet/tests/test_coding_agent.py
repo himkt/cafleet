@@ -239,3 +239,136 @@ class TestGetCodingAgent:
     def test_error_message_includes_unknown_name(self):
         with pytest.raises(ValueError, match="aider"):
             get_coding_agent("aider")
+
+
+class TestDisallowTools:
+    """Step 3 task 1+2: ``disallow_tools_args`` field + ``deny_bash`` kwarg.
+
+    Pinned argv ordering: ``[binary, *extra_args, *deny_args, *name_args, prompt]``
+    — ``deny_args`` MUST come BEFORE ``name_args``. Asserted by index, not just
+    membership, so a future revert that flips the order would fail loudly.
+    """
+
+    def test_claude_disallow_tools_args_constant(self):
+        assert CLAUDE.disallow_tools_args == ("--disallowedTools", "Bash")
+
+    def test_codex_disallow_tools_args_is_empty(self):
+        assert CODEX.disallow_tools_args == ()
+
+    def test_disallow_tools_args_field_default_empty_tuple(self):
+        config = CodingAgentConfig(name="test", binary="test-bin")
+        assert config.disallow_tools_args == ()
+        assert isinstance(config.disallow_tools_args, tuple)
+
+    def test_claude_build_command_with_deny_bash_true_no_display_name(self):
+        result = CLAUDE.build_command("hello", deny_bash=True)
+        assert result == ["claude", "--disallowedTools", "Bash", "hello"]
+
+    def test_claude_build_command_with_deny_bash_true_and_display_name(self):
+        result = CLAUDE.build_command("hello", deny_bash=True, display_name="Drafter")
+        assert result == [
+            "claude",
+            "--disallowedTools",
+            "Bash",
+            "--name",
+            "Drafter",
+            "hello",
+        ]
+
+    def test_claude_deny_args_appear_before_name_args(self):
+        result = CLAUDE.build_command("p", deny_bash=True, display_name="Drafter")
+        deny_index = result.index("--disallowedTools")
+        name_index = result.index("--name")
+        assert deny_index < name_index, (
+            f"deny_args must precede name_args; got {result!r}"
+        )
+
+    def test_claude_build_command_with_deny_bash_false_omits_disallow_tokens(self):
+        result = CLAUDE.build_command("hello", deny_bash=False)
+        assert "--disallowedTools" not in result
+        assert "Bash" not in result
+        assert result == ["claude", "hello"]
+
+    def test_claude_build_command_default_deny_bash_omits_disallow_tokens(self):
+        result = CLAUDE.build_command("hello")
+        assert "--disallowedTools" not in result
+        assert "Bash" not in result
+        assert result == ["claude", "hello"]
+
+    def test_codex_build_command_with_deny_bash_true_omits_disallow_tokens(self):
+        result = CODEX.build_command("hello", deny_bash=True)
+        assert "--disallowedTools" not in result
+        assert result == ["codex", "--approval-mode", "auto-edit", "hello"]
+
+    def test_codex_build_command_with_deny_bash_false_unchanged(self):
+        result = CODEX.build_command("hello", deny_bash=False)
+        assert result == ["codex", "--approval-mode", "auto-edit", "hello"]
+
+    def test_custom_config_with_deny_bash_true_and_disallow_args_injects_tokens(self):
+        config = CodingAgentConfig(
+            name="custom",
+            binary="custom-bin",
+            extra_args=("--mode", "auto"),
+            disallow_tools_args=("--deny", "Shell"),
+        )
+        result = config.build_command("p", deny_bash=True)
+        assert result == ["custom-bin", "--mode", "auto", "--deny", "Shell", "p"]
+
+    def test_custom_config_with_deny_bash_true_but_empty_disallow_args_no_op(self):
+        config = CodingAgentConfig(
+            name="custom",
+            binary="custom-bin",
+            extra_args=("--mode", "auto"),
+            disallow_tools_args=(),
+        )
+        result = config.build_command("p", deny_bash=True)
+        assert result == ["custom-bin", "--mode", "auto", "p"]
+
+
+class TestPromptTemplates:
+    """Step 3 task 3+4: bash-routing reminder added to both templates.
+
+    Round-5c-era state — both CLAUDE and CODEX templates exist. Round 6
+    (Step 13 task 1) deletes the CODEX template entirely.
+    """
+
+    _STANDARD_KWARGS = {
+        "session_id": "550e8400-e29b-41d4-a716-446655440000",
+        "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
+        "director_name": "Alice",
+        "director_agent_id": "dir-001",
+    }
+
+    def test_claude_template_contains_bash_routing_canary(self):
+        assert "Routing Bash via the Director" in CLAUDE.default_prompt_template
+
+    def test_codex_template_contains_bash_request_canary(self):
+        assert "bash_request" in CODEX.default_prompt_template
+
+    def test_codex_template_has_doubled_braces(self):
+        # Per design 0000018 template-safety rule: literal `{` / `}` must be
+        # doubled so ``str.format()`` collapses them to single literal braces.
+        assert "{{" in CODEX.default_prompt_template
+        assert "}}" in CODEX.default_prompt_template
+
+    def test_claude_template_format_succeeds_with_standard_kwargs(self):
+        result = CLAUDE.default_prompt_template.format(**self._STANDARD_KWARGS)
+        assert "550e8400-e29b-41d4-a716-446655440000" in result
+        assert "7ba91234-5678-90ab-cdef-112233445566" in result
+        assert "Alice" in result
+        assert "dir-001" in result
+
+    def test_codex_template_format_succeeds_with_standard_kwargs(self):
+        result = CODEX.default_prompt_template.format(**self._STANDARD_KWARGS)
+        assert "550e8400-e29b-41d4-a716-446655440000" in result
+        assert "7ba91234-5678-90ab-cdef-112233445566" in result
+        assert "Alice" in result
+        assert "dir-001" in result
+
+    def test_codex_template_format_collapses_doubled_braces_to_single(self):
+        result = CODEX.default_prompt_template.format(**self._STANDARD_KWARGS)
+        # After ``str.format``, the doubled braces collapse to single literals
+        # AND the ``bash_request`` JSON envelope is intact.
+        assert '{"type":"bash_request"' in result
+        assert "{{" not in result
+        assert "}}" not in result
