@@ -1,7 +1,7 @@
 # CAFleet CLI consolidation: Bash-via-Director, nested-only restructure, codex deprecation
 
 **Status**: Approved
-**Progress**: 33/63 tasks complete
+**Progress**: 35/63 tasks complete
 **Last Updated**: 2026-04-28
 
 ## Overview
@@ -791,8 +791,8 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
 
 ### Step 11: Documentation — admin SPA
 
-- [ ] Update `admin/src/components/Sidebar.tsx:56`: `"cafleet register"` → `"cafleet agent register"`. <!-- completed: -->
-- [ ] Update `admin/src/components/Dashboard.tsx:88`: `"cafleet register"` → `"cafleet agent register"`. <!-- completed: -->
+- [x] Update `admin/src/components/Sidebar.tsx:56`: `"cafleet register"` → `"cafleet agent register"`. <!-- completed: 2026-04-28T19:00 -->
+- [x] Update `admin/src/components/Dashboard.tsx:88`: `"cafleet register"` → `"cafleet agent register"`. <!-- completed: 2026-04-28T19:00 -->
 
 (`Dashboard.tsx:76` "cafleet db init" and `SessionPicker.tsx:53` "cafleet session create" are already nested — verify in spec phase that no edit is needed.)
 

@@ -85,7 +85,7 @@ export default function Dashboard({
             <div className="flex-1 flex items-center justify-center">
               <p className="text-gray-400 text-sm">
                 No agents registered in this session. Use the{" "}
-                <code className="text-gray-500">cafleet register</code> CLI to
+                <code className="text-gray-500">cafleet agent register</code> CLI to
                 add one.
               </p>
             </div>
