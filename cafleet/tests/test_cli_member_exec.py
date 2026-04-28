@@ -116,6 +116,23 @@ class TestMemberExecOverCapTimeoutDenied:
         assert payload["duration_ms"] == 0
 
 
+class TestMemberExecNegativeTimeoutDenied:
+    """A negative ``--timeout`` is not a valid wall-clock budget. The helper
+    short-circuits with a denied JSON payload on stdout (helper-process exit
+    code 0) — same shape as the over-cap case so callers branch only on
+    ``status``.
+    """
+
+    def test_negative_timeout_returns_status_denied_with_verbatim_reason(self):
+        exit_code, payload = _invoke(["--cmd", "echo x", "--timeout", "-1"])
+        assert exit_code == 0
+        assert payload["status"] == "denied"
+        # Per the canonical-status rule, do NOT assert on exit_code.
+        assert "bash_request.timeout must be a positive integer." in payload["stderr"]
+        assert payload["stdout"] == ""
+        assert payload["duration_ms"] == 0
+
+
 class TestMemberExecNonexistentCwd:
     """§12 edge case: ``cwd`` does not exist → runtime path, not denied.
 

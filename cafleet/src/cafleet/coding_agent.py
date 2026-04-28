@@ -42,7 +42,7 @@ CLAUDE = CodingAgentConfig(
         "You are a member of the team led by {director_name} ({director_agent_id}).\n"
         "Wait for instructions via "
         "`cafleet --session-id {session_id} message poll --agent-id {agent_id}`.\n"
-        "Your Bash tool is denied. Route any shell command through your Director —\n"
+        "By default your Bash tool is denied. Route any shell command through your Director —\n"
         "see Skill(cafleet) > Routing Bash via the Director for the bash_request JSON envelope."
     ),
     display_name_args=("--name",),

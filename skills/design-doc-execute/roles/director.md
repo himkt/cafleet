@@ -41,8 +41,8 @@ A push notification automatically injects `cafleet --session-id <session-id> mes
 
 **Checking for incoming messages from members:**
 ```bash
-cafleet --session-id <session-id> --json poll --agent-id <director-agent-id>
-cafleet --session-id <session-id> --json poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check>"
+cafleet --session-id <session-id> --json message poll --agent-id <director-agent-id>
+cafleet --session-id <session-id> --json message poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check>"
 ```
 Acknowledge each message after reading:
 ```bash

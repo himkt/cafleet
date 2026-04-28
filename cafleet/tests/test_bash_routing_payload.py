@@ -10,7 +10,7 @@ must convert through ``dataclasses.asdict`` before subscript access; until
 then the simpler mapping contract is asserted.
 
 Truncation-marker formatting lives in ``cafleet member exec`` (the helper),
-NOT in ``format_bash_result`` — see ``test_cli_bash_exec.py`` for that path.
+NOT in ``format_bash_result`` — see ``test_cli_member_exec.py`` for that path.
 ``format_bash_result`` is a pure formatter; callers pass already-truncated
 streams.
 """

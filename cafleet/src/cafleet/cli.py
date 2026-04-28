@@ -533,6 +533,19 @@ def member_exec(cmd: str, cwd: str | None, timeout: int, stdin: str | None) -> N
             )
         )
         return
+    if timeout < 1:
+        click.echo(
+            json.dumps(
+                {
+                    "status": "denied",
+                    "exit_code": 126,
+                    "stdout": "",
+                    "stderr": "bash_request.timeout must be a positive integer.",
+                    "duration_ms": 0,
+                }
+            )
+        )
+        return
     if timeout > _MEMBER_EXEC_TIMEOUT_CAP:
         click.echo(
             json.dumps(

@@ -473,7 +473,7 @@ The helper prints exactly one JSON object on its own stdout:
 |---|---|---|
 | `status` | `"ran" \| "denied" \| "timeout"` | Top-level outcome. **Sole source of truth.** Clients MUST switch on `status`, not on `exit_code`. |
 | `exit_code` | `int` | When `status == "ran"`: the subprocess's verbatim exit code. When `status == "denied"` or `"timeout"`: the value is **opaque** — present so shell tooling that always reads the field does not crash, but documented as not for client branching. The helper internally uses `126` for denied and `124` for timeout for shell-legibility. |
-| `stdout` | `string` | UTF-8, capped at 64 KiB. On truncation the captured stream's last line is replaced by `\n[truncated: original was N bytes; last 65536 bytes shown]\n`. |
+| `stdout` | `string` | UTF-8, capped at 64 KiB. On truncation, the field contains the last 65536 bytes of the captured stream followed by the marker `\n[truncated: original was N bytes; last 65536 bytes shown]\n` (i.e. the field ends with the marker; `N` is the original byte count). |
 | `stderr` | `string` | Same shape as `stdout`. On `status: "denied"` it carries the helper's input-validation message. On `status: "timeout"` it carries `"hard-killed at <N> seconds."` plus any partial stderr captured before SIGKILL. |
 | `duration_ms` | `int` | Wall-clock duration in milliseconds. Zero on `status: "denied"`. |
 

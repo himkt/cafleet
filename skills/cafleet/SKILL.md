@@ -737,7 +737,7 @@ When a member is spawned via `cafleet member create --no-bash` (the default for 
 The member uses **existing `cafleet message send`** with a JSON-typed payload in the `--text` body. No new member-side subcommand. Send call shape (use `--json` so the broker's server-side `task_id` is machine-parseable; `--json` is global and goes BEFORE the subcommand):
 
 ```bash
-cafleet --session-id <session-id> --json send --agent-id <my-agent-id> \
+cafleet --session-id <session-id> --json message send --agent-id <my-agent-id> \
   --to <director-agent-id> \
   --text '{"type":"bash_request","cmd":"git log -1 --oneline","cwd":"/home/himkt/work/himkt/cafleet","reason":"verifying main before PR"}'
 ```

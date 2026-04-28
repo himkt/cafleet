@@ -3,7 +3,7 @@
 Members spawned with ``--no-bash`` route shell commands through their Director
 via a JSON ``bash_request`` envelope. The Director matches the request against
 its resolved ``permissions.allow`` / ``permissions.deny``, runs the command via
-``cafleet bash-exec``, and replies with a ``bash_result``. This module exposes
+``cafleet member exec``, and replies with a ``bash_result``. This module exposes
 three pure helpers used by that flow:
 
 - ``parse_bash_request`` — JSON-shape discriminator. Returns ``None`` for
@@ -51,7 +51,7 @@ def parse_bash_request(text: str) -> BashRequest | None:
     Returns ``None`` for non-``bash_request`` shapes (parse fail / not a JSON
     object / missing ``type`` / ``type != 'bash_request'``). Does NOT validate
     field semantics — empty ``cmd`` and oversized ``timeout`` are returned
-    verbatim and rejected later by ``cafleet bash-exec``.
+    verbatim and rejected later by ``cafleet member exec``.
     """
     try:
         parsed = json.loads(text)
