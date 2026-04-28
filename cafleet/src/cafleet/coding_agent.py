@@ -42,9 +42,9 @@ CLAUDE = CodingAgentConfig(
         "You are a member of the team led by {director_name} ({director_agent_id}).\n"
         "Wait for instructions via "
         "`cafleet --session-id {session_id} message poll --agent-id {agent_id}`.\n"
-        "By default your Bash tool is denied. When you need a shell command run, send a plain message\n"
-        "to your Director asking for it — the Director will respond with `! command` keystrokes that\n"
-        "your harness will execute via Claude Code's shell shortcut."
+        "If your Bash tool is denied for this session, route any shell command through your Director —\n"
+        "send a plain message to your Director asking for it; the Director will respond with `! command`\n"
+        "keystrokes that your harness will execute via Claude Code's shell shortcut."
     ),
     display_name_args=("--name",),
     disallow_tools_args=("--disallowedTools", "Bash"),

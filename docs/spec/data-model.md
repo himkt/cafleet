@@ -123,7 +123,7 @@ Indexes:
 | `tmux_session` | `TEXT` | `NOT NULL` | e.g. `'main'`, from `tmux display-message '#{session_name}'`. |
 | `tmux_window_id` | `TEXT` | `NOT NULL` | e.g. `'@3'`, from `#{window_id}`. |
 | `tmux_pane_id` | `TEXT` | nullable | e.g. `'%7'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set via `PATCH /api/v1/agents/{id}/placement` after `tmux split-window` succeeds. |
-| `coding_agent` | `TEXT` | `NOT NULL`, `DEFAULT 'claude'` | Coding agent identifier (`"claude"`). Server default ensures existing rows are backfilled on migration. |
+| `coding_agent` | `TEXT` | `NOT NULL`, `DEFAULT 'claude'` | Free-form coding-agent identifier. Current known values are `"claude"` (the server default for normal registrations) and `"unknown"` for the session's root Director placement created by `broker.create_session`. The SQL default ensures existing rows are backfilled on migration. |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp, set server-side to match `agents.registered_at`. |
 
 Indexes:

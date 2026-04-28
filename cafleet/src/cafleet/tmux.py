@@ -81,7 +81,7 @@ def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
 
 
 def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) -> bool:
-    """Best-effort ``cafleet poll`` trigger for the recipient's pane.
+    """Best-effort ``cafleet ... message poll`` trigger for the recipient's pane.
 
     The command string is sent literally so the recipient's
     ``permissions.allow`` can match it. Returns False on any tmux failure

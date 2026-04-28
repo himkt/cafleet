@@ -430,6 +430,10 @@ def agent_list_(ctx, agent_id):
     """List registered agents in the session."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         agent_list = broker.list_agents(ctx.obj["session_id"])
         if ctx.obj["json_output"]:
             click.echo(output.format_json(agent_list))
@@ -445,6 +449,10 @@ def agent_show(ctx, agent_id, detail_id):
     """Show detail for a specific agent."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         result = broker.get_agent(detail_id, ctx.obj["session_id"])
         if result is None:
             raise ValueError(f"Agent {detail_id} not found")
