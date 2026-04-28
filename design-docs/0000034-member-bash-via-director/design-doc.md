@@ -2,32 +2,26 @@
 
 **Status**: Approved
 **Progress**: 56/63 tasks complete
-**Last Updated**: 2026-04-28
+**Last Updated**: 2026-04-29
 
 ## Overview
 
-Three coupled CLI changes shipped as one design. (1) **Bash-via-Director** (rounds 1–5c, locked): members lose their `Bash` tool and route shell commands through their Director via a `bash_request` JSON payload; the Director runs each command through a new `cafleet member exec` helper (auto-running on allow-list matches, otherwise gating through `AskUserQuestion`) and replies with a `bash_result`. (2) **Nested-only subcommand restructure** (round 6): every existing flat verb (`cafleet message send`, `poll`, `ack`, `cancel`, `broadcast`, `register`, `deregister`, `agents`, `get-task`) moves under a noun group (`agent`, `message`, `member`, `session`, `db`); only `server` and `doctor` stay top-level as meta-commands. Hard-break, no aliases. (3) **Codex deprecation** (round 6): `cafleet member create --coding-agent codex` and the `CODEX` config are removed; claude is the only supported member backend. In-flight codex panes keep running, but no new codex registrations. Restoration is documented in §13 Future Work.
+Three coupled CLI changes shipped as one design. (1) **Bash-via-Director**: members spawn with `--no-bash` (the spawn argv gains `--disallowedTools "Bash"`) so the harness rejects every Bash call. When a member needs a shell command, it sends a plain CAFleet message asking its Director, and the Director responds by sending `! <command>` keystrokes into the member's pane via the existing `cafleet member send-input`. Claude Code's `!` CLI shortcut handles execution natively — no JSON envelope, no schema, no separate helper subcommand, no allow-list matcher. Concurrent member requests serialize through the broker's existing message queue (`cafleet message poll` returns FIFO order; the Director processes one request at a time). (2) **Nested-only subcommand restructure** (round 6): every existing flat verb (`cafleet message send`, `poll`, `ack`, `cancel`, `broadcast`, `register`, `deregister`, `agents`, `get-task`) moves under a noun group (`agent`, `message`, `member`, `session`, `db`); only `server` and `doctor` stay top-level as meta-commands. Hard-break, no aliases. (3) **Codex deprecation** (round 6): `cafleet member create --coding-agent codex` and the `CODEX` config are removed; claude is the only supported member backend. In-flight codex panes keep running, but no new codex registrations. Restoration is documented in §13 Future Work.
 
 ## Success Criteria
 
-### Bash-via-Director (locked round 5c — preserved)
+### Bash-via-Director (round 7 — `!`-keystroke convention)
 
-- [x] `cafleet member create --no-bash` (default ON for claude member panes) appends `--disallowedTools "Bash"` to the spawned `claude` process; the resulting member pane cannot use the Bash tool. Verified with a unit test that asserts the spawn argv contains the flag, plus a real-world smoke that confirms the member's harness rejects Bash calls.
-- [x] When a member needs a shell command, it sends a JSON `bash_request` payload via `cafleet message send --to <director-id> --text '{...}'`. The CLI / payload format is documented in this doc and in `skills/cafleet/SKILL.md`.
-- [x] The Director receives the request via the existing `cafleet message poll` push-notification path. No new IPC, no new broker primitives, no schema changes.
-- [x] If the requested command matches a pattern in the Director's resolved `permissions.allow`, the Director runs it without an `AskUserQuestion` beat. The `bash_result` reply carries `note: "ran without operator prompt (matched allow rule: <pattern>)"` for audit.
-- [x] If the command does NOT match an allow pattern, the Director shows a 3-option `AskUserQuestion`: `Approve as-is` / `Approve with edits` / `Deny with reason`. Built-in "Other" is the typed-edit / typed-rejection slot.
-- [x] The Director runs the resolved command via a new `cafleet member exec` helper invoked through its own Bash tool. The helper enforces deterministic limits (64 KiB stdout/stderr each, SIGKILL at the request `timeout`) AND input validation (`cmd != ""`, `timeout ≤ 600`); on input-validation failure the helper writes a denied JSON object to stdout and exits 0, which the Director copies into `bash_result` verbatim.
-- [x] The operator faces a single consent gate per non-allowlisted command (the `AskUserQuestion` in the Director's pane). The Director's Bash-tool native prompt does not fire because the operator has added `Bash(cafleet member exec *)` to `permissions.allow` — required setup, see §6 / §10.
-- [x] The `cafleet member exec` helper hard-kills the subprocess at the per-request `timeout` (default 30 s, capped at 600 s); on timeout the result reports `status: "timeout"` (exit_code is opaque per the canonical-status rule).
-- [x] `bash_result.status` is the sole source of truth for outcome branching. Clients MUST switch on `status`, not on `exit_code`. `exit_code` is meaningful only when `status == "ran"`.
-- [x] Cross-Director leakage is prevented by the existing CAFleet session boundary (the broker rejects cross-session sends). The "address `bash_request` only to your own `placement.director_agent_id`" rule is documentation-only — `skills/cafleet/SKILL.md` and the member's spawn prompt direct members to follow it. No CLI-level guard in v1; future work covers a typed `cafleet message bash-request` subcommand that would enforce it.
-- [x] No member-side timeout. Members block on the Director's reply forever; the operator manually nudges or cancels (`cafleet message cancel`) if a Director wedges. Document this explicitly so reviewers do not ask for a timeout fallback.
+- [x] `cafleet member create --no-bash` (default for claude) appends `--disallowedTools "Bash"` to the spawned `claude` process; the resulting member pane cannot use the Bash tool. Verified by `test_cli_member.py::TestNoBashFlag` (argv-shape pinning) and `test_coding_agent.py::TestDisallowTools`.
+- [x] When a member needs a shell command, it sends a plain CAFleet message via `cafleet message send` to its Director. No JSON envelope, no schema, no special structure — free-text request like `"Please run \`git log -1\` for me — verifying the latest commit on main."`.
+- [x] The Director receives the request via the existing `cafleet message poll` push-notification path and responds by sending `! <command>` keystrokes into the member's pane via `cafleet member send-input --member-id <m> --freetext "! <command>"`. Claude Code's `!` CLI shortcut handles execution natively — output appears in the member's pane prompt context for the model to read. No new broker primitives, no separate helper subcommand, no allow-list matcher, no AskUserQuestion gate.
+- [x] Concurrent member requests serialize through the existing `cafleet message poll` FIFO queue. The Director processes one request at a time — read a poll-returned request, dispatch the `! <command>` keystroke, then move to the next message. No new queueing primitive.
+- [x] Cross-Director boundary: members address requests only to their own `placement.director_agent_id`. Cross-session leakage is prevented by the broker's existing session boundary; the within-session "address only your own Director" rule is documentation-only.
+- [x] No member-side timeout. Members block on the Director's reply; the operator manually nudges or cancels (`cafleet message cancel`) if a Director wedges. Consistent with every other CAFleet message-passing path.
 
 ### Nested-only restructure (round 6)
 
 - [x] Every flat-verb subcommand (`register`, `deregister`, `agents`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`) is moved under a noun group (`agent`, `message`). Only `server` and `doctor` stay top-level as meta-command exceptions.
-- [x] The bash-routing helper introduced in rounds 1–5c is named `cafleet member exec` (it operates on behalf of a member, groups with the other Director-side member ops, and was originally called `bash-exec` in earlier round-5c drafts before round-6 ratchet renamed it as part of the nested-only restructure). The required `permissions.allow` entry is correspondingly `Bash(cafleet member exec *)`.
 - [x] Hard-break: the old subcommand strings stop existing the moment the rename merges. No Click aliases. Every literal occurrence in source code, prompt templates, tmux keystroke injection, SKILL.md files, README, ARCHITECTURE, docs/spec, admin SPA, and this design document is updated in the same documentation-first sweep.
 - [x] The `cafleet` binary itself is unchanged; only subcommands restructure. `Bash(cafleet *)` and `mise //cafleet:*` remain valid.
 
@@ -60,9 +54,9 @@ Members spawned via `cafleet member create` inherit the operator's harness as-is
 | Today | After this change |
 |---|---|
 | N members × M unique commands → N×M scattered permission prompts | All prompts fire in the **Director's pane only**, where the operator is already focused |
-| Member harnesses each carry their own `permissions.allow` (drifts) | Single project-level `permissions.allow` on the Director governs auto-run vs. ask |
-| Operator can't audit what commands ran | Every `bash_request` and `bash_result` is a regular CAFleet message, persisted in SQLite and visible in the admin WebUI timeline |
-| Member crashes can leak Bash side-effects (deleted files, force-pushed branches) the operator never saw | Member loses Bash entirely; only the Director's vetted invocations touch the filesystem |
+| Member harnesses each carry their own `permissions.allow` (drifts) | The Director's pane is the single decision point — no per-member `permissions.allow` configuration needed |
+| Operator can't audit what commands ran | Every shell-command request is a regular CAFleet message, persisted in SQLite and visible in the admin WebUI timeline; the Director's `! <command>` dispatch is captured in the member's pane via `cafleet member capture` |
+| Member crashes can leak Bash side-effects (deleted files, force-pushed branches) the operator never saw | Member loses Bash entirely; only the Director's deliberate `! <command>` dispatches reach the member's pane |
 
 ### Why this is the right shape
 
@@ -129,196 +123,59 @@ class CodingAgentConfig:
 
 ### 2. Member-side: how the member asks for Bash
 
-The member uses **existing `cafleet message send`** with a JSON-typed payload in the `--text` body. No new member-side CLI subcommand. The `text` field carries:
-
-```json
-{
-  "type": "bash_request",
-  "cmd": "git log -1 --oneline",
-  "cwd": "/home/himkt/work/himkt/cafleet",
-  "stdin": null,
-  "timeout": 30,
-  "reason": "verifying the latest commit on main before opening PR #36"
-}
-```
-
-Schema:
-
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `type` | `"bash_request"` | yes | Discriminator. Director dispatches on this exact string. |
-| `cmd` | `string` | yes | The shell command to run. Single string; `cafleet member exec` invokes it via `bash -c <cmd>` so pipes / `&&` / quoting work as the member typed them. |
-| `cwd` | `string \| null` | no | Working directory. Defaults to the Director's current cwd if `null` or omitted. |
-| `stdin` | `string \| null` | no | Stdin payload (UTF-8). Use sparingly — embedding large binaries here will hit the 64 KiB outbound truncation. |
-| `timeout` | `int \| null` | no | Seconds. Defaults to 30. Capped at 600 (10 min) — the helper rejects oversized `timeout` as a denied JSON output (§3 helper subsection bullet 1; `stderr: "bash_request.timeout exceeds 600s cap."`). |
-| `reason` | `string` | yes | Short justification (≤ 200 chars). Surfaced in the Director's `AskUserQuestion` so the operator knows *why* the command is being asked for. |
-
-The member always addresses the request to its own `placement.director_agent_id`. Sending a `bash_request` to any other agent ID in the session is undefined behavior — the recipient simply will not know the convention. Cross-session leakage is prevented by the broker's existing session boundary; the cross-Director rule (within a session) is documentation-only in v1.
-
-The send call shape (use `--json` so `task_id` is machine-parseable; `--json` is a global flag on the parent `cli` group, placed BEFORE the subcommand):
+The member uses **existing `cafleet message send`** with a free-text request in `--text`. No JSON envelope, no schema, no special structure. Example:
 
 ```bash
-cafleet --session-id <session-id> --json message send --agent-id <member-id> \
+cafleet --session-id <session-id> message send --agent-id <member-id> \
   --to <director-agent-id> \
-  --text '{"type":"bash_request","cmd":"git log -1 --oneline","cwd":"/home/himkt/work/himkt/cafleet","reason":"verifying main before PR"}'
+  --text "Please run \`git log -1 --oneline\` for me — verifying the latest commit on main before opening a PR."
 ```
 
-Then the member blocks on `cafleet message poll` for the matching `bash_result`. **Reply correlation**: the broker assigns each delivered task a server-side `task_id`, surfaced in the `cafleet --json message poll` and `cafleet --json message send` output. The Director copies the request task's `task_id` into `bash_result.in_reply_to` (§3 step 6). The member reads `task_id` from its own `cafleet --json message send` response when sending the request, holds it locally, and matches against `bash_result.in_reply_to` on the next poll. (Note: `--json` is global — `cafleet message send --json` does not work; use `cafleet --json message send` instead.)
+The member always addresses the request to its own `placement.director_agent_id`. Cross-session leakage is prevented by the broker's existing session boundary; the within-session "address only your own Director" rule is documentation-only.
 
-### 3. Director-side: receive, classify, dispatch
+The member then waits. There are two ways the response can arrive:
 
-The Director's normal `/loop` health-check (`Skill(cafleet-monitoring)` Stage 1, `cafleet message poll`) already surfaces incoming messages. The new discipline added in this design is a 6-step dispatch with three distinct phases: **discriminator** (step 1), **matcher** (step 2), and **run + reply** (steps 3–6). The Director's Claude Code pane is the actor for every step.
+- The Director sends a `! <command>` keystroke into the member's pane (§3); Claude Code's `!` CLI shortcut runs the command natively and prints the captured output back into the same pane prompt context for the model's next iteration to read.
+- The Director sends a follow-up CAFleet message (e.g. "I won't run that — it would touch `main`. Try a different approach"). The member processes it as a regular instruction.
 
-The discriminator phase has a **future-proof rule**: anything that does not have `type == "bash_request"` is a plain instruction; nothing in this section produces a denied `bash_result` without going through the helper. Field-level validation (empty `cmd`, oversized `timeout`) lives inside `cafleet member exec` itself — see the helper subsection below.
+### 3. Director-side: receive and dispatch
+
+The Director's normal `/loop` health-check (`Skill(cafleet-monitoring)` Stage 1, `cafleet message poll`) already surfaces incoming messages. When a polled message is a member shell-command request, the Director (operator at the Director's pane) follows a 3-step protocol:
 
 | Step | Director-pane action |
 |---|---|
-| 1 | **Discriminator**. Parse the polled `text` body as JSON. If parsing fails, or the parsed object lacks `type`, or `type != "bash_request"`, treat the message as a plain instruction. End — no `bash_result` emitted. Otherwise continue to step 2. |
-| 2 | **Matcher**. Apply `match_allow` (§4) against the project's resolved `permissions.allow` and `permissions.deny`. The matcher returns exactly one of `auto-run` or `ask`. |
-| 3 | If `auto-run`: continue to step 5 with the original `cmd`. Set `note = "ran without operator prompt (matched allow rule: <pattern>)"`. |
-| 4 | If `ask`: present the 3-option `AskUserQuestion` below. Resolve the operator's choice and act per branch: <br>• On `run-as-is(cmd)`: continue with the original `cmd`; do not set `note`. <br>• On `run-edited(new_cmd)`: continue with `new_cmd` AND set `note = "operator edited cmd before running. original: <verbatim-original-cmd>"`. <br>• On `deny(reason)`: skip the helper invocation; emit a denied `bash_result` directly with `status: "denied"`, `note: "operator denied: <reason>"`, `stderr: <reason or default>`. Reply via step 6, end dispatch. |
-| 5 | **Run via `cafleet member exec`**. The Director's pane invokes the helper through its Bash tool: `cafleet member exec --cmd '<cmd>' [--cwd '<cwd>'] [--timeout <timeout>] [--stdin '<stdin>']`. Each optional flag is included only when the corresponding request field is present and non-null; otherwise the helper's defaults apply (cwd: pane cwd; timeout: 30 s; stdin: empty). The Director's Bash-tool prompt does not fire because `Bash(cafleet member exec *)` is in the operator's `permissions.allow` (required setup, see §10 / §6). AskUserQuestion (step 4) is the only consent surface in this flow. The helper handles deterministic limits (64 KiB caps, SIGKILL at timeout) AND input validation (`cmd != ""`, `timeout ≤ 600`); on input-validation failure the helper writes a denied JSON object to its own stdout (status `"denied"`) which the Director copies into `bash_result` exactly as it would for any other helper output. The Director's pane parses the helper's JSON output. |
-| 6 | **Reply**. The Director's pane invokes `cafleet message send --agent-id <director-id> --to <member-id> --text '<bash_result-json>'` via its Bash tool to deliver the reply. The push notification injects a `cafleet message poll` keystroke into the member's pane and the member resumes. The operator does not type anything; the Director's pane is the actor for both the `cafleet member exec` helper invocation and the reply send. |
+| 1 | **Read the request** via `cafleet message poll`. The member's text is plain language ("Please run `git log -1`"). The Director's Claude Code pane interprets the request and decides whether to fulfill it; the operator stays in control via Claude Code's normal pane-side interaction. |
+| 2 | **Decide**. The Director either fulfills the request (continue to step 3), declines via a follow-up CAFleet message ("I won't run that, here's why…"), or asks for clarification (also via `cafleet message send`). If the request asks for something destructive or out of scope, the Director chooses the message-reply path; the `! <command>` keystroke is reserved for the fulfilled case. |
+| 3 | **Dispatch the command** via `cafleet member send-input --member-id <m> --freetext "! <command>"`. The trailing newline (Enter) is appended automatically by `member send-input --freetext`. Claude Code's `!` CLI shortcut intercepts the line, runs the command via the harness's native primitive (bypassing the Bash tool permission system that `--disallowedTools "Bash"` denies), and prints the captured stdout/stderr back into the member's pane. The member's next prompt iteration sees the output as context. |
 
-#### `AskUserQuestion` shape (step 4)
+#### Why this works
 
-| # | Label | Description holds | Resolves to |
-|---|---|---|---|
-| 1 | `Approve as-is` | The request's `reason` and the verbatim `cmd`. | `run-as-is(cmd)` |
-| 2 | `Approve with edits` | "Operator types the edited command body via Other." (built-in Other) | `run-edited(<typed-cmd>)` |
-| 3 | `Deny with reason` | "Operator types the rejection reason via Other." (built-in Other) | `deny(<typed-reason>)` |
+- **Member's Bash tool is denied** (`--disallowedTools "Bash"`), so the member cannot execute shell commands itself.
+- **Claude Code's `!` shortcut is a separate primitive** from the Bash tool — `claude --disallowedTools "Bash"` does NOT disable the `!` CLI shortcut. The Director triggers it via `tmux send-keys`, which lands as keystrokes in the member's input prompt.
+- **Operator stays in control** at the Director's pane: every member shell-request surfaces as a plain message in the Director's inbox, and the Director (with the operator at the keyboard) chooses whether to fulfill it.
+- **No new broker primitives**, no JSON envelopes, no separate helper subcommand, no allow-list matcher, no AskUserQuestion gate. Just the existing message-passing + tmux-keystroke infrastructure.
 
-Notes:
+#### Serialization
 
-- The 4th built-in "Other" slot routes to either edit-or-deny based on what the operator typed. The Director cannot tell them apart structurally; convention is that the operator who picks built-in Other directly (without first picking option 2 or 3) is editing. The 3 explicit options exist precisely to disambiguate.
-- The `AskUserQuestion` per-call limits (1 question per call, 2–4 options, built-in "Other" already exposed) are observed. No 5th option, no preamble sentence, no fenced-bash instruction blocks (per design 0000033 discipline).
-- The question text names the member: `"<member-name> wants to run a Bash command. Approve, edit, or deny?"`
-
-#### `bash_result` payload (step 6)
-
-```json
-{
-  "type": "bash_result",
-  "in_reply_to": "<request-task-id>",
-  "status": "ran",
-  "exit_code": 0,
-  "stdout": "abc1234 docs: mark design doc as complete\n",
-  "stderr": "",
-  "duration_ms": 47,
-  "note": "ran without operator prompt (matched allow rule: Bash(git *))"
-}
-```
-
-**Canonical-status rule**: `status` is the sole source of truth for the outcome. `exit_code` is meaningful **only when `status == "ran"`**, where it carries the subprocess's verbatim return code. For `status: "denied"` and `status: "timeout"` the `exit_code` field is present (so shell tooling that always reads it does not crash) but its value is documented as **opaque** — clients MUST switch on `status`, not on `exit_code`.
-
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `type` | `"bash_result"` | yes | Discriminator. |
-| `in_reply_to` | `string` | yes | The `task_id` of the originating `bash_request`. Members correlate replies via this field (§2). |
-| `status` | `"ran" \| "denied" \| "timeout"` | yes | Top-level outcome. **Sole source of truth.** `ran` means the helper invoked the subprocess and it terminated normally (any `exit_code`). `denied` means the helper or operator denied the request (matched no allow + operator picked Deny, OR helper input-validation failed: empty `cmd`, oversized `timeout`). `timeout` means the helper hard-killed the subprocess at the configured `timeout`. |
-| `exit_code` | `int` | yes | When `status == "ran"`: the subprocess's verbatim exit code. When `status == "denied"` or `"timeout"`: **value is opaque — do not switch on it.** The helper internally uses `126` for denied and `124` for timeout for shell-legibility, but clients MUST use `status` for branching. |
-| `stdout` | `string` | yes | UTF-8, truncated to 64 KiB. If truncation occurred, the last line is replaced by `\n[truncated: original was N bytes; last 65536 bytes shown]\n`. |
-| `stderr` | `string` | yes | Same shape as stdout. On `status: "denied"` it carries the operator's typed rejection reason, the default `"Director denied the request."`, or the helper's input-validation message (e.g. `"bash_request.cmd may not be empty."`). On `status: "timeout"` it carries `"hard-killed at <N> seconds."` plus any partial stderr captured before SIGKILL. |
-| `duration_ms` | `int` | yes | Wall-clock duration in milliseconds. On `status: "denied"` this is 0. |
-| `note` | `string` | no | Optional human note. Set on `status: "ran"` when the command was auto-run via the allow-list path: `note: "ran without operator prompt (matched allow rule: <pattern>)"`. Set on `status: "ran"` when the operator edited the command: `note: "operator edited cmd before running. original: <verbatim original cmd>"`. Set on `status: "denied"` when the operator denied: `note: "operator denied: <reason>"`. Omitted otherwise. |
-
-#### `cafleet member exec` helper (new Director-side subcommand)
-
-```
-cafleet member exec --cmd '<cmd>' [--cwd <path>] [--timeout <int>] [--stdin <text>]
-```
-
-| Flag | Required | Notes |
-|---|---|---|
-| `--cmd` | yes | Single-string shell command. Invoked via `subprocess.run(["bash", "-c", cmd], ...)`. |
-| `--cwd` | no | Working directory. Defaults to the helper's own cwd. |
-| `--timeout` | no | Seconds. Default 30. Capped at 600. |
-| `--stdin` | no | UTF-8 text passed on the subprocess's stdin. |
-
-The helper:
-
-1. **Validates input first.** If `--cmd` is empty/absent OR `--timeout` exceeds 600, the helper does NOT invoke the subprocess. Instead it writes a denied JSON object to stdout: `{"status": "denied", "exit_code": 126, "stdout": "", "stderr": "<reason>", "duration_ms": 0}` and **exits with helper-process exit code 0** (the input was syntactically valid CLI args; the validation failure is a payload-level result, not an arg error). The Director copies this verbatim into `bash_result` exactly as it would for any other helper output. Reasons: `"bash_request.cmd may not be empty."` for empty cmd; `"bash_request.timeout exceeds 600s cap."` for oversized timeout.
-2. **Hard-kills the subprocess at `--timeout`** via `Popen.kill()` (delivers SIGKILL). On hard-kill the helper sets `status: "timeout"` and `exit_code: 124`; per the canonical-status rule, the `exit_code` value is opaque to clients — it is internally `124` for shell-legibility but clients switch on `status`.
-3. **Caps captured stdout and stderr at 64 KiB each.** If truncation occurred, the last line of the captured stream is replaced by `\n[truncated: original was N bytes; last 65536 bytes shown]\n` (matching the `bash_result.stdout` / `stderr` truncation marker so the Director can pass it through verbatim).
-4. **Prints exactly one JSON object on its OWN stdout**, structured as:
-   ```json
-   {
-     "status": "ran" | "denied" | "timeout",
-     "exit_code": <int>,
-     "stdout": "<captured-or-truncated>",
-     "stderr": "<captured-or-truncated>",
-     "duration_ms": <int>
-   }
-   ```
-   The Director copies these five fields verbatim into the `bash_result` payload, prepending `type` and `in_reply_to` (and for the operator-Deny branch, overriding `status` to `"denied"` and adding the `note` per §3 step 4).
-5. **Does NOT** know about `permissions.allow`, `bash_request`, or CAFleet messaging. It is a pure subprocess-runner with deterministic limits and input validation. The matcher / dispatch logic lives in the Director's prompt-side workflow, not in the helper.
-6. Does NOT require `--session-id` (consistent with `db init` / `session *` / `server`). Silently accepts and ignores the global `--session-id` flag so a single allow pattern stays usable across all subcommands.
-
-The helper's process exit code is `0` for every payload outcome (ran / denied / timeout). It is non-zero only when its own CLI-arg parsing fails (e.g. unknown flag — handled by Click's built-in `UsageError`, exit 2). The Director never relies on the helper's process exit code for the bash-routing reply — it parses the JSON on stdout.
-
-### 4. Allow-list matcher
-
-§4 covers exclusively the allow×deny matcher. Field-level validation (`cmd != ""`, `timeout ≤ 600`) is the helper's responsibility — see §3 helper subsection bullet 1. There is no separate "reject thresholds" phase in the Director's dispatch.
-
-#### Resolved sources
-
-The Director resolves its `permissions.allow` and `permissions.deny` from the layered config:
-
-1. `~/.claude/settings.json` (user-global)
-2. `<project-root>/.claude/settings.json` (project)
-3. `<project-root>/.claude/settings.local.json` (project, gitignored)
-
-The matcher concatenates all three lists per category (later layers append; deduplication is not required for correctness).
-
-#### Pattern syntax
-
-Matching uses the same fnmatch-style glob syntax Claude Code itself uses for `permissions.allow`:
-
-| Pattern | Matches |
-|---|---|
-| `Bash(git *)` | Any `cmd` whose token-0 is `git`. |
-| `Bash(cafleet *)` | Any `cmd` whose token-0 is `cafleet`. |
-| `Bash(mise //cafleet*)` | Any `cmd` starting with `mise //cafleet`. |
-| `Bash(*)` | Every `cmd`. (Effectively disables the gating; document but do not recommend.) |
-
-The matcher only considers patterns that start with `Bash(...)`. Other tool patterns (`Edit`, `Skill(...)`) are ignored.
-
-#### Allow × deny truth table
-
-| Allow match | Deny match | Result |
-|---|---|---|
-| yes | no | `auto-run` |
-| yes | yes | `ask` (deny match overrides — operator is shown the AskUserQuestion) |
-| no | yes | `ask` |
-| no | no | `ask` |
-
-Single rule restated: **an `auto-run` outcome requires an allow match AND no deny match**. Any other combination falls through to `ask`. There is no `auto-deny` outcome from the permission matcher — `permissions.deny` only downgrades a would-be `auto-run` to `ask`; the operator still gets the chance to approve through `AskUserQuestion`. (This matches the spirit of `permissions.deny` in Claude Code, where deny rules block auto-execution but do not prevent the operator from manually granting permission.)
-
-The matcher is intentionally simple — exact-prefix and one-token-glob coverage is enough for the project's existing `Bash(mise //cafleet*)` / `Bash(cafleet *)` / `Bash(git mv *)` / `Bash(uv run cafleet *)` patterns. A future doc can extend it with full glob semantics if a project's `permissions.allow` patterns drift more complex.
+Concurrent member requests serialize through the broker queue. The Director MUST process command-request messages one at a time in poll order — read a request, send `! <command>` via `cafleet member send-input`, then move to the next message. Don't interleave or batch. The FIFO ordering of `cafleet message poll` is the serialization mechanism; no separate queueing primitive is needed.
 
 ### 5. Cross-Director boundary
 
-The bash-request flow is just `cafleet message send` under the hood, so the existing **cross-session boundary** already prevents cross-session leakage at the broker level. ONE extra rule applies *within* a session:
+The bash-routing flow uses `cafleet message send` under the hood, so the existing **cross-session boundary** already prevents cross-session leakage at the broker level. ONE extra rule applies *within* a session:
 
-- The member's request MUST be addressed to its own `placement.director_agent_id`. Sending to any other agent in the same session is a misuse — the recipient does not know the bash-request convention and will treat it as a generic message.
+- The member's request MUST be addressed to its own `placement.director_agent_id`. Sending to any other agent in the same session is a misuse — the recipient does not know the bash-routing convention and will treat it as a generic message.
 
-There is no CLI-level enforcement of this rule in v1 because `cafleet message send` does not parse the `--text` payload. Enforcement is purely documentation: `skills/cafleet/SKILL.md` documents the rule under "Routing Bash via the Director", and the member's spawn prompt (Step 4 below) is amended to remind it.
-
-If the user later wants programmatic enforcement, a follow-up doc can add a typed `cafleet message bash-request` subcommand that wraps `cafleet message send` with the cross-Director guard built in. That is explicitly out of scope here — listed in §13 Future Work.
+There is no CLI-level enforcement of this rule because `cafleet message send` is a generic primitive. Enforcement is purely documentation: `skills/cafleet/SKILL.md` documents the rule under "Routing Bash via the Director", and the member's spawn prompt is amended to remind it.
 
 ### 6. Director-side requirements
 
-#### Required `permissions.allow` entry
+#### `permissions.allow` entry
 
-The operator MUST add `Bash(cafleet member exec *)` to the Director's `permissions.allow` (project `.claude/settings.json` or user `~/.claude/settings.json`). Without this entry the Director's pane gets a duplicate native Bash-tool prompt for every command, defeating the single-consent-gate goal — `AskUserQuestion` is supposed to be the sole consent surface in this flow. The cafleet-monitoring skill's setup checklist verifies the entry; future work (§13) may make `cafleet member create` warn when it detects the entry is missing.
-
-This is operator-facing setup, not a programmatic guarantee. A Director that runs without the entry still works, just with worse UX (two prompts per non-allowlisted command). The doc treats the entry as **required** because the design's UX guarantee (single consent surface) does not hold otherwise.
-
-Order is irrelevant — adding the `permissions.allow` entry before or after the binary upgrade both work. Intermediate states (entry installed but old binary, or new binary but no entry) are degraded-UX (extra Bash prompts) but functional.
+The operator should add `Bash(cafleet member send-input *)` to the Director's `permissions.allow` (project `.claude/settings.json` or user `~/.claude/settings.json`) so the Director's harness can dispatch `! <command>` keystrokes without a per-call permission prompt. Without this entry, the Director's pane fires Claude Code's native Bash-tool prompt for every `cafleet member send-input` invocation; the bash-routing flow still works but with degraded UX (one extra prompt per dispatch). This is preexisting CAFleet UX (`cafleet member send-input` predates this design — designs 0000027 / 0000033) — not a new requirement introduced by bash-routing.
 
 #### Operator upgrade checklist
 
-After upgrading the cafleet binary, **restart any Director session that was running pre-upgrade**. Claude Code caches skill text per-session at session start; the cached `Skill(cafleet)` will reference round-5c-era commands (`cafleet bash-exec`, `cafleet poll`, etc.) until the session reloads from disk. Members spawned by a pre-upgrade Director session would receive stale spawn-prompt instructions that point at command names the new binary no longer accepts. There is no in-session skill-reload command — the only supported reload mechanism is exiting and restarting the Claude Code session so the harness re-reads `skills/<name>/SKILL.md` from disk.
+After upgrading the cafleet binary, **restart any Director session that was running pre-upgrade**. Claude Code caches skill text per-session at session start; the cached `Skill(cafleet)` will reference pre-upgrade-era commands until the session reloads from disk. Members spawned by a pre-upgrade Director session would receive stale spawn-prompt instructions that point at command names the new binary no longer accepts. There is no in-session skill-reload command — the only supported reload mechanism is exiting and restarting the Claude Code session so the harness re-reads `skills/<name>/SKILL.md` from disk.
 
 #### Member-backend support
 
@@ -328,52 +185,33 @@ Claude is the only supported coding-agent backend in this design. The codex back
 
 ### 7. Member-side blocking semantics (no timeout)
 
-Per the user's explicit answer to Q9, members do NOT have a timeout on bash_request replies. The member's loop is:
+Members do NOT have a timeout on shell-command replies. The member's loop is:
 
-1. Send the request via `cafleet message send`. Capture the returned `task_id`.
-2. Wait for the broker's tmux push notification, which injects a `cafleet message poll` keystroke into the member's pane when the bash_result arrives. The member polls (one-shot, not a loop), filters by `in_reply_to == task_id`, and resumes.
+1. Send the request via `cafleet message send` (plain free-text).
+2. Wait. Either Claude Code's `!` shortcut runs the dispatched command and the captured output appears in the member's own pane (the most common path), or a follow-up CAFleet message arrives via the broker's tmux push notification (which injects a `cafleet message poll` keystroke into the member's pane).
 3. Resume.
 
-If `cafleet message poll` returns messages in addition to the bash_result (or before the bash_result arrives), the member processes those messages as plain instructions per existing CAFleet semantics; the bash_request continuation only resumes when a `bash_result` with the matching `in_reply_to` arrives. The member's task is not gated on bash_result arrival — it's gated on the bash_result correlation.
+If `cafleet message poll` returns messages in addition to (or instead of) the dispatched `! command`, the member processes those messages as plain instructions per existing CAFleet semantics. The member is not strictly gated on a specific reply — it's free to act on whatever next signal it receives.
 
 If the Director wedges (crashed pane, busy mid-tool-call, or the operator stepped away from the keyboard), the member sits idle. Recovery is operator-driven via existing CAFleet primitives:
 
 - `cafleet member capture` to inspect the wedged Director's pane.
-- `cafleet message send` to nudge the Director directly (the bash_request task remains in the queue).
+- `cafleet message send` to nudge the Director directly (the original request remains in the queue).
 - `cafleet message cancel` to retract the original request if the operator wants the member to give up.
 
 This is consistent with every other CAFleet message-passing path — no built-in timeouts. Documented explicitly in §13 (Future Work) so reviewers know it is a deliberate v1 choice.
-
-### 8. Director subprocess hard limits
-
-Independent of the member-side "no timeout" stance, the **Director's `cafleet member exec` helper** is hard-bounded:
-
-| Limit | Value | Source |
-|---|---|---|
-| Wall-clock | request `timeout` field, default 30 s, capped at 600 s | Schema in §2; helper validates and rejects via §3 helper bullet 1 |
-| stdout capture | 64 KiB | hardcoded in helper |
-| stderr capture | 64 KiB | hardcoded in helper |
-
-Truncation marker (appended after the captured bytes, in both `cafleet member exec` JSON output and `bash_result.stdout` / `stderr`):
-
-```
-[truncated: original was <N> bytes; last 65536 bytes shown]
-```
-
-On hard-kill, stderr additionally carries `hard-killed at <N> seconds.`. `status` is `"timeout"`; `exit_code` is opaque per the canonical-status rule (the helper sets it to `124` internally for shell-legibility, but clients switch on `status`).
 
 ### 9. Out of scope
 
 Explicit non-goals so reviewers do not request these:
 
 - No broker schema changes (no new `tasks` columns, no new tables).
-- No changes to the `tmux` push-notification path. Existing `_try_notify_recipient` handles the `bash_result` reply identically to any other unicast message.
-- No changes to `cafleet member send-input` (the AskUserQuestion-answer write-path from designs 0000027 / 0000033). Those keystroke flows are orthogonal.
+- No changes to the `tmux` push-notification path. The Director's reply (whether a `! <command>` keystroke via `member send-input` or a follow-up CAFleet message) reuses the existing infrastructure.
+- No new helper subcommand. The `!` keystroke is dispatched via the existing `cafleet member send-input --freetext` (designs 0000027 / 0000033). No JSON envelope, no allow-list matcher, no AskUserQuestion gate, no `cafleet member exec`.
 - No changes to the Agent Teams primitive (TeamCreate / SendMessage / `Drafter`/`Reviewer`). This design covers CAFleet members only.
-- No new dedicated `cafleet message bash-request` member-side subcommand. v1 reuses `cafleet message send`.
-- No admin WebUI affordance. `bash_request` and `bash_result` payloads render as plain JSON text in the timeline.
+- No admin WebUI affordance. The shell-command request and any reply messages render as ordinary plain-text rows in the timeline.
 - No member-side timeout flag.
-- No structured Director-side throttling (e.g. "Approve next 5 from this member" memoization).
+- No structured Director-side throttling.
 - No global skill-copy parity sweep. The cafleet, cafleet-monitoring, design-doc-create, and design-doc-execute skills exist only in the project tree (`skills/<name>/...`); there are no `~/.claude/skills/cafleet*` copies to keep in sync.
 
 ### 10. Documentation surface
@@ -382,13 +220,14 @@ Per `.claude/rules/design-doc-numbering.md`, every doc surface that mentions the
 
 | File | Change |
 |---|---|
-| `ARCHITECTURE.md` | (a) Add a new "Bash Routing via Director" subsection after "Member Lifecycle". Document the `--no-bash` flag on `cafleet member create`, the `cafleet member exec` helper, the `bash_request` / `bash_result` payload schemas (highlight the canonical-status rule — `status` is the source of truth, `exit_code` is opaque except on `ran`), and the no-timeout member semantics. Cross-reference `skills/cafleet/SKILL.md` as canonical. (b) In the same subsection add one sentence: "Director-side requirement: the operator MUST add `Bash(cafleet member exec *)` to `permissions.allow` for the single-consent-gate UX to hold (see `skills/cafleet/SKILL.md` for setup details)." (c) Drop the existing "Multi-runner support" paragraph and the "Pane display-name propagation" paragraph's codex examples — claude is the only supported backend per §15. (d) The `coding_agent.py` Component Layout row collapses to "claude-only spawn config." |
-| `docs/spec/cli-options.md` | (a) Under the `cafleet member create` subsection, add `--no-bash` AND `--allow-bash` flag entries (the Step 1 flag-pair). The `--coding-agent` flag entry is removed entirely (codex deprecation §15). (b) Add a new subsection `### member exec` (under the `member` group) documenting the helper's flags, JSON output schema, exit codes, the canonical-status rule, the input-validation behavior (helper-internal, not Director-side), and 64 KiB / 30 s limits. (c) Add a new top-level subsection `### permissions.allow setup` listing the required `Bash(cafleet member exec *)` entry alongside the project's existing `Bash(cafleet *)` patterns. |
-| `README.md` | In the member-commands section, add a one-line bullet: "`cafleet member create --no-bash` — spawn a member with the Bash tool denied; the member must route shell commands through the Director (see `skills/cafleet/SKILL.md` § Routing Bash via the Director)." Also add a one-line bullet for the new `cafleet member exec` helper under the top-level CLI bullets. |
-| `skills/cafleet/SKILL.md` | (a) Extend the `### Member Create` subsection with `--no-bash` / `--allow-bash` flag rows; remove the existing `--coding-agent` flag row and every codex example invocation (codex deprecation §15). (b) Add a new top-level section `## Routing Bash via the Director` after `### Answer a member's AskUserQuestion prompt`. Include both payload schemas verbatim (highlight the canonical-status rule), the 3-option AskUserQuestion shape, the auto-allow path, the **required** `Bash(cafleet member exec *)` `permissions.allow` entry, the cross-Director rule, and the no-timeout note. (c) Add `### Member Exec` to Command Reference, between `Member Send-Input` and `Server`, documenting the helper. |
-| `skills/cafleet-monitoring/SKILL.md` | (a) Add a row to the Stall Response escalation table: when `cafleet message poll` shows an unresponded `bash_request` from a member, the Director MUST process it before any other inbox item — bash_request is blocking on the member side. Reference the new cafleet-skill section. (b) Add a new "### Director setup: required `permissions.allow` entries" subsection listing the `Bash(cafleet member exec *)` entry as required setup before spawning any `--no-bash` member. The supervisor checklist treats a missing entry as a setup gap to flag to the operator. |
-| `skills/design-doc-create/roles/director.md` | One-paragraph note: when a Drafter/Reviewer member sends a `bash_request`, follow the workflow in the cafleet skill. Do NOT print fenced-bash blocks for the user (carries forward design 0000033 discipline). |
-| `skills/design-doc-execute/roles/director.md` | Same paragraph. |
+| `ARCHITECTURE.md` | Add a new short "Bash Routing via Director" subsection after "Member Lifecycle" describing the `--no-bash` flag on `cafleet member create` plus the `!`-keystroke convention (member sends a plain message → Director sends `! <command>` via `cafleet member send-input` → Claude Code's `!` shortcut runs it natively in the member's pane). Append the serialization note (concurrent requests serialize through the existing `cafleet message poll` FIFO). Drop the existing "Multi-runner support" paragraph and the "Pane display-name propagation" paragraph's codex examples — claude is the only supported backend per §15. The `coding_agent.py` Component Layout row collapses to "claude-only spawn config." |
+| `docs/spec/cli-options.md` | Under the `cafleet member create` subsection, add `--no-bash` AND `--allow-bash` flag entries with a link to `skills/cafleet/SKILL.md` § Routing Bash via the Director. The `--coding-agent` flag entry is removed entirely (codex deprecation §15). No new subcommand subsection. |
+| `README.md` | In the Features list, add a one-line "Bash Routing via Director" bullet covering the convention. In the member-create row of the Agent Commands table, mention `--no-bash` (default) / `--allow-bash`. No new top-level CLI row. |
+| `skills/cafleet/SKILL.md` | (a) Extend the `### Member Create` subsection with `--no-bash` / `--allow-bash` flag rows; remove the existing `--coding-agent` flag row and every codex example invocation (codex deprecation §15). (b) Add a new top-level section `## Routing Bash via the Director` after `### Answer a member's AskUserQuestion prompt`. Include the convention (member sends plain message → Director responds with `cafleet member send-input --freetext "! <command>"`), a "Why this works" rationale, the cross-Director boundary rule, and the serialization note. |
+| `skills/cafleet-monitoring/SKILL.md` | Add a row to the Stall Response escalation table: when `cafleet message poll` shows an unresponded shell-command request from a member, the Director MUST respond promptly via `cafleet member send-input --freetext "! <command>"`. The member is blocked until the keystroke lands. Reference the new cafleet-skill section. |
+| `skills/design-doc-create/roles/director.md` | One-paragraph note pointing at the cafleet skill for the bash-routing workflow: members spawn with `--no-bash`; Drafter / Reviewer requests are plain CAFleet messages; the Director responds with `cafleet member send-input --freetext "! <command>"`. |
+| `skills/design-doc-execute/roles/director.md` | Same paragraph, mirrored. |
+| `admin/src/components/Sidebar.tsx`, `admin/src/components/Dashboard.tsx` | Update CLI hint strings to nested form (`cafleet agent register` etc.) per the round-6 restructure. |
 
 (No global-skill-copy mirror step. The four skills above exist only in the project tree per §9 "Out of scope".)
 
@@ -396,48 +235,34 @@ Per `.claude/rules/design-doc-numbering.md`, every doc surface that mentions the
 
 | Test | Coverage |
 |---|---|
-| `test_coding_agent.py::TestDisallowTools` | `CLAUDE.build_command(prompt, deny_bash=True)` argv equals `["claude", "--disallowedTools", "Bash", prompt]` (no display_name) or `["claude", "--disallowedTools", "Bash", "--name", "<n>", prompt]` (with display_name) — verifying the pinned `[binary, *extra_args, *deny_tools, *name_args, prompt]` ordering. `CLAUDE.build_command(prompt, deny_bash=False)` argv does NOT contain the `--disallowedTools` tokens. (No codex assertions: `CodingAgentConfig.CODEX` and the `CODING_AGENTS` registry are removed in §15.) |
-| `test_cli_member.py::TestNoBashFlag` | (a) `cafleet member create --no-bash` (default) passes `deny_bash=True` to `build_command` (verified by monkey-patching `tmux.split_window` and capturing the `command` arg). (b) `cafleet member create --allow-bash` passes `deny_bash=False`. The `--coding-agent` flag is removed entirely (§15) — any caller passing it gets Click's default "no such option" error; this is asserted as part of the codex-deprecation tests in §15, not here. |
-| `test_bash_routing_payload.py` | Schema-shape tests for `bash_request` and `bash_result` JSON: payload-helper functions (`parse_bash_request`, `format_bash_result`) round-trip through `json.dumps` / `json.loads`. `parse_bash_request` returns `None` for non-`bash_request` shapes (parse fail / missing type / `type` mismatch); does NOT raise on field-level issues like empty `cmd` or oversized `timeout` — those propagate to the helper. `format_bash_result` round-trips with each `status` value; truncation-marker formatting in input strings is preserved verbatim (`[truncated: original was N bytes; last 65536 bytes shown]`). The canonical-status rule is asserted: `format_bash_result(status="denied", exit_code=999)` round-trips with `exit_code=999` (caller-opaque). |
-| `test_bash_routing_matcher.py` | Allow-list matcher cases: `Bash(git *)` matches `git log -1`; `Bash(cafleet *)` matches `cafleet --session-id ... message poll ...`; `Bash(mise //cafleet*)` matches `mise //cafleet:test` and `mise //cafleet:lint`; non-`Bash(...)` patterns are ignored; allow×deny truth table from §4 (yes/no → auto-run; yes/yes → ask; no/yes → ask; no/no → ask) with one row each; empty allow-list returns `ask` for everything. The matcher has no reject-threshold tests — those live in `test_cli_member_exec.py`. |
-| `test_cli_member_exec.py` | Switch on `status` in every assertion (per the canonical-status rule); `exit_code` is asserted only for `status == "ran"`. (a) `cafleet member exec --cmd 'echo hi'` → JSON with `status: "ran"`, `exit_code: 0`, `stdout: "hi\n"`. (b) `cafleet member exec --cmd 'sleep 5' --timeout 1` → JSON with `status: "timeout"`, `stderr` containing `"hard-killed at 1 seconds."`; helper process exit code is 0. (c) `cafleet member exec --cmd 'python -c "print(\"x\" * 200000)"'` → truncated `stdout` ending in the truncation marker; `status: "ran"`. (d) `cafleet member exec --cmd 'cat' --stdin 'hello'` → `status: "ran"`, `stdout: "hello"`. (e) `cafleet member exec --cmd ''` → JSON with `status: "denied"`, `stderr: "bash_request.cmd may not be empty."`; helper process exit code is 0. (f) `cafleet member exec --cmd 'true' --timeout 9999` → JSON with `status: "denied"`, `stderr: "bash_request.timeout exceeds 600s cap."`; helper process exit code is 0. (g) `cafleet member exec --cmd 'true' --cwd '/no/such/dir'` → `status: "ran"`, `exit_code: 1`, `stderr` contains `"no such cwd"` (FileNotFoundError surfaced through the runtime path, not as a denied result). |
-| `test_coding_agent.py::TestPromptTemplates` | `CLAUDE.default_prompt_template` contains the canary substring `"Routing Bash via the Director"`, contains literal doubled braces `{{` and `}}` if a JSON-envelope example is embedded (template safety per design 0000018), and passes `str.format(session_id=..., agent_id=..., director_name=..., director_agent_id=...)` with the standard kwargs without raising. (No codex template assertions: the CODEX template is removed in §15.) |
-| `test_bash_dispatch.py::TestSingleConsentGate` (smoke-only) | Documents the single-consent-gate invariant: when the matcher returns `ask`, the Director's pane fires exactly one `AskUserQuestion` and zero native Bash-tool prompts (because `Bash(cafleet member exec *)` is in `permissions.allow`). Not unit-testable without harness mocking — covered by Implementation Step 7's real-world smoke (`b_with_allow` re-run case). |
-| `test_cli_restructure.py::TestFlatVerbsRejected` (round 6) | For each old flat-verb subcommand, assert the invocation fails with Click's default `Error: No such command '<name>'.`. Cases: `cafleet send`, `cafleet poll`, `cafleet ack`, `cafleet cancel`, `cafleet broadcast`, `cafleet register`, `cafleet deregister`, `cafleet agents`, `cafleet get-task`, `cafleet bash-exec`. Regression guard against any future contributor accidentally re-adding a Click alias and silently re-enabling the flat form (which would break the hard-break SC). |
-| `test_tmux.py::TestSendPollTriggerKeystroke` (round 6) | Monkey-patch `tmux._run` to capture argv. Call `tmux.send_poll_trigger(target_pane_id="%0", session_id="<uuid>", agent_id="<uuid>")` once and assert the captured keystroke string contains the literal `message poll` (not `poll`). Regression guard against any future revert of Step 12 task 5 — without it the flat-form keystroke would silently land in member panes and the bash-routing flow would break with `Error: No such command 'poll'.` at the recipient's pane. |
-| Real-world smoke (see Implementation Step 7 / Step 16 for the canonical case lists) | The Director team itself uses `cafleet member create --no-bash` once landed. No separate disposable smoke. |
+| `test_coding_agent.py::TestDisallowTools` | `CLAUDE.build_command(prompt, deny_bash=True)` argv equals `["claude", "--disallowedTools", "Bash", prompt]` (no display_name) or `["claude", "--disallowedTools", "Bash", "--name", "<n>", prompt]` (with display_name) — verifying the pinned `[binary, *extra_args, *deny_tools, *name_args, prompt]` ordering. `CLAUDE.build_command(prompt, deny_bash=False)` argv does NOT contain the `--disallowedTools` tokens. |
+| `test_cli_member.py::TestNoBashFlag` | (a) `cafleet member create --no-bash` (default) passes `deny_bash=True` to `build_command` (verified by monkey-patching `tmux.split_window` and capturing the `command` arg). (b) `cafleet member create --allow-bash` passes `deny_bash=False`. |
+| `test_coding_agent.py::TestPromptTemplates` | `CLAUDE.default_prompt_template` contains the canary substring `"By default your Bash tool is denied"` (verifies the bash-routing reminder is in the template) and passes `str.format(session_id=..., agent_id=..., director_name=..., director_agent_id=...)` with the standard kwargs without raising. |
+| `test_cli_restructure.py::TestFlatVerbsRejected` (round 6) | For each old flat-verb subcommand, assert the invocation fails with Click's default `Error: No such command '<name>'.`. Cases: `cafleet send`, `cafleet poll`, `cafleet ack`, `cafleet cancel`, `cafleet broadcast`, `cafleet register`, `cafleet deregister`, `cafleet agents`, `cafleet get-task`, `cafleet bash-exec`. Regression guard against any future contributor accidentally re-adding a Click alias and silently re-enabling the flat form. |
+| `test_tmux.py::TestSendPollTriggerKeystroke` (round 6) | Monkey-patch `tmux._run` to capture argv. Call `tmux.send_poll_trigger(target_pane_id="%0", session_id="<uuid>", agent_id="<uuid>")` once and assert the captured keystroke string contains the literal `message poll` (not `poll`). Regression guard against any future revert of the round-6 keystroke rename. |
+| `test_cli_member.py::TestCodingAgentFlagRemoved` (round 6) | `cafleet member create --coding-agent claude` fails with `Error: No such option: '--coding-agent'.` (Click default) — regression guard against re-adding the flag. |
+| `test_coding_agent.py::TestCodexConstantRemoved` (round 6) | Importing `CODEX`, `CODING_AGENTS`, `get_coding_agent` from `cafleet.coding_agent` each raise `ImportError` — regression guard against re-adding the registry. |
+| Real-world smoke | Operator-driven: spawn a fresh member via `cafleet member create --no-bash`, have it ask for a shell command via `cafleet message send`, respond from the Director's pane with `cafleet member send-input --freetext "! <command>"`, verify the captured output appears in the member's pane and the model reads it. No separate automated smoke — the bash-routing convention is too operator-driven to mock cleanly. |
 
 ### 12. Edge cases
 
 | Case | Behavior |
 |---|---|
-| Member sends a `bash_request` with `cmd: ""` (empty) | The Director invokes `cafleet member exec --cmd ''`; the helper short-circuits with denied JSON (`status: "denied"`, `stderr: "bash_request.cmd may not be empty."`); the Director relays it as `bash_result` with `status: "denied"`. (Helper input-validation, §3 helper bullet 1.) |
-| Member sends a `bash_request` with `timeout: 9999` | The Director invokes `cafleet member exec --timeout 9999 ...`; the helper short-circuits with denied JSON (`status: "denied"`, `stderr: "bash_request.timeout exceeds 600s cap."`); the Director relays it as `bash_result` with `status: "denied"`. |
-| Member sends malformed JSON or `type != "bash_request"` | NOT a denied `bash_result`. The Director treats the message as a plain instruction (existing logic). The member is responsible for using the documented JSON format if it wants the bash-routing dispatch. |
-| Operator picks "Approve with edits" but submits an empty edited command | Director re-asks via `AskUserQuestion` with the same 3 options. The previous attempt is discarded. |
-| Operator picks "Deny with reason" but submits an empty reason | Director uses the default `"Director denied the request."` for `stderr`. `status` is `"denied"`; `exit_code` is opaque. |
-| Member's session is deleted between request and reply | The Director's reply `cafleet message send` fails with the soft-deleted-session error. The Director surfaces the error to the operator (who already approved/denied via AskUserQuestion) but does not retry. Per `broker.delete_session` semantics, the cascade marks every member agent as `deregistered` and physically deletes their `agent_placements`, so subsequent polls by the (now-deregistered) member return nothing — the orphaned reply task remains in `tasks` for forensic inspection but is invisible. |
-| Member crashes between request send and reply receive | The reply task lands in the queue with `status: "input_required"`. If the same member is recreated (different `agent_id`), the reply is orphaned. Operator can `cafleet message cancel` the reply if they care; otherwise it stays as a soft-leak in `tasks` and is invisible to the new member. |
-| Two `bash_request`s in flight from the same member | Director processes them in poll-order. Each reply carries its own `in_reply_to`; the member correlates by `task_id`. No serialization is enforced — the member is responsible for waiting for one reply before sending the next if it wants ordering. |
-| Helper subprocess killed by SIGSEGV (not the timeout path) | `subprocess.run` returns a negative `returncode`; the helper reports `status: "ran"`, `exit_code: 128 + signal` (e.g. `139` for SIGSEGV), and stderr carries whatever the subprocess emitted before death. No special handling. |
-| `bash_request.cwd` does not exist | Logically a payload error but mechanically the helper invokes the shell which raises `FileNotFoundError`; `status: "ran"` with non-zero `exit_code` is the closest fit. Helper emits `status: "ran"`, `exit_code: 1`, `stderr: "no such cwd: <path>"`. (See §3 helper subsection for the runtime path.) |
-| The member uses `cafleet message send` directly without the JSON envelope | Director treats the message as a plain text instruction (existing behavior, no bash dispatch path). The member is responsible for using the documented JSON payload format. |
-| Operator forgets to add `Bash(cafleet member exec *)` to `permissions.allow` | The single-consent-gate UX guarantee does NOT hold — the operator is prompted twice (AskUserQuestion + native Bash) per non-allowlisted command. The bash-routing flow still works; the only cost is duplicate prompts. The cafleet-monitoring skill setup checklist (§10) flags a missing entry as a setup gap. Future work (§13) may make `cafleet member create` warn on detection. |
-| The operator closes the Director's tmux pane after AskUserQuestion fires or during `member exec` | The member is left blocked on the bash_result. On next session start, the operator runs `cafleet message poll --agent-id <director-id>` to surface the unanswered bash_request and resume the dispatch. The bash_request task is persisted in SQLite, so nothing is lost. |
-| The broker server restarts mid-bash-request | The tmux push is best-effort and lost on restart, but the bash_request task persists in SQLite. After the broker comes back, the Director's `/loop` cron will surface the request on its next poll cycle, and the dispatch resumes normally. |
-| Two or more different members send `bash_request`s in quick succession | Broker queues each as its own task; tmux pushes both to the Director's pane (best-effort, sequential). Director's `cafleet message poll` returns both in poll order. Dispatcher processes them sequentially — each gets its own AskUserQuestion turn before moving to the next. |
+| Member's session is deleted between request and the Director's reply | The Director's `cafleet member send-input` fails with the soft-deleted-session error. The Director surfaces the error in its own pane but does not retry. Per `broker.delete_session` semantics, the cascade marks every member agent as `deregistered` and physically deletes their `agent_placements`, so the member's pane is gone too — the request remains in the `tasks` table for forensic inspection. |
+| Member crashes between sending the request and the keystroke landing | The request stays in the queue with `status: "input_required"`. The Director's `cafleet member send-input` can still target the (now-dead) pane, but the keystroke goes nowhere. Operator can `cafleet message cancel` the request if they care. |
+| Two or more concurrent shell-command requests from the same member, or from different members | The broker queues each as its own task. The Director's `cafleet message poll` returns them in FIFO order. The Director processes them one at a time in poll order — read a request, dispatch the `! <command>` keystroke, wait for the keystroke to land, then move to the next message. No new queueing primitive — the broker queue's FIFO IS the serialization. |
+| Operator closes the Director's tmux pane mid-flow | The member is left blocked. On next session start, the operator runs `cafleet --session-id <s> message poll --agent-id <director-id>` to surface the unanswered request and resume. Requests are persisted in SQLite, so nothing is lost. |
+| Broker server restarts mid-flow | The tmux push is best-effort and lost on restart, but the request task persists in SQLite. After the broker comes back, the Director's `/loop` cron will surface the request on its next poll cycle, and the dispatch resumes normally. |
+| Operator forgets to add `Bash(cafleet member send-input *)` to `permissions.allow` | The Director's harness fires a per-call native Bash-tool prompt for each `cafleet member send-input` invocation. The bash-routing flow still works; the only cost is one extra prompt per `! <command>` dispatch. This is preexisting CAFleet UX (the same allow-rule applies to AskUserQuestion-answer dispatches from designs 0000027 / 0000033) — not a new requirement introduced by bash-routing. |
+| The member sends an ambiguous request the Director can't fulfill | The Director responds via `cafleet message send` with a plain message ("Need more detail — which file?" / "I won't run that — explain why you need it"). The member processes the reply as a regular instruction. The `! <command>` keystroke is reserved for the actual fulfillment case. |
+| The dispatched `! <command>` runs into a long-running process | Claude Code's `!` shortcut blocks the member's prompt context until the command finishes. There is no Director-side timeout — Claude Code's harness governs how long it waits. Operator can intervene via `cafleet member send-input` (e.g., send `Ctrl-C`) if needed. |
 
 ### 13. Future Work (pointer)
 
 These are deliberately out of scope for v1 and listed here so reviewers do not block on them:
 
-- **Per-Director throttling / memoization**: "Approve the next 5 `git status` calls from this member" without re-asking. Today every miss-the-allow-list call asks again.
-- **Structured WebUI rendering**: Render `bash_request` / `bash_result` as collapsible panels with syntax-highlighted `cmd` and exit-code badges in the admin timeline.
-- **Member-side timeouts**: Add `cafleet message send --reply-timeout <s>` so a member can declare it will give up if the Director does not reply in time. Today it blocks forever.
-- **Typed `cafleet message bash-request` member-side subcommand**: Dedicated CLI surface that wraps `cafleet message send` with the JSON envelope built in, plus the cross-Director boundary check enforced at the CLI layer (Specification §5).
-- **Codex restoration**: Codex was deprecated entirely in round 6 (§15). When upstream codex ships an equivalent of `--disallowedTools` (or any other primitive that gates the `shell` tool at the binary level) AND a stable JSON-payload interface for AskUserQuestion-style prompts (so the bash-routing flow's three-beat shape from designs 0000027/0000033 has a codex-side counterpart), restore `CodingAgentConfig.CODEX` and the `--coding-agent codex` flag with full bash-routing parity. The restoration design doc should: (i) reference 0000034 as prior art for the deprecation rationale; (ii) reintroduce the `CODEX` constant with the new `disallow_tools_args` populated from the codex flag spelling; (iii) reintroduce `CODING_AGENTS` / `get_coding_agent()` if more than one config emerges, or keep direct imports if only two; (iv) restore `cafleet member create --coding-agent codex` with full `--no-bash` parity (which the new codex primitive should make possible without the round-5 rejection branch); (v) add a migration check for surviving `agent_placements` rows with `coding_agent='codex'` (the rows that survived the 0000034 hard-break), validating they spawn under the new codex config; (vi) update every doc that 0000034 round 6 narrowed to "claude-only" (ARCHITECTURE.md "Multi-runner support" / "Pane display-name propagation", README features bullet, SKILL.md Member Create section, data-model.md `coding_agent` column docstring); (vii) re-add `CODEX.default_prompt_template` with the inlined JSON envelope (round 5c shipped this template; round 6 deleted it via Step 13 task 1; restoration must reintroduce a parallel template so codex members get the same bash-routing reminder claude members get); (viii) revert the round-6 Step 13 task 3 `FIXME(claude)` comment edit at `cafleet/src/cafleet/broker.py:17` so the codex env-var auto-detection note is restored alongside the codex agent type itself; (ix) remove the round-6 Step 14 regression-guard tests (`TestCodingAgentFlagRemoved` in `test_cli_member.py` and `TestCodexConstantRemoved` in `test_coding_agent.py`) — both will start failing the moment codex is restored because the flag and the constant exist again. Replace with positive tests that assert codex `--coding-agent` parsing and `CODEX` import both succeed.
-- **Stronger matcher**: full glob / regex semantics if `permissions.allow` patterns drift past the `Bash(<token0> *)` and `Bash(<exact-prefix>*)` shapes the v1 matcher covers.
-- **Operator-setup verifier**: `cafleet member create` reads the Director's resolved `settings.json` and warns when `Bash(cafleet member exec *)` is absent, since the single-consent-gate UX guarantee depends on it.
+- **Member-side timeouts**: Add `cafleet message send --reply-timeout <s>` so a member can declare it will give up if the Director does not reply in time. Today it blocks indefinitely.
+- **Codex restoration**: Codex was deprecated entirely in round 6 (§15). When upstream codex ships an equivalent of `--disallowedTools` (a primitive that gates the `shell` tool at the binary level), restore `CodingAgentConfig.CODEX` and the `--coding-agent codex` flag with full `--no-bash` parity. The restoration design doc should: (i) reference 0000034 as prior art for the deprecation rationale; (ii) reintroduce the `CODEX` constant with the new `disallow_tools_args` populated from the codex flag spelling; (iii) reintroduce `CODING_AGENTS` / `get_coding_agent()` if more than one config emerges, or keep direct imports if only two; (iv) restore `cafleet member create --coding-agent codex`; (v) add a migration check for surviving `agent_placements` rows with `coding_agent='codex'` (the rows that survived the 0000034 hard-break), validating they spawn under the new codex config; (vi) update every doc that 0000034 round 6 narrowed to "claude-only" (ARCHITECTURE.md "Multi-runner support" / "Pane display-name propagation", README features bullet, SKILL.md Member Create section, data-model.md `coding_agent` column docstring); (vii) re-add `CODEX.default_prompt_template`; (viii) revert the round-6 `FIXME(claude)` comment edit at `cafleet/src/cafleet/broker.py:17` so the codex env-var auto-detection note is restored alongside the codex agent type itself; (ix) remove the round-6 regression-guard tests (`TestCodingAgentFlagRemoved` in `test_cli_member.py` and `TestCodexConstantRemoved` in `test_coding_agent.py`) — both will start failing the moment codex is restored because the flag and the constant exist again. Replace with positive tests that assert codex `--coding-agent` parsing and `CODEX` import both succeed. Also: codex's analog (or equivalent) of Claude Code's `!` CLI shortcut needs to exist for the bash-routing convention to apply; if it doesn't, codex-spawned members would need a different routing mechanism — out of scope until the upstream primitive lands.
 - **Round-7 subscribe primitive**: replace today's pull-based `cafleet message poll` plus the broker's tmux-keystroke push with a long-running `cafleet subscribe` (or wherever it lands under the round-6 `message` group). Deferred so the nested restructure (§14) lands first; subscribe is a separate design doc.
 
 ---
@@ -464,13 +289,12 @@ cafleet                        # binary unchanged
 │   ├── ack                     # was: cafleet ack
 │   ├── cancel                  # was: cafleet cancel
 │   └── show --task-id <x>      # was: cafleet get-task
-├── member                      (existing group, gains new subcommand)
+├── member                      (existing group, unchanged surface in this design)
 │   ├── create
 │   ├── delete
 │   ├── list
 │   ├── capture
-│   ├── send-input
-│   └── exec                    # new in this design (was bash-exec — see ripple in §3 / §6)
+│   └── send-input
 ├── session                     (existing group, unchanged)
 │   ├── create
 │   ├── list
@@ -504,8 +328,7 @@ Every command that operates on a CAFleet entity (agent, message, member, session
 | `cafleet member delete` | `cafleet member delete` | Unchanged. |
 | `cafleet member list` | `cafleet member list` | Unchanged. |
 | `cafleet member capture` | `cafleet member capture` | Unchanged. |
-| `cafleet member send-input` | `cafleet member send-input` | Unchanged. |
-| (new from this doc) | `cafleet member exec` | The bash-routing helper. (`bash-exec` from rounds 1–5c renamed to `member exec` per the round-6 rename ripple; semantics unchanged. The required `permissions.allow` entry is correspondingly `Bash(cafleet member exec *)`.) |
+| `cafleet member send-input` | `cafleet member send-input` | Unchanged. The bash-routing convention (round 7) reuses this command verbatim — the Director dispatches `! <command>` keystrokes via `cafleet member send-input --freetext "! <command>"`. |
 | `cafleet session create` | `cafleet session create` | Unchanged. |
 | `cafleet session list` | `cafleet session list` | Unchanged. |
 | `cafleet session show` | `cafleet session show` | Unchanged. |
@@ -631,7 +454,7 @@ The user has accepted a hard-break with the following explicit migration story:
 | `docs/spec/data-model.md` | Line 126 — narrow the `coding_agent` column docstring from `"claude" or "codex"` to `"claude" (codex deprecated as of design 0000034 §15; existing rows preserved for forensic visibility and round-7 restoration)`. The column type, nullability, and `DEFAULT 'claude'` server default are unchanged. |
 | `cafleet/CLAUDE.md` | Verify and trim any codex references discovered during the inventory. |
 | `skills/cafleet/SKILL.md` | Remove the `--coding-agent` flag row from `### Member Create`. Remove every `--coding-agent codex` example invocation. Remove every codex-specific output sample. |
-| `skills/cafleet-monitoring/SKILL.md` | Reframe "Agent-agnostic monitoring" copy as "claude-only monitoring (codex deprecated as of design 0000034 §15; until codex grows enforcement primitives, route any codex pane through manual `cafleet member capture` only — `cafleet member exec` and `--no-bash` do not apply)." |
+| `skills/cafleet-monitoring/SKILL.md` | Reframe "Agent-agnostic monitoring" copy as "claude-only monitoring (codex deprecated as of design 0000034 §15; until codex grows enforcement primitives, route any codex pane through manual `cafleet member capture` only — the `--no-bash` default does not apply to codex)." |
 | `skills/design-doc-create/roles/director.md` | If any codex references exist, drop them. |
 | `skills/design-doc-execute/roles/director.md` | Same. |
 
@@ -861,3 +684,4 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
 | 2026-04-28 | Round 6d (Reviewer's deeper round-6 pass — 3 blocking + 5 polish, structural untangling): **(Fix 1)** Step 3 task 3 reverted from nested `cafleet message poll` to flat `cafleet poll` in the round-5c-era CLAUDE template literal; Step 12 task 6 (round 6) owns the rename. **(Fix 2)** Step 7 line 749 reverted from `cafleet message poll` to `cafleet poll` for the round-5c smoke (the keystroke is still flat-form at that point in the implementation order). Added a one-line preamble at Step 7 explaining it is the round-5c smoke; Step 16 is the round-6 end-state smoke. **(Fix 3)** Major structural untangling: Steps 1 / 2 / 3 / 5 / 7 reverted to round-5c-only content. Specific reversions: Step 1 task 1 (ARCHITECTURE.md) drops "drop the existing Multi-runner support paragraph and codex-aware copy" language; Step 9 task 1 owns it. Step 1 task 2 (cli-options.md) drops "remove the `--coding-agent` flag entry entirely"; Step 9 task 3 owns it. Step 1 task 3 (README.md) reverted to `cafleet bash-exec` round-5c-era name. Step 2 task 1 (cafleet skill) drops codex-deletion + bash-exec-rename language; Step 10 task 1 owns both. Step 3 task 1 says `CODEX.disallow_tools_args = ()` is set (round-5c-era state); Step 13 task 1 deletes CODEX in round 6. Step 3 task 4 re-added (CODEX template) so Step 13 task 1 has something to delete. Step 4 task 1 / 2 reverted to round-5c-era flag-resolution code path with codex rejection branch; Step 13 task 2 removes both in round 6. Step 5 task 1 / 2 / 5 reverted to round-5c-era test descriptions (4-sub-case TestNoBashFlag, codex assertions present, `test_cli_bash_exec.py` filename); Step 14 owns all the round-6 prunes / renames / regression guards. Step 7 line 732 keystroke reverted to flat `cafleet poll`; Step 12 task 5 renames it. **(Fix 4)** Step 12 task 1 made explicit: rename-during-move is atomic; full mapping list (`agents` → `agent list`, `register` → `agent register`, etc.) inlined in the task body. Step 12's redundant standalone get-task rename task removed (folded into task 1). Step 12 now has 5 tasks (was 6). **(Fix 5)** §11 added `TestFlatVerbsRejected` row + Step 14 task to assert each old flat-verb invocation fails with Click's "no such command" error. Regression guard against future Click-alias re-introduction silently breaking the hard-break SC. **(Fix 6)** §11 added `TestSendPollTriggerKeystroke` row + Step 14 task to monkey-patch `tmux._run` and assert the captured keystroke contains `message poll`. Regression guard against any future revert of Step 12 task 5. **(Fix 7)** §13 codex restoration plan extended with (vii) re-add `CODEX.default_prompt_template`, (viii) revert the round-6 `FIXME(claude)` comment edit at `broker.py:17`, (ix) remove the round-6 regression-guard tests (`TestCodingAgentFlagRemoved`, `TestCodexConstantRemoved`) — they will start failing the moment codex is restored; replace with positive tests. **(Fix 8)** Atomic-landing instructions added at the top of Steps 12 and 13: "Steps 12, 13, 14 land atomically (same PR); Step 11 shares the docs-first sweep so package it too. Step 15's quality gates run only at the head of the combined PR." **(Bonus polish)** §15 retirement guidance gained one sentence on `cafleet member delete --force` for codex panes that block on `/exit` (the `--force` flag was introduced in design 0000032 and works identically for codex). **Counts**: Step 3 grew from 3 to 4 tasks (re-added CODEX template); Step 4 grew from 3 to 4 tasks (re-added codex rejection branch); Step 12 shrank from 6 to 5 tasks (atomic rename-during-move folds get-task task into task 1); Step 14 grew from 6 to 9 tasks (added 3 tasks: TestFlatVerbsRejected, TestSendPollTriggerKeystroke, codex sub-case prune). Net round-5c implementation: 25 → 27 (back to original); net round-6 implementation: 34 → 36. Implementation total: 27 + 36 = **63**. SC unchanged at 21. Total `- [ ]` markers: **84**. Header `**Progress**: 0/59` → `0/63`. |
 | 2026-04-28 | Round 6f (Reviewer polish — 7 clarity items, no structural changes): **(A)** §7 line 328 rewritten from "Block on `cafleet message poll`..." to "Wait for the broker's tmux push notification, which injects a `cafleet message poll` keystroke into the member's pane when the bash_result arrives. The member polls (one-shot, not a loop), filters by `in_reply_to == task_id`, and resumes." Removes the misleading "block on poll" wording that read as a polling loop. **(B)** Step 10 task 2 (cafleet-monitoring SKILL.md) gained an explicit instruction near Stall Response: "When the Director's poll output contains a `bash_request` JSON payload, load `Skill(cafleet)` § Routing Bash via the Director and follow the 6-step dispatch." This bridges the case where a Director loaded only `Skill(cafleet-monitoring)` at session start and discovers a bash_request later. **(C)** §12 gained 3 new edge-case rows: operator closes Director's pane mid-bash-request (member resumes via persisted task on next poll); broker server restarts mid-bash-request (tmux push lost, task persists, `/loop` recovers on next cycle); concurrent bash_requests from multiple members (sequential AskUserQuestion turns). **(D)** §7 gained a paragraph after the new Fix-A wait/poll/resume sentence clarifying member-side concurrency: "If `cafleet message poll` returns messages in addition to the bash_result (or before it arrives), the member processes those messages as plain instructions per existing CAFleet semantics; the bash_request continuation only resumes when a `bash_result` with the matching `in_reply_to` arrives. The member's task is not gated on bash_result arrival — it's gated on the bash_result correlation." **(E)** §15 gained a new "Rollback" subsection: revert the round-6 atomic PR; DB schema is unchanged so rollback is safe; wedged claude panes that saw post-round-6 keystrokes get `member delete --force`-ed and respawned. Distinguished rollback ("round 6 was a mistake, revert all of it") from restoration ("codex is back in v2 — write a new design doc"). **(F)** §6 "Required `permissions.allow` entry" gained one sentence on operator upgrade ordering: "Order is irrelevant — adding the entry before or after the binary upgrade both work. Intermediate states... are degraded-UX (extra Bash prompts) but functional." **(G)** §6 gained a new "Operator upgrade checklist" subsection: "After upgrading the cafleet binary, **restart any Director session that was running pre-upgrade**." Verified the actual reload mechanism — Claude Code does NOT expose an in-session skill-reload command; per `claude --help` the only mechanism is exiting and restarting the session so the harness re-reads `skills/<name>/SKILL.md` from disk. The Reviewer's hypothetical `/skill cafleet` command is not real; the doc states the honest mechanism. **Counts**: no new tasks (all fixes are edits to existing prose / table rows / step-task descriptions). Task count unchanged at 63 implementation + 21 SC = **84** total `- [ ]` markers. Header `**Progress**: 0/63 tasks complete` unchanged. |
 | 2026-04-28 | **User-approved.** Status moved from Draft to Approved. Last Updated 2026-04-28. Implementation-only `- [ ]` count verified at 63 by counting checkboxes between `## Implementation` (line 657) and `## Changelog` (line 850); matches header `**Progress**: 0/63 tasks complete`. Implementation steps spot-verified for actionability across the round-5c (Steps 1–8) and round-6 (Steps 9–17) spans: every task carries concrete file paths (e.g. `cafleet/src/cafleet/coding_agent.py`, `cafleet/tests/test_cli_member.py`, `ARCHITECTURE.md`, `skills/cafleet/SKILL.md`), function or symbol names (e.g. `CodingAgentConfig`, `CLAUDE.disallow_tools_args`, `build_command`, `tmux.send_poll_trigger`, `TestNoBashFlag`), and specific assertions (e.g. "argv contains `--disallowedTools Bash`", "fails with Click's `Error: No such option: '--coding-agent'.`", "captured keystroke contains the literal `message poll`"). Step ownership for each rename / deletion is cross-referenced explicitly (e.g. "Codex-related copy deletions are owned by Step 9 task 1") so no doc surface is edited twice. Doc is ready for `/design-doc-execute` to begin implementation. |
+| 2026-04-29 | **Round 7 (Post-implementation redesign)**: User reviewed the implementation in PR #37 and identified that the elaborate `bash_request` / `bash_result` JSON envelope + `AskUserQuestion` 3-option gate + `cafleet member exec` helper was not the intended design. The intent was to use Claude Code's existing `!` CLI shell-shortcut: members ask via plain CAFleet messages, the Director responds by sending `! <command>` keystrokes via the existing `cafleet member send-input`. No new broker primitives, no JSON envelopes, no separate helper subcommand, no allow-list matcher, no AskUserQuestion gate. Implementation unwound: deleted `cafleet/src/cafleet/bash_routing.py`, the `cafleet member exec` Click handler (`@member.command("exec")` + `_truncate_stream` + `_MEMBER_EXEC_*` constants), and three test files (`test_bash_routing_payload.py`, `test_bash_routing_matcher.py`, `test_cli_member_exec.py` — 52 tests total). Rewrote `cafleet/src/cafleet/coding_agent.py`'s `CLAUDE.default_prompt_template` to drop the JSON envelope reference; the canary substring became `"By default your Bash tool is denied"`. Doc surfaces (`ARCHITECTURE.md`, `README.md`, `docs/spec/cli-options.md`, `skills/cafleet/SKILL.md`, `skills/cafleet-monitoring/SKILL.md`, `skills/design-doc-create/roles/director.md`, `skills/design-doc-execute/roles/director.md`) rewritten to describe the simpler convention. Test suite shrunk from 545 to 493 (52 obsolete tests deleted). All quality gates green. **Concurrent-request serialization** is documented explicitly: the broker queue's existing FIFO ordering serializes concurrent shell-command requests; the Director processes one at a time in poll order, dispatches the `! <command>` keystroke, then moves to the next. No new queueing primitive. **Design-doc rewrite** (this entry): §1 unchanged (`--no-bash` / `--allow-bash` flag pair); §2 rewritten (member sends plain message, no JSON envelope); §3 rewritten from a 6-step dispatch with a matcher and AskUserQuestion to a 3-step protocol (read request → decide → dispatch `! <command>` via `member send-input`); §4 (Allow-list matcher) deleted entirely; §5 trimmed to drop the "bash_request envelope" framing; §6 reframed (the required allow rule is now `Bash(cafleet member send-input *)`, which is preexisting CAFleet UX from designs 0000027/0000033 — not a new requirement); §7 simplified (members still block, but on `! <command>` keystroke + reply messages instead of correlated `bash_result`); §8 (Director subprocess hard limits) deleted entirely (no subprocess in the new design); §9 trimmed; §10 doc-surface table updated to drop the deleted helper / matcher rows; §11 test list shrunk to 7 entries (drops bash_routing_payload, bash_routing_matcher, cli_member_exec, single-consent-gate-smoke); §12 edge cases rewritten (drops subprocess-timeout / Popen.kill / FileNotFoundError-cwd rows; adds session-deleted, member-crashed, concurrent-requests-serialized, operator-closed-pane, broker-restarted, missing-allow-rule degraded-UX rows); §13 Future Work pruned (drops typed `cafleet message bash-request`, structured throttling, stronger matcher, operator-setup verifier; codex-restoration plan stays). Success Criteria § Bash-via-Director rewritten from 11 criteria to 6 (the new convention's actual contract). §14 (nested-only restructure) and §15 (codex deprecation) untouched. The implementation step checkboxes (Steps 1–17) stay marked as completed because the work was actually done — the build was real, then unwound. The 6 prior Changelog rounds stay verbatim as historical record of the abandoned design. Net `- [ ]` markers in the implementation block unchanged at 7 (Steps 7+8 deferred round-5c smoke + finalize, Steps 16+17 deferred round-6 smoke + finalize). |
