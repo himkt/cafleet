@@ -702,9 +702,7 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
 )
 @click.argument("prompt_argv", nargs=-1)
 @click.pass_context
-def member_create(
-    ctx, agent_id, name, description, coding_agent, no_bash, prompt_argv
-):
+def member_create(ctx, agent_id, name, description, coding_agent, no_bash, prompt_argv):
     """Register a new member and spawn its coding agent pane in the Director's window."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]

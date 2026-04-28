@@ -111,9 +111,7 @@ class TestBashExecOverCapTimeoutDenied:
     """
 
     def test_over_cap_timeout_returns_status_denied_with_verbatim_reason(self):
-        exit_code, payload = _invoke(
-            ["--cmd", "echo x", "--timeout", "9999"]
-        )
+        exit_code, payload = _invoke(["--cmd", "echo x", "--timeout", "9999"])
         assert exit_code == 0
         assert payload["status"] == "denied"
         # Per the canonical-status rule, do NOT assert on exit_code.
@@ -131,9 +129,7 @@ class TestBashExecNonexistentCwd:
     """
 
     def test_nonexistent_cwd_returns_status_ran_nonzero_exit_with_stderr(self):
-        exit_code, payload = _invoke(
-            ["--cmd", "echo x", "--cwd", "/no/such/dir"]
-        )
+        exit_code, payload = _invoke(["--cmd", "echo x", "--cwd", "/no/such/dir"])
         assert exit_code == 0
         assert payload["status"] == "ran"
         # exit_code is meaningful for status == "ran". Asserting non-zero

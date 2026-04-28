@@ -1,7 +1,7 @@
 # CAFleet CLI consolidation: Bash-via-Director, nested-only restructure, codex deprecation
 
 **Status**: Approved
-**Progress**: 15/63 tasks complete
+**Progress**: 24/63 tasks complete
 **Last Updated**: 2026-04-28
 
 ## Overview
@@ -743,18 +743,18 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
 
 ### Step 5: Tests
 
-- [ ] Extend `cafleet/tests/test_coding_agent.py` with `TestDisallowTools` AND `TestPromptTemplates` cases from §11 round-5c text (argv-shape pinning for `TestDisallowTools` against both CLAUDE and CODEX; canary-substring + `str.format()` smoke for `TestPromptTemplates` against both CLAUDE and CODEX templates). (Round-5c-era state. Step 14 task 2 deletes every codex-specific test case in this file as part of the round-6 codex deprecation.) <!-- completed: -->
-- [ ] Extend `cafleet/tests/test_cli_member.py` with `TestNoBashFlag` cases from §11 round-5c text (four sub-cases: claude default `--no-bash`; explicit `--allow-bash`; codex `--no-bash` rejection with verbatim error; codex default `--allow-bash`). Reuse the existing fixture style; monkey-patch `tmux.split_window` to capture the `command` argv. (Round-5c-era state. Step 14 task 1 / task 3 prune the codex sub-cases and add `TestCodingAgentFlagRemoved` regression guard as part of the round-6 codex deprecation.) <!-- completed: -->
-- [ ] Add a new file `cafleet/tests/test_bash_routing_payload.py` covering `parse_bash_request` / `format_bash_result` helpers from Step 4 (round-trip, missing-field errors, truncation marker exact match). <!-- completed: -->
-- [ ] Add a new file `cafleet/tests/test_bash_routing_matcher.py` covering `match_allow` (per-pattern matches; allow×deny truth table from §4; ignored non-`Bash(...)` patterns; empty list returns `ask`). <!-- completed: -->
-- [ ] Add a new file `cafleet/tests/test_cli_bash_exec.py` covering the `cafleet bash-exec` helper's seven cases from §11 round-5c text (happy path; timeout / SIGKILL; truncation; stdin propagation; empty-cmd denied JSON; over-cap timeout denied JSON; nonexistent-cwd runtime path). All assertions switch on `status` per the canonical-status rule; `exit_code` is asserted only for `status == "ran"`. Use `CliRunner`; for the timeout test prefer a real `sleep` invocation since `subprocess.run` timeout behavior is what's under test. (Round-5c-era file name and CLI-invocation strings. Step 14 task 1 renames the file to `test_cli_member_exec.py` and rewrites every `cafleet bash-exec` invocation inside it to `cafleet member exec` as part of the round-6 nested-only restructure.) <!-- completed: -->
+- [x] Extend `cafleet/tests/test_coding_agent.py` with `TestDisallowTools` AND `TestPromptTemplates` cases from §11 round-5c text (argv-shape pinning for `TestDisallowTools` against both CLAUDE and CODEX; canary-substring + `str.format()` smoke for `TestPromptTemplates` against both CLAUDE and CODEX templates). (Round-5c-era state. Step 14 task 2 deletes every codex-specific test case in this file as part of the round-6 codex deprecation.) <!-- completed: 2026-04-28T17:00 -->
+- [x] Extend `cafleet/tests/test_cli_member.py` with `TestNoBashFlag` cases from §11 round-5c text (four sub-cases: claude default `--no-bash`; explicit `--allow-bash`; codex `--no-bash` rejection with verbatim error; codex default `--allow-bash`). Reuse the existing fixture style; monkey-patch `tmux.split_window` to capture the `command` argv. (Round-5c-era state. Step 14 task 1 / task 3 prune the codex sub-cases and add `TestCodingAgentFlagRemoved` regression guard as part of the round-6 codex deprecation.) <!-- completed: 2026-04-28T17:00 -->
+- [x] Add a new file `cafleet/tests/test_bash_routing_payload.py` covering `parse_bash_request` / `format_bash_result` helpers from Step 4 (round-trip, missing-field errors, truncation marker exact match). <!-- completed: 2026-04-28T17:00 -->
+- [x] Add a new file `cafleet/tests/test_bash_routing_matcher.py` covering `match_allow` (per-pattern matches; allow×deny truth table from §4; ignored non-`Bash(...)` patterns; empty list returns `ask`). <!-- completed: 2026-04-28T17:00 -->
+- [x] Add a new file `cafleet/tests/test_cli_bash_exec.py` covering the `cafleet bash-exec` helper's seven cases from §11 round-5c text (happy path; timeout / SIGKILL; truncation; stdin propagation; empty-cmd denied JSON; over-cap timeout denied JSON; nonexistent-cwd runtime path). All assertions switch on `status` per the canonical-status rule; `exit_code` is asserted only for `status == "ran"`. Use `CliRunner`; for the timeout test prefer a real `sleep` invocation since `subprocess.run` timeout behavior is what's under test. (Round-5c-era file name and CLI-invocation strings. Step 14 task 1 renames the file to `test_cli_member_exec.py` and rewrites every `cafleet bash-exec` invocation inside it to `cafleet member exec` as part of the round-6 nested-only restructure.) <!-- completed: 2026-04-28T17:00 -->
 
 ### Step 6: Quality gates
 
-- [ ] Run `mise //cafleet:test` — must pass with zero failures. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` — must pass. <!-- completed: -->
-- [ ] Run `mise //cafleet:format` — must pass. <!-- completed: -->
-- [ ] Run `mise //cafleet:typecheck` — must pass. <!-- completed: -->
+- [x] Run `mise //cafleet:test` — must pass with zero failures. <!-- completed: 2026-04-28T17:10 -->
+- [x] Run `mise //cafleet:lint` — must pass. <!-- completed: 2026-04-28T17:10 -->
+- [x] Run `mise //cafleet:format` — must pass. <!-- completed: 2026-04-28T17:10 -->
+- [x] Run `mise //cafleet:typecheck` — must pass. <!-- completed: 2026-04-28T17:10 -->
 
 ### Step 7: Real-world smoke (round 5c)
 

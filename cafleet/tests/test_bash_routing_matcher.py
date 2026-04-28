@@ -75,55 +75,76 @@ class TestMatchAllowGlobPatterns:
     """Per §4 pattern-syntax table."""
 
     def test_bash_git_star_matches_git_log(self):
-        assert match_allow(
-            cmd="git log -1",
-            allow_patterns=["Bash(git *)"],
-            deny_patterns=[],
-        ) == "auto-run"
+        assert (
+            match_allow(
+                cmd="git log -1",
+                allow_patterns=["Bash(git *)"],
+                deny_patterns=[],
+            )
+            == "auto-run"
+        )
 
     def test_bash_git_star_matches_git_push(self):
-        assert match_allow(
-            cmd="git push origin main",
-            allow_patterns=["Bash(git *)"],
-            deny_patterns=[],
-        ) == "auto-run"
+        assert (
+            match_allow(
+                cmd="git push origin main",
+                allow_patterns=["Bash(git *)"],
+                deny_patterns=[],
+            )
+            == "auto-run"
+        )
 
     def test_bash_git_star_does_not_match_gh_pr_view(self):
         # token-0 differs (``gh`` not ``git``), so the glob ``git *`` does
         # not match ``gh pr view``.
-        assert match_allow(
-            cmd="gh pr view",
-            allow_patterns=["Bash(git *)"],
-            deny_patterns=[],
-        ) == "ask"
+        assert (
+            match_allow(
+                cmd="gh pr view",
+                allow_patterns=["Bash(git *)"],
+                deny_patterns=[],
+            )
+            == "ask"
+        )
 
     def test_bash_cafleet_star_matches_cafleet_message_poll(self):
-        assert match_allow(
-            cmd="cafleet --session-id abc message poll --agent-id def",
-            allow_patterns=["Bash(cafleet *)"],
-            deny_patterns=[],
-        ) == "auto-run"
+        assert (
+            match_allow(
+                cmd="cafleet --session-id abc message poll --agent-id def",
+                allow_patterns=["Bash(cafleet *)"],
+                deny_patterns=[],
+            )
+            == "auto-run"
+        )
 
     def test_bash_mise_cafleet_prefix_matches_test(self):
-        assert match_allow(
-            cmd="mise //cafleet:test",
-            allow_patterns=["Bash(mise //cafleet*)"],
-            deny_patterns=[],
-        ) == "auto-run"
+        assert (
+            match_allow(
+                cmd="mise //cafleet:test",
+                allow_patterns=["Bash(mise //cafleet*)"],
+                deny_patterns=[],
+            )
+            == "auto-run"
+        )
 
     def test_bash_mise_cafleet_prefix_matches_lint(self):
-        assert match_allow(
-            cmd="mise //cafleet:lint",
-            allow_patterns=["Bash(mise //cafleet*)"],
-            deny_patterns=[],
-        ) == "auto-run"
+        assert (
+            match_allow(
+                cmd="mise //cafleet:lint",
+                allow_patterns=["Bash(mise //cafleet*)"],
+                deny_patterns=[],
+            )
+            == "auto-run"
+        )
 
     def test_bash_star_matches_everything(self):
-        assert match_allow(
-            cmd="any random command here",
-            allow_patterns=["Bash(*)"],
-            deny_patterns=[],
-        ) == "auto-run"
+        assert (
+            match_allow(
+                cmd="any random command here",
+                allow_patterns=["Bash(*)"],
+                deny_patterns=[],
+            )
+            == "auto-run"
+        )
 
 
 class TestMatchAllowIgnoresNonBashPatterns:

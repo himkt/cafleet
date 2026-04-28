@@ -316,8 +316,9 @@ class TestFormatBashResultPreservesTruncationMarkerVerbatim:
         )
         decoded = json.loads(text)
         assert decoded["stdout"].endswith(marker)
-        assert "[truncated: original was 200000 bytes; last 65536 bytes shown]" in (
-            decoded["stdout"]
+        assert (
+            "[truncated: original was 200000 bytes; last 65536 bytes shown]"
+            in (decoded["stdout"])
         )
 
     def test_truncation_marker_in_stderr_passes_through(self):

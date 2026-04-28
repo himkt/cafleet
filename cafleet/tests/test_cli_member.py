@@ -491,9 +491,7 @@ class TestNoBashFlag:
         )
         assert result.exit_code == 1, result.output
         # Verbatim error per design doc §6 round-5c text.
-        assert (
-            "--no-bash with --coding-agent codex is not supported" in result.output
-        )
+        assert "--no-bash with --coding-agent codex is not supported" in result.output
         assert "Codex has no --disallowedTools-equivalent flag" in result.output
         assert "Use --allow-bash, or pick claude" in result.output
         # No broker rows created — rejection happens before register_agent.
