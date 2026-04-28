@@ -29,7 +29,7 @@ Every `cafleet` invocation that touches agents or messages must carry two litera
 
 If `--session-id` is missing on a subcommand that needs it, the CLI exits with `Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id.`
 
-> **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --session-id <uuid> <subcmd> --agent-id <uuid>` invocation matches a single allow pattern across every subcommand for that session. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — never store them in shell variables.
+> **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --session-id <uuid> <subcmd> --agent-id <uuid>` invocation matches a single allow pattern across every subcommand for that session. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet agent register` — never store them in shell variables.
 
 The environment variables the CLI reads (all wired through `cafleet.config.Settings` via explicit `validation_alias` on each field, so the `CAFLEET_` prefix is uniform):
 
@@ -39,7 +39,7 @@ The environment variables the CLI reads (all wired through `cafleet.config.Setti
 
 ## Placeholder convention used below
 
-In every example below, substitute the literal UUID strings printed by `cafleet session create` / `cafleet register`. Angle-bracket tokens are placeholders, **not** shell variables:
+In every example below, substitute the literal UUID strings printed by `cafleet session create` / `cafleet agent register`. Angle-bracket tokens are placeholders, **not** shell variables:
 
 - `<session-id>` — the session UUID printed by `cafleet session create`
 - `<my-agent-id>` — the UUID returned by your own `cafleet ... register` call
@@ -57,7 +57,7 @@ cafleet --session-id <session-id> --json register --name "My Agent" --descriptio
 cafleet --session-id <session-id> --json agents --agent-id <my-agent-id>
 ```
 
-`cafleet agents --json` will fail with `No such option: --json`. Same for `--session-id` placed after the subcommand — keep it before. `--agent-id` must come **after** the subcommand, not before it.
+`cafleet agent list --json` will fail with `No such option: --json`. Same for `--session-id` placed after the subcommand — keep it before. `--agent-id` must come **after** the subcommand, not before it.
 
 ### `--version`
 
@@ -70,10 +70,10 @@ cafleet --session-id <session-id> --json agents --agent-id <my-agent-id>
 Register a new agent with the broker.
 
 ```bash
-cafleet --session-id <session-id> register \
+cafleet --session-id <session-id> agent register \
   --name "My Agent" --description "What this agent does"
 
-cafleet --session-id <session-id> register \
+cafleet --session-id <session-id> agent register \
   --name "My Agent" --description "Frontend dev" \
   --skills '[{"id":"react","name":"React Dev","description":"React/TS"}]'
 ```
@@ -108,7 +108,7 @@ Rules:
 - **Description**: one sentence stating who the agent is and what it is for.
 - **Capture `agent_id` immediately.** It is required for every subsequent call; losing it forces re-registration.
 - Non-`--json` output prints `Agent registered successfully!` followed by `  agent_id:  <uuid>` and `  name:      <name>`. Parse the `agent_id:` line if `--json` is not an option.
-- Call `cafleet --session-id <session-id> deregister --agent-id <my-agent-id>` at end of session so stale registrations do not accumulate.
+- Call `cafleet --session-id <session-id> agent deregister --agent-id <my-agent-id>` at end of session so stale registrations do not accumulate.
 
 ### Doctor
 
@@ -154,8 +154,8 @@ JSON output:
 List all registered agents, or get detail for a specific agent.
 
 ```bash
-cafleet --session-id <session-id> agents --agent-id <my-agent-id>
-cafleet --session-id <session-id> agents --agent-id <my-agent-id> --id <target-agent-id>
+cafleet --session-id <session-id> agent list --agent-id <my-agent-id>
+cafleet --session-id <session-id> agent list --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
 ### Send (Unicast)
@@ -163,18 +163,18 @@ cafleet --session-id <session-id> agents --agent-id <my-agent-id> --id <target-a
 Send a message to a specific agent by ID.
 
 ```bash
-cafleet --session-id <session-id> send --agent-id <my-agent-id> \
+cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
   --to <target-agent-id> --text "Did the API schema change?"
 ```
 
-After persisting the message, the broker attempts a tmux push notification to the recipient's pane (`tmux send-keys` with `cafleet --session-id <session-id> poll --agent-id <recipient-id>`). The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome.
+After persisting the message, the broker attempts a tmux push notification to the recipient's pane (`tmux send-keys` with `cafleet --session-id <session-id> message poll --agent-id <recipient-id>`). The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome.
 
 ### Broadcast
 
 Send a message to all registered agents (except self).
 
 ```bash
-cafleet --session-id <session-id> broadcast --agent-id <my-agent-id> \
+cafleet --session-id <session-id> message broadcast --agent-id <my-agent-id> \
   --text "Build failed on main branch"
 ```
 
@@ -185,9 +185,9 @@ After persisting each delivery, the broker attempts a tmux push notification per
 Poll for incoming messages. Returns tasks addressed to this agent.
 
 ```bash
-cafleet --session-id <session-id> poll --agent-id <my-agent-id>
-cafleet --session-id <session-id> poll --agent-id <my-agent-id> --since "2026-03-28T12:00:00Z"
-cafleet --session-id <session-id> poll --agent-id <my-agent-id> --page-size 10
+cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
+cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --since "2026-03-28T12:00:00Z"
+cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --page-size 10
 ```
 
 ### Acknowledge (ACK)
@@ -195,7 +195,7 @@ cafleet --session-id <session-id> poll --agent-id <my-agent-id> --page-size 10
 Acknowledge receipt of a message. Moves the task from INPUT_REQUIRED to COMPLETED.
 
 ```bash
-cafleet --session-id <session-id> ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 ### Cancel (Retract)
@@ -203,7 +203,7 @@ cafleet --session-id <session-id> ack --agent-id <my-agent-id> --task-id <task-i
 Cancel a sent message that hasn't been acknowledged yet. Only the sender can cancel.
 
 ```bash
-cafleet --session-id <session-id> cancel --agent-id <my-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message cancel --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 ### Get Task
@@ -211,7 +211,7 @@ cafleet --session-id <session-id> cancel --agent-id <my-agent-id> --task-id <tas
 Get details of a specific task by ID.
 
 ```bash
-cafleet --session-id <session-id> get-task --agent-id <my-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message show --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 ### Deregister
@@ -219,12 +219,12 @@ cafleet --session-id <session-id> get-task --agent-id <my-agent-id> --task-id <t
 Remove this agent's registration from the broker.
 
 ```bash
-cafleet --session-id <session-id> deregister --agent-id <my-agent-id>
+cafleet --session-id <session-id> agent deregister --agent-id <my-agent-id>
 ```
 
-> **Root Director cannot be deregistered**. The agent created by `cafleet session create` (the session's `sessions.director_agent_id`) is protected — `cafleet deregister --agent-id <root-director-id>` exits 1 with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` This guard exists because removing the root Director would orphan `sessions.director_agent_id`, break Member → Director push notifications, and leave no supported teardown path. Use `cafleet session delete <session-id>` for session teardown — it deregisters the root Director along with every member and Administrator as part of its cascade.
+> **Root Director cannot be deregistered**. The agent created by `cafleet session create` (the session's `sessions.director_agent_id`) is protected — `cafleet agent deregister --agent-id <root-director-id>` exits 1 with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` This guard exists because removing the root Director would orphan `sessions.director_agent_id`, break Member → Director push notifications, and leave no supported teardown path. Use `cafleet session delete <session-id>` for session teardown — it deregisters the root Director along with every member and Administrator as part of its cascade.
 
-> **Administrator cannot be deregistered**. Passing the built-in Administrator's `agent_id` to `cafleet deregister` exits with status 1 and prints `Error: Administrator cannot be deregistered` to stderr — the broker raises `AdministratorProtectedError` and the CLI handles it by printing the error and calling `ctx.exit(1)`. The Administrator row stays `active`; there is no override flag. The same guard applies to `member create` — the built-in Administrator cannot be used as a Director (its `agent_id` cannot appear in `placement.director_agent_id`). Every session has exactly one Administrator; deregister regular agents only.
+> **Administrator cannot be deregistered**. Passing the built-in Administrator's `agent_id` to `cafleet agent deregister` exits with status 1 and prints `Error: Administrator cannot be deregistered` to stderr — the broker raises `AdministratorProtectedError` and the CLI handles it by printing the error and calling `ctx.exit(1)`. The Administrator row stays `active`; there is no override flag. The same guard applies to `member create` — the built-in Administrator cannot be used as a Director (its `agent_id` cannot appear in `placement.director_agent_id`). Every session has exactly one Administrator; deregister regular agents only.
 
 ### Session Delete
 
@@ -235,22 +235,22 @@ cafleet session delete <session-id>
 
 Soft-deletes a session in a single transaction: stamps `sessions.deleted_at`, deregisters every active agent in the session (root Director + Administrator + any remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. The command is idempotent — re-running against an already-deleted session prints `Deregistered 0 agents.` and exits 0.
 
-After soft-delete, the session is hidden from `cafleet session list` and further `cafleet register --session-id <deleted>` calls fail with `Error: session <id> is deleted`. Surviving member `claude` / `codex` processes are **not** automatically closed — call `cafleet member delete` per member **before** `cafleet session delete` for a clean teardown. See the Shutdown Protocol under "Multi-Session Coordination" for the full ordering — raw `tmux` commands are NOT part of the recovery path.
+After soft-delete, the session is hidden from `cafleet session list` and further `cafleet --session-id <deleted> agent register` calls fail with `Error: session <id> is deleted`. Surviving member `claude` processes are **not** automatically closed — call `cafleet member delete` per member **before** `cafleet session delete` for a clean teardown. See the Shutdown Protocol under "Multi-Session Coordination" for the full ordering — raw `tmux` commands are NOT part of the recovery path.
 
 ### Member Create
 
-Register a new member agent and spawn a coding agent pane in the Director's own tmux window. Must be run inside a tmux session. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
+Register a new member agent and spawn a claude pane in the Director's own tmux window. Must be run inside a tmux session. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
 
 ```bash
 cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42"
 
 cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
-  --name Codex-B --description "Reviewer for PR #42" --coding-agent codex
+  --name Claude-B --description "Reviewer for PR #42" --allow-bash
 
 cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42" \
-  -- "Review PR #42, post feedback via send, and deregister on completion."
+  -- "Review PR #42, post feedback via cafleet message send, and deregister on completion."
 ```
 
 | Flag | Required | Notes |
@@ -258,15 +258,12 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 | `--agent-id` | yes | The Director's agent ID |
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
-| `--coding-agent` | no | Coding agent to spawn: `claude` (default) or `codex`. Codex is spawned with `--approval-mode auto-edit`. |
-| `--no-bash` / `--allow-bash` | no | Enable / disable Bash tool denial at spawn time. Defaults to `--no-bash` for `--coding-agent claude` (the spawned process gains `--disallowedTools "Bash"` so the harness rejects every Bash call). The member is expected to route shell commands through its Director via the `bash_request` JSON envelope — see the new `## Routing Bash via the Director` section below. `--allow-bash` is the opt-out for one-off members that need direct Bash; the soft "route through the Director" discipline still applies but is no longer enforced by the harness. Codex defaults to `--allow-bash` because codex has no `--disallowedTools` analog today, and `--no-bash --coding-agent codex` is rejected at the CLI layer. |
-| *(positional, after `--`)* | no | Prompt for the spawned coding agent process. If omitted, a default prompt is generated (agent-specific). BOTH the default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_name` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
+| `--no-bash` / `--allow-bash` | no | Enable / disable Bash tool denial at spawn time. Defaults to `--no-bash` (the spawned process gains `--disallowedTools "Bash"` so the harness rejects every Bash call). The member is expected to route shell commands through its Director via the `bash_request` JSON envelope — see the `## Routing Bash via the Director` section below. `--allow-bash` is the opt-out for one-off members that need direct Bash; the soft "route through the Director" discipline still applies but is no longer enforced by the harness. |
+| *(positional, after `--`)* | no | Prompt for the spawned claude process. If omitted, the default prompt template is used. BOTH the default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_name` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`) — `.format()` collapses each `{{` / `}}` pair to a single literal brace and, critically, does not attempt placeholder substitution on the inner tokens. This matters for prompts that embed JSON snippets, shell expansions, or other content with literal curly braces. Pre-substituting the dynamic values in shell does NOT exempt the prompt from this rule — even a placeholder-free prompt is still passed through `str.format()`, so any literal braces must still be doubled or removed.
 
-**Pane title**: for `--coding-agent claude`, the `--name` flag is forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the tmux pane title (`#{pane_title}`) shows the member name internally. Operators should locate a specific member's pane via `cafleet member list --agent-id <director-agent-id>` (the output column `pane_id` carries the same pane identifier without requiring any raw `tmux` command).
-
-For `--coding-agent codex`, no display-name flag exists today; the pane title stays on the auto-derived default.
+**Pane title**: the `--name` flag is forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the tmux pane title (`#{pane_title}`) shows the member name internally. Operators should locate a specific member's pane via `cafleet member list --agent-id <director-agent-id>` (the output column `pane_id` carries the same pane identifier without requiring any raw `tmux` command).
 
 If the tmux `split-window` fails, the registered agent is rolled back. If the placement PATCH fails, the pane is `/exit`'d and the agent rolled back.
 
@@ -352,7 +349,7 @@ cafleet --session-id <session-id> --json member list --agent-id <director-agent-
 |---|---|---|
 | `--agent-id` | yes | The Director's agent ID |
 
-Output columns: `agent_id`, `name`, `status`, `backend`, `session`, `window_id`, `pane_id`, `created_at`. The `backend` column shows which coding agent is running (`claude` or `codex`). A pending placement (pane not yet spawned) shows `(pending)` for `pane_id` in text mode and `null` in JSON.
+Output columns: `agent_id`, `name`, `status`, `backend`, `session`, `window_id`, `pane_id`, `created_at`. The `backend` column shows `claude`. A pending placement (pane not yet spawned) shows `(pending)` for `pane_id` in text mode and `null` in JSON.
 
 Output (`--json`):
 ```json
@@ -413,7 +410,7 @@ Output (`--json`):
 
 ### Member Send-Input
 
-Safely forward a restricted keystroke to a member's tmux pane. This is the write-path companion to `member capture` — designed for answering an `AskUserQuestion` prompt (or any prompt with the same "3 choices + Type something" shape) rendered in a member's Claude Code / Codex pane. Exactly one of `--choice` / `--freetext` must be supplied.
+Safely forward a restricted keystroke to a member's tmux pane. This is the write-path companion to `member capture` — designed for answering an `AskUserQuestion` prompt (or any prompt with the same "3 choices + Type something" shape) rendered in a member's Claude Code pane. Exactly one of `--choice` / `--freetext` must be supplied.
 
 ```bash
 cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
@@ -437,7 +434,7 @@ Cross-Director send is rejected: the CLI verifies `placement.director_agent_id` 
 
 **Why three tmux calls for `--freetext`**: tmux's `-l` (literal) flag is per-invocation — one `send-keys` call cannot mix literal characters with the `Enter` key name. Splitting the sequence into three calls (`4` → `-l "<text>"` → `Enter`) guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the text (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are all delivered as plain characters. The CLI calls `subprocess.run([...], shell=False)`, so no shell ever interprets the text. Newlines in `--freetext` are rejected with `Error: free text may not contain newlines.` (exit 2) because a literal newline would submit a second prompt without a following Enter — the single-action contract is "one CLI call = one prompt submission."
 
-Backend-agnostic: works identically for `claude` and `codex` member panes (the CLI never inspects `placement.coding_agent`).
+The CLI never inspects `placement.coding_agent`.
 
 Output (text):
 
@@ -466,20 +463,20 @@ Output (`--json`):
 }
 ```
 
-### Bash Exec
+### Member Exec
 
 Director-side helper that runs a single shell command with deterministic limits (64 KiB stdout/stderr caps, SIGKILL at the requested timeout) and prints exactly one JSON object on its own stdout. Invoked through the Director's own Bash tool when dispatching a `bash_request` from a member — see `## Routing Bash via the Director` above for the full dispatch flow.
 
 ```bash
-cafleet bash-exec --cmd 'git log -1 --oneline'
-cafleet bash-exec --cmd 'mise //cafleet:test' --timeout 120
-cafleet bash-exec --cmd 'cat' --stdin 'hello'
-cafleet bash-exec --cmd 'echo $PWD' --cwd /tmp
+cafleet member exec --cmd 'git log -1 --oneline'
+cafleet member exec --cmd 'mise //cafleet:test' --timeout 120
+cafleet member exec --cmd 'cat' --stdin 'hello'
+cafleet member exec --cmd 'echo $PWD' --cwd /tmp
 ```
 
 The helper does NOT know about CAFleet messaging, `permissions.allow`, or the `bash_request` envelope. It is a pure subprocess-runner with deterministic limits and input validation. The matcher and dispatch logic live in the Director's prompt-side workflow.
 
-`cafleet bash-exec` does NOT require `--session-id` (consistent with `db init` / `session *` / `server`). Supplying `--session-id` is silently accepted and ignored, so a single `cafleet --session-id <id> *` allow pattern keeps matching every subcommand.
+`cafleet member exec` does NOT require `--session-id` (consistent with `db init` / `session *` / `server`). Supplying `--session-id` is silently accepted and ignored, so a single `cafleet --session-id <id> *` allow pattern keeps matching every subcommand.
 
 | Flag | Required | Notes |
 |---|---|---|
@@ -522,7 +519,7 @@ Helper-process exit codes:
 | `0` | Every payload outcome — `status: "ran"`, `status: "denied"`, `status: "timeout"`. The Director never relies on the process exit code; it parses the JSON on stdout. |
 | `2` | Click's built-in `UsageError` for unknown CLI flags. |
 
-> **Required `permissions.allow` entry**: the operator MUST add `Bash(cafleet bash-exec *)` to the Director's `permissions.allow` for the single-consent-gate UX to hold — see `## Routing Bash via the Director` for setup details.
+> **Required `permissions.allow` entry**: the operator MUST add `Bash(cafleet member exec *)` to the Director's `permissions.allow` for the single-consent-gate UX to hold — see `## Routing Bash via the Director` for setup details.
 
 ### Server
 
@@ -595,7 +592,7 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
    }
    ```
 
-   `placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is literally `"unknown"` — auto-detection from `$CLAUDECODE` / `$CLAUDE_CODE_ENTRYPOINT` / codex env vars is deferred.
+   `placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is literally `"unknown"` — auto-detection from `$CLAUDECODE` / `$CLAUDE_CODE_ENTRYPOINT` env vars is deferred.
 
    Outside tmux the command fails fast with `Error: cafleet session create must be run inside a tmux session` and exit 1 — nothing is written to the DB.
 
@@ -603,30 +600,30 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 
 2. **Register** with the broker:
    ```bash
-   cafleet --session-id <session-id> register \
+   cafleet --session-id <session-id> agent register \
      --name "Code Review Agent" --description "Reviews pull requests"
    # → returns <my-agent-id>, e.g. 7ba91234-5678-90ab-cdef-112233445566
    ```
 
 3. **Discover** other agents:
    ```bash
-   cafleet --session-id <session-id> agents --agent-id <my-agent-id>
+   cafleet --session-id <session-id> agent list --agent-id <my-agent-id>
    ```
 
 4. **Send** a message to another agent:
    ```bash
-   cafleet --session-id <session-id> send --agent-id <my-agent-id> \
+   cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
      --to <target-agent-id> --text "Please review PR #42"
    ```
 
 5. **Poll** for incoming messages:
    ```bash
-   cafleet --session-id <session-id> poll --agent-id <my-agent-id>
+   cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
    ```
 
 6. **Acknowledge** received messages:
    ```bash
-   cafleet --session-id <session-id> ack --agent-id <my-agent-id> --task-id <task-id>
+   cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
    ```
 
 7. **Repeat** steps 4-6 as needed. Use `cafleet --session-id <session-id> --json <cmd>` when parsing output programmatically.
@@ -635,14 +632,14 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 
 ### Roles
 
-- **Director** — the Claude Code session that first runs `cafleet --session-id <session-id> register` in this project. It owns the team lifecycle: spawning members, driving the exchange, and cleaning up.
+- **Director** — the Claude Code session that first runs `cafleet --session-id <session-id> agent register` in this project. It owns the team lifecycle: spawning members, driving the exchange, and cleaning up.
 - **Member** — any peer Claude Code session the Director spawns via `cafleet ... member create`. Each member is automatically registered, and its spawn prompt has the literal `session_id` and `agent_id` UUIDs baked in so every `cafleet` command it issues uses literal flags.
 
 ### Monitoring mandate (Director only)
 
 Before spawning **any** member, the Director MUST load `Skill(cafleet-monitoring)` and start a `/loop` monitor as that skill instructs. Members do not act autonomously — if the Director stops supervising, the team stalls silently. Keep the `/loop` active until the final shutdown step.
 
-To inspect a stalled member, follow the 2-stage health check in `Skill(cafleet-monitoring)`: first check `cafleet poll` for messages, then fall back to `cafleet member capture`:
+To inspect a stalled member, follow the 2-stage health check in `Skill(cafleet-monitoring)`: first check `cafleet message poll` for messages, then fall back to `cafleet member capture`:
 
 ```bash
 cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
@@ -677,17 +674,17 @@ The CLI sends `/exit`, polls `tmux list-panes` for the target `pane_id` until it
 
 ### Shutdown Protocol
 
-The teardown MUST run in this exact order. Skipping any step leaves crons firing against dead agents, or orphan `claude` / `codex` processes lingering in panes.
+The teardown MUST run in this exact order. Skipping any step leaves crons firing against dead agents, or orphan `claude` processes lingering in panes.
 
 **Rule: use cafleet primitives only.** All tmux interactions — write, inspect, and metadata — are encapsulated by cafleet commands. For tmux session/window/pane metadata at Director startup, use `cafleet doctor`. Never invoke `tmux send-keys`, `tmux kill-pane`, `tmux list-panes`, `tmux capture-pane`, or `tmux display-message` directly from the Director. If a workflow appears to need a raw tmux call, file a gap in `cafleet member *` or `cafleet doctor` — NOT a raw tmux invocation.
 
 1. **Stop every background `/loop` monitor FIRST.** Any `/loop` cron the Director started during the session must be cancelled with `CronDelete <job-id>` **before** members are deleted. A cron that keeps firing after members are gone will issue `cafleet member list` / `poll` against a tearing-down session, spam `Error: session is deleted`, and (worse) race with the member-delete path and nudge agents that are mid-`/exit`. Fixed-cadence `/loop`s (e.g. the 1-minute team-health monitor from `Skill(cafleet-monitoring)`) and any augmented loops you created (PR review loops, verifier loops, etc.) all fall under this rule. Stop them all.
 2. **Delete every member** via `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>`. This call now blocks until the target pane is actually gone (15 s default timeout). If the pane is stuck on a prompt, the command exits 2 with the pane buffer tail on stderr — inspect with `cafleet member capture`, answer the prompt with `cafleet member send-input --choice N` or `--freetext`, then re-run `cafleet member delete`. If the pane is truly wedged, escalate to `cafleet member delete --force`, which skips `/exit` and kill-panes immediately. Do NOT fall back to raw `tmux kill-pane`. Do this per member, not via `session delete` alone — `session delete` deregisters agents in the DB but does NOT send `/exit` to panes.
 3. **Verify every member is gone via cafleet.** Run `cafleet --session-id <session-id> member list --agent-id <director-agent-id>`. The team's member roster should be empty. Any agent still present means step 2 failed — re-run `cafleet member delete` on that member, inspect with `cafleet member capture` if needed, and report to the user if it still refuses to leave. Do NOT use raw tmux to "check" or "force" anything.
-4. **Run `cafleet session delete <session-id>`** (positional, no `--session-id` flag). This deregisters the root Director, deregisters the Administrator, sweeps any agent rows that survived step 2, and physically deletes every `agent_placements` row. Plain `cafleet --session-id <session-id> deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` — always use `session delete` for the final teardown step.
+4. **Run `cafleet session delete <session-id>`** (positional, no `--session-id` flag). This deregisters the root Director, deregisters the Administrator, sweeps any agent rows that survived step 2, and physically deletes every `agent_placements` row. Plain `cafleet --session-id <session-id> agent deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` — always use `session delete` for the final teardown step.
 5. **Confirm the session is closed.** Run `cafleet session list`; the current session should not appear (soft-deleted sessions are hidden). If it still appears with `active` agents, repeat steps 2–4 for that session. Any cross-conversation orphan session surfaced by this final check is also cleaned up via `cafleet session delete <its-session-id>` — never via tmux.
 
-Skipping step 1 is the single most common failure and the one that visibly leaks into the operator's view (recurring cron output in the Director's terminal). Skipping step 3 means you proceed to `session delete` without knowing whether members actually quit, leaving orphan `claude` / `codex` processes behind.
+Skipping step 1 is the single most common failure and the one that visibly leaks into the operator's view (recurring cron output in the Director's terminal). Skipping step 3 means you proceed to `session delete` without knowing whether members actually quit, leaving orphan `claude` processes behind.
 
 ### Answer a member's AskUserQuestion prompt
 
@@ -707,7 +704,7 @@ The pane is ALWAYS on the AskUserQuestion 4-option frame when `send-input` is ap
 |---|---|---|---|
 | **Choice-routing** | AskUserQuestion where the labelled options `1. …`, `2. …`, `3. …` ARE the decision point (option labels are meaningful to the user). | Mirror UP TO 3 of the member's labels as AskUserQuestion options. `label` holds the member's short label; `description` holds the member's description if visible in the capture. AskUserQuestion's built-in Other handles custom freetext — do NOT add an explicit 4th option, since `--choice` is `IntRange(1, 3)` and only the CLI's built-in 4-slot routes through `--freetext`. | If the user picked mirror option N (1, 2, or 3), `--choice N`. If the user picked built-in Other and typed a custom body, `--freetext "<typed>"`. |
 | **Open-ended** | AskUserQuestion where the labelled options `1. …`, `2. …`, `3. …` are NOT useful for this situation (the member is effectively waiting for free-form instruction). The 4-option frame itself still renders — that frame is exactly what `send-input --freetext` submits through. | 2–4 *complete candidate message bodies*. `label` is a short intent tag (≈12 chars, e.g. `Direct nudge`, `Soft check-in`, `Strict redirect`). `description` holds the FULL draft body so the user can compare wording side-by-side. Built-in Other is the typed-custom-body path. | `--freetext "<picked body>"` when the user picked one of the drafts, or `--freetext "<typed>"` when the user picked built-in Other. |
-| **Other shapes** | Pane is NOT on an AskUserQuestion — e.g. mid-command, Codex idle REPL, crashed, awaiting a yes/no confirmation, or mid tool-call. | Do NOT call AskUserQuestion and do NOT call `send-input`. The `send-input` CLI is validated only for the AskUserQuestion 4-option frame; sending a `1`, `2`, `3`, or `4` keystroke into any other shape will corrupt pane state. | None. Escalate to the user via a regular `cafleet send` nudge, or wait for the member to return to an AskUserQuestion prompt. |
+| **Other shapes** | Pane is NOT on an AskUserQuestion — e.g. mid-command, idle REPL, crashed, awaiting a yes/no confirmation, or mid tool-call. | Do NOT call AskUserQuestion and do NOT call `send-input`. The `send-input` CLI is validated only for the AskUserQuestion 4-option frame; sending a `1`, `2`, `3`, or `4` keystroke into any other shape will corrupt pane state. | None. Escalate to the user via a regular `cafleet message send` nudge, or wait for the member to return to an AskUserQuestion prompt. |
 
 #### AskUserQuestion constraints
 
@@ -733,11 +730,11 @@ The CLI validates input (`--choice` is `IntRange(1, 3)`; `--freetext` rejects ne
 
 ## Routing Bash via the Director
 
-When a member is spawned via `cafleet member create --no-bash` (the default for claude), its harness rejects every Bash call. To run a shell command, the member sends a JSON `bash_request` envelope to its Director via `cafleet send`; the Director runs the command via `cafleet bash-exec` and replies with a `bash_result`. Every operator-consent prompt fires in the Director's pane — never scattered across N member panes.
+When a member is spawned via `cafleet member create --no-bash` (the default for claude), its harness rejects every Bash call. To run a shell command, the member sends a JSON `bash_request` envelope to its Director via `cafleet message send`; the Director runs the command via `cafleet member exec` and replies with a `bash_result`. Every operator-consent prompt fires in the Director's pane — never scattered across N member panes.
 
 ### `bash_request` (member → Director)
 
-The member uses **existing `cafleet send`** with a JSON-typed payload in the `--text` body. No new member-side subcommand. Send call shape (use `--json` so the broker's server-side `task_id` is machine-parseable; `--json` is global and goes BEFORE the subcommand):
+The member uses **existing `cafleet message send`** with a JSON-typed payload in the `--text` body. No new member-side subcommand. Send call shape (use `--json` so the broker's server-side `task_id` is machine-parseable; `--json` is global and goes BEFORE the subcommand):
 
 ```bash
 cafleet --session-id <session-id> --json send --agent-id <my-agent-id> \
@@ -750,7 +747,7 @@ Payload schema:
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `type` | `"bash_request"` | yes | Discriminator. Director dispatches on this exact string. |
-| `cmd` | `string` | yes | The shell command to run. Single string; `cafleet bash-exec` invokes it via `bash -c <cmd>` so pipes / `&&` / quoting work as the member typed them. |
+| `cmd` | `string` | yes | The shell command to run. Single string; `cafleet member exec` invokes it via `bash -c <cmd>` so pipes / `&&` / quoting work as the member typed them. |
 | `cwd` | `string \| null` | no | Working directory. Defaults to the Director's current cwd if `null` or omitted. |
 | `stdin` | `string \| null` | no | Stdin payload (UTF-8). Use sparingly — embedding large binaries here will hit the 64 KiB outbound truncation. |
 | `timeout` | `int \| null` | no | Seconds. Defaults to 30. Capped at 600 (10 min) — the helper rejects oversized `timeout` as a denied JSON output. |
@@ -762,7 +759,7 @@ The member always addresses the request to its own `placement.director_agent_id`
 
 ### Reply correlation
 
-The broker assigns each delivered task a server-side `task_id`, surfaced in `cafleet --json poll` and `cafleet --json send`. The member captures the `task_id` from its own `cafleet --json send` response, holds it locally, and then waits for the broker's tmux push notification (which injects a `cafleet poll` keystroke into the member's pane when a `bash_result` arrives). The member polls (one-shot, not a loop), filters the polled messages by `in_reply_to == <captured-task-id>`, and resumes.
+The broker assigns each delivered task a server-side `task_id`, surfaced in `cafleet --json message poll` and `cafleet --json message send`. The member captures the `task_id` from its own `cafleet --json message send` response, holds it locally, and then waits for the broker's tmux push notification (which injects a `cafleet message poll` keystroke into the member's pane when a `bash_result` arrives). The member polls (one-shot, not a loop), filters the polled messages by `in_reply_to == <captured-task-id>`, and resumes.
 
 If the poll returns messages in addition to the `bash_result` (or before it arrives), the member processes those messages as plain instructions per existing CAFleet semantics — the bash-routing continuation only resumes when a `bash_result` with the matching `in_reply_to` arrives.
 
@@ -796,7 +793,7 @@ If the poll returns messages in addition to the `bash_result` (or before it arri
 
 ### Director-side dispatch (6 steps)
 
-When the Director's `cafleet poll` surfaces a message whose `text` parses as `{"type": "bash_request", ...}`:
+When the Director's `cafleet message poll` surfaces a message whose `text` parses as `{"type": "bash_request", ...}`:
 
 1. **Discriminator**. Parse the polled `text` body as JSON. If parsing fails, or the parsed object lacks `type`, or `type != "bash_request"`, treat the message as a plain instruction. End — no `bash_result` emitted. Otherwise continue.
 2. **Matcher**. Apply the project's resolved `permissions.allow` and `permissions.deny` (concatenated from `~/.claude/settings.json`, `<project>/.claude/settings.json`, and `<project>/.claude/settings.local.json`) using fnmatch-style `Bash(...)` glob patterns. The matcher returns `auto-run` (allow match AND no deny match) or `ask` (every other combination). There is no `auto-deny` outcome — `permissions.deny` only downgrades a would-be `auto-run` to `ask`.
@@ -805,8 +802,8 @@ When the Director's `cafleet poll` surfaces a message whose `text` parses as `{"
    - `Approve as-is` → continue with the original `cmd`; do not set `note`.
    - `Approve with edits` → continue with `<typed-cmd>` AND set `note = "operator edited cmd before running. original: <verbatim-original-cmd>"`.
    - `Deny with reason` → skip the helper invocation; emit a denied `bash_result` directly with `status: "denied"`, `note: "operator denied: <reason>"`, `stderr: <reason or "Director denied the request.">`. Reply via step 6, end dispatch.
-5. **Run via `cafleet bash-exec`**. The Director's pane invokes the helper through its Bash tool: `cafleet bash-exec --cmd '<cmd>' [--cwd '<cwd>'] [--timeout <timeout>] [--stdin '<stdin>']`. Each optional flag is included only when the corresponding request field is present and non-null; otherwise the helper's defaults apply (cwd: pane cwd; timeout: 30 s; stdin: empty). The Director's native Bash-tool prompt does NOT fire because `Bash(cafleet bash-exec *)` is in the operator's `permissions.allow` (required setup, see § Required `permissions.allow` entry below). The `AskUserQuestion` (step 4) is the only consent surface in this flow. The helper handles deterministic limits (64 KiB caps, SIGKILL at timeout) AND input validation (`cmd != ""`, `timeout ≤ 600`); on input-validation failure the helper writes a denied JSON object to its own stdout (status `"denied"`) which the Director copies into `bash_result` exactly as it would for any other helper output.
-6. **Reply**. The Director's pane invokes `cafleet send --agent-id <director-id> --to <member-id> --text '<bash_result-json>'` via its Bash tool. The push notification injects a `cafleet poll` keystroke into the member's pane and the member resumes.
+5. **Run via `cafleet member exec`**. The Director's pane invokes the helper through its Bash tool: `cafleet member exec --cmd '<cmd>' [--cwd '<cwd>'] [--timeout <timeout>] [--stdin '<stdin>']`. Each optional flag is included only when the corresponding request field is present and non-null; otherwise the helper's defaults apply (cwd: pane cwd; timeout: 30 s; stdin: empty). The Director's native Bash-tool prompt does NOT fire because `Bash(cafleet member exec *)` is in the operator's `permissions.allow` (required setup, see § Required `permissions.allow` entry below). The `AskUserQuestion` (step 4) is the only consent surface in this flow. The helper handles deterministic limits (64 KiB caps, SIGKILL at timeout) AND input validation (`cmd != ""`, `timeout ≤ 600`); on input-validation failure the helper writes a denied JSON object to its own stdout (status `"denied"`) which the Director copies into `bash_result` exactly as it would for any other helper output.
+6. **Reply**. The Director's pane invokes `cafleet message send --agent-id <director-id> --to <member-id> --text '<bash_result-json>'` via its Bash tool. The push notification injects a `cafleet message poll` keystroke into the member's pane and the member resumes.
 
 ### `AskUserQuestion` shape (step 4)
 
@@ -824,7 +821,7 @@ Constraints:
 
 ### Auto-allow path (no operator prompt)
 
-When the matcher returns `auto-run`, the Director skips the `AskUserQuestion` entirely and invokes `cafleet bash-exec` directly. The reply carries a `note` field for audit:
+When the matcher returns `auto-run`, the Director skips the `AskUserQuestion` entirely and invokes `cafleet member exec` directly. The reply carries a `note` field for audit:
 
 ```json
 {
@@ -843,19 +840,19 @@ The auto-allow path is the entire reason this design exists — commands the ope
 
 ### Required `permissions.allow` entry
 
-The operator MUST add `Bash(cafleet bash-exec *)` to the Director's `permissions.allow` (project `.claude/settings.json` or user `~/.claude/settings.json`). Without this entry the Director's pane fires a duplicate native Bash-tool prompt for every command, defeating the single-consent-gate goal — `AskUserQuestion` is supposed to be the sole consent surface in this flow.
+The operator MUST add `Bash(cafleet member exec *)` to the Director's `permissions.allow` (project `.claude/settings.json` or user `~/.claude/settings.json`). Without this entry the Director's pane fires a duplicate native Bash-tool prompt for every command, defeating the single-consent-gate goal — `AskUserQuestion` is supposed to be the sole consent surface in this flow.
 
 This is operator-facing setup, not a programmatic guarantee. A Director that runs without the entry still works, just with worse UX (two prompts per non-allowlisted command). Order is irrelevant — adding the entry before or after the binary upgrade both work.
 
 ### No member-side timeout
 
-Members do NOT have a timeout on `bash_result` replies. The member's loop is: send the request via `cafleet send`, capture the returned `task_id`, wait for the broker's tmux push notification (which injects a `cafleet poll` keystroke when the `bash_result` arrives), filter polled messages by `in_reply_to == task_id`, and resume.
+Members do NOT have a timeout on `bash_result` replies. The member's loop is: send the request via `cafleet message send`, capture the returned `task_id`, wait for the broker's tmux push notification (which injects a `cafleet message poll` keystroke when the `bash_result` arrives), filter polled messages by `in_reply_to == task_id`, and resume.
 
 If the Director wedges (crashed pane, busy mid-tool-call, or the operator stepped away from the keyboard), the member sits idle. Recovery is operator-driven via existing CAFleet primitives:
 
 - `cafleet member capture` to inspect the wedged Director's pane.
-- `cafleet send` to nudge the Director directly (the bash_request task remains in the queue).
-- `cafleet cancel` to retract the original request if the operator wants the member to give up.
+- `cafleet message send` to nudge the Director directly (the bash_request task remains in the queue).
+- `cafleet message cancel` to retract the original request if the operator wants the member to give up.
 
 This is consistent with every other CAFleet message-passing path — no built-in timeouts.
 

@@ -1,7 +1,7 @@
 # CAFleet CLI consolidation: Bash-via-Director, nested-only restructure, codex deprecation
 
 **Status**: Approved
-**Progress**: 29/63 tasks complete
+**Progress**: 33/63 tasks complete
 **Last Updated**: 2026-04-28
 
 ## Overview
@@ -784,10 +784,10 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
 
 ### Step 10: Documentation — round-6 project skills
 
-- [ ] Update `skills/cafleet/SKILL.md`: every command-reference entry, every Multi-Session Coordination invocation, every Typical Workflow step, and every example invocation moves to the nested form. Drop the `--coding-agent` flag row from `### Member Create` and every `--coding-agent codex` example (§15). Add `### Member Exec` (already specified in §10). <!-- completed: -->
-- [ ] Update `skills/cafleet-monitoring/SKILL.md`: the `/loop` prompt template's literal commands move to nested form; every Stage 1 / Stage 2 / Escalation table entry updates; reframe "Agent-agnostic monitoring" copy as claude-only per §15. Add an explicit instruction near the Stall Response section: "When the Director's poll output contains a `bash_request` JSON payload, load `Skill(cafleet)` § Routing Bash via the Director and follow the 6-step dispatch." This bridges the case where a Director loaded only `Skill(cafleet-monitoring)` at session start and discovers a bash_request later — without the hint, the dispatch flow won't be in context. <!-- completed: -->
-- [ ] Update `skills/design-doc-create/roles/director.md`: every literal cafleet invocation moves to nested form; drop codex references if any. <!-- completed: -->
-- [ ] Update `skills/design-doc-execute/roles/director.md`: same edit, mirrored. <!-- completed: -->
+- [x] Update `skills/cafleet/SKILL.md`: every command-reference entry, every Multi-Session Coordination invocation, every Typical Workflow step, and every example invocation moves to the nested form. Drop the `--coding-agent` flag row from `### Member Create` and every `--coding-agent codex` example (§15). Add `### Member Exec` (already specified in §10). <!-- completed: 2026-04-28T18:30 -->
+- [x] Update `skills/cafleet-monitoring/SKILL.md`: the `/loop` prompt template's literal commands move to nested form; every Stage 1 / Stage 2 / Escalation table entry updates; reframe "Agent-agnostic monitoring" copy as claude-only per §15. Add an explicit instruction near the Stall Response section: "When the Director's poll output contains a `bash_request` JSON payload, load `Skill(cafleet)` § Routing Bash via the Director and follow the 6-step dispatch." This bridges the case where a Director loaded only `Skill(cafleet-monitoring)` at session start and discovers a bash_request later — without the hint, the dispatch flow won't be in context. <!-- completed: 2026-04-28T18:30 -->
+- [x] Update `skills/design-doc-create/roles/director.md`: every literal cafleet invocation moves to nested form; drop codex references if any. <!-- completed: 2026-04-28T18:30 -->
+- [x] Update `skills/design-doc-execute/roles/director.md`: same edit, mirrored. <!-- completed: 2026-04-28T18:30 -->
 
 ### Step 11: Documentation — admin SPA
 

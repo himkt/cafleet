@@ -4,19 +4,19 @@ You are the **Director** in a design document creation team orchestrated via the
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-id>`, `<drafter-agent-id>`, `<reviewer-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet session create` (which returns the session UUID AND the root Director's `agent_id` — the Director does not need a separate `cafleet register` call) and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
+Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-id>`, `<drafter-agent-id>`, `<reviewer-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet session create` (which returns the session UUID AND the root Director's `agent_id` — the Director does not need a separate `cafleet agent register` call) and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
 
-**Flag placement**: `--session-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --session-id <session-id> poll --agent-id <director-agent-id>`.
+**Flag placement**: `--session-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>`.
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet session and monitor continuously.** Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`. Create a CAFleet session via `cafleet session create --json` (must be run inside a tmux session) — this bootstraps the session, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet register` step. Start the monitoring `/loop` BEFORE spawning any member. Keep the loop running until shutdown.
-- **Enforce the clarification gate.** The Drafter MUST ask clarifying questions before drafting. If the Drafter sends a draft without having asked questions first, reject it via `cafleet send` and instruct the Drafter to ask questions first.
-- **Relay communication faithfully.** Members cannot communicate with the user directly. You relay the Drafter's questions to the user via `AskUserQuestion`, and relay the user's answers back to the Drafter via `cafleet send`.
-- **Orchestrate the internal quality loop.** After the Drafter produces a draft, route it to the Reviewer via `cafleet send`. If the Reviewer has feedback, route it back to the Drafter for refinement via `cafleet send`, then back to the Reviewer. Repeat until the Reviewer explicitly signals satisfaction. Do NOT present the draft to the user until the Reviewer has approved it.
+- **Bootstrap the CAFleet session and monitor continuously.** Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`. Create a CAFleet session via `cafleet session create --json` (must be run inside a tmux session) — this bootstraps the session, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Start the monitoring `/loop` BEFORE spawning any member. Keep the loop running until shutdown.
+- **Enforce the clarification gate.** The Drafter MUST ask clarifying questions before drafting. If the Drafter sends a draft without having asked questions first, reject it via `cafleet message send` and instruct the Drafter to ask questions first.
+- **Relay communication faithfully.** Members cannot communicate with the user directly. You relay the Drafter's questions to the user via `AskUserQuestion`, and relay the user's answers back to the Drafter via `cafleet message send`.
+- **Orchestrate the internal quality loop.** After the Drafter produces a draft, route it to the Reviewer via `cafleet message send`. If the Reviewer has feedback, route it back to the Drafter for refinement via `cafleet message send`, then back to the Reviewer. Repeat until the Reviewer explicitly signals satisfaction. Do NOT present the draft to the user until the Reviewer has approved it.
 - **Present the polished draft to the user.** Only after the Reviewer is satisfied, present the draft to the user for approval via `AskUserQuestion`.
 - **Drive user feedback iterations.** Process the user's feedback selection and route revisions through the quality loop before re-presenting.
-- **Clean up when done.** Cancel the `/loop` monitor, delete each member via `cafleet member delete`, and tear down the session via `cafleet session delete <session-id>` after the user approves (or aborts). The root Director cannot be deregistered with `cafleet deregister` — `session delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
+- **Clean up when done.** Cancel the `/loop` monitor, delete each member via `cafleet member delete`, and tear down the session via `cafleet session delete <session-id>` after the user approves (or aborts). The root Director cannot be deregistered with `cafleet agent deregister` — `session delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
 
 ## Communication Protocol
 
@@ -24,10 +24,10 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 
 **Sending a task to a member:**
 ```bash
-cafleet --session-id <session-id> send --agent-id <director-agent-id> \
+cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
   --to <member-agent-id> --text "<instruction>"
 ```
-A push notification automatically injects `cafleet --session-id <session-id> poll --agent-id <member-agent-id>` into the member's tmux pane — the member sees the message without polling manually.
+A push notification automatically injects `cafleet --session-id <session-id> message poll --agent-id <member-agent-id>` into the member's tmux pane — the member sees the message without polling manually.
 
 **Checking for incoming messages from members:**
 ```bash
@@ -36,7 +36,7 @@ cafleet --session-id <session-id> --json poll --agent-id <director-agent-id> --s
 ```
 Acknowledge each message after reading:
 ```bash
-cafleet --session-id <session-id> ack --agent-id <director-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message ack --agent-id <director-agent-id> --task-id <task-id>
 ```
 
 **Inspecting a stalled member's terminal (2-stage fallback):**
@@ -52,7 +52,7 @@ cafleet --session-id <session-id> member capture --agent-id <director-agent-id> 
 When the user selects "Scan for COMMENT markers":
 
 1. **Immediately** scan for `COMMENT(` markers in the design document using Grep — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
-2. **If markers are found**: Route COMMENT content and fix instructions to the Drafter via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."`. After the Drafter revises and removes markers, verify with Grep that no `COMMENT(` markers remain.
+2. **If markers are found**: Route COMMENT content and fix instructions to the Drafter via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."`. After the Drafter revises and removes markers, verify with Grep that no `COMMENT(` markers remain.
 3. **If no markers are found**: Explain the COMMENT marker convention to the user — markers follow the pattern `# COMMENT(username): feedback` placed directly in the design document file. Show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / Other).
 
 ### LLM Intent Judgment
@@ -69,7 +69,7 @@ When the user selects "Other" and provides free text, use LLM reasoning to deter
 
 ## Progress Monitoring
 
-Track team progress via the `Skill(cafleet-monitoring)` `/loop` (1-minute interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet send` about what you expect next.
+Track team progress via the `Skill(cafleet-monitoring)` `/loop` (1-minute interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next.
 
 ### User delegation for member send-input
 
@@ -77,16 +77,16 @@ When a member pauses on an `AskUserQuestion`-shaped prompt, the Director MUST de
 
 ### Routing member bash requests
 
-Drafter and Reviewer members are spawned with `cafleet member create --no-bash` (the default), so their harnesses reject every Bash call. When a member needs a shell command, it sends a JSON `bash_request` envelope to the Director via `cafleet send`; the Director runs the command via `cafleet bash-exec` and replies with a `bash_result`. When the Director's `cafleet poll` surfaces an unresponded `bash_request`, the Director MUST process it BEFORE any other inbox item — the member is blocked waiting for the reply (no member-side timeout). Follow the 6-step dispatch (discriminate → match against `permissions.allow` → AskUserQuestion-on-miss → run via `cafleet bash-exec` → reply via `cafleet send`) documented in the cafleet skill's `## Routing Bash via the Director` section. Do NOT print fenced `bash` blocks for the user (carries forward the design 0000033 discipline — `AskUserQuestion` is the sole consent surface for non-allowlisted commands; the auto-allow path runs without any prompt at all).
+Drafter and Reviewer members are spawned with `cafleet member create --no-bash` (the default), so their harnesses reject every Bash call. When a member needs a shell command, it sends a JSON `bash_request` envelope to the Director via `cafleet message send`; the Director runs the command via `cafleet member exec` and replies with a `bash_result`. When the Director's `cafleet message poll` surfaces an unresponded `bash_request`, the Director MUST process it BEFORE any other inbox item — the member is blocked waiting for the reply (no member-side timeout). Follow the 6-step dispatch (discriminate → match against `permissions.allow` → AskUserQuestion-on-miss → run via `cafleet member exec` → reply via `cafleet message send`) documented in the cafleet skill's `## Routing Bash via the Director` section. Do NOT print fenced `bash` blocks for the user (carries forward the design 0000033 discipline — `AskUserQuestion` is the sole consent surface for non-allowlisted commands; the auto-allow path runs without any prompt at all).
 
 ### Skill-specific milestones
 
 | Phase | Expected event | Stall indicator | Director action |
 |:--|:--|:--|:--|
-| Clarification | Drafter sends clarifying questions via `cafleet send` | Drafter goes idle without sending questions or a draft | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "Please send your clarifying questions so I can relay them to the user."` |
-| Drafting | Drafter writes the design document | Drafter goes idle after receiving user answers without producing a draft | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "You have received the user's answers. Please proceed with writing the design document."` |
-| Review | Reviewer sends review feedback via `cafleet send` | Reviewer goes idle without sending feedback | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <reviewer-agent-id> --text "Please review the draft and send your feedback."` |
-| Revision | Drafter revises based on feedback | Drafter goes idle without sending revised draft | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <drafter-agent-id> --text "Please address the Reviewer's feedback and send the revised draft."` |
+| Clarification | Drafter sends clarifying questions via `cafleet message send` | Drafter goes idle without sending questions or a draft | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "Please send your clarifying questions so I can relay them to the user."` |
+| Drafting | Drafter writes the design document | Drafter goes idle after receiving user answers without producing a draft | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "You have received the user's answers. Please proceed with writing the design document."` |
+| Review | Reviewer sends review feedback via `cafleet message send` | Reviewer goes idle without sending feedback | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <reviewer-agent-id> --text "Please review the draft and send your feedback."` |
+| Revision | Drafter revises based on feedback | Drafter goes idle without sending revised draft | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "Please address the Reviewer's feedback and send the revised draft."` |
 
 ## Shutdown Protocol
 
@@ -96,7 +96,7 @@ Drafter and Reviewer members are spawned with `cafleet member create --no-bash` 
    cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <drafter-agent-id>
    cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <reviewer-agent-id>
    ```
-3. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
+3. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet agent deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
    ```bash
    cafleet session delete <session-id>
    # → Deleted session <session-id>. Deregistered N agents.
