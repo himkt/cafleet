@@ -1,7 +1,7 @@
 # CAFleet CLI consolidation: Bash-via-Director, nested-only restructure, codex deprecation
 
 **Status**: Approved
-**Progress**: 24/63 tasks complete
+**Progress**: 29/63 tasks complete
 **Last Updated**: 2026-04-28
 
 ## Overview
@@ -776,11 +776,11 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
 
 ### Step 9: Documentation — round-6 nested-only restructure (top-level docs)
 
-- [ ] Update `ARCHITECTURE.md`: rewrite every cafleet invocation to its nested form (`cafleet message send`, `cafleet message poll`, etc.). Update the Operation Mapping table (CLI Command → broker function) so the left column carries the new nested commands. Drop codex copy per §15 (Multi-runner support paragraph removed; Pane display-name propagation paragraph rewritten claude-only; coding_agent.py Component Layout row collapsed). <!-- completed: -->
-- [ ] Update `README.md`: rewrite every cafleet invocation example. Drop the multi-runner Features bullet (codex §15). <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md`: reorganize sections by noun group (`agent`, `message`, `member`, `session`, `db`) plus the two top-level meta-command exceptions (`server`, `doctor`). Every example invocation updates. Remove the `--coding-agent` flag row from `member create` and add the codex-deprecation pointer per §15. <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md`: narrow the `coding_agent` column docstring to claude-only per §15. <!-- completed: -->
-- [ ] Update `cafleet/CLAUDE.md`: rewrite every cafleet invocation example to its nested form; drop codex references per §15. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md`: rewrite every cafleet invocation to its nested form (`cafleet message send`, `cafleet message poll`, etc.). Update the Operation Mapping table (CLI Command → broker function) so the left column carries the new nested commands. Drop codex copy per §15 (Multi-runner support paragraph removed; Pane display-name propagation paragraph rewritten claude-only; coding_agent.py Component Layout row collapsed). <!-- completed: 2026-04-28T17:50 -->
+- [x] Update `README.md`: rewrite every cafleet invocation example. Drop the multi-runner Features bullet (codex §15). <!-- completed: 2026-04-28T17:50 -->
+- [x] Update `docs/spec/cli-options.md`: reorganize sections by noun group (`agent`, `message`, `member`, `session`, `db`) plus the two top-level meta-command exceptions (`server`, `doctor`). Every example invocation updates. Remove the `--coding-agent` flag row from `member create` and add the codex-deprecation pointer per §15. <!-- completed: 2026-04-28T17:50 -->
+- [x] Update `docs/spec/data-model.md`: narrow the `coding_agent` column docstring to claude-only per §15. <!-- completed: 2026-04-28T17:50 -->
+- [x] Update `cafleet/CLAUDE.md`: rewrite every cafleet invocation example to its nested form; drop codex references per §15. <!-- completed: 2026-04-28T17:50 -->
 
 ### Step 10: Documentation — round-6 project skills
 

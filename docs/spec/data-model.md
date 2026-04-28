@@ -123,7 +123,7 @@ Indexes:
 | `tmux_session` | `TEXT` | `NOT NULL` | e.g. `'main'`, from `tmux display-message '#{session_name}'`. |
 | `tmux_window_id` | `TEXT` | `NOT NULL` | e.g. `'@3'`, from `#{window_id}`. |
 | `tmux_pane_id` | `TEXT` | nullable | e.g. `'%7'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set via `PATCH /api/v1/agents/{id}/placement` after `tmux split-window` succeeds. |
-| `coding_agent` | `TEXT` | `NOT NULL`, `DEFAULT 'claude'` | Which coding agent binary is running in this pane: `"claude"` or `"codex"`. Server default ensures existing rows are backfilled on migration. |
+| `coding_agent` | `TEXT` | `NOT NULL`, `DEFAULT 'claude'` | Which coding agent binary is running in this pane. Always `"claude"` for new rows — codex support was deprecated in design 0000034 §15 and `cafleet member create` no longer accepts a `--coding-agent` flag. The column type, nullability, and `DEFAULT 'claude'` server default are unchanged: pre-existing rows with `coding_agent='codex'` from before round 6 are preserved verbatim for forensic visibility and for the §13 Future Work restoration plan. Server default ensures existing rows are backfilled on migration. |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp, set server-side to match `agents.registered_at`. |
 
 Indexes:

@@ -13,7 +13,7 @@ Each parameter has exactly one input source:
 | Agent ID | `--agent-id <uuid>` subcommand option |
 | JSON output | `--json` global flag |
 
-> **Why `--session-id` is a literal CLI flag, not an environment variable.** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --session-id <uuid> ...` invocation matches a single `permissions.allow` pattern of the same shape across every subcommand for that session. Shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts that interrupt agent work. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — do not use shell variables to hold them.
+> **Why `--session-id` is a literal CLI flag, not an environment variable.** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --session-id <uuid> ...` invocation matches a single `permissions.allow` pattern of the same shape across every subcommand for that session. Shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts that interrupt agent work. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet agent register` — do not use shell variables to hold them.
 
 ## Global Options
 
@@ -22,16 +22,16 @@ Placed **before** the subcommand:
 | Flag | Required | Notes |
 |---|---|---|
 | `--json` | no | Emit JSON output. |
-| `--session-id <id>` | yes for client + member subcommands; no for `db init` and `session *` | Session identifier (opaque string; new sessions get a UUIDv4, migrated sessions reuse a 64-char hex value). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
+| `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input` subcommands; no for `db *`, `session *`, `server`, `doctor`, `member exec` | Session identifier (opaque string; new sessions get a UUIDv4, migrated sessions reuse a 64-char hex value). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
 ### Subcommands that require `--session-id`
 
-`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member create`, `member delete`, `member list`, `member capture`, `member send-input`.
+`agent register`, `agent deregister`, `agent list`, `agent show`, `message send`, `message broadcast`, `message poll`, `message ack`, `message cancel`, `message show`, `member create`, `member delete`, `member list`, `member capture`, `member send-input`.
 
 ### Subcommands that do NOT require `--session-id`
 
-`db init`, `db *`, `session create`, `session list`, `session show`, `session delete`, `server`.
+`db init`, `db *`, `session create`, `session list`, `session show`, `session delete`, `server`, `doctor`, `member exec`.
 
 The top-level `--version` flag also short-circuits this check: it is an eager Click option whose callback runs during option parsing and exits before any subcommand (and the `_require_session_id` guard) is reached, so `cafleet --version` succeeds with no `--session-id`.
 
@@ -62,14 +62,15 @@ These removals keep secrets out of shell history and let `permissions.allow` pat
 
 ### Commands that require `--agent-id`
 
-- `send` — Send a message to another agent
-- `broadcast` — Broadcast a message to all agents
-- `poll` — Poll for incoming messages
-- `ack` — Acknowledge a received message
-- `cancel` — Cancel a sent message
-- `get-task` — Get task details
-- `agents` — List agents in the session
-- `deregister` — Deregister an agent
+- `agent deregister` — Deregister an agent
+- `agent list` — List agents in the session
+- `agent show` — Show detail for a specific agent
+- `message send` — Send a message to another agent
+- `message broadcast` — Broadcast a message to all agents
+- `message poll` — Poll for incoming messages
+- `message ack` — Acknowledge a received message
+- `message cancel` — Cancel a sent message
+- `message show` — Get task details
 - `member create` — Register a new member and spawn its claude pane (Director only)
 - `member delete` — Deregister a member and close its pane (Director only)
 - `member list` — List members spawned by this Director
@@ -78,7 +79,8 @@ These removals keep secrets out of shell history and let `permissions.allow` pat
 
 ### Commands that do NOT require `--agent-id`
 
-- `register` — Register a new agent (returns an agent ID)
+- `agent register` — Register a new agent (returns an agent ID)
+- `member exec` — Director-side helper that runs a single shell command; takes no agent identity
 
 ## `cafleet session` — Session Management
 
@@ -142,7 +144,7 @@ administrator:    <administrator_agent_id>
 
 `placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is the string `"unknown"` — auto-detection of the actual coding agent binary at bootstrap time is deferred (tracked via a `FIXME(claude)` comment in `broker.py`).
 
-Attempting `cafleet --session-id <session_id> deregister --agent-id <director_agent_id>` is rejected by the broker with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` and exits 1. Attempting `cafleet --session-id <session_id> deregister --agent-id <administrator_agent_id>` is rejected with `Error: Administrator cannot be deregistered` (exit 1) via the `AdministratorProtectedError` path from design 0000025.
+Attempting `cafleet --session-id <session_id> agent deregister --agent-id <director_agent_id>` is rejected by the broker with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` and exits 1. Attempting `cafleet --session-id <session_id> agent deregister --agent-id <administrator_agent_id>` is rejected with `Error: Administrator cannot be deregistered` (exit 1) via the `AdministratorProtectedError` path from design 0000025.
 
 ### `session list`
 
@@ -287,71 +289,6 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 cafleet --session-id 550e8400-e29b-41d4-a716-446655440000 server
 ```
 
-### bash-exec
-
-`cafleet bash-exec` is a Director-side helper subcommand that runs a single shell command with deterministic limits (64 KiB stdout/stderr caps, SIGKILL at the requested timeout) and prints exactly one JSON object to its own stdout. It is invoked through the Director's own Bash tool when dispatching a `bash_request` from a member — see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director for the full dispatch flow.
-
-The helper does NOT know about CAFleet messaging, `permissions.allow`, or the `bash_request` envelope. It is a pure subprocess-runner. The matcher and dispatch logic live in the Director's prompt-side workflow.
-
-`cafleet bash-exec` does NOT require `--session-id` (consistent with `db init` / `session *` / `server`). Supplying `--session-id` is silently accepted and ignored, so a single `permissions.allow` pattern of the form `cafleet --session-id <id> *` keeps matching every subcommand.
-
-| Flag | Required | Notes |
-|---|---|---|
-| `--cmd <text>` | yes | Single-string shell command. Invoked via `subprocess.run(["bash", "-c", cmd], ...)` so pipes / `&&` / quoting work as the operator typed them. Empty string is rejected as a denied JSON output (input validation, see below). |
-| `--cwd <path>` | no | Working directory. Defaults to the helper's own cwd when omitted. A nonexistent path surfaces through the runtime path: `status: "ran"`, non-zero `exit_code`, `stderr` contains `no such cwd: <path>`. |
-| `--timeout <int>` | no | Wall-clock seconds. Default 30. Capped at 600. Values above the cap are rejected as a denied JSON output. |
-| `--stdin <text>` | no | UTF-8 text passed on the subprocess's stdin. |
-
-#### JSON output schema
-
-The helper prints exactly one JSON object on its own stdout:
-
-```json
-{
-  "status": "ran",
-  "exit_code": 0,
-  "stdout": "abc1234 docs: mark design doc as complete\n",
-  "stderr": "",
-  "duration_ms": 47
-}
-```
-
-| Field | Type | Notes |
-|---|---|---|
-| `status` | `"ran" \| "denied" \| "timeout"` | Top-level outcome. **Sole source of truth.** Clients MUST switch on `status`, not on `exit_code`. |
-| `exit_code` | `int` | When `status == "ran"`: the subprocess's verbatim exit code. When `status == "denied"` or `"timeout"`: the value is **opaque** — present so shell tooling that always reads the field does not crash, but documented as not for client branching. The helper internally uses `126` for denied and `124` for timeout for shell-legibility. |
-| `stdout` | `string` | UTF-8, capped at 64 KiB. On truncation the captured stream's last line is replaced by `\n[truncated: original was N bytes; last 65536 bytes shown]\n`. |
-| `stderr` | `string` | Same shape as `stdout`. On `status: "denied"` it carries the helper's input-validation message. On `status: "timeout"` it carries `"hard-killed at <N> seconds."` plus any partial stderr captured before SIGKILL. |
-| `duration_ms` | `int` | Wall-clock duration in milliseconds. Zero on `status: "denied"`. |
-
-#### Input validation
-
-Two payload-level inputs are rejected without invoking the subprocess:
-
-| Input | Reason emitted in `stderr` |
-|---|---|
-| `--cmd ""` (empty or absent) | `bash_request.cmd may not be empty.` |
-| `--timeout` greater than 600 | `bash_request.timeout exceeds 600s cap.` |
-
-In both cases the helper writes `{"status": "denied", "exit_code": 126, "stdout": "", "stderr": "<reason>", "duration_ms": 0}` to stdout and exits with helper-process exit code 0 (the validation failure is a payload-level result, not a CLI-arg error). The Director copies the JSON object verbatim into the `bash_result` payload sent back to the member.
-
-#### Hard limits
-
-| Limit | Value | Source |
-|---|---|---|
-| Wall-clock timeout | request `--timeout`, default 30 s, capped at 600 s | helper |
-| stdout capture | 64 KiB | helper |
-| stderr capture | 64 KiB | helper |
-
-On hard-kill (`Popen.kill()` → SIGKILL at `timeout`), the helper sets `status: "timeout"`, appends `hard-killed at <N> seconds.` to `stderr`, and emits whatever partial output was captured before the kill.
-
-#### Exit codes
-
-| Helper-process exit | When |
-|---|---|
-| `0` | Every payload outcome — `status: "ran"`, `status: "denied"`, `status: "timeout"`. The Director never relies on the process exit code; it parses the JSON on stdout. |
-| `2` | Click's built-in `UsageError` for unknown CLI flags. |
-
 ## Member Commands
 
 The `cafleet member` subgroup manages tmux-backed member agents. All commands require `--agent-id` (the Director's agent ID) and must be run inside a tmux session.
@@ -361,12 +298,12 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | Flag | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID |
-| `--name` | yes | Display name of the new member. For `--coding-agent claude`, this value is ALSO forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. |
+| `--name` | yes | Display name of the new member. Forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. |
 | `--description` | yes | One-sentence purpose |
-| `--coding-agent` | no | Coding agent to spawn: `claude` (default) or `codex`. Codex is spawned with `--approval-mode auto-edit`. |
-| `--no-bash` / `--allow-bash` | no | Enable / disable Bash tool denial at spawn time. Defaults to `--no-bash` for `--coding-agent claude` (the spawned process gains `--disallowedTools "Bash"`), so the member's harness rejects every Bash call. The member is expected to route shell commands through its Director via the `bash_request` JSON envelope (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director). `--allow-bash` is the opt-out; codex defaults to `--allow-bash` because codex has no `--disallowedTools` analog today, and `--no-bash --coding-agent codex` is rejected at the CLI layer. |
+| `--no-bash` / `--allow-bash` | no | Enable / disable Bash tool denial at spawn time. Defaults to `--no-bash` (the spawned process gains `--disallowedTools "Bash"`), so the member's harness rejects every Bash call. The member is expected to route shell commands through its Director via the `bash_request` JSON envelope (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director). `--allow-bash` is the opt-out for one-off members that need direct Bash. |
 | *(positional, after `--`)* | no | Prompt text for the spawned coding agent process |
-| *(spawn-side)* | n/a | For `--coding-agent claude`, the spawned process is invoked as `claude --name <member-name> <prompt>` so the pane title matches `--name`. For `--coding-agent codex`, no display-name flag is passed — codex has no equivalent today and the invocation stays `codex --approval-mode auto-edit <prompt>`. The decision is encoded on `CodingAgentConfig.display_name_args`, so `cli.py` makes the call unconditionally. |
+
+> **Codex deprecated**: codex support and the `--coding-agent` flag were removed in design 0000034 round 6. Claude is the only supported member backend; passing `--coding-agent` fails with Click's default `Error: No such option: '--coding-agent'.`. See `design-docs/0000034-member-bash-via-director/design-doc.md` §13 Future Work for the restoration plan.
 
 ### `member delete`
 
@@ -414,7 +351,7 @@ Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet
 
 ### `member send-input`
 
-Forwards a restricted keystroke to a member's tmux pane. Designed for answering an `AskUserQuestion` prompt (or any prompt with the same 3-choices + "Type something" shape) rendered in the member's Claude Code / Codex pane. Exactly one of `--choice` or `--freetext` must be supplied. Works identically for `claude` and `codex` backends — the CLI never inspects `placement.coding_agent`.
+Forwards a restricted keystroke to a member's tmux pane. Designed for answering an `AskUserQuestion` prompt (or any prompt with the same 3-choices + "Type something" shape) rendered in the member's Claude Code pane. Exactly one of `--choice` or `--freetext` must be supplied.
 
 | Flag | Required | Notes |
 |---|---|---|
@@ -499,11 +436,76 @@ The CLI is deliberately one-shot — the surrounding choose-and-answer loop stay
    - Option 1 / 2 / 3 → `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --choice N`
    - Free-text → `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --freetext "<user text>"`
 
-Capture parsing is intentionally left manual because prompt layouts differ across Claude Code / Codex versions. The CLI's job is to *send* restricted keystrokes safely; reading and presenting options belongs to the Director.
+Capture parsing is intentionally left manual because prompt layouts differ across Claude Code versions. The CLI's job is to *send* restricted keystrokes safely; reading and presenting options belongs to the Director.
 
 #### Director-side usage pattern
 
 The canonical Director-side workflow is three-beat and AskUserQuestion-delegated: (1) `cafleet member capture` to inspect the pane, (2) the Director's own `AskUserQuestion` tool call — with shape-matched options per the pane-shapes table — to put the decision in front of the user, (3) the Director invokes the resolved `cafleet member send-input` via its Bash tool, where Claude Code's native per-call permission prompt is the user-consent surface (never a fenced `bash` block for the user to paste). The canonical three-beat workflow, pane-shapes table (choice-routing / open-ended / other shapes), AskUserQuestion constraints (1–4 questions, 2–4 options, built-in "Other"), and "MUST NOT do" rules live in [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) under "Answer a member's AskUserQuestion prompt" — that is canonical, and this CLI spec does not duplicate the table.
+
+### `member exec`
+
+`cafleet member exec` is a Director-side helper subcommand that runs a single shell command with deterministic limits (64 KiB stdout/stderr caps, SIGKILL at the requested timeout) and prints exactly one JSON object to its own stdout. It is invoked through the Director's own Bash tool when dispatching a `bash_request` from a member — see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director for the full dispatch flow.
+
+The helper does NOT know about CAFleet messaging, `permissions.allow`, or the `bash_request` envelope. It is a pure subprocess-runner. The matcher and dispatch logic live in the Director's prompt-side workflow.
+
+`cafleet member exec` does NOT require `--session-id` (consistent with `db init` / `session *` / `server` / `doctor`). Supplying `--session-id` is silently accepted and ignored, so a single `permissions.allow` pattern of the form `cafleet --session-id <id> *` keeps matching every subcommand. It also does NOT require `--agent-id` — the helper is identity-agnostic.
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--cmd <text>` | yes | Single-string shell command. Invoked via `subprocess.run(["bash", "-c", cmd], ...)` so pipes / `&&` / quoting work as the operator typed them. Empty string is rejected as a denied JSON output (input validation, see below). |
+| `--cwd <path>` | no | Working directory. Defaults to the helper's own cwd when omitted. A nonexistent path surfaces through the runtime path: `status: "ran"`, non-zero `exit_code`, `stderr` contains `no such cwd: <path>`. |
+| `--timeout <int>` | no | Wall-clock seconds. Default 30. Capped at 600. Values above the cap are rejected as a denied JSON output. |
+| `--stdin <text>` | no | UTF-8 text passed on the subprocess's stdin. |
+
+#### JSON output schema
+
+The helper prints exactly one JSON object on its own stdout:
+
+```json
+{
+  "status": "ran",
+  "exit_code": 0,
+  "stdout": "abc1234 docs: mark design doc as complete\n",
+  "stderr": "",
+  "duration_ms": 47
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | `"ran" \| "denied" \| "timeout"` | Top-level outcome. **Sole source of truth.** Clients MUST switch on `status`, not on `exit_code`. |
+| `exit_code` | `int` | When `status == "ran"`: the subprocess's verbatim exit code. When `status == "denied"` or `"timeout"`: the value is **opaque** — present so shell tooling that always reads the field does not crash, but documented as not for client branching. The helper internally uses `126` for denied and `124` for timeout for shell-legibility. |
+| `stdout` | `string` | UTF-8, capped at 64 KiB. On truncation the captured stream's last line is replaced by `\n[truncated: original was N bytes; last 65536 bytes shown]\n`. |
+| `stderr` | `string` | Same shape as `stdout`. On `status: "denied"` it carries the helper's input-validation message. On `status: "timeout"` it carries `"hard-killed at <N> seconds."` plus any partial stderr captured before SIGKILL. |
+| `duration_ms` | `int` | Wall-clock duration in milliseconds. Zero on `status: "denied"`. |
+
+#### Input validation
+
+Two payload-level inputs are rejected without invoking the subprocess:
+
+| Input | Reason emitted in `stderr` |
+|---|---|
+| `--cmd ""` (empty or absent) | `bash_request.cmd may not be empty.` |
+| `--timeout` greater than 600 | `bash_request.timeout exceeds 600s cap.` |
+
+In both cases the helper writes `{"status": "denied", "exit_code": 126, "stdout": "", "stderr": "<reason>", "duration_ms": 0}` to stdout and exits with helper-process exit code 0 (the validation failure is a payload-level result, not a CLI-arg error). The Director copies the JSON object verbatim into the `bash_result` payload sent back to the member.
+
+#### Hard limits
+
+| Limit | Value | Source |
+|---|---|---|
+| Wall-clock timeout | request `--timeout`, default 30 s, capped at 600 s | helper |
+| stdout capture | 64 KiB | helper |
+| stderr capture | 64 KiB | helper |
+
+On hard-kill (`Popen.kill()` → SIGKILL at `timeout`), the helper sets `status: "timeout"`, appends `hard-killed at <N> seconds.` to `stderr`, and emits whatever partial output was captured before the kill.
+
+#### Exit codes
+
+| Helper-process exit | When |
+|---|---|
+| `0` | Every payload outcome — `status: "ran"`, `status: "denied"`, `status: "timeout"`. The Director never relies on the process exit code; it parses the JSON on stdout. |
+| `2` | Click's built-in `UsageError` for unknown CLI flags. |
 
 ## Error Messages
 
