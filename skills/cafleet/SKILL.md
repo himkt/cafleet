@@ -53,8 +53,8 @@ In every example below, substitute the literal UUID strings printed by `cafleet 
 Only `--json`, `--session-id`, and `--version` are global (before the subcommand). `--agent-id` is a per-subcommand option and must appear **after** the subcommand name:
 
 ```bash
-cafleet --session-id <session-id> --json register --name "My Agent" --description "..."
-cafleet --session-id <session-id> --json agents --agent-id <my-agent-id>
+cafleet --session-id <session-id> --json agent register --name "My Agent" --description "..."
+cafleet --session-id <session-id> --json agent list --agent-id <my-agent-id>
 ```
 
 `cafleet agent list --json` will fail with `No such option: --json`. Same for `--session-id` placed after the subcommand — keep it before. `--agent-id` must come **after** the subcommand, not before it.
@@ -710,7 +710,7 @@ The member should always address the request to its own `placement.director_agen
 
 ### Serialization
 
-Concurrent member requests serialize through the broker queue. The Director MUST process command-request messages one at a time in poll order — read a request, send `! cmd` via `cafleet member send-input`, then move to the next message. Don't interleave or batch. The FIFO ordering of `cafleet message poll` is the serialization mechanism; no separate queueing primitive is needed.
+Concurrent member requests serialize through the broker queue. The Director MUST process command-request messages one at a time in the order returned by `cafleet message poll` — read a request, send `! cmd` via `cafleet member send-input`, then move to the next message. Don't interleave or batch. The current poll order is newest-first, and that returned order is the serialization mechanism; no separate queueing primitive is needed.
 
 ## Message Lifecycle
 

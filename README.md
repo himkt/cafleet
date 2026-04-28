@@ -189,7 +189,7 @@ Global flags (placed **before** the subcommand):
 
 | Flag | Required | Description |
 |---|---|---|
-| `--session-id <id>` | Yes (for client + member subcommands) | Session identifier for agent routing (opaque string — new sessions get a UUIDv4, migrated sessions reuse a 64-char hex value). Required for `register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member *`. Silently accepted (and ignored) on `db init` / `session *`. |
+| `--session-id <id>` | Yes (for client + member subcommands) | Session identifier for agent routing (opaque string — new sessions get a UUIDv4, migrated sessions reuse a 64-char hex value). Required for `agent *`, `message *`, `member *`. Silently accepted (and ignored) on `db init` / `session *` / `server` / `doctor`. |
 | `--json` | No | Emit JSON output. |
 | `--version` | No | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
