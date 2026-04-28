@@ -301,9 +301,7 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `--name` | yes | Display name of the new member. Forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. |
 | `--description` | yes | One-sentence purpose |
 | `--no-bash` / `--allow-bash` | no | Enable / disable Bash tool denial at spawn time. Defaults to `--no-bash` (the spawned process gains `--disallowedTools "Bash"`), so the member's harness rejects every Bash call. The member is expected to route shell commands through its Director via the `bash_request` JSON envelope (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director). `--allow-bash` is the opt-out for one-off members that need direct Bash. |
-| *(positional, after `--`)* | no | Prompt text for the spawned coding agent process |
-
-> **Codex deprecated**: codex support and the `--coding-agent` flag were removed in design 0000034 round 6. Claude is the only supported member backend; passing `--coding-agent` fails with Click's default `Error: No such option: '--coding-agent'.`. See `design-docs/0000034-member-bash-via-director/design-doc.md` §13 Future Work for the restoration plan.
+| *(positional, after `--`)* | no | Prompt text for the spawned claude process |
 
 ### `member delete`
 
