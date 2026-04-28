@@ -349,7 +349,7 @@ cafleet --session-id <session-id> --json member list --agent-id <director-agent-
 |---|---|---|
 | `--agent-id` | yes | The Director's agent ID |
 
-Output columns: `agent_id`, `name`, `status`, `backend`, `session`, `window_id`, `pane_id`, `created_at`. The `backend` column shows `claude`. A pending placement (pane not yet spawned) shows `(pending)` for `pane_id` in text mode and `null` in JSON.
+Output columns: `agent_id`, `name`, `status`, `backend`, `session`, `window_id`, `pane_id`, `created_at`. The `backend` column shows the placement's configured coding agent (for newly spawned members, this is typically `claude`). A pending placement (pane not yet spawned) shows `(pending)` for `pane_id` in text mode and `null` in JSON.
 
 Output (`--json`):
 ```json
