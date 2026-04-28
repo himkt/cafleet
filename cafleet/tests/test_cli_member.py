@@ -366,3 +366,175 @@ class TestMemberCreatePassesDisplayName:
         assert command[0] == "codex"
         assert "--approval-mode" in command
         assert "auto-edit" in command
+
+
+class TestNoBashFlag:
+    """Step 4 task 1+2 (round-5c-era): ``--no-bash`` / ``--allow-bash`` flag pair.
+
+    Per-coding-agent default resolution:
+    - claude unset → ``--no-bash`` (deny_bash=True), argv gains
+      ``--disallowedTools Bash``.
+    - claude ``--allow-bash`` → deny_bash=False, argv stays clean.
+    - codex ``--no-bash`` → CLI rejects with verbatim error, exits 1, no
+      broker rows are created.
+    - codex unset → ``--allow-bash`` (deny_bash=False), argv stays clean
+      (codex's empty ``disallow_tools_args`` makes deny_bash a no-op anyway).
+
+    Step 14 task 5 (round 6) prunes the codex sub-cases. Until then the four
+    sub-cases must coexist.
+    """
+
+    def test_claude_default_appends_disallowed_tools_bash(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--coding-agent",
+                "claude",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert len(split_window_recorder) == 1
+        command = split_window_recorder[0]["command"]
+        assert "--disallowedTools" in command
+        deny_index = command.index("--disallowedTools")
+        assert command[deny_index + 1] == "Bash"
+        assert command[0] == "claude"
+        # Pinned argv ordering: deny tokens before name args.
+        name_index = command.index("--name")
+        assert deny_index < name_index, (
+            f"--disallowedTools must precede --name; got {command!r}"
+        )
+
+    def test_claude_explicit_allow_bash_omits_disallowed_tools(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--coding-agent",
+                "claude",
+                "--allow-bash",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert len(split_window_recorder) == 1
+        command = split_window_recorder[0]["command"]
+        assert "--disallowedTools" not in command
+        assert "Bash" not in command
+        assert command[0] == "claude"
+
+    def test_codex_no_bash_rejected_with_verbatim_error_no_broker_rows(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        session_id, director_id, runner = bootstrapped_session
+        before = broker.list_agents(session_id)
+        before_count = len(before)
+        # Snapshot only — the bootstrap fixture creates the Director plus an
+        # Administrator agent; the rejection must not grow that count.
+
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--coding-agent",
+                "codex",
+                "--no-bash",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        # Verbatim error per design doc §6 round-5c text.
+        assert (
+            "--no-bash with --coding-agent codex is not supported" in result.output
+        )
+        assert "Codex has no --disallowedTools-equivalent flag" in result.output
+        assert "Use --allow-bash, or pick claude" in result.output
+        # No broker rows created — rejection happens before register_agent.
+        after = broker.list_agents(session_id)
+        assert len(after) == before_count, (
+            "Rejection must short-circuit before register_agent runs; "
+            f"agent count grew from {before_count} to {len(after)}"
+        )
+        # No tmux pane spawned either.
+        assert split_window_recorder == [], (
+            "Rejection must short-circuit before tmux.split_window runs"
+        )
+
+    def test_codex_default_omits_disallowed_tools(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--coding-agent",
+                "codex",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert len(split_window_recorder) == 1
+        command = split_window_recorder[0]["command"]
+        assert "--disallowedTools" not in command
+        assert command[0] == "codex"
