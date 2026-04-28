@@ -232,7 +232,7 @@ class TestPromptTemplates:
     }
 
     def test_claude_template_contains_bash_routing_canary(self):
-        assert "Routing Bash via the Director" in CLAUDE.default_prompt_template
+        assert "By default your Bash tool is denied" in CLAUDE.default_prompt_template
 
     def test_claude_template_format_succeeds_with_standard_kwargs(self):
         result = CLAUDE.default_prompt_template.format(**self._STANDARD_KWARGS)
