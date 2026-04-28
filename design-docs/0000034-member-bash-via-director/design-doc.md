@@ -1,7 +1,7 @@
 # CAFleet CLI consolidation: Bash-via-Director, nested-only restructure, codex deprecation
 
 **Status**: Approved
-**Progress**: 7/63 tasks complete
+**Progress**: 11/63 tasks complete
 **Last Updated**: 2026-04-28
 
 ## Overview
@@ -674,8 +674,8 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
 
 ### Step 3: Code — `CodingAgentConfig` extension and spawn-prompt amendments
 
-- [ ] Add `disallow_tools_args: tuple[str, ...] = ()` field to `CodingAgentConfig` in `cafleet/src/cafleet/coding_agent.py`. Set `CLAUDE.disallow_tools_args = ("--disallowedTools", "Bash")` and `CODEX.disallow_tools_args = ()`. (Round-5c-era state. CODEX deletion is owned by Step 13 task 1.) <!-- completed: -->
-- [ ] Extend `CodingAgentConfig.build_command(...)` with a `deny_bash: bool = False` keyword. When `deny_bash=True` AND `disallow_tools_args` is non-empty, inject the tokens. Pinned argv ordering: `[binary, *extra_args, *deny_args, *name_args, prompt]` — deny_args BEFORE name_args. (Mirrors §1's snippet exactly.) <!-- completed: -->
+- [x] Add `disallow_tools_args: tuple[str, ...] = ()` field to `CodingAgentConfig` in `cafleet/src/cafleet/coding_agent.py`. Set `CLAUDE.disallow_tools_args = ("--disallowedTools", "Bash")` and `CODEX.disallow_tools_args = ()`. (Round-5c-era state. CODEX deletion is owned by Step 13 task 1.) <!-- completed: 2026-04-28T16:10 -->
+- [x] Extend `CodingAgentConfig.build_command(...)` with a `deny_bash: bool = False` keyword. When `deny_bash=True` AND `disallow_tools_args` is non-empty, inject the tokens. Pinned argv ordering: `[binary, *extra_args, *deny_args, *name_args, prompt]` — deny_args BEFORE name_args. (Mirrors §1's snippet exactly.) <!-- completed: 2026-04-28T16:10 -->
 - [ ] Update `CLAUDE.default_prompt_template` to add the bash-routing reminder. New round-5c-era template (Step 12 task 6 renames the literal `cafleet poll` invocation to `cafleet message poll` as part of the round-6 nested-only restructure):
   ```
   Load Skill(cafleet). Your session_id is {session_id} and your agent_id is {agent_id}.
@@ -684,7 +684,7 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
   Your Bash tool is denied. Route any shell command through your Director —
   see Skill(cafleet) > Routing Bash via the Director for the bash_request JSON envelope.
   ```
-  <!-- completed: -->
+  <!-- completed: 2026-04-28T16:10 -->
 - [ ] Update `CODEX.default_prompt_template` to add the same bash-routing reminder, inlined since codex has no skills to load. New round-5c-era template (Step 13 task 1 deletes the entire CODEX constant + this template as part of the round-6 codex deprecation; until then the template lives at parity with CLAUDE):
   ```
   Your session_id is {session_id} and your agent_id is {agent_id}.
@@ -698,7 +698,7 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
     {{"type":"bash_request","cmd":"<shell-command>","cwd":"<absolute-path>","reason":"<short-reason>"}}
   Then poll for a bash_result reply correlated by in_reply_to == <your-send-task-id>.
   ```
-  Note: literal `{` / `}` in the JSON example are doubled (`{{` / `}}`) so `str.format()` collapses them per the design 0000018 template-safety rule. <!-- completed: -->
+  Note: literal `{` / `}` in the JSON example are doubled (`{{` / `}}`) so `str.format()` collapses them per the design 0000018 template-safety rule. <!-- completed: 2026-04-28T16:10 -->
 
 ### Step 4: Code — `cafleet member create` flag and `cafleet member exec` helper
 
