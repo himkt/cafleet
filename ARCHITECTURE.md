@@ -168,6 +168,56 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 **Supervision skill**: The Director's monitoring obligations are defined in `.claude/skills/cafleet-monitoring/SKILL.md`. This skill must be loaded (`Skill(cafleet-monitoring)`) before spawning any members. It provides a 2-stage health check protocol (message poll then terminal capture) and a ready-to-use `/loop` prompt template.
 
+## Bash Routing via Director
+
+Members spawned via `cafleet member create` lose their `Bash` tool by default and route every shell command through their Director. The Director runs the requested command via a new helper subcommand (`cafleet bash-exec`) and replies with the captured result. This concentrates every operator-consent prompt in the Director's pane — where the operator is already focused — instead of scattering them across N member panes. Canonical reference: [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) § Routing Bash via the Director.
+
+**Member-side enforcement**: `cafleet member create` accepts a `--no-bash` / `--allow-bash` flag pair. The `--no-bash` default appends `--disallowedTools "Bash"` to the spawned `claude` argv, so the member's harness rejects every Bash call at the tool layer (`claude --help` documents the flag; the syntax matches `permissions.allow` patterns). `--allow-bash` is the opt-out for one-off members that need direct Bash; the soft "route through the Director" discipline still applies but is no longer enforced by the harness. The decision lives on `CodingAgentConfig.disallow_tools_args` so `cli.py` stays agent-agnostic.
+
+**Member-side request shape**: A member that needs a shell command sends the request via existing `cafleet send` with a JSON-typed payload in `--text`. No new member-side subcommand. The payload schema:
+
+```json
+{
+  "type": "bash_request",
+  "cmd": "git log -1 --oneline",
+  "cwd": "/home/himkt/work/himkt/cafleet",
+  "stdin": null,
+  "timeout": 30,
+  "reason": "verifying main before PR"
+}
+```
+
+`type` and `cmd` and `reason` are required; `cwd` / `stdin` / `timeout` are optional (timeout defaults to 30 s, capped at 600 s). The member always addresses the request to its own `placement.director_agent_id`. Cross-session leakage is prevented by the broker's existing session boundary; the within-session "address only your own Director" rule is documentation-only in v1.
+
+**Reply correlation**: The broker assigns each delivered task a server-side `task_id` surfaced in `cafleet --json poll` and `cafleet --json send`. The Director copies the request task's `task_id` into `bash_result.in_reply_to`. The member reads its own `task_id` from the `cafleet --json send` response when sending the request, holds it locally, and matches against `bash_result.in_reply_to` on the next poll.
+
+**Director-side dispatch (6 steps)**: When the Director's `cafleet poll` surfaces a message whose `text` parses as `{"type": "bash_request", ...}`, the Director (1) **discriminates** — non-`bash_request` shapes are treated as plain instructions; (2) **matches** — applies the project's resolved `permissions.allow` and `permissions.deny` (concatenated from `~/.claude/settings.json`, `<project>/.claude/settings.json`, `<project>/.claude/settings.local.json`) using fnmatch-style `Bash(...)` glob patterns, returning `auto-run` (allow match AND no deny match) or `ask` (every other combination); (3/4) on `auto-run` continues directly to the helper; on `ask` fires a 3-option `AskUserQuestion` (`Approve as-is` / `Approve with edits` / `Deny with reason`); (5) **runs** the resolved command via `cafleet bash-exec` invoked through the Director's own Bash tool — the Director's native Bash-tool prompt does NOT fire because `Bash(cafleet bash-exec *)` is in the operator's `permissions.allow` (required setup, see § Director-side requirement below); (6) **replies** by sending a `bash_result` JSON payload back via `cafleet send`, which triggers the existing tmux push notification on the member's pane.
+
+**Reply payload shape**:
+
+```json
+{
+  "type": "bash_result",
+  "in_reply_to": "<request-task-id>",
+  "status": "ran",
+  "exit_code": 0,
+  "stdout": "abc1234 docs: mark design doc as complete\n",
+  "stderr": "",
+  "duration_ms": 47,
+  "note": "ran without operator prompt (matched allow rule: Bash(git *))"
+}
+```
+
+**Canonical-status rule**: `status` (one of `"ran"`, `"denied"`, `"timeout"`) is the SOLE source of truth for the outcome. `exit_code` is meaningful **only when `status == "ran"`** — it carries the subprocess's verbatim return code. For `status: "denied"` and `status: "timeout"` the field is present (so shell tooling that always reads it does not crash) but its value is documented as **opaque** — clients MUST switch on `status`, not on `exit_code`.
+
+**Director subprocess hard limits** (enforced by the `cafleet bash-exec` helper, not by the matcher): wall-clock per request `timeout` field (default 30 s, capped at 600 s; on hard-kill via `Popen.kill()` SIGKILL the helper sets `status: "timeout"` and stderr `"hard-killed at <N> seconds."`); stdout and stderr captures each capped at 64 KiB. On truncation, the captured stream's last line is replaced by `\n[truncated: original was N bytes; last 65536 bytes shown]\n`. The helper also performs **input validation**: empty `cmd` and `timeout > 600` are rejected as a denied JSON output (`status: "denied"`, exit_code opaque, `stderr: "bash_request.cmd may not be empty."` or `"bash_request.timeout exceeds 600s cap."`) — the helper writes the denied JSON to stdout and exits 0 (the validation failure is a payload-level result, not a CLI-arg error).
+
+**Director-side requirement**: The operator MUST add `Bash(cafleet bash-exec *)` to the Director's `permissions.allow` (project `.claude/settings.json` or user `~/.claude/settings.json`). Without this entry the Director's pane gets a duplicate native Bash-tool prompt for every command, defeating the single-consent-gate goal — `AskUserQuestion` is supposed to be the sole consent surface in this flow. See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for setup details.
+
+**Member-side blocking semantics (no timeout)**: Members do NOT have a timeout on `bash_result` replies. The member's loop is: send the request via `cafleet send`, capture the returned `task_id`, wait for the broker's tmux push notification (which injects a `cafleet poll` keystroke when the `bash_result` arrives), filter the polled messages by `in_reply_to == task_id`, and resume. If the Director wedges, the member sits idle until the operator nudges (`cafleet send`) or retracts (`cafleet cancel`) the request. This is consistent with every other CAFleet message-passing path — no built-in timeouts.
+
+**No broker schema changes**: `bash_request` and `bash_result` are plain CAFleet messages persisted as ordinary `tasks` rows. They render as plain JSON text in the admin WebUI timeline. No new tables, no new columns, no changes to `_try_notify_recipient`.
+
 ## Design Document Orchestration Skills
 
 CAFleet ships CAFleet-native replicas of the global Agent Teams design document workflows. They replace Claude Code's `TeamCreate` / `Agent(team_name=...)` / `SendMessage` primitives with `cafleet register`, `cafleet member create`, and `cafleet send`, so every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline.

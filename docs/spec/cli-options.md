@@ -287,6 +287,71 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 cafleet --session-id 550e8400-e29b-41d4-a716-446655440000 server
 ```
 
+### bash-exec
+
+`cafleet bash-exec` is a Director-side helper subcommand that runs a single shell command with deterministic limits (64 KiB stdout/stderr caps, SIGKILL at the requested timeout) and prints exactly one JSON object to its own stdout. It is invoked through the Director's own Bash tool when dispatching a `bash_request` from a member — see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director for the full dispatch flow.
+
+The helper does NOT know about CAFleet messaging, `permissions.allow`, or the `bash_request` envelope. It is a pure subprocess-runner. The matcher and dispatch logic live in the Director's prompt-side workflow.
+
+`cafleet bash-exec` does NOT require `--session-id` (consistent with `db init` / `session *` / `server`). Supplying `--session-id` is silently accepted and ignored, so a single `permissions.allow` pattern of the form `cafleet --session-id <id> *` keeps matching every subcommand.
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--cmd <text>` | yes | Single-string shell command. Invoked via `subprocess.run(["bash", "-c", cmd], ...)` so pipes / `&&` / quoting work as the operator typed them. Empty string is rejected as a denied JSON output (input validation, see below). |
+| `--cwd <path>` | no | Working directory. Defaults to the helper's own cwd when omitted. A nonexistent path surfaces through the runtime path: `status: "ran"`, non-zero `exit_code`, `stderr` contains `no such cwd: <path>`. |
+| `--timeout <int>` | no | Wall-clock seconds. Default 30. Capped at 600. Values above the cap are rejected as a denied JSON output. |
+| `--stdin <text>` | no | UTF-8 text passed on the subprocess's stdin. |
+
+#### JSON output schema
+
+The helper prints exactly one JSON object on its own stdout:
+
+```json
+{
+  "status": "ran",
+  "exit_code": 0,
+  "stdout": "abc1234 docs: mark design doc as complete\n",
+  "stderr": "",
+  "duration_ms": 47
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | `"ran" \| "denied" \| "timeout"` | Top-level outcome. **Sole source of truth.** Clients MUST switch on `status`, not on `exit_code`. |
+| `exit_code` | `int` | When `status == "ran"`: the subprocess's verbatim exit code. When `status == "denied"` or `"timeout"`: the value is **opaque** — present so shell tooling that always reads the field does not crash, but documented as not for client branching. The helper internally uses `126` for denied and `124` for timeout for shell-legibility. |
+| `stdout` | `string` | UTF-8, capped at 64 KiB. On truncation the captured stream's last line is replaced by `\n[truncated: original was N bytes; last 65536 bytes shown]\n`. |
+| `stderr` | `string` | Same shape as `stdout`. On `status: "denied"` it carries the helper's input-validation message. On `status: "timeout"` it carries `"hard-killed at <N> seconds."` plus any partial stderr captured before SIGKILL. |
+| `duration_ms` | `int` | Wall-clock duration in milliseconds. Zero on `status: "denied"`. |
+
+#### Input validation
+
+Two payload-level inputs are rejected without invoking the subprocess:
+
+| Input | Reason emitted in `stderr` |
+|---|---|
+| `--cmd ""` (empty or absent) | `bash_request.cmd may not be empty.` |
+| `--timeout` greater than 600 | `bash_request.timeout exceeds 600s cap.` |
+
+In both cases the helper writes `{"status": "denied", "exit_code": 126, "stdout": "", "stderr": "<reason>", "duration_ms": 0}` to stdout and exits with helper-process exit code 0 (the validation failure is a payload-level result, not a CLI-arg error). The Director copies the JSON object verbatim into the `bash_result` payload sent back to the member.
+
+#### Hard limits
+
+| Limit | Value | Source |
+|---|---|---|
+| Wall-clock timeout | request `--timeout`, default 30 s, capped at 600 s | helper |
+| stdout capture | 64 KiB | helper |
+| stderr capture | 64 KiB | helper |
+
+On hard-kill (`Popen.kill()` → SIGKILL at `timeout`), the helper sets `status: "timeout"`, appends `hard-killed at <N> seconds.` to `stderr`, and emits whatever partial output was captured before the kill.
+
+#### Exit codes
+
+| Helper-process exit | When |
+|---|---|
+| `0` | Every payload outcome — `status: "ran"`, `status: "denied"`, `status: "timeout"`. The Director never relies on the process exit code; it parses the JSON on stdout. |
+| `2` | Click's built-in `UsageError` for unknown CLI flags. |
+
 ## Member Commands
 
 The `cafleet member` subgroup manages tmux-backed member agents. All commands require `--agent-id` (the Director's agent ID) and must be run inside a tmux session.
@@ -299,6 +364,7 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `--name` | yes | Display name of the new member. For `--coding-agent claude`, this value is ALSO forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | Coding agent to spawn: `claude` (default) or `codex`. Codex is spawned with `--approval-mode auto-edit`. |
+| `--no-bash` / `--allow-bash` | no | Enable / disable Bash tool denial at spawn time. Defaults to `--no-bash` for `--coding-agent claude` (the spawned process gains `--disallowedTools "Bash"`), so the member's harness rejects every Bash call. The member is expected to route shell commands through its Director via the `bash_request` JSON envelope (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director). `--allow-bash` is the opt-out; codex defaults to `--allow-bash` because codex has no `--disallowedTools` analog today, and `--no-bash --coding-agent codex` is rejected at the CLI layer. |
 | *(positional, after `--`)* | no | Prompt text for the spawned coding agent process |
 | *(spawn-side)* | n/a | For `--coding-agent claude`, the spawned process is invoked as `claude --name <member-name> <prompt>` so the pane title matches `--name`. For `--coding-agent codex`, no display-name flag is passed — codex has no equivalent today and the invocation stays `codex --approval-mode auto-edit <prompt>`. The decision is encoded on `CodingAgentConfig.display_name_args`, so `cli.py` makes the call unconditionally. |
 
