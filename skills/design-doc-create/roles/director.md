@@ -77,7 +77,7 @@ When a member pauses on an `AskUserQuestion`-shaped prompt, the Director MUST de
 
 ### Routing member bash requests
 
-Drafter and Reviewer members are spawned with `cafleet member create --no-bash` (the default), so their harnesses reject every Bash call. When a member needs a shell command, it sends a plain CAFleet message to the Director via `cafleet message send` asking for it. When the Director's `cafleet message poll` surfaces such a request, the Director MUST respond promptly via `cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> --member-id <m> --freetext "! <command>"` — Claude Code's `!` CLI shortcut runs the command natively in the member's pane and the captured output appears in the member's prompt context. The member is blocked until the `!` keystroke lands. Process incoming shell-command requests one at a time in poll order; the broker queue's FIFO is the serialization. See the cafleet skill's `## Routing Bash via the Director` section for the full convention.
+Drafter and Reviewer members are spawned with `--no-bash` (the harness rejects every Bash call). When a member sends a plain shell-command request via `cafleet message send`, the Director responds by sending `! <command>` keystrokes through `cafleet member send-input`. The member blocks until the `!` keystroke lands; process requests one at a time in poll order. Full invocation + flag layout in `Skill(cafleet)` § Routing Bash via the Director.
 
 ### Skill-specific milestones
 
