@@ -1,8 +1,4 @@
-"""Tests for ``cafleet bash-exec`` (Step 4 task 3, round-5c-era placement).
-
-Round-5c-era file name and CLI invocation strings. Step 14 task 1 (round 6)
-will rename this file to ``test_cli_member_exec.py`` and rewrite every
-``cafleet bash-exec`` invocation inside to ``cafleet member exec``.
+"""Tests for ``cafleet member exec`` (Step 4 task 3, round-6 placement).
 
 Per the canonical-status rule (§3 ``bash_result`` payload subsection):
 ``status`` is the sole source of truth for outcome branching. Every
@@ -21,14 +17,14 @@ from cafleet.cli import cli
 
 
 def _invoke(args: list[str]) -> tuple[int, dict]:
-    """Invoke ``cafleet bash-exec`` and return (exit_code, parsed_json)."""
+    """Invoke ``cafleet member exec`` and return (exit_code, parsed_json)."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["bash-exec", *args])
+    result = runner.invoke(cli, ["member", "exec", *args])
     # The helper always writes exactly one JSON object to stdout.
     return result.exit_code, json.loads(result.output)
 
 
-class TestBashExecHappyPath:
+class TestMemberExecHappyPath:
     def test_echo_returns_status_ran_with_stdout_and_zero_exit_code(self):
         exit_code, payload = _invoke(["--cmd", "echo hello"])
         assert exit_code == 0
@@ -40,7 +36,7 @@ class TestBashExecHappyPath:
         assert payload["duration_ms"] >= 0
 
 
-class TestBashExecTimeout:
+class TestMemberExecTimeout:
     """Real ``sleep`` invocation — the test exercises ``subprocess.run``'s
     timeout path including the SIGKILL fallback. Mocking would defeat the
     purpose: timeout behavior IS what's under test.
@@ -55,7 +51,7 @@ class TestBashExecTimeout:
         assert "hard-killed at 1 seconds." in payload["stderr"]
 
 
-class TestBashExecTruncation:
+class TestMemberExecTruncation:
     """Stdout > 64 KiB is truncated; the marker carries the verbatim
     original byte count and the 65536 last-bytes-shown count.
     """
@@ -80,7 +76,7 @@ class TestBashExecTruncation:
         assert set(body) == {"x"}
 
 
-class TestBashExecStdinPropagation:
+class TestMemberExecStdinPropagation:
     def test_cat_with_stdin_echoes_input_to_stdout(self):
         exit_code, payload = _invoke(["--cmd", "cat", "--stdin", "hello world"])
         assert exit_code == 0
@@ -89,7 +85,7 @@ class TestBashExecStdinPropagation:
         assert "hello world" in payload["stdout"]
 
 
-class TestBashExecEmptyCmdDenied:
+class TestMemberExecEmptyCmdDenied:
     """§3 helper bullet 1: empty cmd short-circuits with a denied JSON
     object on stdout. Helper-process exit code is 0 (the validation
     failure is a payload-level outcome, not a CLI-arg error).
@@ -105,7 +101,7 @@ class TestBashExecEmptyCmdDenied:
         assert payload["duration_ms"] == 0
 
 
-class TestBashExecOverCapTimeoutDenied:
+class TestMemberExecOverCapTimeoutDenied:
     """§3 helper bullet 1: timeout > 600 short-circuits with a denied JSON
     object on stdout. Helper-process exit code is 0.
     """
@@ -120,7 +116,7 @@ class TestBashExecOverCapTimeoutDenied:
         assert payload["duration_ms"] == 0
 
 
-class TestBashExecNonexistentCwd:
+class TestMemberExecNonexistentCwd:
     """§12 edge case: ``cwd`` does not exist → runtime path, not denied.
 
     The helper invokes the shell which raises FileNotFoundError;

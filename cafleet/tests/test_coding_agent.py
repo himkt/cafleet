@@ -1,12 +1,6 @@
 import pytest
 
-from cafleet.coding_agent import (
-    CLAUDE,
-    CODEX,
-    CODING_AGENTS,
-    CodingAgentConfig,
-    get_coding_agent,
-)
+from cafleet.coding_agent import CLAUDE, CodingAgentConfig
 
 
 class TestCodingAgentConfig:
@@ -74,21 +68,12 @@ class TestBuildCommand:
         result = CLAUDE.build_command("Hello world")
         assert result == ["claude", "Hello world"]
 
-    def test_codex_build_command(self):
-        result = CODEX.build_command("Hello world")
-        assert result == ["codex", "--approval-mode", "auto-edit", "Hello world"]
-
     def test_display_name_kwarg_injects_for_claude(self):
         result = CLAUDE.build_command("p", display_name="Drafter")
         assert result == ["claude", "--name", "Drafter", "p"]
 
-    def test_display_name_kwarg_no_op_for_codex(self):
-        result = CODEX.build_command("p", display_name="Drafter")
-        assert result == ["codex", "--approval-mode", "auto-edit", "p"]
-
     def test_display_name_none_matches_default(self):
         assert CLAUDE.build_command("p", display_name=None) == CLAUDE.build_command("p")
-        assert CODEX.build_command("p", display_name=None) == CODEX.build_command("p")
 
     def test_display_name_with_spaces_preserved(self):
         result = CLAUDE.build_command("p", display_name="Code Reviewer")
@@ -164,85 +149,8 @@ class TestClaudeConfig:
         assert "dir-001" in result
 
 
-class TestCodexConfig:
-    def test_name(self):
-        assert CODEX.name == "codex"
-
-    def test_binary(self):
-        assert CODEX.binary == "codex"
-
-    def test_extra_args(self):
-        assert CODEX.extra_args == ("--approval-mode", "auto-edit")
-
-    def test_prompt_template_no_skill_reference(self):
-        assert "Skill(" not in CODEX.default_prompt_template
-
-    def test_prompt_template_uses_format_placeholders_for_ids(self):
-        assert "{session_id}" in CODEX.default_prompt_template
-        assert "{agent_id}" in CODEX.default_prompt_template
-        assert "$CAFLEET_AGENT_ID" not in CODEX.default_prompt_template
-        assert "$CAFLEET_SESSION_ID" not in CODEX.default_prompt_template
-
-    def test_prompt_template_has_format_placeholders(self):
-        result = CODEX.default_prompt_template.format(
-            session_id="550e8400-e29b-41d4-a716-446655440000",
-            agent_id="7ba91234-5678-90ab-cdef-112233445566",
-            director_name="Bob",
-            director_agent_id="dir-002",
-        )
-        assert "550e8400-e29b-41d4-a716-446655440000" in result
-        assert "7ba91234-5678-90ab-cdef-112233445566" in result
-        assert "Bob" in result
-        assert "dir-002" in result
-
-    def test_prompt_template_contains_explicit_cli_instructions(self):
-        template = CODEX.default_prompt_template
-        assert (
-            "cafleet --session-id {session_id} poll --agent-id {agent_id}" in template
-        )
-        assert "cafleet --session-id {session_id} ack --agent-id {agent_id}" in template
-        assert (
-            "cafleet --session-id {session_id} send --agent-id {agent_id}" in template
-        )
-
-
-class TestCodingAgentsRegistry:
-    def test_contains_claude(self):
-        assert "claude" in CODING_AGENTS
-        assert CODING_AGENTS["claude"] is CLAUDE
-
-    def test_contains_codex(self):
-        assert "codex" in CODING_AGENTS
-        assert CODING_AGENTS["codex"] is CODEX
-
-    def test_exactly_two_entries(self):
-        assert set(CODING_AGENTS.keys()) == {"claude", "codex"}
-
-
-class TestGetCodingAgent:
-    def test_returns_claude_config(self):
-        result = get_coding_agent("claude")
-        assert result is CLAUDE
-
-    def test_returns_codex_config(self):
-        result = get_coding_agent("codex")
-        assert result is CODEX
-
-    def test_raises_valueerror_for_unknown_name(self):
-        with pytest.raises(ValueError, match="Unknown coding agent"):
-            get_coding_agent("unknown-agent")
-
-    def test_raises_valueerror_for_empty_string(self):
-        with pytest.raises(ValueError, match="Unknown coding agent"):
-            get_coding_agent("")
-
-    def test_error_message_includes_unknown_name(self):
-        with pytest.raises(ValueError, match="aider"):
-            get_coding_agent("aider")
-
-
 class TestDisallowTools:
-    """Step 3 task 1+2: ``disallow_tools_args`` field + ``deny_bash`` kwarg.
+    """``disallow_tools_args`` field + ``deny_bash`` kwarg.
 
     Pinned argv ordering: ``[binary, *extra_args, *deny_args, *name_args, prompt]``
     — ``deny_args`` MUST come BEFORE ``name_args``. Asserted by index, not just
@@ -251,9 +159,6 @@ class TestDisallowTools:
 
     def test_claude_disallow_tools_args_constant(self):
         assert CLAUDE.disallow_tools_args == ("--disallowedTools", "Bash")
-
-    def test_codex_disallow_tools_args_is_empty(self):
-        assert CODEX.disallow_tools_args == ()
 
     def test_disallow_tools_args_field_default_empty_tuple(self):
         config = CodingAgentConfig(name="test", binary="test-bin")
@@ -295,15 +200,6 @@ class TestDisallowTools:
         assert "Bash" not in result
         assert result == ["claude", "hello"]
 
-    def test_codex_build_command_with_deny_bash_true_omits_disallow_tokens(self):
-        result = CODEX.build_command("hello", deny_bash=True)
-        assert "--disallowedTools" not in result
-        assert result == ["codex", "--approval-mode", "auto-edit", "hello"]
-
-    def test_codex_build_command_with_deny_bash_false_unchanged(self):
-        result = CODEX.build_command("hello", deny_bash=False)
-        assert result == ["codex", "--approval-mode", "auto-edit", "hello"]
-
     def test_custom_config_with_deny_bash_true_and_disallow_args_injects_tokens(self):
         config = CodingAgentConfig(
             name="custom",
@@ -326,11 +222,7 @@ class TestDisallowTools:
 
 
 class TestPromptTemplates:
-    """Step 3 task 3+4: bash-routing reminder added to both templates.
-
-    Round-5c-era state — both CLAUDE and CODEX templates exist. Round 6
-    (Step 13 task 1) deletes the CODEX template entirely.
-    """
+    """Bash-routing reminder added to the claude template."""
 
     _STANDARD_KWARGS = {
         "session_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -342,15 +234,6 @@ class TestPromptTemplates:
     def test_claude_template_contains_bash_routing_canary(self):
         assert "Routing Bash via the Director" in CLAUDE.default_prompt_template
 
-    def test_codex_template_contains_bash_request_canary(self):
-        assert "bash_request" in CODEX.default_prompt_template
-
-    def test_codex_template_has_doubled_braces(self):
-        # Per design 0000018 template-safety rule: literal `{` / `}` must be
-        # doubled so ``str.format()`` collapses them to single literal braces.
-        assert "{{" in CODEX.default_prompt_template
-        assert "}}" in CODEX.default_prompt_template
-
     def test_claude_template_format_succeeds_with_standard_kwargs(self):
         result = CLAUDE.default_prompt_template.format(**self._STANDARD_KWARGS)
         assert "550e8400-e29b-41d4-a716-446655440000" in result
@@ -358,17 +241,22 @@ class TestPromptTemplates:
         assert "Alice" in result
         assert "dir-001" in result
 
-    def test_codex_template_format_succeeds_with_standard_kwargs(self):
-        result = CODEX.default_prompt_template.format(**self._STANDARD_KWARGS)
-        assert "550e8400-e29b-41d4-a716-446655440000" in result
-        assert "7ba91234-5678-90ab-cdef-112233445566" in result
-        assert "Alice" in result
-        assert "dir-001" in result
 
-    def test_codex_template_format_collapses_doubled_braces_to_single(self):
-        result = CODEX.default_prompt_template.format(**self._STANDARD_KWARGS)
-        # After ``str.format``, the doubled braces collapse to single literals
-        # AND the ``bash_request`` JSON envelope is intact.
-        assert '{"type":"bash_request"' in result
-        assert "{{" not in result
-        assert "}}" not in result
+class TestCodexConstantRemoved:
+    """Regression guard: the codex backend was removed in design 0000034 §15.
+    ``CODEX``, ``CODING_AGENTS``, and ``get_coding_agent`` are gone from
+    ``cafleet.coding_agent`` — importing any of them MUST raise
+    ``ImportError``.
+    """
+
+    def test_codex_constant_import_raises(self):
+        with pytest.raises(ImportError):
+            from cafleet.coding_agent import CODEX  # noqa: F401
+
+    def test_coding_agents_registry_import_raises(self):
+        with pytest.raises(ImportError):
+            from cafleet.coding_agent import CODING_AGENTS  # noqa: F401
+
+    def test_get_coding_agent_helper_import_raises(self):
+        with pytest.raises(ImportError):
+            from cafleet.coding_agent import get_coding_agent  # noqa: F401

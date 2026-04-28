@@ -1,7 +1,7 @@
 # CAFleet CLI consolidation: Bash-via-Director, nested-only restructure, codex deprecation
 
 **Status**: Approved
-**Progress**: 35/63 tasks complete
+**Progress**: 43/63 tasks complete
 **Last Updated**: 2026-04-28
 
 ## Overview
@@ -800,19 +800,19 @@ The codex restoration plan in §13 (i)–(ix) is **Future Work, not a rollback p
 
 > **Atomic-landing instruction**: Steps 12 and 14 land atomically (same commit/PR) — Step 12's renames break existing CLI tests until Step 14's invocation rewrites land. Steps 13 and 14 also land atomically — Step 13's CODEX deletion breaks test imports until Step 14's test deletions land. Concretely: package Steps 11, 12, 13, 14 into one PR (Step 11 shares the docs-first sweep over `admin/`). Step 15's quality gates run only at the head of that combined PR, never against intermediate states.
 
-- [ ] Refactor `cafleet/src/cafleet/cli.py` to introduce `@cli.group()` decorators for `agent` and `message`. Move the existing flat-verb handlers under their new groups, applying rename-during-move atomically per the §14 mapping table: `agents` → `agent list`, `register` → `agent register`, `deregister` → `agent deregister`, `send` → `message send`, `broadcast` → `message broadcast`, `poll` → `message poll`, `ack` → `message ack`, `cancel` → `message cancel`, `get-task` → `message show`. Decorator changes + handler renames only; handler bodies unchanged. Hard-break — no Click aliases. <!-- completed: -->
-- [ ] Rename the round-5c `cafleet bash-exec` handler to `cafleet member exec` — move the handler from a top-level `@cli.command()` to `@member.command("exec")`. Handler body unchanged. The `Bash(cafleet member exec *)` allow-rule entry follows from this rename. <!-- completed: -->
-- [ ] Materialize `cafleet agent show --id <x>` as its own subcommand by extracting the existing `agents --id <x>` branch from the `agent list` handler (renamed in task 1) into a dedicated `agent.command("show")` handler. The `agent list` handler no longer accepts `--id`. <!-- completed: -->
-- [ ] Update the `tmux.send_poll_trigger` keystroke literal in `cafleet/src/cafleet/tmux.py` from `cafleet --session-id <s> poll --agent-id <r>` to `cafleet --session-id <s> message poll --agent-id <r>`. <!-- completed: -->
-- [ ] Update the `CLAUDE.default_prompt_template` literal in `cafleet/src/cafleet/coding_agent.py` so the bash-routing reminder references `cafleet --session-id {session_id} message poll --agent-id {agent_id}` (was `... poll ...`). <!-- completed: -->
+- [x] Refactor `cafleet/src/cafleet/cli.py` to introduce `@cli.group()` decorators for `agent` and `message`. Move the existing flat-verb handlers under their new groups, applying rename-during-move atomically per the §14 mapping table: `agents` → `agent list`, `register` → `agent register`, `deregister` → `agent deregister`, `send` → `message send`, `broadcast` → `message broadcast`, `poll` → `message poll`, `ack` → `message ack`, `cancel` → `message cancel`, `get-task` → `message show`. Decorator changes + handler renames only; handler bodies unchanged. Hard-break — no Click aliases. <!-- completed: 2026-04-28T19:30 -->
+- [x] Rename the round-5c `cafleet bash-exec` handler to `cafleet member exec` — move the handler from a top-level `@cli.command()` to `@member.command("exec")`. Handler body unchanged. The `Bash(cafleet member exec *)` allow-rule entry follows from this rename. <!-- completed: 2026-04-28T19:30 -->
+- [x] Materialize `cafleet agent show --id <x>` as its own subcommand by extracting the existing `agents --id <x>` branch from the `agent list` handler (renamed in task 1) into a dedicated `agent.command("show")` handler. The `agent list` handler no longer accepts `--id`. <!-- completed: 2026-04-28T19:30 -->
+- [x] Update the `tmux.send_poll_trigger` keystroke literal in `cafleet/src/cafleet/tmux.py` from `cafleet --session-id <s> poll --agent-id <r>` to `cafleet --session-id <s> message poll --agent-id <r>`. <!-- completed: 2026-04-28T19:30 -->
+- [x] Update the `CLAUDE.default_prompt_template` literal in `cafleet/src/cafleet/coding_agent.py` so the bash-routing reminder references `cafleet --session-id {session_id} message poll --agent-id {agent_id}` (was `... poll ...`). <!-- completed: 2026-04-28T19:30 -->
 
 ### Step 13: Code — round-6 codex deprecation
 
 > **Atomic-landing instruction**: Steps 13 and 14 land atomically with Step 12 (same PR). Step 13's CODEX deletion breaks test imports until Step 14's test deletions land. See Step 12's atomic-landing note for the full PR-packaging guidance.
 
-- [ ] Delete `CODEX = CodingAgentConfig(...)` from `cafleet/src/cafleet/coding_agent.py`. Delete `CODING_AGENTS` registry and `get_coding_agent()` helper. The module collapses to `CodingAgentConfig` dataclass + a single `CLAUDE` instance. <!-- completed: -->
-- [ ] Remove the `--coding-agent` flag from `member_create` in `cafleet/src/cafleet/cli.py`. Remove the round-5c codex rejection branch. Member creation always uses `CLAUDE.build_command(...)` directly. <!-- completed: -->
-- [ ] Update the `FIXME(claude)` comment at `cafleet/src/cafleet/broker.py:17` to drop the codex env-var reference. <!-- completed: -->
+- [x] Delete `CODEX = CodingAgentConfig(...)` from `cafleet/src/cafleet/coding_agent.py`. Delete `CODING_AGENTS` registry and `get_coding_agent()` helper. The module collapses to `CodingAgentConfig` dataclass + a single `CLAUDE` instance. <!-- completed: 2026-04-28T19:30 -->
+- [x] Remove the `--coding-agent` flag from `member_create` in `cafleet/src/cafleet/cli.py`. Remove the round-5c codex rejection branch. Member creation always uses `CLAUDE.build_command(...)` directly. <!-- completed: 2026-04-28T19:30 -->
+- [x] Update the `FIXME(claude)` comment at `cafleet/src/cafleet/broker.py:17` to drop the codex env-var reference. <!-- completed: 2026-04-28T19:30 -->
 
 ### Step 14: Tests — round-6 restructure + codex deprecation
 

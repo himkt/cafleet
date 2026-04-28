@@ -1,4 +1,4 @@
-"""Coding-agent registry: parameterizes tmux spawn per backend."""
+"""Coding-agent spawn config."""
 
 import shutil
 from dataclasses import dataclass
@@ -41,48 +41,10 @@ CLAUDE = CodingAgentConfig(
         "Load Skill(cafleet). Your session_id is {session_id} and your agent_id is {agent_id}.\n"
         "You are a member of the team led by {director_name} ({director_agent_id}).\n"
         "Wait for instructions via "
-        "`cafleet --session-id {session_id} poll --agent-id {agent_id}`.\n"
+        "`cafleet --session-id {session_id} message poll --agent-id {agent_id}`.\n"
         "Your Bash tool is denied. Route any shell command through your Director —\n"
         "see Skill(cafleet) > Routing Bash via the Director for the bash_request JSON envelope."
     ),
     display_name_args=("--name",),
     disallow_tools_args=("--disallowedTools", "Bash"),
 )
-
-CODEX = CodingAgentConfig(
-    name="codex",
-    binary="codex",
-    extra_args=("--approval-mode", "auto-edit"),
-    default_prompt_template=(
-        "Your session_id is {session_id} and your agent_id is {agent_id}.\n"
-        "You are a member of the team led by {director_name} ({director_agent_id}).\n"
-        "Check for instructions using "
-        "`cafleet --session-id {session_id} poll --agent-id {agent_id}`.\n"
-        "Use `cafleet --session-id {session_id} ack --agent-id {agent_id} --task-id <id>` "
-        "to acknowledge messages\n"
-        "and `cafleet --session-id {session_id} send --agent-id {agent_id} "
-        '--to <id> --text "..."` to reply.\n'
-        "\n"
-        "When you need to run a shell command, do NOT use your shell tool directly. "
-        "Instead send a JSON\n"
-        "bash_request to your Director ({director_agent_id}) via `cafleet send`:\n"
-        '  {{"type":"bash_request","cmd":"<shell-command>","cwd":"<absolute-path>","reason":"<short-reason>"}}\n'
-        "Then poll for a bash_result reply correlated by in_reply_to == <your-send-task-id>."
-    ),
-    disallow_tools_args=(),
-)
-
-CODING_AGENTS: dict[str, CodingAgentConfig] = {
-    "claude": CLAUDE,
-    "codex": CODEX,
-}
-
-
-def get_coding_agent(name: str) -> CodingAgentConfig:
-    try:
-        return CODING_AGENTS[name]
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown coding agent '{name}'. "
-            f"Available: {', '.join(sorted(CODING_AGENTS))}"
-        ) from exc

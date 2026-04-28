@@ -104,7 +104,7 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
                 "-t",
                 target_pane_id,
                 "-l",
-                f"cafleet --session-id {session_id} poll --agent-id {agent_id}",
+                f"cafleet --session-id {session_id} message poll --agent-id {agent_id}",
             ],
             timeout=5,
         )

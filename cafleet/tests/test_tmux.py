@@ -104,26 +104,6 @@ class TestSplitWindow:
         assert captured_args[-2] == "claude"
         assert "Load Skill(cafleet)" in captured_args[-1]
 
-    def test_codex_style_command(self, monkeypatch):
-        captured_args = []
-
-        def mock_run(args):
-            captured_args.extend(args)
-            return "%10\n"
-
-        monkeypatch.setattr(tmux, "_run", mock_run)
-        tmux.split_window(
-            target_window_id="@3",
-            env={},
-            command=["codex", "--approval-mode", "auto-edit", "Do the task"],
-        )
-        assert captured_args[-4:] == [
-            "codex",
-            "--approval-mode",
-            "auto-edit",
-            "Do the task",
-        ]
-
     def test_env_vars_forwarded_as_flags(self, monkeypatch):
         """Only CAFLEET_DATABASE_URL is forwarded as -e KEY=VAL when set.
 
@@ -233,11 +213,11 @@ class TestCapturePane:
 
 class TestSendPollTrigger:
     def test_success_returns_true(self, monkeypatch):
-        """Design doc 0000023 (Copilot review fix): ``--session-id`` is a
-        root-group global option and MUST come before the subcommand;
-        ``--agent-id`` is a per-subcommand option and MUST come after
-        ``poll``. This ordering is what click's parser actually accepts and
-        is the literal string ``permissions.allow`` entries need to match.
+        """``--session-id`` is a root-group global option and MUST come
+        before the subcommand; ``--agent-id`` is a per-subcommand option
+        and MUST come after ``message poll``. This ordering is what click's
+        parser actually accepts and is the literal string
+        ``permissions.allow`` entries need to match.
         """
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
         captured_args = []
@@ -259,7 +239,7 @@ class TestSendPollTrigger:
             "-t",
             "%7",
             "-l",
-            "cafleet --session-id sess-001 poll --agent-id agent-001",
+            "cafleet --session-id sess-001 message poll --agent-id agent-001",
             "tmux",
             "send-keys",
             "-t",
@@ -315,6 +295,40 @@ class TestSendPollTrigger:
             agent_id="agent-001",
         )
         assert result is False
+
+
+class TestSendPollTriggerKeystroke:
+    """Regression guard against any future revert of the round-6 keystroke
+    rename (design 0000034 §14). The pushed keystroke MUST contain the
+    literal ``message poll`` — bare ``poll`` no longer parses, so a stale
+    keystroke would land in the member's pane and error out with
+    ``Error: No such command 'poll'``.
+    """
+
+    def test_keystroke_contains_message_poll(self, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
+        captured_args = []
+
+        def mock_run(args, **kwargs):
+            captured_args.extend(args)
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        tmux.send_poll_trigger(
+            target_pane_id="%0",
+            session_id="550e8400-e29b-41d4-a716-446655440000",
+            agent_id="7ba91234-5678-90ab-cdef-112233445566",
+        )
+        # The keystroke literal is the 6th element of the captured argv:
+        # ["tmux", "send-keys", "-t", <pane>, "-l", <keystroke>, ...].
+        keystroke = captured_args[5]
+        assert "message poll" in keystroke, (
+            f"keystroke must contain 'message poll', got: {keystroke!r}"
+        )
+        # Belt-and-suspenders: a bare ' poll ' with no preceding 'message'
+        # would slip through ``"message poll" in keystroke`` only if the
+        # literal contained both, so this is just a sanity check.
+        assert " poll --agent-id" in keystroke
 
 
 class TestPaneExists:

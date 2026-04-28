@@ -275,21 +275,20 @@ def split_window_recorder(monkeypatch):
 
 @pytest.fixture
 def stub_coding_agent_binaries(monkeypatch):
-    """Pretend every coding-agent binary is on PATH.
+    """Pretend the claude binary is on PATH.
 
     ``coding_agent_config.ensure_available()`` calls ``shutil.which(self.binary)``;
-    patching it module-wide is the narrowest monkeypatch that keeps both
-    ``claude`` and ``codex`` spawns alive without a real binary.
+    patching it module-wide is the narrowest monkeypatch that keeps the
+    spawn alive without a real binary.
     """
     monkeypatch.setattr("cafleet.coding_agent.shutil.which", lambda _: "/usr/bin/stub")
 
 
 class TestMemberCreatePassesDisplayName:
-    """Design doc 0000029 Step 4(f),(g): ``cli.py`` threads ``--name`` as
-    ``display_name`` into ``coding_agent_config.build_command()``, which
-    means the ``command`` kwarg handed to ``tmux.split_window`` contains
-    ``"--name"`` + the member name for ``claude`` spawns and does NOT
-    contain ``"--name"`` for ``codex`` spawns.
+    """``cli.py`` threads ``--name`` as ``display_name`` into
+    ``coding_agent_config.build_command()``, which means the ``command``
+    kwarg handed to ``tmux.split_window`` contains ``"--name"`` + the
+    member name.
     """
 
     def test_member_create_passes_member_name_as_display_name(
@@ -312,8 +311,6 @@ class TestMemberCreatePassesDisplayName:
                 "Drafter",
                 "--description",
                 "Drafter for PR #42",
-                "--coding-agent",
-                "claude",
                 "--",
                 "hello",
             ],
@@ -328,60 +325,12 @@ class TestMemberCreatePassesDisplayName:
         assert command[name_index + 2] == "hello"
         assert command[0] == "claude"
 
-    def test_member_create_codex_does_not_pass_name_flag(
-        self,
-        bootstrapped_session,
-        split_window_recorder,
-        stub_coding_agent_binaries,
-    ):
-        """Codex regression: ``codex`` has no ``--name`` equivalent today, so
-        ``display_name_args=()`` must elide the flag even when ``--name``
-        is supplied to ``cafleet member create`` (it is always required
-        at the CLI level — ``click.Option --name required=True``).
-        """
-        session_id, director_id, runner = bootstrapped_session
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "member",
-                "create",
-                "--agent-id",
-                director_id,
-                "--name",
-                "Drafter",
-                "--description",
-                "Drafter for PR #42",
-                "--coding-agent",
-                "codex",
-                "--",
-                "hello",
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        assert len(split_window_recorder) == 1
-        command = split_window_recorder[0]["command"]
-        assert "--name" not in command
-        assert command[0] == "codex"
-        assert "--approval-mode" in command
-        assert "auto-edit" in command
-
 
 class TestNoBashFlag:
-    """Step 4 task 1+2 (round-5c-era): ``--no-bash`` / ``--allow-bash`` flag pair.
+    """``--no-bash`` (default) / ``--allow-bash`` flag pair.
 
-    Per-coding-agent default resolution:
-    - claude unset → ``--no-bash`` (deny_bash=True), argv gains
-      ``--disallowedTools Bash``.
-    - claude ``--allow-bash`` → deny_bash=False, argv stays clean.
-    - codex ``--no-bash`` → CLI rejects with verbatim error, exits 1, no
-      broker rows are created.
-    - codex unset → ``--allow-bash`` (deny_bash=False), argv stays clean
-      (codex's empty ``disallow_tools_args`` makes deny_bash a no-op anyway).
-
-    Step 14 task 5 (round 6) prunes the codex sub-cases. Until then the four
-    sub-cases must coexist.
+    - Default → deny_bash=True; argv gains ``--disallowedTools Bash``.
+    - Explicit ``--allow-bash`` → deny_bash=False; argv stays clean.
     """
 
     def test_claude_default_appends_disallowed_tools_bash(
@@ -404,8 +353,6 @@ class TestNoBashFlag:
                 "Drafter",
                 "--description",
                 "Drafter for PR #42",
-                "--coding-agent",
-                "claude",
                 "--",
                 "hello",
             ],
@@ -443,8 +390,6 @@ class TestNoBashFlag:
                 "Drafter",
                 "--description",
                 "Drafter for PR #42",
-                "--coding-agent",
-                "claude",
                 "--allow-bash",
                 "--",
                 "hello",
@@ -457,55 +402,14 @@ class TestNoBashFlag:
         assert "Bash" not in command
         assert command[0] == "claude"
 
-    def test_codex_no_bash_rejected_with_verbatim_error_no_broker_rows(
-        self,
-        bootstrapped_session,
-        split_window_recorder,
-        stub_coding_agent_binaries,
-    ):
-        session_id, director_id, runner = bootstrapped_session
-        before = broker.list_agents(session_id)
-        before_count = len(before)
-        # Snapshot only — the bootstrap fixture creates the Director plus an
-        # Administrator agent; the rejection must not grow that count.
 
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "member",
-                "create",
-                "--agent-id",
-                director_id,
-                "--name",
-                "Drafter",
-                "--description",
-                "Drafter for PR #42",
-                "--coding-agent",
-                "codex",
-                "--no-bash",
-                "--",
-                "hello",
-            ],
-        )
-        assert result.exit_code == 1, result.output
-        # Verbatim error per design doc §6 round-5c text.
-        assert "--no-bash with --coding-agent codex is not supported" in result.output
-        assert "Codex has no --disallowedTools-equivalent flag" in result.output
-        assert "Use --allow-bash, or pick claude" in result.output
-        # No broker rows created — rejection happens before register_agent.
-        after = broker.list_agents(session_id)
-        assert len(after) == before_count, (
-            "Rejection must short-circuit before register_agent runs; "
-            f"agent count grew from {before_count} to {len(after)}"
-        )
-        # No tmux pane spawned either.
-        assert split_window_recorder == [], (
-            "Rejection must short-circuit before tmux.split_window runs"
-        )
+class TestCodingAgentFlagRemoved:
+    """Regression guard: the ``--coding-agent`` flag was removed in design
+    0000034 §15. Any value MUST fail with Click's default ``Error: No such
+    option: '--coding-agent'.`` (exit 2 — UsageError).
+    """
 
-    def test_codex_default_omits_disallowed_tools(
+    def test_coding_agent_flag_no_longer_parses(
         self,
         bootstrapped_session,
         split_window_recorder,
@@ -526,13 +430,12 @@ class TestNoBashFlag:
                 "--description",
                 "Drafter for PR #42",
                 "--coding-agent",
-                "codex",
+                "claude",
                 "--",
                 "hello",
             ],
         )
-        assert result.exit_code == 0, result.output
-        assert len(split_window_recorder) == 1
-        command = split_window_recorder[0]["command"]
-        assert "--disallowedTools" not in command
-        assert command[0] == "codex"
+        assert result.exit_code == 2, result.output
+        out = result.output or ""
+        assert "No such option" in out
+        assert "--coding-agent" in out
