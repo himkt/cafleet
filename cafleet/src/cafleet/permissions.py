@@ -9,6 +9,7 @@ Every call re-reads disk; nothing is cached.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -97,6 +98,10 @@ def load_bash_patterns(paths: list[Path]) -> tuple[list[Pattern], list[Pattern]]
     return all_allow, all_deny
 
 
+# Regex compilation cache — keyed by pattern body. Settings files and
+# Pattern objects are never cached (every safe-exec call re-reads disk),
+# but compiling the same body's regex on every match call is wasted work.
+@functools.lru_cache(maxsize=256)
 def _compile_body(body: str) -> re.Pattern[str]:
     if body == "*":
         return re.compile(".*", re.DOTALL)
