@@ -693,45 +693,31 @@ The CLI validates input (`--choice` is `IntRange(1, 3)`; `--freetext` rejects ne
 
 ## Routing Bash via the Director
 
-When a member is spawned via `cafleet member create --no-bash` (the default), its harness rejects every Bash call. To run a shell command, the member sends a **plain CAFleet message** to its Director asking for the command — no JSON envelope, no schema, no special structure. The Director (or operator at the Director's pane) decides whether to fulfill the request and responds by sending `! <command>` keystrokes into the member's pane via `cafleet member send-input`. Claude Code's `!` CLI shortcut handles execution natively — output appears in the member's pane prompt context for the model to read. No new broker primitives, no separate helper subcommand — just the existing message-passing + tmux-keystroke infrastructure.
+When a member is spawned via `cafleet member create --no-bash` (the default), its harness rejects every Bash call. To run a shell command, the member sends a plain CAFleet message to its Director, and the Director dispatches the command into the member's pane via `cafleet member send-input --bash` — Claude Code's `!` CLI shortcut handles execution natively. No new broker primitives, no separate helper subcommand: just the existing message-passing + tmux-keystroke infrastructure.
 
-### Member side: ask plainly
+The protocol has two perspectives. Read **only the file matching your role** — they contain different MUST/MUST-NOT rules and different command shapes:
 
-The member uses existing `cafleet message send` with a free-text request. Example:
+- **If you are a member** (spawned by `cafleet member create`, your Bash tool is denied) → read [`roles/member.md`](roles/member.md). Covers: when to send the CAFleet message, exact `cafleet message send` form, the strict `--no-bash` fallback when even `cafleet message send` is denied, and the forbidden behaviors (no Bash invoke, no fake `<bash-input>` markup, no fabrication, no silent stalling).
+- **If you are a Director** (you bootstrapped the session via `cafleet session create` and spawn members) → read [`roles/director.md`](roles/director.md). Covers: how to recognize a bash request in your inbox, the `cafleet member send-input --bash` dispatch, serialization (one request at a time in poll order), the cross-Director boundary, and why the Director's own commands do **not** route through this protocol.
 
-```bash
-cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
-  --to <director-agent-id> \
-  --text "Please run \`git log -1 --oneline\` for me — I want to verify the latest commit on main before opening a PR."
+### Member side: prefix every cafleet call with `!`
+
+Members spawned via `cafleet member create --no-bash` (the default) get `--disallowedTools "Bash"` appended to their argv, so the Bash tool itself is denied at the harness. To call `cafleet` from within the member, you MUST prefix the invocation with `! ` (literal exclamation + space) — Claude Code's `!` CLI shortcut is a separate primitive that runs the command in a shell *without* going through the Bash tool, and is therefore unaffected by the deny posture.
+
+Examples (member-initiated cafleet calls):
+
+```text
+! cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
+! cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <id> --text "..."
+! cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+! cafleet --session-id <session-id> message cancel --agent-id <my-agent-id> --task-id <task-id>
 ```
 
-The member then waits for either a follow-up CAFleet message from the Director or the `! <command>` output to land in its own pane (Claude Code prints the captured stdout/stderr inline after running `!`).
+Notes:
 
-### Director side: respond with `--bash` keystrokes
-
-When the Director's `cafleet message poll` surfaces a member message asking for a shell command, the Director (or operator) decides what to fulfill. To execute, the Director sends the command into the member's pane via `cafleet member send-input --bash`:
-
-```bash
-cafleet --session-id <session-id> member send-input \
-  --agent-id <director-agent-id> --member-id <member-agent-id> \
-  --bash "git log -1 --oneline"
-```
-
-The CLI prepends `! ` and appends `Enter` for you (two `tmux send-keys` calls: literal `! <command>`, then the `Enter` keystroke). Claude Code's `!` shortcut intercepts the line, runs the command via the harness's native CLI primitive (bypassing the Bash tool permission system), and prints the captured output back into the same pane. The member's next prompt iteration sees the output as context. `--bash` is mutually exclusive with `--choice` and `--freetext`; unlike `--freetext`, it does NOT prepend the AskUserQuestion `4` digit, so it works on any pane that is at the Claude Code input prompt.
-
-### Why this works
-
-- **Member's Bash tool is denied** (`--disallowedTools "Bash"`), so the member cannot execute shell commands itself.
-- **Claude Code's `!` shortcut is a separate primitive** from the Bash tool — `claude --disallowedTools "Bash"` does NOT disable the `!` CLI shortcut. The Director triggers it via `tmux send-keys`, which lands as keystrokes in the member's input prompt.
-- **Operator stays in control** at the Director's pane: every member shell-request surfaces as a plain message in the Director's inbox, and the Director (with the operator at the keyboard) chooses whether to fulfill it.
-
-### Cross-Director boundary
-
-The member should always address the request to its own `placement.director_agent_id`. Sending to any other agent ID in the same session is a misuse — the recipient does not know the convention. Cross-session leakage is prevented by the broker's existing session boundary.
-
-### Serialization
-
-Concurrent member requests serialize through the broker queue. The Director MUST process command-request messages one at a time in the order returned by `cafleet message poll` — read a request, send `! cmd` via `cafleet member send-input`, then move to the next message. Don't interleave or batch. The current poll order is newest-first, and that returned order is the serialization mechanism; no separate queueing primitive is needed.
+- The `!` shortcut is independent of the Bash-tool deny posture. Do NOT attempt to call `cafleet` via the Bash tool — it will be rejected. The CLAUDE spawn-prompt template (`cafleet/src/cafleet/coding_agent.py`) tells the spawned member this verbatim.
+- The broker's tmux push notification (`tmux.send_poll_trigger`) injects the keystroke pre-prefixed with `! ` (as of design 0000035), so when the broker pushes a poll trigger into the member's pane the LLM does not have to add the prefix itself. The prefix only matters when the member *initiates* a cafleet call (e.g., replying to the Director after processing a poll result, or acknowledging a task).
+- See [`design-docs/0000035-member-bash-whitelist/design-doc.md`](../../design-docs/0000035-member-bash-whitelist/design-doc.md) for the full record of why this is the convention. Three alternatives were smoke-tested in PR #37 (status quo `--disallowedTools "Bash"`, `--allowedTools "Bash(cafleet *)"`, and a `--settings` deny+allow scheme); none of them deliver a clean strict-allowlist via native Claude Code flags. Option A (the `!` prefix + better docs) was chosen for v1; Options B (PreToolUse hook) and C (proxy binary) remain in Future Work.
 
 ## Message Lifecycle
 

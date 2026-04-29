@@ -1,7 +1,7 @@
 # Member-side Bash whitelist (allow only `Bash(cafleet *)`)
 
 **Status**: Approved
-**Progress**: 4/7 tasks complete
+**Progress**: 7/7 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -10,10 +10,13 @@ CAFleet members today are spawned with `--disallowedTools "Bash"`, which removes
 
 ## Success Criteria
 
-- [ ] A spawned member can invoke `cafleet --session-id <s> message poll --agent-id <a>` via the Bash tool without permission prompt and without using the `!` shortcut.
-- [ ] The same member's attempt to invoke `Bash(echo test)` (or any non-cafleet pattern) is denied at the harness level, surfacing as a tool-use error rather than executing.
-- [ ] The member retains access to read-only and editing tools it needs (Read, Edit, Grep, Glob, etc.) — no other tool axis is restricted.
-- [ ] The existing `--bash` route via `cafleet member send-input --bash <cmd>` continues to work for Director-initiated shell execution (the `!` keystroke shortcut is independent of the Bash tool's allow/deny posture, but verify the integration end-to-end).
+The original criteria targeted a strict-allowlist outcome (cafleet calls allowed via the Bash tool, all other Bash denied). The smoke tests in §Background showed native Claude Code flags do not deliver that today — Option A (the `!` shortcut + better docs) was chosen instead. The criteria below describe what Option A actually ships.
+
+- [x] The CLAUDE spawn-prompt template documents the `!`-prefix requirement explicitly so the spawned member knows to prefix every cafleet call (poll/send/ack/cancel) with `! `, without having to discover the workaround on its own. Asserted by `tests/test_coding_agent.py::TestPromptTemplates::test_claude_template_documents_bang_prefix_for_cafleet`.
+- [x] The broker's tmux push notification (`tmux.send_poll_trigger`) injects the keystroke pre-prefixed with `! ` so members consuming a poll trigger do not have to add the prefix themselves. Asserted by `tests/test_tmux.py::TestSendPollTriggerKeystroke::test_keystroke_carries_bang_prefix_for_message_poll` and the full-argv equality in `TestSendPollTrigger::test_success_returns_true`.
+- [x] The member retains access to read-only and editing tools it needs (Read, Edit, Grep, Glob, etc.) — no other tool axis is restricted.
+- [x] The existing `--bash` route via `cafleet member send-input --bash <cmd>` continues to work for Director-initiated shell execution. The `!` shortcut is independent of the Bash-tool deny posture, so this path is unaffected by Option A.
+- [ ] **Deferred to Options B/C** (see Future Work): a strict-allowlist that lets the member invoke `cafleet *` via the Bash tool without the `!` prefix, AND that denies non-cafleet Bash patterns (`Bash(echo)`) at the harness level. Native Claude Code flags do not deliver this today; revisit when `--strict-allowedTools`-style support lands or when the `!` workaround proves insufficient in production.
 
 ---
 
@@ -101,9 +104,9 @@ Marginal benefit over Option A/B: clearer attack surface (only one binary need b
 
 ### Step 3: Documentation sweep
 
-- [ ] `skills/cafleet/SKILL.md` § Routing Bash via the Director — add a member-side subsection: members MUST prefix every cafleet call with `! ` because the Bash tool is denied; the `!` shortcut is independent of the Bash tool's allow/deny posture. <!-- completed: -->
-- [ ] `ARCHITECTURE.md` Bash Routing section — add the same `!` prefix requirement for member-side cafleet calls; clarify that the broker's tmux push notification injects `! cafleet message poll ...` (with prefix). <!-- completed: -->
-- [ ] `design-docs/0000034-member-bash-via-director/design-doc.md` — append a final Round 11 Changelog entry referencing design 0000035 as the resolution for the implicit-`!`-shortcut gap, and noting that Round 11 lands in PR #37 alongside the rest of the 0000034 work. <!-- completed: -->
+- [x] `skills/cafleet/SKILL.md` § Routing Bash via the Director — add a member-side subsection: members MUST prefix every cafleet call with `! ` because the Bash tool is denied; the `!` shortcut is independent of the Bash tool's allow/deny posture. <!-- completed: 2026-04-29T02:34 -->
+- [x] `ARCHITECTURE.md` Bash Routing section — add the same `!` prefix requirement for member-side cafleet calls; clarify that the broker's tmux push notification injects `! cafleet message poll ...` (with prefix). <!-- completed: 2026-04-29T02:34 -->
+- [x] `design-docs/0000034-member-bash-via-director/design-doc.md` — append a final Round 11 Changelog entry referencing design 0000035 as the resolution for the implicit-`!`-shortcut gap, and noting that Round 11 lands in PR #37 alongside the rest of the 0000034 work. <!-- completed: 2026-04-29T02:34 -->
 
 ---
 
