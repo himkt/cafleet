@@ -469,23 +469,68 @@ Output (`--json`):
 }
 ```
 
-### Member Safe-Exec
+### Member Exec
 
-Permission-aware bash dispatch. Every invocation re-reads three `settings.json` files and matches the inner CMD against the operator's `Bash(...)` allow / deny patterns. On allow, the inner CMD is keystroked into the member's pane via Claude Code's `!` shortcut. On deny or unmatched ("ask"), nothing is keystroked. This is the Director-side dispatch primitive used by [Routing Bash via the Director](#routing-bash-via-the-director).
+Bare bash dispatch. Keystrokes `! CMD` + `Enter` into the member's pane after authorization and pre-flight validation. NO internal permission decision — the outer Bash hook layer (Claude Code's `permissions.ask` on the Director's invocation, configured via `Bash(cafleet --session-id * member exec *)` in the operator's `permissions.ask`) is the operator-confirmation surface. This is the smart-routing fallback used when [Member Safe-Exec](#member-safe-exec) returns exit 3 (ask). See [Routing Bash via the Director](#routing-bash-via-the-director) for the smart-routing rule that wraps both subcommands.
 
 ```bash
-cafleet --session-id <session-id> member safe-exec --agent-id <director-agent-id> \
-  --member-id <member-agent-id> --bash "git log -1 --oneline"
+cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \
+  --member-id <member-agent-id> "git log -1 --oneline"
 
-cafleet --session-id <session-id> --json member safe-exec --agent-id <director-agent-id> \
-  --member-id <member-agent-id> --bash "git log -1 --oneline"
+cafleet --session-id <session-id> --json member exec --agent-id <director-agent-id> \
+  --member-id <member-agent-id> "git log -1 --oneline"
 ```
 
-| Flag | Required | Notes |
+| Flag / Argument | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | The target member's agent ID |
-| `--bash` | yes | Shell command to dispatch. Sent to the pane as `! <command>` + `Enter` after the permission decision allows it. The only input flag on this subcommand. Empty strings and newlines are rejected with Click `UsageError` (exit 2). |
+| `CMD` (positional) | yes | Shell command to dispatch. Sent to the pane as `! CMD` + `Enter`. Newlines are rejected before strip; whitespace-only strings fail the post-strip empty check. |
+
+#### Exit codes
+
+| Outcome | Stdout | Stderr | Exit |
+|---|---|---|---|
+| dispatched | `Sent bash command '<cmd>' to member <name> (<pane>).` | (empty) | 0 |
+| empty / whitespace-only `CMD` | (empty) | `Error: command may not be empty.` (Click `UsageError`) | 2 |
+| `CMD` containing `\n` or `\r` | (empty) | `Error: command may not contain newlines.` (Click `UsageError`) | 2 |
+| Missing positional `CMD` | (empty) | Click default `Error: Missing argument 'COMMAND'.` | 2 |
+| Cross-Director / pending pane / send failure / tmux unavailable | (empty) | existing wording (mirrors `member send-input` / `member safe-exec`) | 1 |
+
+`exec` never emits exit 3 — it has no internal ask path. Authorization, pre-flight validation, and tmux send paths are identical to `safe-exec`; the only difference is that `exec` skips the `permissions.decide` call entirely.
+
+#### JSON output
+
+`cafleet --json member exec CMD` emits a four-key payload mirroring the legacy `member send-input --bash` shape:
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "action": "bash",
+  "value": "<command as-sent>"
+}
+```
+
+`action` is the literal string `"bash"`. `value` is the dispatched command verbatim (after pre-flight strip).
+
+### Member Safe-Exec
+
+Permission-aware bash dispatch. Every invocation re-reads three `settings.json` files and matches the inner CMD against the operator's `Bash(...)` allow / deny patterns. On allow, the inner CMD is keystroked into the member's pane via Claude Code's `!` shortcut. On deny or unmatched ("ask"), nothing is keystroked. This is the Director-side dispatch primitive used by [Routing Bash via the Director](#routing-bash-via-the-director). The operator typically grants `Bash(cafleet --session-id * member safe-exec *)` to `permissions.allow` so safe-exec runs silently and only the inner CMD decision matters.
+
+```bash
+cafleet --session-id <session-id> member safe-exec --agent-id <director-agent-id> \
+  --member-id <member-agent-id> "git log -1 --oneline"
+
+cafleet --session-id <session-id> --json member safe-exec --agent-id <director-agent-id> \
+  --member-id <member-agent-id> "git log -1 --oneline"
+```
+
+| Flag / Argument | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
+| `--member-id` | yes | The target member's agent ID |
+| `CMD` (positional) | yes | Shell command to dispatch. Sent to the pane as `! CMD` + `Enter` after the permission decision allows it. Newlines are rejected before strip; whitespace-only strings fail the post-strip empty check. Identical pre-flight to [`member exec`](#member-exec). |
 
 #### Three-file discovery
 
@@ -525,7 +570,7 @@ Patterns are converted to anchored regex via `re.fullmatch`. The trailing form d
 
 #### JSON output
 
-`cafleet --json member safe-exec --bash CMD` emits the same five-key payload for all three outcomes (allow on stdout; deny / ask on stderr):
+`cafleet --json member safe-exec CMD` emits the same five-key payload for all three outcomes (allow on stdout; deny / ask on stderr — the JSON branch follows the same stream as the text branch):
 
 ```json
 {
@@ -766,11 +811,22 @@ The CLI validates input (`--choice` is `IntRange(1, 3)`; `--freetext` rejects ne
 
 Members spawn with `--permission-mode dontAsk` — the Bash tool is enabled and permission prompts auto-resolve, so a member runs cafleet (and any other shell command) directly via the Bash tool. No prefix, no Director routing required by default.
 
-The bash-via-Director protocol is the **fallback when the Claude Code harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). In that case the member auto-routes: it sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via `cafleet member safe-exec --bash CMD` — a permission-aware dispatcher that re-reads the operator's `Bash(...)` allow / deny patterns from three `settings.json` files and only keystrokes the inner CMD when an allow pattern matches. Claude Code's `!` CLI shortcut handles execution natively on the receiving side. No new broker primitives — just the existing message-passing infrastructure plus the new `safe-exec` subcommand.
+The bash-via-Director protocol is the **fallback when the Claude Code harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). In that case the member auto-routes: it sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via one of two sibling subcommands — `cafleet member safe-exec CMD` (silent fast-path) or `cafleet member exec CMD` (operator-prompted fallback). Both keystroke `! CMD` + `Enter` into the member pane on success and trigger Claude Code's `!` CLI shortcut. No new broker primitives — just the existing message-passing infrastructure plus the two `member exec` / `member safe-exec` subcommands.
 
 Before routing, the member MUST reconsider the command. Most denials happen because the underlying command is wrong — wrong flag, wrong path, or unnecessary altogether. Fix the command first; only route a command that is genuinely correct AND genuinely needed AND still rejected by the harness.
 
-### Three-file discovery
+### Smart-routing rule (Director-side)
+
+The Director picks between `safe-exec` and `exec` using a check-then-fallback rule:
+
+1. **Try `cafleet member safe-exec ... CMD` first.** Capture exit code.
+2. If exit 0 (allow) → command was already dispatched silently. Done. Acknowledge to the requesting member.
+3. If exit 2 (deny) → relay the named pattern + file + offending command from stderr to the operator. Do not retry. The deny rule is intentional.
+4. If exit 3 (ask) → fall back to `cafleet member exec ... CMD`. The outer Bash hook layer prompts the operator (configured via `Bash(cafleet --session-id * member exec *)` in the operator's `permissions.ask`); on accept the command dispatches (exit 0) and on cancel the operator declines.
+
+This routes routine pre-rule'd commands through the silent fast-path while everything else surfaces as per-call operator confirmation. The operator does not have to maintain a comprehensive allow list — unknown commands surface as outer-layer prompts via `exec`.
+
+### Three-file discovery (safe-exec only)
 
 `safe-exec` consults three `settings.json` files on every call (no caching):
 
@@ -778,9 +834,9 @@ Before routing, the member MUST reconsider the command. Most denials happen beca
 2. `<cwd>/.claude/settings.json` — project shared
 3. `$CLAUDE_CONFIG_DIR/settings.json` if the env var is set, else `~/.claude/settings.json` — user
 
-Allow lists are unioned across all three files; deny lists are unioned across all three files. Deny is checked first, so deny wins on any conflict. Missing files are treated as empty documents. Non-`Bash(...)` entries are silently filtered out. `permissions.ask` is ignored — `safe-exec` has its own ask path.
+Allow lists are unioned across all three files; deny lists are unioned across all three files. Deny is checked first, so deny wins on any conflict. Missing files are treated as empty documents. Non-`Bash(...)` entries are silently filtered out. `permissions.ask` is ignored — `safe-exec` has its own ask path. `exec` performs no settings discovery; it is a bare dispatcher.
 
-### Tri-state outcome and exit codes
+### Tri-state outcome and exit codes (safe-exec)
 
 | Outcome | Behavior | Exit |
 |---|---|---|
@@ -788,14 +844,14 @@ Allow lists are unioned across all three files; deny lists are unioned across al
 | **deny** | Inner CMD matches a `Bash(...)` deny pattern. CMD is NOT dispatched. Stderr names the matched pattern, the file it came from, and the offending command. | 2 |
 | **ask** | No allow pattern matches. CMD is NOT dispatched. Stderr lists the three searched files and a suggested `Bash(<first-token>:*)` pattern the operator can add. | 3 |
 
-Exit 1 is reserved for runtime / IO / authorization failures (cross-Director, pending pane, malformed settings JSON, send failure, tmux unavailable). See the [Member Safe-Exec](#member-safe-exec) command reference for the full flag table, JSON schema, and glob-matcher details.
+`exec` exits 0 on dispatch, 2 on validation failure (empty / whitespace-only / newline / missing CMD), 1 on authorization or IO failure. `exec` never emits exit 3 — it has no internal ask path. Exit 1 is reserved for runtime / IO / authorization failures (cross-Director, pending pane, malformed settings JSON [safe-exec only], send failure, tmux unavailable). See the [Member Safe-Exec](#member-safe-exec) and [Member Exec](#member-exec) command references for the full flag tables, JSON schemas, and (safe-exec) glob-matcher details.
 
 ### Two role perspectives
 
 The fallback has two perspectives. Read **only the file matching your role**:
 
 - **If you are a member** (spawned by `cafleet member create`) → read [`roles/member.md`](roles/member.md). Covers: the default "run it yourself via Bash" path, the reconsider-then-route protocol when Bash is denied, and forbidden behaviors (no fake `<bash-input>` markup, no fabrication, no silent stalling, no operator-routing-prompts).
-- **If you are a Director** (you bootstrapped the session via `cafleet session create` and spawn members) → read [`roles/director.md`](roles/director.md). Covers: how to recognize a member's denial-fallback request, the `cafleet member safe-exec --bash` dispatch, serialization (one request at a time in poll order), and the cross-Director boundary. Includes guidance on relaying deny / ask outcomes back to the operator so the operator can either correct the command or amend `settings.json`.
+- **If you are a Director** (you bootstrapped the session via `cafleet session create` and spawn members) → read [`roles/director.md`](roles/director.md). Covers: how to recognize a member's denial-fallback request, the smart-routing rule (try `safe-exec` first, fall back to `exec` on ask), the `cafleet member safe-exec` and `cafleet member exec` dispatches, serialization (one request at a time in poll order), and the cross-Director boundary. Includes guidance on relaying deny outcomes back to the operator so the operator can correct the command or amend `settings.json`.
 
 ## Message Lifecycle
 

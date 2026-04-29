@@ -1005,7 +1005,7 @@ def _emit_safe_exec_output(
             "offending_substring": decision.offending_substring,
             "searched_files": [str(p) for p in decision.searched_files],
         }
-        click.echo(output.format_json(payload))
+        click.echo(output.format_json(payload), err=decision.outcome != "allow")
         return
 
     if decision.outcome == "allow":
@@ -1032,18 +1032,92 @@ def _emit_safe_exec_output(
         )
 
 
+def _emit_exec_output(
+    ctx: click.Context,
+    member_id: str,
+    pane_id: str,
+    member_name: str,
+    command: str,
+) -> None:
+    if ctx.obj["json_output"]:
+        click.echo(
+            output.format_json(
+                {
+                    "member_agent_id": member_id,
+                    "pane_id": pane_id,
+                    "action": "bash",
+                    "value": command,
+                }
+            )
+        )
+    else:
+        click.echo(
+            f"Sent bash command {command!r} to member {member_name} ({pane_id})."
+        )
+
+
+def _validate_dispatch_command(command: str) -> str:
+    """Reject newlines, then strip, then reject empty. Shared by exec / safe-exec."""
+    if "\n" in command or "\r" in command:
+        raise click.UsageError("command may not contain newlines.")
+    stripped = command.strip()
+    if stripped == "":
+        raise click.UsageError("command may not be empty.")
+    return stripped
+
+
+@member.command("exec")
+@click.option("--agent-id", required=True, help="Director's agent ID")
+@click.option("--member-id", required=True, help="Target member's agent ID")
+@click.argument("command")
+@click.pass_context
+def member_exec(ctx, agent_id, member_id, command):
+    """Bare bash dispatch into a member pane (no internal permission check).
+
+    The outer Bash hook layer (Claude Code's ``permissions.ask`` on the
+    Director's invocation) is the operator-confirmation surface. Use
+    ``safe-exec`` for the silent fast-path when the operator has already
+    rule'd the command.
+    """
+    _require_session_id(ctx)
+    session_id = ctx.obj["session_id"]
+
+    command = _validate_dispatch_command(command)
+
+    try:
+        tmux.ensure_tmux_available()
+    except tmux.TmuxError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    target, placement = _load_authorized_member(
+        session_id,
+        agent_id,
+        member_id,
+        placement_missing_msg=(
+            f"agent {member_id} has no placement row; it was not "
+            f"spawned via `cafleet member create`."
+        ),
+    )
+    pane_id = placement["tmux_pane_id"]
+    if pane_id is None:
+        raise click.ClickException(
+            f"member {member_id} has no pane yet (pending placement) — nothing to send."
+        )
+
+    try:
+        tmux.send_bash_command(target_pane_id=pane_id, command=command)
+    except tmux.TmuxError as exc:
+        raise click.ClickException(f"send failed: {exc}") from exc
+
+    _emit_exec_output(ctx, member_id, pane_id, target["name"], command)
+
+
 @member.command("safe-exec")
 @click.option("--agent-id", required=True, help="Director's agent ID")
 @click.option("--member-id", required=True, help="Target member's agent ID")
-@click.option(
-    "--bash",
-    "bash_command",
-    type=str,
-    required=True,
-    help="Shell command to dispatch via the member's `!` shortcut after permission decision.",
-)
+@click.argument("command")
 @click.pass_context
-def member_safe_exec(ctx, agent_id, member_id, bash_command):
+def member_safe_exec(ctx, agent_id, member_id, command):
     """Permission-aware bash dispatch into a member pane.
 
     Matches the inner CMD against the operator's ``Bash(...)`` allow / deny
@@ -1053,10 +1127,7 @@ def member_safe_exec(ctx, agent_id, member_id, bash_command):
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
-    if bash_command == "":
-        raise click.UsageError("--bash command may not be empty.")
-    if "\n" in bash_command or "\r" in bash_command:
-        raise click.UsageError("--bash command may not contain newlines.")
+    command = _validate_dispatch_command(command)
 
     try:
         tmux.ensure_tmux_available()
@@ -1079,21 +1150,22 @@ def member_safe_exec(ctx, agent_id, member_id, bash_command):
         )
 
     paths = permissions.discover_settings_paths()
-    decision = permissions.decide(bash_command, paths)
+    try:
+        decision = permissions.decide(command, paths)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     if decision.outcome == "allow":
         try:
-            tmux.send_bash_command(target_pane_id=pane_id, command=bash_command)
+            tmux.send_bash_command(target_pane_id=pane_id, command=command)
         except tmux.TmuxError as exc:
             raise click.ClickException(f"send failed: {exc}") from exc
         _emit_safe_exec_output(
-            ctx, decision, member_id, pane_id, target["name"], bash_command
+            ctx, decision, member_id, pane_id, target["name"], command
         )
         return
 
-    _emit_safe_exec_output(
-        ctx, decision, member_id, pane_id, target["name"], bash_command
-    )
+    _emit_safe_exec_output(ctx, decision, member_id, pane_id, target["name"], command)
     if decision.outcome == "deny":
         ctx.exit(2)
     else:

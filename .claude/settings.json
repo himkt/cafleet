@@ -35,7 +35,9 @@
       "Bash(mise build)",
       "Bash(mise build *)"
     ],
-    "ask": []
+    "ask": [
+      "Bash(cafleet --session-id * member exec *)"
+    ]
   },
   "enabledPlugins": {
     "cafleet@cafleet": true

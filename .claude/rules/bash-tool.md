@@ -47,9 +47,14 @@ cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
   --text "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
 ```
 
-Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member safe-exec --bash <command>`, which checks the inner CMD against the operator's `permissions.allow` / `permissions.deny` patterns and — when the decision is allow — keystrokes `! <command>` + Enter into your pane via Claude Code's `!` shortcut. The captured stdout/stderr lands in your next-turn context. If the Director-side decision is deny or ask, no keystroke lands and the Director relays the rejection (or operator-pattern suggestion) to you.
+Then **wait** for the `! <command>` output to land in your pane. The Director picks between two dispatch primitives via the smart-routing rule:
 
-If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member safe-exec --bash <command>` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
+1. The Director first runs `cafleet member safe-exec ... <command>`. `safe-exec` re-reads the operator's three-layer `permissions.allow` / `permissions.deny` rules and either (exit 0) keystrokes `! <command>` + Enter into your pane via Claude Code's `!` shortcut, (exit 2) reports the matched deny pattern to you, or (exit 3) emits an "ask" outcome.
+2. On exit 3 (ask), the Director falls back to `cafleet member exec ... <command>`. `exec` is bare dispatch — it does NOT consult the operator's allow/deny rules. Instead, the OUTER Bash hook fires `permissions.ask` against `Bash(cafleet --session-id * member exec *)`, prompting the operator to confirm THIS specific dispatch. If the operator accepts, `exec` keystrokes `! <command>` into your pane. If the operator declines, the prompt is denied and `exec` never runs.
+
+The captured stdout/stderr lands in your next-turn context regardless of which dispatch primitive ran. If the decision is deny (safe-exec exit 2) or the operator declines the outer ask, no keystroke lands and the Director relays the rejection to you.
+
+If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member safe-exec <command>` (or `cafleet member exec <command>` for unrules'd commands) from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
 
 ### Why no operator-prompts-for-routing
 
@@ -65,12 +70,28 @@ The Bash tool is the entry point for every shell-execution request. If you can p
 
 ## Director side (for completeness)
 
-If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you. In that case, dispatch the requested command via:
+If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you. Dispatch the requested command using the smart-routing rule — try `safe-exec` first, fall back to `exec` on ask:
 
 ```bash
+# Step 1: try the permission-aware fast path.
 cafleet --session-id <session-id> member safe-exec \
   --agent-id <director-agent-id> --member-id <member-agent-id> \
-  --bash "<command>"
+  "<command>"
+
+# safe-exec exit codes:
+#   0 → allow (command keystroked into member pane). Done. Acknowledge to the requesting member.
+#   2 → deny (matched deny pattern named in stderr). Relay rejection to the member. Do NOT retry.
+#   3 → ask (no allow rule covers this command). Fall through to step 2.
+
+# Step 2: on ask, fall back to the operator-confirmed path.
+cafleet --session-id <session-id> member exec \
+  --agent-id <director-agent-id> --member-id <member-agent-id> \
+  "<command>"
+
+# exec triggers Claude Code's outer permissions.ask prompt against
+# Bash(cafleet --session-id * member exec *). If the operator accepts,
+# exec keystrokes ! <command> into the member pane (exit 0). If the
+# operator declines, the outer prompt is denied and exec never runs.
 ```
 
-`safe-exec` re-reads the operator's three-layer `settings.json` (project-local → project → user) on every invocation and exits with a tri-state outcome: `0` allow (command keystroked into the member pane), `2` deny (named pattern + source file in stderr), `3` ask (no allow rule yet — relay the suggested `Bash(...)` pattern to the operator and ask them to add it to `settings.json` before retrying). See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full protocol, serialization rules, and cross-Director boundary.
+`safe-exec` re-reads the operator's three-layer `settings.json` (project-local → project → user) on every invocation and gives a tri-state outcome (allow / deny / ask) based on the operator's persistent `Bash(...)` rules. `exec` is bare dispatch with NO internal permission check — it relies entirely on the OUTER Bash hook layer (`permissions.ask` against the configured `Bash(cafleet --session-id * member exec *)` pattern) to confirm each invocation with the operator. Use `safe-exec` for routine allow-listed commands (silent, no operator interruption), `exec` for everything else (operator confirms once per dispatch). See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full protocol, serialization rules, and cross-Director boundary.

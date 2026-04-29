@@ -144,9 +144,10 @@ def send_freetext_and_submit(*, target_pane_id: str, text: str) -> None:
 def send_bash_command(*, target_pane_id: str, command: str) -> None:
     """Send ``! <command>`` + Enter as two separate send-keys calls.
 
-    Used by ``cafleet member safe-exec --bash`` to route shell commands
-    via Claude Code's ``!`` shortcut. Unlike ``send_freetext_and_submit``,
-    there is NO leading ``4`` keystroke (no AskUserQuestion gate).
+    Used by ``cafleet member exec`` and ``cafleet member safe-exec`` to
+    route shell commands via Claude Code's ``!`` shortcut. Unlike
+    ``send_freetext_and_submit``, there is NO leading ``4`` keystroke
+    (no AskUserQuestion gate).
     """
     normalized_command = command.strip()
     if not normalized_command:

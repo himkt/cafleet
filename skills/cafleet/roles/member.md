@@ -65,9 +65,9 @@ cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
   --text "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
 ```
 
-Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member safe-exec --bash <command>` — a permission-aware dispatcher that re-reads the operator's `Bash(...)` allow / deny patterns from three `settings.json` files and, on allow, keystrokes `! <command>` + Enter into your pane to trigger Claude Code's `!` CLI shortcut. The captured stdout/stderr lands in your next-turn context. On deny or ask the Director will message you back with the reason — keep waiting on the message channel, do not retry blindly.
+Then **wait** for the `! <command>` output to land in your pane. The Director runs a smart-routing rule: try `cafleet member safe-exec <command>` first (silent fast-path that re-reads the operator's `Bash(...)` allow / deny patterns); on exit 0 the command was dispatched silently and `! <command>` output lands in your next-turn context. On exit 2 (deny) the Director relays the rejection to you via a CAFleet message — do not retry. On exit 3 (ask) the Director falls back to `cafleet member exec <command>`, which surfaces the operator's outer-layer `permissions.ask` prompt and, on accept, dispatches the command. Either way: keep waiting on the message channel and your pane — do not retry blindly.
 
-If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member safe-exec --bash <command>` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
+If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member safe-exec <command>` (or `cafleet member exec <command>` if safe-exec asks) from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
 
 ### Why no operator-prompts-for-routing
 

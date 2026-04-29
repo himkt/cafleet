@@ -1,7 +1,7 @@
 # Permission-aware shell dispatch via `cafleet member safe-exec`
 
 **Status**: Approved
-**Progress**: 19/20 tasks complete
+**Progress**: 28/29 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -25,6 +25,10 @@ Replace the always-permitted `cafleet member send-input --bash` dispatch with a 
 - [x] Documentation is updated FIRST per `.claude/rules/design-doc-numbering.md`. The full target list is enumerated in Implementation Step 1.
 - [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck` all pass.
 - [x] `.claude/settings.json` removes the three obsolete `ask` entries that scoped the old `--bash` flag and adds `Bash(cafleet --session-id * member safe-exec *)` to `allow`.
+- [ ] `cafleet member exec CMD` exists as a new Director-only subcommand with a single positional `CMD` argument. It validates (empty, newline) and dispatches via `tmux.send_bash_command` without consulting `permissions.discover_settings_paths`. Exit 0 on success.
+- [ ] Both `exec` and `safe-exec` use a positional `CMD` argument — neither subcommand exposes a `--bash` flag. `safe-exec` rejects the old `--bash` form with Click's default `No such option` error.
+- [ ] `.claude/settings.json` adds `Bash(cafleet --session-id * member exec *)` to `permissions.ask` so each Director-side `exec` invocation prompts the operator at the outer Bash hook layer.
+- [ ] The Director-side bash-via-Director smart-routing rule is documented in `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md`, and `.claude/rules/bash-tool.md`: try `safe-exec` first; on exit 0 done, on exit 2 relay rejection, on exit 3 fall back to `exec` (which outer-prompts).
 
 ---
 
@@ -54,26 +58,39 @@ This design moves the inner-CMD permission decision from "always prompt" to "mat
 
 ### 1. Subcommand surface
 
-Two CLI changes are coupled into one design:
+Three CLI changes are coupled into one design:
 
 | Change | Before | After |
 |---|---|---|
 | Existing `member send-input` | accepts `--choice`, `--freetext`, `--bash` (mutually exclusive) | accepts `--choice`, `--freetext` (mutually exclusive). `--bash` is removed entirely — Click rejects the old form with `No such option`. |
-| New `member safe-exec` | does not exist | accepts `--bash CMD` (the only input flag on this subcommand). Director-only. Permission-aware dispatch. |
+| New `member exec` | does not exist | accepts a single positional `CMD` argument. Director-only. **Bare dispatch**: validates and dispatches the keystroke without any internal permission check. The outer Bash hook layer (Claude Code's `permissions.ask` on the Director's invocation) is the operator-confirmation surface. |
+| New `member safe-exec` | does not exist | accepts a single positional `CMD` argument. Director-only. **Permission-aware dispatch**: re-reads the operator's three-layer `settings.json` allow/deny rules and decides allow / deny / ask for the inner CMD. The outer Bash hook layer auto-allows so the operator is not double-prompted. |
 
-There is no aliasing, no deprecation period, no wrapper-shim retaining the old name. Per `.claude/rules/removal.md`, every literal mention of the old `--bash` flag on `cafleet member send-input` is removed in the same change set. **Callers must rewrite to `cafleet member safe-exec --bash CMD`. No migration shim, no deprecation period — the old form starts erroring immediately on merge.**
+Both new subcommands take `CMD` as a positional argument (no `--bash` flag) since shell dispatch is the single purpose. There is no aliasing, no deprecation period, no wrapper-shim retaining the old `member send-input --bash` form. Per `.claude/rules/removal.md`, every literal mention of the old `--bash` flag on `cafleet member send-input` is removed in the same change set. **Callers must rewrite to `cafleet member safe-exec CMD` (silent when allow-listed) or `cafleet member exec CMD` (operator-confirmed). The old form starts erroring immediately on merge.**
 
-### 2. `cafleet member safe-exec` constraints
+### 1.5 Picking exec vs safe-exec — Director-side smart routing
 
-The full Click signature and handler body live in §4 (single source of truth). This section captures the input-validation contract.
+When the bash-via-Director protocol fires (a member's harness denies a Bash invocation and the member auto-routes by sending a plain CAFleet message asking the Director to run a command), the Director picks between `exec` and `safe-exec` using a check-then-fallback rule:
+
+1. **Try `cafleet member safe-exec ... CMD` first.** Capture exit code.
+2. If exit 0 (allow) → command was already dispatched silently. Done. Acknowledge to the requesting member.
+3. If exit 2 (deny) → relay the named pattern + file + offending command from stderr to the operator. Do not retry. The deny rule is intentional.
+4. If exit 3 (ask) → no allow rule covers this command. Fall back to `cafleet member exec ... CMD`. The outer Bash hook (`permissions.ask` against the three `Bash(cafleet --session-id * member exec * ...)` patterns) prompts the operator. If the operator accepts, `exec` dispatches and exits 0. If the operator declines, the prompt is denied and `exec` never runs.
+5. If `exec` exits non-zero (auth, IO, tmux failure), relay the error to the requesting member.
+
+This gives both behaviors a place: `safe-exec` is the silent fast-path for routine commands the operator has rule'd; `exec` is the explicit confirm-each-time path for everything else. The operator does not have to maintain a comprehensive allow list — unknown commands surface as outer-layer prompts via `exec`.
+
+### 2. `cafleet member exec` and `cafleet member safe-exec` constraints
+
+The full Click signatures and handler bodies live in §4 (single source of truth). Both subcommands share the same input-validation and authorization contract; the only behavioral difference is the internal permission check (`safe-exec` consults `permissions.decide`; `exec` does not).
 
 | Constraint | Behavior |
 |---|---|
-| Empty `--bash ""` | Reject before permission check: `Error: --bash command may not be empty.` (exit 2). |
-| `--bash` containing `\n` or `\r` | Reject before permission check: `Error: --bash command may not contain newlines.` (exit 2). |
-| Cross-Director (`placement.director_agent_id != agent_id`) | Reject with existing `_load_authorized_member` wording (exit 1). |
-| Pending placement (`placement.tmux_pane_id is None`) | Reject with existing wording (exit 1). |
-| Compound CMD (pipes, `&&`, `;`, `$(...)`, backticks) | NOT special-cased. Treated as opaque string and matched as-is against patterns. The outer Bash hook layer (`validate_bash.py` and Claude Code's own permission system on the Director's `cafleet member safe-exec ...` invocation) is the layer that catches compound commands before they reach `safe-exec`. `safe-exec` does not enforce or detect them. |
+| Empty `CMD` (`""`) | Reject before any other work: `Error: command may not be empty.` (exit 2). |
+| `CMD` containing `\n` or `\r` | Reject before any other work: `Error: command may not contain newlines.` (exit 2). |
+| Cross-Director (`placement.director_agent_id != agent_id`) | Reject with existing `_load_authorized_member` wording (exit 1). Identical for both subcommands. |
+| Pending placement (`placement.tmux_pane_id is None`) | Reject with existing wording (exit 1). Identical for both subcommands. |
+| Compound CMD (pipes, `&&`, `;`, `$(...)`, backticks) | NOT special-cased. Treated as opaque string. The outer Bash hook layer (`validate_bash.py` and Claude Code's own permission system on the Director's invocation) is the layer that catches compound commands before they reach either subcommand. Neither subcommand enforces or detects them. |
 
 ### 3. Permission discovery (`cafleet/src/cafleet/permissions.py`)
 
@@ -205,26 +222,72 @@ Algorithm:
 
 Deny-wins is enforced by checking deny BEFORE allow. The order between deny patterns within the deny set does not matter for the binary outcome; the first matching deny is reported as the named pattern.
 
-### 4. CLI surface for `safe-exec`
+### 4. CLI surface for `exec` and `safe-exec`
+
+Both subcommands take a single positional `CMD` argument — there is no `--bash` flag because shell dispatch is the sole purpose. The shared pre-flight validation and authorization stages are identical; only the body diverges.
+
+#### 4.1 `cafleet member exec CMD`
+
+```python
+@member.command("exec")
+@click.option("--agent-id", required=True)
+@click.option("--member-id", required=True)
+@click.argument("command")
+@click.pass_context
+def member_exec(ctx, agent_id, member_id, command):
+    """Bare bash dispatch into a member pane (no internal permission check)."""
+    _require_session_id(ctx)
+    session_id = ctx.obj["session_id"]
+
+    # Pre-flight validation (shared with safe-exec)
+    if command == "":
+        raise click.UsageError("command may not be empty.")
+    if "\n" in command or "\r" in command:
+        raise click.UsageError("command may not contain newlines.")
+
+    tmux.ensure_tmux_available()
+
+    target, placement = _load_authorized_member(
+        session_id, agent_id, member_id,
+        placement_missing_msg=(
+            f"agent {member_id} has no placement row; it was not "
+            f"spawned via `cafleet member create`."
+        ),
+    )
+    pane_id = placement["tmux_pane_id"]
+    if pane_id is None:
+        raise click.ClickException(
+            f"member {member_id} has no pane yet (pending placement) — nothing to send."
+        )
+
+    try:
+        tmux.send_bash_command(target_pane_id=pane_id, command=command)
+    except tmux.TmuxError as exc:
+        raise click.ClickException(f"send failed: {exc}") from exc
+
+    _emit_exec_output(ctx, member_id, pane_id, target["name"], command)
+```
+
+#### 4.2 `cafleet member safe-exec CMD`
 
 ```python
 @member.command("safe-exec")
 @click.option("--agent-id", required=True)
 @click.option("--member-id", required=True)
-@click.option("--bash", "bash_command", required=True)
+@click.argument("command")
 @click.pass_context
-def member_safe_exec(ctx, agent_id, member_id, bash_command):
+def member_safe_exec(ctx, agent_id, member_id, command):
+    """Permission-aware bash dispatch (allow/deny/ask via three-layer settings.json)."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
-    json_output = ctx.obj["json_output"]
 
-    # Pre-flight validation
-    if bash_command == "":
-        raise click.UsageError("--bash command may not be empty.")
-    if "\n" in bash_command or "\r" in bash_command:
-        raise click.UsageError("--bash command may not contain newlines.")
+    # Pre-flight validation (shared with exec)
+    if command == "":
+        raise click.UsageError("command may not be empty.")
+    if "\n" in command or "\r" in command:
+        raise click.UsageError("command may not contain newlines.")
 
-    tmux.ensure_tmux_available()  # raises ClickException on failure
+    tmux.ensure_tmux_available()
 
     target, placement = _load_authorized_member(
         session_id, agent_id, member_id,
@@ -240,37 +303,61 @@ def member_safe_exec(ctx, agent_id, member_id, bash_command):
         )
 
     paths = permissions.discover_settings_paths()
-    decision = permissions.decide(bash_command, paths)
+    decision = permissions.decide(command, paths)
 
     if decision.outcome == "allow":
-        tmux.send_bash_command(target_pane_id=pane_id, command=bash_command)
-        _emit_safe_exec_output(ctx, decision, member_id, pane_id, target["name"], bash_command)
+        try:
+            tmux.send_bash_command(target_pane_id=pane_id, command=command)
+        except tmux.TmuxError as exc:
+            raise click.ClickException(f"send failed: {exc}") from exc
+        _emit_safe_exec_output(ctx, decision, member_id, pane_id, target["name"], command)
         return  # exit 0
 
+    _emit_safe_exec_output(ctx, decision, member_id, pane_id, target["name"], command)
     if decision.outcome == "deny":
-        _emit_safe_exec_output(ctx, decision, member_id, pane_id, target["name"], bash_command)
         ctx.exit(2)
-
-    # outcome == "ask"
-    _emit_safe_exec_output(ctx, decision, member_id, pane_id, target["name"], bash_command)
-    ctx.exit(3)
+    else:  # ask
+        ctx.exit(3)
 ```
 
-`_emit_safe_exec_output` produces the text or JSON message per §5.
+`_emit_exec_output` and `_emit_safe_exec_output` produce the text or JSON messages per §5.
 
 ### 5. Output contract
 
-#### 5.1 Text mode (default)
+#### 5.1 `member exec` text mode (default)
 
 | Outcome | Stdout | Stderr | Exit |
 |---|---|---|---|
-| allow | `Sent bash command '<cmd>' to member <name> (<pane>).` (matches existing send-input wording) | (empty) | 0 |
+| dispatched | `Sent bash command '<cmd>' to member <name> (<pane>).` | (empty) | 0 |
+| empty CMD | (empty) | `Error: command may not be empty.` | 2 |
+| newline / CR in CMD | (empty) | `Error: command may not contain newlines.` | 2 |
+
+#### 5.2 `member safe-exec` text mode (default)
+
+| Outcome | Stdout | Stderr | Exit |
+|---|---|---|---|
+| allow | `Sent bash command '<cmd>' to member <name> (<pane>).` (same wording as `exec`) | (empty) | 0 |
 | deny | (empty) | `Error: command rejected by deny pattern Bash(<body>) declared in <file>. Offending command: <cmd>` | 2 |
 | ask | (empty) | `Error: no allow pattern matches "<cmd>". Add a Bash(...) pattern to one of:\n  - <project-local-path>\n  - <project-path>\n  - <user-path>\nFiles were re-read at this invocation. Suggested pattern: Bash(<first-token>:*)` | 3 |
+| empty CMD | (empty) | `Error: command may not be empty.` | 2 |
+| newline / CR in CMD | (empty) | `Error: command may not contain newlines.` | 2 |
 
 `<first-token>` in the ask suggestion is the first whitespace-delimited token of `<cmd>` (e.g. `git` for `git status --short`). This is a hint, not authoritative — the operator may prefer a more or less specific pattern.
 
-#### 5.2 JSON mode (`cafleet --json`)
+#### 5.3 `member exec` JSON mode (`cafleet --json`)
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "action": "bash",
+  "value": "<cmd>"
+}
+```
+
+The JSON shape mirrors the existing `member send-input` JSON output (4 keys: `member_agent_id`, `pane_id`, `action`, `value`). `action` is the literal string `"bash"`. `value` is the dispatched command verbatim.
+
+#### 5.4 `member safe-exec` JSON mode (`cafleet --json`)
 
 For all three outcomes, stdout (allow) or stderr (deny / ask) carries:
 
@@ -298,6 +385,8 @@ For all three outcomes, stdout (allow) or stderr (deny / ask) carries:
 
 The JSON key `offending_substring` carries the full dispatched cmd because the locked C3 schema fixes the key name. The text-mode stderr line uses the more accurate label `Offending command:` instead. The two surfaces are intentionally distinct — JSON consumers parse by key, humans read prose.
 
+The two JSON shapes are intentionally distinct: `exec` is a bare dispatcher that mirrors the old `send-input --bash` payload (no decision metadata). `safe-exec` carries the full decision payload (matched pattern, file, searched paths) so callers programmatically distinguish allow / deny / ask.
+
 ### 6. Out of scope (locked non-goals)
 
 The following Claude Code permission-grammar features are explicitly NOT implemented in this design. If demand surfaces, they are a follow-up design.
@@ -314,25 +403,28 @@ The following Claude Code permission-grammar features are explicitly NOT impleme
 
 ### 7. Error and exit-code matrix
 
-| Path | Exit | Stream | Message anchor |
-|---|---|---|---|
-| Allow, dispatch succeeds | 0 | stdout | `Sent bash command '<cmd>' to member ...` |
-| Deny | 2 | stderr | `command rejected by deny pattern <pat> declared in <file>. Offending command: <cmd>` |
-| Ask | 3 | stderr | `no allow pattern matches "<cmd>"` |
-| `--bash ""` (empty) | 2 | stderr | `--bash command may not be empty.` (Click UsageError) |
-| `--bash` contains `\n` or `\r` | 2 | stderr | `--bash command may not contain newlines.` (Click UsageError) |
-| Missing `--bash` | 2 | stderr | Click default `Missing option '--bash'.` |
-| Cross-Director (placement.director_agent_id mismatch) | 1 | stderr | existing `_load_authorized_member` text |
-| Pending pane (`tmux_pane_id is None`) | 1 | stderr | existing `member <id> has no pane yet (pending placement) — nothing to send.` |
-| Settings file malformed JSON | 1 | stderr | `failed to parse <path>: <json error>` |
-| `tmux.send_bash_command` raises TmuxError | 1 | stderr | existing `send failed: <details>` |
-| `tmux` unavailable in env | 1 | stderr | existing `cafleet member commands must be run inside a tmux session` |
+Applies to both `exec` and `safe-exec` unless the row is marked safe-exec-only.
 
-Exit-code rationale: `2` for deny aligns with Claude Code PreToolUse hook convention (exit 2 stops a tool call). `3` for ask is unique to `safe-exec`, signaling operator intervention required (edit settings.json). `1` is reserved for runtime / IO / authorization failures.
+| Path | Subcommand | Exit | Stream | Message anchor |
+|---|---|---|---|---|
+| Dispatch succeeds (exec) | exec | 0 | stdout | `Sent bash command '<cmd>' to member ...` |
+| Allow, dispatch succeeds | safe-exec | 0 | stdout | `Sent bash command '<cmd>' to member ...` |
+| Deny | safe-exec | 2 | stderr | `command rejected by deny pattern <pat> declared in <file>. Offending command: <cmd>` |
+| Ask | safe-exec | 3 | stderr | `no allow pattern matches "<cmd>"` |
+| Empty `CMD` (`""`) | both | 2 | stderr | `command may not be empty.` (Click UsageError) |
+| `CMD` contains `\n` or `\r` | both | 2 | stderr | `command may not contain newlines.` (Click UsageError) |
+| Missing positional `CMD` | both | 2 | stderr | Click default `Missing argument 'COMMAND'.` |
+| Cross-Director (placement.director_agent_id mismatch) | both | 1 | stderr | existing `_load_authorized_member` text |
+| Pending pane (`tmux_pane_id is None`) | both | 1 | stderr | existing `member <id> has no pane yet (pending placement) — nothing to send.` |
+| Settings file malformed JSON | safe-exec | 1 | stderr | `failed to parse <path>: <json error>` |
+| `tmux.send_bash_command` raises TmuxError | both | 1 | stderr | existing `send failed: <details>` |
+| `tmux` unavailable in env | both | 1 | stderr | existing `cafleet member commands must be run inside a tmux session` |
+
+Exit-code rationale: `2` for deny aligns with Claude Code PreToolUse hook convention (exit 2 stops a tool call). `3` for ask is unique to `safe-exec`, signaling operator intervention required (edit settings.json). `1` is reserved for runtime / IO / authorization failures. `exec` never emits exit 3 — it has no internal ask path; the outer Bash hook (`permissions.ask`) is the sole confirmation surface.
 
 ### 8. Cross-Director boundary
 
-`safe-exec` reuses `_load_authorized_member(session_id, agent_id, member_id, ...)` exactly as the existing send-input subcommand uses it. No new authorization path. The check happens BEFORE settings discovery so we don't waste IO when the request is going to be rejected on identity grounds.
+Both `exec` and `safe-exec` reuse `_load_authorized_member(session_id, agent_id, member_id, ...)` exactly as the existing send-input subcommand uses it. No new authorization path. For `safe-exec` the check happens BEFORE settings discovery so we don't waste IO when the request is going to be rejected on identity grounds. For `exec` the check happens BEFORE the tmux dispatch.
 
 ### 9. Documentation surface
 
@@ -340,21 +432,22 @@ Per `.claude/rules/design-doc-numbering.md`, documentation MUST be updated FIRST
 
 | File | Change |
 |---|---|
-| `ARCHITECTURE.md` | Add a "Permission-aware shell dispatch" subsection under the CLI surface section. Describe three-file discovery, tri-state outcome, and the deferred Claude Code parity features. |
-| `docs/spec/cli-options.md` | Drop the rows that documented the removed `--bash` flag on the existing send-input subcommand. Add a new `### member safe-exec` section with the flag table, exit codes, and the JSON output schema. |
-| `README.md` | Update the CLI command list to add `member safe-exec` and remove the bash-flag mention from the existing send-input bullet. Add one example showing the allow / deny / ask paths in summary form. |
-| `skills/cafleet/SKILL.md` | Rewrite the "Routing Bash via the Director" subsection: the dispatch primitive is `cafleet member safe-exec --bash CMD` (not the existing send-input subcommand). Drop the `--bash` row from the existing send-input flag table. Document the three-file discovery, tri-state outcome, and exit codes. |
-| `skills/cafleet/roles/director.md` | Replace the `cafleet member send-input --bash` dispatch example with `cafleet member safe-exec --bash`. Add a paragraph on handling deny (relay the stderr block to the operator) and ask (relay the suggested pattern, ask the operator to add it to settings.json, then re-run). |
-| `skills/cafleet/roles/member.md` | Update the trailing paragraph that names the Director's dispatch primitive: `cafleet member safe-exec --bash`. |
-| `.claude/rules/bash-tool.md` | Two paragraphs change. (a) The "Director side (for completeness)" code block at the bottom of the file: replace `cafleet member send-input --bash <command>` with `cafleet member safe-exec --bash <command>`. (b) The "When your Bash tool denies a command" → operator-fallback paragraph: its surface-to-operator wording literally references `cafleet member send-input --bash <command> from your Director pane` and must be rewritten to point at `cafleet member safe-exec --bash <command>`. The default-path member-side text — "send a plain message asking the Director" — is genuinely unchanged. |
-| `.claude/settings.json` | Remove the three obsolete `ask` entries that scoped the old bash-flag form on the existing send-input subcommand. Add `Bash(cafleet --session-id * member safe-exec *)` to `permissions.allow`. |
+| `ARCHITECTURE.md` | Add a "Permission-aware shell dispatch" subsection under the CLI surface section. Document BOTH `member exec` (bare dispatch, outer-prompted) and `member safe-exec` (permission-aware, three-file discovery, tri-state outcome). Note the smart-routing rule (try safe-exec first, fall back to exec on ask) and the deferred Claude Code parity features. |
+| `docs/spec/cli-options.md` | Drop every row that documented the removed `--bash` flag on `member send-input`. Add a new `### member exec` section AND a new `### member safe-exec` section, each with positional `CMD` argument, exit codes, and JSON output schema. The two sections are siblings — same authorization boundary, different decision behavior. |
+| `README.md` | Drop the bash-flag mention from the existing send-input bullet. Add `member exec` and `member safe-exec` bullets to the CLI command list. Add one paragraph showing the smart-routing flow (safe-exec first, exec fallback on ask). |
+| `skills/cafleet/SKILL.md` | Rewrite the "Routing Bash via the Director" subsection: the dispatch primitives are `cafleet member safe-exec CMD` (silent fast-path) and `cafleet member exec CMD` (operator-confirmed fallback). Drop the `--bash` row from the existing send-input flag table. Document three-file discovery for safe-exec, tri-state outcome, exit codes, and the smart-routing rule. |
+| `skills/cafleet/roles/director.md` | Replace the `cafleet member send-input --bash` dispatch example. Document the smart-routing rule: try `cafleet member safe-exec ... CMD` first; on exit 0 done, on exit 2 relay rejection, on exit 3 fall back to `cafleet member exec ... CMD` (which outer-prompts the operator). Add a paragraph on handling deny (relay the stderr block to the operator) and ask (relay the suggested pattern OR fall back to exec). |
+| `skills/cafleet/roles/member.md` | Update the trailing paragraph that names the Director's dispatch primitive: explain that the Director picks `cafleet member safe-exec` for allow-listed commands and `cafleet member exec` (operator-prompted) otherwise. The member-side protocol is unchanged. |
+| `.claude/rules/bash-tool.md` | Two paragraphs change. (a) The "Director side (for completeness)" code block at the bottom of the file: rewrite to show the smart-routing rule (safe-exec first, exec fallback). (b) The "When your Bash tool denies a command" → operator-fallback paragraph: its surface-to-operator wording rewritten to point at `cafleet member safe-exec CMD` (or `exec CMD`) from the Director pane. The default-path member-side text — "send a plain message asking the Director" — is genuinely unchanged. |
+| `.claude/settings.json` | Remove the three obsolete `ask` entries that scoped the old send-input `--bash` form. Add `Bash(cafleet --session-id * member safe-exec *)` to `permissions.allow` (silent fast-path). Add `Bash(cafleet --session-id * member exec *)` to `permissions.ask` (outer-prompt for every exec invocation). |
 
 ### 10. Test surface
 
 | File | Change |
 |---|---|
 | `cafleet/tests/test_cli_member_send_input.py` (existing) | Delete the bash-flag test class, the bash recorder fixture, and any `--bash` argument in the flag-validation parametrizations. Add ONE regression test asserting that the old form produces Click `Error: No such option: '--bash'.` (exit 2). Per `.claude/rules/removal.md`, no positive sentinel — the absence is the test. |
-| `cafleet/tests/test_cli_member_safe_exec.py` (new) | Full coverage: allow path dispatches via `tmux.send_bash_command`; deny path exits 2 with named pattern + file + offending command; ask path exits 3 with three resolved file paths and a suggested pattern; cross-Director rejection; pending-placement rejection; empty-string and newline rejection; `cafleet --json member safe-exec --bash CMD` emits a JSON object with exactly the five documented keys (`outcome`, `matched_pattern`, `matched_file`, `offending_substring`, `searched_files`) for each of the three outcomes. |
+| `cafleet/tests/test_cli_member_exec.py` (new) | Coverage: dispatches the positional CMD via `tmux.send_bash_command`; exit 0 with the existing send-input wording; cross-Director rejection (exit 1); pending-placement rejection (exit 1); empty-string rejection (exit 2 with `command may not be empty.`); newline / CR rejection (exit 2 with `command may not contain newlines.`); missing positional argument (Click default `Missing argument`); JSON mode emits a JSON object with exactly the four documented keys (`member_agent_id`, `pane_id`, `action`, `value`) where `action == "bash"`. NO internal permission check — assert that even when settings.json contains a deny pattern matching the CMD, exec dispatches anyway (the deny check is safe-exec-only). |
+| `cafleet/tests/test_cli_member_safe_exec.py` (new) | Full coverage: allow path dispatches via `tmux.send_bash_command`; deny path exits 2 with named pattern + file + offending command; ask path exits 3 with three resolved file paths and a suggested pattern; cross-Director rejection; pending-placement rejection; empty-string and newline rejection; `cafleet --json member safe-exec CMD` emits a JSON object with exactly the five documented keys (`outcome`, `matched_pattern`, `matched_file`, `offending_substring`, `searched_files`) for each of the three outcomes. All test invocations use the positional `CMD` argument — there is no `--bash` flag. |
 | `cafleet/tests/test_permissions.py` (new) | Settings discovery: `CLAUDE_CONFIG_DIR` set vs unset, missing files (treated as empty), malformed JSON (raises with file path), missing `permissions` key (treated as empty), `permissions.allow` / `deny` containing only non-`Bash` entries (filtered out), allow / deny union semantics, deny-wins-on-conflict. Glob matcher: `Bash(*)`, exact-match `Bash(npm test)`, trailing word-boundary `Bash(ls *)` and `Bash(npm test:*)`, no-boundary `Bash(ls*)`, mid-string `Bash(* install)`, multi-position `Bash(git * main)`. |
 
 ### 11. Settings-file change in this repo
@@ -366,10 +459,11 @@ Per `.claude/rules/design-doc-numbering.md`, documentation MUST be updated FIRST
 -    "Bash(cafleet --session-id * member send-input --bash *)",
 -    "Bash(cafleet --session-id * member send-input * --bash)",
 -    "Bash(cafleet --session-id * member send-input * --bash *)"
++    "Bash(cafleet --session-id * member exec *)"
    ]
 ```
 
-(The literal entries are removed; the `ask` array becomes empty or, if other entries are added in the future, retains those.)
+The three obsolete `send-input --bash` ask entries are removed. A single `Bash(cafleet --session-id * member exec *)` ask entry is added so every Director-side `cafleet member exec ...` invocation surfaces an outer-layer prompt for the operator. The pattern uses a trailing `*` so the positional `CMD` argument matches without enumerating flag-vs-positional permutations (since `exec` has only `--agent-id`, `--member-id`, and the positional, the trailing wildcard captures the entire tail).
 
 ```diff
    "allow": [
@@ -424,6 +518,20 @@ Write all tests for `cafleet/permissions.py` and `cafleet member safe-exec` BEFO
 - [x] Confirm `validate_bash.py` (project hook) blocks any compound-command attempt at the OUTER Director Bash invocation, demonstrating that `safe-exec`'s opaque pass-through assumption holds in practice. <!-- completed: 2026-04-30T06:50 -->
 - [ ] Update this design document: flip Status to `Complete`, set `Last Updated` to the merge date. <!-- completed: -->
 
+### Step 5: `exec` subcommand and `--bash` to positional rework
+
+Triggered by reviewer feedback after Step 4 finished. Adds the operator-confirmed `cafleet member exec CMD` sibling subcommand, drops the `--bash` flag from `safe-exec` in favour of a positional argument, and documents the smart-routing rule that picks safe-exec vs exec.
+
+- [x] Edit `cafleet/src/cafleet/cli.py`: drop the `--bash` Click option from `member_safe_exec` and replace with `@click.argument("command")`. Rename the parameter from `bash_command` to `command`. Adjust validation messages from `--bash command may not be empty.` to `command may not be empty.` (and similarly for newline). Update `_emit_safe_exec_output` callers. <!-- completed: 2026-04-30T07:00 -->
+- [x] Edit `cafleet/src/cafleet/cli.py`: add `member_exec` Click command per §4.1 — positional `CMD`, shared validation, `_load_authorized_member`, pending-pane check, `tmux.send_bash_command`, then `_emit_exec_output` (new helper). NO call to `permissions.discover_settings_paths` or `permissions.decide`. <!-- completed: 2026-04-30T07:00 -->
+- [x] Edit `cafleet/tests/test_cli_member_safe_exec.py`: replace every `--bash CMD` argv pair with positional `CMD`. Update `_invoke` helper. Adjust expected validation-error messages (`command may not be empty.` etc). Update the missing-flag test to assert the Click default `Missing argument 'COMMAND'` error. <!-- completed: 2026-04-30T07:00 -->
+- [x] Create `cafleet/tests/test_cli_member_exec.py`: full coverage per §10 (dispatch, exit codes, validation, authz, JSON shape, no-internal-permission-check). <!-- completed: 2026-04-30T07:00 -->
+- [x] Edit `cafleet/src/cafleet/tmux.py`: docstring of `send_bash_command` rewritten from "Used by `cafleet member safe-exec --bash`" to "Used by `cafleet member exec` and `cafleet member safe-exec`" (the helper now serves both subcommands). <!-- completed: 2026-04-30T07:05 -->
+- [x] Update `.claude/settings.json` (Director task): add `Bash(cafleet --session-id * member exec *)` to `permissions.ask`. The existing `Bash(cafleet --session-id * member safe-exec *)` allow entry stays. <!-- completed: 2026-04-30T07:10 -->
+- [x] Doc sweep — update every file enumerated in §9 to describe both `exec` and `safe-exec`, the smart-routing rule, and the positional CMD argument: `ARCHITECTURE.md`, `docs/spec/cli-options.md`, `README.md`, `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md`, `skills/cafleet/roles/member.md`, `skills/cafleet-monitoring/SKILL.md`, `skills/design-doc-execute/roles/director.md`, `skills/design-doc-create/roles/director.md`, `.claude/rules/bash-tool.md`. <!-- completed: 2026-04-30T07:30 -->
+- [x] Run `mise //cafleet:test` and confirm 562+ tests pass GREEN (existing 562 + new exec test count). <!-- completed: 2026-04-30T07:35 -->
+- [x] Run `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`. All clean. <!-- completed: 2026-04-30T07:35 -->
+
 ---
 
 ## Changelog
@@ -432,3 +540,4 @@ Write all tests for `cafleet/permissions.py` and `cafleet member safe-exec` BEFO
 |------|---------|
 | 2026-04-29 | Initial draft. |
 | 2026-04-30 | Step 1 execution — removal-rule scope expansion. The §9 file list captured 7 doc surfaces + `.claude/settings.json`, but a project-wide grep during Step 1 review surfaced three additional skill files that referenced the old `cafleet member send-input --bash` form: `skills/cafleet-monitoring/SKILL.md` (3 mentions across stall-response and escalation tables), `skills/design-doc-execute/roles/director.md` (1 mention in the bash-routing paragraph), `skills/design-doc-create/roles/director.md` (1 mention, same paragraph as design-doc-execute). Per `.claude/rules/removal.md` ("delete every corresponding mention from the repository in the same change"), all three were rewritten to point at `cafleet member safe-exec --bash` in the same Step 1 commit. The lone source-file mention — a docstring comment at `cafleet/src/cafleet/tmux.py:147` referencing `member send-input --bash` — is deferred to Step 3 (Programmer scope) since it ships in the same commit as the corresponding `cli.py` removal. |
+| 2026-04-30 | Step 5 added in response to PR #40 inline review feedback ("normal `exec` must sit here." on `.claude/settings.json:38`, plus follow-up "`--bash` is not needed"). Two coupled changes: (1) split bash dispatch into two sibling subcommands — `cafleet member exec CMD` (bare dispatcher, outer-prompted via `permissions.ask`) and `cafleet member safe-exec CMD` (permission-aware, outer-allowed). The split mirrors the operator's mental model: routine commands the operator has rule'd run silently via safe-exec; everything else surfaces as a per-call prompt via exec. (2) Drop the `--bash` flag from both subcommands — shell dispatch is the single purpose, so a positional `CMD` argument is more natural and removes flag-vs-positional permutation noise from the settings.json patterns. §1 expanded with the three-row subcommand table, §1.5 added documenting the Director-side smart-routing rule (try safe-exec first, fall back to exec on ask). §4 split into §4.1 (exec) and §4.2 (safe-exec) Click signatures. §5 split into separate text-mode and JSON-mode tables for each subcommand. §7 error matrix marked rows safe-exec-only / both. §11 settings diff updated. Five new Success Criteria added. Step 5 implementation block added with 9 tasks. Total Implementation tasks: 20 + 9 = 29. |

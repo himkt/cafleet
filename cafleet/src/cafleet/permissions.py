@@ -39,9 +39,9 @@ def discover_settings_paths() -> list[Path]:
     project_shared = cwd / ".claude" / "settings.json"
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
     if config_dir:
-        user_settings = Path(config_dir) / "settings.json"
+        user_settings = Path(config_dir).expanduser().resolve() / "settings.json"
     else:
-        user_settings = Path("~/.claude/settings.json").expanduser()
+        user_settings = Path("~/.claude/settings.json").expanduser().resolve()
     return [project_local, project_shared, user_settings]
 
 

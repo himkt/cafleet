@@ -22,12 +22,12 @@ Placed **before** the subcommand:
 | Flag | Required | Notes |
 |---|---|---|
 | `--json` | no | Emit JSON output. |
-| `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/safe-exec` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
+| `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/safe-exec` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
 ### Subcommands that require `--session-id`
 
-`agent register`, `agent deregister`, `agent list`, `agent show`, `message send`, `message broadcast`, `message poll`, `message ack`, `message cancel`, `message show`, `member create`, `member delete`, `member list`, `member capture`, `member send-input`, `member safe-exec`.
+`agent register`, `agent deregister`, `agent list`, `agent show`, `message send`, `message broadcast`, `message poll`, `message ack`, `message cancel`, `message show`, `member create`, `member delete`, `member list`, `member capture`, `member send-input`, `member exec`, `member safe-exec`.
 
 ### Subcommands that do NOT require `--session-id`
 
@@ -64,7 +64,8 @@ Then pass the printed UUID as `--session-id <uuid>` on every client + member com
 - `member list` — List members spawned by this Director
 - `member capture` — Capture the last N lines of a member's pane (Director only)
 - `member send-input` — Forward a restricted keystroke (digit 1/2/3 or free text) to a member's pane (Director only)
-- `member safe-exec` — Permission-aware bash dispatch: re-read the operator's `Bash(...)` allow / deny patterns and on allow keystroke `! <cmd>` into a member's pane (Director only)
+- `member exec` — Bare bash dispatch: keystroke `! CMD` into a member's pane after authorization. NO internal permission decision — the outer Bash hook layer (Claude Code's `permissions.ask` on the Director's invocation) is the operator-confirmation surface (Director only)
+- `member safe-exec` — Permission-aware bash dispatch: re-read the operator's `Bash(...)` allow / deny patterns and on allow keystroke `! CMD` into a member's pane (Director only)
 
 ### Commands that do NOT require `--agent-id`
 
@@ -430,15 +431,69 @@ Capture parsing is intentionally left manual because prompt layouts differ acros
 
 The canonical Director-side workflow is three-beat and AskUserQuestion-delegated: (1) `cafleet member capture` to inspect the pane, (2) the Director's own `AskUserQuestion` tool call — with shape-matched options per the pane-shapes table — to put the decision in front of the user, (3) the Director invokes the resolved `cafleet member send-input` via its Bash tool, where Claude Code's native per-call permission prompt is the user-consent surface (never a fenced `bash` block for the user to paste). The canonical three-beat workflow, pane-shapes table (choice-routing / open-ended / other shapes), AskUserQuestion constraints (1–4 questions, 2–4 options, built-in "Other"), and "MUST NOT do" rules live in [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) under "Answer a member's AskUserQuestion prompt" — that is canonical, and this CLI spec does not duplicate the table.
 
-### `member safe-exec`
+### `member exec`
 
-Permission-aware bash dispatch. Every invocation re-reads three `settings.json` files and matches the inner CMD against the operator's existing `Bash(...)` allow / deny patterns. On allow, the inner CMD is keystroked into the member's pane via Claude Code's `!` shortcut. On deny or unmatched ("ask"), nothing is keystroked. See [Routing Bash via the Director](../../skills/cafleet/SKILL.md#routing-bash-via-the-director) for the end-to-end protocol.
+Bare bash dispatch. Keystrokes `! CMD` + `Enter` into the member's pane after authorization and pre-flight validation, with NO internal permission decision. The outer Bash hook layer (Claude Code's `permissions.ask` on the Director's invocation, configured via `Bash(cafleet --session-id * member exec *)` in `permissions.ask`) is the operator-confirmation surface. Use [`member safe-exec`](#member-safe-exec) for the silent fast-path when the operator has already rule'd the command in `permissions.allow` / `permissions.deny`. See [Routing Bash via the Director](../../skills/cafleet/SKILL.md#routing-bash-via-the-director) for the smart-routing protocol that picks `safe-exec` then falls back to `exec`.
 
-| Flag | Required | Notes |
+| Flag / Argument | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | Target member's agent ID |
-| `--bash` | yes | Shell command to dispatch. Sent to the pane as `! <command>` + `Enter` after the permission decision allows it. The only input flag on this subcommand. |
+| `CMD` (positional) | yes | Shell command to dispatch. Sent to the pane as `! CMD` + `Enter`. Per-call newline rejection and post-strip empty rejection apply. |
+
+#### Validation rules
+
+| Input | Result |
+|---|---|
+| `CMD == ""` (empty) | Exit 2 with `Error: command may not be empty.` (Click `UsageError`). |
+| `CMD` containing `\n` or `\r` | Exit 2 with `Error: command may not contain newlines.` (Click `UsageError`). Newlines are rejected BEFORE strip, so `"foo\n"` does not first collapse to `"foo"`. |
+| Whitespace-only `CMD` (e.g. `"   "`) | Exit 2 — fails the post-strip empty check. |
+| Missing `CMD` | Exit 2 with Click default `Error: Missing argument 'COMMAND'.`. |
+| Cross-Director (`placement.director_agent_id != --agent-id`) | Exit 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other>).` (mirrors `member send-input`, `member safe-exec`). |
+| Pending placement (`tmux_pane_id is None`) | Exit 1 with `Error: member <member-id> has no pane yet (pending placement) — nothing to send.` |
+| `tmux.send_bash_command` raises `TmuxError` | Exit 1 with `Error: send failed: <details>` |
+| tmux unavailable | Exit 1 via `tmux.ensure_tmux_available()` |
+
+#### Exit code matrix
+
+| Exit | Path |
+|---|---|
+| 0 | Inner CMD dispatched |
+| 1 | Authorization, IO, or tmux failure (cross-Director, pending pane, send failure, tmux unavailable) |
+| 2 | Empty `CMD`; whitespace-only `CMD`; `CMD` containing newline; missing `CMD` |
+
+`exec` never emits exit 3 — it has no internal ask path. The outer `permissions.ask` is the sole confirmation surface.
+
+#### Output format
+
+Text:
+
+```
+Sent bash command 'git log -1 --oneline' to member Claude-B (%7).
+```
+
+JSON (`cafleet --json member exec CMD`):
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "action": "bash",
+  "value": "<command as-sent>"
+}
+```
+
+The four-key shape mirrors the legacy `send-input --bash` JSON output. `action` is the literal string `"bash"`. `value` is the dispatched command verbatim (after pre-flight strip).
+
+### `member safe-exec`
+
+Permission-aware bash dispatch. Every invocation re-reads three `settings.json` files and matches the inner CMD against the operator's existing `Bash(...)` allow / deny patterns. On allow, the inner CMD is keystroked into the member's pane via Claude Code's `!` shortcut. On deny or unmatched ("ask"), nothing is keystroked. See [Routing Bash via the Director](../../skills/cafleet/SKILL.md#routing-bash-via-the-director) for the smart-routing protocol that wraps both subcommands.
+
+| Flag / Argument | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
+| `--member-id` | yes | Target member's agent ID |
+| `CMD` (positional) | yes | Shell command to dispatch. Sent to the pane as `! CMD` + `Enter` after the permission decision allows it. Per-call newline rejection and post-strip empty rejection apply, identical to `member exec`. |
 
 #### Settings discovery
 
@@ -466,12 +521,13 @@ Allow lists and deny lists are concatenated (unioned) across all three files. De
 
 | Input | Result |
 |---|---|
-| `--bash ""` (empty) | Exit 2 with `Error: --bash command may not be empty.` (Click `UsageError`) |
-| `--bash` containing `\n` or `\r` | Exit 2 with `Error: --bash command may not contain newlines.` (Click `UsageError`) |
-| Missing `--bash` | Exit 2 with Click default `Error: Missing option '--bash'.` |
-| Cross-Director (`placement.director_agent_id != --agent-id`) | Exit 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other>).` (mirrors `member send-input`) |
+| `CMD == ""` (empty) | Exit 2 with `Error: command may not be empty.` (Click `UsageError`). |
+| `CMD` containing `\n` or `\r` | Exit 2 with `Error: command may not contain newlines.` (Click `UsageError`). Newlines are rejected BEFORE strip. |
+| Whitespace-only `CMD` (e.g. `"   "`) | Exit 2 — fails the post-strip empty check. |
+| Missing `CMD` | Exit 2 with Click default `Error: Missing argument 'COMMAND'.` |
+| Cross-Director (`placement.director_agent_id != --agent-id`) | Exit 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other>).` (mirrors `member send-input`, `member exec`). |
 | Pending placement (`tmux_pane_id is None`) | Exit 1 with `Error: member <member-id> has no pane yet (pending placement) — nothing to send.` |
-| Settings file malformed JSON | Exit 1 with `Error: failed to parse <path>: <json error>` |
+| Settings file malformed JSON | Exit 1 with `Error: failed to parse <path>: <json error>`. The CLI catches `permissions.decide`'s `ValueError` and surfaces it as a `ClickException` so the user sees a clean exit instead of an uncaught traceback. |
 | `tmux.send_bash_command` raises `TmuxError` | Exit 1 with the existing `Error: send failed: <details>` wording |
 | tmux unavailable | Exit 1 via `tmux.ensure_tmux_available()` (same surface as `member capture`) |
 
@@ -481,14 +537,14 @@ Allow lists and deny lists are concatenated (unioned) across all three files. De
 |---|---|
 | 0 | Allow path; inner CMD dispatched |
 | 1 | Authorization, IO, or tmux failure (cross-Director, pending pane, malformed settings JSON, send failure, tmux unavailable) |
-| 2 | Deny path; or `--bash ""`; or `--bash` containing newline; or missing `--bash` |
+| 2 | Deny path; or empty `CMD`; or whitespace-only `CMD`; or `CMD` containing newline; or missing `CMD` |
 | 3 | Ask path (no allow pattern matches the inner CMD) |
 
-Exit 2 for deny aligns with Claude Code PreToolUse hook convention (exit 2 stops a tool call). Exit 3 for ask is unique to `safe-exec`, signaling operator intervention required (edit `settings.json` and re-run). Exit 1 is reserved for runtime / IO / authorization failures.
+Exit 2 for deny aligns with Claude Code PreToolUse hook convention (exit 2 stops a tool call). Exit 3 for ask is unique to `safe-exec`, signaling operator intervention required (edit `settings.json` and re-run, OR fall back to [`member exec`](#member-exec) per the smart-routing rule). Exit 1 is reserved for runtime / IO / authorization failures.
 
 #### JSON output
 
-`cafleet --json member safe-exec --bash CMD` emits the same five-key payload for all three outcomes (allow on stdout; deny / ask on stderr):
+`cafleet --json member safe-exec CMD` emits the same five-key payload for all three outcomes (allow on stdout; deny / ask on stderr — the JSON branch follows the same stream as the text branch):
 
 ```json
 {
@@ -561,10 +617,11 @@ The matcher operates on the inner CMD as one opaque string.
 | `member send-input --freetext` with `\n` or `\r` | `Error: free text may not contain newlines.` (exit 2) |
 | `member send-input` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
 | `member send-input` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
-| `member safe-exec --bash ""` (empty) | `Error: --bash command may not be empty.` (Click `UsageError`, exit 2) |
-| `member safe-exec --bash` with `\n` or `\r` | `Error: --bash command may not contain newlines.` (Click `UsageError`, exit 2) |
+| `member exec` / `member safe-exec` empty `CMD` | `Error: command may not be empty.` (Click `UsageError`, exit 2) |
+| `member exec` / `member safe-exec` `CMD` with `\n` or `\r` | `Error: command may not contain newlines.` (Click `UsageError`, exit 2) |
+| `member exec` / `member safe-exec` missing positional `CMD` | Click default `Error: Missing argument 'COMMAND'.` (exit 2) |
 | `member safe-exec` deny path | `Error: command rejected by deny pattern Bash(<body>) declared in <file>. Offending command: <cmd>` (exit 2) |
 | `member safe-exec` ask path | `Error: no allow pattern matches "<cmd>". Add a Bash(...) pattern to one of: ...` (exit 3) |
 | `member safe-exec` malformed settings.json | `Error: failed to parse <path>: <json error>` (exit 1) |
-| `member safe-exec` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
-| `member safe-exec` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
+| `member exec` / `member safe-exec` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
+| `member exec` / `member safe-exec` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
