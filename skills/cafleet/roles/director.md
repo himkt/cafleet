@@ -45,12 +45,12 @@ You receive a member-originated bash request when **all** of the following are t
 
 Concurrent member requests serialize through the broker queue. You MUST process command-request messages one at a time in the order returned by `cafleet message poll`:
 
-1. Poll → get the oldest command-request.
+1. Poll → take the first command-request in the returned list (the broker orders by `Task.status_timestamp.desc()` — newest-first).
 2. Dispatch via `member send-input --bash` (or refuse).
 3. ACK.
 4. Poll the next one.
 
-Do not interleave or batch. The current poll order is newest-first, and that returned order is the serialization mechanism — no separate queueing primitive is needed. Batching dispatches across multiple members can cause `! <command>` keystrokes to land in the wrong pane state if a member is mid-prompt.
+Do not interleave or batch. The poll order (newest-first today) is the serialization mechanism — no separate queueing primitive is needed. Batching dispatches across multiple members can cause `! <command>` keystrokes to land in the wrong pane state if a member is mid-prompt.
 
 ## Cross-Director boundary
 

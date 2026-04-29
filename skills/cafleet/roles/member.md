@@ -15,10 +15,10 @@ This file covers the **member side** of the bash-routing protocol introduced in 
 > - **(a) The operator asks you to run a command** (e.g. "run `git status`", "show me the diff").
 > - **(b) You yourself want to run a command** (e.g. you want to verify a file, check the branch, run tests, list a directory, look up anything).
 >
-> **The single action:**
+> **The single action** — note the leading `! ` prefix; your Bash tool is denied, so the call goes through Claude Code's `!` CLI shortcut, NOT the Bash tool:
 >
 > ```bash
-> cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+> ! cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
 >   --to <director-agent-id> \
 >   --text "Please run \`<command>\` for me — <brief reason>."
 > ```
@@ -66,7 +66,6 @@ You do **not** ask the operator for them. If they are genuinely missing, the `ca
 
 ## WHY THIS WORKS
 
-- **Your Bash tool is denied** (`--disallowedTools "Bash"`), so you cannot execute shell commands yourself.
-- **`cafleet message send` is allowlisted** in the harness `permissions.allow` for member panes, so the routing message goes through even when general Bash is denied.
-- **Claude Code's `!` shortcut is a separate primitive** from the Bash tool. The Director triggers it via `tmux send-keys`, which lands as keystrokes in your input prompt — your next turn sees the captured stdout/stderr.
+- **Your Bash tool is denied** (`--disallowedTools "Bash"`), so you cannot execute shell commands yourself — and that includes `cafleet`. Per design 0000035, native Claude Code flags don't deliver a strict-allowlist that lets `Bash(cafleet *)` through while denying the rest, so we keep Bash fully denied and route every cafleet call through the `!` shortcut instead.
+- **Claude Code's `!` shortcut is a separate primitive** from the Bash tool — `claude --disallowedTools "Bash"` does NOT disable the `!` CLI shortcut. Prefix every cafleet invocation (`! cafleet ...`) so your harness routes it through the shortcut. The same `!` primitive is what the Director uses to dispatch shell commands back to you via `cafleet member send-input --bash`, which lands as keystrokes in your input prompt — your next turn sees the captured stdout/stderr.
 - **Director stays in control.** Every member shell-request surfaces in the Director's inbox; the Director (with the operator at the keyboard) chooses whether to fulfill it. That decision belongs to the Director, not to you, and not to a member-operator side conversation.
