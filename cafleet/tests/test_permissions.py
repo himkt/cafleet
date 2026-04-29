@@ -7,7 +7,6 @@ import pytest
 
 from cafleet import permissions
 
-
 # ---------------------------------------------------------------------------
 # discover_settings_paths
 # ---------------------------------------------------------------------------
@@ -146,12 +145,10 @@ class TestLoadBashPatterns:
         path = tmp_path / "settings.json"
         path.write_text("{ not valid json")
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(Exception, match="failed to parse") as exc_info:
             permissions.load_bash_patterns([path])
 
-        msg = str(exc_info.value)
-        assert "failed to parse" in msg
-        assert str(path) in msg
+        assert str(path) in str(exc_info.value)
 
     def test_non_bash_entries_silently_filtered(self, tmp_path):
         path = tmp_path / "settings.json"
@@ -223,7 +220,7 @@ class TestLoadBashPatterns:
 
 
 # ---------------------------------------------------------------------------
-# match (glob)
+# Glob matcher
 # ---------------------------------------------------------------------------
 
 

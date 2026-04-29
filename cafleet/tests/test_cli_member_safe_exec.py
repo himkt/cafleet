@@ -101,9 +101,7 @@ def settings_files(tmp_path, monkeypatch):
 def _write_settings(path: Path, *, allow=None, deny=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(
-            {"permissions": {"allow": allow or [], "deny": deny or []}}
-        )
+        json.dumps({"permissions": {"allow": allow or [], "deny": deny or []}})
     )
 
 
@@ -378,7 +376,8 @@ def _extract_json(result) -> dict:
     # appear before the JSON — pick the JSON object substring.
     start = text.find("{")
     end = text.rfind("}")
-    assert start != -1 and end != -1, f"no JSON object in output: {text!r}"
+    assert start != -1, f"no opening brace in output: {text!r}"
+    assert end != -1, f"no closing brace in output: {text!r}"
     return json.loads(text[start : end + 1])
 
 
@@ -406,9 +405,7 @@ class TestJsonOutput:
     ):
         _write_settings(settings_files[0], deny=["Bash(rm -rf *)"])
 
-        result = _invoke(
-            runner, session_id, "--bash", "rm -rf /tmp/x", json_mode=True
-        )
+        result = _invoke(runner, session_id, "--bash", "rm -rf /tmp/x", json_mode=True)
 
         assert result.exit_code == 2, result.output
         data = _extract_json(result)
