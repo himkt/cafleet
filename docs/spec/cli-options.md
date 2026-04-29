@@ -22,7 +22,7 @@ Placed **before** the subcommand:
 | Flag | Required | Notes |
 |---|---|---|
 | `--json` | no | Emit JSON output. |
-| `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions get a UUIDv4, migrated sessions reuse a 64-char hex value). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
+| `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
 ### Subcommands that require `--session-id`
@@ -43,18 +43,6 @@ cafleet session create --label "my-project"
 ```
 
 Then pass the printed UUID as `--session-id <uuid>` on every client + member command.
-
-## Removed CLI Options
-
-The following CLI options, environment variables, and subcommands have been removed:
-
-- `--url` flag and the corresponding broker-URL env var — CLI commands access SQLite directly; no broker URL is needed.
-- `--api-key` flag — Removed entirely (sessions replace API keys).
-- The session-id env var — Replaced by the `--session-id` global flag.
-- The agent-id env var — Replaced by literal `--agent-id <uuid>` substitution at member-spawn time.
-- `cafleet env` subcommand — Existed only to dump env vars; obsolete now that session/agent IDs are passed as flags.
-
-These removals keep secrets out of shell history and let `permissions.allow` patterns match every invocation literally.
 
 ## Agent ID (`--agent-id`)
 

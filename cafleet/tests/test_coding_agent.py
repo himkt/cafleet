@@ -251,23 +251,3 @@ class TestPromptTemplates:
         assert "7ba91234-5678-90ab-cdef-112233445566" in result
         assert "Alice" in result
         assert "dir-001" in result
-
-
-class TestCodexConstantRemoved:
-    """Regression guard: the codex backend was removed in design 0000034 §15.
-    ``CODEX``, ``CODING_AGENTS``, and ``get_coding_agent`` are gone from
-    ``cafleet.coding_agent`` — importing any of them MUST raise
-    ``ImportError``.
-    """
-
-    def test_codex_constant_import_raises(self):
-        with pytest.raises(ImportError):
-            from cafleet.coding_agent import CODEX  # noqa: F401
-
-    def test_coding_agents_registry_import_raises(self):
-        with pytest.raises(ImportError):
-            from cafleet.coding_agent import CODING_AGENTS  # noqa: F401
-
-    def test_get_coding_agent_helper_import_raises(self):
-        with pytest.raises(ImportError):
-            from cafleet.coding_agent import get_coding_agent  # noqa: F401

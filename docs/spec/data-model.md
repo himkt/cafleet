@@ -12,7 +12,7 @@ Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the ru
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `session_id` | `TEXT` | `PRIMARY KEY` | Opaque string. New sessions receive a UUIDv4; migrated sessions reuse the original `api_key_hash` value (64-char hex). |
+| `session_id` | `TEXT` | `PRIMARY KEY` | Opaque string. New sessions receive a UUIDv4. |
 | `label` | `TEXT` | nullable | Optional free-form text for human bookkeeping (e.g. `"PR-42 review"`). |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
 | `deleted_at` | `TEXT` | nullable | `NULL` = active; non-NULL ISO-8601 timestamp = soft-deleted. Written by `broker.delete_session`; never cleared. |

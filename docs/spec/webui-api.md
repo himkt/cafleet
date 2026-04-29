@@ -10,7 +10,7 @@ The WebUI does not require authentication. Session-scoped endpoints require an `
 |---|---|
 | `X-Session-Id: <session_id>` | Required on session-scoped endpoints (agents, inbox, sent, timeline, send). The backend verifies the session exists in the `sessions` table. |
 
-No server-side session. No Auth0. The SPA manages the active session_id client-side via hash-based routing.
+No server-side session cookies. The SPA stores the active session_id client-side via hash-based routing and sends it in the X-Session-Id header on each request.
 
 ## Endpoints
 

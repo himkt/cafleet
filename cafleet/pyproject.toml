@@ -55,7 +55,6 @@ allowed-unresolved-imports = [
     "fastapi.*",
     "uvicorn",
     "click.*",
-    "httpx.*",
 ]
 
 [tool.ruff.lint]
