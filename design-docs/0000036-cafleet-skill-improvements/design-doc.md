@@ -1,7 +1,7 @@
 # 0000036 — CAFleet Skill Improvements
 
 **Status**: Approved
-**Progress**: 12/22 tasks complete
+**Progress**: 16/22 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -232,10 +232,10 @@ Constraints:
 
 ### Step 4: Cleanup steps reference canonical Shutdown Protocol (S5)
 
-- [ ] Replace `skills/design-doc-create/SKILL.md` Step 6 body with the version specified in S5 (Drafter finalize + 5-rung canonical teardown pointer). Verify the cron ID origin reference reads `Step 1b` after S1 renumbering. <!-- completed: -->
-- [ ] Replace `skills/design-doc-execute/SKILL.md` Step 8 body with the version specified in S5 (status-Complete commit + push decision + 5-rung canonical teardown pointer). Verify the cron ID origin references read `Step 3b` and `Step 7a` after S1 renumbering. <!-- completed: -->
-- [ ] Update `skills/design-doc-create/roles/director.md` § *Shutdown Protocol* to point at `Skill(cafleet)` § *Shutdown Protocol* with a one-sentence pointer plus the skill-specific cron-ID nuance. <!-- completed: -->
-- [ ] Update `skills/design-doc-execute/roles/director.md` § *Shutdown Protocol* the same way (cron ID nuance: team-health vs augmented). <!-- completed: -->
+- [x] Replace `skills/design-doc-create/SKILL.md` Step 6 body with the version specified in S5 (Drafter finalize + 5-rung canonical teardown pointer). Verify the cron ID origin reference reads `Step 1b` after S1 renumbering. <!-- completed: 2026-04-29T15:00 -->
+- [x] Replace `skills/design-doc-execute/SKILL.md` Step 8 body with the version specified in S5 (status-Complete commit + push decision + 5-rung canonical teardown pointer). Verify the cron ID origin references read `Step 3b` and `Step 7a` after S1 renumbering. <!-- completed: 2026-04-29T15:00 -->
+- [x] Update `skills/design-doc-create/roles/director.md` § *Shutdown Protocol* to point at `Skill(cafleet)` § *Shutdown Protocol* with a one-sentence pointer plus the skill-specific cron-ID nuance. <!-- completed: 2026-04-29T15:00 -->
+- [x] Update `skills/design-doc-execute/roles/director.md` § *Shutdown Protocol* the same way (cron ID nuance: team-health vs augmented). <!-- completed: 2026-04-29T15:00 -->
 
 ### Step 5: Allow `cafleet:` plugin skills (S6)
 

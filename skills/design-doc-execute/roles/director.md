@@ -158,19 +158,6 @@ Programmer / Tester / Verifier members are spawned with `--permission-mode dontA
 
 ## Shutdown Protocol
 
-Shutdown runs as Step 8's tail — only AFTER Step 8's doc-complete commit (and the conditional `git push` when the branch is tracked on origin) has landed. The `CronDelete` target depends on how far execution reached: the team-health loop (cron ID recorded in Step 3b) if Step 6 was skipped, or the augmented loop (cron ID recorded in Step 7a) if Step 7 ran. Use whichever cron ID is currently active — do not assume which one.
+Shutdown runs as Step 8's tail — only AFTER Step 8's doc-complete commit (and the conditional `git push` when the branch is tracked on origin) has landed.
 
-1. Cancel the currently active `/loop` monitor (`CronDelete` on the team-health cron ID from Step 3b when Step 6 was skipped, or the augmented cron ID from Step 7a otherwise).
-2. Delete each member:
-   ```bash
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <programmer-agent-id>
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <tester-agent-id>
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <verifier-agent-id>   # if spawned
-   ```
-3. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet agent deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
-   ```bash
-   cafleet session delete <session-id>
-   # → Deleted session <session-id>. Deregistered N agents.
-   ```
-
-The `sessions` row is soft-deleted (not physically removed) and all `tasks` rows are preserved so the message trail remains inspectable in the admin WebUI (subject to the WebUI's soft-delete filtering behavior).
+Run the canonical 5-rung teardown per `Skill(cafleet)` § *Shutdown Protocol* (CronDelete → `cafleet member delete` per member → `cafleet member list` verification → `cafleet session delete <session-id>` → `cafleet session list` sanity check). The skill-specific cron-ID nuance: the `/loop` monitor cancelled at the first rung is whichever loop is currently active — the team-health cron recorded at Step 3b if Step 6 was skipped, or the augmented cron recorded at Step 7a if Step 7 ran. Use whichever cron ID is currently active; do not assume which one.

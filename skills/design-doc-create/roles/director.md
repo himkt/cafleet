@@ -112,16 +112,4 @@ Drafter and Reviewer members are spawned with `--permission-mode dontAsk` (Bash 
 
 ## Shutdown Protocol
 
-1. Cancel the `/loop` monitor (`CronDelete` on the cron ID recorded when the loop was created).
-2. Delete each member:
-   ```bash
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <drafter-agent-id>
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <reviewer-agent-id>
-   ```
-3. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet agent deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
-   ```bash
-   cafleet session delete <session-id>
-   # → Deleted session <session-id>. Deregistered N agents.
-   ```
-
-The `sessions` row is soft-deleted (not physically removed) and all `tasks` rows are preserved so the message trail remains inspectable in the admin WebUI (subject to the WebUI's soft-delete filtering behavior).
+Run the canonical 5-rung teardown per `Skill(cafleet)` § *Shutdown Protocol* (CronDelete → `cafleet member delete` per member → `cafleet member list` verification → `cafleet session delete <session-id>` → `cafleet session list` sanity check). The skill-specific cron-ID nuance: the `/loop` monitor cancelled at the first rung is the team-health cron recorded at Step 1b — this skill never creates a second loop, so there is only one cron ID to track.

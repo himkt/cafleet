@@ -622,24 +622,13 @@ Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped (gh no
 2. `git add <design-doc>` (separate Bash call).
 3. `git commit -m "docs: mark design doc as complete"` (separate Bash call).
 4. **Push decision** (separate Bash call): run `git rev-parse --abbrev-ref <branch-name>@{upstream}`.
-   - Exit code 0 (branch is tracked on origin): `git push`. This covers both the "Step 6 fully succeeded" path and the "Step 6 partial-fail (push OK, PR create failed)" path, so the final docs commit is never orphaned locally when the branch is already on origin.
-   - Non-zero exit (Step 6 was skipped before the `git push -u`): skip the push. The docs commit stays local.
-   - The Director does NOT re-request Copilot review on this final docs commit — docs status changes are not worth another review round.
-5. `CronDelete` the currently active `/loop` monitor — whichever cron ID is recorded: team-health (from Step 3b) if Step 6 was skipped, augmented (from Step 7) otherwise.
-6. Delete each spawned member:
-   ```bash
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <programmer-agent-id>
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <tester-agent-id>      # if spawned
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <verifier-agent-id>    # if spawned
-   ```
-
-   Each `member delete` now blocks until the pane is actually gone (15 s default timeout). On exit 2 (stuck prompt), inspect with `cafleet member capture` and answer with `cafleet member send-input`, then retry — or rerun with `--force` to skip `/exit` and kill-pane immediately.
-
-7. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet agent deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
-   ```bash
-   cafleet session delete <session-id>
-   # → Deleted session <session-id>. Deregistered N agents.
-   ```
-8. **Report to the user**: include the PR URL (if Step 6 created one), the review-round summary (rounds used, exit reason: approved / quiescent / round-limit / skipped), and any skipped-step reasons.
-
-`session delete` soft-deletes the `sessions` row and physically deletes every associated `agent_placements` row while preserving all `tasks` rows for audit — the message history remains inspectable in the admin WebUI (subject to the WebUI's soft-delete filtering behavior).
+   - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 6 fully succeeded" path and the "Step 6 partial-fail (push OK, PR create failed)" path.
+   - Non-zero exit: skip the push. The docs commit stays local.
+   - The Director does NOT re-request Copilot review on this final docs commit.
+5. Run the canonical teardown per `Skill(cafleet)` § *Shutdown Protocol*:
+   1. `CronDelete` the currently active `/loop` monitor — team-health (cron ID from Step 3b) if Step 6 was skipped, augmented (cron ID from Step 7a) otherwise.
+   2. `cafleet member delete` for each spawned member (Programmer, Tester if spawned, Verifier if spawned). Each call blocks until the pane is gone; on exit 2 follow the `member capture` + `send-input` recovery, or rerun with `--force`.
+   3. `cafleet member list` — the team's roster MUST be empty before continuing.
+   4. `cafleet session delete <session-id>`.
+   5. `cafleet session list` — the session MUST not appear.
+6. **Report to the user**: include the PR URL (if Step 6 created one), the review-round summary (rounds used, exit reason: approved / quiescent / round-limit / skipped), and any skipped-step reasons.

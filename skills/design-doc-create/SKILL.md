@@ -309,20 +309,11 @@ No round limit — loop continues until approved or aborted.
    ```
    Wait for the Drafter's confirmation.
 
-2. Cancel the `/loop` monitor (`CronDelete` on the cron ID returned when the loop was created).
+2. Run the canonical teardown per `Skill(cafleet)` § *Shutdown Protocol*:
+   1. `CronDelete` the `/loop` monitor (cron ID recorded at Step 1b).
+   2. `cafleet member delete` for each member (Drafter, then Reviewer). Each call blocks until the pane is gone (15 s timeout); on exit 2 follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
+   3. `cafleet member list` — the team's roster MUST be empty before continuing.
+   4. `cafleet session delete <session-id>` (positional, no `--session-id` flag).
+   5. `cafleet session list` — the session MUST not appear (soft-deleted sessions are hidden).
 
-3. Shut down members:
-   ```bash
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <drafter-agent-id>
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <reviewer-agent-id>
-   ```
-
-   Each `member delete` now blocks until the pane is actually gone (15 s default timeout). On exit 2 (stuck prompt), inspect with `cafleet member capture` and answer with `cafleet member send-input`, then retry — or rerun with `--force` to skip `/exit` and kill-pane immediately.
-
-4. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet agent deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
-   ```bash
-   cafleet session delete <session-id>
-   # → Deleted session <session-id>. Deregistered N agents.
-   ```
-
-`session delete` soft-deletes the `sessions` row and physically deletes every associated `agent_placements` row while preserving all `tasks` rows for audit — the message history remains inspectable in the admin WebUI (subject to the WebUI's soft-delete filtering behavior).
+The session row is soft-deleted and `tasks` are preserved so the message trail remains inspectable in the admin WebUI.
