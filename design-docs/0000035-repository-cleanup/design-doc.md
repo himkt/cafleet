@@ -1,7 +1,7 @@
 # Repository cleanup — remove obsolete files, stale skill content, dead pyproject config
 
 **Status**: Approved
-**Progress**: 8/25 tasks complete
+**Progress**: 12/25 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -203,10 +203,10 @@ New terms added in response to Reviewer feedback:
 
 ### Step 4: Test cleanup (tests fourth — Q4 ruling on sentinel tests)
 
-- [ ] Edit `cafleet/tests/test_coding_agent.py`: delete the entire `class TestCodexConstantRemoved:` (3 test methods + class docstring). Keep all other classes. Verify imports at the top of the file still all have at least one consumer; remove any import that becomes unused. <!-- completed: -->
-- [ ] Edit `cafleet/tests/test_cli_member.py`: delete the `test_no_bash_flag_no_longer_parses` and `test_allow_bash_flag_no_longer_parses` functions. <!-- completed: -->
-- [ ] Edit `cafleet/tests/test_cli_member.py`: delete the entire `class TestCodingAgentFlagRemoved:` and any of its test methods. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` and confirm the test count drops by at least 6 (3 from `TestCodexConstantRemoved`, 2 from the two stand-alone functions, ≥1 from `TestCodingAgentFlagRemoved`). Record the new total in the executor's PR description. <!-- completed: -->
+- [x] Edit `cafleet/tests/test_coding_agent.py`: delete the entire `class TestCodexConstantRemoved:` (3 test methods + class docstring). Keep all other classes. Verify imports at the top of the file still all have at least one consumer; remove any import that becomes unused. <!-- completed: 2026-04-29T15:15 -->
+- [x] Edit `cafleet/tests/test_cli_member.py`: delete the `test_no_bash_flag_no_longer_parses` and `test_allow_bash_flag_no_longer_parses` functions. <!-- completed: 2026-04-29T15:15 -->
+- [x] Edit `cafleet/tests/test_cli_member.py`: delete the entire `class TestCodingAgentFlagRemoved:` and any of its test methods. <!-- completed: 2026-04-29T15:15 -->
+- [x] Run `mise //cafleet:test` and confirm the test count drops by at least 6 (3 from `TestCodexConstantRemoved`, 2 from the two stand-alone functions, ≥1 from `TestCodingAgentFlagRemoved`). Record the new total in the executor's PR description. <!-- completed: 2026-04-29T15:15 -->
 
 ### Step 5: Lockfile refresh (lockfile fifth — generated artifact)
 
