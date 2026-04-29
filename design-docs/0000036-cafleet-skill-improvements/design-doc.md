@@ -1,7 +1,7 @@
 # 0000036 — CAFleet Skill Improvements
 
 **Status**: Approved
-**Progress**: 16/22 tasks complete
+**Progress**: 22/22 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -239,12 +239,12 @@ Constraints:
 
 ### Step 5: Allow `cafleet:` plugin skills (S6)
 
-- [ ] Add `Skill(cafleet:cafleet)` to `.claude/settings.json` `permissions.allow`. <!-- completed: -->
-- [ ] Add `Skill(cafleet:cafleet-monitoring)` to `.claude/settings.json` `permissions.allow`. <!-- completed: -->
-- [ ] Add `Skill(cafleet:design-doc)` to `.claude/settings.json` `permissions.allow`. <!-- completed: -->
-- [ ] Add `Skill(cafleet:design-doc-create)` to `.claude/settings.json` `permissions.allow`. <!-- completed: -->
-- [ ] Add `Skill(cafleet:design-doc-execute)` to `.claude/settings.json` `permissions.allow`. <!-- completed: -->
-- [ ] Verify `.claude/settings.json` parses as valid JSON after the edits (e.g. `python -m json.tool < .claude/settings.json > /dev/null`) and that the existing global-skill entries (`Skill(design-doc-create)`, `Skill(design-doc-execute)`, `Skill(design-doc)`, `Skill(update-readme)`) and `Bash(...)` entries are unchanged. <!-- completed: -->
+- [x] Add `Skill(cafleet:cafleet)` to `.claude/settings.json` `permissions.allow`. <!-- completed: 2026-04-29T15:30 -->
+- [x] Add `Skill(cafleet:cafleet-monitoring)` to `.claude/settings.json` `permissions.allow`. <!-- completed: 2026-04-29T15:30 -->
+- [x] Add `Skill(cafleet:design-doc)` to `.claude/settings.json` `permissions.allow`. <!-- completed: 2026-04-29T15:30 -->
+- [x] Add `Skill(cafleet:design-doc-create)` to `.claude/settings.json` `permissions.allow`. <!-- completed: 2026-04-29T15:30 -->
+- [x] Add `Skill(cafleet:design-doc-execute)` to `.claude/settings.json` `permissions.allow`. <!-- completed: 2026-04-29T15:30 -->
+- [x] Verify `.claude/settings.json` parses as valid JSON after the edits (e.g. `python -m json.tool < .claude/settings.json > /dev/null`) and that the existing global-skill entries (`Skill(design-doc-create)`, `Skill(design-doc-execute)`, `Skill(design-doc)`, `Skill(update-readme)`) and `Bash(...)` entries are unchanged. <!-- completed: 2026-04-29T15:30 -->
 
 ---
 

@@ -9,6 +9,11 @@
       "Skill(design-doc-create)",
       "Skill(design-doc-execute)",
       "Skill(design-doc)",
+      "Skill(cafleet:cafleet)",
+      "Skill(cafleet:cafleet-monitoring)",
+      "Skill(cafleet:design-doc)",
+      "Skill(cafleet:design-doc-create)",
+      "Skill(cafleet:design-doc-execute)",
       "Bash(cafleet *)"
     ],
     "deny": [
