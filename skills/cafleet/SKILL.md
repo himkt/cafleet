@@ -42,11 +42,11 @@ The environment variables the CLI reads (all wired through `cafleet.config.Setti
 In every example below, substitute the literal UUID strings printed by `cafleet session create` / `cafleet agent register`. Angle-bracket tokens are placeholders, **not** shell variables:
 
 - `<session-id>` — the session UUID printed by `cafleet session create`
-- `<my-agent-id>` — the UUID returned by your own `cafleet ... register` call
+- `<my-agent-id>` — the UUID returned by your own `cafleet ... agent register` call
 - `<director-agent-id>` — the Director's UUID (handed to you in your spawn prompt if you are a member)
 - `<member-agent-id>` — a target member's UUID (from `member create` / `member list`)
 - `<target-agent-id>` — the recipient of a unicast message
-- `<task-id>` — the task UUID printed by `poll` / `send`
+- `<task-id>` — the task UUID printed by `message poll` / `message send`
 
 ## Global Options
 
@@ -87,7 +87,7 @@ Returns the newly created `agent_id`. Record it; every other command needs it vi
 Use `--json` so the output is machine-parseable, and capture `agent_id` for every subsequent call:
 
 ```bash
-cafleet --session-id <session-id> --json register \
+cafleet --session-id <session-id> --json agent register \
   --name "<short-label>" \
   --description "<one-sentence purpose>"
 ```

@@ -23,14 +23,14 @@ You do NOT speak to the user directly. All feedback goes through the Director vi
 
 **Sending feedback or approval to the Director:**
 ```bash
-cafleet --session-id <session-id> send --agent-id <my-agent-id> \
+cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "<review feedback or APPROVED signal>"
 ```
 The literal `<session-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
 **Receiving review assignments from the Director:** When the Director sends a message, the broker injects `cafleet --session-id <session-id> message poll --agent-id <my-agent-id>` into your tmux pane via push notification. You will see the `cafleet message poll` output with the Director's assignment (typically the path to a draft). Read the message, then acknowledge it:
 ```bash
-cafleet --session-id <session-id> ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 Then read the document file and send your review back via `cafleet message send`.
 

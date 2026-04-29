@@ -49,8 +49,8 @@ User
 |---|---|
 | `TeamCreate(name="execute-{slug}")` | CAFleet session created via `cafleet session create` — it bootstraps the session + root Director + placement + Administrator in one transaction (no separate `cafleet agent register` call needed for the Director) |
 | `Agent(team_name=..., subagent_type=...)` | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
-| `SendMessage(to="Programmer")` | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."` |
-| `SendMessage(to="Director")` (from member) | `cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
+| `SendMessage(to="Programmer")` | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."` |
+| `SendMessage(to="Director")` (from member) | `cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
 | `agent-team-supervision` `/loop` | `Skill(cafleet-monitoring)` `/loop` |
 | `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` for each member, then `cafleet session delete <session-id>` (soft-deletes the session and sweeps the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `session delete` is the only supported teardown. |
 | Auto message delivery | Push notification injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into member's tmux pane |
@@ -235,7 +235,7 @@ YOUR AGENT ID: <my-agent-id>     (will be filled in literally by member create)
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
@@ -275,7 +275,7 @@ YOUR AGENT ID: <my-agent-id>     (will be filled in literally by member create)
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
@@ -316,7 +316,7 @@ YOUR AGENT ID: <my-agent-id>     (will be filled in literally by member create)
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code or modify implementation/test files.
@@ -358,7 +358,7 @@ For each step in the design document:
 
 1. **Assign**: Send the Tester the step number, description, and specification:
    ```bash
-   cafleet --session-id <session-id> send --agent-id <director-agent-id> \
+   cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
      --to <tester-agent-id> --text "Step N: <description>. Spec: <…>. Write unit tests and report file paths when done."
    ```
 2. **Wait for Tester report via `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>`**. If the test framework is ambiguous, ask the user via `AskUserQuestion` and relay the answer via `cafleet message send`.
@@ -371,7 +371,7 @@ For each step in the design document:
 
 1. **Assign**: Send the Programmer the step number, description, and test file paths:
    ```bash
-   cafleet --session-id <session-id> send --agent-id <director-agent-id> \
+   cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
      --to <programmer-agent-id> --text "Step N: <description>. Tests at: <paths>. Implement to pass all tests, update design doc checkboxes and Progress counter, then report."
    ```
 2. **Wait for Programmer report via `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>`**. On suspected test defect, see [roles/director.md](roles/director.md) for the escalation protocol.
@@ -403,7 +403,7 @@ Repeat from Phase A for the next step. Always include the design document in the
 
 If the Verifier was spawned, assign verification:
 
-1. Send the Verifier the design document, completed steps, and relevant files via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <verifier-agent-id> --text "..."`.
+1. Send the Verifier the design document, completed steps, and relevant files via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <verifier-agent-id> --text "..."`.
 2. Verifier discovers tools, executes E2E verification, captures evidence, reports results via `cafleet message send`.
 3. **Route failures**: Implementation bugs → Programmer via `cafleet message send`, test gaps → Tester via `cafleet message send`, spec issues → user.
 4. Re-verify after fixes. Proceed to User Approval when all verifiable criteria pass.
@@ -444,8 +444,8 @@ See [roles/director.md](roles/director.md) for user interaction rules (COMMENT h
 
 When the user selects "Scan for COMMENT markers": scan changed files for `COMMENT(` markers. Classify by file location (see [roles/director.md](roles/director.md)) and route via `cafleet message send`:
 - Design-doc COMMENTs → Director resolves directly (no routing).
-- Source-file COMMENTs → `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."`.
-- Test-file COMMENTs → `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <tester-agent-id> --text "..."`.
+- Source-file COMMENTs → `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."`.
+- Test-file COMMENTs → `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "..."`.
 
 After all COMMENTs are resolved and verified, re-present to user.
 
@@ -535,8 +535,8 @@ For each new inline comment, pick the owner by file-path pattern:
 | Path pattern | Owner | Route |
 |:--|:--|:--|
 | Design doc (`design-docs/**/design-doc.md`) | Director | Director applies directly — no `cafleet message send` route |
-| Test file (e.g. `**/test_*.py`, `**/*_test.py`, `**/tests/**`) | Tester | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <tester-agent-id> --text "Copilot review: <file>:<line> — <comment body>. Please address."` |
-| Any other source file | Programmer | `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <programmer-agent-id> --text "Copilot review: <file>:<line> — <comment body>. Please address."` |
+| Test file (e.g. `**/test_*.py`, `**/*_test.py`, `**/tests/**`) | Tester | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "Copilot review: <file>:<line> — <comment body>. Please address."` |
+| Any other source file | Programmer | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "Copilot review: <file>:<line> — <comment body>. Please address."` |
 
 For review-level comments (body text not attached to a specific line), route by Director judgment: spec-level → Director resolves directly; implementation-level → Programmer; test-level → Tester.
 
@@ -571,9 +571,9 @@ Monitor team health AND PR review state (interval: 1 minute).
 
 TEAM HEALTH:
 1. Run `cafleet --session-id <session-id> --json member list --agent-id <director-agent-id>`.
-2. Run `cafleet --session-id <session-id> --json poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check>"`. ACK progress reports.
+2. Run `cafleet --session-id <session-id> --json message poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check>"`. ACK progress reports.
 3. For each member that has not sent a message since last check, run `cafleet --session-id <session-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id> --lines 200`.
-4. Nudge stalled members via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id> --text "Report your progress now. If blocked, state what is blocking you."`.
+4. Nudge stalled members via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Report your progress now. If blocked, state what is blocking you."`.
 
 PR REVIEW:
 5. Run `gh pr view <pr-number> --json reviews` (GraphQL shape: `author.login`, `state`, `submittedAt`, `body`).
@@ -581,7 +581,7 @@ PR REVIEW:
 7. Filter to entries where the appropriate login field (`author.login` for GraphQL reviews, `user.login` for REST inline comments) starts with `copilot` (case-insensitive) and the appropriate timestamp (`submittedAt` / `created_at`) > `<last-push-timestamp>`.
 8. If the most recent Copilot-authored entry in `reviews` has `state == "APPROVED"`: signal Step 7 exit (success).
 9. If filter returned 0 entries for 5 consecutive ticks: signal Step 7 exit (quiescent).
-10. If filter returned ≥ 1 entries: classify by file path and dispatch via `cafleet --session-id <session-id> send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`.
+10. If filter returned ≥ 1 entries: classify by file path and dispatch via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`.
 
 ESCALATION:
 11. If any member has been nudged 2 times with no progress, escalate to the user.

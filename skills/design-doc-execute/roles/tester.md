@@ -22,14 +22,14 @@ You do NOT speak to the user directly. All communication goes through the Direct
 
 **Sending a message to the Director:**
 ```bash
-cafleet --session-id <session-id> send --agent-id <my-agent-id> \
+cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "<your report>"
 ```
 The literal `<session-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
 **Receiving tasks from the Director:** When the Director sends a message, the broker injects `cafleet --session-id <session-id> message poll --agent-id <my-agent-id>` into your tmux pane via push notification. You will see the `cafleet message poll` output with the Director's task. Read the message, then acknowledge it:
 ```bash
-cafleet --session-id <session-id> ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 Then act on the Director's instructions. Report completion or follow-up questions via `cafleet message send` to the Director.
 
