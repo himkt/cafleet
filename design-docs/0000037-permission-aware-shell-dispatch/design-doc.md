@@ -1,7 +1,7 @@
 # Permission-aware shell dispatch via `cafleet member safe-exec`
 
 **Status**: Approved
-**Progress**: 16/20 tasks complete
+**Progress**: 19/20 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -10,21 +10,21 @@ Replace the always-permitted `cafleet member send-input --bash` dispatch with a 
 
 ## Success Criteria
 
-- [ ] `cafleet member send-input` no longer accepts a `--bash` flag. The flag is removed from `cafleet/src/cafleet/cli.py`. Click rejects the old form with `Error: No such option: '--bash'.` (exit 2).
-- [ ] `cafleet member safe-exec --bash CMD` exists as a new Director-only subcommand, mutually exclusive with no other input mode (it has only `--bash` because shell dispatch is its single purpose).
-- [ ] Every `safe-exec` invocation re-reads three settings files in the order project-local → project → user. No caching at any layer.
-- [ ] Discovery honors `CLAUDE_CONFIG_DIR/settings.json` for the user layer when the env var is set, falling back to `~/.claude/settings.json` when unset.
-- [ ] Allow lists and deny lists are unioned across all three layers. Deny wins on any conflict.
-- [ ] Only `Bash(...)` patterns are honored; `Read(...)`, `WebFetch(...)`, and any other tool prefix is silently ignored.
-- [ ] Allow path: dispatches the inner CMD into the member pane via existing `tmux.send_bash_command`. Exit 0.
-- [ ] Deny path: command is NOT dispatched. Exit 2. Stderr names the matched deny pattern, the file it lives in, and the offending command substring.
-- [ ] Ask path: command is NOT dispatched. Exit 3. Stderr lists the three searched files (with the resolved user path) and a suggested `Bash(...)` pattern the operator can add.
-- [ ] `cafleet --json member safe-exec --bash CMD` emits a structured JSON payload for all three outcomes with keys `outcome`, `matched_pattern`, `matched_file`, `offending_substring`, `searched_files`.
-- [ ] Cross-Director boundary: `safe-exec` rejects when `placement.director_agent_id != --agent-id` with the existing wording (`agent <id> is not a member of your team (director_agent_id=<other>)`).
-- [ ] Pending placement (no `tmux_pane_id`) is rejected with the existing wording.
-- [ ] Documentation is updated FIRST per `.claude/rules/design-doc-numbering.md`. The full target list is enumerated in Implementation Step 1.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck` all pass.
-- [ ] `.claude/settings.json` removes the three obsolete `ask` entries that scoped the old `--bash` flag and adds `Bash(cafleet --session-id * member safe-exec *)` to `allow`.
+- [x] `cafleet member send-input` no longer accepts a `--bash` flag. The flag is removed from `cafleet/src/cafleet/cli.py`. Click rejects the old form with `Error: No such option: '--bash'.` (exit 2).
+- [x] `cafleet member safe-exec --bash CMD` exists as a new Director-only subcommand, mutually exclusive with no other input mode (it has only `--bash` because shell dispatch is its single purpose).
+- [x] Every `safe-exec` invocation re-reads three settings files in the order project-local → project → user. No caching at any layer.
+- [x] Discovery honors `CLAUDE_CONFIG_DIR/settings.json` for the user layer when the env var is set, falling back to `~/.claude/settings.json` when unset.
+- [x] Allow lists and deny lists are unioned across all three layers. Deny wins on any conflict.
+- [x] Only `Bash(...)` patterns are honored; `Read(...)`, `WebFetch(...)`, and any other tool prefix is silently ignored.
+- [x] Allow path: dispatches the inner CMD into the member pane via existing `tmux.send_bash_command`. Exit 0.
+- [x] Deny path: command is NOT dispatched. Exit 2. Stderr names the matched deny pattern, the file it lives in, and the offending command substring.
+- [x] Ask path: command is NOT dispatched. Exit 3. Stderr lists the three searched files (with the resolved user path) and a suggested `Bash(...)` pattern the operator can add.
+- [x] `cafleet --json member safe-exec --bash CMD` emits a structured JSON payload for all three outcomes with keys `outcome`, `matched_pattern`, `matched_file`, `offending_substring`, `searched_files`.
+- [x] Cross-Director boundary: `safe-exec` rejects when `placement.director_agent_id != --agent-id` with the existing wording (`agent <id> is not a member of your team (director_agent_id=<other>)`).
+- [x] Pending placement (no `tmux_pane_id`) is rejected with the existing wording.
+- [x] Documentation is updated FIRST per `.claude/rules/design-doc-numbering.md`. The full target list is enumerated in Implementation Step 1.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck` all pass.
+- [x] `.claude/settings.json` removes the three obsolete `ask` entries that scoped the old `--bash` flag and adds `Bash(cafleet --session-id * member safe-exec *)` to `allow`.
 
 ---
 
@@ -419,9 +419,9 @@ Write all tests for `cafleet/permissions.py` and `cafleet member safe-exec` BEFO
 
 ### Step 4: Cross-cutting verification
 
-- [ ] Manual integration smoke: spawn a member via `cafleet member create`; from the Director, dispatch one allow-matching command (e.g. `git status`), one deny-matching command (e.g. `git push:*` if denied in user settings), and one unmatched command. Confirm exit codes 0 / 2 / 3 and the stderr / JSON shapes per §5. <!-- completed: -->
-- [ ] Confirm the existing `Bash(cafleet *)` allow rule lets the Director's `cafleet member safe-exec ...` invocation through Claude Code without a per-call prompt. <!-- completed: -->
-- [ ] Confirm `validate_bash.py` (project hook) blocks any compound-command attempt at the OUTER Director Bash invocation, demonstrating that `safe-exec`'s opaque pass-through assumption holds in practice. <!-- completed: -->
+- [x] Manual integration smoke: spawn a member via `cafleet member create`; from the Director, dispatch one allow-matching command (e.g. `git status`), one deny-matching command (e.g. `git push:*` if denied in user settings), and one unmatched command. Confirm exit codes 0 / 2 / 3 and the stderr / JSON shapes per §5. <!-- completed: 2026-04-30T06:50 -->
+- [x] Confirm the existing `Bash(cafleet *)` allow rule lets the Director's `cafleet member safe-exec ...` invocation through Claude Code without a per-call prompt. <!-- completed: 2026-04-30T06:50 -->
+- [x] Confirm `validate_bash.py` (project hook) blocks any compound-command attempt at the OUTER Director Bash invocation, demonstrating that `safe-exec`'s opaque pass-through assumption holds in practice. <!-- completed: 2026-04-30T06:50 -->
 - [ ] Update this design document: flip Status to `Complete`, set `Last Updated` to the merge date. <!-- completed: -->
 
 ---
