@@ -234,6 +234,20 @@ class TestPromptTemplates:
     def test_claude_template_contains_bash_routing_canary(self):
         assert "If your Bash tool is denied" in CLAUDE.default_prompt_template
 
+    def test_claude_template_documents_bang_prefix_for_cafleet(self):
+        """Design 0000035 Step 1: the rendered template must explicitly
+        document the ``!`` shortcut for member-side cafleet calls. The
+        canary ``"! cafleet"`` (literal exclamation + space + cafleet)
+        is the smallest change-resistant marker proving the prefix was
+        documented; a future revert that drops the ``!`` shortcut
+        guidance would fail this assertion.
+        """
+        rendered = CLAUDE.default_prompt_template.format(**self._STANDARD_KWARGS)
+        assert "! cafleet" in rendered, (
+            "CLAUDE template must document the `!` shortcut for cafleet "
+            f"calls (canary `'! cafleet'`); got:\n{rendered}"
+        )
+
     def test_claude_template_format_succeeds_with_standard_kwargs(self):
         result = CLAUDE.default_prompt_template.format(**self._STANDARD_KWARGS)
         assert "550e8400-e29b-41d4-a716-446655440000" in result
