@@ -55,10 +55,10 @@ When you receive any signal that a member may be stalled (loop check, idle notif
 
 ```bash
 cafleet --session-id <session-id> message poll --agent-id <director-agent-id> \
-  --since "2026-04-12T10:00:00Z"
+  --since "2026-04-12T10:00:00+00:00"
 ```
 
-The `--since` flag accepts an ISO 8601 timestamp. If the member has sent a progress report or help request via `cafleet message send`, you can act on it immediately without interrupting the member's work. This is non-intrusive and preferred.
+The `--since` flag accepts an ISO 8601 timestamp. The broker stores `status_timestamp` via `datetime.now(UTC).isoformat()`, which renders as `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` (microsecond precision, `+00:00` suffix — **not** `Z`), and the `--since` filter is applied as a raw SQLite TEXT comparison, so pass timestamps in the same `+00:00` form to get correct ordering. If the member has sent a progress report or help request via `cafleet message send`, you can act on it immediately without interrupting the member's work. This is non-intrusive and preferred.
 
 ### Stage 2 -- Terminal capture fallback (`cafleet member capture`)
 

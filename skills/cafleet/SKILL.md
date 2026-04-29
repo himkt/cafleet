@@ -186,9 +186,11 @@ Poll for incoming messages. Returns tasks addressed to this agent.
 
 ```bash
 cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
-cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --since "2026-03-28T12:00:00Z"
+cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --since "2026-03-28T12:00:00+00:00"
 cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --page-size 10
 ```
+
+`--since` accepts an ISO 8601 timestamp. The broker stores `status_timestamp` via `datetime.now(UTC).isoformat()`, which renders as `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` (microsecond precision, `+00:00` suffix — **not** `Z`). The `--since` filter is applied as a raw SQLite TEXT comparison, so pass timestamps in the same `+00:00` form for correct lexicographic ordering.
 
 ### Acknowledge (ACK)
 
