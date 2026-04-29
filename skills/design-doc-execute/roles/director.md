@@ -28,6 +28,28 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-
 - **Run the PR & Copilot Review loop after Approve.** When the user selects Approve, the Director moves through Steps 6 → 7 → 8 without further prompting. Step 6 pushes the branch, runs `gh pr create --fill` (re-using an existing PR on the branch if one is present), records the PR number literally (no shell variables), requests `@copilot` via `gh pr edit <pr-number> --add-reviewer @copilot`, verifies the request with `gh api repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers`, and captures `last_push_ts`. Step 7 swaps the team-health `/loop` for an augmented loop (create-before-delete order — start the new cron, then `CronDelete` the old one), classifies each new Copilot inline comment by file path (design doc → Director direct, test file → Tester via `cafleet message send`, other source → Programmer via `cafleet message send`), waits for the routed member's completion report, commits per scope with the Copilot-review commit messages, `git push`es, increments `round`, and re-requests `@copilot`. The loop exits on Copilot APPROVED, 5 quiescent ticks, or `round >= 5` (escalate to the user via AskUserQuestion). Only after Step 7 exits does the Director mark the doc Complete and run Step 8 (commit + conditional `git push` when the branch is tracked on origin, then `CronDelete` + member deletes + `cafleet session delete`). When `gh auth status` fails, the branch equals the default branch, there are no commits beyond base, `git push`/`gh pr create` fails, or the user expresses approve-local intent under "Other", skip Steps 6 + 7 and proceed directly to Step 8 local-finalize.
 - **Clean up when done.** Final commit updating status to "Complete", then delete each member via `cafleet member delete`, and tear down the session via `cafleet session delete <session-id>`. The root Director cannot be deregistered with `cafleet agent deregister` — `session delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
 
+## Idle Semantics
+
+**Members go idle after every turn. A member's tmux pane sitting at the prompt between turns is the expected state, NOT a stall.** A member sending you a `cafleet message send` and then returning to the prompt is the normal flow — they sent their output and are waiting for the next push notification or the next assignment.
+
+- Idle members receive messages normally; the broker's push notification (`tmux send-keys` of `cafleet message poll`) wakes them.
+- `/loop` notifications about idle panes are informational. Do not react unless you are ready to assign new work, OR the member's idleness is **blocking your next step** (a downstream phase cannot start, an expected deliverable file is missing past its milestone, you sent a message and received no reply after a reasonable window).
+- Do NOT comment on idleness or nudge a member just because they went idle. Only nudge per the Stall Response Ladder below.
+
+## Stall Response Ladder
+
+A member is stalled when they **block your next step** — not merely because they are idle. Signals:
+
+- The deliverable file you expect at this milestone does not exist.
+- `cafleet message poll --agent-id <director-agent-id>` shows no progress message from the member since the last assignment AND `cafleet member capture` shows no forward progress in the pane buffer.
+- You sent a `cafleet message send` and the member has not replied past one full `/loop` tick.
+
+**Response ladder (in order — do NOT skip rungs):**
+
+1. Send a specific instruction via `cafleet message send` — never a generic "are you OK?". State the deliverable you expect and the blocker you are trying to unblock.
+2. If still no reply after a second nudge across one more `/loop` tick, run `cafleet member capture --member-id <member-agent-id> --lines 200` and inspect the pane state. If the pane is on an `AskUserQuestion` frame, follow the canonical three-beat workflow in `Skill(cafleet)` § *Answer a member's AskUserQuestion prompt*.
+3. After 2 nudges without progress, escalate to the user via `AskUserQuestion` with concrete options (re-spawn / redistribute / drop scope / Other). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
+
 ## Communication Protocol
 
 All Director-to-member messages use the CAFleet message broker. The Director stores each member's `agent_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-agent-id>` as the `--to` target.

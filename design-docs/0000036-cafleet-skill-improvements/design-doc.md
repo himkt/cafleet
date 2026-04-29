@@ -1,7 +1,7 @@
 # 0000036 — CAFleet Skill Improvements
 
 **Status**: Approved
-**Progress**: 3/22 tasks complete
+**Progress**: 7/22 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -217,10 +217,10 @@ Constraints:
 
 ### Step 2: Idle Semantics + Stall Response Ladder (S2, S3)
 
-- [ ] Add the **Idle Semantics** subsection (verbatim per S2 in this design doc) to `skills/design-doc-create/roles/director.md`, immediately before the existing `## Communication Protocol` heading. <!-- completed: -->
-- [ ] Add the **Stall Response Ladder** subsection (verbatim per S3) to `skills/design-doc-create/roles/director.md`, immediately after the new `## Idle Semantics` heading. <!-- completed: -->
-- [ ] Add the **Idle Semantics** subsection to `skills/design-doc-execute/roles/director.md`, immediately before the existing `## Communication Protocol` heading. <!-- completed: -->
-- [ ] Add the **Stall Response Ladder** subsection to `skills/design-doc-execute/roles/director.md`, immediately after the new `## Idle Semantics` heading. <!-- completed: -->
+- [x] Add the **Idle Semantics** subsection (verbatim per S2 in this design doc) to `skills/design-doc-create/roles/director.md`, immediately before the existing `## Communication Protocol` heading. <!-- completed: 2026-04-29T13:05 -->
+- [x] Add the **Stall Response Ladder** subsection (verbatim per S3) to `skills/design-doc-create/roles/director.md`, immediately after the new `## Idle Semantics` heading. <!-- completed: 2026-04-29T13:05 -->
+- [x] Add the **Idle Semantics** subsection to `skills/design-doc-execute/roles/director.md`, immediately before the existing `## Communication Protocol` heading. <!-- completed: 2026-04-29T13:05 -->
+- [x] Add the **Stall Response Ladder** subsection to `skills/design-doc-execute/roles/director.md`, immediately after the new `## Idle Semantics` heading. <!-- completed: 2026-04-29T13:05 -->
 
 ### Step 3: Member Shutdown subsections (S4)
 
