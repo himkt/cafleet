@@ -83,10 +83,12 @@ def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
 def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) -> bool:
     """Best-effort ``cafleet ... message poll`` trigger for the recipient's pane.
 
-    The keystroke is sent literally so the recipient's Bash tool runs it
-    directly — members are spawned with ``--permission-mode dontAsk`` so
-    the Bash tool is enabled and permission prompts auto-resolve. Returns
-    False on any tmux failure or when the binary is missing, never raising.
+    Injects the poll command string literally into the recipient's tmux
+    pane and then submits it with Enter. Members are spawned with
+    ``--permission-mode dontAsk``, so if running the injected command
+    eventually invokes the Bash tool, permission prompts auto-resolve.
+    Returns False on any tmux failure or when the binary is missing,
+    never raising.
 
     Split into two ``send-keys`` calls for the same reason as
     ``send_freetext_and_submit``: ``-l`` is per-invocation, so mixing
