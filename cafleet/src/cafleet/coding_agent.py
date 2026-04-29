@@ -41,10 +41,14 @@ CLAUDE = CodingAgentConfig(
         "Load Skill(cafleet). Your session_id is {session_id} and your agent_id is {agent_id}.\n"
         "You are a member of the team led by {director_name} ({director_agent_id}).\n"
         "Wait for instructions via "
-        "`cafleet --session-id {session_id} message poll --agent-id {agent_id}`.\n"
-        "If your Bash tool is denied for this session, route any shell command through your Director —\n"
-        "send a plain message to your Director asking for it; the Director will respond with `! command`\n"
-        "keystrokes that your harness will execute via Claude Code's shell shortcut."
+        "`! cafleet --session-id {session_id} message poll --agent-id {agent_id}`.\n"
+        "If your Bash tool is denied for this session, you MUST prefix every cafleet call\n"
+        "(poll/send/ack) with `! ` — for example, `! cafleet --session-id {session_id} message send\n"
+        '--agent-id {agent_id} --to <id> --text "..."`. Do NOT attempt cafleet via the Bash tool;\n'
+        "it is denied. The `!` shortcut is independent of the Bash-tool deny posture. Likewise route\n"
+        "any other shell command through your Director — send a plain message asking for it; the\n"
+        "Director will respond with `! command` keystrokes that your harness will execute via the\n"
+        "same `!` CLI shortcut."
     ),
     display_name_args=("--name",),
     disallow_tools_args=("--disallowedTools", "Bash"),
