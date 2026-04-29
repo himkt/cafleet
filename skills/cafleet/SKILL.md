@@ -149,13 +149,13 @@ JSON output:
 }
 ```
 
-### List Agents
+### List Agents / Agent Detail
 
-List all registered agents, or get detail for a specific agent.
+`agent list` returns all registered agents in the session. To fetch detail for a single agent, use `agent show --id <target-agent-id>` (the `--id` flag is on `agent show`, not `agent list` — `agent list --id ...` will fail with `No such option: --id`).
 
 ```bash
 cafleet --session-id <session-id> agent list --agent-id <my-agent-id>
-cafleet --session-id <session-id> agent list --agent-id <my-agent-id> --id <target-agent-id>
+cafleet --session-id <session-id> agent show --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
 ### Send (Unicast)
