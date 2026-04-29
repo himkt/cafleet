@@ -210,9 +210,9 @@ Based on the design document steps (see [roles/director.md](roles/director.md) f
 
 Read the role files that will be embedded verbatim in spawn prompts:
 
-- `.claude/skills/design-doc-execute/roles/programmer.md`
-- `.claude/skills/design-doc-execute/roles/tester.md` (if Tester needed)
-- `.claude/skills/design-doc-execute/roles/verifier.md` (if Verifier needed)
+- `skills/design-doc-execute/roles/programmer.md`
+- `skills/design-doc-execute/roles/tester.md` (if Tester needed)
+- `skills/design-doc-execute/roles/verifier.md` (if Verifier needed)
 
 #### 3f. Spawn each member via `cafleet member create`
 

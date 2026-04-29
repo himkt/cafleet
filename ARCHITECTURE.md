@@ -164,7 +164,7 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 **Operator diagnostics**: `cafleet doctor` prints the calling pane's session/window/pane identifiers (plus `$TMUX_PANE`) for operators diagnosing placement issues without reaching for raw tmux commands. It is a top-level command — not a member-family command — but reuses `tmux.ensure_tmux_available()` so the TMUX-required wording stays consistent with the member surface.
 
-**Supervision skill**: The Director's monitoring obligations are defined in `.claude/skills/cafleet-monitoring/SKILL.md`. This skill must be loaded (`Skill(cafleet-monitoring)`) before spawning any members. It provides a 2-stage health check protocol (message poll then terminal capture) and a ready-to-use `/loop` prompt template.
+**Supervision skill**: The Director's monitoring obligations are defined in `skills/cafleet-monitoring/SKILL.md`. This skill must be loaded (`Skill(cafleet-monitoring)`) before spawning any members. It provides a 2-stage health check protocol (message poll then terminal capture) and a ready-to-use `/loop` prompt template.
 
 ## Bash Routing via Director
 
@@ -178,9 +178,9 @@ CAFleet ships CAFleet-native replicas of the global Agent Teams design document 
 
 | Skill | Location | Purpose |
 |---|---|---|
-| `design-doc` | `.claude/skills/design-doc/` | Plugin-local copy of the global `/design-doc` skill (template + guidelines). Spawned members load this instead of the global skill so the plugin is self-contained. |
-| `design-doc-create` | `.claude/skills/design-doc-create/` | Create a design document through CAFleet-orchestrated Director / Drafter / Reviewer roles. Mirrors the process of `/design-doc-create`. |
-| `design-doc-execute` | `.claude/skills/design-doc-execute/` | Execute a design document through CAFleet-orchestrated Director / Programmer / Tester / (optional) Verifier roles with per-step TDD cycle. Mirrors the process of `/design-doc-execute`. |
+| `design-doc` | `skills/design-doc/` | Plugin-local copy of the global `/design-doc` skill (template + guidelines). Spawned members load this instead of the global skill so the plugin is self-contained. |
+| `design-doc-create` | `skills/design-doc-create/` | Create a design document through CAFleet-orchestrated Director / Drafter / Reviewer roles. Mirrors the process of `/design-doc-create`. |
+| `design-doc-execute` | `skills/design-doc-execute/` | Execute a design document through CAFleet-orchestrated Director / Programmer / Tester / (optional) Verifier roles with per-step TDD cycle. Mirrors the process of `/design-doc-execute`. |
 
 **Role files**: Each `*-create` and `*-execute` skill ships a `roles/` directory with one Markdown file per role. The Director reads the relevant role file and embeds its content verbatim in the `cafleet member create` spawn prompt.
 
