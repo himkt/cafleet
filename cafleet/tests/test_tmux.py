@@ -217,9 +217,7 @@ class TestSendPollTrigger:
         before the subcommand; ``--agent-id`` is a per-subcommand option
         and MUST come after ``message poll``. This ordering is what click's
         parser actually accepts and is the literal string the recipient's
-        Bash tool receives. Under design 0000035's dontAsk model the
-        recipient runs the keystroke directly via the Bash tool — no
-        ``!`` prefix workaround is needed.
+        Bash tool receives.
         """
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
         captured_args = []
@@ -303,16 +301,10 @@ class TestSendPollTriggerKeystroke:
     """Regression guard for the literal keystroke shape pushed by
     ``send_poll_trigger``.
 
-    Two contracts pinned here:
-
-    1. **Design 0000034 §14** — the underlying cafleet command MUST be
-       ``message poll --agent-id <a>`` (not the legacy bare ``poll``,
-       which no longer parses).
-    2. **Design 0000035 (revised, dontAsk model)** — the keystroke is the
-       bare cafleet command (NO ``! `` prefix). The recipient's Bash tool
-       is enabled (spawn argv carries ``--permission-mode dontAsk``), so
-       the harness runs the keystroke as a normal Bash invocation. A
-       leading ``!`` would either fail or get typed as literal text.
+    The keystroke is the bare cafleet command and MUST carry
+    ``message poll --agent-id <a>``. The recipient's Bash tool is
+    enabled under ``--permission-mode dontAsk``, so the harness runs
+    the keystroke as a normal Bash invocation.
 
     The two ``send-keys`` calls are inspected separately:
 
@@ -339,17 +331,11 @@ class TestSendPollTriggerKeystroke:
 
         keystroke = captured[0][-1]
         assert keystroke.startswith("cafleet --session-id "), (
-            "send_poll_trigger keystroke must start with `cafleet --session-id ` "
-            "(design 0000035 dontAsk model — no `!` prefix); "
+            "send_poll_trigger keystroke must start with `cafleet --session-id `; "
             f"got: {keystroke!r}"
         )
-        assert not keystroke.startswith("! "), (
-            "keystroke must NOT carry the legacy `! ` prefix under the "
-            f"dontAsk model; got: {keystroke!r}"
-        )
         assert "message poll --agent-id" in keystroke, (
-            "keystroke must still carry `message poll --agent-id` "
-            f"(design 0000034 §14); got: {keystroke!r}"
+            f"keystroke must carry `message poll --agent-id`; got: {keystroke!r}"
         )
 
         assert captured[1] == ["tmux", "send-keys", "-t", "%5", "Enter"]

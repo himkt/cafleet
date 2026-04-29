@@ -4,9 +4,7 @@ This rule fires every time you reach for the Bash tool as a CAFleet team member.
 
 ## The MUST rule
 
-> **If you are a CAFleet member spawned by `cafleet member create`, your harness runs in `--permission-mode dontAsk`. Your Bash tool is ENABLED and permission prompts auto-resolve silently. Run cafleet (and any other shell command) directly via the Bash tool. No `!` prefix workaround, no Director routing, no operator prompts.**
-
-This is the design 0000035 default — see `design-docs/0000035-member-bash-whitelist/design-doc.md` for the full record.
+> **If you are a CAFleet member spawned by `cafleet member create`, your harness runs in `--permission-mode dontAsk`. Your Bash tool is ENABLED and permission prompts auto-resolve silently. Run cafleet (and any other shell command) directly via the Bash tool. No prefix, no Director routing, no operator prompts.**
 
 ## How to detect that you are a CAFleet member
 
@@ -30,12 +28,16 @@ You take a single action — invoke Bash — instead of the previous "send a CAF
 - **Do not fabricate output.** If you have not actually run the command and seen real output, you do not know the result. Say so plainly.
 - **Do not "just answer from prior context"** when a fresh command result is needed. Working-tree state changes between turns; only a real execution gives a true answer.
 - **Do not refuse to run a command on the assumption that Bash is denied.** Bash is enabled under dontAsk. Try it.
+- **Do not route a denied command to the Director without first reconsidering it.** Most denials happen because the command is wrong (typo, wrong flag, wrong path) or unnecessary altogether. Fix the command yourself before asking anyone else to run it.
 
-## When your Bash tool denies a command — auto-route to the Director
+## When your Bash tool denies a command — reconsider, then auto-route to the Director
 
 `dontAsk` mode auto-resolves most permission prompts, but the Claude Code harness has its own deny list above dontAsk for destructive operations (e.g. `git push`, `rm -rf`). When the harness denies a Bash invocation:
 
-> **You MUST automatically opt into the bash-via-Director protocol. You MUST NOT ask the operator for a routing decision. You MUST NOT offer the operator alternative paths. You MUST NOT propose `!` prefix workarounds for the operator to run themselves.**
+1. **Reconsider the command first.** Re-examine what you tried. Is the flag right? Is the path right? Did you really need to run it at all? In most cases the right answer is to fix the command and try again, or to skip it entirely because you already have the answer.
+2. **Only when the command is genuinely correct AND genuinely needed AND the harness still denies it**, take the routing action below.
+
+> **When you do route, you MUST do so automatically. You MUST NOT ask the operator for a routing decision. You MUST NOT offer the operator alternative paths. You MUST NOT propose `!` prefix workarounds for the operator to run themselves.**
 
 The operator has already asked you to run the command. The Director is your fallback when your harness can't run it. Take the single action:
 
@@ -63,7 +65,7 @@ The Bash tool is the entry point for every shell-execution request. If you can p
 
 ## Director side (for completeness)
 
-If you are the **Director** (not a member), this rule applies in reverse only when a member opts into the bash-via-Director protocol. In that case, dispatch the requested command via:
+If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you. In that case, dispatch the requested command via:
 
 ```bash
 cafleet --session-id <session-id> member send-input \

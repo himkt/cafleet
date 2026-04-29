@@ -46,7 +46,7 @@ CLAUDE = CodingAgentConfig(
         "`cafleet --session-id {session_id} message poll --agent-id {agent_id}`.\n"
         "Your harness runs in dontAsk mode — your Bash tool is enabled and permission\n"
         "prompts auto-resolve, so call cafleet (and any other shell command) directly\n"
-        "via the Bash tool. No prefix workaround is needed."
+        "via the Bash tool."
     ),
     display_name_args=("--name",),
     permission_args=("--permission-mode", "dontAsk"),

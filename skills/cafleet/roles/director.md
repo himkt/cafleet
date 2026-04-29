@@ -1,10 +1,10 @@
 # Director Role — Bash Routing
 
-You are a **Director** managing one or more members in a CAFleet team. Members spawn with `--permission-mode dontAsk` (design 0000035 revised), so by default they run shell commands themselves via the Bash tool — no Director routing required.
+You are a **Director** managing one or more members in a CAFleet team. Members spawn with `--permission-mode dontAsk`, so by default they run shell commands themselves via the Bash tool — no Director routing required.
 
-When a member explicitly **opts into** the bash-via-Director protocol (typically because the operator or the member wants Director-level oversight on a destructive or sensitive command), the member sends you a plain CAFleet message asking for the command. You decide whether to fulfill, and dispatch the command into the member's pane via `cafleet member send-input --bash`.
+The bash-via-Director protocol is the fallback when a member's Bash invocation is rejected by the Claude Code harness deny-list (destructive operations such as `git push`, `rm -rf`). In that case the member sends you a plain CAFleet message asking for the command. You decide whether to fulfill, and dispatch the command into the member's pane via `cafleet member send-input --bash`.
 
-This file covers the **Director side** of that opt-in protocol (originally introduced in design `0000034-member-bash-via-director`, retained as opt-in by design 0000035 revised). The member side lives in `skills/cafleet/roles/member.md`.
+This file covers the **Director side** of the fallback. The member side lives in `skills/cafleet/roles/member.md`.
 
 ## Placeholder convention
 
@@ -19,7 +19,7 @@ Substitute the literal UUID strings printed by `cafleet session create` / `cafle
 
 You receive a member-originated bash request when **both** of the following are true:
 
-1. `cafleet message poll --agent-id <director-agent-id>` surfaces a plain free-text message from a member asking you to run a command. There is no JSON envelope, no schema, no special `kind` field — just a natural-language request like "Please run `git status` for me — I want to confirm the working tree is clean before opening a PR." Recognize the pattern by content, not by structure. Members default to running commands themselves under dontAsk; a request reaching you means the member explicitly opted in to Director routing for this specific command.
+1. `cafleet message poll --agent-id <director-agent-id>` surfaces a plain free-text message from a member asking you to run a command. There is no JSON envelope, no schema, no special `kind` field — just a natural-language request like "Please run `git push` for me — my Bash tool denied it." Recognize the pattern by content, not by structure. Members default to running commands themselves under dontAsk; a request reaching you means the member's harness deny-list rejected the command and the member auto-routed to you as the fallback.
 2. The sender's `placement.director_agent_id` matches your `<director-agent-id>`. Cross-Director requests are rejected at the CLI layer; you should also reject them at the protocol layer (do not dispatch on behalf of a member who is not yours).
 
 ## What you MUST do
@@ -63,6 +63,6 @@ This protocol is **member → Director only**. Run your own commands directly vi
 
 ## Why this works
 
-- **Members spawn with `--permission-mode dontAsk`**, so under the default flow they run cafleet (and any other shell command) themselves via the Bash tool. The bash-via-Director path fires only when a member explicitly opts in.
+- **Members spawn with `--permission-mode dontAsk`**, so under the default flow they run cafleet (and any other shell command) themselves via the Bash tool. The bash-via-Director path fires only when the member's harness deny-list rejects the command.
 - **Claude Code's `!` shortcut is the dispatch primitive** — `cafleet member send-input --bash` keystrokes `! <command>` + Enter into the member's pane, and Claude Code's `!` shortcut runs the command. The captured stdout/stderr lands in the member's next-turn context.
-- **You stay in control of opt-in dispatches.** Every opt-in request surfaces as a plain message in your inbox; you (with the operator at your keyboard) choose whether to fulfill it. The operator's `permissions.allow` for `cafleet member send-input *` controls the per-call confirmation UX.
+- **You stay in control of fallback dispatches.** Every fallback request surfaces as a plain message in your inbox; you (with the operator at your keyboard) choose whether to fulfill it. The operator's `permissions.allow` for `cafleet member send-input *` controls the per-call confirmation UX.

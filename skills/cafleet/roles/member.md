@@ -1,8 +1,8 @@
 # Member Role — Bash Routing
 
-You are a **member** spawned by `cafleet member create`. Your harness runs in `--permission-mode dontAsk` (design 0000035 revised), so your Bash tool is **enabled** and permission prompts auto-resolve silently.
+You are a **member** spawned by `cafleet member create`. Your harness runs in `--permission-mode dontAsk`, so your Bash tool is **enabled** and permission prompts auto-resolve silently.
 
-This file covers the **member side** of how shell commands are handled in a CAFleet team. The Director side (the bash-via-Director opt-in protocol from design 0000034) lives in `skills/cafleet/roles/director.md`.
+This file covers the **member side** of how shell commands are handled in a CAFleet team. The Director side of the bash-via-Director fallback lives in `skills/cafleet/roles/director.md`.
 
 ---
 
@@ -42,15 +42,20 @@ These are normal Bash invocations — nothing special. The dontAsk mode auto-res
 - **NEVER fabricate output.** If you have not actually run the command and seen real output, you do not know the result. Say so plainly.
 - **NEVER "just answer from prior context"** when a fresh command result is needed. Working-tree state changes between turns; only a real execution gives a true answer.
 - **NEVER refuse silently or stall.** Run the command. Report the result.
-- **NEVER assume Bash is denied** based on legacy guidance. Under dontAsk, Bash is enabled. If a Bash call appears to fail, surface the actual error message; don't assume it's a permission issue.
+- **NEVER assume Bash is denied** without trying. Under dontAsk, Bash is enabled. If a Bash call appears to fail, surface the actual error message; don't assume it's a permission issue.
+- **NEVER treat a denial as the end of the line.** Before asking the Director or the operator for help, re-examine the command you tried. In most denial cases, the underlying command is the wrong one (typo, wrong flag, wrong path) — fix the command yourself. Only route to the Director when the command is genuinely correct AND genuinely needed AND the harness still denies it.
 
 ---
 
-## WHEN YOUR BASH TOOL DENIES A COMMAND — AUTO-ROUTE TO THE DIRECTOR
+## WHEN YOUR BASH TOOL DENIES A COMMAND — RECONSIDER, THEN AUTO-ROUTE TO THE DIRECTOR
 
 `dontAsk` mode auto-resolves most permission prompts, but the Claude Code harness has its own deny list above dontAsk for destructive operations (e.g. `git push`, `rm -rf`, etc.). When the harness denies a Bash invocation:
 
-> **You MUST automatically opt into the bash-via-Director protocol. You MUST NOT ask the operator for a routing decision. You MUST NOT offer the operator alternative paths. You MUST NOT propose `!` prefix workarounds for the operator to run themselves.**
+1. **First, reconsider the command.** Most denials happen because the command is wrong — wrong flag, wrong path, typo, command that does not need to run at all because you already have the answer in context. Do NOT route to the Director just because something was denied. Fix the command and try again. Skip the routing entirely if you realize the command is unnecessary.
+
+2. **Only if the command is genuinely correct AND genuinely needed AND the harness still denies it**, take the routing action below.
+
+> **When you do route, you MUST do so automatically. You MUST NOT ask the operator for a routing decision. You MUST NOT offer the operator alternative paths. You MUST NOT propose `!` prefix workarounds for the operator to run themselves.**
 
 The operator has already asked you to run the command. The Director is your fallback when your harness can't run it. Take the single action:
 
@@ -82,5 +87,5 @@ You do **not** ask the operator for them. If they are genuinely missing, the caf
 
 - **Your Bash tool is enabled** (`--permission-mode dontAsk` in the spawn argv). Every Bash invocation auto-approves.
 - **dontAsk mode silently resolves permission prompts** — no operator interaction needed for normal cafleet calls or any other shell command.
-- **The bash-via-Director protocol stays available** as an opt-in escape hatch for cases that genuinely warrant Director oversight. It is not the default flow.
-- **Trust model:** the dontAsk default assumes you (the spawned member) are trusted to the same level as the operator. If a more restrictive trust gradient is needed, see Future Work in `design-docs/0000035-member-bash-whitelist/design-doc.md`.
+- **The bash-via-Director protocol is the fallback when the harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). It fires automatically in that case — not because the operator wants oversight, but because the harness will not run the command directly.
+- **Trust model:** dontAsk assumes you (the spawned member) are trusted to the same level as the operator.

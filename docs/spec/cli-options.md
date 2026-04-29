@@ -301,7 +301,7 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `--description` | yes | One-sentence purpose |
 | *(positional, after `--`)* | no | Prompt text for the spawned claude process |
 
-The spawn argv always carries `--permission-mode dontAsk` (design 0000035 revised), so the member's Bash tool is enabled and permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no `!` prefix workaround, no Director routing required by default. The bash-via-Director protocol from design 0000034 is preserved as an opt-in (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director).
+The spawn argv always carries `--permission-mode dontAsk`, so the member's Bash tool is enabled and permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no Director routing required by default. The bash-via-Director protocol fires as a fallback when the harness deny-list rejects a Bash invocation (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director).
 
 ### `member delete`
 

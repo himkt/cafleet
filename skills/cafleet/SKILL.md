@@ -257,7 +257,7 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 | `--description` | yes | One-sentence purpose |
 | *(positional, after `--`)* | no | Prompt for the spawned claude process. If omitted, the default prompt template is used. BOTH the default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_name` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
 
-The spawned `claude` process is always launched with `--permission-mode dontAsk`, so the member's Bash tool is enabled and permission prompts auto-resolve silently. Members run cafleet (and any shell command) directly via the Bash tool; no `!` prefix workaround is needed. See `## Routing Bash via the Director` below for the opt-in protocol that lets a member request the Director run a command on its behalf when Director-level oversight is wanted.
+The spawned `claude` process is always launched with `--permission-mode dontAsk`, so the member's Bash tool is enabled and permission prompts auto-resolve silently. Members run cafleet (and any shell command) directly via the Bash tool. See `## Routing Bash via the Director` below for the fallback path that fires when the harness deny-list (destructive operations such as `git push`) rejects a Bash invocation.
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`) — `.format()` collapses each `{{` / `}}` pair to a single literal brace and, critically, does not attempt placeholder substitution on the inner tokens. This matters for prompts that embed JSON snippets, shell expansions, or other content with literal curly braces. Pre-substituting the dynamic values in shell does NOT exempt the prompt from this rule — even a placeholder-free prompt is still passed through `str.format()`, so any literal braces must still be doubled or removed.
 
@@ -691,14 +691,16 @@ The CLI validates input (`--choice` is `IntRange(1, 3)`; `--freetext` rejects ne
 
 ## Routing Bash via the Director
 
-Members spawn with `--permission-mode dontAsk` — the Bash tool is enabled and permission prompts auto-resolve, so a member can run cafleet (and any other shell command) directly via the Bash tool. No `!` prefix workaround, no Director routing required. This is the design 0000035 (revised) default.
+Members spawn with `--permission-mode dontAsk` — the Bash tool is enabled and permission prompts auto-resolve, so a member runs cafleet (and any other shell command) directly via the Bash tool. No prefix, no Director routing required by default.
 
-The bash-via-Director protocol is preserved as an **opt-in escape hatch** for cases where Director-level oversight on a shell command is wanted (destructive operations, sensitive paths, audit logging). When opted into, the member sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via `cafleet member send-input --bash` — Claude Code's `!` CLI shortcut handles execution natively. No new broker primitives, no separate helper subcommand: just the existing message-passing + tmux-keystroke infrastructure.
+The bash-via-Director protocol is the **fallback when the Claude Code harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). In that case the member auto-routes: it sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via `cafleet member send-input --bash` — Claude Code's `!` CLI shortcut handles execution natively. No new broker primitives, no separate helper subcommand: just the existing message-passing + tmux-keystroke infrastructure.
 
-The opt-in protocol has two perspectives. Read **only the file matching your role**:
+Before routing, the member MUST reconsider the command. Most denials happen because the underlying command is wrong — wrong flag, wrong path, or unnecessary altogether. Fix the command first; only route a command that is genuinely correct AND genuinely needed AND still rejected by the harness.
 
-- **If you are a member** (spawned by `cafleet member create`) → read [`roles/member.md`](roles/member.md). Covers: the default "run it yourself via Bash" path, when to opt into Director routing instead, and forbidden behaviors (no fake `<bash-input>` markup, no fabrication, no silent stalling).
-- **If you are a Director** (you bootstrapped the session via `cafleet session create` and spawn members) → read [`roles/director.md`](roles/director.md). Covers: how to recognize a member's opt-in bash request, the `cafleet member send-input --bash` dispatch, serialization (one request at a time in poll order), and the cross-Director boundary.
+The fallback has two perspectives. Read **only the file matching your role**:
+
+- **If you are a member** (spawned by `cafleet member create`) → read [`roles/member.md`](roles/member.md). Covers: the default "run it yourself via Bash" path, the reconsider-then-route protocol when Bash is denied, and forbidden behaviors (no fake `<bash-input>` markup, no fabrication, no silent stalling, no operator-routing-prompts).
+- **If you are a Director** (you bootstrapped the session via `cafleet session create` and spawn members) → read [`roles/director.md`](roles/director.md). Covers: how to recognize a member's denial-fallback request, the `cafleet member send-input --bash` dispatch, serialization (one request at a time in poll order), and the cross-Director boundary.
 
 ## Message Lifecycle
 

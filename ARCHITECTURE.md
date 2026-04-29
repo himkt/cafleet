@@ -63,7 +63,7 @@ The post-bootstrap invariant is that every non-deleted `sessions` row has a non-
 | `alembic/versions/` | `cafleet/src/cafleet/alembic/versions/` | Migration scripts (`0001_initial_schema.py`, …) |
 | `webui_api.py` | `cafleet/src/cafleet/` | WebUI API router (`/ui/api/*`) — calls `broker` for all data access |
 | `output.py` | `cafleet/src/cafleet/` | CLI output formatting (tables + JSON) |
-| `coding_agent.py` | `cafleet/src/cafleet/` | claude-only spawn config — `CodingAgentConfig` dataclass plus a single `CLAUDE` instance carrying binary, extra args, default prompt template, display-name flag, and `permission_args=("--permission-mode", "dontAsk")` injected into every spawn (design 0000035). |
+| `coding_agent.py` | `cafleet/src/cafleet/` | claude-only spawn config — `CodingAgentConfig` dataclass plus a single `CLAUDE` instance carrying binary, extra args, default prompt template, display-name flag, and `permission_args=("--permission-mode", "dontAsk")` injected into every spawn. |
 | `tmux.py` | `cafleet/src/cafleet/` | tmux subprocess helper: `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit`, `capture_pane`, `send_choice_key`, `send_freetext_and_submit`, `send_bash_command` |
 | `admin/` | Project root | WebUI SPA (Vite + React + TypeScript + Tailwind CSS) |
 
@@ -168,9 +168,9 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 ## Bash Routing via Director
 
-Members spawn with `--permission-mode dontAsk` (always, no flag pair to opt in/out — design 0000035 revised). The Bash tool is enabled and permission prompts auto-resolve silently, so members run cafleet (and any shell command) directly via the Bash tool. The CLAUDE spawn-prompt template tells the member explicitly that its harness runs in dontAsk mode and that no `!` prefix workaround is needed.
+Members spawn with `--permission-mode dontAsk` (always, no flag pair to opt in/out). The Bash tool is enabled and permission prompts auto-resolve silently, so members run cafleet (and any shell command) directly via the Bash tool. The CLAUDE spawn-prompt template tells the member explicitly that its harness runs in dontAsk mode.
 
-The bash-via-Director protocol from design 0000034 is preserved as an opt-in escape hatch: a Director can still dispatch a command into a member's pane via `cafleet member send-input --bash "<cmd>"`, which keystrokes literal `! <cmd>` + `Enter` and triggers Claude Code's `!` CLI shortcut on the receiving side. Operators who want Director-level oversight on shell commands can still get it by routing requests through the Director. The protocol is no longer the default flow — under dontAsk, members do not need to ask. See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) § Routing Bash via the Director and [`design-docs/0000035-member-bash-whitelist/design-doc.md`](design-docs/0000035-member-bash-whitelist/design-doc.md) for the full convention and the alternatives that were rejected.
+The bash-via-Director protocol is the **fallback** for the harness deny-list: dontAsk does not auto-resolve everything — destructive operations such as `git push` and `rm -rf` are still rejected at the Claude Code harness layer. When a member's Bash invocation is denied, the member auto-routes by sending a plain CAFleet message to its Director, and the Director dispatches the command into the member's pane via `cafleet member send-input --bash "<cmd>"`, which keystrokes literal `! <cmd>` + `Enter` and triggers Claude Code's `!` CLI shortcut on the receiving side. Members must first reconsider whether the rejected command is correct and necessary — most denials are caused by a wrong command, not a missing privilege. See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) § Routing Bash via the Director for the full convention.
 
 ## Design Document Orchestration Skills
 

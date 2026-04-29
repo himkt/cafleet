@@ -239,24 +239,11 @@ class TestPromptTemplates:
     }
 
     def test_claude_template_documents_dontask_mode(self):
-        """Design 0000035 (revised): the template tells the spawned member
-        its harness runs in ``dontAsk`` mode and the Bash tool is enabled.
-        The canary ``"dontAsk"`` is the smallest change-resistant marker
-        — a future revert to a deny-Bash posture would fail this assertion.
+        """The template tells the spawned member its harness runs in
+        ``dontAsk`` mode and the Bash tool is enabled. The canary
+        ``"dontAsk"`` is the smallest change-resistant marker.
         """
         assert "dontAsk" in CLAUDE.default_prompt_template
-
-    def test_claude_template_omits_legacy_bang_prefix_guidance(self):
-        """Design 0000035 (revised): the prior ``!``-shortcut workaround
-        is gone. The rendered template must NOT instruct the member to
-        prefix cafleet with ``!`` — that path was specific to the
-        deny-Bash posture which is no longer in use.
-        """
-        rendered = CLAUDE.default_prompt_template.format(**self._STANDARD_KWARGS)
-        assert "! cafleet" not in rendered, (
-            "CLAUDE template must NOT instruct `!` prefix for cafleet calls "
-            f"under dontAsk mode; got:\n{rendered}"
-        )
 
     def test_claude_template_format_succeeds_with_standard_kwargs(self):
         result = CLAUDE.default_prompt_template.format(**self._STANDARD_KWARGS)

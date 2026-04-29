@@ -327,11 +327,9 @@ class TestMemberCreatePassesDisplayName:
 
 
 class TestPermissionMode:
-    """Spawn argv carries ``--permission-mode dontAsk`` (design 0000035 revised).
+    """Spawn argv carries ``--permission-mode dontAsk``.
 
-    The deny-Bash posture (``--disallowedTools Bash``) is gone; the
-    ``--no-bash`` / ``--allow-bash`` flag pair was removed. Members spawn
-    with the Bash tool enabled and permission prompts auto-resolve.
+    Members spawn with the Bash tool enabled and permission prompts auto-resolve.
     """
 
     def test_claude_default_injects_dontask_permission_mode(
@@ -365,7 +363,6 @@ class TestPermissionMode:
         perm_index = command.index("--permission-mode")
         assert command[perm_index + 1] == "dontAsk"
         assert command[0] == "claude"
-        # The legacy deny-Bash tokens MUST NOT be present under the new model.
         assert "--disallowedTools" not in command
         assert "Bash" not in command
         # Pinned argv ordering: permission tokens before name args.
@@ -380,9 +377,8 @@ class TestPermissionMode:
         split_window_recorder,
         stub_coding_agent_binaries,
     ):
-        """Regression guard: the ``--no-bash`` flag was removed in
-        design 0000035 (revised). Click MUST reject it with ``No such
-        option: --no-bash`` (exit 2).
+        """Regression guard: ``cafleet member create`` has no ``--no-bash``
+        option. Click MUST reject it with ``No such option: --no-bash`` (exit 2).
         """
         session_id, director_id, runner = bootstrapped_session
         result = runner.invoke(
@@ -412,9 +408,8 @@ class TestPermissionMode:
         split_window_recorder,
         stub_coding_agent_binaries,
     ):
-        """Regression guard: the ``--allow-bash`` flag was removed in
-        design 0000035 (revised). Click MUST reject it with ``No such
-        option: --allow-bash`` (exit 2).
+        """Regression guard: ``cafleet member create`` has no ``--allow-bash``
+        option. Click MUST reject it with ``No such option: --allow-bash`` (exit 2).
         """
         session_id, director_id, runner = bootstrapped_session
         result = runner.invoke(
