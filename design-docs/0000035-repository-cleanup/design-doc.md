@@ -1,7 +1,7 @@
 # Repository cleanup — remove obsolete files, stale skill content, dead pyproject config
 
-**Status**: Approved
-**Progress**: 23/25 tasks complete
+**Status**: Complete
+**Progress**: 25/25 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -227,8 +227,8 @@ New terms added in response to Reviewer feedback:
 
 ### Step 7: Finalize
 
-- [ ] Update this design doc: `**Status**: Approved` → `Complete` and refresh `**Last Updated**:` to the merge date. <!-- completed: -->
-- [ ] Confirm header `**Progress**: N/N tasks complete` matches the actual `- [x]` count. <!-- completed: -->
+- [x] Update this design doc: `**Status**: Approved` → `Complete` and refresh `**Last Updated**:` to the merge date. <!-- completed: 2026-04-29T15:50 -->
+- [x] Confirm header `**Progress**: N/N tasks complete` matches the actual `- [x]` count. <!-- completed: 2026-04-29T15:50 -->
 
 ---
 
@@ -241,3 +241,4 @@ New terms added in response to Reviewer feedback:
 | 2026-04-29 | **User-approved.** Status moved Draft → Approved. Last Updated stamp 2026-04-29. `**Progress**: 0/25 tasks complete` retained (no implementation started). Implementation tasks spot-verified for actionability: every task carries a concrete file path (e.g. `cafleet/pyproject.toml`, `docs/spec/cli-options.md`, `cafleet/tests/test_coding_agent.py`), a concrete line number or symbol name (e.g. `class TestCodexConstantRemoved`, `[tool.ty.analysis].allowed-unresolved-imports`, `## Removed CLI Options` subsection), a verbatim before/after string for every text replacement, and a specific exit-code or grep-zero-hit assertion for every verification step. The two `bun install` and `mise //admin:build` tasks include byte-equality / dependency-chain diagnostics so an executor never has to invent its own pass criteria. Doc is ready for `/design-doc-execute` to begin implementation. |
 | 2026-04-29 | **Implementation progress synced.** `/design-doc-execute` ran Steps 1–6 across 8 commits on `feat/0000035-repository-cleanup` (PR #38). Header `**Progress**: 0/25` → `23/25`. All 8 Success Criteria ticked after Step 6 verification (mise lint/typecheck/test/admin-lint/admin-build all green; 516 tests pass after deletion of 6 sentinel-style tests; `@auth0/` removed from `admin/bun.lock`; `httpx.*` removed from pyproject; user-facing docs no longer advertise the Auth0/api-key deletions). Acceptance grep set returned 3 documented suppressions (verifier.md MCP-tool refs, MessageInput.tsx Cursor-substring false positive, test_cli_member.py:366 canonical-shape regression guard). Steps 7's two finalize tasks remain Director-driven (run as part of `/design-doc-execute` Step 8 after Copilot review loop completes). |
 | 2026-04-29 | **Copilot review fold-in (rounds 1–2).** Round 1 (commit `4f19d3f`): rewrote `docs/spec/webui-api.md` L13 to clarify cookies vs server-side state — the post-cleanup sentence now reads `"No server-side session cookies. The SPA stores the active session_id client-side via hash-based routing and sends it in the X-Session-Id header on each request."`. Round 2 (commit `f56ecfd`): synced the Specification → Documentation surface row for `webui-api.md` with the implemented wording, and reworded the Success Criteria dontAsk bullet to make clear that bash-via-Director is an opt-in escape hatch, not the canonical default. Round 2 also picked up a follow-up Copilot pass with two more design-doc-only comments (Step 1 checklist row sync + this changelog sync) — both folded in here. |
+| 2026-04-29 | **Status: Complete.** Round 3 (commit `1150188`) addressed the round-2 follow-up Copilot pass — Step 1 checklist row for `webui-api.md` resynced and a sync changelog entry added. Final Copilot review (10:20:30Z) reported "no new comments" — quiescent exit. Step 7 finalize tasks ticked: `**Status**: Approved` → `Complete`, `**Progress**: 23/25` → `25/25` (matches actual `- [x]` count after the two Step 7 ticks). PR #38 ready for human merge. |
