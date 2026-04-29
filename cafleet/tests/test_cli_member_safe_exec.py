@@ -264,6 +264,17 @@ class TestPreflightValidation:
         assert "command may not be empty." in (result.output or "")
         assert len(bash_recorder) == 0
 
+    @pytest.mark.parametrize("ws", ["   ", "\t", " \t ", "\t\t"])
+    def test_whitespace_only_rejected(
+        self, runner, session_id, happy_path_agent, bash_recorder, settings_files, ws
+    ):
+        """Post-strip empty CMD — guards against whitespace-only dispatch."""
+        result = _invoke(runner, session_id, ws)
+
+        assert result.exit_code == 2, result.output
+        assert "command may not be empty." in (result.output or "")
+        assert len(bash_recorder) == 0
+
     @pytest.mark.parametrize(
         "bad_text",
         [

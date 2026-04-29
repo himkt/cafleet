@@ -145,7 +145,7 @@ class TestLoadBashPatterns:
         path = tmp_path / "settings.json"
         path.write_text("{ not valid json")
 
-        with pytest.raises(Exception, match="failed to parse") as exc_info:
+        with pytest.raises(ValueError, match="failed to parse") as exc_info:
             permissions.load_bash_patterns([path])
 
         assert str(path) in str(exc_info.value)
