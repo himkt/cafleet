@@ -1,7 +1,7 @@
 # Repository cleanup — remove obsolete files, stale skill content, dead pyproject config
 
 **Status**: Approved
-**Progress**: 14/25 tasks complete
+**Progress**: 23/25 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -215,15 +215,15 @@ New terms added in response to Reviewer feedback:
 
 ### Step 6: Verification (project rule order: lint → typecheck → test → grep)
 
-- [ ] Run `mise //cafleet:lint`. Confirm exit 0 and no new warnings introduced. <!-- completed: -->
-- [ ] Run `mise //cafleet:typecheck`. Confirm exit 0 and no new unresolved-import errors after the `httpx.*` removal (none expected, since no source file imports `httpx`). <!-- completed: -->
-- [ ] Run `mise //cafleet:test`. Confirm exit 0 and the test count delta from Step 4 is reflected. <!-- completed: -->
-- [ ] Run `mise //admin:lint`. Confirm exit 0. <!-- completed: -->
-- [ ] Run `mise //admin:build`. Confirm exit 0 and the resulting bundle is byte-for-byte unchanged from the pre-cleanup build (the Auth0 packages were already not imported by `admin/src/`). <!-- completed: -->
-- [ ] Execute the grep set from §"Acceptance grep set" exactly as documented. Verify the only hits are the documented suppressions (verifier.md MCP-tool references; alembic / test_alembic / bun.lock exclusions enforced by the flags). Record each suppression's reason inline in the PR description. <!-- completed: -->
-- [ ] Targeted grep `grep -nE '@auth0/' admin/bun.lock`: zero hits. <!-- completed: -->
-- [ ] Targeted grep `grep -nE 'httpx' cafleet/pyproject.toml`: zero hits. <!-- completed: -->
-- [ ] Targeted grep `grep -nE '## Removed CLI Options|api_key_hash|--api-key|cafleet env' docs/spec/cli-options.md docs/spec/data-model.md`: zero hits. <!-- completed: -->
+- [x] Run `mise //cafleet:lint`. Confirm exit 0 and no new warnings introduced. <!-- completed: 2026-04-29T15:35 -->
+- [x] Run `mise //cafleet:typecheck`. Confirm exit 0 and no new unresolved-import errors after the `httpx.*` removal (none expected, since no source file imports `httpx`). <!-- completed: 2026-04-29T15:35 -->
+- [x] Run `mise //cafleet:test`. Confirm exit 0 and the test count delta from Step 4 is reflected. <!-- completed: 2026-04-29T15:35 -->
+- [x] Run `mise //admin:lint`. Confirm exit 0. <!-- completed: 2026-04-29T15:35 -->
+- [x] Run `mise //admin:build`. Confirm exit 0 and the resulting bundle is byte-for-byte unchanged from the pre-cleanup build (the Auth0 packages were already not imported by `admin/src/`). <!-- completed: 2026-04-29T15:35 -->
+- [x] Execute the grep set from §"Acceptance grep set" exactly as documented. Verify the only hits are the documented suppressions (verifier.md MCP-tool references; alembic / test_alembic / bun.lock exclusions enforced by the flags). Record each suppression's reason inline in the PR description. <!-- completed: 2026-04-29T15:35 -->
+- [x] Targeted grep `grep -nE '@auth0/' admin/bun.lock`: zero hits. <!-- completed: 2026-04-29T15:35 -->
+- [x] Targeted grep `grep -nE 'httpx' cafleet/pyproject.toml`: zero hits. <!-- completed: 2026-04-29T15:35 -->
+- [x] Targeted grep `grep -nE '## Removed CLI Options|api_key_hash|--api-key|cafleet env' docs/spec/cli-options.md docs/spec/data-model.md`: zero hits. <!-- completed: 2026-04-29T15:35 -->
 
 ### Step 7: Finalize
 

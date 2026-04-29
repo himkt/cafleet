@@ -370,4 +370,3 @@ class TestPermissionMode:
         assert perm_index < name_index, (
             f"--permission-mode must precede --name; got {command!r}"
         )
-
