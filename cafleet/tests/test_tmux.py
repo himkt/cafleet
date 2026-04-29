@@ -216,8 +216,13 @@ class TestSendPollTrigger:
         """``--session-id`` is a root-group global option and MUST come
         before the subcommand; ``--agent-id`` is a per-subcommand option
         and MUST come after ``message poll``. This ordering is what click's
-        parser actually accepts and is the literal string
-        ``permissions.allow`` entries need to match.
+        parser actually accepts.
+
+        Design 0000035 Step 2: the keystroke is prefixed with ``! `` so
+        the recipient's harness routes it through Claude Code's shell
+        shortcut (the recipient's Bash tool is denied). The cafleet
+        command portion remains the literal ``permissions.allow`` entries
+        target.
         """
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
         captured_args = []
@@ -239,7 +244,7 @@ class TestSendPollTrigger:
             "-t",
             "%7",
             "-l",
-            "cafleet --session-id sess-001 message poll --agent-id agent-001",
+            "! cafleet --session-id sess-001 message poll --agent-id agent-001",
             "tmux",
             "send-keys",
             "-t",
@@ -298,37 +303,54 @@ class TestSendPollTrigger:
 
 
 class TestSendPollTriggerKeystroke:
-    """Regression guard against any future revert of the round-6 keystroke
-    rename (design 0000034 §14). The pushed keystroke MUST contain the
-    literal ``message poll`` — bare ``poll`` no longer parses, so a stale
-    keystroke would land in the member's pane and error out with
-    ``Error: No such command 'poll'``.
+    """Regression guard for the literal keystroke shape pushed by
+    ``send_poll_trigger``.
+
+    Two contracts pinned here:
+
+    1. **Design 0000034 §14** — the underlying cafleet command MUST be
+       ``message poll --agent-id <a>`` (not the legacy bare ``poll``,
+       which no longer parses).
+    2. **Design 0000035 Step 2** — the keystroke MUST be prefixed with
+       ``! `` (literal exclamation + space) so the recipient's harness
+       routes it through Claude Code's shell shortcut. Without the
+       prefix, members whose Bash tool is denied will refuse to run
+       the command.
+
+    The two ``send-keys`` calls are inspected separately:
+
+    - call 0: ``["tmux", "send-keys", "-t", <pane>, "-l", <keystroke>]``
+    - call 1: ``["tmux", "send-keys", "-t", <pane>, "Enter"]``
     """
 
-    def test_keystroke_contains_message_poll(self, monkeypatch):
+    def test_keystroke_carries_bang_prefix_for_message_poll(self, monkeypatch):
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
-        captured_args = []
+        captured: list[list[str]] = []
 
-        def mock_run(args, **kwargs):
-            captured_args.extend(args)
+        def mock_run(args, **_kwargs):
+            captured.append(list(args))
             return ""
 
         monkeypatch.setattr(tmux, "_run", mock_run)
-        tmux.send_poll_trigger(
-            target_pane_id="%0",
+        ok = tmux.send_poll_trigger(
+            target_pane_id="%5",
             session_id="550e8400-e29b-41d4-a716-446655440000",
             agent_id="7ba91234-5678-90ab-cdef-112233445566",
         )
-        # The keystroke literal is the 6th element of the captured argv:
-        # ["tmux", "send-keys", "-t", <pane>, "-l", <keystroke>, ...].
-        keystroke = captured_args[5]
-        assert "message poll" in keystroke, (
-            f"keystroke must contain 'message poll', got: {keystroke!r}"
+        assert ok is True
+        assert len(captured) == 2
+
+        keystroke = captured[0][-1]
+        assert keystroke.startswith("! cafleet --session-id "), (
+            "send_poll_trigger keystroke must start with `! cafleet --session-id ` "
+            f"(design 0000035 Step 2); got: {keystroke!r}"
         )
-        # Belt-and-suspenders: a bare ' poll ' with no preceding 'message'
-        # would slip through ``"message poll" in keystroke`` only if the
-        # literal contained both, so this is just a sanity check.
-        assert " poll --agent-id" in keystroke
+        assert "message poll --agent-id" in keystroke, (
+            "keystroke must still carry `message poll --agent-id` "
+            f"(design 0000034 §14); got: {keystroke!r}"
+        )
+
+        assert captured[1] == ["tmux", "send-keys", "-t", "%5", "Enter"]
 
 
 class TestPaneExists:
