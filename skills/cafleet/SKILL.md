@@ -595,7 +595,7 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 
 ### Roles
 
-- **Director** — the Claude Code session that first runs `cafleet --session-id <session-id> agent register` in this project. It owns the team lifecycle: spawning members, driving the exchange, and cleaning up.
+- **Director** — the Claude Code session that first runs `cafleet session create` in this project (the command bootstraps the session and the root Director agent atomically; no separate `cafleet agent register` call is needed). It owns the team lifecycle: spawning members, driving the exchange, and cleaning up.
 - **Member** — any peer Claude Code session the Director spawns via `cafleet ... member create`. Each member is automatically registered, and its spawn prompt has the literal `session_id` and `agent_id` UUIDs baked in so every `cafleet` command it issues uses literal flags.
 
 ### Monitoring mandate (Director only)

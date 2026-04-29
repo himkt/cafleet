@@ -22,11 +22,11 @@ Implement features based on a design document using up to four roles orchestrate
 
 ## Architecture
 
-The Director registers with a CAFleet session and spawns each needed member via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
+The Director is the root agent of a CAFleet session — bootstrapped automatically by `cafleet session create` (no separate `cafleet agent register` call) — and spawns each needed member via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
 
 ```
 User
- +-- Director (main Claude -- cafleet agent register, cafleet member create, orchestrates TDD cycle)
+ +-- Director (main Claude -- cafleet session create, cafleet member create, orchestrates TDD cycle)
       +-- Programmer (member agent -- implements code to pass tests)
       +-- Tester (member agent -- writes unit tests per step)
       +-- Verifier (member agent, optional -- E2E/integration testing)

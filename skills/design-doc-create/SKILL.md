@@ -21,11 +21,11 @@ Create high-quality design documents using a three-role team orchestrated via th
 
 ## Architecture
 
-The Director registers with a CAFleet session and spawns both the Drafter and Reviewer via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
+The Director is the root agent of a CAFleet session — bootstrapped automatically by `cafleet session create` (no separate `cafleet agent register` call) — and spawns both the Drafter and Reviewer via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
 
 ```
 User
- +-- Director (main Claude -- cafleet agent register, cafleet member create, orchestrates cycle)
+ +-- Director (main Claude -- cafleet session create, cafleet member create, orchestrates cycle)
       +-- Drafter (member agent -- spawned in tmux pane; writes the design document)
       +-- Reviewer (member agent -- spawned in tmux pane; critically reviews the draft)
 ```
