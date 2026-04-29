@@ -88,3 +88,11 @@ When spawned with a resume mode prompt (the document already exists and contains
 4. **Marker removal**: Remove every `COMMENT(...)` marker after its issue has been resolved. No markers should remain after the resume pass.
 5. **Change summary**: Report to the Director via `cafleet message send` what was changed, organized by section. Include the original COMMENT and what was done to resolve it.
 6. **Scope discipline**: Do NOT rewrite sections unrelated to the COMMENTs. Only touch content that is directly affected by a COMMENT or must change as a consequence of a COMMENT fix.
+
+## Shutdown
+
+You are terminated by the Director via `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <my-agent-id>`. The CLI sends `/exit` to your pane and waits up to 15 s for it to disappear.
+
+You do NOT need to handle any `shutdown_request` JSON message — that is the in-process Agent Teams primitive. The CAFleet equivalent is `/exit`, dispatched by the Director through the tmux push primitive. When you receive `/exit`, your `claude` process terminates immediately; nothing is required of you.
+
+If your Director sends `cafleet message send` instructing you to wrap up (e.g. "report final status, then I will run member delete"), do that one final report via `cafleet message send` and return to the prompt. The Director will then run `cafleet member delete` from its own pane.

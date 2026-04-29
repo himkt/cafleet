@@ -1,7 +1,7 @@
 # 0000036 — CAFleet Skill Improvements
 
 **Status**: Approved
-**Progress**: 7/22 tasks complete
+**Progress**: 12/22 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -224,11 +224,11 @@ Constraints:
 
 ### Step 3: Member Shutdown subsections (S4)
 
-- [ ] Append the `## Shutdown` subsection (verbatim per S4) to `skills/design-doc-create/roles/drafter.md`. <!-- completed: -->
-- [ ] Append the `## Shutdown` subsection to `skills/design-doc-create/roles/reviewer.md`. <!-- completed: -->
-- [ ] Append the `## Shutdown` subsection to `skills/design-doc-execute/roles/programmer.md`. <!-- completed: -->
-- [ ] Append the `## Shutdown` subsection to `skills/design-doc-execute/roles/tester.md`. <!-- completed: -->
-- [ ] Append the `## Shutdown` subsection to `skills/design-doc-execute/roles/verifier.md`. <!-- completed: -->
+- [x] Append the `## Shutdown` subsection (verbatim per S4) to `skills/design-doc-create/roles/drafter.md`. <!-- completed: 2026-04-29T14:30 -->
+- [x] Append the `## Shutdown` subsection to `skills/design-doc-create/roles/reviewer.md`. <!-- completed: 2026-04-29T14:30 -->
+- [x] Append the `## Shutdown` subsection to `skills/design-doc-execute/roles/programmer.md`. <!-- completed: 2026-04-29T14:30 -->
+- [x] Append the `## Shutdown` subsection to `skills/design-doc-execute/roles/tester.md`. <!-- completed: 2026-04-29T14:30 -->
+- [x] Append the `## Shutdown` subsection to `skills/design-doc-execute/roles/verifier.md`. <!-- completed: 2026-04-29T14:30 -->
 
 ### Step 4: Cleanup steps reference canonical Shutdown Protocol (S5)
 
