@@ -385,8 +385,8 @@ Three separate tmux invocations for `--freetext` (and two for `--bash`) because 
 | `--choice 0` / `--choice 4` / `--choice a` | Exit 2 via click's built-in `IntRange(1, 3)` validator |
 | `--freetext ""` (empty) | Allowed — sends `4` + empty literal + `Enter` (submits an empty answer; AskUserQuestion's own UI decides whether to accept it) |
 | `--freetext` containing `\n` or `\r` | Exit 2 with `Error: free text may not contain newlines.` (single-action contract — one prompt submission per call) |
-| `--bash ""` (empty) | Exit 1 with `Error: send_bash_command: command may not be empty` (no shell command to run) |
-| `--bash` containing `\n` or `\r` | Exit 1 with `Error: send_bash_command: command may not contain newlines` (multi-line scripts cannot be expressed as one keystroke) |
+| `--bash ""` (empty) | Exit 1 with `Error: send failed: send_bash_command: command may not be empty` (CLI wraps the underlying `TmuxError`; no shell command to run) |
+| `--bash` containing `\n` or `\r` | Exit 1 with `Error: send failed: send_bash_command: command may not contain newlines` (CLI wraps the underlying `TmuxError`; multi-line scripts cannot be expressed as one keystroke) |
 | Any input with tmux unavailable | Exit 1 via `tmux.ensure_tmux_available()` (same surface as `member capture`) |
 
 #### Authorization boundary
@@ -465,13 +465,13 @@ The canonical Director-side workflow is three-beat and AskUserQuestion-delegated
 | Missing `--agent-id` | `Error: Missing option '--agent-id'.` (Click built-in) |
 | `session create` run outside a tmux session | `Error: cafleet session create must be run inside a tmux session` (exit 1; no DB writes) |
 | `session delete` on unknown session_id | `Error: session 'X' not found.` (exit 1) |
-| `register` into a soft-deleted session | `Error: session X is deleted` (exit 1) |
-| `deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` (exit 1) |
-| `deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
+| `agent register` into a soft-deleted session | `Error: session X is deleted` (exit 1) |
+| `agent deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` (exit 1) |
+| `agent deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
 | `member send-input` with zero or ≥2 of `--choice` / `--freetext` / `--bash` | `Error: --choice, --freetext, --bash are mutually exclusive; supply exactly one.` (exit 2) |
 | `member send-input --choice` outside `1..3` | Click `IntRange(1, 3)` built-in (exit 2) |
 | `member send-input --freetext` with `\n` or `\r` | `Error: free text may not contain newlines.` (exit 2) |
-| `member send-input --bash ""` (empty) | `Error: send_bash_command: command may not be empty` (exit 1) |
-| `member send-input --bash` with `\n` or `\r` | `Error: send_bash_command: command may not contain newlines` (exit 1) |
+| `member send-input --bash ""` (empty) | `Error: send failed: send_bash_command: command may not be empty` (exit 1) |
+| `member send-input --bash` with `\n` or `\r` | `Error: send failed: send_bash_command: command may not contain newlines` (exit 1) |
 | `member send-input` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
 | `member send-input` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
