@@ -1,7 +1,7 @@
 # Permission-aware shell dispatch via `cafleet member safe-exec`
 
 **Status**: Approved
-**Progress**: 8/20 tasks complete
+**Progress**: 16/20 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -405,17 +405,17 @@ Update every documentation surface BEFORE writing any code, per `.claude/rules/d
 
 Write all tests for `cafleet/permissions.py` and `cafleet member safe-exec` BEFORE writing implementation code. Tests fail until Step 3 lands.
 
-- [ ] Create `cafleet/tests/test_permissions.py` covering settings discovery (env precedence, missing files, malformed JSON, missing `permissions` key) and the glob matcher (every pattern shape from §3.3). <!-- completed: -->
-- [ ] Create `cafleet/tests/test_cli_member_safe_exec.py` covering allow / deny / ask paths, cross-Director rejection, pending-placement rejection, empty / newline rejection, and JSON output for all three outcomes. <!-- completed: -->
-- [ ] Edit `cafleet/tests/test_cli_member_send_input.py`: delete the bash-flag class, the bash recorder fixture, and `--bash` mentions in flag-validation parametrizations. Add the single Click-no-such-option regression test. <!-- completed: -->
+- [x] Create `cafleet/tests/test_permissions.py` covering settings discovery (env precedence, missing files, malformed JSON, missing `permissions` key) and the glob matcher (every pattern shape from §3.3). <!-- completed: 2026-04-30T06:25 -->
+- [x] Create `cafleet/tests/test_cli_member_safe_exec.py` covering allow / deny / ask paths, cross-Director rejection, pending-placement rejection, empty / newline rejection, and JSON output for all three outcomes. <!-- completed: 2026-04-30T06:25 -->
+- [x] Edit `cafleet/tests/test_cli_member_send_input.py`: delete the bash-flag class, the bash recorder fixture, and `--bash` mentions in flag-validation parametrizations. Add the single Click-no-such-option regression test. <!-- completed: 2026-04-30T06:25 -->
 
 ### Step 3: Implementation
 
-- [ ] Create `cafleet/src/cafleet/permissions.py` implementing `discover_settings_paths`, `load_bash_patterns`, `match`, `decide`. <!-- completed: -->
-- [ ] Edit `cafleet/src/cafleet/cli.py`: add `member safe-exec` Click command per §4. Wire the discovery + decision + dispatch + output flow. <!-- completed: -->
-- [ ] Edit `cafleet/src/cafleet/cli.py`: remove the `--bash` Click option from the existing send-input subcommand. Update the mutual-exclusion message and the count-supplied check accordingly. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` and confirm every Step 2 test passes. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint`, `mise //cafleet:format --check`, `mise //cafleet:typecheck`. <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/permissions.py` implementing `discover_settings_paths`, `load_bash_patterns`, `match`, `decide`. <!-- completed: 2026-04-30T06:30 -->
+- [x] Edit `cafleet/src/cafleet/cli.py`: add `member safe-exec` Click command per §4. Wire the discovery + decision + dispatch + output flow. <!-- completed: 2026-04-30T06:32 -->
+- [x] Edit `cafleet/src/cafleet/cli.py`: remove the `--bash` Click option from the existing send-input subcommand. Update the mutual-exclusion message and the count-supplied check accordingly. <!-- completed: 2026-04-30T06:32 -->
+- [x] Run `mise //cafleet:test` and confirm every Step 2 test passes. <!-- completed: 2026-04-30T06:34 -->
+- [x] Run `mise //cafleet:lint`, `mise //cafleet:format --check`, `mise //cafleet:typecheck`. <!-- completed: 2026-04-30T06:36 -->
 
 ### Step 4: Cross-cutting verification
 

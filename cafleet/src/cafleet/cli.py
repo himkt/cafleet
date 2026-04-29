@@ -15,7 +15,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.url import make_url
 
-from cafleet import broker, output, tmux
+from cafleet import broker, output, permissions, tmux
 from cafleet.coding_agent import CLAUDE, CodingAgentConfig
 from cafleet.config import settings
 
@@ -921,25 +921,18 @@ def member_capture(ctx, agent_id, member_id, lines):
     "--freetext",
     type=str,
     default=None,
-    help='Send "4" + literal text + Enter (AskUserQuestion only). Mutually exclusive with --choice and --bash.',
-)
-@click.option(
-    "--bash",
-    "bash_command",
-    type=str,
-    default=None,
-    help='Send "! <command>" + Enter for bash routing. Mutually exclusive with --choice and --freetext.',
+    help='Send "4" + literal text + Enter (AskUserQuestion only). Mutually exclusive with --choice.',
 )
 @click.pass_context
-def member_send_input(ctx, agent_id, member_id, choice, freetext, bash_command):
+def member_send_input(ctx, agent_id, member_id, choice, freetext):
     """Safely forward a restricted keystroke to a member pane."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
-    supplied = sum(1 for v in (choice, freetext, bash_command) if v is not None)
+    supplied = sum(1 for v in (choice, freetext) if v is not None)
     if supplied != 1:
         raise click.UsageError(
-            "--choice, --freetext, --bash are mutually exclusive; supply exactly one."
+            "--choice, --freetext are mutually exclusive; supply exactly one."
         )
 
     if freetext is not None and ("\n" in freetext or "\r" in freetext):
@@ -969,12 +962,9 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext, bash_command):
         if choice is not None:
             tmux.send_choice_key(target_pane_id=pane_id, digit=choice)
             action, value = "choice", str(choice)
-        elif freetext is not None:
+        else:
             tmux.send_freetext_and_submit(target_pane_id=pane_id, text=freetext)
             action, value = "freetext", freetext
-        else:
-            tmux.send_bash_command(target_pane_id=pane_id, command=bash_command)
-            action, value = "bash", bash_command
     except tmux.TmuxError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
 
@@ -990,13 +980,124 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext, bash_command):
             )
         )
     else:
-        if action == "choice":
-            label = f"choice {value}"
-        elif action == "bash":
-            label = f"bash command {value!r}"
-        else:
-            label = "free text"
+        label = f"choice {value}" if action == "choice" else "free text"
         click.echo(f"Sent {label} to member {target['name']} ({pane_id}).")
+
+
+def _emit_safe_exec_output(
+    ctx: click.Context,
+    decision: permissions.Decision,
+    member_id: str,
+    pane_id: str,
+    member_name: str,
+    command: str,
+) -> None:
+    json_output = ctx.obj["json_output"]
+    if json_output:
+        payload = {
+            "outcome": decision.outcome,
+            "matched_pattern": decision.matched_pattern,
+            "matched_file": (
+                str(decision.matched_file)
+                if decision.matched_file is not None
+                else None
+            ),
+            "offending_substring": decision.offending_substring,
+            "searched_files": [str(p) for p in decision.searched_files],
+        }
+        click.echo(output.format_json(payload))
+        return
+
+    if decision.outcome == "allow":
+        click.echo(
+            f"Sent bash command {command!r} to member {member_name} ({pane_id})."
+        )
+    elif decision.outcome == "deny":
+        click.echo(
+            f"Error: command rejected by deny pattern {decision.matched_pattern} "
+            f"declared in {decision.matched_file}. "
+            f"Offending command: {command}",
+            err=True,
+        )
+    else:
+        first_token = command.split()[0] if command.split() else command
+        files_block = "\n".join(f"  - {p}" for p in decision.searched_files)
+        click.echo(
+            f'Error: no allow pattern matches "{command}". '
+            f"Add a Bash(...) pattern to one of:\n"
+            f"{files_block}\n"
+            f"Files were re-read at this invocation. "
+            f"Suggested pattern: Bash({first_token}:*)",
+            err=True,
+        )
+
+
+@member.command("safe-exec")
+@click.option("--agent-id", required=True, help="Director's agent ID")
+@click.option("--member-id", required=True, help="Target member's agent ID")
+@click.option(
+    "--bash",
+    "bash_command",
+    type=str,
+    required=True,
+    help="Shell command to dispatch via the member's `!` shortcut after permission decision.",
+)
+@click.pass_context
+def member_safe_exec(ctx, agent_id, member_id, bash_command):
+    """Permission-aware bash dispatch into a member pane.
+
+    Matches the inner CMD against the operator's ``Bash(...)`` allow / deny
+    patterns from three settings.json files, re-read on every call. Allow
+    keystrokes ``! <cmd>`` into the member pane; deny exits 2; ask exits 3.
+    """
+    _require_session_id(ctx)
+    session_id = ctx.obj["session_id"]
+
+    if bash_command == "":
+        raise click.UsageError("--bash command may not be empty.")
+    if "\n" in bash_command or "\r" in bash_command:
+        raise click.UsageError("--bash command may not contain newlines.")
+
+    try:
+        tmux.ensure_tmux_available()
+    except tmux.TmuxError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    target, placement = _load_authorized_member(
+        session_id,
+        agent_id,
+        member_id,
+        placement_missing_msg=(
+            f"agent {member_id} has no placement row; it was not "
+            f"spawned via `cafleet member create`."
+        ),
+    )
+    pane_id = placement["tmux_pane_id"]
+    if pane_id is None:
+        raise click.ClickException(
+            f"member {member_id} has no pane yet (pending placement) — nothing to send."
+        )
+
+    paths = permissions.discover_settings_paths()
+    decision = permissions.decide(bash_command, paths)
+
+    if decision.outcome == "allow":
+        try:
+            tmux.send_bash_command(target_pane_id=pane_id, command=bash_command)
+        except tmux.TmuxError as exc:
+            raise click.ClickException(f"send failed: {exc}") from exc
+        _emit_safe_exec_output(
+            ctx, decision, member_id, pane_id, target["name"], bash_command
+        )
+        return
+
+    _emit_safe_exec_output(
+        ctx, decision, member_id, pane_id, target["name"], bash_command
+    )
+    if decision.outcome == "deny":
+        ctx.exit(2)
+    else:
+        ctx.exit(3)
 
 
 if __name__ == "__main__":
