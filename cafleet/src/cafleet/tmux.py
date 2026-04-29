@@ -146,11 +146,12 @@ def send_bash_command(*, target_pane_id: str, command: str) -> None:
     via Claude Code's ``!`` shortcut. Unlike ``send_freetext_and_submit``,
     there is NO leading ``4`` keystroke (no AskUserQuestion gate).
     """
-    if not command:
+    normalized_command = command.strip()
+    if not normalized_command:
         raise TmuxError("send_bash_command: command may not be empty")
     if "\n" in command or "\r" in command:
         raise TmuxError("send_bash_command: command may not contain newlines")
-    _run(["tmux", "send-keys", "-t", target_pane_id, "-l", f"! {command}"])
+    _run(["tmux", "send-keys", "-t", target_pane_id, "-l", f"! {normalized_command}"])
     _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
 
 

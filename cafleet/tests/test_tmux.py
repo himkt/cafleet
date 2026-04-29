@@ -591,3 +591,40 @@ class TestSendBashCommand:
         ):
             tmux.send_bash_command(target_pane_id="%5", command="")
         assert run_calls == []
+
+    @pytest.mark.parametrize(
+        "whitespace_command",
+        [" ", "   ", "\t", " \t ", "\t\t"],
+    )
+    def test_rejects_whitespace_only_command(self, monkeypatch, whitespace_command):
+        run_calls: list[list[str]] = []
+
+        def mock_run(args, **_kwargs):
+            run_calls.append(list(args))
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        with pytest.raises(
+            tmux.TmuxError,
+            match="send_bash_command: command may not be empty",
+        ):
+            tmux.send_bash_command(target_pane_id="%5", command=whitespace_command)
+        assert run_calls == []
+
+    def test_strips_surrounding_whitespace_from_command(self, monkeypatch):
+        captured_calls: list[list[str]] = []
+
+        def mock_run(args, **_kwargs):
+            captured_calls.append(list(args))
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        tmux.send_bash_command(target_pane_id="%5", command="  git status  ")
+        assert captured_calls[0] == [
+            "tmux",
+            "send-keys",
+            "-t",
+            "%5",
+            "-l",
+            "! git status",
+        ]
