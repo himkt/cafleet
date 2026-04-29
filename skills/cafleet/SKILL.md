@@ -445,8 +445,6 @@ Cross-Director send is rejected: the CLI verifies `placement.director_agent_id` 
 
 **Why three tmux calls for `--freetext`** (and two for `--bash`): tmux's `-l` (literal) flag is per-invocation — one `send-keys` call cannot mix literal characters with the `Enter` key name. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the text (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are all delivered as plain characters. The CLI calls `subprocess.run([...], shell=False)`, so no shell ever interprets the text. Newlines in `--freetext` and `--bash` are rejected because a literal newline would submit a second prompt without a following Enter — the single-action contract is "one CLI call = one prompt submission."
 
-The CLI never inspects `placement.coding_agent`.
-
 Output (text):
 
 ```

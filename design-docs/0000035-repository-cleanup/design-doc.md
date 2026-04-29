@@ -1,7 +1,7 @@
 # Repository cleanup — remove obsolete files, stale skill content, dead pyproject config
 
 **Status**: Approved
-**Progress**: 6/25 tasks complete
+**Progress**: 7/25 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -195,7 +195,7 @@ New terms added in response to Reviewer feedback:
 
 ### Step 2: Skill cleanup (skills second)
 
-- [ ] Edit `skills/cafleet/SKILL.md` line 448: delete the standalone sentence `"The CLI never inspects placement.coding_agent."`. Verify the surrounding paragraph still reads cleanly — adjust whitespace if a blank-line collision results. The line-558 `auto-detection ... is deferred` sentence is intentionally NOT touched (see §"Specification → Skills surface" for the consistency rationale). <!-- completed: -->
+- [x] Edit `skills/cafleet/SKILL.md` line 448: delete the standalone sentence `"The CLI never inspects placement.coding_agent."`. Verify the surrounding paragraph still reads cleanly — adjust whitespace if a blank-line collision results. The line-558 `auto-detection ... is deferred` sentence is intentionally NOT touched (see §"Specification → Skills surface" for the consistency rationale). <!-- completed: 2026-04-29T15:05 -->
 
 ### Step 3: Source-config cleanup (source third — config-only, no source edits)
 
