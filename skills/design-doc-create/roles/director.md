@@ -18,6 +18,28 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-
 - **Drive user feedback iterations.** Process the user's feedback selection and route revisions through the quality loop before re-presenting.
 - **Clean up when done.** Cancel the `/loop` monitor, delete each member via `cafleet member delete`, and tear down the session via `cafleet session delete <session-id>` after the user approves (or aborts). The root Director cannot be deregistered with `cafleet agent deregister` — `session delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
 
+## Idle Semantics
+
+**Members go idle after every turn. A member's tmux pane sitting at the prompt between turns is the expected state, NOT a stall.** A member sending you a `cafleet message send` and then returning to the prompt is the normal flow — they sent their output and are waiting for the next push notification or the next assignment.
+
+- Idle members receive messages normally; the broker's push notification (`tmux send-keys` of `cafleet message poll`) wakes them.
+- `/loop` notifications about idle panes are informational. Do not react unless you are ready to assign new work, OR the member's idleness is **blocking your next step** (a downstream phase cannot start, an expected deliverable file is missing past its milestone, you sent a message and received no reply after a reasonable window).
+- Do NOT comment on idleness or nudge a member just because they went idle. Only nudge per the Stall Response Ladder below.
+
+## Stall Response Ladder
+
+A member is stalled when they **block your next step** — not merely because they are idle. Signals:
+
+- The deliverable file you expect at this milestone does not exist.
+- `cafleet message poll --agent-id <director-agent-id>` shows no progress message from the member since the last assignment AND `cafleet member capture` shows no forward progress in the pane buffer.
+- You sent a `cafleet message send` and the member has not replied past one full `/loop` tick.
+
+**Response ladder (in order — do NOT skip rungs):**
+
+1. Send a specific instruction via `cafleet message send` — never a generic "are you OK?". State the deliverable you expect and the blocker you are trying to unblock.
+2. If still no reply after a second nudge across one more `/loop` tick, run `cafleet member capture --member-id <member-agent-id> --lines 200` and inspect the pane state. If the pane is on an `AskUserQuestion` frame, follow the canonical three-beat workflow in `Skill(cafleet)` § *Answer a member's AskUserQuestion prompt*.
+3. After 2 nudges without progress, escalate to the user via `AskUserQuestion` with concrete options (re-spawn / redistribute / drop scope / Other). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
+
 ## Communication Protocol
 
 All Director-to-member messages use the CAFleet message broker. The Director stores each member's `agent_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-agent-id>` as the `--to` target.
@@ -90,16 +112,4 @@ Drafter and Reviewer members are spawned with `--permission-mode dontAsk` (Bash 
 
 ## Shutdown Protocol
 
-1. Cancel the `/loop` monitor (`CronDelete` on the cron ID recorded when the loop was created).
-2. Delete each member:
-   ```bash
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <drafter-agent-id>
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <reviewer-agent-id>
-   ```
-3. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet agent deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
-   ```bash
-   cafleet session delete <session-id>
-   # → Deleted session <session-id>. Deregistered N agents.
-   ```
-
-The `sessions` row is soft-deleted (not physically removed) and all `tasks` rows are preserved so the message trail remains inspectable in the admin WebUI (subject to the WebUI's soft-delete filtering behavior).
+Run the canonical 5-rung teardown per `Skill(cafleet)` § *Shutdown Protocol* (CronDelete → `cafleet member delete` per member → `cafleet member list` verification → `cafleet session delete <session-id>` → `cafleet session list` sanity check). The skill-specific cron-ID nuance: the `/loop` monitor cancelled at the first rung is the team-health cron recorded at Step 1b — this skill never creates a second loop, so there is only one cron ID to track.

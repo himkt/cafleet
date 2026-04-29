@@ -192,11 +192,11 @@ Capture `session_id` and `director.agent_id` from the JSON response. Substitute 
 
 If you already have a running session (e.g. an outer orchestration), reuse its `session_id` and its root Director's `agent_id` instead of creating a new session. Do **not** attempt to register a second Director with `cafleet agent register --name Director` — the root Director from `session create` is the team lead; a second registration would just create an unrelated agent with no placement row.
 
-#### 3c. Start the monitoring `/loop`
+#### 3b. Start the monitoring `/loop`
 
 BEFORE spawning any member, follow `Skill(cafleet-monitoring)`'s Monitoring Mandate and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. This is the **team-health loop** — it stays active through Steps 3–5 and, when Step 6 runs, is swapped (create-before-delete order in Step 7a) for the augmented team-health + PR-review loop. Whichever loop is active gets `CronDelete`d in Step 8's cleanup.
 
-#### 3d. Analyze implementation tasks to decide team composition
+#### 3c. Analyze implementation tasks to decide team composition
 
 Based on the design document steps (see [roles/director.md](roles/director.md) for the full decision matrix):
 
@@ -206,7 +206,7 @@ Based on the design document steps (see [roles/director.md](roles/director.md) f
 | Config/documentation only | Programmer only |
 | E2E verification needed (user-visible changes, CLI/UI/API) | + Verifier |
 
-#### 3e. Read role files
+#### 3d. Read role files
 
 Read the role files that will be embedded verbatim in spawn prompts:
 
@@ -214,7 +214,7 @@ Read the role files that will be embedded verbatim in spawn prompts:
 - `skills/design-doc-execute/roles/tester.md` (if Tester needed)
 - `skills/design-doc-execute/roles/verifier.md` (if Verifier needed)
 
-#### 3f. Spawn each member via `cafleet member create`
+#### 3e. Spawn each member via `cafleet member create`
 
 **Programmer spawn prompt:**
 
@@ -338,7 +338,7 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 
 Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-id>` in every subsequent command.
 
-#### 3g. Verify members are live
+#### 3f. Verify members are live
 
 ```bash
 cafleet --session-id <session-id> member list --agent-id <director-agent-id>
@@ -500,7 +500,7 @@ The Director holds three in-context variables across loop firings. They are NOT 
 On entry to Step 7:
 
 1. **Start the augmented `/loop` first** with the template in "Augmented Loop Prompt" below. Record the new cron ID.
-2. **Then `CronDelete` the existing team-health loop** (cron ID recorded in Step 3c).
+2. **Then `CronDelete` the existing team-health loop** (cron ID recorded in Step 3b).
 3. The new loop keeps every team-health check AND adds PR review polling.
 
 Order matters: create-before-delete eliminates any window where no monitor is running. A one-tick overlap (both loops firing for one minute) is harmless — the Director receives two nudge prompts and reconciles them trivially.
@@ -622,24 +622,13 @@ Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped (gh no
 2. `git add <design-doc>` (separate Bash call).
 3. `git commit -m "docs: mark design doc as complete"` (separate Bash call).
 4. **Push decision** (separate Bash call): run `git rev-parse --abbrev-ref <branch-name>@{upstream}`.
-   - Exit code 0 (branch is tracked on origin): `git push`. This covers both the "Step 6 fully succeeded" path and the "Step 6 partial-fail (push OK, PR create failed)" path, so the final docs commit is never orphaned locally when the branch is already on origin.
-   - Non-zero exit (Step 6 was skipped before the `git push -u`): skip the push. The docs commit stays local.
-   - The Director does NOT re-request Copilot review on this final docs commit — docs status changes are not worth another review round.
-5. `CronDelete` the currently active `/loop` monitor — whichever cron ID is recorded: team-health (from Step 3c) if Step 6 was skipped, augmented (from Step 7) otherwise.
-6. Delete each spawned member:
-   ```bash
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <programmer-agent-id>
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <tester-agent-id>      # if spawned
-   cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <verifier-agent-id>    # if spawned
-   ```
-
-   Each `member delete` now blocks until the pane is actually gone (15 s default timeout). On exit 2 (stuck prompt), inspect with `cafleet member capture` and answer with `cafleet member send-input`, then retry — or rerun with `--force` to skip `/exit` and kill-pane immediately.
-
-7. Tear down the session (this also deregisters the root Director and the Administrator — `cafleet agent deregister --agent-id <director-agent-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`):
-   ```bash
-   cafleet session delete <session-id>
-   # → Deleted session <session-id>. Deregistered N agents.
-   ```
-8. **Report to the user**: include the PR URL (if Step 6 created one), the review-round summary (rounds used, exit reason: approved / quiescent / round-limit / skipped), and any skipped-step reasons.
-
-`session delete` soft-deletes the `sessions` row and physically deletes every associated `agent_placements` row while preserving all `tasks` rows for audit — the message history remains inspectable in the admin WebUI (subject to the WebUI's soft-delete filtering behavior).
+   - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 6 fully succeeded" path and the "Step 6 partial-fail (push OK, PR create failed)" path.
+   - Non-zero exit: skip the push. The docs commit stays local.
+   - The Director does NOT re-request Copilot review on this final docs commit.
+5. Run the canonical teardown per `Skill(cafleet)` § *Shutdown Protocol*:
+   1. `CronDelete` the currently active `/loop` monitor — team-health (cron ID from Step 3b) if Step 6 was skipped, augmented (cron ID from Step 7a) otherwise.
+   2. `cafleet member delete` for each spawned member (Programmer, Tester if spawned, Verifier if spawned). Each call blocks until the pane is gone; on exit 2 follow the `member capture` + `send-input` recovery, or rerun with `--force`.
+   3. `cafleet member list` — the team's roster MUST be empty before continuing.
+   4. `cafleet session delete <session-id>`.
+   5. `cafleet session list` — the session MUST not appear.
+6. **Report to the user**: include the PR URL (if Step 6 created one), the review-round summary (rounds used, exit reason: approved / quiescent / round-limit / skipped), and any skipped-step reasons.

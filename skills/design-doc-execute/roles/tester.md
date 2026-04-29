@@ -84,3 +84,11 @@ If the Director relays a test defect report from the Programmer (the Programmer'
 - **Use descriptive names**: Test names should clearly indicate what requirement they verify
 - **Include setup and teardown** as needed for clean test isolation
 - **Do not test implementation details**: Test the public interface and expected behavior
+
+## Shutdown
+
+You are terminated by the Director via `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <my-agent-id>`. The CLI sends `/exit` to your pane and waits up to 15 s for it to disappear.
+
+You do NOT need to handle any `shutdown_request` JSON message — that is the in-process Agent Teams primitive. The CAFleet equivalent is `/exit`, dispatched by the Director through the tmux push primitive. When you receive `/exit`, your `claude` process terminates immediately; nothing is required of you.
+
+If your Director sends `cafleet message send` instructing you to wrap up (e.g. "report final status, then I will run member delete"), do that one final report via `cafleet message send` and return to the prompt. The Director will then run `cafleet member delete` from its own pane.
