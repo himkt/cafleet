@@ -1,7 +1,7 @@
 # Member-side Bash whitelist (allow only `Bash(cafleet *)`)
 
 **Status**: Approved
-**Progress**: 2/7 tasks complete
+**Progress**: 4/7 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -96,8 +96,8 @@ Marginal benefit over Option A/B: clearer attack surface (only one binary need b
 
 ### Step 2: Prefix tmux poll trigger with `!`
 
-- [ ] Edit `cafleet/src/cafleet/tmux.py` `send_poll_trigger` to inject `f"! cafleet --session-id {session_id} message poll --agent-id {agent_id}"` (with leading `! `) instead of the bare command. The keystroke arrives in the member's pane and the LLM's harness routes it through Claude Code's `!` CLI shortcut without going through the Bash tool. <!-- completed: -->
-- [ ] Update `TestSendPollTriggerKeystroke` in `cafleet/tests/test_tmux.py` to assert the captured first keystroke is `! cafleet --session-id <s> message poll --agent-id <a>` (with the `!` prefix). <!-- completed: -->
+- [x] Edit `cafleet/src/cafleet/tmux.py` `send_poll_trigger` to inject `f"! cafleet --session-id {session_id} message poll --agent-id {agent_id}"` (with leading `! `) instead of the bare command. The keystroke arrives in the member's pane and the LLM's harness routes it through Claude Code's `!` CLI shortcut without going through the Bash tool. <!-- completed: 2026-04-29T02:30 -->
+- [x] Update `TestSendPollTriggerKeystroke` in `cafleet/tests/test_tmux.py` to assert the captured first keystroke is `! cafleet --session-id <s> message poll --agent-id <a>` (with the `!` prefix). <!-- completed: 2026-04-29T02:30 -->
 
 ### Step 3: Documentation sweep
 
