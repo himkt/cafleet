@@ -601,24 +601,12 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
 @click.option("--agent-id", required=True, help="Director's agent ID")
 @click.option("--name", required=True, help="Member name")
 @click.option("--description", required=True, help="Member description")
-@click.option(
-    "--no-bash/--allow-bash",
-    "no_bash",
-    default=None,
-    help=(
-        "Deny / allow the spawned member's Bash tool. Defaults to --no-bash "
-        "(route shell commands through the Director). --allow-bash is the "
-        "opt-out for one-off members that need direct Bash."
-    ),
-)
 @click.argument("prompt_argv", nargs=-1)
 @click.pass_context
-def member_create(ctx, agent_id, name, description, no_bash, prompt_argv):
+def member_create(ctx, agent_id, name, description, prompt_argv):
     """Register a new member and spawn its claude pane in the Director's window."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
-
-    deny_bash = no_bash if no_bash is not None else True
 
     try:
         tmux.ensure_tmux_available()
@@ -659,9 +647,7 @@ def member_create(ctx, agent_id, name, description, no_bash, prompt_argv):
         pane_id = tmux.split_window(
             target_window_id=director_ctx.window_id,
             env=fwd_env,
-            command=CLAUDE.build_command(
-                prompt, display_name=name, deny_bash=deny_bash
-            ),
+            command=CLAUDE.build_command(prompt, display_name=name),
         )
     except tmux.TmuxError as exc:
         _rollback_register(

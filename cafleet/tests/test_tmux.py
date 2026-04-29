@@ -216,13 +216,10 @@ class TestSendPollTrigger:
         """``--session-id`` is a root-group global option and MUST come
         before the subcommand; ``--agent-id`` is a per-subcommand option
         and MUST come after ``message poll``. This ordering is what click's
-        parser actually accepts.
-
-        Design 0000035 Step 2: the keystroke is prefixed with ``! `` so
-        the recipient's harness routes it through Claude Code's shell
-        shortcut (the recipient's Bash tool is denied). The cafleet
-        command portion remains the literal ``permissions.allow`` entries
-        target.
+        parser actually accepts and is the literal string the recipient's
+        Bash tool receives. Under design 0000035's dontAsk model the
+        recipient runs the keystroke directly via the Bash tool — no
+        ``!`` prefix workaround is needed.
         """
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
         captured_args = []
@@ -244,7 +241,7 @@ class TestSendPollTrigger:
             "-t",
             "%7",
             "-l",
-            "! cafleet --session-id sess-001 message poll --agent-id agent-001",
+            "cafleet --session-id sess-001 message poll --agent-id agent-001",
             "tmux",
             "send-keys",
             "-t",
@@ -311,11 +308,11 @@ class TestSendPollTriggerKeystroke:
     1. **Design 0000034 §14** — the underlying cafleet command MUST be
        ``message poll --agent-id <a>`` (not the legacy bare ``poll``,
        which no longer parses).
-    2. **Design 0000035 Step 2** — the keystroke MUST be prefixed with
-       ``! `` (literal exclamation + space) so the recipient's harness
-       routes it through Claude Code's shell shortcut. Without the
-       prefix, members whose Bash tool is denied will refuse to run
-       the command.
+    2. **Design 0000035 (revised, dontAsk model)** — the keystroke is the
+       bare cafleet command (NO ``! `` prefix). The recipient's Bash tool
+       is enabled (spawn argv carries ``--permission-mode dontAsk``), so
+       the harness runs the keystroke as a normal Bash invocation. A
+       leading ``!`` would either fail or get typed as literal text.
 
     The two ``send-keys`` calls are inspected separately:
 
@@ -323,7 +320,7 @@ class TestSendPollTriggerKeystroke:
     - call 1: ``["tmux", "send-keys", "-t", <pane>, "Enter"]``
     """
 
-    def test_keystroke_carries_bang_prefix_for_message_poll(self, monkeypatch):
+    def test_keystroke_starts_with_bare_cafleet(self, monkeypatch):
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
         captured: list[list[str]] = []
 
@@ -341,9 +338,14 @@ class TestSendPollTriggerKeystroke:
         assert len(captured) == 2
 
         keystroke = captured[0][-1]
-        assert keystroke.startswith("! cafleet --session-id "), (
-            "send_poll_trigger keystroke must start with `! cafleet --session-id ` "
-            f"(design 0000035 Step 2); got: {keystroke!r}"
+        assert keystroke.startswith("cafleet --session-id "), (
+            "send_poll_trigger keystroke must start with `cafleet --session-id ` "
+            "(design 0000035 dontAsk model — no `!` prefix); "
+            f"got: {keystroke!r}"
+        )
+        assert not keystroke.startswith("! "), (
+            "keystroke must NOT carry the legacy `! ` prefix under the "
+            f"dontAsk model; got: {keystroke!r}"
         )
         assert "message poll --agent-id" in keystroke, (
             "keystroke must still carry `message poll --agent-id` "

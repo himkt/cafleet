@@ -66,18 +66,37 @@ class TestBuildCommand:
 
     def test_claude_build_command(self):
         result = CLAUDE.build_command("Hello world")
-        assert result == ["claude", "Hello world"]
+        assert result == [
+            "claude",
+            "--permission-mode",
+            "dontAsk",
+            "Hello world",
+        ]
 
     def test_display_name_kwarg_injects_for_claude(self):
         result = CLAUDE.build_command("p", display_name="Drafter")
-        assert result == ["claude", "--name", "Drafter", "p"]
+        assert result == [
+            "claude",
+            "--permission-mode",
+            "dontAsk",
+            "--name",
+            "Drafter",
+            "p",
+        ]
 
     def test_display_name_none_matches_default(self):
         assert CLAUDE.build_command("p", display_name=None) == CLAUDE.build_command("p")
 
     def test_display_name_with_spaces_preserved(self):
         result = CLAUDE.build_command("p", display_name="Code Reviewer")
-        assert result == ["claude", "--name", "Code Reviewer", "p"]
+        assert result == [
+            "claude",
+            "--permission-mode",
+            "dontAsk",
+            "--name",
+            "Code Reviewer",
+            "p",
+        ]
 
     def test_display_name_args_field_default_empty_tuple(self):
         config = CodingAgentConfig(name="test", binary="test-bin")
@@ -149,80 +168,68 @@ class TestClaudeConfig:
         assert "dir-001" in result
 
 
-class TestDisallowTools:
-    """``disallow_tools_args`` field + ``deny_bash`` kwarg.
+class TestPermissionArgs:
+    """``permission_args`` field — always-injected spawn argv.
 
-    Pinned argv ordering: ``[binary, *extra_args, *deny_args, *name_args, prompt]``
-    — ``deny_args`` MUST come BEFORE ``name_args``. Asserted by index, not just
-    membership, so a future revert that flips the order would fail loudly.
+    Pinned argv ordering: ``[binary, *extra_args, *permission_args, *name_args, prompt]``
+    — ``permission_args`` MUST come BEFORE ``name_args``. Asserted by index,
+    not just membership, so a future revert that flips the order would fail loudly.
     """
 
-    def test_claude_disallow_tools_args_constant(self):
-        assert CLAUDE.disallow_tools_args == ("--disallowedTools", "Bash")
+    def test_claude_permission_args_constant(self):
+        assert CLAUDE.permission_args == ("--permission-mode", "dontAsk")
 
-    def test_disallow_tools_args_field_default_empty_tuple(self):
+    def test_permission_args_field_default_empty_tuple(self):
         config = CodingAgentConfig(name="test", binary="test-bin")
-        assert config.disallow_tools_args == ()
-        assert isinstance(config.disallow_tools_args, tuple)
+        assert config.permission_args == ()
+        assert isinstance(config.permission_args, tuple)
 
-    def test_claude_build_command_with_deny_bash_true_no_display_name(self):
-        result = CLAUDE.build_command("hello", deny_bash=True)
-        assert result == ["claude", "--disallowedTools", "Bash", "hello"]
+    def test_claude_build_command_no_display_name(self):
+        result = CLAUDE.build_command("hello")
+        assert result == ["claude", "--permission-mode", "dontAsk", "hello"]
 
-    def test_claude_build_command_with_deny_bash_true_and_display_name(self):
-        result = CLAUDE.build_command("hello", deny_bash=True, display_name="Drafter")
+    def test_claude_build_command_with_display_name(self):
+        result = CLAUDE.build_command("hello", display_name="Drafter")
         assert result == [
             "claude",
-            "--disallowedTools",
-            "Bash",
+            "--permission-mode",
+            "dontAsk",
             "--name",
             "Drafter",
             "hello",
         ]
 
-    def test_claude_deny_args_appear_before_name_args(self):
-        result = CLAUDE.build_command("p", deny_bash=True, display_name="Drafter")
-        deny_index = result.index("--disallowedTools")
+    def test_permission_args_appear_before_name_args(self):
+        result = CLAUDE.build_command("p", display_name="Drafter")
+        perm_index = result.index("--permission-mode")
         name_index = result.index("--name")
-        assert deny_index < name_index, (
-            f"deny_args must precede name_args; got {result!r}"
+        assert perm_index < name_index, (
+            f"permission_args must precede name_args; got {result!r}"
         )
 
-    def test_claude_build_command_with_deny_bash_false_omits_disallow_tokens(self):
-        result = CLAUDE.build_command("hello", deny_bash=False)
-        assert "--disallowedTools" not in result
-        assert "Bash" not in result
-        assert result == ["claude", "hello"]
-
-    def test_claude_build_command_default_deny_bash_omits_disallow_tokens(self):
-        result = CLAUDE.build_command("hello")
-        assert "--disallowedTools" not in result
-        assert "Bash" not in result
-        assert result == ["claude", "hello"]
-
-    def test_custom_config_with_deny_bash_true_and_disallow_args_injects_tokens(self):
+    def test_custom_config_with_permission_args_injects_tokens(self):
         config = CodingAgentConfig(
             name="custom",
             binary="custom-bin",
             extra_args=("--mode", "auto"),
-            disallow_tools_args=("--deny", "Shell"),
+            permission_args=("--allowedTools", "Read"),
         )
-        result = config.build_command("p", deny_bash=True)
-        assert result == ["custom-bin", "--mode", "auto", "--deny", "Shell", "p"]
+        result = config.build_command("p")
+        assert result == ["custom-bin", "--mode", "auto", "--allowedTools", "Read", "p"]
 
-    def test_custom_config_with_deny_bash_true_but_empty_disallow_args_no_op(self):
+    def test_custom_config_with_empty_permission_args_no_op(self):
         config = CodingAgentConfig(
             name="custom",
             binary="custom-bin",
             extra_args=("--mode", "auto"),
-            disallow_tools_args=(),
+            permission_args=(),
         )
-        result = config.build_command("p", deny_bash=True)
+        result = config.build_command("p")
         assert result == ["custom-bin", "--mode", "auto", "p"]
 
 
 class TestPromptTemplates:
-    """Bash-routing reminder added to the claude template."""
+    """dontAsk wiring reminder in the claude template."""
 
     _STANDARD_KWARGS = {
         "session_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -231,21 +238,24 @@ class TestPromptTemplates:
         "director_agent_id": "dir-001",
     }
 
-    def test_claude_template_contains_bash_routing_canary(self):
-        assert "If your Bash tool is denied" in CLAUDE.default_prompt_template
+    def test_claude_template_documents_dontask_mode(self):
+        """Design 0000035 (revised): the template tells the spawned member
+        its harness runs in ``dontAsk`` mode and the Bash tool is enabled.
+        The canary ``"dontAsk"`` is the smallest change-resistant marker
+        — a future revert to a deny-Bash posture would fail this assertion.
+        """
+        assert "dontAsk" in CLAUDE.default_prompt_template
 
-    def test_claude_template_documents_bang_prefix_for_cafleet(self):
-        """Design 0000035 Step 1: the rendered template must explicitly
-        document the ``!`` shortcut for member-side cafleet calls. The
-        canary ``"! cafleet"`` (literal exclamation + space + cafleet)
-        is the smallest change-resistant marker proving the prefix was
-        documented; a future revert that drops the ``!`` shortcut
-        guidance would fail this assertion.
+    def test_claude_template_omits_legacy_bang_prefix_guidance(self):
+        """Design 0000035 (revised): the prior ``!``-shortcut workaround
+        is gone. The rendered template must NOT instruct the member to
+        prefix cafleet with ``!`` — that path was specific to the
+        deny-Bash posture which is no longer in use.
         """
         rendered = CLAUDE.default_prompt_template.format(**self._STANDARD_KWARGS)
-        assert "! cafleet" in rendered, (
-            "CLAUDE template must document the `!` shortcut for cafleet "
-            f"calls (canary `'! cafleet'`); got:\n{rendered}"
+        assert "! cafleet" not in rendered, (
+            "CLAUDE template must NOT instruct `!` prefix for cafleet calls "
+            f"under dontAsk mode; got:\n{rendered}"
         )
 
     def test_claude_template_format_succeeds_with_standard_kwargs(self):

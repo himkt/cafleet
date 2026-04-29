@@ -326,14 +326,15 @@ class TestMemberCreatePassesDisplayName:
         assert command[0] == "claude"
 
 
-class TestNoBashFlag:
-    """``--no-bash`` (default) / ``--allow-bash`` flag pair.
+class TestPermissionMode:
+    """Spawn argv carries ``--permission-mode dontAsk`` (design 0000035 revised).
 
-    - Default → deny_bash=True; argv gains ``--disallowedTools Bash``.
-    - Explicit ``--allow-bash`` → deny_bash=False; argv stays clean.
+    The deny-Bash posture (``--disallowedTools Bash``) is gone; the
+    ``--no-bash`` / ``--allow-bash`` flag pair was removed. Members spawn
+    with the Bash tool enabled and permission prompts auto-resolve.
     """
 
-    def test_claude_default_appends_disallowed_tools_bash(
+    def test_claude_default_injects_dontask_permission_mode(
         self,
         bootstrapped_session,
         split_window_recorder,
@@ -360,22 +361,61 @@ class TestNoBashFlag:
         assert result.exit_code == 0, result.output
         assert len(split_window_recorder) == 1
         command = split_window_recorder[0]["command"]
-        assert "--disallowedTools" in command
-        deny_index = command.index("--disallowedTools")
-        assert command[deny_index + 1] == "Bash"
+        assert "--permission-mode" in command
+        perm_index = command.index("--permission-mode")
+        assert command[perm_index + 1] == "dontAsk"
         assert command[0] == "claude"
-        # Pinned argv ordering: deny tokens before name args.
+        # The legacy deny-Bash tokens MUST NOT be present under the new model.
+        assert "--disallowedTools" not in command
+        assert "Bash" not in command
+        # Pinned argv ordering: permission tokens before name args.
         name_index = command.index("--name")
-        assert deny_index < name_index, (
-            f"--disallowedTools must precede --name; got {command!r}"
+        assert perm_index < name_index, (
+            f"--permission-mode must precede --name; got {command!r}"
         )
 
-    def test_claude_explicit_allow_bash_omits_disallowed_tools(
+    def test_no_bash_flag_no_longer_parses(
         self,
         bootstrapped_session,
         split_window_recorder,
         stub_coding_agent_binaries,
     ):
+        """Regression guard: the ``--no-bash`` flag was removed in
+        design 0000035 (revised). Click MUST reject it with ``No such
+        option: --no-bash`` (exit 2).
+        """
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--no-bash",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 2
+        assert "No such option: --no-bash" in (result.output or "")
+
+    def test_allow_bash_flag_no_longer_parses(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        """Regression guard: the ``--allow-bash`` flag was removed in
+        design 0000035 (revised). Click MUST reject it with ``No such
+        option: --allow-bash`` (exit 2).
+        """
         session_id, director_id, runner = bootstrapped_session
         result = runner.invoke(
             cli,
@@ -395,12 +435,8 @@ class TestNoBashFlag:
                 "hello",
             ],
         )
-        assert result.exit_code == 0, result.output
-        assert len(split_window_recorder) == 1
-        command = split_window_recorder[0]["command"]
-        assert "--disallowedTools" not in command
-        assert "Bash" not in command
-        assert command[0] == "claude"
+        assert result.exit_code == 2
+        assert "No such option: --allow-bash" in (result.output or "")
 
 
 class TestCodingAgentFlagRemoved:

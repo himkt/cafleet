@@ -83,11 +83,10 @@ def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
 def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) -> bool:
     """Best-effort ``cafleet ... message poll`` trigger for the recipient's pane.
 
-    The keystroke is prefixed with ``! `` so the recipient's harness routes
-    it through Claude Code's shell shortcut rather than the Bash tool —
-    members are spawned with the Bash tool denied, but the ``!`` shortcut
-    is independent of that deny posture. Returns False on any tmux failure
-    or when the binary is missing, never raising.
+    The keystroke is sent literally so the recipient's Bash tool runs it
+    directly — members are spawned with ``--permission-mode dontAsk`` so
+    the Bash tool is enabled and permission prompts auto-resolve. Returns
+    False on any tmux failure or when the binary is missing, never raising.
 
     Split into two ``send-keys`` calls for the same reason as
     ``send_freetext_and_submit``: ``-l`` is per-invocation, so mixing
@@ -106,7 +105,7 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
                 "-t",
                 target_pane_id,
                 "-l",
-                f"! cafleet --session-id {session_id} message poll --agent-id {agent_id}",
+                f"cafleet --session-id {session_id} message poll --agent-id {agent_id}",
             ],
             timeout=5,
         )
