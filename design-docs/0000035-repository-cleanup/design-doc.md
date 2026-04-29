@@ -1,7 +1,7 @@
 # Repository cleanup — remove obsolete files, stale skill content, dead pyproject config
 
 **Status**: Approved
-**Progress**: 12/25 tasks complete
+**Progress**: 14/25 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -210,8 +210,8 @@ New terms added in response to Reviewer feedback:
 
 ### Step 5: Lockfile refresh (lockfile fifth — generated artifact)
 
-- [ ] In the `admin/` directory, run `bun install` to regenerate `admin/bun.lock` from the current `admin/package.json`. Do NOT hand-edit the lockfile. <!-- completed: -->
-- [ ] Hard gate: run `grep -nE '@auth0/' admin/bun.lock`. The expected output is zero matches. If any remain, run `bun why @auth0/auth0-react` (and the same for any other surviving `@auth0/*` package) inside `admin/` and report the dependency chain to the user. Do NOT proceed past Step 5 until the targeted grep returns zero hits. <!-- completed: -->
+- [x] In the `admin/` directory, run `bun install` to regenerate `admin/bun.lock` from the current `admin/package.json`. Do NOT hand-edit the lockfile. <!-- completed: 2026-04-29T15:25 -->
+- [x] Hard gate: run `grep -nE '@auth0/' admin/bun.lock`. The expected output is zero matches. If any remain, run `bun why @auth0/auth0-react` (and the same for any other surviving `@auth0/*` package) inside `admin/` and report the dependency chain to the user. Do NOT proceed past Step 5 until the targeted grep returns zero hits. <!-- completed: 2026-04-29T15:25 -->
 
 ### Step 6: Verification (project rule order: lint → typecheck → test → grep)
 
