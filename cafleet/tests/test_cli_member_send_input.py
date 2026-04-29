@@ -111,6 +111,22 @@ def freetext_recorder(monkeypatch):
     return calls
 
 
+@pytest.fixture
+def bash_recorder(monkeypatch):
+    """Record every call into ``tmux.send_bash_command``.
+
+    Uses ``raising=False`` so the fixture works before the Programmer adds
+    the helper to ``cafleet.tmux`` — clean FAIL beats setup ERROR.
+    """
+    calls: list[dict] = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(tmux, "send_bash_command", fake, raising=False)
+    return calls
+
+
 def _invoke(runner, session_id, *extra_args, **invoke_kwargs):
     """Helper: call ``cafleet --session-id <sid> member send-input ...``."""
     return runner.invoke(
@@ -415,3 +431,102 @@ class TestOutputFormat:
         assert data["pane_id"] == PANE_ID
         assert data["action"] == "freetext"
         assert data["value"] == payload
+
+
+class TestBashFlag:
+    """Round-8 ``--bash`` flag — third mutually-exclusive input mode.
+
+    Unlike ``--freetext`` (which prepends the AskUserQuestion ``4`` digit),
+    ``--bash`` issues a raw ``! <command>`` keystroke followed by ``Enter``,
+    which Claude Code's bash-input mode picks up. The flag is mutually
+    exclusive with ``--choice`` and ``--freetext``.
+    """
+
+    def test_bash_flag_sends_command(
+        self,
+        runner,
+        session_id,
+        happy_path_agent,
+        bash_recorder,
+        choice_recorder,
+        freetext_recorder,
+    ):
+        result = _invoke(runner, session_id, "--bash", "git log -1")
+        assert result.exit_code == 0, result.output
+        assert len(bash_recorder) == 1
+        call = bash_recorder[0]
+        assert call["target_pane_id"] == PANE_ID
+        assert call["command"] == "git log -1"
+        assert len(choice_recorder) == 0
+        assert len(freetext_recorder) == 0
+
+    def test_mutual_exclusion_with_choice(
+        self, runner, session_id, happy_path_agent
+    ):
+        result = _invoke(runner, session_id, "--bash", "x", "--choice", "1")
+        assert result.exit_code == 2, result.output
+        out = result.output or ""
+        assert "--choice" in out
+        assert "--freetext" in out
+        assert "--bash" in out
+        assert "mutually exclusive" in out
+
+    def test_mutual_exclusion_with_freetext(
+        self, runner, session_id, happy_path_agent
+    ):
+        result = _invoke(runner, session_id, "--bash", "x", "--freetext", "y")
+        assert result.exit_code == 2, result.output
+        out = result.output or ""
+        assert "--choice" in out
+        assert "--freetext" in out
+        assert "--bash" in out
+        assert "mutually exclusive" in out
+
+    def test_no_flag_supplied(self, runner, session_id, happy_path_agent):
+        """When none of ``--choice`` / ``--freetext`` / ``--bash`` is supplied,
+        the command must exit 2 (UsageError) and the error must enumerate
+        all three flags so the user knows ``--bash`` is now an option.
+        """
+        result = _invoke(runner, session_id)
+        assert result.exit_code == 2, result.output
+        out = result.output or ""
+        assert "--choice" in out
+        assert "--freetext" in out
+        assert "--bash" in out
+
+    def test_bash_audit_log(
+        self,
+        runner,
+        session_id,
+        happy_path_agent,
+        bash_recorder,
+    ):
+        """JSON audit log records ``action="bash"``, ``value="<command>"``."""
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "--json",
+                "member",
+                "send-input",
+                "--agent-id",
+                DIRECTOR_ID,
+                "--member-id",
+                MEMBER_ID,
+                "--bash",
+                "git log -1",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert set(data.keys()) == {
+            "member_agent_id",
+            "pane_id",
+            "action",
+            "value",
+        }
+        assert data["member_agent_id"] == MEMBER_ID
+        assert data["pane_id"] == PANE_ID
+        assert data["action"] == "bash"
+        assert data["value"] == "git log -1"

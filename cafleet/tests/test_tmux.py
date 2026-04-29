@@ -507,3 +507,77 @@ class TestWaitForPaneGone:
         with pytest.raises(tmux.TmuxError, match="server exited unexpectedly"):
             tmux.wait_for_pane_gone(target_pane_id="%7", timeout=2.0, interval=0.5)
         assert call_count["n"] == 2
+
+
+class TestSendBashCommand:
+    """Round-8 ``tmux.send_bash_command`` helper.
+
+    Bash routing uses Claude Code's ``!`` keystroke convention: the keystroke
+    ``! <command>`` followed by ``Enter`` enters Bash-input mode in the
+    member's pane and runs ``<command>``. Unlike ``send_freetext_and_submit``,
+    there is NO leading ``4`` keystroke (no AskUserQuestion gate), so the
+    helper issues exactly two ``send-keys`` invocations.
+    """
+
+    def test_sends_keystrokes_in_two_calls(self, monkeypatch):
+        captured_calls: list[list[str]] = []
+
+        def mock_run(args, **_kwargs):
+            captured_calls.append(list(args))
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        tmux.send_bash_command(target_pane_id="%5", command="git log -1 --oneline")
+        assert len(captured_calls) == 2
+        assert captured_calls[0] == [
+            "tmux",
+            "send-keys",
+            "-t",
+            "%5",
+            "-l",
+            "! git log -1 --oneline",
+        ]
+        assert captured_calls[1] == [
+            "tmux",
+            "send-keys",
+            "-t",
+            "%5",
+            "Enter",
+        ]
+
+    @pytest.mark.parametrize(
+        "bad_command",
+        [
+            "line1\nline2",
+            "trailing\n",
+            "\nleading",
+            "carriage\rreturn",
+            "mixed\r\nCRLF",
+        ],
+    )
+    def test_rejects_newlines(self, monkeypatch, bad_command):
+        run_calls: list[list[str]] = []
+
+        def mock_run(args, **_kwargs):
+            run_calls.append(list(args))
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        with pytest.raises(tmux.TmuxError, match="(?i)newline"):
+            tmux.send_bash_command(target_pane_id="%5", command=bad_command)
+        assert run_calls == []
+
+    def test_rejects_empty_command(self, monkeypatch):
+        run_calls: list[list[str]] = []
+
+        def mock_run(args, **_kwargs):
+            run_calls.append(list(args))
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        with pytest.raises(
+            tmux.TmuxError,
+            match="send_bash_command: command may not be empty",
+        ):
+            tmux.send_bash_command(target_pane_id="%5", command="")
+        assert run_calls == []
