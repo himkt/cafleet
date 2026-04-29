@@ -328,7 +328,7 @@ class TestDeregisterAdministratorCliGuard:
             ],
         )
         assert result.exit_code == 1, result.output
-        assert "not found or already deregistered" in (result.output or "")
+        assert "is not a member of session" in (result.output or "")
 
     def test_cli_deregister_admin_leaves_row_active(self, tmp_path, monkeypatch):
         db_file = tmp_path / "registry.db"

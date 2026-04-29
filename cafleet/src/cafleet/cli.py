@@ -365,6 +365,10 @@ def message_poll(ctx, agent_id, since, page_size):
     """Poll inbox for messages."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         result = broker.poll_tasks(
             agent_id,
             since=since,
@@ -384,6 +388,10 @@ def message_ack(ctx, agent_id, task_id):
     """Acknowledge receipt of a message."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         result = broker.ack_task(agent_id, task_id)
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
@@ -400,6 +408,10 @@ def message_cancel(ctx, agent_id, task_id):
     """Cancel (retract) a sent message."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         result = broker.cancel_task(agent_id, task_id)
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
@@ -473,6 +485,10 @@ def agent_deregister(ctx, agent_id):
     """Deregister this agent from the broker."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         deregistered = broker.deregister_agent(agent_id)
 
     if not deregistered:

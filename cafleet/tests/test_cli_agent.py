@@ -37,9 +37,7 @@ class TestAgentDeregisterAuthCheck:
     any agent in the database by supplying an unrelated ``--session-id``.
     """
 
-    def test_rejects_unknown_agent(
-        self, runner, session_id, agent_id, monkeypatch
-    ):
+    def test_rejects_unknown_agent(self, runner, session_id, agent_id, monkeypatch):
         deregister_calls: list[tuple] = []
 
         def fake_verify(aid, sid):
@@ -75,9 +73,7 @@ class TestAgentDeregisterAuthCheck:
             "verify_agent_session fails"
         )
 
-    def test_accepts_valid_agent(
-        self, runner, session_id, agent_id, monkeypatch
-    ):
+    def test_accepts_valid_agent(self, runner, session_id, agent_id, monkeypatch):
         verify_calls: list[tuple] = []
         deregister_calls: list[tuple] = []
 

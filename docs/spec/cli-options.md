@@ -468,6 +468,7 @@ The canonical Director-side workflow is three-beat and AskUserQuestion-delegated
 | `agent register` into a soft-deleted session | `Error: session X is deleted` (exit 1) |
 | `agent deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` (exit 1) |
 | `agent deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
+| `agent list` / `agent show` / `agent deregister` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--session-id` | `Error: agent <id> is not a member of session <sid>.` (exit 1) — gate is `broker.verify_agent_session` and runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different session" apart and treats both as not-a-member). |
 | `member send-input` with zero or ≥2 of `--choice` / `--freetext` / `--bash` | `Error: --choice, --freetext, --bash are mutually exclusive; supply exactly one.` (exit 2) |
 | `member send-input --choice` outside `1..3` | Click `IntRange(1, 3)` built-in (exit 2) |
 | `member send-input --freetext` with `\n` or `\r` | `Error: free text may not contain newlines.` (exit 2) |

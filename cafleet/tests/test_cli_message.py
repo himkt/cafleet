@@ -138,9 +138,7 @@ class TestMessagePollAuthCheck:
     ``--session-id`` they like.
     """
 
-    def test_rejects_unknown_agent(
-        self, runner, session_id, agent_id, monkeypatch
-    ):
+    def test_rejects_unknown_agent(self, runner, session_id, agent_id, monkeypatch):
         poll_calls: list[tuple] = []
 
         def fake_verify(aid, sid):
@@ -175,9 +173,7 @@ class TestMessagePollAuthCheck:
             "broker.poll_tasks must not be invoked when verify_agent_session fails"
         )
 
-    def test_accepts_valid_agent(
-        self, runner, session_id, agent_id, monkeypatch
-    ):
+    def test_accepts_valid_agent(self, runner, session_id, agent_id, monkeypatch):
         verify_calls: list[tuple] = []
         poll_calls: list[tuple] = []
 
