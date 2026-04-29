@@ -14,7 +14,8 @@
       "Skill(cafleet:design-doc)",
       "Skill(cafleet:design-doc-create)",
       "Skill(cafleet:design-doc-execute)",
-      "Bash(cafleet *)"
+      "Bash(cafleet *)",
+      "Bash(cafleet --session-id * member safe-exec *)"
     ],
     "deny": [
       "Bash(uv run pytest *)",
@@ -34,11 +35,7 @@
       "Bash(mise build)",
       "Bash(mise build *)"
     ],
-    "ask": [
-      "Bash(cafleet --session-id * member send-input --bash *)",
-      "Bash(cafleet --session-id * member send-input * --bash)",
-      "Bash(cafleet --session-id * member send-input * --bash *)"
-    ]
+    "ask": []
   },
   "enabledPlugins": {
     "cafleet@cafleet": true

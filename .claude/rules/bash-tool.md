@@ -47,9 +47,9 @@ cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
   --text "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
 ```
 
-Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member send-input --bash <command>`, which keystrokes `! <command>` + Enter into your pane via Claude Code's `!` shortcut. The captured stdout/stderr lands in your next-turn context.
+Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member safe-exec --bash <command>`, which checks the inner CMD against the operator's `permissions.allow` / `permissions.deny` patterns and — when the decision is allow — keystrokes `! <command>` + Enter into your pane via Claude Code's `!` shortcut. The captured stdout/stderr lands in your next-turn context. If the Director-side decision is deny or ask, no keystroke lands and the Director relays the rejection (or operator-pattern suggestion) to you.
 
-If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member send-input --bash <command>` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
+If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member safe-exec --bash <command>` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
 
 ### Why no operator-prompts-for-routing
 
@@ -68,9 +68,9 @@ The Bash tool is the entry point for every shell-execution request. If you can p
 If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you. In that case, dispatch the requested command via:
 
 ```bash
-cafleet --session-id <session-id> member send-input \
+cafleet --session-id <session-id> member safe-exec \
   --agent-id <director-agent-id> --member-id <member-agent-id> \
   --bash "<command>"
 ```
 
-See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full protocol, serialization rules, and cross-Director boundary.
+`safe-exec` re-reads the operator's three-layer `settings.json` (project-local → project → user) on every invocation and exits with a tri-state outcome: `0` allow (command keystroked into the member pane), `2` deny (named pattern + source file in stderr), `3` ask (no allow rule yet — relay the suggested `Bash(...)` pattern to the operator and ask them to add it to `settings.json` before retrying). See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full protocol, serialization rules, and cross-Director boundary.

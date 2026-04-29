@@ -410,12 +410,13 @@ Output (`--json`):
 
 ### Member Send-Input
 
-Safely forward a restricted keystroke to a member's tmux pane. This is the write-path companion to `member capture`. Three input modes:
+Safely forward a restricted keystroke to a member's tmux pane to answer an `AskUserQuestion` prompt. This is the write-path companion to `member capture`. Two input modes:
 
 - `--choice` / `--freetext` answer an `AskUserQuestion` prompt (or any prompt with the same "3 choices + Type something" shape) — `--freetext` is **AskUserQuestion-only** because it prepends the digit `4`.
-- `--bash` routes a shell command via Claude Code's `!` keystroke — no AskUserQuestion gate. See [Routing Bash via the Director](#routing-bash-via-the-director).
 
-Exactly one of the three flags must be supplied.
+For permission-aware bash dispatch, see [Member Safe-Exec](#member-safe-exec).
+
+Exactly one of the two flags must be supplied.
 
 ```bash
 cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
@@ -423,9 +424,6 @@ cafleet --session-id <session-id> member send-input --agent-id <director-agent-i
 
 cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
   --member-id <member-agent-id> --freetext "please prioritize correctness"
-
-cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
-  --member-id <member-agent-id> --bash "git log -1 --oneline"
 
 cafleet --session-id <session-id> --json member send-input --agent-id <director-agent-id> \
   --member-id <member-agent-id> --choice 2
@@ -437,20 +435,18 @@ cafleet --session-id <session-id> --json member send-input --agent-id <director-
 | `--member-id` | yes | The target member's agent ID |
 | `--choice` | one-of | Integer `1`, `2`, or `3`. Sends the matching digit key to the pane (no Enter). Validated via `click.IntRange(1, 3)`. |
 | `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. Newlines are rejected. AskUserQuestion-only. |
-| `--bash` | one-of | Shell command for Claude Code's bash-input mode. Sends `! <command>` via `tmux send-keys -l`, then `Enter`. No AskUserQuestion gate. Newlines and empty strings are rejected. |
 
-Supplying zero or two-or-more of `--choice` / `--freetext` / `--bash` exits 2 with `Error: --choice, --freetext, --bash are mutually exclusive; supply exactly one.`.
+Supplying zero or both of `--choice` / `--freetext` exits 2 with `Error: --choice, --freetext are mutually exclusive; supply exactly one.`.
 
 Cross-Director send is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before making any tmux call (same wording as `member capture`). A missing placement row, a pending pane (`tmux_pane_id is None`), or an unavailable `tmux` binary each exit 1 with a dedicated message.
 
-**Why three tmux calls for `--freetext`** (and two for `--bash`): tmux's `-l` (literal) flag is per-invocation — one `send-keys` call cannot mix literal characters with the `Enter` key name. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the text (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are all delivered as plain characters. The CLI calls `subprocess.run([...], shell=False)`, so no shell ever interprets the text. Newlines in `--freetext` and `--bash` are rejected because a literal newline would submit a second prompt without a following Enter — the single-action contract is "one CLI call = one prompt submission."
+**Why three tmux calls for `--freetext`**: tmux's `-l` (literal) flag is per-invocation — one `send-keys` call cannot mix literal characters with the `Enter` key name. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the text (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are all delivered as plain characters. The CLI calls `subprocess.run([...], shell=False)`, so no shell ever interprets the text. Newlines in `--freetext` are rejected because a literal newline would submit a second prompt without a following Enter — the single-action contract is "one CLI call = one prompt submission."
 
 Output (text):
 
 ```
 Sent choice 1 to member Claude-B (%7).
 Sent free text to member Claude-B (%7).
-Sent bash command 'git log -1 --oneline' to member Claude-B (%7).
 ```
 
 Output (`--json`):
@@ -473,14 +469,91 @@ Output (`--json`):
 }
 ```
 
+### Member Safe-Exec
+
+Permission-aware bash dispatch. Every invocation re-reads three `settings.json` files and matches the inner CMD against the operator's `Bash(...)` allow / deny patterns. On allow, the inner CMD is keystroked into the member's pane via Claude Code's `!` shortcut. On deny or unmatched ("ask"), nothing is keystroked. This is the Director-side dispatch primitive used by [Routing Bash via the Director](#routing-bash-via-the-director).
+
+```bash
+cafleet --session-id <session-id> member safe-exec --agent-id <director-agent-id> \
+  --member-id <member-agent-id> --bash "git log -1 --oneline"
+
+cafleet --session-id <session-id> --json member safe-exec --agent-id <director-agent-id> \
+  --member-id <member-agent-id> --bash "git log -1 --oneline"
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
+| `--member-id` | yes | The target member's agent ID |
+| `--bash` | yes | Shell command to dispatch. Sent to the pane as `! <command>` + `Enter` after the permission decision allows it. The only input flag on this subcommand. Empty strings and newlines are rejected with Click `UsageError` (exit 2). |
+
+#### Three-file discovery
+
+Three settings files are consulted in matcher-precedence order on every call (no caching at any layer):
+
+1. `<cwd>/.claude/settings.local.json` — project-local
+2. `<cwd>/.claude/settings.json` — project shared
+3. `$CLAUDE_CONFIG_DIR/settings.json` if the env var is set, else `~/.claude/settings.json` — user
+
+Missing files are treated as empty `{"permissions": {"allow": [], "deny": []}}` documents. Malformed JSON raises with the file path (`Error: failed to parse <path>: <json error>`, exit 1). A `permissions` key without `allow` / `deny` is treated as empty. Non-`Bash(...)` entries (`Read(...)`, `WebFetch(...)`, …) are silently filtered out. `permissions.ask` is ignored entirely — `safe-exec` has its own ask path. Allow lists and deny lists are concatenated (unioned) across all three files. Deny patterns are checked first, so deny wins on any conflict.
+
+#### Tri-state outcome
+
+| Outcome | Stdout | Stderr | Exit |
+|---|---|---|---|
+| allow | `Sent bash command '<cmd>' to member <name> (<pane>).` | (empty) | 0 |
+| deny | (empty) | `Error: command rejected by deny pattern Bash(<body>) declared in <file>. Offending command: <cmd>` | 2 |
+| ask | (empty) | `Error: no allow pattern matches "<cmd>". Add a Bash(...) pattern to one of:\n  - <project-local-path>\n  - <project-path>\n  - <user-path>\nFiles were re-read at this invocation. Suggested pattern: Bash(<first-token>:*)` | 3 |
+
+Exit code 2 for deny aligns with Claude Code PreToolUse hook convention (exit 2 stops a tool call). Exit code 3 for ask is unique to `safe-exec`, signaling operator intervention required (edit `settings.json` and re-run). Exit code 1 is reserved for runtime / IO / authorization failures (cross-Director, pending pane, malformed settings JSON, send failure, tmux unavailable). The `<first-token>` in the ask suggestion is the first whitespace-delimited token of the command (e.g. `git` for `git status --short`); it is a hint, not authoritative.
+
+#### Glob matcher
+
+Patterns are converted to anchored regex via `re.fullmatch`. The trailing form determines word-boundary semantics:
+
+| Pattern body | Classification | Matches |
+|---|---|---|
+| `*` | wildcard-everything | any command |
+| `git status` | exact | `git status` only |
+| `git status:*` | trailing word-boundary | `git status`, `git status --short`, but NOT `git statuses` |
+| `git status *` | trailing word-boundary | same as `git status:*` |
+| `gitstatus*` | trailing no-boundary | any string starting with `gitstatus` |
+| `* install` | NONE (no trailing wildcard) | only literal `<anything> install` |
+| `git * main` | NONE (interior `*` only) | `git checkout main`, `git push origin main` |
+
+`re.escape` protects every non-`*` character. The classification only inspects the LAST star — earlier stars are always treated as interior wildcards. `Bash(* install)` does NOT match `npm install --save-dev` because there is no trailing wildcard.
+
+#### JSON output
+
+`cafleet --json member safe-exec --bash CMD` emits the same five-key payload for all three outcomes (allow on stdout; deny / ask on stderr):
+
 ```json
 {
-  "member_agent_id": "<uuid>",
-  "pane_id": "%7",
-  "action": "bash",
-  "value": "<command as-sent>"
+  "outcome": "allow",
+  "matched_pattern": "Bash(git status:*)",
+  "matched_file": "/home/u/.claude/settings.json",
+  "offending_substring": "git status --short",
+  "searched_files": [
+    "/home/u/work/proj/.claude/settings.local.json",
+    "/home/u/work/proj/.claude/settings.json",
+    "/home/u/.claude/settings.json"
+  ]
 }
 ```
+
+| Key | allow | deny | ask |
+|---|---|---|---|
+| `outcome` | `"allow"` | `"deny"` | `"ask"` |
+| `matched_pattern` | matched allow pattern raw form | matched deny pattern raw form | `null` |
+| `matched_file` | source `settings.json` path | source `settings.json` path | `null` |
+| `offending_substring` | the dispatched cmd | the dispatched cmd | `null` |
+| `searched_files` | three resolved paths in matcher precedence order | same | same |
+
+Cross-Director dispatch is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before reading any settings file. A missing placement row, a pending pane (`tmux_pane_id is None`), or an unavailable `tmux` binary each exit 1 with a dedicated message (mirrors `member capture` / `member send-input`).
+
+#### Out of scope (deferred Claude Code parity features)
+
+`safe-exec` does NOT implement: process-wrapper stripping (`timeout`, `time`, `nice`, `nohup`, `stdbuf`, bare `xargs`); read-only command auto-allow (`ls`, `cat`, `grep`, `find`, `wc`, ...); exec-wrapper auto-prompt (`watch`, `setsid`, `ionice`, `flock`); compound-command split-and-match (pipes, `&&`, `;`, `$(...)`, backticks); `permissions.ask` rule honoring; caching; runtime override flags. The matcher operates on the inner CMD as one opaque string. Compound-command rejection happens at the outer Bash hook layer (`validate_bash.py` and Claude Code's permission system on the Director's `cafleet ...` invocation), never inside `safe-exec`.
 
 ### Server
 
@@ -693,14 +766,36 @@ The CLI validates input (`--choice` is `IntRange(1, 3)`; `--freetext` rejects ne
 
 Members spawn with `--permission-mode dontAsk` — the Bash tool is enabled and permission prompts auto-resolve, so a member runs cafleet (and any other shell command) directly via the Bash tool. No prefix, no Director routing required by default.
 
-The bash-via-Director protocol is the **fallback when the Claude Code harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). In that case the member auto-routes: it sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via `cafleet member send-input --bash` — Claude Code's `!` CLI shortcut handles execution natively. No new broker primitives, no separate helper subcommand: just the existing message-passing + tmux-keystroke infrastructure.
+The bash-via-Director protocol is the **fallback when the Claude Code harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). In that case the member auto-routes: it sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via `cafleet member safe-exec --bash CMD` — a permission-aware dispatcher that re-reads the operator's `Bash(...)` allow / deny patterns from three `settings.json` files and only keystrokes the inner CMD when an allow pattern matches. Claude Code's `!` CLI shortcut handles execution natively on the receiving side. No new broker primitives — just the existing message-passing infrastructure plus the new `safe-exec` subcommand.
 
 Before routing, the member MUST reconsider the command. Most denials happen because the underlying command is wrong — wrong flag, wrong path, or unnecessary altogether. Fix the command first; only route a command that is genuinely correct AND genuinely needed AND still rejected by the harness.
+
+### Three-file discovery
+
+`safe-exec` consults three `settings.json` files on every call (no caching):
+
+1. `<cwd>/.claude/settings.local.json` — project-local
+2. `<cwd>/.claude/settings.json` — project shared
+3. `$CLAUDE_CONFIG_DIR/settings.json` if the env var is set, else `~/.claude/settings.json` — user
+
+Allow lists are unioned across all three files; deny lists are unioned across all three files. Deny is checked first, so deny wins on any conflict. Missing files are treated as empty documents. Non-`Bash(...)` entries are silently filtered out. `permissions.ask` is ignored — `safe-exec` has its own ask path.
+
+### Tri-state outcome and exit codes
+
+| Outcome | Behavior | Exit |
+|---|---|---|
+| **allow** | Inner CMD matches at least one `Bash(...)` allow pattern (and no deny pattern). `tmux.send_bash_command` keystrokes `! <cmd>` + `Enter` into the member pane. | 0 |
+| **deny** | Inner CMD matches a `Bash(...)` deny pattern. CMD is NOT dispatched. Stderr names the matched pattern, the file it came from, and the offending command. | 2 |
+| **ask** | No allow pattern matches. CMD is NOT dispatched. Stderr lists the three searched files and a suggested `Bash(<first-token>:*)` pattern the operator can add. | 3 |
+
+Exit 1 is reserved for runtime / IO / authorization failures (cross-Director, pending pane, malformed settings JSON, send failure, tmux unavailable). See the [Member Safe-Exec](#member-safe-exec) command reference for the full flag table, JSON schema, and glob-matcher details.
+
+### Two role perspectives
 
 The fallback has two perspectives. Read **only the file matching your role**:
 
 - **If you are a member** (spawned by `cafleet member create`) → read [`roles/member.md`](roles/member.md). Covers: the default "run it yourself via Bash" path, the reconsider-then-route protocol when Bash is denied, and forbidden behaviors (no fake `<bash-input>` markup, no fabrication, no silent stalling, no operator-routing-prompts).
-- **If you are a Director** (you bootstrapped the session via `cafleet session create` and spawn members) → read [`roles/director.md`](roles/director.md). Covers: how to recognize a member's denial-fallback request, the `cafleet member send-input --bash` dispatch, serialization (one request at a time in poll order), and the cross-Director boundary.
+- **If you are a Director** (you bootstrapped the session via `cafleet session create` and spawn members) → read [`roles/director.md`](roles/director.md). Covers: how to recognize a member's denial-fallback request, the `cafleet member safe-exec --bash` dispatch, serialization (one request at a time in poll order), and the cross-Director boundary. Includes guidance on relaying deny / ask outcomes back to the operator so the operator can either correct the command or amend `settings.json`.
 
 ## Message Lifecycle
 

@@ -1,8 +1,8 @@
 # Permission-aware shell dispatch via `cafleet member safe-exec`
 
 **Status**: Approved
-**Progress**: 0/20 tasks complete
-**Last Updated**: 2026-04-29
+**Progress**: 8/20 tasks complete
+**Last Updated**: 2026-04-30
 
 ## Overview
 
@@ -392,14 +392,14 @@ The narrower `safe-exec` allow entry is REDUNDANT with the broader `Bash(cafleet
 
 Update every documentation surface BEFORE writing any code, per `.claude/rules/design-doc-numbering.md`.
 
-- [ ] Update `ARCHITECTURE.md` to add the "Permission-aware shell dispatch" subsection (§9). <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md`: drop bash-flag rows on the existing send-input subcommand; add `### member safe-exec` section with flag table, exit codes, JSON schema. <!-- completed: -->
-- [ ] Update `README.md`: replace bash-flag mention in the existing send-input bullet; add `member safe-exec` bullet; add a one-paragraph example showing allow / deny / ask in summary form. <!-- completed: -->
-- [ ] Update `skills/cafleet/SKILL.md`: rewrite "Routing Bash via the Director"; drop bash-flag row from the existing send-input flag table. <!-- completed: -->
-- [ ] Update `skills/cafleet/roles/director.md`: replace dispatch example, add deny / ask handling paragraphs. <!-- completed: -->
-- [ ] Update `skills/cafleet/roles/member.md`: name `safe-exec` as the Director-side dispatch primitive in the closing paragraph. <!-- completed: -->
-- [ ] Update `.claude/rules/bash-tool.md` per §9: (a) Director-side "for completeness" code block at the bottom of the file AND (b) operator-fallback paragraph in the "When your Bash tool denies a command" subsection — both must be rewritten to point at `cafleet member safe-exec --bash`. <!-- completed: -->
-- [ ] Update `.claude/settings.json`: remove the three obsolete `ask` entries and add `Bash(cafleet --session-id * member safe-exec *)` under `permissions.allow`. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` to add the "Permission-aware shell dispatch" subsection (§9). <!-- completed: 2026-04-30T06:00 -->
+- [x] Update `docs/spec/cli-options.md`: drop bash-flag rows on the existing send-input subcommand; add `### member safe-exec` section with flag table, exit codes, JSON schema. <!-- completed: 2026-04-30T06:05 -->
+- [x] Update `README.md`: replace bash-flag mention in the existing send-input bullet; add `member safe-exec` bullet; add a one-paragraph example showing allow / deny / ask in summary form. <!-- completed: 2026-04-30T06:08 -->
+- [x] Update `skills/cafleet/SKILL.md`: rewrite "Routing Bash via the Director"; drop bash-flag row from the existing send-input flag table. <!-- completed: 2026-04-30T06:12 -->
+- [x] Update `skills/cafleet/roles/director.md`: replace dispatch example, add deny / ask handling paragraphs. <!-- completed: 2026-04-30T06:14 -->
+- [x] Update `skills/cafleet/roles/member.md`: name `safe-exec` as the Director-side dispatch primitive in the closing paragraph. <!-- completed: 2026-04-30T06:15 -->
+- [x] Update `.claude/rules/bash-tool.md` per §9: (a) Director-side "for completeness" code block at the bottom of the file AND (b) operator-fallback paragraph in the "When your Bash tool denies a command" subsection — both must be rewritten to point at `cafleet member safe-exec --bash`. <!-- completed: 2026-04-30T06:18 -->
+- [x] Update `.claude/settings.json`: remove the three obsolete `ask` entries and add `Bash(cafleet --session-id * member safe-exec *)` under `permissions.allow`. <!-- completed: 2026-04-30T06:18 -->
 
 ### Step 2: Tests (TDD red phase)
 
@@ -431,3 +431,4 @@ Write all tests for `cafleet/permissions.py` and `cafleet member safe-exec` BEFO
 | Date | Changes |
 |------|---------|
 | 2026-04-29 | Initial draft. |
+| 2026-04-30 | Step 1 execution — removal-rule scope expansion. The §9 file list captured 7 doc surfaces + `.claude/settings.json`, but a project-wide grep during Step 1 review surfaced three additional skill files that referenced the old `cafleet member send-input --bash` form: `skills/cafleet-monitoring/SKILL.md` (3 mentions across stall-response and escalation tables), `skills/design-doc-execute/roles/director.md` (1 mention in the bash-routing paragraph), `skills/design-doc-create/roles/director.md` (1 mention, same paragraph as design-doc-execute). Per `.claude/rules/removal.md` ("delete every corresponding mention from the repository in the same change"), all three were rewritten to point at `cafleet member safe-exec --bash` in the same Step 1 commit. The lone source-file mention — a docstring comment at `cafleet/src/cafleet/tmux.py:147` referencing `member send-input --bash` — is deferred to Step 3 (Programmer scope) since it ships in the same commit as the corresponding `cli.py` removal. |
