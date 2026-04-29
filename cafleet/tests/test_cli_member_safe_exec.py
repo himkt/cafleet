@@ -134,7 +134,7 @@ class TestAllowPath:
     ):
         _write_settings(settings_files[0], allow=["Bash(git status:*)"])
 
-        result = _invoke(runner, session_id, "--bash", "git status --short")
+        result = _invoke(runner, session_id, "git status --short")
 
         assert result.exit_code == 0, result.output
         assert len(bash_recorder) == 1
@@ -147,7 +147,7 @@ class TestAllowPath:
     ):
         _write_settings(settings_files[0], allow=["Bash(git status:*)"])
 
-        result = _invoke(runner, session_id, "--bash", "git status --short")
+        result = _invoke(runner, session_id, "git status --short")
 
         assert result.exit_code == 0, result.output
         expected = (
@@ -162,7 +162,7 @@ class TestAllowPath:
         # Only the user-layer file has the allow rule
         _write_settings(settings_files[2], allow=["Bash(git status:*)"])
 
-        result = _invoke(runner, session_id, "--bash", "git status")
+        result = _invoke(runner, session_id, "git status")
 
         assert result.exit_code == 0, result.output
         assert len(bash_recorder) == 1
@@ -179,7 +179,7 @@ class TestDenyPath:
     ):
         _write_settings(settings_files[0], deny=["Bash(rm -rf *)"])
 
-        result = _invoke(runner, session_id, "--bash", "rm -rf /tmp/x")
+        result = _invoke(runner, session_id, "rm -rf /tmp/x")
 
         assert result.exit_code == 2, result.output
         assert len(bash_recorder) == 0
@@ -189,7 +189,7 @@ class TestDenyPath:
     ):
         _write_settings(settings_files[0], deny=["Bash(rm -rf *)"])
 
-        result = _invoke(runner, session_id, "--bash", "rm -rf /tmp/x")
+        result = _invoke(runner, session_id, "rm -rf /tmp/x")
 
         out = result.output or ""
         assert "Bash(rm -rf *)" in out
@@ -205,7 +205,7 @@ class TestDenyPath:
             deny=["Bash(git push:*)"],
         )
 
-        result = _invoke(runner, session_id, "--bash", "git push origin main")
+        result = _invoke(runner, session_id, "git push origin main")
 
         assert result.exit_code == 2, result.output
         assert len(bash_recorder) == 0
@@ -222,7 +222,7 @@ class TestAskPath:
     ):
         _write_settings(settings_files[0], allow=["Bash(npm test:*)"])
 
-        result = _invoke(runner, session_id, "--bash", "git status")
+        result = _invoke(runner, session_id, "git status")
 
         assert result.exit_code == 3, result.output
         assert len(bash_recorder) == 0
@@ -231,7 +231,7 @@ class TestAskPath:
         self, runner, session_id, happy_path_agent, bash_recorder, settings_files
     ):
         # All three files left unwritten — ask path
-        result = _invoke(runner, session_id, "--bash", "git status")
+        result = _invoke(runner, session_id, "git status")
 
         assert result.exit_code == 3, result.output
         out = result.output or ""
@@ -241,7 +241,7 @@ class TestAskPath:
     def test_ask_message_suggests_first_token_pattern(
         self, runner, session_id, happy_path_agent, bash_recorder, settings_files
     ):
-        result = _invoke(runner, session_id, "--bash", "git status --short")
+        result = _invoke(runner, session_id, "git status --short")
 
         assert result.exit_code == 3, result.output
         out = result.output or ""
@@ -258,10 +258,10 @@ class TestPreflightValidation:
     def test_empty_string_rejected(
         self, runner, session_id, happy_path_agent, bash_recorder, settings_files
     ):
-        result = _invoke(runner, session_id, "--bash", "")
+        result = _invoke(runner, session_id, "")
 
         assert result.exit_code == 2, result.output
-        assert "--bash command may not be empty." in (result.output or "")
+        assert "command may not be empty." in (result.output or "")
         assert len(bash_recorder) == 0
 
     @pytest.mark.parametrize(
@@ -283,13 +283,13 @@ class TestPreflightValidation:
         settings_files,
         bad_text,
     ):
-        result = _invoke(runner, session_id, "--bash", bad_text)
+        result = _invoke(runner, session_id, bad_text)
 
         assert result.exit_code == 2, result.output
-        assert "--bash command may not contain newlines." in (result.output or "")
+        assert "command may not contain newlines." in (result.output or "")
         assert len(bash_recorder) == 0
 
-    def test_missing_bash_flag_exits_two(
+    def test_missing_command_exits_two(
         self, runner, session_id, happy_path_agent, settings_files
     ):
         result = runner.invoke(
@@ -307,7 +307,8 @@ class TestPreflightValidation:
         )
 
         assert result.exit_code == 2, result.output
-        assert "--bash" in (result.output or "")
+        out = result.output or ""
+        assert "Missing argument" in out or "COMMAND" in out
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +328,7 @@ class TestAuthorizationBoundary:
             ),
         )
 
-        result = _invoke(runner, session_id, "--bash", "git status")
+        result = _invoke(runner, session_id, "git status")
 
         assert result.exit_code == 1, result.output
         out = result.output or ""
@@ -345,7 +346,7 @@ class TestAuthorizationBoundary:
             lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
         )
 
-        result = _invoke(runner, session_id, "--bash", "git status")
+        result = _invoke(runner, session_id, "git status")
 
         assert result.exit_code == 1, result.output
         out = result.output or ""
@@ -387,9 +388,7 @@ class TestJsonOutput:
     ):
         _write_settings(settings_files[0], allow=["Bash(git status:*)"])
 
-        result = _invoke(
-            runner, session_id, "--bash", "git status --short", json_mode=True
-        )
+        result = _invoke(runner, session_id, "git status --short", json_mode=True)
 
         assert result.exit_code == 0, result.output
         data = _extract_json(result)
@@ -405,7 +404,7 @@ class TestJsonOutput:
     ):
         _write_settings(settings_files[0], deny=["Bash(rm -rf *)"])
 
-        result = _invoke(runner, session_id, "--bash", "rm -rf /tmp/x", json_mode=True)
+        result = _invoke(runner, session_id, "rm -rf /tmp/x", json_mode=True)
 
         assert result.exit_code == 2, result.output
         data = _extract_json(result)
@@ -420,7 +419,7 @@ class TestJsonOutput:
         self, runner, session_id, happy_path_agent, bash_recorder, settings_files
     ):
         # No settings files written → ask
-        result = _invoke(runner, session_id, "--bash", "git status", json_mode=True)
+        result = _invoke(runner, session_id, "git status", json_mode=True)
 
         assert result.exit_code == 3, result.output
         data = _extract_json(result)
@@ -430,3 +429,30 @@ class TestJsonOutput:
         assert data["matched_file"] is None
         assert data["offending_substring"] is None
         assert data["searched_files"] == [str(p) for p in settings_files]
+
+
+# ---------------------------------------------------------------------------
+# Malformed settings JSON (Copilot review C5)
+# ---------------------------------------------------------------------------
+
+
+class TestMalformedSettingsJSON:
+    def test_malformed_json_exits_one_and_does_not_dispatch(
+        self, runner, session_id, happy_path_agent, bash_recorder, settings_files
+    ):
+        """Malformed JSON in any settings file surfaces as a clean exit 1.
+
+        Pairs with the Programmer's C4 fix wrapping ``permissions.decide``
+        in try/except ValueError → click.ClickException, so the CLI
+        reports the path and exits 1 instead of leaking a raw traceback.
+        """
+        settings_files[0].parent.mkdir(parents=True, exist_ok=True)
+        settings_files[0].write_text("{ not valid json")
+
+        result = _invoke(runner, session_id, "git status")
+
+        assert result.exit_code == 1, result.output
+        out = result.output or ""
+        assert "failed to parse" in out
+        assert str(settings_files[0]) in out
+        assert len(bash_recorder) == 0
