@@ -1,7 +1,7 @@
 # Repository cleanup — remove obsolete files, stale skill content, dead pyproject config
 
 **Status**: Approved
-**Progress**: 7/25 tasks complete
+**Progress**: 8/25 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
@@ -199,7 +199,7 @@ New terms added in response to Reviewer feedback:
 
 ### Step 3: Source-config cleanup (source third — config-only, no source edits)
 
-- [ ] Edit `cafleet/pyproject.toml` `[tool.ty.analysis].allowed-unresolved-imports`: remove the `"httpx.*"` entry. The list shrinks from 6 entries to 5. <!-- completed: -->
+- [x] Edit `cafleet/pyproject.toml` `[tool.ty.analysis].allowed-unresolved-imports`: remove the `"httpx.*"` entry. The list shrinks from 6 entries to 5. <!-- completed: 2026-04-29T15:08 -->
 
 ### Step 4: Test cleanup (tests fourth — Q4 ruling on sentinel tests)
 
