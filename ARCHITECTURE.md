@@ -29,7 +29,7 @@ Admin WebUI  ──→  server.py (minimal FastAPI)         │
 
 The `session_id` serves as the session boundary. Sessions are created via `cafleet session create`. All agents registered with the same `session_id` form one session. The broker does not perform authentication — it performs session routing only.
 
-No bearer tokens, no API keys, no Auth0. The `session_id` is a non-secret session identifier. Sessions are partitions for tidiness, not security boundaries.
+The `session_id` is a non-secret session identifier. Sessions are partitions for tidiness, not security boundaries.
 
 **Registration** requires a valid, non-soft-deleted `session_id`. Sessions are created via `cafleet session create` before any members can be spawned.
 
