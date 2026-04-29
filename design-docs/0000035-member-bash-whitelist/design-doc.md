@@ -1,36 +1,35 @@
-# Member-side Bash whitelist (allow only `Bash(cafleet *)`)
+# Member spawn permission posture (dontAsk mode)
 
 **Status**: Approved
-**Progress**: 7/7 tasks complete
+**Progress**: 4/4 tasks complete
 **Last Updated**: 2026-04-29
 
 ## Overview
 
-CAFleet members today are spawned with `--disallowedTools "Bash"`, which removes the Bash tool entirely. This forces them to use Claude Code's `!` CLI shortcut as a workaround for `cafleet message poll/send/ack` calls — fragile because the LLM has to remember the prefix on every cafleet invocation. We want to instead allow ONLY `Bash(cafleet *)` patterns and deny everything else, so the member can use the Bash tool normally for cafleet calls but cannot run other shell commands.
+CAFleet members were originally spawned with `--disallowedTools "Bash"` (design 0000034 default), which removed the Bash tool from the member's harness entirely. The intent was to force shell commands through the Director for human oversight (the bash-via-Director protocol). In practice this proved fragile: the Bash-tool deny posture had no clean strict-allowlist alternative for cafleet calls (the smoke tests below explored three flag combinations, none delivered), and the `!` CLI-shortcut workaround documented as a fallback was unreliable — the LLM frequently composed `! cafleet ...` as response text without firing the shortcut, leaving messages stuck in the inbox.
+
+This design switches the spawn posture to `--permission-mode dontAsk` (Bash tool **enabled**, permission prompts auto-resolve silently) and removes the `--no-bash` / `--allow-bash` flag pair entirely. Members run cafleet (and any shell command) directly via the Bash tool, no operator interaction, no `!` workaround. The bash-via-Director protocol from design 0000034 stays in the codebase as an opt-in escape hatch (`cafleet member send-input --bash <cmd>` still works for Director-driven dispatch), but is no longer the default flow.
 
 ## Success Criteria
 
-The original criteria targeted a strict-allowlist outcome (cafleet calls allowed via the Bash tool, all other Bash denied). The smoke tests in §Background showed native Claude Code flags do not deliver that today — Option A (the `!` shortcut + better docs) was chosen instead. The criteria below describe what Option A actually ships.
-
-- [x] The CLAUDE spawn-prompt template documents the `!`-prefix requirement explicitly so the spawned member knows to prefix every cafleet call (poll/send/ack/cancel) with `! `, without having to discover the workaround on its own. Asserted by `tests/test_coding_agent.py::TestPromptTemplates::test_claude_template_documents_bang_prefix_for_cafleet`.
-- [x] The broker's tmux push notification (`tmux.send_poll_trigger`) injects the keystroke pre-prefixed with `! ` so members consuming a poll trigger do not have to add the prefix themselves. Asserted by `tests/test_tmux.py::TestSendPollTriggerKeystroke::test_keystroke_carries_bang_prefix_for_message_poll` and the full-argv equality in `TestSendPollTrigger::test_success_returns_true`.
-- [x] The member retains access to read-only and editing tools it needs (Read, Edit, Grep, Glob, etc.) — no other tool axis is restricted.
-- [x] The existing `--bash` route via `cafleet member send-input --bash <cmd>` continues to work for Director-initiated shell execution. The `!` shortcut is independent of the Bash-tool deny posture, so this path is unaffected by Option A.
-- [ ] **Deferred to Options B/C** (see Future Work): a strict-allowlist that lets the member invoke `cafleet *` via the Bash tool without the `!` prefix, AND that denies non-cafleet Bash patterns (`Bash(echo)`) at the harness level. Native Claude Code flags do not deliver this today; revisit when `--strict-allowedTools`-style support lands or when the `!` workaround proves insufficient in production.
+- [x] `cafleet member create` spawns members with `--permission-mode dontAsk` injected into the spawn argv. Asserted by `tests/test_cli_member.py::TestPermissionMode::test_claude_default_injects_dontask_permission_mode`.
+- [x] The legacy `--no-bash` / `--allow-bash` flags are removed from `cafleet member create` and Click rejects them with `No such option`. Asserted by `tests/test_cli_member.py::TestPermissionMode::test_no_bash_flag_no_longer_parses` and `test_allow_bash_flag_no_longer_parses`.
+- [x] The CLAUDE spawn-prompt template tells the member that its harness runs in dontAsk mode and the Bash tool is enabled — no `!` prefix workaround required. Asserted by `tests/test_coding_agent.py::TestPromptTemplates::test_claude_template_documents_dontask_mode` and `test_claude_template_omits_legacy_bang_prefix_guidance`.
+- [x] The broker's `tmux.send_poll_trigger` keystroke is the bare cafleet command (no `!` prefix). Asserted by `tests/test_tmux.py::TestSendPollTriggerKeystroke::test_keystroke_starts_with_bare_cafleet`.
 
 ---
 
 ## Background
 
-### Why the current design needs this
+### Why the original design needed revision
 
-`cafleet member create --no-bash` (default since design 0000034) appends `--disallowedTools "Bash"` to the spawn argv. Consequence: the member's harness rejects every Bash tool call. The member's spawn-prompt template tells it to "Wait for instructions via `cafleet message poll`" but it cannot actually run that command via the Bash tool — only via the `!` shortcut, which is a separate Claude Code primitive.
+`cafleet member create --no-bash` (the design 0000034 default) appended `--disallowedTools "Bash"` to the spawn argv. Consequence: the member's harness rejected every Bash tool call. The member had to either (a) ask the Director to run the command via `cafleet member send-input --bash <cmd>` (the bash-via-Director protocol), or (b) use Claude Code's `!` CLI shortcut for cafleet calls (`! cafleet message poll ...`), which is a separate primitive unaffected by the Bash-tool deny posture.
 
-Two practical problems with the status quo:
+Two practical problems with the deny-Bash posture:
 
-1. **The `!` workaround is implicit.** The spawn prompt does not document the prefix, and the LLM does not always reach for it. When the broker pushes a `cafleet message poll` keystroke into the member's pane (via `tmux.send_poll_trigger`), the keystroke is the bare command without `!`. Whether the LLM correctly executes it depends on Claude Code's user-input handling. In smoke tests, members frequently respond with text like "I cannot run that command — Bash is denied" instead of using `!`.
+1. **The `!` workaround is implicit and unreliable.** The spawn prompt could document the prefix, and the broker's tmux push notification could inject the prefix automatically — both were done in design 0000035's first iteration (Steps 1 and 2). But when the member needs to compose a NEW cafleet call mid-turn (e.g., reply to the Director after processing a poll result), the LLM frequently emits the line as response text without firing the `!` shortcut. Smoke tests on commit `ca3462e` showed the member retrieving messages successfully (broker push fires the shortcut) but failing to compose-and-fire the reply.
 
-2. **Members cannot directly write back via cafleet.** Even when a member receives a clear instruction like "reply via `cafleet message send`", with Bash denied entirely it must either route the cafleet call through `!` (relying on the LLM to get the prefix right) or it stalls.
+2. **Operator overhead from permission prompts on cafleet.** Even if we drop `--disallowedTools "Bash"` and let the member call cafleet via the Bash tool directly, every Bash invocation triggers a permission prompt unless allowlisted. Allowlisting `Bash(cafleet *)` works in `default` mode but is not strict (other Bash patterns auto-approve too — the smoke test confirmed `echo` went through), and `dontAsk` mode with `--allowedTools` is over-restrictive (denies Read/Edit/Grep too — member becomes wedged).
 
 ### Smoke-test results from 2026-04-29 PR #37 follow-up
 
@@ -38,84 +37,91 @@ Three approaches were tested by editing `coding_agent.py` and re-spawning member
 
 | Approach (spawn argv) | `cafleet message send` via Bash tool | `Bash(echo test)` | Verdict |
 |---|---|---|---|
-| `--disallowedTools "Bash"` (status quo) | Denied (must use `!` shortcut) | Denied | Workable but fragile |
-| `--allowedTools "Bash(cafleet *)"` | ✅ Allowed | ❌ **Also allowed** (auto-approved) | Leaks all bash |
-| `--settings '{"permissions":{"deny":["Bash(*)"],"allow":["Bash(cafleet *)"]}}'` | Denied | Denied | Worse — also blocks `!` |
+| `--disallowedTools "Bash"` (Round-7 default; Round-8 doc-template-only `!` reminder) | Denied (must use `!` shortcut) | Denied | LLM unreliable at firing `!` mid-turn |
+| `--allowedTools "Bash(cafleet *)"` | ✅ Allowed | ❌ **Also allowed** (`default` mode auto-approves unmatched) | Leaks all bash; not a strict whitelist |
+| `--settings '{"permissions":{"deny":["Bash(*)"],"allow":["Bash(cafleet *)"]}}'` | Denied | Denied | Worse — `deny` removes Bash entirely; `allow` doesn't bring it back |
+| `--permission-mode dontAsk --allowedTools "Bash(cafleet *)"` | Denied | Denied | Member wedges — `dontAsk` denies all non-listed tools (Read, Edit, Grep…) silently |
 
-`--allowedTools` is documented as "tool names to allow" — it adds patterns to the auto-approve list, but the Bash tool itself remains generally available, so non-matching invocations flow through default permission resolution (and in many test environments auto-approve). It is NOT a strict whitelist.
+**Round 7 (committed, then revised)** prefixed the broker's tmux push keystroke with `! ` and added wording to the spawn template, but the LLM-judgment problem on member-initiated cafleet sends remained. Smoke test on `ca3462e`: broker push poll worked; member-initiated send didn't fire reliably.
 
-`--settings` with a deny+allow pair removes Bash from the available tool list outright — Claude Code seems to compute "Bash available iff at least one allow pattern matches" before considering deny patterns, OR the deny pattern wins in same-tool conflicts. Either way the allow pattern does not bring Bash back.
-
-There is no single Claude Code CLI flag combination that achieves "allow only `Bash(cafleet *)`, deny everything else" cleanly. The platform's permission model treats Bash as binary-available + pattern-auto-approve, not as a strict allowlist.
+**The chosen path (Option D)** is `--permission-mode dontAsk` with no allowlist restriction — Bash tool stays enabled, permission prompts auto-resolve, member calls cafleet directly via the Bash tool, no LLM-judgment dependency. Smoke test on the dontAsk wiring (verified before commit): member ran `git branch --show-current` and replied via `cafleet message send` cleanly with no operator interaction, no `!` prefix anywhere.
 
 ---
 
 ## Specification
 
-Three candidate paths, in order of preference. Pick one based on Claude Code's evolving permission model.
+### Options considered
 
-### Option A — wait for native strict-whitelist support (Recommended short-term)
+#### Option A — `!` shortcut + better docs (initially shipped, later revised)
 
-Status: blocked on Claude Code adding a flag like `--strict-allowedTools` or extending `--permission-mode` with a "denyByDefault" mode. Until that lands, we keep `--disallowedTools "Bash"` and:
+Keep `--disallowedTools "Bash"`. Document the `!` prefix in the spawn template. Pre-prefix the broker's tmux push keystroke. Members use `! cafleet ...` for every cafleet call.
 
-1. **Update the CLAUDE spawn-prompt template** to explicitly document the `!` shortcut: "Run cafleet calls via the `!` prefix — `! cafleet --session-id ... message poll --agent-id ...`. Do NOT attempt to use the Bash tool for these calls; it is denied at the harness level."
+**Why this didn't ship:** the `!` shortcut is reliable when the harness types it from outside (broker push notification works), but unreliable when the LLM has to emit-and-fire it mid-turn. Member-initiated `cafleet message send` calls regularly stalled.
 
-2. **Update the broker's tmux push notification** in `tmux.send_poll_trigger` to inject `! cafleet message poll ...` (with `!` prefix) instead of the bare command. This way the keystroke arrives in a form the LLM will execute via the shell shortcut without needing to add the prefix itself.
+#### Option B — PreToolUse hook gate
 
-3. **Document the limitation** in `skills/cafleet/SKILL.md` § Routing Bash via the Director: members can ONLY shell out via `!` shortcut for `cafleet *` calls, OR via Director-initiated `cafleet member send-input --bash` keystrokes. They cannot run arbitrary `cafleet` calls through the Bash tool today.
+Drop `--disallowedTools "Bash"`. Configure a `PreToolUse` hook that intercepts every Bash invocation and rejects non-cafleet patterns. Bash is generally available; the hook is the gate.
 
-Cost: 2 small edits + 1 doc edit. Lands in a single commit.
+**Why this didn't ship:** larger surface (new shell script + `--settings` plumbing), and the hook becomes a new failure mode. Deferred.
 
-### Option B — hook-based gate on the Bash tool
+#### Option C — Proxy `cafleet-member` CLI
 
-Configure a `PreToolUse` hook in the member's settings that intercepts Bash tool calls and rejects any pattern that doesn't match `cafleet *`. This is an out-of-band enforcement layer that doesn't depend on Claude Code's built-in permission semantics.
+Drop `--disallowedTools "Bash"`. Create a dedicated `cafleet-member` binary; allow only `Bash(cafleet-member *)`. The proxy validates and forwards.
 
-1. `cafleet member create` writes a `.claude/settings.json` (or passes `--settings <inline-json>`) into the member's working directory with a `PreToolUse` hook for `Bash`.
-2. The hook is a small shell script that reads the tool input from stdin, checks if `command` starts with `cafleet `, and exits 0 (allow) or 2 (block with stderr message).
-3. `--disallowedTools "Bash"` is dropped — Bash is generally available, but the hook gates every invocation.
+**Why this didn't ship:** marginal benefit over A/B; adds a whole CLI to maintain. Deferred.
 
-Risks: hook must be reliable; a buggy hook either over-blocks (member wedges) or under-blocks (security hole). Hook failure mode would need clear error messages.
+#### Option D — `dontAsk` mode (chosen)
 
-Cost: small new shell script + plumbing in `cafleet member create` to write the settings file. Larger surface than Option A, smaller than Option C.
+Drop `--disallowedTools "Bash"`. Add `--permission-mode dontAsk` to the spawn argv. Bash tool is enabled and permission prompts auto-resolve (no operator interaction). Members call cafleet (and any shell command) directly via the Bash tool. The bash-via-Director protocol from design 0000034 (`cafleet member send-input --bash`) stays available as an opt-in for cases where Director-driven dispatch is wanted, but is no longer the default flow.
 
-### Option C — proxy `cafleet` invocations through a dedicated CLI tool
+**Why this ships:**
 
-Create a `cafleet-member` CLI subcommand that the member calls instead of `cafleet ... message poll/send/ack`, and grant only `Bash(cafleet-member *)` via Claude Code's allowlist mechanism (same as Option A would, just with a narrower binary name). The proxy validates and forwards to the real broker.
+- Simplest possible wiring — single argv change, no protocol layer, no LLM-judgment dependency.
+- Verified working end-to-end via smoke test (member ran `git branch --show-current` and replied via `cafleet message send` cleanly).
+- The `--no-bash` / `--allow-bash` flag pair becomes vestigial; removing it cleans up the CLI surface.
+- The bash-via-Director protocol in design 0000034 is preserved verbatim (the `--bash` flag, the `cafleet member send-input` machinery) — operators who want Director-level oversight on shell commands can still get it by using `cafleet member send-input --bash <cmd>` directly. The protocol is just no longer the default.
 
-Marginal benefit over Option A/B: clearer attack surface (only one binary need be safe). Marginal cost: another CLI subcommand to maintain.
+### Trust model
 
-### Decision
-
-**Option A is the chosen path** for v1, executed in PR #37 alongside design 0000034. Options B and C are deferred to Future Work — they remain valid evolution paths if the `!` shortcut workaround proves insufficient in production.
+The dontAsk model assumes the spawned member is **trusted to the same level as the operator**. If you wouldn't trust the LLM to run `rm -rf` in your home dir, don't use this default. Future opt-in modes (Options B/C, or sandboxing) can be layered on later if richer trust gradients are needed.
 
 ---
 
 ## Implementation
 
-### Step 1: Update CLAUDE spawn-prompt template
+### Step 1: Spawn argv
 
-- [x] Edit `cafleet/src/cafleet/coding_agent.py` `CLAUDE.default_prompt_template` to mention the `!` shortcut explicitly. The new wording must clearly tell the member: cafleet calls (poll/send/ack) MUST be prefixed with `!` because the Bash tool is denied; do NOT attempt Bash tool calls. <!-- completed: 2026-04-29T02:25 -->
-- [x] Add a `TestPromptTemplates` canary in `cafleet/tests/test_coding_agent.py` asserting the new substring (e.g. `"! cafleet"` or `"shell shortcut"`). <!-- completed: 2026-04-29T02:25 -->
+- [x] `cafleet/src/cafleet/coding_agent.py` — replace the `disallow_tools_args` field with `permission_args` (always-injected; default `()`). Set `CLAUDE.permission_args = ("--permission-mode", "dontAsk")`. Drop the `deny_bash` parameter from `build_command`. <!-- completed: 2026-04-29T03:10 -->
+- [x] `cafleet/src/cafleet/cli.py` — remove the `--no-bash` / `--allow-bash` flag pair from `member create`. Update the `member_create` body to drop the `no_bash` / `deny_bash` plumbing. <!-- completed: 2026-04-29T03:10 -->
 
-### Step 2: Prefix tmux poll trigger with `!`
+### Step 2: Broker tmux push keystroke
 
-- [x] Edit `cafleet/src/cafleet/tmux.py` `send_poll_trigger` to inject `f"! cafleet --session-id {session_id} message poll --agent-id {agent_id}"` (with leading `! `) instead of the bare command. The keystroke arrives in the member's pane and the LLM's harness routes it through Claude Code's `!` CLI shortcut without going through the Bash tool. <!-- completed: 2026-04-29T02:30 -->
-- [x] Update `TestSendPollTriggerKeystroke` in `cafleet/tests/test_tmux.py` to assert the captured first keystroke is `! cafleet --session-id <s> message poll --agent-id <a>` (with the `!` prefix). <!-- completed: 2026-04-29T02:30 -->
+- [x] `cafleet/src/cafleet/tmux.py` — `send_poll_trigger` keystroke reverts to bare `f"cafleet --session-id {sid} message poll --agent-id {aid}"` (no `! ` prefix). Update docstring to describe the dontAsk model. <!-- completed: 2026-04-29T03:10 -->
 
-### Step 3: Documentation sweep
+### Step 3: CLAUDE prompt template + tests + docs
 
-- [x] `skills/cafleet/SKILL.md` § Routing Bash via the Director — add a member-side subsection: members MUST prefix every cafleet call with `! ` because the Bash tool is denied; the `!` shortcut is independent of the Bash tool's allow/deny posture. <!-- completed: 2026-04-29T02:34 -->
-- [x] `ARCHITECTURE.md` Bash Routing section — add the same `!` prefix requirement for member-side cafleet calls; clarify that the broker's tmux push notification injects `! cafleet message poll ...` (with prefix). <!-- completed: 2026-04-29T02:34 -->
-- [x] `design-docs/0000034-member-bash-via-director/design-doc.md` — append a final Round 11 Changelog entry referencing design 0000035 as the resolution for the implicit-`!`-shortcut gap, and noting that Round 11 lands in PR #37 alongside the rest of the 0000034 work. <!-- completed: 2026-04-29T02:34 -->
+- [x] `cafleet/src/cafleet/coding_agent.py` `CLAUDE.default_prompt_template` — rewrite to describe the dontAsk model. Wait-instructions example uses bare `cafleet message poll` (no `!`). Body says "Your harness runs in dontAsk mode — your Bash tool is enabled and permission prompts auto-resolve, so call cafleet (and any other shell command) directly via the Bash tool. No prefix workaround is needed." <!-- completed: 2026-04-29T03:10 -->
+- [x] `cafleet/tests/test_coding_agent.py` — replace `TestDisallowTools` with `TestPermissionArgs`. Replace `test_claude_template_contains_bash_routing_canary` and `test_claude_template_documents_bang_prefix_for_cafleet` with `test_claude_template_documents_dontask_mode` (canary: `"dontAsk"`) + `test_claude_template_omits_legacy_bang_prefix_guidance` (negative canary: `"! cafleet"` NOT present). Update `TestBuildCommand` expected argv. <!-- completed: 2026-04-29T03:10 -->
+- [x] `cafleet/tests/test_cli_member.py` — replace `TestNoBashFlag` with `TestPermissionMode`. Three tests: `test_claude_default_injects_dontask_permission_mode` (positive — the new mode is in argv), `test_no_bash_flag_no_longer_parses` (regression guard — Click rejects), `test_allow_bash_flag_no_longer_parses` (regression guard — Click rejects). <!-- completed: 2026-04-29T03:10 -->
+- [x] `cafleet/tests/test_tmux.py` — `TestSendPollTrigger::test_success_returns_true` and `TestSendPollTriggerKeystroke::test_keystroke_starts_with_bare_cafleet` updated to assert the bare keystroke (no `! ` prefix). <!-- completed: 2026-04-29T03:10 -->
+
+### Step 4: Doc sweep + design 0000034 R12 changelog
+
+- [x] `skills/cafleet/SKILL.md` — `## Routing Bash via the Director` section: clarify that the protocol is now opt-in (Director-initiated dispatch) rather than the default, and remove the member-side `!`-prefix subsection introduced in the prior design 0000035 iteration. <!-- completed: 2026-04-29T03:11 -->
+- [x] `skills/cafleet/roles/member.md` — rewrite for the dontAsk model: members can run cafleet (and other shell commands) directly via the Bash tool. The "ask Director" path is preserved as an OPTIONAL fallback when the member wants Director-level oversight. <!-- completed: 2026-04-29T03:11 -->
+- [x] `skills/cafleet/roles/director.md` — note that the bash-routing protocol is opt-in under the dontAsk model. <!-- completed: 2026-04-29T03:11 -->
+- [x] `ARCHITECTURE.md` `## Bash Routing via Director` — same: protocol is opt-in. Update the spawn-argv description to reflect `--permission-mode dontAsk` instead of `--disallowedTools "Bash"`. <!-- completed: 2026-04-29T03:11 -->
+- [x] `design-docs/0000034-member-bash-via-director/design-doc.md` — append a Round 12 changelog row noting that R11's `!`-prefix wiring was reverted in favor of dontAsk mode, and the bash-routing protocol introduced in 0000034 is now opt-in. <!-- completed: 2026-04-29T03:11 -->
 
 ---
 
 ## Future Work
 
-If Option A's `!` shortcut workaround proves insufficient in production usage, evaluate:
+If the dontAsk model proves too permissive in production (e.g. teams that want to gate destructive commands behind operator confirmation), revisit:
 
-- **Option B (PreToolUse hook)** — `cafleet member create` writes a per-member `.claude/settings.json` with a `PreToolUse` hook that gates Bash invocations to `cafleet *` patterns. Bash remains generally available but every call is hook-validated. Trade-off: hook reliability becomes a new failure surface.
-- **Option C (proxy binary `cafleet-member`)** — a dedicated CLI binary that wraps the relevant cafleet subcommands; allow only `Bash(cafleet-member *)` via Claude Code's allowlist. Marginal benefit over A: narrower attack surface. Marginal cost: another CLI to maintain.
+- **Option B (PreToolUse hook)** — `cafleet member create` writes a per-member `.claude/settings.json` with a `PreToolUse` hook that gates Bash invocations to a configurable pattern set. Bash remains generally available but every call is hook-validated.
+- **Option C (proxy binary `cafleet-member`)** — a dedicated CLI binary that wraps relevant cafleet subcommands; allow only `Bash(cafleet-member *)` via Claude Code's allowlist. Narrower attack surface; another CLI to maintain.
+- **Layered trust modes** — `cafleet member create --trust-level <low|default|high>` selects between `dontAsk`, hook-gated, and fully-restricted.
 
 ---
 
@@ -123,4 +129,5 @@ If Option A's `!` shortcut workaround proves insufficient in production usage, e
 
 | Date | Changes |
 |------|---------|
-| 2026-04-29 | Initial draft. Three approaches smoke-tested in PR #37 follow-up; all fail to deliver strict whitelist via native Claude Code flags. Option A (`!` shortcut + better docs) recommended as v1 fix. |
+| 2026-04-29 | Initial draft (Option A — `!` shortcut + better docs). Three approaches smoke-tested; Option A chosen as v1 fix. |
+| 2026-04-29 | **Revised in-place to Option D (dontAsk mode).** Smoke testing on commit `ca3462e` (Option A as committed) revealed the LLM-judgment problem: members reliably run broker-pushed `!`-shortcut keystrokes, but unreliably fire the shortcut for member-composed cafleet calls (e.g. `cafleet message send` replies). Three additional flag combinations were tested (`--allowedTools` strict-whitelist, `--settings` deny+allow, `dontAsk + --allowedTools` restrictive) — none delivered. The simplest working solution is to drop the deny-Bash posture entirely and use `--permission-mode dontAsk` instead. Smoke test on the dontAsk wiring confirmed end-to-end: member ran `git branch --show-current` and replied via `cafleet message send` with no operator interaction, no `!` prefix. R11's `!`-prefix wiring on `coding_agent.py` (CLAUDE template) and `tmux.py` (`send_poll_trigger` keystroke) is reverted; the `--no-bash` / `--allow-bash` flag pair on `cafleet member create` is removed. The bash-via-Director protocol from design 0000034 is preserved as an opt-in escape hatch (`cafleet member send-input --bash <cmd>` still works) but is no longer the default flow. |

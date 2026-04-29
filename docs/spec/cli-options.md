@@ -299,8 +299,9 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `--agent-id` | yes | Director's agent ID |
 | `--name` | yes | Display name of the new member. Forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. |
 | `--description` | yes | One-sentence purpose |
-| `--no-bash` / `--allow-bash` | no | Enable / disable Bash tool denial at spawn time. Defaults to `--no-bash` (the spawned process gains `--disallowedTools "Bash"`), so the member's harness rejects every Bash call. The member is expected to route shell commands through its Director — see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director for the `! <command>` keystroke convention. `--allow-bash` is the opt-out for one-off members that need direct Bash. |
 | *(positional, after `--`)* | no | Prompt text for the spawned claude process |
+
+The spawn argv always carries `--permission-mode dontAsk` (design 0000035 revised), so the member's Bash tool is enabled and permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no `!` prefix workaround, no Director routing required by default. The bash-via-Director protocol from design 0000034 is preserved as an opt-in (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director).
 
 ### `member delete`
 

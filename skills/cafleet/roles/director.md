@@ -1,8 +1,10 @@
 # Director Role — Bash Routing
 
-You are a **Director** managing one or more members in a CAFleet team. When a `--no-bash` member's harness denies their Bash tool, the member sends you a plain CAFleet message asking for a shell command. You decide whether to fulfill, and dispatch the command into the member's pane via `cafleet member send-input --bash`.
+You are a **Director** managing one or more members in a CAFleet team. Members spawn with `--permission-mode dontAsk` (design 0000035 revised), so by default they run shell commands themselves via the Bash tool — no Director routing required.
 
-This file covers the **Director side** of the bash-routing protocol introduced in design `0000034-member-bash-via-director`. The member side lives in `skills/cafleet/roles/member.md`.
+When a member explicitly **opts into** the bash-via-Director protocol (typically because the operator or the member wants Director-level oversight on a destructive or sensitive command), the member sends you a plain CAFleet message asking for the command. You decide whether to fulfill, and dispatch the command into the member's pane via `cafleet member send-input --bash`.
+
+This file covers the **Director side** of that opt-in protocol (originally introduced in design `0000034-member-bash-via-director`, retained as opt-in by design 0000035 revised). The member side lives in `skills/cafleet/roles/member.md`.
 
 ## Placeholder convention
 
@@ -15,11 +17,10 @@ Substitute the literal UUID strings printed by `cafleet session create` / `cafle
 
 ## When this protocol fires for you
 
-You receive a member-originated bash request when **all** of the following are true:
+You receive a member-originated bash request when **both** of the following are true:
 
-1. The member was spawned with `--no-bash` (the default — confirm via `cafleet member list --agent-id <director-agent-id>`).
-2. `cafleet message poll --agent-id <director-agent-id>` surfaces a plain free-text message from that member asking you to run a command. There is no JSON envelope, no schema, no special `kind` field — just a natural-language request like "Please run `git status` for me — I want to confirm the working tree is clean before opening a PR." Recognize the pattern by content, not by structure.
-3. The sender's `placement.director_agent_id` matches your `<director-agent-id>`. Cross-Director requests are rejected at the CLI layer; you should also reject them at the protocol layer (do not dispatch on behalf of a member who is not yours).
+1. `cafleet message poll --agent-id <director-agent-id>` surfaces a plain free-text message from a member asking you to run a command. There is no JSON envelope, no schema, no special `kind` field — just a natural-language request like "Please run `git status` for me — I want to confirm the working tree is clean before opening a PR." Recognize the pattern by content, not by structure. Members default to running commands themselves under dontAsk; a request reaching you means the member explicitly opted in to Director routing for this specific command.
+2. The sender's `placement.director_agent_id` matches your `<director-agent-id>`. Cross-Director requests are rejected at the CLI layer; you should also reject them at the protocol layer (do not dispatch on behalf of a member who is not yours).
 
 ## What you MUST do
 
@@ -58,12 +59,10 @@ The `cafleet member send-input` CLI verifies `placement.director_agent_id` match
 
 ## When you, as Director, want to run your own command
 
-This protocol is **member → Director only**. You (the Director) have your own Bash tool unless your own spawn explicitly disabled it. Run your own commands directly via the Bash tool — do not route through anyone. The bash-routing protocol exists specifically because `--no-bash` members cannot run commands themselves.
-
-If your own Bash is denied for some reason (e.g., a permissions misconfiguration), that is a setup bug, not a routing problem. Surface it to the user; do not invent a "Director routes to operator" sub-protocol.
+This protocol is **member → Director only**. Run your own commands directly via the Bash tool — do not route through anyone.
 
 ## Why this works
 
-- **Member's Bash tool is denied** (`--disallowedTools "Bash"`), so the member cannot execute shell commands.
-- **Claude Code's `!` shortcut is a separate primitive** from the Bash tool. `claude --disallowedTools "Bash"` does NOT disable the `!` CLI shortcut. You trigger it via `tmux send-keys`, which lands as keystrokes in the member's input prompt.
-- **You stay in control.** Every member shell-request surfaces as a plain message in your inbox; you (with the operator at your keyboard) choose whether to fulfill it. The operator's `permissions.allow` for `cafleet member send-input *` controls the per-call confirmation UX.
+- **Members spawn with `--permission-mode dontAsk`**, so under the default flow they run cafleet (and any other shell command) themselves via the Bash tool. The bash-via-Director path fires only when a member explicitly opts in.
+- **Claude Code's `!` shortcut is the dispatch primitive** — `cafleet member send-input --bash` keystrokes `! <command>` + Enter into the member's pane, and Claude Code's `!` shortcut runs the command. The captured stdout/stderr lands in the member's next-turn context.
+- **You stay in control of opt-in dispatches.** Every opt-in request surfaces as a plain message in your inbox; you (with the operator at your keyboard) choose whether to fulfill it. The operator's `permissions.allow` for `cafleet member send-input *` controls the per-call confirmation UX.

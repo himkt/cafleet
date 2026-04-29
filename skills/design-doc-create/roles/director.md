@@ -77,7 +77,7 @@ When a member pauses on an `AskUserQuestion`-shaped prompt, the Director MUST de
 
 ### Routing member bash requests
 
-Drafter and Reviewer members are spawned with `--no-bash` (the harness rejects every Bash call). When a member sends a plain shell-command request via `cafleet message send`, the Director responds by sending `! <command>` keystrokes through `cafleet member send-input`. The member blocks until the `!` keystroke lands; process requests one at a time in poll order. Full invocation + flag layout in `Skill(cafleet)` § Routing Bash via the Director.
+Drafter and Reviewer members are spawned with `--permission-mode dontAsk` (Bash tool enabled, permission prompts auto-resolve), so they run shell commands directly by default. The bash-via-Director protocol stays available as an opt-in escape hatch: when a member explicitly sends a plain shell-command request via `cafleet message send` (because the operator wants Director-level oversight on a sensitive command), the Director responds by sending `! <command>` keystrokes through `cafleet member send-input --bash`. Process such opt-in requests one at a time in poll order. Full invocation + flag layout in `Skill(cafleet)` § Routing Bash via the Director.
 
 ### Skill-specific milestones
 

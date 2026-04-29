@@ -246,9 +246,6 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42"
 
 cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
-  --name Claude-B --description "Reviewer for PR #42" --allow-bash
-
-cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42" \
   -- "Review PR #42, post feedback via cafleet message send, and deregister on completion."
 ```
@@ -258,8 +255,9 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 | `--agent-id` | yes | The Director's agent ID |
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
-| `--no-bash` / `--allow-bash` | no | Enable / disable Bash tool denial at spawn time. Defaults to `--no-bash` (the spawned process gains `--disallowedTools "Bash"` so the harness rejects every Bash call). The member is expected to route shell commands through its Director — see the `## Routing Bash via the Director` section below for the `! <command>` keystroke convention. `--allow-bash` is the opt-out for one-off members that need direct Bash; the soft "route through the Director" discipline still applies but is no longer enforced by the harness. |
 | *(positional, after `--`)* | no | Prompt for the spawned claude process. If omitted, the default prompt template is used. BOTH the default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_name` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
+
+The spawned `claude` process is always launched with `--permission-mode dontAsk`, so the member's Bash tool is enabled and permission prompts auto-resolve silently. Members run cafleet (and any shell command) directly via the Bash tool; no `!` prefix workaround is needed. See `## Routing Bash via the Director` below for the opt-in protocol that lets a member request the Director run a command on its behalf when Director-level oversight is wanted.
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`) — `.format()` collapses each `{{` / `}}` pair to a single literal brace and, critically, does not attempt placeholder substitution on the inner tokens. This matters for prompts that embed JSON snippets, shell expansions, or other content with literal curly braces. Pre-substituting the dynamic values in shell does NOT exempt the prompt from this rule — even a placeholder-free prompt is still passed through `str.format()`, so any literal braces must still be doubled or removed.
 
@@ -693,31 +691,14 @@ The CLI validates input (`--choice` is `IntRange(1, 3)`; `--freetext` rejects ne
 
 ## Routing Bash via the Director
 
-When a member is spawned via `cafleet member create --no-bash` (the default), its harness rejects every Bash call. To run a shell command, the member sends a plain CAFleet message to its Director, and the Director dispatches the command into the member's pane via `cafleet member send-input --bash` — Claude Code's `!` CLI shortcut handles execution natively. No new broker primitives, no separate helper subcommand: just the existing message-passing + tmux-keystroke infrastructure.
+Members spawn with `--permission-mode dontAsk` — the Bash tool is enabled and permission prompts auto-resolve, so a member can run cafleet (and any other shell command) directly via the Bash tool. No `!` prefix workaround, no Director routing required. This is the design 0000035 (revised) default.
 
-The protocol has two perspectives. Read **only the file matching your role** — they contain different MUST/MUST-NOT rules and different command shapes:
+The bash-via-Director protocol is preserved as an **opt-in escape hatch** for cases where Director-level oversight on a shell command is wanted (destructive operations, sensitive paths, audit logging). When opted into, the member sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via `cafleet member send-input --bash` — Claude Code's `!` CLI shortcut handles execution natively. No new broker primitives, no separate helper subcommand: just the existing message-passing + tmux-keystroke infrastructure.
 
-- **If you are a member** (spawned by `cafleet member create`, your Bash tool is denied) → read [`roles/member.md`](roles/member.md). Covers: when to send the CAFleet message, exact `cafleet message send` form, the strict `--no-bash` fallback when even `cafleet message send` is denied, and the forbidden behaviors (no Bash invoke, no fake `<bash-input>` markup, no fabrication, no silent stalling).
-- **If you are a Director** (you bootstrapped the session via `cafleet session create` and spawn members) → read [`roles/director.md`](roles/director.md). Covers: how to recognize a bash request in your inbox, the `cafleet member send-input --bash` dispatch, serialization (one request at a time in poll order), the cross-Director boundary, and why the Director's own commands do **not** route through this protocol.
+The opt-in protocol has two perspectives. Read **only the file matching your role**:
 
-### Member side: prefix every cafleet call with `!`
-
-Members spawned via `cafleet member create --no-bash` (the default) get `--disallowedTools "Bash"` appended to their argv, so the Bash tool itself is denied at the harness. To call `cafleet` from within the member, you MUST prefix the invocation with `! ` (literal exclamation + space) — Claude Code's `!` CLI shortcut is a separate primitive that runs the command in a shell *without* going through the Bash tool, and is therefore unaffected by the deny posture.
-
-Examples (member-initiated cafleet calls):
-
-```text
-! cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
-! cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <id> --text "..."
-! cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
-! cafleet --session-id <session-id> message cancel --agent-id <my-agent-id> --task-id <task-id>
-```
-
-Notes:
-
-- The `!` shortcut is independent of the Bash-tool deny posture. Do NOT attempt to call `cafleet` via the Bash tool — it will be rejected. The CLAUDE spawn-prompt template (`cafleet/src/cafleet/coding_agent.py`) tells the spawned member this verbatim.
-- The broker's tmux push notification (`tmux.send_poll_trigger`) injects the keystroke pre-prefixed with `! ` (as of design 0000035), so when the broker pushes a poll trigger into the member's pane the LLM does not have to add the prefix itself. The prefix only matters when the member *initiates* a cafleet call (e.g., replying to the Director after processing a poll result, or acknowledging a task).
-- See [`design-docs/0000035-member-bash-whitelist/design-doc.md`](../../design-docs/0000035-member-bash-whitelist/design-doc.md) for the full record of why this is the convention. Three alternatives were smoke-tested in PR #37 (status quo `--disallowedTools "Bash"`, `--allowedTools "Bash(cafleet *)"`, and a `--settings` deny+allow scheme); none of them deliver a clean strict-allowlist via native Claude Code flags. Option A (the `!` prefix + better docs) was chosen for v1; Options B (PreToolUse hook) and C (proxy binary) remain in Future Work.
+- **If you are a member** (spawned by `cafleet member create`) → read [`roles/member.md`](roles/member.md). Covers: the default "run it yourself via Bash" path, when to opt into Director routing instead, and forbidden behaviors (no fake `<bash-input>` markup, no fabrication, no silent stalling).
+- **If you are a Director** (you bootstrapped the session via `cafleet session create` and spawn members) → read [`roles/director.md`](roles/director.md). Covers: how to recognize a member's opt-in bash request, the `cafleet member send-input --bash` dispatch, serialization (one request at a time in poll order), and the cross-Director boundary.
 
 ## Message Lifecycle
 

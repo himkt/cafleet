@@ -9,10 +9,10 @@
   "license": "MIT",
   "keywords": ["a2a", "messaging", "broker", "agents", "cli", "design-doc"],
   "skills": [
-    "./.claude/skills/cafleet",
-    "./.claude/skills/cafleet-monitoring",
-    "./.claude/skills/design-doc",
-    "./.claude/skills/design-doc-create",
-    "./.claude/skills/design-doc-execute"
+    "./skills/cafleet",
+    "./skills/cafleet-monitoring",
+    "./skills/design-doc",
+    "./skills/design-doc-create",
+    "./skills/design-doc-execute"
   ]
 }
