@@ -9,9 +9,7 @@
       "Skill(design-doc-create)",
       "Skill(design-doc-execute)",
       "Skill(design-doc)",
-      "Bash(cafleet *)",
-      "Bash(git mv *)",
-      "Bash(uv run cafleet *)"
+      "Bash(cafleet *)"
     ],
     "deny": [
       "Bash(uv run pytest *)",
@@ -30,6 +28,11 @@
       "Bash(mise dev *)",
       "Bash(mise build)",
       "Bash(mise build *)"
+    ],
+    "ask": [
+      "Bash(cafleet --session-id * member send-input --bash *)",
+      "Bash(cafleet --session-id * member send-input * --bash)",
+      "Bash(cafleet --session-id * member send-input * --bash *)"
     ]
   },
   "enabledPlugins": {
