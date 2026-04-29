@@ -138,6 +138,21 @@ def send_freetext_and_submit(*, target_pane_id: str, text: str) -> None:
     _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
 
 
+def send_bash_command(*, target_pane_id: str, command: str) -> None:
+    """Send ``! <command>`` + Enter as two separate send-keys calls.
+
+    Used by ``cafleet member send-input --bash`` to route shell commands
+    via Claude Code's ``!`` shortcut. Unlike ``send_freetext_and_submit``,
+    there is NO leading ``4`` keystroke (no AskUserQuestion gate).
+    """
+    if not command:
+        raise TmuxError("send_bash_command: command may not be empty")
+    if "\n" in command or "\r" in command:
+        raise TmuxError("send_bash_command: command may not contain newlines")
+    _run(["tmux", "send-keys", "-t", target_pane_id, "-l", f"! {command}"])
+    _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
+
+
 def capture_pane(*, target_pane_id: str, lines: int = 80) -> str:
     """Return the last ``lines`` lines of the pane's terminal buffer."""
     if lines <= 0:

@@ -410,7 +410,12 @@ Output (`--json`):
 
 ### Member Send-Input
 
-Safely forward a restricted keystroke to a member's tmux pane. This is the write-path companion to `member capture` — designed for answering an `AskUserQuestion` prompt (or any prompt with the same "3 choices + Type something" shape) rendered in a member's Claude Code pane. Exactly one of `--choice` / `--freetext` must be supplied.
+Safely forward a restricted keystroke to a member's tmux pane. This is the write-path companion to `member capture`. Three input modes:
+
+- `--choice` / `--freetext` answer an `AskUserQuestion` prompt (or any prompt with the same "3 choices + Type something" shape) — `--freetext` is **AskUserQuestion-only** because it prepends the digit `4`.
+- `--bash` routes a shell command via Claude Code's `!` keystroke — no AskUserQuestion gate. See [Routing Bash via the Director](#routing-bash-via-the-director).
+
+Exactly one of the three flags must be supplied.
 
 ```bash
 cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
@@ -418,6 +423,9 @@ cafleet --session-id <session-id> member send-input --agent-id <director-agent-i
 
 cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
   --member-id <member-agent-id> --freetext "please prioritize correctness"
+
+cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
+  --member-id <member-agent-id> --bash "git log -1 --oneline"
 
 cafleet --session-id <session-id> --json member send-input --agent-id <director-agent-id> \
   --member-id <member-agent-id> --choice 2
@@ -428,11 +436,14 @@ cafleet --session-id <session-id> --json member send-input --agent-id <director-
 | `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | The target member's agent ID |
 | `--choice` | one-of | Integer `1`, `2`, or `3`. Sends the matching digit key to the pane (no Enter). Validated via `click.IntRange(1, 3)`. |
-| `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. Newlines are rejected. |
+| `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. Newlines are rejected. AskUserQuestion-only. |
+| `--bash` | one-of | Shell command for Claude Code's bash-input mode. Sends `! <command>` via `tmux send-keys -l`, then `Enter`. No AskUserQuestion gate. Newlines and empty strings are rejected. |
+
+Supplying zero or two-or-more of `--choice` / `--freetext` / `--bash` exits 2 with `Error: --choice, --freetext, --bash are mutually exclusive; supply exactly one.`.
 
 Cross-Director send is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before making any tmux call (same wording as `member capture`). A missing placement row, a pending pane (`tmux_pane_id is None`), or an unavailable `tmux` binary each exit 1 with a dedicated message.
 
-**Why three tmux calls for `--freetext`**: tmux's `-l` (literal) flag is per-invocation — one `send-keys` call cannot mix literal characters with the `Enter` key name. Splitting the sequence into three calls (`4` → `-l "<text>"` → `Enter`) guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the text (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are all delivered as plain characters. The CLI calls `subprocess.run([...], shell=False)`, so no shell ever interprets the text. Newlines in `--freetext` are rejected with `Error: free text may not contain newlines.` (exit 2) because a literal newline would submit a second prompt without a following Enter — the single-action contract is "one CLI call = one prompt submission."
+**Why three tmux calls for `--freetext`** (and two for `--bash`): tmux's `-l` (literal) flag is per-invocation — one `send-keys` call cannot mix literal characters with the `Enter` key name. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the text (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are all delivered as plain characters. The CLI calls `subprocess.run([...], shell=False)`, so no shell ever interprets the text. Newlines in `--freetext` and `--bash` are rejected because a literal newline would submit a second prompt without a following Enter — the single-action contract is "one CLI call = one prompt submission."
 
 The CLI never inspects `placement.coding_agent`.
 
@@ -441,6 +452,7 @@ Output (text):
 ```
 Sent choice 1 to member Claude-B (%7).
 Sent free text to member Claude-B (%7).
+Sent bash command 'git log -1 --oneline' to member Claude-B (%7).
 ```
 
 Output (`--json`):
@@ -460,6 +472,15 @@ Output (`--json`):
   "pane_id": "%7",
   "action": "freetext",
   "value": "<user text as-sent>"
+}
+```
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "action": "bash",
+  "value": "<command as-sent>"
 }
 ```
 
@@ -686,17 +707,17 @@ cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
 
 The member then waits for either a follow-up CAFleet message from the Director or the `! <command>` output to land in its own pane (Claude Code prints the captured stdout/stderr inline after running `!`).
 
-### Director side: respond with `! <command>` keystrokes
+### Director side: respond with `--bash` keystrokes
 
-When the Director's `cafleet message poll` surfaces a member message asking for a shell command, the Director (or operator) decides what to fulfill. To execute, the Director sends the command into the member's pane via `cafleet member send-input` with a `! <command>` payload:
+When the Director's `cafleet message poll` surfaces a member message asking for a shell command, the Director (or operator) decides what to fulfill. To execute, the Director sends the command into the member's pane via `cafleet member send-input --bash`:
 
 ```bash
 cafleet --session-id <session-id> member send-input \
   --agent-id <director-agent-id> --member-id <member-agent-id> \
-  --freetext "! git log -1 --oneline"
+  --bash "git log -1 --oneline"
 ```
 
-The trailing newline (Enter) is appended automatically by `member send-input --freetext`. Claude Code's `!` shortcut intercepts the line, runs the command via the harness's native CLI primitive (bypassing the Bash tool permission system), and prints the captured output back into the same pane. The member's next prompt iteration sees the output as context.
+The CLI prepends `! ` and appends `Enter` for you (two `tmux send-keys` calls: literal `! <command>`, then the `Enter` keystroke). Claude Code's `!` shortcut intercepts the line, runs the command via the harness's native CLI primitive (bypassing the Bash tool permission system), and prints the captured output back into the same pane. The member's next prompt iteration sees the output as context. `--bash` is mutually exclusive with `--choice` and `--freetext`; unlike `--freetext`, it does NOT prepend the AskUserQuestion `4` digit, so it works on any pane that is at the Claude Code input prompt.
 
 ### Why this works
 

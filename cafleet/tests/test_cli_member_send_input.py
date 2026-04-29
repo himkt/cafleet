@@ -147,16 +147,16 @@ def _invoke(runner, session_id, *extra_args, **invoke_kwargs):
 
 
 class TestFlagValidation:
-    def test_neither_choice_nor_freetext_exits_two(
-        self, runner, session_id, happy_path_agent
-    ):
+    def test_no_flag_supplied_exits_two(self, runner, session_id, happy_path_agent):
         result = _invoke(runner, session_id)
         assert result.exit_code == 2, result.output
-        assert "Must supply exactly one of --choice or --freetext" in (
-            result.output or ""
-        )
+        out = result.output or ""
+        assert "--choice" in out
+        assert "--freetext" in out
+        assert "--bash" in out
+        assert "mutually exclusive" in out
 
-    def test_both_choice_and_freetext_exits_two(
+    def test_choice_and_freetext_combo_exits_two(
         self, runner, session_id, happy_path_agent
     ):
         result = _invoke(
@@ -168,9 +168,11 @@ class TestFlagValidation:
             "hello",
         )
         assert result.exit_code == 2, result.output
-        assert "Must supply exactly one of --choice or --freetext" in (
-            result.output or ""
-        )
+        out = result.output or ""
+        assert "--choice" in out
+        assert "--freetext" in out
+        assert "--bash" in out
+        assert "mutually exclusive" in out
 
     @pytest.mark.parametrize("bad_digit", ["0", "4", "5", "-1", "a"])
     def test_choice_out_of_range_exits_two(
@@ -460,9 +462,7 @@ class TestBashFlag:
         assert len(choice_recorder) == 0
         assert len(freetext_recorder) == 0
 
-    def test_mutual_exclusion_with_choice(
-        self, runner, session_id, happy_path_agent
-    ):
+    def test_mutual_exclusion_with_choice(self, runner, session_id, happy_path_agent):
         result = _invoke(runner, session_id, "--bash", "x", "--choice", "1")
         assert result.exit_code == 2, result.output
         out = result.output or ""
@@ -471,9 +471,7 @@ class TestBashFlag:
         assert "--bash" in out
         assert "mutually exclusive" in out
 
-    def test_mutual_exclusion_with_freetext(
-        self, runner, session_id, happy_path_agent
-    ):
+    def test_mutual_exclusion_with_freetext(self, runner, session_id, happy_path_agent):
         result = _invoke(runner, session_id, "--bash", "x", "--freetext", "y")
         assert result.exit_code == 2, result.output
         out = result.output or ""

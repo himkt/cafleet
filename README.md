@@ -233,7 +233,7 @@ All commands below require the global `--session-id <uuid>` flag (placed before 
 | `cafleet --session-id <id> member delete --agent-id <id>` | Required | Deregister a member and close its pane (Director only) |
 | `cafleet --session-id <id> member list --agent-id <id>` | Required | List members spawned by this Director |
 | `cafleet --session-id <id> member capture --agent-id <id>` | Required | Capture the last N lines of a member's pane (Director only) |
-| `cafleet --session-id <id> member send-input --agent-id <id>` | Required | Forward a restricted keystroke (`--choice {1,2,3}` or `--freetext "<text>"`) to a member's pane (Director only); see [docs/spec/cli-options.md](docs/spec/cli-options.md#member-send-input). Director-side workflow is AskUserQuestion-delegated — see [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) "Answer a member's AskUserQuestion prompt" for the canonical three-beat shape |
+| `cafleet --session-id <id> member send-input --agent-id <id>` | Required | Forward a restricted keystroke (`--choice {1,2,3}`, `--freetext "<text>"` for AskUserQuestion, or `--bash "<cmd>"` for bash routing) to a member's pane (Director only); see [docs/spec/cli-options.md](docs/spec/cli-options.md#member-send-input). For `--choice`/`--freetext` the workflow is AskUserQuestion-delegated; for `--bash` the Director keystrokes `! <cmd>` + Enter into the member's normal prompt — see [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) "Answer a member's AskUserQuestion prompt" and "Routing Bash via the Director" for the canonical workflows |
 
 ## API Overview
 

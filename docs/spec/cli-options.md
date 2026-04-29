@@ -348,16 +348,22 @@ Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet
 
 ### `member send-input`
 
-Forwards a restricted keystroke to a member's tmux pane. Designed for answering an `AskUserQuestion` prompt (or any prompt with the same 3-choices + "Type something" shape) rendered in the member's Claude Code pane. Exactly one of `--choice` or `--freetext` must be supplied.
+Forwards a restricted keystroke to a member's tmux pane. Three input modes:
+
+- `--choice` / `--freetext` answer an `AskUserQuestion` prompt (or any prompt with the same 3-choices + "Type something" shape) — `--freetext` is **AskUserQuestion-only** because it prepends the digit `4` (the "Type something" gate).
+- `--bash` routes a shell command via Claude Code's `!` keystroke — no AskUserQuestion gate. See [Routing Bash via the Director](../../skills/cafleet/SKILL.md#routing-bash-via-the-director).
+
+Exactly one of the three flags must be supplied.
 
 | Flag | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | Target member's agent ID |
 | `--choice` | one-of | Integer `1`, `2`, or `3`. Sends the matching digit key to the pane (no Enter). Validated via `click.IntRange(1, 3)`. |
-| `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. |
+| `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. AskUserQuestion-only. |
+| `--bash` | one-of | Shell command for Claude Code's bash-input mode. Sends `! <command>` via `tmux send-keys -l`, then `Enter`. No AskUserQuestion gate. |
 
-Exactly one of `--choice` / `--freetext` must appear. Supplying neither or both exits 2 with `Error: Must supply exactly one of --choice or --freetext.`.
+Exactly one of `--choice` / `--freetext` / `--bash` must appear. Supplying zero or two-or-more exits 2 with `Error: --choice, --freetext, --bash are mutually exclusive; supply exactly one.`.
 
 #### Key sequence sent to the pane
 
@@ -367,18 +373,20 @@ Exactly one of `--choice` / `--freetext` must appear. Supplying neither or both 
 | `--choice 2` | `tmux send-keys -t <pane> 2` |
 | `--choice 3` | `tmux send-keys -t <pane> 3` |
 | `--freetext "X"` | `tmux send-keys -t <pane> 4` → `tmux send-keys -t <pane> -l "X"` → `tmux send-keys -t <pane> Enter` |
+| `--bash "X"` | `tmux send-keys -t <pane> -l "! X"` → `tmux send-keys -t <pane> Enter` |
 
-Three separate tmux invocations for `--freetext` because tmux's `-l` (literal) flag is per-invocation: every key in a single `send-keys` call is either literal or key-name interpreted, never a mix. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters in the user's text are delivered as plain characters. Because the CLI uses `subprocess.run([...], shell=False)`, no shell ever evaluates the text.
+Three separate tmux invocations for `--freetext` (and two for `--bash`) because tmux's `-l` (literal) flag is per-invocation: every key in a single `send-keys` call is either literal or key-name interpreted, never a mix. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are delivered as plain characters. Because the CLI uses `subprocess.run([...], shell=False)`, no shell ever evaluates the text.
 
 #### Validation rules
 
 | Input | Result |
 |---|---|
-| Neither `--choice` nor `--freetext` | Exit 2 with `Error: Must supply exactly one of --choice or --freetext.` |
-| Both `--choice` and `--freetext` | Exit 2 with the same message |
+| Zero or ≥2 of `--choice` / `--freetext` / `--bash` | Exit 2 with `Error: --choice, --freetext, --bash are mutually exclusive; supply exactly one.` |
 | `--choice 0` / `--choice 4` / `--choice a` | Exit 2 via click's built-in `IntRange(1, 3)` validator |
 | `--freetext ""` (empty) | Allowed — sends `4` + empty literal + `Enter` (submits an empty answer; AskUserQuestion's own UI decides whether to accept it) |
 | `--freetext` containing `\n` or `\r` | Exit 2 with `Error: free text may not contain newlines.` (single-action contract — one prompt submission per call) |
+| `--bash ""` (empty) | Exit 1 with `Error: send_bash_command: command may not be empty` (no shell command to run) |
+| `--bash` containing `\n` or `\r` | Exit 1 with `Error: send_bash_command: command may not contain newlines` (multi-line scripts cannot be expressed as one keystroke) |
 | Any input with tmux unavailable | Exit 1 via `tmux.ensure_tmux_available()` (same surface as `member capture`) |
 
 #### Authorization boundary
@@ -399,6 +407,7 @@ Text:
 ```
 Sent choice 1 to member Claude-B (%7).
 Sent free text to member Claude-B (%7).
+Sent bash command 'git log -1 --oneline' to member Claude-B (%7).
 ```
 
 JSON (`cafleet --json ... member send-input ...`):
@@ -418,6 +427,15 @@ JSON (`cafleet --json ... member send-input ...`):
   "pane_id": "%7",
   "action": "freetext",
   "value": "<user text as-sent>"
+}
+```
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7",
+  "action": "bash",
+  "value": "<command as-sent>"
 }
 ```
 
@@ -450,8 +468,10 @@ The canonical Director-side workflow is three-beat and AskUserQuestion-delegated
 | `register` into a soft-deleted session | `Error: session X is deleted` (exit 1) |
 | `deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` (exit 1) |
 | `deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
-| `member send-input` with neither or both of `--choice` / `--freetext` | `Error: Must supply exactly one of --choice or --freetext.` (exit 2) |
+| `member send-input` with zero or ≥2 of `--choice` / `--freetext` / `--bash` | `Error: --choice, --freetext, --bash are mutually exclusive; supply exactly one.` (exit 2) |
 | `member send-input --choice` outside `1..3` | Click `IntRange(1, 3)` built-in (exit 2) |
 | `member send-input --freetext` with `\n` or `\r` | `Error: free text may not contain newlines.` (exit 2) |
+| `member send-input --bash ""` (empty) | `Error: send_bash_command: command may not be empty` (exit 1) |
+| `member send-input --bash` with `\n` or `\r` | `Error: send_bash_command: command may not contain newlines` (exit 1) |
 | `member send-input` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
 | `member send-input` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |

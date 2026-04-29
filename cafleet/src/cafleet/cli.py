@@ -416,6 +416,10 @@ def message_show(ctx, agent_id, task_id):
     """Get details of a specific task."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         result = broker.get_task(ctx.obj["session_id"], task_id)
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
@@ -426,7 +430,7 @@ def message_show(ctx, agent_id, task_id):
 @agent.command("list")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.pass_context
-def agent_list_(ctx, agent_id):
+def agent_list(ctx, agent_id):
     """List registered agents in the session."""
     _require_session_id(ctx)
     with _handle_broker_errors():
@@ -434,11 +438,11 @@ def agent_list_(ctx, agent_id):
             raise click.ClickException(
                 f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
             )
-        agent_list = broker.list_agents(ctx.obj["session_id"])
+        agents = broker.list_agents(ctx.obj["session_id"])
         if ctx.obj["json_output"]:
-            click.echo(output.format_json(agent_list))
+            click.echo(output.format_json(agents))
         else:
-            click.echo(output.format_agent_list(agent_list))
+            click.echo(output.format_agent_list(agents))
 
 
 @agent.command("show")
@@ -915,16 +919,26 @@ def member_capture(ctx, agent_id, member_id, lines):
     "--freetext",
     type=str,
     default=None,
-    help='Send "4" + literal text + Enter. Mutually exclusive with --choice.',
+    help='Send "4" + literal text + Enter (AskUserQuestion only). Mutually exclusive with --choice and --bash.',
+)
+@click.option(
+    "--bash",
+    "bash_command",
+    type=str,
+    default=None,
+    help='Send "! <command>" + Enter for bash routing. Mutually exclusive with --choice and --freetext.',
 )
 @click.pass_context
-def member_send_input(ctx, agent_id, member_id, choice, freetext):
+def member_send_input(ctx, agent_id, member_id, choice, freetext, bash_command):
     """Safely forward a restricted keystroke to a member pane."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
-    if (choice is None) == (freetext is None):
-        raise click.UsageError("Must supply exactly one of --choice or --freetext.")
+    supplied = sum(1 for v in (choice, freetext, bash_command) if v is not None)
+    if supplied != 1:
+        raise click.UsageError(
+            "--choice, --freetext, --bash are mutually exclusive; supply exactly one."
+        )
 
     if freetext is not None and ("\n" in freetext or "\r" in freetext):
         raise click.UsageError("free text may not contain newlines.")
@@ -953,9 +967,12 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
         if choice is not None:
             tmux.send_choice_key(target_pane_id=pane_id, digit=choice)
             action, value = "choice", str(choice)
-        else:
+        elif freetext is not None:
             tmux.send_freetext_and_submit(target_pane_id=pane_id, text=freetext)
             action, value = "freetext", freetext
+        else:
+            tmux.send_bash_command(target_pane_id=pane_id, command=bash_command)
+            action, value = "bash", bash_command
     except tmux.TmuxError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
 
@@ -971,7 +988,12 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
             )
         )
     else:
-        label = f"choice {value}" if action == "choice" else "free text"
+        if action == "choice":
+            label = f"choice {value}"
+        elif action == "bash":
+            label = f"bash command {value!r}"
+        else:
+            label = "free text"
         click.echo(f"Sent {label} to member {target['name']} ({pane_id}).")
 
 
