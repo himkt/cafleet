@@ -136,9 +136,9 @@ Programmer / Tester / Verifier members are spawned with `--permission-mode dontA
 
 ## Shutdown Protocol
 
-Shutdown runs as Step 8's tail — only AFTER Step 8's doc-complete commit (and the conditional `git push` when the branch is tracked on origin) has landed. The `CronDelete` target depends on how far execution reached: the team-health loop (cron ID recorded in Step 3c) if Step 6 was skipped, or the augmented loop (cron ID recorded in Step 7a) if Step 7 ran. Use whichever cron ID is currently active — do not assume which one.
+Shutdown runs as Step 8's tail — only AFTER Step 8's doc-complete commit (and the conditional `git push` when the branch is tracked on origin) has landed. The `CronDelete` target depends on how far execution reached: the team-health loop (cron ID recorded in Step 3b) if Step 6 was skipped, or the augmented loop (cron ID recorded in Step 7a) if Step 7 ran. Use whichever cron ID is currently active — do not assume which one.
 
-1. Cancel the currently active `/loop` monitor (`CronDelete` on the team-health cron ID from Step 3c when Step 6 was skipped, or the augmented cron ID from Step 7a otherwise).
+1. Cancel the currently active `/loop` monitor (`CronDelete` on the team-health cron ID from Step 3b when Step 6 was skipped, or the augmented cron ID from Step 7a otherwise).
 2. Delete each member:
    ```bash
    cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <programmer-agent-id>

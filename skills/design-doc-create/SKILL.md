@@ -102,18 +102,18 @@ Capture `session_id` and `director.agent_id` from the JSON response. Substitute 
 
 If you already have a running session (e.g. an outer orchestration), reuse its `session_id` and its root Director's `agent_id` instead of creating a new session. Do **not** attempt to register a second Director with `cafleet agent register --name Director` — the root Director from `session create` is the team lead; a second registration would just create an unrelated agent with no placement row.
 
-#### 1c. Start the monitoring `/loop`
+#### 1b. Start the monitoring `/loop`
 
 BEFORE spawning any member, follow `Skill(cafleet-monitoring)`'s Monitoring Mandate and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. The loop must stay active from the first `member create` until Step 6's shutdown cleanup.
 
-#### 1d. Read role definitions
+#### 1c. Read role definitions
 
 Read the role files that will be embedded verbatim in spawn prompts:
 
 - `skills/design-doc-create/roles/drafter.md`
 - `skills/design-doc-create/roles/reviewer.md`
 
-#### 1e. Spawn the Drafter
+#### 1d. Spawn the Drafter
 
 **Drafter spawn prompt (normal mode):**
 
@@ -188,7 +188,7 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 
 Parse `agent_id` from the JSON response and substitute it for `<drafter-agent-id>` in every subsequent command.
 
-#### 1f. Spawn the Reviewer
+#### 1e. Spawn the Reviewer
 
 **Reviewer spawn prompt:**
 
@@ -227,7 +227,7 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 
 Parse `agent_id` from the JSON response and substitute it for `<reviewer-agent-id>` in every subsequent command.
 
-#### 1g. Verify members are live
+#### 1f. Verify members are live
 
 ```bash
 cafleet --session-id <session-id> member list --agent-id <director-agent-id>
