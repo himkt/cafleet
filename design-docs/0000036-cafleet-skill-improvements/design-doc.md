@@ -1,6 +1,6 @@
 # 0000036 — CAFleet Skill Improvements
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 22/22 tasks complete
 **Last Updated**: 2026-04-29
 
@@ -10,14 +10,14 @@ The project's `skills/design-doc-create/` and `skills/design-doc-execute/` skill
 
 ## Success Criteria
 
-- [ ] Every step header in `skills/design-doc-create/SKILL.md` Step 1 is contiguous (no missing `1b`).
-- [ ] Every step header in `skills/design-doc-execute/SKILL.md` Step 3 is contiguous (no missing `3b`).
-- [ ] Both director role files (`skills/design-doc-create/roles/director.md`, `skills/design-doc-execute/roles/director.md`) contain an **Idle Semantics** subsection that mirrors the global `agent-team-supervision` rule, adapted for CAFleet's tmux-pane idle model.
-- [ ] Both director role files contain a **Stall Response Ladder** subsection (1 — specific instruction, 2 — second specific nudge, 3 — escalate to user via `AskUserQuestion`).
-- [ ] All five member role files (`design-doc-create/roles/{drafter,reviewer}.md`, `design-doc-execute/roles/{programmer,tester,verifier}.md`) contain a **Shutdown** subsection explaining that termination is via `cafleet member delete` → `/exit` (no `shutdown_request` JSON message).
-- [ ] `skills/design-doc-create/SKILL.md` Step 6 and `skills/design-doc-execute/SKILL.md` Step 8 explicitly defer to `Skill(cafleet)` § *Shutdown Protocol* for the full 5-step teardown order (cron-cancel → `member delete` per member → `member list` verification → `session delete` → `session list` sanity check) instead of inlining a partial subset.
-- [ ] `.claude/settings.json` `permissions.allow` lists every `cafleet:` plugin skill (`Skill(cafleet:cafleet)`, `Skill(cafleet:cafleet-monitoring)`, `Skill(cafleet:design-doc)`, `Skill(cafleet:design-doc-create)`, `Skill(cafleet:design-doc-execute)`) so loading any of them no longer triggers a permission prompt.
-- [ ] No regressions: every existing example command, prompt body, and table elsewhere in the touched files reads identically apart from the targeted edits.
+- [x] Every step header in `skills/design-doc-create/SKILL.md` Step 1 is contiguous (no missing `1b`).
+- [x] Every step header in `skills/design-doc-execute/SKILL.md` Step 3 is contiguous (no missing `3b`).
+- [x] Both director role files (`skills/design-doc-create/roles/director.md`, `skills/design-doc-execute/roles/director.md`) contain an **Idle Semantics** subsection that mirrors the global `agent-team-supervision` rule, adapted for CAFleet's tmux-pane idle model.
+- [x] Both director role files contain a **Stall Response Ladder** subsection (1 — specific instruction, 2 — second specific nudge, 3 — escalate to user via `AskUserQuestion`).
+- [x] All five member role files (`design-doc-create/roles/{drafter,reviewer}.md`, `design-doc-execute/roles/{programmer,tester,verifier}.md`) contain a **Shutdown** subsection explaining that termination is via `cafleet member delete` → `/exit` (no `shutdown_request` JSON message).
+- [x] `skills/design-doc-create/SKILL.md` Step 6 and `skills/design-doc-execute/SKILL.md` Step 8 explicitly defer to `Skill(cafleet)` § *Shutdown Protocol* for the full 5-step teardown order (cron-cancel → `member delete` per member → `member list` verification → `session delete` → `session list` sanity check) instead of inlining a partial subset.
+- [x] `.claude/settings.json` `permissions.allow` lists every `cafleet:` plugin skill (`Skill(cafleet:cafleet)`, `Skill(cafleet:cafleet-monitoring)`, `Skill(cafleet:design-doc)`, `Skill(cafleet:design-doc-create)`, `Skill(cafleet:design-doc-execute)`) so loading any of them no longer triggers a permission prompt.
+- [x] No regressions: every existing example command, prompt body, and table elsewhere in the touched files reads identically apart from the targeted edits.
 
 ---
 
@@ -255,3 +255,4 @@ Constraints:
 | 2026-04-29 | Initial draft |
 | 2026-04-29 | Added S6 / Step 5 — extend `.claude/settings.json` `permissions.allow` with the five `cafleet:` plugin skill entries (resolves `COMMENT(himkt)` from initial review). |
 | 2026-04-29 | Status flipped to **Approved** by user. |
+| 2026-04-29 | All 22 implementation tasks complete (5 commits: S1 numbering, S2/S3 director additions, S4 member shutdown, S5 canonical pointers, S6 settings.json). All 8 Success Criteria verified. Status flipped to **Complete**. |
