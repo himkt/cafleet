@@ -10,14 +10,14 @@ After 34 design-doc cycles the CAFleet repository has accumulated a small set of
 
 ## Success Criteria
 
-- [ ] The grep set in §"Acceptance grep set" below returns zero hits outside `design-docs/`, alembic migration sources/tests, and admin lockfiles.
-- [ ] All sentinel-style "removed-flag-now-errors" / "removed-import-now-fails" tests are gone (`TestCodexConstantRemoved`, `test_no_bash_flag_no_longer_parses`, `test_allow_bash_flag_no_longer_parses`, `TestCodingAgentFlagRemoved`).
-- [ ] `cafleet/pyproject.toml` `[tool.ty.analysis].allowed-unresolved-imports` no longer references modules that the source tree never imports (specifically `httpx.*`).
-- [ ] `admin/bun.lock` no longer pins `@auth0/*` packages (regenerated from current `admin/package.json`).
-- [ ] User-facing docs no longer "advertise the deletion" of removed features. Specifically: no `No Auth0` / `No bearer tokens, no API keys` sentences in `ARCHITECTURE.md` or `docs/spec/webui-api.md`; no `## Removed CLI Options` section in `docs/spec/cli-options.md`; no `migrated sessions reuse the original api_key_hash value` clauses in `docs/spec/data-model.md` or `docs/spec/cli-options.md`.
-- [ ] `skills/cafleet/SKILL.md` line 448 no longer carries the apology meta-line `"The CLI never inspects placement.coding_agent."`.
-- [ ] An explicit decision note is recorded in this document: `--permission-mode dontAsk` + bash-via-Director (`cafleet member send-input --bash`) is the canonical member-spawn discipline; `--disallowedTools "Bash"` is not used.
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test`, `mise //admin:lint`, and `mise //admin:build` all pass after the cleanup.
+- [x] The grep set in §"Acceptance grep set" below returns zero hits outside `design-docs/`, alembic migration sources/tests, and admin lockfiles.
+- [x] All sentinel-style "removed-flag-now-errors" / "removed-import-now-fails" tests are gone (`TestCodexConstantRemoved`, `test_no_bash_flag_no_longer_parses`, `test_allow_bash_flag_no_longer_parses`, `TestCodingAgentFlagRemoved`).
+- [x] `cafleet/pyproject.toml` `[tool.ty.analysis].allowed-unresolved-imports` no longer references modules that the source tree never imports (specifically `httpx.*`).
+- [x] `admin/bun.lock` no longer pins `@auth0/*` packages (regenerated from current `admin/package.json`).
+- [x] User-facing docs no longer "advertise the deletion" of removed features. Specifically: no `No Auth0` / `No bearer tokens, no API keys` sentences in `ARCHITECTURE.md` or `docs/spec/webui-api.md`; no `## Removed CLI Options` section in `docs/spec/cli-options.md`; no `migrated sessions reuse the original api_key_hash value` clauses in `docs/spec/data-model.md` or `docs/spec/cli-options.md`.
+- [x] `skills/cafleet/SKILL.md` line 448 no longer carries the apology meta-line `"The CLI never inspects placement.coding_agent."`.
+- [x] An explicit decision note is recorded in this document: `--permission-mode dontAsk` + bash-via-Director (`cafleet member send-input --bash`) is the canonical member-spawn discipline; `--disallowedTools "Bash"` is not used.
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test`, `mise //admin:lint`, and `mise //admin:build` all pass after the cleanup.
 
 ---
 
