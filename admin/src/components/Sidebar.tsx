@@ -53,7 +53,7 @@ export default function Sidebar({ agents }: SidebarProps) {
       {agents.length === 0 && (
         <p className="text-xs text-gray-400 p-3">
           No agents registered in this session. Use the{" "}
-          <code className="text-gray-500">cafleet register</code> CLI to add
+          <code className="text-gray-500">cafleet agent register</code> CLI to add
           one.
         </p>
       )}

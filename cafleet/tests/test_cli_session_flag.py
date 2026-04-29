@@ -48,14 +48,14 @@ class TestMissingSessionIdFailsClientSubcommands:
     def test_register_without_session_id_exits_one(self, db_runner):
         result = db_runner.invoke(
             cli,
-            ["register", "--name", "A", "--description", "a"],
+            ["agent", "register", "--name", "A", "--description", "a"],
         )
         assert result.exit_code == 1, result.output
 
     def test_register_without_session_id_shows_new_error_message(self, db_runner):
         result = db_runner.invoke(
             cli,
-            ["register", "--name", "A", "--description", "a"],
+            ["agent", "register", "--name", "A", "--description", "a"],
         )
         out = result.output or ""
         assert "--session-id" in out
@@ -69,13 +69,13 @@ class TestMissingSessionIdFailsClientSubcommands:
         bid = str(uuid.uuid4())
         result = db_runner.invoke(
             cli,
-            ["send", "--agent-id", aid, "--to", bid, "--text", "hi"],
+            ["message", "send", "--agent-id", aid, "--to", bid, "--text", "hi"],
         )
         assert result.exit_code == 1, result.output
 
     def test_poll_without_session_id_exits_one(self, db_runner):
         aid = str(uuid.uuid4())
-        result = db_runner.invoke(cli, ["poll", "--agent-id", aid])
+        result = db_runner.invoke(cli, ["message", "poll", "--agent-id", aid])
         assert result.exit_code == 1, result.output
 
 
@@ -97,7 +97,16 @@ class TestSessionIdFlagFlowsIntoBroker:
         sid = str(uuid.uuid4())
         result = db_runner.invoke(
             cli,
-            ["--session-id", sid, "register", "--name", "A", "--description", "a"],
+            [
+                "--session-id",
+                sid,
+                "agent",
+                "register",
+                "--name",
+                "A",
+                "--description",
+                "a",
+            ],
         )
 
         assert result.exit_code == 0, result.output
@@ -139,6 +148,7 @@ class TestSessionIdFlagFlowsIntoBroker:
             [
                 "--session-id",
                 sid,
+                "message",
                 "send",
                 "--agent-id",
                 aid,
@@ -158,7 +168,7 @@ class TestSessionIdFlagFlowsIntoBroker:
         monkeypatch.setenv("CAFLEET_SESSION_ID", str(uuid.uuid4()))
         result = db_runner.invoke(
             cli,
-            ["register", "--name", "A", "--description", "a"],
+            ["agent", "register", "--name", "A", "--description", "a"],
         )
         assert result.exit_code == 1, result.output
 
@@ -267,7 +277,7 @@ class TestDeregisterAdministratorCliGuard:
 
         result = runner.invoke(
             cli,
-            ["--session-id", session_id, "deregister", "--agent-id", admin_id],
+            ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
         )
         assert result.exit_code == 1, result.output
 
@@ -286,7 +296,7 @@ class TestDeregisterAdministratorCliGuard:
 
         result = runner.invoke(
             cli,
-            ["--session-id", session_id, "deregister", "--agent-id", admin_id],
+            ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
         )
         out = result.output or ""
         assert "Administrator cannot be deregistered" in out
@@ -308,10 +318,17 @@ class TestDeregisterAdministratorCliGuard:
 
         result = runner.invoke(
             cli,
-            ["--session-id", session_id, "deregister", "--agent-id", bogus_agent_id],
+            [
+                "--session-id",
+                session_id,
+                "agent",
+                "deregister",
+                "--agent-id",
+                bogus_agent_id,
+            ],
         )
         assert result.exit_code == 1, result.output
-        assert "not found or already deregistered" in (result.output or "")
+        assert "is not a member of session" in (result.output or "")
 
     def test_cli_deregister_admin_leaves_row_active(self, tmp_path, monkeypatch):
         db_file = tmp_path / "registry.db"
@@ -328,7 +345,7 @@ class TestDeregisterAdministratorCliGuard:
 
         runner.invoke(
             cli,
-            ["--session-id", session_id, "deregister", "--agent-id", admin_id],
+            ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
         )
         status, deregistered_at = _fetch_agent_status(db_file, admin_id)
         assert status == "active"

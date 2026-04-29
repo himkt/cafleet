@@ -533,7 +533,7 @@ class TestAuthorizationBoundary:
         out = result.output or ""
         assert f"agent {MEMBER_ID}" in out
         assert "has no placement" in out
-        assert "cafleet deregister" in out
+        assert "cafleet agent deregister" in out
         assert deregister_recorder == []
 
     def test_cross_director_same_session_is_rejected(

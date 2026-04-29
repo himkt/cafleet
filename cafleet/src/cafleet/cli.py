@@ -16,7 +16,7 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.url import make_url
 
 from cafleet import broker, output, tmux
-from cafleet.coding_agent import CODING_AGENTS, CodingAgentConfig, get_coding_agent
+from cafleet.coding_agent import CLAUDE, CodingAgentConfig
 from cafleet.config import settings
 
 
@@ -275,12 +275,22 @@ def doctor(ctx) -> None:
         click.echo(f"  TMUX_PANE:     {tmux_pane_env}")
 
 
-@cli.command()
+@cli.group()
+def agent() -> None:
+    """Agent registry commands."""
+
+
+@cli.group()
+def message() -> None:
+    """Message broker commands."""
+
+
+@agent.command("register")
 @click.option("--name", required=True, help="Agent name")
 @click.option("--description", required=True, help="Agent description")
 @click.option("--skills", default=None, help="Skills as JSON string")
 @click.pass_context
-def register(ctx, name, description, skills):
+def agent_register(ctx, name, description, skills):
     """Register a new agent with the broker."""
     _require_session_id(ctx)
 
@@ -304,12 +314,12 @@ def register(ctx, name, description, skills):
             click.echo(output.format_register(result))
 
 
-@cli.command()
+@message.command("send")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--to", required=True, help="Recipient agent ID")
 @click.option("--text", required=True, help="Message text")
 @click.pass_context
-def send(ctx, agent_id, to, text):
+def message_send(ctx, agent_id, to, text):
     """Send a unicast message to another agent."""
     _require_session_id(ctx)
     with _handle_broker_errors():
@@ -326,11 +336,11 @@ def send(ctx, agent_id, to, text):
             click.echo(output.format_task(result))
 
 
-@cli.command()
+@message.command("broadcast")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--text", required=True, help="Message text")
 @click.pass_context
-def broadcast(ctx, agent_id, text):
+def message_broadcast(ctx, agent_id, text):
     """Broadcast a message to all agents."""
     _require_session_id(ctx)
     with _handle_broker_errors():
@@ -346,15 +356,19 @@ def broadcast(ctx, agent_id, text):
             click.echo(output.format_task_list(result))
 
 
-@cli.command()
+@message.command("poll")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--since", default=None, help="Filter tasks since timestamp")
 @click.option("--page-size", default=None, type=int, help="Number of tasks")
 @click.pass_context
-def poll(ctx, agent_id, since, page_size):
+def message_poll(ctx, agent_id, since, page_size):
     """Poll inbox for messages."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         result = broker.poll_tasks(
             agent_id,
             since=since,
@@ -366,14 +380,18 @@ def poll(ctx, agent_id, since, page_size):
             click.echo(output.format_task_list(result))
 
 
-@cli.command()
+@message.command("ack")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to acknowledge")
 @click.pass_context
-def ack(ctx, agent_id, task_id):
+def message_ack(ctx, agent_id, task_id):
     """Acknowledge receipt of a message."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         result = broker.ack_task(agent_id, task_id)
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
@@ -382,14 +400,18 @@ def ack(ctx, agent_id, task_id):
             click.echo(output.format_task(result))
 
 
-@cli.command()
+@message.command("cancel")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to cancel")
 @click.pass_context
-def cancel(ctx, agent_id, task_id):
+def message_cancel(ctx, agent_id, task_id):
     """Cancel (retract) a sent message."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         result = broker.cancel_task(agent_id, task_id)
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
@@ -398,14 +420,18 @@ def cancel(ctx, agent_id, task_id):
             click.echo(output.format_task(result))
 
 
-@cli.command("get-task")
+@message.command("show")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to retrieve")
 @click.pass_context
-def get_task(ctx, agent_id, task_id):
+def message_show(ctx, agent_id, task_id):
     """Get details of a specific task."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         result = broker.get_task(ctx.obj["session_id"], task_id)
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
@@ -413,37 +439,56 @@ def get_task(ctx, agent_id, task_id):
             click.echo(output.format_task(result))
 
 
-@cli.command()
+@agent.command("list")
 @click.option("--agent-id", required=True, help="Agent ID")
-@click.option("--id", "detail_id", default=None, help="Get detail for specific agent")
 @click.pass_context
-def agents(ctx, agent_id, detail_id):
-    """List registered agents or get agent detail."""
+def agent_list(ctx, agent_id):
+    """List registered agents in the session."""
     _require_session_id(ctx)
     with _handle_broker_errors():
-        if detail_id:
-            result = broker.get_agent(detail_id, ctx.obj["session_id"])
-            if result is None:
-                raise ValueError(f"Agent {detail_id} not found")
-            if ctx.obj["json_output"]:
-                click.echo(output.format_json(result))
-            else:
-                click.echo(output.format_agent(result))
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
+        agents = broker.list_agents(ctx.obj["session_id"])
+        if ctx.obj["json_output"]:
+            click.echo(output.format_json(agents))
         else:
-            agent_list = broker.list_agents(ctx.obj["session_id"])
-            if ctx.obj["json_output"]:
-                click.echo(output.format_json(agent_list))
-            else:
-                click.echo(output.format_agent_list(agent_list))
+            click.echo(output.format_agent_list(agents))
 
 
-@cli.command()
+@agent.command("show")
+@click.option("--agent-id", required=True, help="Agent ID")
+@click.option("--id", "detail_id", required=True, help="Target agent ID")
+@click.pass_context
+def agent_show(ctx, agent_id, detail_id):
+    """Show detail for a specific agent."""
+    _require_session_id(ctx)
+    with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
+        result = broker.get_agent(detail_id, ctx.obj["session_id"])
+        if result is None:
+            raise ValueError(f"Agent {detail_id} not found")
+        if ctx.obj["json_output"]:
+            click.echo(output.format_json(result))
+        else:
+            click.echo(output.format_agent(result))
+
+
+@agent.command("deregister")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.pass_context
-def deregister(ctx, agent_id):
+def agent_deregister(ctx, agent_id):
     """Deregister this agent from the broker."""
     _require_session_id(ctx)
     with _handle_broker_errors():
+        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
+            raise click.ClickException(
+                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
+            )
         deregistered = broker.deregister_agent(agent_id)
 
     if not deregistered:
@@ -473,7 +518,7 @@ def _load_authorized_member(
 
     ``placement_missing_msg`` is the full error body for the "no placement"
     path, because each caller points users at a different follow-up command
-    (``cafleet deregister`` from delete; ``cafleet member create`` from
+    (``cafleet agent deregister`` from delete; ``cafleet member create`` from
     capture / send-input). Pane-id presence is NOT checked here — delete
     tolerates a pending placement while the others reject it.
     """
@@ -545,7 +590,7 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
         click.echo(
             f"WARNING: rollback deregister failed — agent {new_agent_id} is "
             f"orphaned in the registry. Run `cafleet --session-id {session_id} "
-            f"deregister --agent-id {new_agent_id}` manually to clean up. "
+            f"agent deregister --agent-id {new_agent_id}` manually to clean up. "
             f"Cause: {drop_exc}",
             err=True,
         )
@@ -556,24 +601,16 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
 @click.option("--agent-id", required=True, help="Director's agent ID")
 @click.option("--name", required=True, help="Member name")
 @click.option("--description", required=True, help="Member description")
-@click.option(
-    "--coding-agent",
-    type=click.Choice(list(CODING_AGENTS)),
-    default="claude",
-    show_default=True,
-    help="Coding agent to spawn in the tmux pane",
-)
 @click.argument("prompt_argv", nargs=-1)
 @click.pass_context
-def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
-    """Register a new member and spawn its coding agent pane in the Director's window."""
+def member_create(ctx, agent_id, name, description, prompt_argv):
+    """Register a new member and spawn its claude pane in the Director's window."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
-    coding_agent_config = get_coding_agent(coding_agent)
 
     try:
         tmux.ensure_tmux_available()
-        coding_agent_config.ensure_available()
+        CLAUDE.ensure_available()
         director_ctx = tmux.director_context()
     except (tmux.TmuxError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -588,7 +625,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
                 "tmux_session": director_ctx.session,
                 "tmux_window_id": director_ctx.window_id,
                 "tmux_pane_id": None,
-                "coding_agent": coding_agent_config.name,
+                "coding_agent": CLAUDE.name,
             },
         )
     except Exception as exc:
@@ -596,9 +633,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
     new_agent_id = result["agent_id"]
 
     try:
-        prompt = _resolve_prompt(
-            ctx, agent_id, new_agent_id, prompt_argv, coding_agent_config
-        )
+        prompt = _resolve_prompt(ctx, agent_id, new_agent_id, prompt_argv, CLAUDE)
     except click.UsageError as exc:
         _rollback_register(
             new_agent_id,
@@ -612,7 +647,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
         pane_id = tmux.split_window(
             target_window_id=director_ctx.window_id,
             env=fwd_env,
-            command=coding_agent_config.build_command(prompt, display_name=name),
+            command=CLAUDE.build_command(prompt, display_name=name),
         )
     except tmux.TmuxError as exc:
         _rollback_register(
@@ -681,7 +716,7 @@ def member_delete(ctx, agent_id, member_id, force):
         agent_id,
         member_id,
         placement_missing_msg=(
-            f"agent {member_id} has no placement; use `cafleet deregister` instead"
+            f"agent {member_id} has no placement; use `cafleet agent deregister` instead"
         ),
     )
     pane_id = placement["tmux_pane_id"]
@@ -886,16 +921,26 @@ def member_capture(ctx, agent_id, member_id, lines):
     "--freetext",
     type=str,
     default=None,
-    help='Send "4" + literal text + Enter. Mutually exclusive with --choice.',
+    help='Send "4" + literal text + Enter (AskUserQuestion only). Mutually exclusive with --choice and --bash.',
+)
+@click.option(
+    "--bash",
+    "bash_command",
+    type=str,
+    default=None,
+    help='Send "! <command>" + Enter for bash routing. Mutually exclusive with --choice and --freetext.',
 )
 @click.pass_context
-def member_send_input(ctx, agent_id, member_id, choice, freetext):
+def member_send_input(ctx, agent_id, member_id, choice, freetext, bash_command):
     """Safely forward a restricted keystroke to a member pane."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
-    if (choice is None) == (freetext is None):
-        raise click.UsageError("Must supply exactly one of --choice or --freetext.")
+    supplied = sum(1 for v in (choice, freetext, bash_command) if v is not None)
+    if supplied != 1:
+        raise click.UsageError(
+            "--choice, --freetext, --bash are mutually exclusive; supply exactly one."
+        )
 
     if freetext is not None and ("\n" in freetext or "\r" in freetext):
         raise click.UsageError("free text may not contain newlines.")
@@ -924,9 +969,12 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
         if choice is not None:
             tmux.send_choice_key(target_pane_id=pane_id, digit=choice)
             action, value = "choice", str(choice)
-        else:
+        elif freetext is not None:
             tmux.send_freetext_and_submit(target_pane_id=pane_id, text=freetext)
             action, value = "freetext", freetext
+        else:
+            tmux.send_bash_command(target_pane_id=pane_id, command=bash_command)
+            action, value = "bash", bash_command
     except tmux.TmuxError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
 
@@ -942,7 +990,12 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
             )
         )
     else:
-        label = f"choice {value}" if action == "choice" else "free text"
+        if action == "choice":
+            label = f"choice {value}"
+        elif action == "bash":
+            label = f"bash command {value!r}"
+        else:
+            label = "free text"
         click.echo(f"Sent {label} to member {target['name']} ({pane_id}).")
 
 

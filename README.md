@@ -10,8 +10,8 @@ CAFleet enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 
 - **Agent Registry** -- Register, discover, and deregister agents via CLI
 - **Session Isolation** -- A `session_id` defines a session boundary; cross-session agents are fully invisible to each other
-- **Auto-bootstrap root Director on session create** -- `cafleet session create` runs a single transaction that inserts the session row, registers a hardcoded root Director (`name="Director"`) with an `agent_placements` row pointing at the current tmux pane, back-fills `sessions.director_agent_id`, and seeds the built-in Administrator. Must be run inside a tmux session — the CLI fails fast with `Error: cafleet session create must be run inside a tmux session` (exit 1) otherwise. The root Director's placement has `director_agent_id=NULL` to indicate "no parent"; this is what allows Member → Director tmux push notifications to work out of the box. `cafleet deregister` refuses the root Director (use `cafleet session delete` instead)
-- **Soft-delete sessions** -- `cafleet session delete <id>` is a single-transaction logical delete: stamps `sessions.deleted_at`, sweeps every active agent in the session (root Director included) to `status='deregistered'`, and physically deletes their `agent_placements` rows. Tasks are preserved (audit trail). Idempotent — re-running against an already-deleted session prints `Deregistered 0 agents.` and exits 0. Soft-deleted sessions are hidden from `cafleet session list` and rejected by `cafleet register` with `Error: session <id> is deleted`. Surviving member tmux panes are intentionally orphaned — call `cafleet member delete` per member first for a clean teardown
+- **Auto-bootstrap root Director on session create** -- `cafleet session create` runs a single transaction that inserts the session row, registers a hardcoded root Director (`name="Director"`) with an `agent_placements` row pointing at the current tmux pane, back-fills `sessions.director_agent_id`, and seeds the built-in Administrator. Must be run inside a tmux session — the CLI fails fast with `Error: cafleet session create must be run inside a tmux session` (exit 1) otherwise. The root Director's placement has `director_agent_id=NULL` to indicate "no parent"; this is what allows Member → Director tmux push notifications to work out of the box. `cafleet agent deregister` refuses the root Director (use `cafleet session delete` instead)
+- **Soft-delete sessions** -- `cafleet session delete <id>` is a single-transaction logical delete: stamps `sessions.deleted_at`, sweeps every active agent in the session (root Director included) to `status='deregistered'`, and physically deletes their `agent_placements` rows. Tasks are preserved (audit trail). Idempotent — re-running against an already-deleted session prints `Deregistered 0 agents.` and exits 0. Soft-deleted sessions are hidden from `cafleet session list` and rejected by `cafleet agent register` with `Error: session <id> is deleted`. Surviving member tmux panes are intentionally orphaned — call `cafleet member delete` per member first for a clean teardown
 - **Built-in Administrator agent** -- `cafleet session create` auto-seeds exactly one built-in `Administrator` agent per session (marked via `agent_card_json.cafleet.kind == "builtin-administrator"`); the Admin WebUI always sends from this identity. The broker rejects deregister and placement operations targeting an Administrator (`AdministratorProtectedError` currently surfaces as `Error: ...` + exit 1 in the CLI; WebUI HTTP 409 mapping is reserved for a future deregister endpoint/handler) and filters Administrators out of broadcast recipient sets so they are write-only identities. Alembic revision `0006` backfills one Administrator into each pre-existing session on `cafleet db init`
 - **Unicast Messaging** -- Send messages to a specific agent by ID (same-session only)
 - **Broadcast Messaging** -- Send messages to all agents in the same session
@@ -20,11 +20,11 @@ CAFleet enables ephemeral agents -- such as Claude Code sessions, CI/CD runners,
 - **Session-Based Routing** -- `session_id` + `agent_id` (identity) parameters on all operations; no authentication or bearer tokens
 - **WebUI** -- Browser-based dashboard; session picker at `/ui/#/sessions`, then a Discord-style unified timeline per session (sidebar of active/deregistered agents, message timeline with broadcasts collapsed to one entry + per-recipient ACK reactions on hover, and a multi-line `@<agent>` / `@all` textarea input with Discord-style autocomplete popover). Every message is sent as the built-in Administrator — a fixed read-only `Sending as Administrator` label replaces the old sender dropdown. Typing `@` opens a popover of matching active agents (plus virtual `@all`); ArrowUp/Down navigate, Enter/Tab insert, Esc dismisses. Enter sends, Shift+Enter inserts a newline, and IME composition (Japanese/Chinese candidates) never triggers an accidental submit. Newlines in message bodies are preserved end-to-end and rendered on multiple lines in the timeline
 - **Member Lifecycle** -- `cafleet member create/delete/list/capture/send-input` commands wrap tmux pane spawning + agent registration into atomic operations; the `agent_placements` table persists the agent-to-pane mapping in the registry. `member send-input` is a safe `tmux send-keys` wrapper for answering an `AskUserQuestion` prompt (digit 1/2/3 or free text) that mirrors the `capture` authorization boundary. Director-side usage is AskUserQuestion-delegated: the Director asks the user via its own `AskUserQuestion` call and then invokes the resolved command via Bash — see [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) "Answer a member's AskUserQuestion prompt" for the canonical three-beat workflow and pane-shapes table
-- **Multi-Runner Support** -- `--coding-agent claude|codex` flag on `member create` selects which coding agent to spawn; defaults to `claude` for backward compatibility. Codex runs with `--approval-mode auto-edit`
-- **tmux Push Notifications** -- After persisting a message, the broker injects a `cafleet poll` command into each recipient's tmux pane via `tmux send-keys` for near-instant delivery. Best-effort: self-sends are skipped, missing/dead panes fail silently, and the message queue remains the source of truth
-- **Director Monitoring Skill** -- `.claude/skills/cafleet-monitoring/SKILL.md` defines mandatory supervision protocol for Directors: 2-stage health check (poll inbox → capture terminal), spawn protocol, stall response, and a `/loop` prompt template
-- **Design Document Orchestration Skills** -- `.claude/skills/design-doc-create/` and `.claude/skills/design-doc-execute/` replicate the global `/design-doc-create` and `/design-doc-execute` workflows using CAFleet primitives (register + `cafleet send` + `cafleet member create`). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. A plugin-local `design-doc` template skill (copy of the global `/design-doc`) keeps the plugin self-contained. Exposed as `/cafleet:design-doc-create` and `/cafleet:design-doc-execute` to other projects via the `cafleet` plugin
-- **Unified CLI** -- Single `cafleet` command for all operations: server admin (`db init`, `session`), agent messaging (`register`, `send`, `poll`, `ack`), and member lifecycle (`member create/delete/list/capture/send-input`)
+- **Member Spawn Permission Posture** -- `cafleet member create` always launches the spawned `claude` process with `--permission-mode dontAsk` so the member's Bash tool is enabled and permission prompts auto-resolve silently. Members run cafleet (and any other shell command) directly via the Bash tool. The bash-via-Director protocol (member sends a plain CAFleet message asking the Director to run a command, Director dispatches via `cafleet member send-input --bash`) is the fallback when the harness deny-list rejects a Bash invocation (e.g. `git push`, `rm -rf`); members auto-route in that case after first reconsidering whether the command is correct and necessary. See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) "Routing Bash via the Director" for details
+- **tmux Push Notifications** -- After persisting a message, the broker injects a `cafleet message poll` command into each recipient's tmux pane via `tmux send-keys` for near-instant delivery. Best-effort: self-sends are skipped, missing/dead panes fail silently, and the message queue remains the source of truth
+- **Director Monitoring Skill** -- `skills/cafleet-monitoring/SKILL.md` defines mandatory supervision protocol for Directors: 2-stage health check (poll inbox → capture terminal), spawn protocol, stall response, and a `/loop` prompt template
+- **Design Document Orchestration Skills** -- `skills/design-doc-create/` and `skills/design-doc-execute/` replicate the global `/design-doc-create` and `/design-doc-execute` workflows using CAFleet primitives (`cafleet agent register` + `cafleet message send` + `cafleet member create`). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. A plugin-local `design-doc` template skill (copy of the global `/design-doc`) keeps the plugin self-contained. Exposed as `/cafleet:design-doc-create` and `/cafleet:design-doc-execute` to other projects via the `cafleet` plugin
+- **Unified CLI** -- Single `cafleet` command for all operations: schema (`db init`), session lifecycle (`session create/list/show/delete`), agent registry (`agent register/deregister/list/show`), messaging (`message send/broadcast/poll/ack/cancel/show`), and member lifecycle (`member create/delete/list/capture/send-input`). `server` and `doctor` are top-level meta-command exceptions.
 - **SQLite Storage** -- Single-file database; no daemon required. Schema managed by Alembic via `cafleet db init`
 
 ## Architecture
@@ -46,7 +46,7 @@ Key design decisions:
 - Sessions are created via `cafleet session create`, which must be run inside a tmux session and atomically bootstraps the session + root Director + placement + Administrator in one transaction. Deleting a session via `cafleet session delete` is a soft-delete: the row is stamped with `deleted_at`, all agents are deregistered, and their placements are physically removed — tasks are preserved.
 - The WebUI requires no login. A session picker at `/ui/#/sessions` lets the user select which session to view.
 - **Storage layer**: All data is persisted in a single SQLite file (`~/.local/share/cafleet/registry.db` by default). Indexed fields are columns; task payloads are stored as JSON blobs. `PRAGMA busy_timeout=5000` handles concurrent access. No physical cleanup loop -- deregistered agents and tasks persist forever and are invisible to normal traffic via `status='active'` filters.
-- **tmux push notifications**: After persisting a message, the broker looks up the recipient's `agent_placements` row and, if a tmux pane is available, injects `cafleet --session-id <session-id> poll --agent-id <recipient-agent-id>` via `tmux send-keys`. This is best-effort -- failures are silent, and the queue remains the source of truth. Unicast responses include `notification_sent`; broadcast summaries include `notifications_sent_count`.
+- **tmux push notifications**: After persisting a message, the broker looks up the recipient's `agent_placements` row and, if a tmux pane is available, injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` via `tmux send-keys`. This is best-effort -- failures are silent, and the queue remains the source of truth. Unicast responses include `notification_sent`; broadcast summaries include `notifications_sent_count`.
 
 ## Quick Start
 
@@ -120,7 +120,7 @@ Outside tmux the command fails fast with `Error: cafleet session create must be 
 
 Capture the printed `session_id` and pass it as `--session-id <session-id>` (a global flag, placed before the subcommand) on every subsequent command. CLI commands access SQLite directly — no server needed. Start `cafleet server` (or `mise //cafleet:dev` from a repo clone) only if you want the admin WebUI.
 
-The root Director is the session's built-in team lead: `cafleet deregister --agent-id <director_agent_id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`. Use `cafleet session delete` when you want to tear down the session.
+The root Director is the session's built-in team lead: `cafleet agent deregister --agent-id <director_agent_id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.`. Use `cafleet session delete` when you want to tear down the session.
 
 The built-in `Administrator` agent is seeded in the same transaction. The Admin WebUI always sends from this identity; the broker rejects deregister and placement operations targeting it. Pre-existing sessions are backfilled on `cafleet db init` via Alembic revision `0006`.
 
@@ -135,12 +135,12 @@ cafleet session delete 550e8400-e29b-41d4-a716-446655440000
 
 Member tmux panes that were spawned via `cafleet member create` are **not** automatically closed by `session delete`. For a clean teardown, call `cafleet member delete` on each member first (which sends `/exit`), then call `session delete`. If a member pane refuses to close (e.g. blocked on a confirmation prompt), rerun `cafleet member delete` with `--force`, which kill-panes the target, sweeps the placement, and rebalances the layout.
 
-> **Why a literal flag, not an env var?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. Passing `--session-id <literal-uuid>` lets a single allow-list pattern match every subcommand for that session; shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet register` — do not introduce shell variables to hold them.
+> **Why a literal flag, not an env var?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. Passing `--session-id <literal-uuid>` lets a single allow-list pattern match every subcommand for that session; shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet agent register` — do not introduce shell variables to hold them.
 
 ### Register an Agent
 
 ```bash
-cafleet --session-id 550e8400-e29b-41d4-a716-446655440000 register \
+cafleet --session-id 550e8400-e29b-41d4-a716-446655440000 agent register \
   --name "my-agent" --description "A coding assistant"
 # → prints: 7ba91234-5678-90ab-cdef-112233445566
 ```
@@ -150,20 +150,20 @@ Save the returned `agent_id` for subsequent commands.
 ### Send a Message
 
 ```bash
-cafleet --session-id <session-id> send --agent-id <your-agent-id> \
+cafleet --session-id <session-id> message send --agent-id <your-agent-id> \
   --to <recipient-agent-id> --text "Hello from my agent"
 ```
 
 ### Poll for Messages
 
 ```bash
-cafleet --session-id <session-id> poll --agent-id <your-agent-id>
+cafleet --session-id <session-id> message poll --agent-id <your-agent-id>
 ```
 
 ### Acknowledge a Message
 
 ```bash
-cafleet --session-id <session-id> ack --agent-id <your-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message ack --agent-id <your-agent-id> --task-id <task-id>
 ```
 
 ### Start the Admin WebUI (optional)
@@ -189,7 +189,7 @@ Global flags (placed **before** the subcommand):
 
 | Flag | Required | Description |
 |---|---|---|
-| `--session-id <id>` | Yes (for client + member subcommands) | Session identifier for agent routing (opaque string — new sessions get a UUIDv4, migrated sessions reuse a 64-char hex value). Required for `register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `get-task`, `agents`, `deregister`, `member *`. Silently accepted (and ignored) on `db init` / `session *`. |
+| `--session-id <id>` | Yes (for client + member subcommands) | Session identifier for agent routing (opaque string — new sessions get a UUIDv4, migrated sessions reuse a 64-char hex value). Required for `agent *`, `message *`, `member *`. Silently accepted (and ignored) on `db init` / `session *` / `server` / `doctor`. |
 | `--json` | No | Emit JSON output. |
 | `--version` | No | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
@@ -219,20 +219,21 @@ All commands below require the global `--session-id <uuid>` flag (placed before 
 
 | Command | `--agent-id` | Description |
 |---|---|---|
-| `cafleet --session-id <id> register` | Not required | Register a new agent; returns an agent ID |
-| `cafleet --session-id <id> send --agent-id <id>` | Required | Send a unicast message to another agent in the same session |
-| `cafleet --session-id <id> broadcast --agent-id <id>` | Required | Broadcast a message to all agents in the same session |
-| `cafleet --session-id <id> poll --agent-id <id>` | Required | Poll inbox for incoming messages |
-| `cafleet --session-id <id> ack --agent-id <id>` | Required | Acknowledge receipt of a message |
-| `cafleet --session-id <id> cancel --agent-id <id>` | Required | Cancel (retract) a sent message before it is acknowledged |
-| `cafleet --session-id <id> get-task --agent-id <id>` | Required | Get details of a specific task/message |
-| `cafleet --session-id <id> agents --agent-id <id>` | Required | List agents in the session or get detail for a specific agent |
-| `cafleet --session-id <id> deregister --agent-id <id>` | Required | Deregister this agent from the broker |
-| `cafleet --session-id <id> member create --agent-id <id>` | Required | Register a member agent and spawn its tmux pane (Director only). `--coding-agent claude\|codex` selects the backend (default: `claude`) |
+| `cafleet --session-id <id> agent register` | Not required | Register a new agent; returns an agent ID |
+| `cafleet --session-id <id> agent list --agent-id <id>` | Required | List agents in the session |
+| `cafleet --session-id <id> agent show --agent-id <id> --id <target-id>` | Required | Show detail for a specific agent |
+| `cafleet --session-id <id> agent deregister --agent-id <id>` | Required | Deregister this agent from the broker |
+| `cafleet --session-id <id> message send --agent-id <id>` | Required | Send a unicast message to another agent in the same session |
+| `cafleet --session-id <id> message broadcast --agent-id <id>` | Required | Broadcast a message to all agents in the same session |
+| `cafleet --session-id <id> message poll --agent-id <id>` | Required | Poll inbox for incoming messages |
+| `cafleet --session-id <id> message ack --agent-id <id>` | Required | Acknowledge receipt of a message |
+| `cafleet --session-id <id> message cancel --agent-id <id>` | Required | Cancel (retract) a sent message before it is acknowledged |
+| `cafleet --session-id <id> message show --agent-id <id> --task-id <task-id>` | Required | Get details of a specific task/message |
+| `cafleet --session-id <id> member create --agent-id <id>` | Required | Register a member agent and spawn its claude tmux pane (Director only). The spawned `claude` process always launches with `--permission-mode dontAsk`, so the member's Bash tool is enabled and permission prompts auto-resolve. The bash-via-Director protocol fires as a fallback when the harness deny-list rejects a member's Bash invocation (see [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) "Routing Bash via the Director") |
 | `cafleet --session-id <id> member delete --agent-id <id>` | Required | Deregister a member and close its pane (Director only) |
 | `cafleet --session-id <id> member list --agent-id <id>` | Required | List members spawned by this Director |
 | `cafleet --session-id <id> member capture --agent-id <id>` | Required | Capture the last N lines of a member's pane (Director only) |
-| `cafleet --session-id <id> member send-input --agent-id <id>` | Required | Forward a restricted keystroke (`--choice {1,2,3}` or `--freetext "<text>"`) to a member's pane (Director only); see [docs/spec/cli-options.md](docs/spec/cli-options.md#member-send-input). Director-side workflow is AskUserQuestion-delegated — see [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) "Answer a member's AskUserQuestion prompt" for the canonical three-beat shape |
+| `cafleet --session-id <id> member send-input --agent-id <id>` | Required | Forward a restricted keystroke (`--choice {1,2,3}`, `--freetext "<text>"` for AskUserQuestion, or `--bash "<cmd>"` for bash routing) to a member's pane (Director only); see [docs/spec/cli-options.md](docs/spec/cli-options.md#member-send-input). For `--choice`/`--freetext` the workflow is AskUserQuestion-delegated; for `--bash` the Director keystrokes `! <cmd>` + Enter into the member's normal prompt — see [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) "Answer a member's AskUserQuestion prompt" and "Routing Bash via the Director" for the canonical workflows |
 
 ## API Overview
 

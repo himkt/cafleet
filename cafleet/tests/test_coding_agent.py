@@ -1,12 +1,6 @@
 import pytest
 
-from cafleet.coding_agent import (
-    CLAUDE,
-    CODEX,
-    CODING_AGENTS,
-    CodingAgentConfig,
-    get_coding_agent,
-)
+from cafleet.coding_agent import CLAUDE, CodingAgentConfig
 
 
 class TestCodingAgentConfig:
@@ -72,27 +66,37 @@ class TestBuildCommand:
 
     def test_claude_build_command(self):
         result = CLAUDE.build_command("Hello world")
-        assert result == ["claude", "Hello world"]
-
-    def test_codex_build_command(self):
-        result = CODEX.build_command("Hello world")
-        assert result == ["codex", "--approval-mode", "auto-edit", "Hello world"]
+        assert result == [
+            "claude",
+            "--permission-mode",
+            "dontAsk",
+            "Hello world",
+        ]
 
     def test_display_name_kwarg_injects_for_claude(self):
         result = CLAUDE.build_command("p", display_name="Drafter")
-        assert result == ["claude", "--name", "Drafter", "p"]
-
-    def test_display_name_kwarg_no_op_for_codex(self):
-        result = CODEX.build_command("p", display_name="Drafter")
-        assert result == ["codex", "--approval-mode", "auto-edit", "p"]
+        assert result == [
+            "claude",
+            "--permission-mode",
+            "dontAsk",
+            "--name",
+            "Drafter",
+            "p",
+        ]
 
     def test_display_name_none_matches_default(self):
         assert CLAUDE.build_command("p", display_name=None) == CLAUDE.build_command("p")
-        assert CODEX.build_command("p", display_name=None) == CODEX.build_command("p")
 
     def test_display_name_with_spaces_preserved(self):
         result = CLAUDE.build_command("p", display_name="Code Reviewer")
-        assert result == ["claude", "--name", "Code Reviewer", "p"]
+        assert result == [
+            "claude",
+            "--permission-mode",
+            "dontAsk",
+            "--name",
+            "Code Reviewer",
+            "p",
+        ]
 
     def test_display_name_args_field_default_empty_tuple(self):
         config = CodingAgentConfig(name="test", binary="test-bin")
@@ -164,78 +168,106 @@ class TestClaudeConfig:
         assert "dir-001" in result
 
 
-class TestCodexConfig:
-    def test_name(self):
-        assert CODEX.name == "codex"
+class TestPermissionArgs:
+    """``permission_args`` field — always-injected spawn argv.
 
-    def test_binary(self):
-        assert CODEX.binary == "codex"
+    Pinned argv ordering: ``[binary, *extra_args, *permission_args, *name_args, prompt]``
+    — ``permission_args`` MUST come BEFORE ``name_args``. Asserted by index,
+    not just membership, so a future revert that flips the order would fail loudly.
+    """
 
-    def test_extra_args(self):
-        assert CODEX.extra_args == ("--approval-mode", "auto-edit")
+    def test_claude_permission_args_constant(self):
+        assert CLAUDE.permission_args == ("--permission-mode", "dontAsk")
 
-    def test_prompt_template_no_skill_reference(self):
-        assert "Skill(" not in CODEX.default_prompt_template
+    def test_permission_args_field_default_empty_tuple(self):
+        config = CodingAgentConfig(name="test", binary="test-bin")
+        assert config.permission_args == ()
+        assert isinstance(config.permission_args, tuple)
 
-    def test_prompt_template_uses_format_placeholders_for_ids(self):
-        assert "{session_id}" in CODEX.default_prompt_template
-        assert "{agent_id}" in CODEX.default_prompt_template
-        assert "$CAFLEET_AGENT_ID" not in CODEX.default_prompt_template
-        assert "$CAFLEET_SESSION_ID" not in CODEX.default_prompt_template
+    def test_claude_build_command_no_display_name(self):
+        result = CLAUDE.build_command("hello")
+        assert result == ["claude", "--permission-mode", "dontAsk", "hello"]
 
-    def test_prompt_template_has_format_placeholders(self):
-        result = CODEX.default_prompt_template.format(
-            session_id="550e8400-e29b-41d4-a716-446655440000",
-            agent_id="7ba91234-5678-90ab-cdef-112233445566",
-            director_name="Bob",
-            director_agent_id="dir-002",
+    def test_claude_build_command_with_display_name(self):
+        result = CLAUDE.build_command("hello", display_name="Drafter")
+        assert result == [
+            "claude",
+            "--permission-mode",
+            "dontAsk",
+            "--name",
+            "Drafter",
+            "hello",
+        ]
+
+    def test_permission_args_appear_before_name_args(self):
+        result = CLAUDE.build_command("p", display_name="Drafter")
+        perm_index = result.index("--permission-mode")
+        name_index = result.index("--name")
+        assert perm_index < name_index, (
+            f"permission_args must precede name_args; got {result!r}"
         )
+
+    def test_custom_config_with_permission_args_injects_tokens(self):
+        config = CodingAgentConfig(
+            name="custom",
+            binary="custom-bin",
+            extra_args=("--mode", "auto"),
+            permission_args=("--allowedTools", "Read"),
+        )
+        result = config.build_command("p")
+        assert result == ["custom-bin", "--mode", "auto", "--allowedTools", "Read", "p"]
+
+    def test_custom_config_with_empty_permission_args_no_op(self):
+        config = CodingAgentConfig(
+            name="custom",
+            binary="custom-bin",
+            extra_args=("--mode", "auto"),
+            permission_args=(),
+        )
+        result = config.build_command("p")
+        assert result == ["custom-bin", "--mode", "auto", "p"]
+
+
+class TestPromptTemplates:
+    """dontAsk wiring reminder in the claude template."""
+
+    _STANDARD_KWARGS = {
+        "session_id": "550e8400-e29b-41d4-a716-446655440000",
+        "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
+        "director_name": "Alice",
+        "director_agent_id": "dir-001",
+    }
+
+    def test_claude_template_documents_dontask_mode(self):
+        """The template tells the spawned member its harness runs in
+        ``dontAsk`` mode and the Bash tool is enabled. The canary
+        ``"dontAsk"`` is the smallest change-resistant marker.
+        """
+        assert "dontAsk" in CLAUDE.default_prompt_template
+
+    def test_claude_template_format_succeeds_with_standard_kwargs(self):
+        result = CLAUDE.default_prompt_template.format(**self._STANDARD_KWARGS)
         assert "550e8400-e29b-41d4-a716-446655440000" in result
         assert "7ba91234-5678-90ab-cdef-112233445566" in result
-        assert "Bob" in result
-        assert "dir-002" in result
-
-    def test_prompt_template_contains_explicit_cli_instructions(self):
-        template = CODEX.default_prompt_template
-        assert (
-            "cafleet --session-id {session_id} poll --agent-id {agent_id}" in template
-        )
-        assert "cafleet --session-id {session_id} ack --agent-id {agent_id}" in template
-        assert (
-            "cafleet --session-id {session_id} send --agent-id {agent_id}" in template
-        )
+        assert "Alice" in result
+        assert "dir-001" in result
 
 
-class TestCodingAgentsRegistry:
-    def test_contains_claude(self):
-        assert "claude" in CODING_AGENTS
-        assert CODING_AGENTS["claude"] is CLAUDE
+class TestCodexConstantRemoved:
+    """Regression guard: the codex backend was removed in design 0000034 §15.
+    ``CODEX``, ``CODING_AGENTS``, and ``get_coding_agent`` are gone from
+    ``cafleet.coding_agent`` — importing any of them MUST raise
+    ``ImportError``.
+    """
 
-    def test_contains_codex(self):
-        assert "codex" in CODING_AGENTS
-        assert CODING_AGENTS["codex"] is CODEX
+    def test_codex_constant_import_raises(self):
+        with pytest.raises(ImportError):
+            from cafleet.coding_agent import CODEX  # noqa: F401
 
-    def test_exactly_two_entries(self):
-        assert set(CODING_AGENTS.keys()) == {"claude", "codex"}
+    def test_coding_agents_registry_import_raises(self):
+        with pytest.raises(ImportError):
+            from cafleet.coding_agent import CODING_AGENTS  # noqa: F401
 
-
-class TestGetCodingAgent:
-    def test_returns_claude_config(self):
-        result = get_coding_agent("claude")
-        assert result is CLAUDE
-
-    def test_returns_codex_config(self):
-        result = get_coding_agent("codex")
-        assert result is CODEX
-
-    def test_raises_valueerror_for_unknown_name(self):
-        with pytest.raises(ValueError, match="Unknown coding agent"):
-            get_coding_agent("unknown-agent")
-
-    def test_raises_valueerror_for_empty_string(self):
-        with pytest.raises(ValueError, match="Unknown coding agent"):
-            get_coding_agent("")
-
-    def test_error_message_includes_unknown_name(self):
-        with pytest.raises(ValueError, match="aider"):
-            get_coding_agent("aider")
+    def test_get_coding_agent_helper_import_raises(self):
+        with pytest.raises(ImportError):
+            from cafleet.coding_agent import get_coding_agent  # noqa: F401

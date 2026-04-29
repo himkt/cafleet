@@ -81,11 +81,14 @@ def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
 
 
 def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) -> bool:
-    """Best-effort ``cafleet poll`` trigger for the recipient's pane.
+    """Best-effort ``cafleet ... message poll`` trigger for the recipient's pane.
 
-    The command string is sent literally so the recipient's
-    ``permissions.allow`` can match it. Returns False on any tmux failure
-    or when the binary is missing, never raising.
+    Injects the poll command string literally into the recipient's tmux
+    pane and then submits it with Enter. Members are spawned with
+    ``--permission-mode dontAsk``, so if running the injected command
+    eventually invokes the Bash tool, permission prompts auto-resolve.
+    Returns False on any tmux failure or when the binary is missing,
+    never raising.
 
     Split into two ``send-keys`` calls for the same reason as
     ``send_freetext_and_submit``: ``-l`` is per-invocation, so mixing
@@ -104,7 +107,7 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
                 "-t",
                 target_pane_id,
                 "-l",
-                f"cafleet --session-id {session_id} poll --agent-id {agent_id}",
+                f"cafleet --session-id {session_id} message poll --agent-id {agent_id}",
             ],
             timeout=5,
         )
@@ -135,6 +138,22 @@ def send_freetext_and_submit(*, target_pane_id: str, text: str) -> None:
         raise TmuxError("send_freetext_and_submit: text may not contain newlines")
     _run(["tmux", "send-keys", "-t", target_pane_id, "4"])
     _run(["tmux", "send-keys", "-t", target_pane_id, "-l", text])
+    _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
+
+
+def send_bash_command(*, target_pane_id: str, command: str) -> None:
+    """Send ``! <command>`` + Enter as two separate send-keys calls.
+
+    Used by ``cafleet member send-input --bash`` to route shell commands
+    via Claude Code's ``!`` shortcut. Unlike ``send_freetext_and_submit``,
+    there is NO leading ``4`` keystroke (no AskUserQuestion gate).
+    """
+    normalized_command = command.strip()
+    if not normalized_command:
+        raise TmuxError("send_bash_command: command may not be empty")
+    if "\n" in command or "\r" in command:
+        raise TmuxError("send_bash_command: command may not contain newlines")
+    _run(["tmux", "send-keys", "-t", target_pane_id, "-l", f"! {normalized_command}"])
     _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
 
 

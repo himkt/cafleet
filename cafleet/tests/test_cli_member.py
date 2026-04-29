@@ -275,24 +275,172 @@ def split_window_recorder(monkeypatch):
 
 @pytest.fixture
 def stub_coding_agent_binaries(monkeypatch):
-    """Pretend every coding-agent binary is on PATH.
+    """Pretend the claude binary is on PATH.
 
     ``coding_agent_config.ensure_available()`` calls ``shutil.which(self.binary)``;
-    patching it module-wide is the narrowest monkeypatch that keeps both
-    ``claude`` and ``codex`` spawns alive without a real binary.
+    patching it module-wide is the narrowest monkeypatch that keeps the
+    spawn alive without a real binary.
     """
     monkeypatch.setattr("cafleet.coding_agent.shutil.which", lambda _: "/usr/bin/stub")
 
 
 class TestMemberCreatePassesDisplayName:
-    """Design doc 0000029 Step 4(f),(g): ``cli.py`` threads ``--name`` as
-    ``display_name`` into ``coding_agent_config.build_command()``, which
-    means the ``command`` kwarg handed to ``tmux.split_window`` contains
-    ``"--name"`` + the member name for ``claude`` spawns and does NOT
-    contain ``"--name"`` for ``codex`` spawns.
+    """``cli.py`` threads ``--name`` as ``display_name`` into
+    ``coding_agent_config.build_command()``, which means the ``command``
+    kwarg handed to ``tmux.split_window`` contains ``"--name"`` + the
+    member name.
     """
 
     def test_member_create_passes_member_name_as_display_name(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert len(split_window_recorder) == 1
+        command = split_window_recorder[0]["command"]
+        assert isinstance(command, list)
+        assert "--name" in command
+        name_index = command.index("--name")
+        assert command[name_index + 1] == "Drafter"
+        assert command[name_index + 2] == "hello"
+        assert command[0] == "claude"
+
+
+class TestPermissionMode:
+    """Spawn argv carries ``--permission-mode dontAsk``.
+
+    Members spawn with the Bash tool enabled and permission prompts auto-resolve.
+    """
+
+    def test_claude_default_injects_dontask_permission_mode(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert len(split_window_recorder) == 1
+        command = split_window_recorder[0]["command"]
+        assert "--permission-mode" in command
+        perm_index = command.index("--permission-mode")
+        assert command[perm_index + 1] == "dontAsk"
+        assert command[0] == "claude"
+        assert "--disallowedTools" not in command
+        assert "Bash" not in command
+        # Pinned argv ordering: permission tokens before name args.
+        name_index = command.index("--name")
+        assert perm_index < name_index, (
+            f"--permission-mode must precede --name; got {command!r}"
+        )
+
+    def test_no_bash_flag_no_longer_parses(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        """Regression guard: ``cafleet member create`` has no ``--no-bash``
+        option. Click MUST reject it with ``No such option: --no-bash`` (exit 2).
+        """
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--no-bash",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 2
+        assert "No such option: --no-bash" in (result.output or "")
+
+    def test_allow_bash_flag_no_longer_parses(
+        self,
+        bootstrapped_session,
+        split_window_recorder,
+        stub_coding_agent_binaries,
+    ):
+        """Regression guard: ``cafleet member create`` has no ``--allow-bash``
+        option. Click MUST reject it with ``No such option: --allow-bash`` (exit 2).
+        """
+        session_id, director_id, runner = bootstrapped_session
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "create",
+                "--agent-id",
+                director_id,
+                "--name",
+                "Drafter",
+                "--description",
+                "Drafter for PR #42",
+                "--allow-bash",
+                "--",
+                "hello",
+            ],
+        )
+        assert result.exit_code == 2
+        assert "No such option: --allow-bash" in (result.output or "")
+
+
+class TestCodingAgentFlagRemoved:
+    """Regression guard: the ``--coding-agent`` flag was removed in design
+    0000034 §15. Any value MUST fail with Click's default ``Error: No such
+    option: '--coding-agent'.`` (exit 2 — UsageError).
+    """
+
+    def test_coding_agent_flag_no_longer_parses(
         self,
         bootstrapped_session,
         split_window_recorder,
@@ -318,51 +466,7 @@ class TestMemberCreatePassesDisplayName:
                 "hello",
             ],
         )
-        assert result.exit_code == 0, result.output
-        assert len(split_window_recorder) == 1
-        command = split_window_recorder[0]["command"]
-        assert isinstance(command, list)
-        assert "--name" in command
-        name_index = command.index("--name")
-        assert command[name_index + 1] == "Drafter"
-        assert command[name_index + 2] == "hello"
-        assert command[0] == "claude"
-
-    def test_member_create_codex_does_not_pass_name_flag(
-        self,
-        bootstrapped_session,
-        split_window_recorder,
-        stub_coding_agent_binaries,
-    ):
-        """Codex regression: ``codex`` has no ``--name`` equivalent today, so
-        ``display_name_args=()`` must elide the flag even when ``--name``
-        is supplied to ``cafleet member create`` (it is always required
-        at the CLI level — ``click.Option --name required=True``).
-        """
-        session_id, director_id, runner = bootstrapped_session
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "member",
-                "create",
-                "--agent-id",
-                director_id,
-                "--name",
-                "Drafter",
-                "--description",
-                "Drafter for PR #42",
-                "--coding-agent",
-                "codex",
-                "--",
-                "hello",
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        assert len(split_window_recorder) == 1
-        command = split_window_recorder[0]["command"]
-        assert "--name" not in command
-        assert command[0] == "codex"
-        assert "--approval-mode" in command
-        assert "auto-edit" in command
+        assert result.exit_code == 2, result.output
+        out = result.output or ""
+        assert "No such option" in out
+        assert "--coding-agent" in out

@@ -104,26 +104,6 @@ class TestSplitWindow:
         assert captured_args[-2] == "claude"
         assert "Load Skill(cafleet)" in captured_args[-1]
 
-    def test_codex_style_command(self, monkeypatch):
-        captured_args = []
-
-        def mock_run(args):
-            captured_args.extend(args)
-            return "%10\n"
-
-        monkeypatch.setattr(tmux, "_run", mock_run)
-        tmux.split_window(
-            target_window_id="@3",
-            env={},
-            command=["codex", "--approval-mode", "auto-edit", "Do the task"],
-        )
-        assert captured_args[-4:] == [
-            "codex",
-            "--approval-mode",
-            "auto-edit",
-            "Do the task",
-        ]
-
     def test_env_vars_forwarded_as_flags(self, monkeypatch):
         """Only CAFLEET_DATABASE_URL is forwarded as -e KEY=VAL when set.
 
@@ -233,11 +213,11 @@ class TestCapturePane:
 
 class TestSendPollTrigger:
     def test_success_returns_true(self, monkeypatch):
-        """Design doc 0000023 (Copilot review fix): ``--session-id`` is a
-        root-group global option and MUST come before the subcommand;
-        ``--agent-id`` is a per-subcommand option and MUST come after
-        ``poll``. This ordering is what click's parser actually accepts and
-        is the literal string ``permissions.allow`` entries need to match.
+        """``--session-id`` is a root-group global option and MUST come
+        before the subcommand; ``--agent-id`` is a per-subcommand option
+        and MUST come after ``message poll``. This ordering is what click's
+        parser actually accepts and is the literal string the recipient's
+        Bash tool receives.
         """
         monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
         captured_args = []
@@ -259,7 +239,7 @@ class TestSendPollTrigger:
             "-t",
             "%7",
             "-l",
-            "cafleet --session-id sess-001 poll --agent-id agent-001",
+            "cafleet --session-id sess-001 message poll --agent-id agent-001",
             "tmux",
             "send-keys",
             "-t",
@@ -315,6 +295,50 @@ class TestSendPollTrigger:
             agent_id="agent-001",
         )
         assert result is False
+
+
+class TestSendPollTriggerKeystroke:
+    """Regression guard for the literal keystroke shape pushed by
+    ``send_poll_trigger``.
+
+    The keystroke is the bare cafleet command and MUST carry
+    ``message poll --agent-id <a>``. The recipient's Bash tool is
+    enabled under ``--permission-mode dontAsk``, so the harness runs
+    the keystroke as a normal Bash invocation.
+
+    The two ``send-keys`` calls are inspected separately:
+
+    - call 0: ``["tmux", "send-keys", "-t", <pane>, "-l", <keystroke>]``
+    - call 1: ``["tmux", "send-keys", "-t", <pane>, "Enter"]``
+    """
+
+    def test_keystroke_starts_with_bare_cafleet(self, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
+        captured: list[list[str]] = []
+
+        def mock_run(args, **_kwargs):
+            captured.append(list(args))
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        ok = tmux.send_poll_trigger(
+            target_pane_id="%5",
+            session_id="550e8400-e29b-41d4-a716-446655440000",
+            agent_id="7ba91234-5678-90ab-cdef-112233445566",
+        )
+        assert ok is True
+        assert len(captured) == 2
+
+        keystroke = captured[0][-1]
+        assert keystroke.startswith("cafleet --session-id "), (
+            "send_poll_trigger keystroke must start with `cafleet --session-id `; "
+            f"got: {keystroke!r}"
+        )
+        assert "message poll --agent-id" in keystroke, (
+            f"keystroke must carry `message poll --agent-id`; got: {keystroke!r}"
+        )
+
+        assert captured[1] == ["tmux", "send-keys", "-t", "%5", "Enter"]
 
 
 class TestPaneExists:
@@ -493,3 +517,114 @@ class TestWaitForPaneGone:
         with pytest.raises(tmux.TmuxError, match="server exited unexpectedly"):
             tmux.wait_for_pane_gone(target_pane_id="%7", timeout=2.0, interval=0.5)
         assert call_count["n"] == 2
+
+
+class TestSendBashCommand:
+    """Round-8 ``tmux.send_bash_command`` helper.
+
+    Bash routing uses Claude Code's ``!`` keystroke convention: the keystroke
+    ``! <command>`` followed by ``Enter`` enters Bash-input mode in the
+    member's pane and runs ``<command>``. Unlike ``send_freetext_and_submit``,
+    there is NO leading ``4`` keystroke (no AskUserQuestion gate), so the
+    helper issues exactly two ``send-keys`` invocations.
+    """
+
+    def test_sends_keystrokes_in_two_calls(self, monkeypatch):
+        captured_calls: list[list[str]] = []
+
+        def mock_run(args, **_kwargs):
+            captured_calls.append(list(args))
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        tmux.send_bash_command(target_pane_id="%5", command="git log -1 --oneline")
+        assert len(captured_calls) == 2
+        assert captured_calls[0] == [
+            "tmux",
+            "send-keys",
+            "-t",
+            "%5",
+            "-l",
+            "! git log -1 --oneline",
+        ]
+        assert captured_calls[1] == [
+            "tmux",
+            "send-keys",
+            "-t",
+            "%5",
+            "Enter",
+        ]
+
+    @pytest.mark.parametrize(
+        "bad_command",
+        [
+            "line1\nline2",
+            "trailing\n",
+            "\nleading",
+            "carriage\rreturn",
+            "mixed\r\nCRLF",
+        ],
+    )
+    def test_rejects_newlines(self, monkeypatch, bad_command):
+        run_calls: list[list[str]] = []
+
+        def mock_run(args, **_kwargs):
+            run_calls.append(list(args))
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        with pytest.raises(tmux.TmuxError, match="(?i)newline"):
+            tmux.send_bash_command(target_pane_id="%5", command=bad_command)
+        assert run_calls == []
+
+    def test_rejects_empty_command(self, monkeypatch):
+        run_calls: list[list[str]] = []
+
+        def mock_run(args, **_kwargs):
+            run_calls.append(list(args))
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        with pytest.raises(
+            tmux.TmuxError,
+            match="send_bash_command: command may not be empty",
+        ):
+            tmux.send_bash_command(target_pane_id="%5", command="")
+        assert run_calls == []
+
+    @pytest.mark.parametrize(
+        "whitespace_command",
+        [" ", "   ", "\t", " \t ", "\t\t"],
+    )
+    def test_rejects_whitespace_only_command(self, monkeypatch, whitespace_command):
+        run_calls: list[list[str]] = []
+
+        def mock_run(args, **_kwargs):
+            run_calls.append(list(args))
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        with pytest.raises(
+            tmux.TmuxError,
+            match="send_bash_command: command may not be empty",
+        ):
+            tmux.send_bash_command(target_pane_id="%5", command=whitespace_command)
+        assert run_calls == []
+
+    def test_strips_surrounding_whitespace_from_command(self, monkeypatch):
+        captured_calls: list[list[str]] = []
+
+        def mock_run(args, **_kwargs):
+            captured_calls.append(list(args))
+            return ""
+
+        monkeypatch.setattr(tmux, "_run", mock_run)
+        tmux.send_bash_command(target_pane_id="%5", command="  git status  ")
+        assert captured_calls[0] == [
+            "tmux",
+            "send-keys",
+            "-t",
+            "%5",
+            "-l",
+            "! git status",
+        ]
