@@ -228,7 +228,14 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
     if as_json or ctx.obj.get("json_output"):
         click.echo(output.format_json(result))
     else:
-        click.echo(output.format_session_show(result))
+        lines = [
+            f"session_id: {result['session_id']}",
+            f"label:      {result['label'] or ''}",
+            f"created_at: {result['created_at']}",
+        ]
+        if result["deleted_at"] is not None:
+            lines.append(f"deleted_at: {result['deleted_at']}")
+        click.echo("\n".join(lines))
 
 
 @session.command("delete")
@@ -380,7 +387,11 @@ def message_broadcast(ctx, agent_id, text):
             click.echo(output.format_json(result))
         else:
             click.echo("Broadcast sent.")
-            click.echo(output.format_task_list(result))
+            click.echo(
+                output.format_indexed_list(
+                    result, output.format_task, "No messages found."
+                )
+            )
 
 
 @message.command("poll")
@@ -404,7 +415,11 @@ def message_poll(ctx, agent_id, since, page_size):
         if ctx.obj["json_output"]:
             click.echo(output.format_json(result))
         else:
-            click.echo(output.format_task_list(result))
+            click.echo(
+                output.format_indexed_list(
+                    result, output.format_task, "No messages found."
+                )
+            )
 
 
 @message.command("ack")
@@ -481,7 +496,11 @@ def agent_list(ctx, agent_id):
         if ctx.obj["json_output"]:
             click.echo(output.format_json(agents))
         else:
-            click.echo(output.format_agent_list(agents))
+            click.echo(
+                output.format_indexed_list(
+                    agents, output.format_agent, "No agents found."
+                )
+            )
 
 
 @agent.command("show")

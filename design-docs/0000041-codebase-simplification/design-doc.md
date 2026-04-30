@@ -1,7 +1,7 @@
 # Codebase Simplification
 
 **Status**: Approved
-**Progress**: 24/60 tasks complete
+**Progress**: 30/60 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -333,15 +333,15 @@ Per `.claude/rules/design-doc-numbering.md`, documentation lands BEFORE code. Th
 - [x] Replace `_format_raw_tasks` and `_format_timeline_entries` call sites in `get_inbox`, `get_sent`, `get_timeline`. <!-- completed: 2026-04-30T00:00; each call collapsed to a one-liner returning {"messages": _format_messages(rows, <accessor>)} -->
 - [x] Delete the two old helpers. <!-- completed: 2026-04-30T00:00; both removed in the same Edit that introduced the new helpers -->
 - [x] `mise //cafleet:test` green; HTTP responses unchanged in tests. <!-- completed: 2026-04-30T00:00; 519 passed in 22.61s. Tester fixed an end-to-end expectation defect (type "message" → "unicast"); Programmer applied the operator-approved PT018 split on 6 compound asserts in test_webui_api_format.py. lint and typecheck both green. -->
-- [ ] Commit: `refactor: merge webui_api formatters (design 0000041 §D)`. <!-- completed: -->
+- [x] Commit: `refactor: merge webui_api formatters (design 0000041 §D)`. <!-- completed: 2026-04-30T13:04 -->
 
 ### Step 6: Trim output.py (§E)
 
-- [ ] Add `format_indexed_list(items, formatter, empty_msg)` to `output.py`. <!-- completed: -->
-- [ ] Replace `format_task_list` / `format_agent_list` call sites in `cli.py` with `format_indexed_list(...)`. <!-- completed: -->
-- [ ] Delete the two old helpers. <!-- completed: -->
-- [ ] Inline `format_session_show` into `cli.session_show`. <!-- completed: -->
-- [ ] `mise //cafleet:test` green. <!-- completed: -->
+- [x] Add `format_indexed_list(items, formatter, empty_msg)` to `output.py`. <!-- completed: 2026-04-30T00:00; takes a formatter callable and an empty_msg, uses enumerate(items, start=1), joins with newline -->
+- [x] Replace `format_task_list` / `format_agent_list` call sites in `cli.py` with `format_indexed_list(...)`. <!-- completed: 2026-04-30T00:00; 3 call sites updated (message_broadcast, message_poll, agent_list) — all pass output.format_task or output.format_agent and the same empty-message strings the old helpers used -->
+- [x] Delete the two old helpers. <!-- completed: 2026-04-30T00:00; format_task_list and format_agent_list removed from output.py -->
+- [x] Inline `format_session_show` into `cli.session_show`. <!-- completed: 2026-04-30T00:00; the 5-line builder (session_id / label / created_at / optional deleted_at) inlined at the single call site, then format_session_show deleted from output.py -->
+- [x] `mise //cafleet:test` green. <!-- completed: 2026-04-30T00:00; 524 passed in 23.03s. ruff format applied to cli.py for the inlined session_show block; lint and typecheck green. -->
 - [ ] Commit: `refactor: trim output.py (design 0000041 §E)`. <!-- completed: -->
 
 ### Step 7: CLI command boilerplate consolidation (§A)
