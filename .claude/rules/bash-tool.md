@@ -47,9 +47,9 @@ cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
   --text "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
 ```
 
-Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member send-input --bash <command>`, which keystrokes `! <command>` + Enter into your pane via Claude Code's `!` shortcut. The captured stdout/stderr lands in your next-turn context.
+Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member exec <command>`, which keystrokes `! <command>` + Enter into your pane via Claude Code's `!` shortcut. The captured stdout/stderr lands in your next-turn context.
 
-If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member send-input --bash <command>` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
+If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member exec <command>` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
 
 ### Why no operator-prompts-for-routing
 
@@ -68,9 +68,9 @@ The Bash tool is the entry point for every shell-execution request. If you can p
 If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you. In that case, dispatch the requested command via:
 
 ```bash
-cafleet --session-id <session-id> member send-input \
+cafleet --session-id <session-id> member exec \
   --agent-id <director-agent-id> --member-id <member-agent-id> \
-  --bash "<command>"
+  "<command>"
 ```
 
 See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full protocol, serialization rules, and cross-Director boundary.

@@ -921,25 +921,24 @@ def member_capture(ctx, agent_id, member_id, lines):
     "--freetext",
     type=str,
     default=None,
-    help='Send "4" + literal text + Enter (AskUserQuestion only). Mutually exclusive with --choice and --bash.',
-)
-@click.option(
-    "--bash",
-    "bash_command",
-    type=str,
-    default=None,
-    help='Send "! <command>" + Enter for bash routing. Mutually exclusive with --choice and --freetext.',
+    help='Send "4" + literal text + Enter (AskUserQuestion only). Mutually exclusive with --choice.',
 )
 @click.pass_context
-def member_send_input(ctx, agent_id, member_id, choice, freetext, bash_command):
+def member_send_input(ctx, agent_id, member_id, choice, freetext):
     """Safely forward a restricted keystroke to a member pane."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
-    supplied = sum(1 for v in (choice, freetext, bash_command) if v is not None)
+    if freetext is not None and freetext.lstrip().startswith("!"):
+        raise click.UsageError(
+            "--freetext may not start with '!' — that triggers Claude Code's "
+            "shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead."
+        )
+
+    supplied = sum(1 for v in (choice, freetext) if v is not None)
     if supplied != 1:
         raise click.UsageError(
-            "--choice, --freetext, --bash are mutually exclusive; supply exactly one."
+            "--choice and --freetext are mutually exclusive; supply exactly one."
         )
 
     if freetext is not None and ("\n" in freetext or "\r" in freetext):
@@ -969,12 +968,9 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext, bash_command):
         if choice is not None:
             tmux.send_choice_key(target_pane_id=pane_id, digit=choice)
             action, value = "choice", str(choice)
-        elif freetext is not None:
+        else:
             tmux.send_freetext_and_submit(target_pane_id=pane_id, text=freetext)
             action, value = "freetext", freetext
-        else:
-            tmux.send_bash_command(target_pane_id=pane_id, command=bash_command)
-            action, value = "bash", bash_command
     except tmux.TmuxError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
 
@@ -990,13 +986,65 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext, bash_command):
             )
         )
     else:
-        if action == "choice":
-            label = f"choice {value}"
-        elif action == "bash":
-            label = f"bash command {value!r}"
-        else:
-            label = "free text"
+        label = f"choice {value}" if action == "choice" else "free text"
         click.echo(f"Sent {label} to member {target['name']} ({pane_id}).")
+
+
+@member.command("exec")
+@click.option("--agent-id", required=True, help="Director's agent ID")
+@click.option("--member-id", required=True, help="Target member's agent ID")
+@click.argument("command")
+@click.pass_context
+def member_exec(ctx, agent_id, member_id, command):
+    """Dispatch a shell command into a member's pane via Claude Code's `!` shortcut."""
+    _require_session_id(ctx)
+    session_id = ctx.obj["session_id"]
+
+    if "\n" in command or "\r" in command:
+        raise click.UsageError("command may not contain newlines.")
+    if not command.strip():
+        raise click.UsageError("command may not be empty.")
+    command = command.strip()
+
+    try:
+        tmux.ensure_tmux_available()
+    except tmux.TmuxError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    target, placement = _load_authorized_member(
+        session_id,
+        agent_id,
+        member_id,
+        placement_missing_msg=(
+            f"agent {member_id} has no placement row; it was not "
+            f"spawned via `cafleet member create`."
+        ),
+    )
+    pane_id = placement["tmux_pane_id"]
+    if pane_id is None:
+        raise click.ClickException(
+            f"member {member_id} has no pane yet (pending placement) — nothing to send."
+        )
+
+    try:
+        tmux.send_bash_command(target_pane_id=pane_id, command=command)
+    except tmux.TmuxError as exc:
+        raise click.ClickException(f"send failed: {exc}") from exc
+
+    if ctx.obj["json_output"]:
+        click.echo(
+            output.format_json(
+                {
+                    "member_agent_id": member_id,
+                    "pane_id": pane_id,
+                    "command": command,
+                }
+            )
+        )
+    else:
+        click.echo(
+            f"Sent bash command {command!r} to member {target['name']} ({pane_id})."
+        )
 
 
 if __name__ == "__main__":
