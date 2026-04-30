@@ -634,4 +634,4 @@ Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped (gh no
    3. `cafleet member list` — the team's roster MUST be empty before continuing.
    4. `cafleet session delete <session-id>`.
    5. `cafleet session list` — the session MUST not appear.
-6. **Report to the user**: include the PR URL (if Step 6 created one), the review-round summary (rounds used, exit reason: approved / quiescent / round-limit / skipped), and any skipped-step reasons.
+6. **Report to the user**: include the PR URL (if Step 6 created one), the Copilot loop exit reason (approved / silence-escalated / skipped / aborted), and any skipped-step reasons.
