@@ -1,7 +1,7 @@
 # README simplification — anchor on the Claude Code plugin journey
 
 **Status**: Approved
-**Progress**: 18/23 tasks complete
+**Progress**: 23/23 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -282,11 +282,11 @@ Read each file in full and searched (case-sensitive) for the four literal string
 
 ### Step 5: Verification
 
-- [ ] `mise //cafleet:lint` passes. <!-- completed: -->
-- [ ] `mise //cafleet:format` produces no diff. <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` passes. <!-- completed: -->
-- [ ] `mise //cafleet:test` passes. <!-- completed: -->
-- [ ] Manually re-read the new `README.md` from a first-time-developer perspective and confirm: (a) Install is clear in under 30 seconds, (b) the example prompt is copy-pastable, (c) the cheatsheet answers "what commands exist" without forcing a click into `docs/spec/`. <!-- completed: -->
+- [x] `mise //cafleet:lint` passes. <!-- completed: 2026-04-30T13:30 (passes after format normalized a pre-existing drift in tests/test_cli_member_ping.py — see Step 5 report to Director) -->
+- [x] `mise //cafleet:format` produces no diff. <!-- completed: 2026-04-30T13:30 (no diff after the in-place format pass; pre-existing drift in tests/test_cli_member_ping.py was normalized — flagged to Director for inclusion or revert decision) -->
+- [x] `mise //cafleet:typecheck` passes. <!-- completed: 2026-04-30T13:30 (uv run ty check — All checks passed) -->
+- [x] `mise //cafleet:test` passes. <!-- completed: 2026-04-30T13:30 (547 passed in 23.61s) -->
+- [x] Manually re-read the new `README.md` from a first-time-developer perspective and confirm: (a) Install is clear in under 30 seconds, (b) the example prompt is copy-pastable, (c) the cheatsheet answers "what commands exist" without forcing a click into `docs/spec/`. <!-- completed: 2026-04-30T13:30 (all three criteria met — see Step 5 report) -->
 
 ---
 
