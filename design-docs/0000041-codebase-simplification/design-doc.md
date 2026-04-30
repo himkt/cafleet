@@ -10,14 +10,14 @@ The CAFleet backend has accumulated repeated boilerplate (per-command session-id
 
 ## Success Criteria
 
-- [ ] Backend Python under `cafleet/src/cafleet/` (excluding `alembic/versions/`) shrinks by ≥ 10 % LOC measured before vs. after.
-- [ ] `mise //cafleet:test` is green at every commit boundary in the implementation sequence.
-- [ ] `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck` all pass.
-- [ ] `mise //admin:lint` and `mise //admin:build` pass.
-- [ ] No Alembic migration files (`cafleet/src/cafleet/alembic/versions/*.py`) are added, modified, or renamed.
-- [ ] CLI exit codes, error messages, JSON output shapes, and HTTP response shapes documented in `docs/spec/cli-options.md` and `docs/spec/webui-api.md` remain compatible — any intentional surface tweak is documented in this design's Specification table.
-- [ ] `ARCHITECTURE.md`, `README.md`, every affected `skills/*/SKILL.md`, and `docs/spec/*` files are updated in the same change set as the code (per `.claude/rules/design-doc-numbering.md`).
-- [ ] Each implementation step ends with a self-contained commit that compiles, lints, and passes tests on its own.
+- [ ] Backend Python under `cafleet/src/cafleet/` (excluding `alembic/versions/`) shrinks by ≥ 10 % LOC measured before vs. after. <!-- NOT MET: actual reduction 3.45 % (102 LOC of 296 floor). User accepted at approval; see Changelog 2026-04-30. -->
+- [x] `mise //cafleet:test` is green at every commit boundary in the implementation sequence.
+- [x] `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck` all pass.
+- [x] `mise //admin:lint` and `mise //admin:build` pass.
+- [x] No Alembic migration files (`cafleet/src/cafleet/alembic/versions/*.py`) are added, modified, or renamed.
+- [x] CLI exit codes, error messages, JSON output shapes, and HTTP response shapes documented in `docs/spec/cli-options.md` and `docs/spec/webui-api.md` remain compatible — any intentional surface tweak is documented in this design's Specification table.
+- [x] `ARCHITECTURE.md`, `README.md`, every affected `skills/*/SKILL.md`, and `docs/spec/*` files are updated in the same change set as the code (per `.claude/rules/design-doc-numbering.md`).
+- [x] Each implementation step ends with a self-contained commit that compiles, lints, and passes tests on its own.
 
 ---
 
@@ -237,7 +237,7 @@ def _format_messages(rows, accessor):
 - Delete tests asserting removed code paths (e.g. anything imported from `coding_agent.py`).
 - Merge near-duplicate tests of the same broker function across `tests/broker/` and `tests/cli/` when one fully subsumes the other.
 - Replace per-command session-id-missing tests with a single parametrized test once the decorator from §A is in place — the missing-session-id error path is now decorator-driven, so 20 separate tests asserting it become one.
-- Drop sentinel-style "deprecated → error" tests if any survive (per `.claude/rules/removal.md`).
+- Drop sentinel-style "deprecated → error" tests if any survive (per the user's global removal rule loaded from `~/.claude/rules/removal.md`).
 
 **Change.** During execute, run `mise //cafleet:test` first to confirm green baseline, then prune in sub-batches with green-baseline gates between each. **Hard gate**: any sub-batch that drops line coverage of any backend module by more than 1 % is reverted. No commit-message escape hatch.
 
