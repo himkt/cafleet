@@ -63,7 +63,6 @@ The post-bootstrap invariant is that every non-deleted `sessions` row has a non-
 | `alembic/versions/` | `cafleet/src/cafleet/alembic/versions/` | Migration scripts (`0001_initial_schema.py`, …) |
 | `webui_api.py` | `cafleet/src/cafleet/` | WebUI API router (`/ui/api/*`) — calls `broker` for all data access |
 | `output.py` | `cafleet/src/cafleet/` | CLI output formatting (tables + JSON) |
-| `coding_agent.py` | `cafleet/src/cafleet/` | claude-only spawn config — `CodingAgentConfig` dataclass plus a single `CLAUDE` instance carrying binary, extra args, default prompt template, display-name flag, and `permission_args=("--permission-mode", "dontAsk")` injected into every spawn. |
 | `tmux.py` | `cafleet/src/cafleet/` | tmux subprocess helper: `ensure_tmux_available`, `director_context`, `split_window`, `select_layout`, `send_exit`, `capture_pane`, `send_choice_key`, `send_freetext_and_submit`, `send_bash_command` |
 | `admin/` | Project root | WebUI SPA (Vite + React + TypeScript + Tailwind CSS) |
 
@@ -158,7 +157,7 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 **Delete ordering** (default path): send `/exit`, poll `list-panes` until the pane disappears (15 s timeout), then deregister, then rebalance layout. On timeout, capture the pane tail and fail loudly with exit code 2; operator reruns with `--force` for an atomic kill+deregister. This overrides the 0000014 deregister-first invariant — see `design-docs/0000032-robust-member-teardown/design-doc.md` §4.
 
-**Pane display-name propagation**: `CodingAgentConfig` carries a `display_name_args: tuple[str, ...]` field that encodes which CLI flag the spawned coding agent accepts for a session display name. `CLAUDE.display_name_args = ("--name",)`. `member_create` calls `CLAUDE.build_command(prompt, display_name=name)` so the spawned process becomes `claude --name <member-name> <prompt>`, and Claude Code re-emits the name via the terminal title escape sequence so `tmux display-message -p -t <pane> "#{pane_title}"` returns the member name for the lifetime of the pane.
+**Pane display-name propagation**: `member_create` builds the spawn argv as `claude --permission-mode dontAsk --name <member-name> <prompt>` directly from `cli.py` constants, so the `--name` flag is forwarded to the spawned process and Claude Code re-emits the name via the terminal title escape sequence. `tmux display-message -p -t <pane> "#{pane_title}"` returns the member name for the lifetime of the pane.
 
 **Commands**: `member create`, `member delete`, `member list`, `member capture`, `member send-input`, `member exec`, `member ping`. All require `--agent-id` (the Director's ID). The tmux helper module (`cafleet/src/cafleet/tmux.py`) isolates all subprocess interaction with tmux. Primitives for pane lifecycle inspection and forced teardown — `pane_exists`, `kill_pane`, and `wait_for_pane_gone` — live here so the CLI never calls tmux directly. Director-side usage of `member send-input --choice` / `--freetext` is AskUserQuestion-delegated (capture → Director-side `AskUserQuestion` → direct Bash invocation of the resolved command); see [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) "Answer a member's AskUserQuestion prompt" for the canonical three-beat workflow and pane-shapes table. `member exec` is the bash-routing primitive — see § Routing Bash via the Director below.
 
@@ -172,7 +171,7 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 ## Bash Routing via Director
 
-Members spawn with `--permission-mode dontAsk` (always, no flag pair to opt in/out). The Bash tool is enabled and permission prompts auto-resolve silently, so members run cafleet (and any shell command) directly via the Bash tool. The CLAUDE spawn-prompt template tells the member explicitly that its harness runs in dontAsk mode.
+Members spawn with `--permission-mode dontAsk` (always, no flag pair to opt in/out). The Bash tool is enabled and permission prompts auto-resolve silently, so members run cafleet (and any shell command) directly via the Bash tool. The default spawn-prompt template tells the member explicitly that its harness runs in dontAsk mode.
 
 The bash-via-Director protocol is the **fallback** for the harness deny-list: dontAsk does not auto-resolve everything — destructive operations such as `git push` and `rm -rf` are still rejected at the Claude Code harness layer. When a member's Bash invocation is denied, the member auto-routes by sending a plain CAFleet message to its Director, and the Director dispatches the command into the member's pane via `cafleet member exec "<cmd>"`, which keystrokes literal `! <cmd>` + `Enter` and triggers Claude Code's `!` CLI shortcut on the receiving side. Members must first reconsider whether the rejected command is correct and necessary — most denials are caused by a wrong command, not a missing privilege. See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) § Routing Bash via the Director for the full convention.
 

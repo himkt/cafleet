@@ -28,7 +28,7 @@ Session deletion is a **soft-delete**: `broker.delete_session` sets `deleted_at=
 
 1. `INSERT INTO sessions (...)` with `deleted_at=NULL`, `director_agent_id=NULL`.
 2. `INSERT INTO agents (...)` for the hardcoded root Director (`name='Director'`, `description='Root Director for this session'`, `status='active'`).
-3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` (the root has no parent Director) and `coding_agent='unknown'` (auto-detection is deferred via a `FIXME(claude)` comment).
+3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` (the root has no parent Director) and `coding_agent='unknown'` (auto-detection is deferred).
 4. `UPDATE sessions SET director_agent_id = <director's agent_id> WHERE session_id = <new>`.
 5. `INSERT INTO agents (...)` for the built-in `Administrator` (per design 0000025) with `agent_card_json.cafleet.kind == 'builtin-administrator'`. The Administrator never gets an `agent_placements` row.
 
@@ -72,14 +72,14 @@ Each session owns exactly one built-in `Administrator` agent, marked by a flag i
 }
 ```
 
-The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned flags. `broker.register_agent` always builds the card itself from `(name, description, skills)`, so callers cannot smuggle `cafleet.kind` through any current public path. A module-level constant `ADMINISTRATOR_KIND = "builtin-administrator"` in `broker.py` plus two helpers (`_administrator_agent_card(session_id)` builder, `_is_administrator_card(agent_card_json)` predicate) centralize Python-side construction and predicate checks for this flag; some hot read paths (e.g. `broker.list_session_agents`, `broker.broadcast_message`) also probe `agent_card_json.cafleet.kind` directly in SQL via `json_extract(...)` to avoid shipping the full blob into Python.
+The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned flags. `broker.register_agent` always builds the card itself from `(name, description, skills)`, so callers cannot smuggle `cafleet.kind` through any current public path. A module-level constant `ADMINISTRATOR_KIND = "builtin-administrator"` in `broker.py` plus a single `_is_administrator(agent_card_json)` predicate centralize Python-side predicate checks for this flag (the Administrator's `agent_card_json` is built inline at session-create time); some hot read paths (e.g. `broker.list_session_agents`, `broker.broadcast_message`) also probe `agent_card_json.cafleet.kind` directly in SQL via `json_extract(...)` to avoid shipping the full blob into Python.
 
 **Creation paths**:
 
 - `broker.create_session(label, director_context)` inserts the Administrator row as the final operation of the 5-step root-Director bootstrap transaction (see "Root Director bootstrap" under the `sessions` table above); `registered_at` matches `sessions.created_at` exactly. The result dict exposes `administrator_agent_id` alongside the `director` sub-object for the caller.
 - Alembic revision `0006_seed_administrator_agent.py` backfills one Administrator into each pre-existing session. The migration generates `agent_id = str(uuid.uuid4())` in Python (matching the broker's idiom — no SQL-side `gen_random_uuid()`), probes for an existing Administrator via `json_extract(agent_card_json, '$.cafleet.kind') = 'builtin-administrator'`, and is idempotent by construction (a second `upgrade` finds the existing row and skips the INSERT). Downgrade is provided for empty sessions only and is forward-only in practice — `tasks.context_id` uses `ON DELETE RESTRICT`, so downgrading a session that has tasks addressed to or from the Administrator raises `IntegrityError`. (`agent_placements.agent_id` uses `ON DELETE CASCADE`, but Administrators never receive a placement anyway.)
 
-**Invariant**: Every session has exactly one active `Administrator` agent. Both `broker.list_session_agents` and `broker.get_agent` surface a derived `kind` field (`"builtin-administrator"` | `"user"`) so the WebUI can locate the Administrator without matching on the name. `list_session_agents` derives the discriminator in SQL via `json_extract(agent_card_json, '$.cafleet.kind')` and never fetches the full card blob; `get_agent` already loads the full ORM row and computes the discriminator via `_is_administrator_card`.
+**Invariant**: Every session has exactly one active `Administrator` agent. Both `broker.list_session_agents` and `broker.get_agent` surface a derived `kind` field (`"builtin-administrator"` | `"user"`) so the WebUI can locate the Administrator without matching on the name. `list_session_agents` derives the discriminator in SQL via `json_extract(agent_card_json, '$.cafleet.kind')` and never fetches the full card blob; `get_agent` already loads the full ORM row and computes the discriminator via `_is_administrator`.
 
 **Protection**: A single `AdministratorProtectedError` class in `broker.py` guards two write paths today:
 
