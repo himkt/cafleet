@@ -75,14 +75,14 @@ Total target: ≤ 180 lines including code blocks and blank lines.
 
 ### 2. Plugin install section — exact wording requirement
 
-```markdown
+````markdown
 ## Install
 
 ### Install the plugin in Claude Code
 
 ```
 /plugin marketplace add himkt/cafleet
-/plugin install cafleet@himkt/cafleet
+/plugin install cafleet@himkt-cafleet
 ```
 
 This adds 5 skills under the `cafleet` namespace: `cafleet`, `cafleet-monitoring`, `design-doc`, `design-doc-create`, `design-doc-execute`. Run `/help` in Claude Code to see them.
@@ -93,11 +93,11 @@ This adds 5 skills under the `cafleet` namespace: `cafleet`, `cafleet-monitoring
 uv tool install cafleet     # or: pip install cafleet
 cafleet db init              # one-time SQLite schema setup
 ```
-```
+````
 
 The plugin install commands are sourced from `.claude-plugin/plugin.json` (manifest `name = cafleet`, `repository = https://github.com/himkt/cafleet`). The marketplace add + plugin install pair is the standard Claude Code plugin install pattern.
 
-**Verification step (mandatory, before committing the README wording)**: the Programmer MUST `WebFetch` `https://docs.claude.com/en/docs/claude-code/plugins` and confirm the canonical syntax of (a) the marketplace-add command and (b) the plugin-install command — specifically whether the marketplace identifier is `himkt/cafleet` (a GitHub `owner/repo` shorthand) or a full URL, and whether the install identifier is `cafleet@himkt/cafleet` or another form. If the canonical form has shifted, adjust the wording (not the structure) and record the verified shape in the commit message. If `https://docs.claude.com/en/docs/claude-code/plugins` is unreachable or has moved, fall back to `https://docs.claude.com/en/docs/claude-code/` and follow the plugins entry in the table of contents.
+**Verification step (mandatory, before committing the README wording)**: the Programmer MUST `WebFetch` `https://docs.claude.com/en/docs/claude-code/plugins` and confirm the canonical syntax of (a) the marketplace-add command and (b) the plugin-install command — specifically whether the marketplace identifier is `himkt/cafleet` (a GitHub `owner/repo` shorthand) or a full URL, and whether the install identifier is `cafleet@himkt-cafleet` (the verified canonical form: marketplace-derived `owner-repo` with **hyphen**) or another form. If the canonical form has shifted, adjust the wording (not the structure) and record the verified shape in the commit message. If `https://docs.claude.com/en/docs/claude-code/plugins` is unreachable or has moved, fall back to `https://docs.claude.com/en/docs/claude-code/` and follow the plugins entry in the table of contents.
 
 ### 3. Example-prompt section — what to show
 
