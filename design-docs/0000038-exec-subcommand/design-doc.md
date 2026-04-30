@@ -1,7 +1,7 @@
 # `cafleet member exec` — extract bash dispatch into its own subcommand
 
 **Status**: Approved
-**Progress**: 24/28 tasks complete
+**Progress**: 28/28 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -10,18 +10,18 @@ Extract the bash-dispatch primitive currently exposed as `cafleet member send-in
 
 ## Success Criteria
 
-- [ ] `cafleet member send-input` no longer accepts a `--bash` flag. Click rejects the old form with `Error: No such option: '--bash'.` (exit 2). Every literal mention of the old `--bash` flag on `send-input` is removed in the same change.
-- [ ] `cafleet member exec CMD` exists as a new Director-only subcommand. CMD is a single required positional argument (`@click.argument("command")`); there is no `--bash` flag on this subcommand.
-- [ ] `cafleet member exec` reuses `_load_authorized_member` for cross-Director boundary enforcement and `tmux.send_bash_command` for the `! CMD` + Enter keystroke pair — no new tmux helper, no new authorization code.
-- [ ] `cafleet member send-input --freetext "<value>"` rejects any value whose first non-whitespace character (per `str.lstrip()` default) is `!`. Rejection wording: `Error: --freetext may not start with '!' — that triggers Claude Code's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` Exit 2 (Click `UsageError`). Empty `--freetext ""` and whitespace-only values stay accepted (current behavior unchanged).
-- [ ] `cafleet member exec` exit codes: `0` dispatch success, `2` for any input-validation failure (Click `UsageError`: missing positional, empty string, newline in command), `1` for runtime / IO / authorization failures (cross-Director rejection, missing placement, pending placement, tmux unavailable, tmux call failed). Empty-string and newline preflight live at the CLI handler and exit `2`; `tmux.send_bash_command`'s internal `TmuxError` preflight stays as defense-in-depth but the CLI handler never reaches it.
-- [ ] Cross-Director, missing-placement, and pending-placement rejection wording on `cafleet member exec` reuses `_load_authorized_member`'s existing strings verbatim (mirroring `member capture` / `member send-input`).
-- [ ] `tmux` unavailability on `cafleet member exec` exits `1` with the existing `cafleet member commands must be run inside a tmux session` wording (same surface as every other `member` subcommand).
-- [ ] `.claude/settings.json` removes the three obsolete `ask` entries that scoped the old `--bash` flag form on `send-input` and adds one new `ask` entry: `Bash(cafleet --session-id * member exec *)`.
-- [ ] Documentation is updated FIRST per `.claude/rules/design-doc-numbering.md`. Targets: `ARCHITECTURE.md`, `docs/spec/cli-options.md`, `README.md`, `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md`, `skills/cafleet/roles/member.md`, `.claude/rules/bash-tool.md`, `.claude/settings.json`. Both the Director-side "for completeness" code block AND the operator-fallback paragraph in `bash-tool.md` § "When your Bash tool denies a command" point at `cafleet member exec`.
-- [ ] `cafleet/tests/test_cli_member_send_input.py` is updated: `TestBashFlag` class deleted, `bash_recorder` fixture deleted, `--bash` removed from `TestFlagValidation` parametrizations, ONE regression test added asserting the old `--bash <cmd>` form errors with Click `No such option`, and tests added for the new bang-prefix rejection on `--freetext`.
-- [ ] `cafleet/tests/test_cli_member_exec.py` is created: covers positional CMD dispatch via `tmux.send_bash_command`, cross-Director rejection, pending-placement rejection, missing-placement rejection, and empty-string / newline rejection.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck` all pass.
+- [x] `cafleet member send-input` no longer accepts a `--bash` flag. Click rejects the old form with `Error: No such option: '--bash'.` (exit 2). Every literal mention of the old `--bash` flag on `send-input` is removed in the same change.
+- [x] `cafleet member exec CMD` exists as a new Director-only subcommand. CMD is a single required positional argument (`@click.argument("command")`); there is no `--bash` flag on this subcommand.
+- [x] `cafleet member exec` reuses `_load_authorized_member` for cross-Director boundary enforcement and `tmux.send_bash_command` for the `! CMD` + Enter keystroke pair — no new tmux helper, no new authorization code.
+- [x] `cafleet member send-input --freetext "<value>"` rejects any value whose first non-whitespace character (per `str.lstrip()` default) is `!`. Rejection wording: `Error: --freetext may not start with '!' — that triggers Claude Code's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` Exit 2 (Click `UsageError`). Empty `--freetext ""` and whitespace-only values stay accepted (current behavior unchanged).
+- [x] `cafleet member exec` exit codes: `0` dispatch success, `2` for any input-validation failure (Click `UsageError`: missing positional, empty string, newline in command), `1` for runtime / IO / authorization failures (cross-Director rejection, missing placement, pending placement, tmux unavailable, tmux call failed). Empty-string and newline preflight live at the CLI handler and exit `2`; `tmux.send_bash_command`'s internal `TmuxError` preflight stays as defense-in-depth but the CLI handler never reaches it.
+- [x] Cross-Director, missing-placement, and pending-placement rejection wording on `cafleet member exec` reuses `_load_authorized_member`'s existing strings verbatim (mirroring `member capture` / `member send-input`).
+- [x] `tmux` unavailability on `cafleet member exec` exits `1` with the existing `cafleet member commands must be run inside a tmux session` wording (same surface as every other `member` subcommand).
+- [x] `.claude/settings.json` removes the three obsolete `ask` entries that scoped the old `--bash` flag form on `send-input` and adds one new `ask` entry: `Bash(cafleet --session-id * member exec *)`.
+- [x] Documentation is updated FIRST per `.claude/rules/design-doc-numbering.md`. Targets: `ARCHITECTURE.md`, `docs/spec/cli-options.md`, `README.md`, `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md`, `skills/cafleet/roles/member.md`, `.claude/rules/bash-tool.md`, `.claude/settings.json`. Both the Director-side "for completeness" code block AND the operator-fallback paragraph in `bash-tool.md` § "When your Bash tool denies a command" point at `cafleet member exec`.
+- [x] `cafleet/tests/test_cli_member_send_input.py` is updated: `TestBashFlag` class deleted, `bash_recorder` fixture deleted, `--bash` removed from `TestFlagValidation` parametrizations, ONE regression test added asserting the old `--bash <cmd>` form errors with Click `No such option`, and tests added for the new bang-prefix rejection on `--freetext`.
+- [x] `cafleet/tests/test_cli_member_exec.py` is created: covers positional CMD dispatch via `tmux.send_bash_command`, cross-Director rejection, pending-placement rejection, missing-placement rejection, and empty-string / newline rejection.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck` all pass.
 
 ---
 
@@ -295,10 +295,10 @@ Per `.claude/rules/design-doc-numbering.md`, every documentation surface is upda
 
 ### Step 5: Quality gates
 
-- [ ] `mise //cafleet:test` passes (existing tests still pass after `--bash` removal; new tests pass). <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes. <!-- completed: -->
-- [ ] `mise //cafleet:format` passes. <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` passes. <!-- completed: -->
+- [x] `mise //cafleet:test` passes (existing tests still pass after `--bash` removal; new tests pass). <!-- completed: 2026-04-30T14:15 -->
+- [x] `mise //cafleet:lint` passes. <!-- completed: 2026-04-30T14:15 -->
+- [x] `mise //cafleet:format` passes. <!-- completed: 2026-04-30T14:15 -->
+- [x] `mise //cafleet:typecheck` passes. <!-- completed: 2026-04-30T14:15 -->
 
 ---
 
