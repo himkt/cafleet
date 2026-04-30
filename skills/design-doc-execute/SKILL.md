@@ -487,12 +487,11 @@ Once the PR exists and Copilot has been invited, the Director runs a cron-driven
 
 #### PR Review Loop State
 
-The Director holds three in-context variables across loop firings. They are NOT persisted to disk — the Director carries them in its own working memory.
+The Director holds two in-context variables across loop firings. They are NOT persisted to disk — the Director carries them in its own working memory.
 
 | Variable | Meaning | Update rule |
 |:--|:--|:--|
 | `last_push_ts` | ISO 8601 timestamp of the most recent push to the PR branch | Reset on every `git push` from 6b-step 2 or 7d-step 3 |
-| `ticks_since_last_new_review` | Number of consecutive loop ticks with 0 new Copilot items | Increment each tick; reset to 0 when new Copilot items arrive |
 | `round` | Fix-round counter (push → Copilot review → fix cycle) | Increment after every push from 7d; reset only via 7e "Continue" |
 
 #### 7a. Replace the monitoring `/loop` (create-before-delete)
@@ -520,11 +519,10 @@ On each 1-minute wake-up, the Director runs — in order:
 | Result | Action |
 |:--|:--|
 | The most recent Copilot-authored entry in `reviews` has `state == "APPROVED"` | Exit loop (success) → Step 8 |
-| 0 new Copilot items AND `ticks_since_last_new_review >= 5` | Exit loop (quiescent) → Step 8 |
-| 0 new Copilot items AND `ticks_since_last_new_review < 5` | Increment `ticks_since_last_new_review`, continue |
+| 0 new Copilot items | Continue waiting (do nothing this tick) |
 | ≥ 1 new Copilot items | Go to 7c |
 
-**Why 5 ticks (not 3)**: Copilot's first review after a push can take 3–5 minutes. 3 ticks risks declaring quiescence while Copilot is still composing its response. 5 ticks (~5 minutes) gives the model comfortable headroom without dragging the session out indefinitely.
+**Why no quiescent exit**: a silent Copilot is NOT proof Copilot is done. Copilot may take longer than expected to re-review after a fix-push, may not have been re-triggered yet, or may be back-pressured. Exiting on silence risks finalizing a PR while Copilot is still composing comments. The loop only exits on an explicit `state == "APPROVED"` signal, on user-driven escalation (round limit at 7e, or "Stop means stop"), or on the cron's natural 7-day expiry. The user can always interrupt to finalize early.
 
 **Why not `reviewDecision`**: the PR-level `reviewDecision` only reflects required reviewers (typically CODEOWNERS). Copilot is usually not a CODEOWNER, so an approve from Copilot alone leaves `reviewDecision` null/REVIEW_REQUIRED. Reading the Copilot-specific entry in the `reviews` array is the reliable signal.
 
@@ -548,7 +546,7 @@ For review-level comments (body text not attached to a specific line), route by 
    - Tester fixes: `git commit -m "fix: address Copilot test review - <short summary>"`
    - Director doc fixes: `git commit -m "docs: address Copilot review - <short summary>"`
 3. `git push` (no flags — the branch already tracks origin from Step 6).
-4. Update `last_push_ts` to the post-push wall-clock timestamp, reset `ticks_since_last_new_review = 0`, and increment `round`.
+4. Update `last_push_ts` to the post-push wall-clock timestamp and increment `round`.
 5. Re-request Copilot review: `gh pr edit <pr-number> --add-reviewer @copilot`. Re-adding the same reviewer triggers a fresh Copilot pass.
 6. Continue the loop.
 
@@ -580,7 +578,7 @@ PR REVIEW:
 6. Run `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST shape: `user.login`, `body`, `path`, `line`, `created_at`).
 7. Filter to entries where the appropriate login field (`author.login` for GraphQL reviews, `user.login` for REST inline comments) starts with `copilot` (case-insensitive) and the appropriate timestamp (`submittedAt` / `created_at`) > `<last-push-timestamp>`.
 8. If the most recent Copilot-authored entry in `reviews` has `state == "APPROVED"`: signal Step 7 exit (success).
-9. If filter returned 0 entries for 5 consecutive ticks: signal Step 7 exit (quiescent).
+9. If filter returned 0 entries: continue waiting (do nothing this tick). The loop never exits on Copilot silence — only on explicit APPROVED, on the round-limit escalation at 7e, on user "Stop means stop", or on the cron's natural 7-day expiry.
 10. If filter returned ≥ 1 entries: classify by file path and dispatch via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`.
 
 ESCALATION:
