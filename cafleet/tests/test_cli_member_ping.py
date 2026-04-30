@@ -311,4 +311,7 @@ class TestInputValidation:
         )
         assert result.exit_code == 2, result.output
         out = result.output or ""
-        assert "unexpected extra argument" in out.lower() or "got unexpected" in out.lower()
+        assert (
+            "unexpected extra argument" in out.lower()
+            or "got unexpected" in out.lower()
+        )
