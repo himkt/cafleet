@@ -1,7 +1,7 @@
 # README simplification — anchor on the Claude Code plugin journey
 
 **Status**: Approved
-**Progress**: 12/23 tasks complete
+**Progress**: 18/23 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -207,6 +207,31 @@ For each of the 5 skills declared in `.claude-plugin/plugin.json` (`./skills/caf
 
 Expected scope: based on the SKILL.md files already inspected (`cafleet`, `cafleet-monitoring`, `design-doc-create`), no current SKILL.md links into specific README anchors. The sweep is likely a no-op, but the design must not assume that — it must record the actual finding.
 
+#### Step 4 sweep results (completed 2026-04-30)
+
+Read each file in full and searched (case-sensitive) for the four literal strings: `README.md`, `README#`, `../README`, `/README`. Total files: **16**. Total matches: **0**.
+
+| # | File | Matches |
+|---|---|---|
+| 1 | `skills/cafleet/SKILL.md` | 0 |
+| 2 | `skills/cafleet/roles/director.md` | 0 |
+| 3 | `skills/cafleet/roles/member.md` | 0 |
+| 4 | `skills/cafleet-monitoring/SKILL.md` | 0 |
+| 5 | `skills/design-doc/SKILL.md` | 0 |
+| 6 | `skills/design-doc/template.md` | 0 |
+| 7 | `skills/design-doc/guidelines.md` | 0 |
+| 8 | `skills/design-doc-create/SKILL.md` | 0 |
+| 9 | `skills/design-doc-create/roles/director.md` | 0 |
+| 10 | `skills/design-doc-create/roles/drafter.md` | 0 |
+| 11 | `skills/design-doc-create/roles/reviewer.md` | 0 |
+| 12 | `skills/design-doc-execute/SKILL.md` | 0 |
+| 13 | `skills/design-doc-execute/roles/director.md` | 0 |
+| 14 | `skills/design-doc-execute/roles/programmer.md` | 0 |
+| 15 | `skills/design-doc-execute/roles/tester.md` | 0 |
+| 16 | `skills/design-doc-execute/roles/verifier.md` | 0 |
+
+**Disposition**: nothing to keep, repoint, or remove — no SKILL.md or roles/*.md file under any of the 5 plugin skills (`cafleet`, `cafleet-monitoring`, `design-doc`, `design-doc-create`, `design-doc-execute`) contains a link or reference to `README.md` or any README anchor. The §7 procedure's expected outcome ("the sweep is likely a no-op") is confirmed empirically. No SKILL.md edits are required for this design.
+
 ### 8. Out of scope
 
 - No source code changes (`cafleet/src/cafleet/`).
@@ -248,12 +273,12 @@ Expected scope: based on the SKILL.md files already inspected (`cafleet`, `cafle
 
 ### Step 4: SKILL.md sweep
 
-- [ ] Search `skills/cafleet/SKILL.md` (+ `roles/director.md`, `roles/member.md`) for `README.md`, `README#`, `../README`, `/README`. Record matches. <!-- completed: -->
-- [ ] Search `skills/cafleet-monitoring/SKILL.md` for the same strings. Record matches. <!-- completed: -->
-- [ ] Search `skills/design-doc/SKILL.md` (+ `template.md`, `guidelines.md`) for the same strings. Record matches. <!-- completed: -->
-- [ ] Search `skills/design-doc-create/SKILL.md` (+ every `roles/*.md`) for the same strings. Record matches. <!-- completed: -->
-- [ ] Search `skills/design-doc-execute/SKILL.md` (+ every `roles/*.md`) for the same strings. Record matches. <!-- completed: -->
-- [ ] For each match found in the steps above, decide kept / repointed / removed and record the disposition in the design doc. Apply each repoint or removal. <!-- completed: -->
+- [x] Search `skills/cafleet/SKILL.md` (+ `roles/director.md`, `roles/member.md`) for `README.md`, `README#`, `../README`, `/README`. Record matches. <!-- completed: 2026-04-30T13:00 (3 files, 0 matches) -->
+- [x] Search `skills/cafleet-monitoring/SKILL.md` for the same strings. Record matches. <!-- completed: 2026-04-30T13:00 (1 file, 0 matches) -->
+- [x] Search `skills/design-doc/SKILL.md` (+ `template.md`, `guidelines.md`) for the same strings. Record matches. <!-- completed: 2026-04-30T13:00 (3 files, 0 matches) -->
+- [x] Search `skills/design-doc-create/SKILL.md` (+ every `roles/*.md`) for the same strings. Record matches. <!-- completed: 2026-04-30T13:00 (4 files: SKILL.md + roles/{director,drafter,reviewer}.md, 0 matches) -->
+- [x] Search `skills/design-doc-execute/SKILL.md` (+ every `roles/*.md`) for the same strings. Record matches. <!-- completed: 2026-04-30T13:00 (5 files: SKILL.md + roles/{director,programmer,tester,verifier}.md, 0 matches) -->
+- [x] For each match found in the steps above, decide kept / repointed / removed and record the disposition in the design doc. Apply each repoint or removal. <!-- completed: 2026-04-30T13:00 (no-op: 0 matches across all 16 files; nothing to keep, repoint, or remove) -->
 
 ### Step 5: Verification
 
