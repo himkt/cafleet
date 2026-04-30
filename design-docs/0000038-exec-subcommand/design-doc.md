@@ -1,6 +1,6 @@
 # `cafleet member exec` — extract bash dispatch into its own subcommand
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 28/28 tasks complete
 **Last Updated**: 2026-04-30
 
@@ -309,3 +309,4 @@ Per `.claude/rules/design-doc-numbering.md`, every documentation surface is upda
 | 2026-04-30 | Initial draft. |
 | 2026-04-30 | Approved by user. Status flipped to Approved. Last Updated refreshed. |
 | 2026-04-30 | Copilot review on PR #41: refined Success Criterion line 19 (tmux unavailability has two wordings, not one) and expanded the documentation surface list to add `skills/cafleet-monitoring/SKILL.md`, `skills/design-doc-create/roles/director.md`, `skills/design-doc-execute/roles/director.md`, and the `cafleet/src/cafleet/tmux.py::send_bash_command` docstring (initially missed in the design's Step 1 surface list — Copilot caught the lingering `--bash` references). |
+| 2026-04-30 | Implementation complete. Status flipped to Complete after Copilot review round 1 closed quiescent (no new comments for 5 consecutive ticks). |
