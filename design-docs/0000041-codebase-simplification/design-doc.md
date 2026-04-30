@@ -1,7 +1,7 @@
 # Codebase Simplification
 
 **Status**: Approved
-**Progress**: 19/60 tasks complete
+**Progress**: 24/60 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -325,14 +325,14 @@ Per `.claude/rules/design-doc-numbering.md`, documentation lands BEFORE code. Th
 - [x] Inline `_administrator_agent_card` into `create_session` (single caller). <!-- completed: 2026-04-30T00:00; inlined the dict literal at line 107; old helper deleted -->
 - [x] Verify SQL-side `func.json_extract(...) != ADMINISTRATOR_KIND` filter unchanged in `broadcast_message` and `list_session_agents`. <!-- completed: 2026-04-30T00:00; SQL filter at lines 683 and 868 left intact -->
 - [x] `mise //cafleet:test` green. <!-- completed: 2026-04-30T00:00; 512 passed in 22.73s; ruff format applied to broker.py; lint and typecheck green -->
-- [ ] Commit: `refactor: consolidate broker admin-card helpers (design 0000041 §C)`. <!-- completed: -->
+- [x] Commit: `refactor: consolidate broker admin-card helpers (design 0000041 §C)`. <!-- completed: 2026-04-30T12:53 -->
 
 ### Step 5: Merge webui_api formatters (§D)
 
-- [ ] Add `_format_messages(rows, accessor)` and `_raw_task_accessor` / `_timeline_entry_accessor` to `webui_api.py`. <!-- completed: -->
-- [ ] Replace `_format_raw_tasks` and `_format_timeline_entries` call sites in `get_inbox`, `get_sent`, `get_timeline`. <!-- completed: -->
-- [ ] Delete the two old helpers. <!-- completed: -->
-- [ ] `mise //cafleet:test` green; HTTP responses unchanged in tests. <!-- completed: -->
+- [x] Add `_format_messages(rows, accessor)` and `_raw_task_accessor` / `_timeline_entry_accessor` to `webui_api.py`. <!-- completed: 2026-04-30T00:00; merger uses the design-spec set-union of from_id/to_id, single broker.get_agent_names call, list comprehension over _build_message -->
+- [x] Replace `_format_raw_tasks` and `_format_timeline_entries` call sites in `get_inbox`, `get_sent`, `get_timeline`. <!-- completed: 2026-04-30T00:00; each call collapsed to a one-liner returning {"messages": _format_messages(rows, <accessor>)} -->
+- [x] Delete the two old helpers. <!-- completed: 2026-04-30T00:00; both removed in the same Edit that introduced the new helpers -->
+- [x] `mise //cafleet:test` green; HTTP responses unchanged in tests. <!-- completed: 2026-04-30T00:00; 519 passed in 22.61s. Tester fixed an end-to-end expectation defect (type "message" → "unicast"); Programmer applied the operator-approved PT018 split on 6 compound asserts in test_webui_api_format.py. lint and typecheck both green. -->
 - [ ] Commit: `refactor: merge webui_api formatters (design 0000041 §D)`. <!-- completed: -->
 
 ### Step 6: Trim output.py (§E)

@@ -236,13 +236,16 @@ class TestFormatMessagesEndToEndRawTaskAccessor:
         assert msg["from_agent_name"] == "alpha"
         assert msg["to_agent_id"] == recipient
         assert msg["to_agent_name"] == "beta"
-        assert msg["type"] == "message"
+        assert msg["type"] == "unicast"
         assert msg["status"] == "input_required"
         assert msg["body"] == "snapshot body"
         assert msg["origin_task_id"] is None
-        assert isinstance(msg["task_id"], str) and msg["task_id"]
-        assert isinstance(msg["created_at"], str) and msg["created_at"]
-        assert isinstance(msg["status_timestamp"], str) and msg["status_timestamp"]
+        assert isinstance(msg["task_id"], str)
+        assert msg["task_id"]
+        assert isinstance(msg["created_at"], str)
+        assert msg["created_at"]
+        assert isinstance(msg["status_timestamp"], str)
+        assert msg["status_timestamp"]
 
 
 class TestFormatMessagesEndToEndTimelineEntryAccessor:
@@ -260,9 +263,12 @@ class TestFormatMessagesEndToEndTimelineEntryAccessor:
         assert msg["from_agent_name"] == "alpha"
         assert msg["to_agent_id"] == recipient
         assert msg["to_agent_name"] == "beta"
-        assert msg["type"] == "message"
+        assert msg["type"] == "unicast"
         assert msg["status"] == "input_required"
         assert msg["body"] == "timeline snapshot"
-        assert isinstance(msg["task_id"], str) and msg["task_id"]
-        assert isinstance(msg["created_at"], str) and msg["created_at"]
-        assert isinstance(msg["status_timestamp"], str) and msg["status_timestamp"]
+        assert isinstance(msg["task_id"], str)
+        assert msg["task_id"]
+        assert isinstance(msg["created_at"], str)
+        assert msg["created_at"]
+        assert isinstance(msg["status_timestamp"], str)
+        assert msg["status_timestamp"]

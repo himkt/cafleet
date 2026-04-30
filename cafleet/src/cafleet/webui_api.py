@@ -59,53 +59,43 @@ def _build_message(
     }
 
 
-def _format_raw_tasks(rows: list[dict]) -> list[dict]:
+def _raw_task_accessor(row: dict) -> dict:
+    return {
+        "task_id": row["task_id"],
+        "from_id": row["from_agent_id"],
+        "to_id": row["to_agent_id"],
+        "type_": row["type"],
+        "status": row["status_state"],
+        "created_at": row["created_at"],
+        "status_timestamp": row["status_timestamp"],
+        "origin_task_id": row["origin_task_id"],
+        "body": _extract_body(json.loads(row["task_json"])),
+    }
+
+
+def _timeline_entry_accessor(entry: dict) -> dict:
+    task = entry["task"]
+    meta = task["metadata"]
+    return {
+        "task_id": task["id"],
+        "from_id": meta["fromAgentId"],
+        "to_id": meta["toAgentId"],
+        "type_": meta["type"],
+        "status": task["status"]["state"],
+        "created_at": entry["created_at"],
+        "status_timestamp": task["status"]["timestamp"],
+        "origin_task_id": entry["origin_task_id"],
+        "body": _extract_body(task),
+    }
+
+
+def _format_messages(rows, accessor) -> list[dict]:
     if not rows:
         return []
-    agent_ids = {
-        aid for row in rows for aid in (row["from_agent_id"], row["to_agent_id"])
-    }
+    extracted = [accessor(row) for row in rows]
+    agent_ids = {x["from_id"] for x in extracted} | {x["to_id"] for x in extracted}
     agent_names = broker.get_agent_names(list(agent_ids))
-    return [
-        _build_message(
-            task_id=row["task_id"],
-            from_id=row["from_agent_id"],
-            to_id=row["to_agent_id"],
-            type_=row["type"],
-            status=row["status_state"],
-            created_at=row["created_at"],
-            status_timestamp=row["status_timestamp"],
-            origin_task_id=row["origin_task_id"],
-            body=_extract_body(json.loads(row["task_json"])),
-            agent_names=agent_names,
-        )
-        for row in rows
-    ]
-
-
-def _format_timeline_entries(entries: list[dict]) -> list[dict]:
-    if not entries:
-        return []
-    metas = [(entry, entry["task"]["metadata"]) for entry in entries]
-    agent_ids = {
-        aid for _, meta in metas for aid in (meta["fromAgentId"], meta["toAgentId"])
-    }
-    agent_names = broker.get_agent_names(list(agent_ids))
-    return [
-        _build_message(
-            task_id=entry["task"]["id"],
-            from_id=meta["fromAgentId"],
-            to_id=meta["toAgentId"],
-            type_=meta["type"],
-            status=entry["task"]["status"]["state"],
-            created_at=entry["created_at"],
-            status_timestamp=entry["task"]["status"]["timestamp"],
-            origin_task_id=entry["origin_task_id"],
-            body=_extract_body(entry["task"]),
-            agent_names=agent_names,
-        )
-        for entry, meta in metas
-    ]
+    return [_build_message(**x, agent_names=agent_names) for x in extracted]
 
 
 class SendMessageRequest(BaseModel):
@@ -134,8 +124,7 @@ def get_inbox(
         raise HTTPException(status_code=404, detail="Agent not found")
 
     rows = broker.list_inbox(agent_id)
-    messages = _format_raw_tasks(rows)
-    return {"messages": messages}
+    return {"messages": _format_messages(rows, _raw_task_accessor)}
 
 
 @webui_router.get("/agents/{agent_id}/sent")
@@ -147,8 +136,7 @@ def get_sent(
         raise HTTPException(status_code=404, detail="Agent not found")
 
     rows = broker.list_sent(agent_id)
-    messages = _format_raw_tasks(rows)
-    return {"messages": messages}
+    return {"messages": _format_messages(rows, _raw_task_accessor)}
 
 
 @webui_router.get("/timeline")
@@ -156,8 +144,7 @@ def get_timeline(
     session_id: str = Depends(get_webui_session),
 ):
     entries = broker.list_timeline(session_id)
-    messages = _format_timeline_entries(entries)
-    return {"messages": messages}
+    return {"messages": _format_messages(entries, _timeline_entry_accessor)}
 
 
 @webui_router.post("/messages/send")
