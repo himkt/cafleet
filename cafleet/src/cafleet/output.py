@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from typing import Any
 
 
@@ -43,13 +44,17 @@ def format_task(task: dict) -> str:
     return "\n".join(lines)
 
 
-def format_task_list(tasks: list) -> str:
-    if not tasks:
-        return "No messages found."
+def format_indexed_list(
+    items: list[Any],
+    formatter: Callable[[Any], str],
+    empty_msg: str,
+) -> str:
+    if not items:
+        return empty_msg
     parts = []
-    for i, task in enumerate(tasks):
-        parts.append(f"[{i + 1}]")
-        parts.append(format_task(task))
+    for i, item in enumerate(items, start=1):
+        parts.append(f"[{i}]")
+        parts.append(formatter(item))
     return "\n".join(parts)
 
 
@@ -61,16 +66,6 @@ def format_agent(agent: dict) -> str:
         f"  status:      {agent['status']}",
     ]
     return "\n".join(lines)
-
-
-def format_agent_list(agents: list) -> str:
-    if not agents:
-        return "No agents found."
-    parts = []
-    for i, agent in enumerate(agents):
-        parts.append(f"[{i + 1}]")
-        parts.append(format_agent(agent))
-    return "\n".join(parts)
 
 
 def format_session_create(data: dict) -> str:
@@ -85,17 +80,6 @@ def format_session_create(data: dict) -> str:
         f"pane:             {placement['tmux_session']}:{placement['tmux_window_id']}:{placement['tmux_pane_id']}",
         f"administrator:    {data['administrator_agent_id']}",
     ]
-    return "\n".join(lines)
-
-
-def format_session_show(data: dict) -> str:
-    lines = [
-        f"session_id: {data['session_id']}",
-        f"label:      {data['label'] or ''}",
-        f"created_at: {data['created_at']}",
-    ]
-    if data["deleted_at"] is not None:
-        lines.append(f"deleted_at: {data['deleted_at']}")
     return "\n".join(lines)
 
 

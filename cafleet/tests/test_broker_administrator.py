@@ -1,7 +1,6 @@
 """Tests for Administrator agent helpers, constants, and broker guards."""
 
 import json
-import uuid
 
 import pytest
 from sqlalchemy import create_engine
@@ -12,8 +11,7 @@ from cafleet import broker
 from cafleet.broker import (
     ADMINISTRATOR_KIND,
     AdministratorProtectedError,
-    _administrator_agent_card,
-    _is_administrator_card,
+    _is_administrator,
 )
 from cafleet.db.models import Agent, Base
 from cafleet.tmux import DirectorContext
@@ -36,60 +34,15 @@ class TestAdministratorKindConstant:
         assert isinstance(ADMINISTRATOR_KIND, str)
 
 
-class TestAdministratorAgentCard:
-    def test_returns_dict(self):
-        session_id = str(uuid.uuid4())
-        card = _administrator_agent_card(session_id)
-        assert isinstance(card, dict)
-
-    def test_name_is_administrator(self):
-        session_id = str(uuid.uuid4())
-        card = _administrator_agent_card(session_id)
-        assert card["name"] == "Administrator"
-
-    def test_description_contains_session_id_first_8_chars(self):
-        session_id = "3f9a1b2c-1234-5678-9abc-def012345678"
-        card = _administrator_agent_card(session_id)
-        assert "3f9a1b2c" in card["description"]
-
-    def test_description_is_string(self):
-        session_id = str(uuid.uuid4())
-        card = _administrator_agent_card(session_id)
-        assert isinstance(card["description"], str)
-        assert len(card["description"]) > 0
-
-    def test_skills_is_empty_list(self):
-        session_id = str(uuid.uuid4())
-        card = _administrator_agent_card(session_id)
-        assert card["skills"] == []
-
-    def test_cafleet_namespace_kind_matches_constant(self):
-        session_id = str(uuid.uuid4())
-        card = _administrator_agent_card(session_id)
-        assert "cafleet" in card
-        assert isinstance(card["cafleet"], dict)
-        assert card["cafleet"]["kind"] == ADMINISTRATOR_KIND
-
-    def test_card_is_json_serializable(self):
-        session_id = str(uuid.uuid4())
-        card = _administrator_agent_card(session_id)
-        serialized = json.dumps(card)
-        assert isinstance(serialized, str)
-
-    def test_different_session_ids_produce_different_descriptions(self):
-        sid_a = "aaaaaaaa-1111-1111-1111-111111111111"
-        sid_b = "bbbbbbbb-2222-2222-2222-222222222222"
-        card_a = _administrator_agent_card(sid_a)
-        card_b = _administrator_agent_card(sid_b)
-        assert card_a["description"] != card_b["description"]
-
-
-class TestIsAdministratorCard:
+class TestIsAdministrator:
     def test_returns_true_for_canonical_administrator_card(self):
-        session_id = str(uuid.uuid4())
-        card = _administrator_agent_card(session_id)
-        card_json = json.dumps(card)
-        assert _is_administrator_card(card_json) is True
+        payload = {
+            "name": "Administrator",
+            "description": "Built-in administrator agent for session 3f9a1b2c",
+            "skills": [],
+            "cafleet": {"kind": ADMINISTRATOR_KIND},
+        }
+        assert _is_administrator(json.dumps(payload)) is True
 
     def test_returns_true_for_hand_built_administrator_card(self):
         payload = {
@@ -98,7 +51,7 @@ class TestIsAdministratorCard:
             "skills": [],
             "cafleet": {"kind": "builtin-administrator"},
         }
-        assert _is_administrator_card(json.dumps(payload)) is True
+        assert _is_administrator(json.dumps(payload)) is True
 
     def test_returns_false_for_normal_user_card(self):
         payload = {
@@ -106,11 +59,11 @@ class TestIsAdministratorCard:
             "description": "Reviewer",
             "skills": [],
         }
-        assert _is_administrator_card(json.dumps(payload)) is False
+        assert _is_administrator(json.dumps(payload)) is False
 
     def test_returns_false_when_cafleet_key_missing(self):
         payload = {"name": "x", "description": "y", "skills": []}
-        assert _is_administrator_card(json.dumps(payload)) is False
+        assert _is_administrator(json.dumps(payload)) is False
 
     def test_returns_false_when_cafleet_kind_missing(self):
         payload = {
@@ -119,7 +72,7 @@ class TestIsAdministratorCard:
             "skills": [],
             "cafleet": {"other": "value"},
         }
-        assert _is_administrator_card(json.dumps(payload)) is False
+        assert _is_administrator(json.dumps(payload)) is False
 
     def test_returns_false_when_cafleet_kind_is_different_value(self):
         payload = {
@@ -128,19 +81,16 @@ class TestIsAdministratorCard:
             "skills": [],
             "cafleet": {"kind": "user"},
         }
-        assert _is_administrator_card(json.dumps(payload)) is False
+        assert _is_administrator(json.dumps(payload)) is False
 
     def test_returns_false_for_malformed_json(self):
-        assert _is_administrator_card("{not valid json") is False
+        assert _is_administrator("{not valid json") is False
 
     def test_returns_false_for_empty_string(self):
-        assert _is_administrator_card("") is False
+        assert _is_administrator("") is False
 
-    def test_returns_false_for_json_array(self):
-        assert _is_administrator_card("[1, 2, 3]") is False
-
-    def test_returns_false_for_json_null(self):
-        assert _is_administrator_card("null") is False
+    def test_returns_false_for_none(self):
+        assert _is_administrator(None) is False
 
 
 class TestAdministratorProtectedError:

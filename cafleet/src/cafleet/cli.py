@@ -1,11 +1,14 @@
 """cafleet CLI."""
 
 import contextlib
+import functools
 import importlib.resources
 import json
 import os
+import shutil
+from collections.abc import Callable
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import click
 from alembic import command
@@ -16,8 +19,34 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.url import make_url
 
 from cafleet import broker, output, tmux
-from cafleet.coding_agent import CLAUDE, CodingAgentConfig
 from cafleet.config import settings
+
+_CLAUDE_BINARY = "claude"
+_CLAUDE_PROMPT_TEMPLATE = (
+    "Load Skill(cafleet). Your session_id is {session_id} and your agent_id is {agent_id}.\n"
+    "You are a member of the team led by {director_name} ({director_agent_id}).\n"
+    "Wait for instructions via "
+    "`cafleet --session-id {session_id} message poll --agent-id {agent_id}`.\n"
+    "Your harness runs in dontAsk mode — your Bash tool is enabled and permission\n"
+    "prompts auto-resolve, so call cafleet (and any other shell command) directly\n"
+    "via the Bash tool."
+)
+
+
+def _build_claude_command(prompt: str, *, display_name: str) -> list[str]:
+    return [
+        _CLAUDE_BINARY,
+        "--permission-mode",
+        "dontAsk",
+        "--name",
+        display_name,
+        prompt,
+    ]
+
+
+def _ensure_claude_available() -> None:
+    if shutil.which(_CLAUDE_BINARY) is None:
+        raise RuntimeError(f"'{_CLAUDE_BINARY}' binary not found on PATH")
 
 
 def _require_session_id(ctx: click.Context) -> None:
@@ -28,19 +57,58 @@ def _require_session_id(ctx: click.Context) -> None:
         )
 
 
-@contextlib.contextmanager
-def _handle_broker_errors():
-    """Re-raise unexpected broker exceptions as ``ClickException`` (exit 1).
+def _client_command(
+    *,
+    requires_agent_session: bool = False,
+    text_formatter: Callable[[Any], str] | None = None,
+):
+    """Subsume the four boilerplate blocks shared by client subcommands.
 
-    ``ClickException`` already carries the right exit code + rendering, so it
-    passes through unchanged.
+    The wrapped function returns the broker result. The decorator validates
+    ``--session-id``, optionally validates ``--agent-id`` belongs to the
+    session, wraps the body in the broker-error converter, and branches
+    JSON-vs-text output via ``ctx.obj['json_output']`` and ``text_formatter``.
+
+    When ``text_formatter`` is None, non-JSON mode falls back to
+    ``output.format_json(result)`` so the result is always visible — this
+    rules out a silent-success failure mode where a misconfigured command
+    produces no output at all.
     """
-    try:
-        yield
-    except click.ClickException:
-        raise
-    except Exception as exc:
-        raise click.ClickException(str(exc)) from exc
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(ctx, *args, **kwargs):
+            _require_session_id(ctx)
+            session_id = ctx.obj["session_id"]
+            try:
+                if requires_agent_session:
+                    agent_id = kwargs.get("agent_id")
+                    if agent_id is None:
+                        raise click.ClickException(
+                            "_client_command(requires_agent_session=True) but no "
+                            "'agent_id' kwarg was passed. Check the @click.option "
+                            "declaration on this command."
+                        )
+                    if not broker.verify_agent_session(agent_id, session_id):
+                        raise click.ClickException(
+                            f"agent {agent_id} is not a member of session {session_id}."
+                        )
+                result = func(ctx, *args, **kwargs)
+                if ctx.obj["json_output"]:
+                    click.echo(output.format_json(result))
+                elif text_formatter is not None:
+                    click.echo(text_formatter(result))
+                else:
+                    click.echo(output.format_json(result))
+            except click.ClickException:
+                raise
+            except Exception as exc:
+                raise click.ClickException(str(exc)) from exc
+            return result
+
+        return wrapper
+
+    return decorator
 
 
 def _sync_db_url() -> str:
@@ -201,7 +269,14 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
     if as_json or ctx.obj.get("json_output"):
         click.echo(output.format_json(result))
     else:
-        click.echo(output.format_session_show(result))
+        lines = [
+            f"session_id: {result['session_id']}",
+            f"label:      {result['label'] or ''}",
+            f"created_at: {result['created_at']}",
+        ]
+        if result["deleted_at"] is not None:
+            lines.append(f"deleted_at: {result['deleted_at']}")
+        click.echo("\n".join(lines))
 
 
 @session.command("delete")
@@ -290,28 +365,21 @@ def message() -> None:
 @click.option("--description", required=True, help="Agent description")
 @click.option("--skills", default=None, help="Skills as JSON string")
 @click.pass_context
+@_client_command(text_formatter=output.format_register)
 def agent_register(ctx, name, description, skills):
     """Register a new agent with the broker."""
-    _require_session_id(ctx)
-
     parsed_skills = None
     if skills is not None:
         try:
             parsed_skills = json.loads(skills)
         except json.JSONDecodeError as exc:
             raise click.ClickException(f"Invalid JSON in --skills: {exc}") from exc
-
-    with _handle_broker_errors():
-        result = broker.register_agent(
-            ctx.obj["session_id"],
-            name,
-            description,
-            skills=parsed_skills,
-        )
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(result))
-        else:
-            click.echo(output.format_register(result))
+    return broker.register_agent(
+        ctx.obj["session_id"],
+        name,
+        description,
+        skills=parsed_skills,
+    )
 
 
 @message.command("send")
@@ -319,41 +387,36 @@ def agent_register(ctx, name, description, skills):
 @click.option("--to", required=True, help="Recipient agent ID")
 @click.option("--text", required=True, help="Message text")
 @click.pass_context
+@_client_command(
+    text_formatter=lambda r: "Message sent.\n" + output.format_task(r),
+)
 def message_send(ctx, agent_id, to, text):
     """Send a unicast message to another agent."""
-    _require_session_id(ctx)
-    with _handle_broker_errors():
-        result = broker.send_message(
-            ctx.obj["session_id"],
-            agent_id,
-            to,
-            text,
-        )
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(result))
-        else:
-            click.echo("Message sent.")
-            click.echo(output.format_task(result))
+    return broker.send_message(
+        ctx.obj["session_id"],
+        agent_id,
+        to,
+        text,
+    )
 
 
 @message.command("broadcast")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--text", required=True, help="Message text")
 @click.pass_context
+@_client_command(
+    text_formatter=lambda r: (
+        "Broadcast sent.\n"
+        + output.format_indexed_list(r, output.format_task, "No messages found.")
+    ),
+)
 def message_broadcast(ctx, agent_id, text):
     """Broadcast a message to all agents."""
-    _require_session_id(ctx)
-    with _handle_broker_errors():
-        result = broker.broadcast_message(
-            ctx.obj["session_id"],
-            agent_id,
-            text,
-        )
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(result))
-        else:
-            click.echo("Broadcast sent.")
-            click.echo(output.format_task_list(result))
+    return broker.broadcast_message(
+        ctx.obj["session_id"],
+        agent_id,
+        text,
+    )
 
 
 @message.command("poll")
@@ -361,145 +424,99 @@ def message_broadcast(ctx, agent_id, text):
 @click.option("--since", default=None, help="Filter tasks since timestamp")
 @click.option("--page-size", default=None, type=int, help="Number of tasks")
 @click.pass_context
+@_client_command(
+    requires_agent_session=True,
+    text_formatter=lambda r: output.format_indexed_list(
+        r, output.format_task, "No messages found."
+    ),
+)
 def message_poll(ctx, agent_id, since, page_size):
     """Poll inbox for messages."""
-    _require_session_id(ctx)
-    with _handle_broker_errors():
-        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
-            raise click.ClickException(
-                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
-            )
-        result = broker.poll_tasks(
-            agent_id,
-            since=since,
-            page_size=page_size,
-        )
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(result))
-        else:
-            click.echo(output.format_task_list(result))
+    return broker.poll_tasks(
+        agent_id,
+        since=since,
+        page_size=page_size,
+    )
 
 
 @message.command("ack")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to acknowledge")
 @click.pass_context
+@_client_command(
+    requires_agent_session=True,
+    text_formatter=lambda r: "Message acknowledged.\n" + output.format_task(r),
+)
 def message_ack(ctx, agent_id, task_id):
     """Acknowledge receipt of a message."""
-    _require_session_id(ctx)
-    with _handle_broker_errors():
-        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
-            raise click.ClickException(
-                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
-            )
-        result = broker.ack_task(agent_id, task_id)
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(result))
-        else:
-            click.echo("Message acknowledged.")
-            click.echo(output.format_task(result))
+    return broker.ack_task(agent_id, task_id)
 
 
 @message.command("cancel")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to cancel")
 @click.pass_context
+@_client_command(
+    requires_agent_session=True,
+    text_formatter=lambda r: "Task canceled.\n" + output.format_task(r),
+)
 def message_cancel(ctx, agent_id, task_id):
     """Cancel (retract) a sent message."""
-    _require_session_id(ctx)
-    with _handle_broker_errors():
-        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
-            raise click.ClickException(
-                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
-            )
-        result = broker.cancel_task(agent_id, task_id)
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(result))
-        else:
-            click.echo("Task canceled.")
-            click.echo(output.format_task(result))
+    return broker.cancel_task(agent_id, task_id)
 
 
 @message.command("show")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to retrieve")
 @click.pass_context
+@_client_command(requires_agent_session=True, text_formatter=output.format_task)
 def message_show(ctx, agent_id, task_id):
     """Get details of a specific task."""
-    _require_session_id(ctx)
-    with _handle_broker_errors():
-        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
-            raise click.ClickException(
-                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
-            )
-        result = broker.get_task(ctx.obj["session_id"], task_id)
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(result))
-        else:
-            click.echo(output.format_task(result))
+    return broker.get_task(ctx.obj["session_id"], task_id)
 
 
 @agent.command("list")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.pass_context
+@_client_command(
+    requires_agent_session=True,
+    text_formatter=lambda agents: output.format_indexed_list(
+        agents, output.format_agent, "No agents found."
+    ),
+)
 def agent_list(ctx, agent_id):
     """List registered agents in the session."""
-    _require_session_id(ctx)
-    with _handle_broker_errors():
-        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
-            raise click.ClickException(
-                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
-            )
-        agents = broker.list_agents(ctx.obj["session_id"])
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(agents))
-        else:
-            click.echo(output.format_agent_list(agents))
+    return broker.list_agents(ctx.obj["session_id"])
 
 
 @agent.command("show")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--id", "detail_id", required=True, help="Target agent ID")
 @click.pass_context
+@_client_command(requires_agent_session=True, text_formatter=output.format_agent)
 def agent_show(ctx, agent_id, detail_id):
     """Show detail for a specific agent."""
-    _require_session_id(ctx)
-    with _handle_broker_errors():
-        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
-            raise click.ClickException(
-                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
-            )
-        result = broker.get_agent(detail_id, ctx.obj["session_id"])
-        if result is None:
-            raise ValueError(f"Agent {detail_id} not found")
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(result))
-        else:
-            click.echo(output.format_agent(result))
+    result = broker.get_agent(detail_id, ctx.obj["session_id"])
+    if result is None:
+        raise ValueError(f"Agent {detail_id} not found")
+    return result
 
 
 @agent.command("deregister")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.pass_context
+@_client_command(
+    requires_agent_session=True,
+    text_formatter=lambda _: "Agent deregistered successfully.",
+)
 def agent_deregister(ctx, agent_id):
     """Deregister this agent from the broker."""
-    _require_session_id(ctx)
-    with _handle_broker_errors():
-        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
-            raise click.ClickException(
-                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
-            )
-        deregistered = broker.deregister_agent(agent_id)
-
+    deregistered = broker.deregister_agent(agent_id)
     if not deregistered:
         raise click.ClickException(
             f"agent {agent_id} not found or already deregistered."
         )
-
-    if ctx.obj["json_output"]:
-        click.echo(output.format_json({"status": "deregistered"}))
-    else:
-        click.echo("Agent deregistered successfully.")
+    return {"status": "deregistered"}
 
 
 @cli.group()
@@ -544,23 +561,18 @@ def _resolve_prompt(
     director_agent_id: str,
     new_agent_id: str,
     prompt_argv: tuple[str, ...],
-    coding_agent_config: CodingAgentConfig,
 ) -> str:
     """Substitute ``session_id`` / ``agent_id`` / ``director_*`` into the spawn prompt.
 
-    Runs ``str.format`` on both the coding-agent default template and any
-    user-supplied ``prompt_argv``, so custom prompts must double literal
-    braces (``{{`` / ``}}``) to survive the substitution.
+    Runs ``str.format`` on both the default template and any user-supplied
+    ``prompt_argv``, so custom prompts must double literal braces
+    (``{{`` / ``}}``) to survive the substitution.
     """
     session_id = ctx.obj["session_id"]
     director = broker.get_agent(director_agent_id, session_id)
     if director is None:
         raise click.UsageError(f"Director agent {director_agent_id} not found")
-    template = (
-        " ".join(prompt_argv)
-        if prompt_argv
-        else coding_agent_config.default_prompt_template
-    )
+    template = " ".join(prompt_argv) if prompt_argv else _CLAUDE_PROMPT_TEMPLATE
     try:
         return template.format(
             session_id=session_id,
@@ -610,7 +622,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
 
     try:
         tmux.ensure_tmux_available()
-        CLAUDE.ensure_available()
+        _ensure_claude_available()
         director_ctx = tmux.director_context()
     except (tmux.TmuxError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -625,7 +637,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
                 "tmux_session": director_ctx.session,
                 "tmux_window_id": director_ctx.window_id,
                 "tmux_pane_id": None,
-                "coding_agent": CLAUDE.name,
+                "coding_agent": _CLAUDE_BINARY,
             },
         )
     except Exception as exc:
@@ -633,7 +645,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
     new_agent_id = result["agent_id"]
 
     try:
-        prompt = _resolve_prompt(ctx, agent_id, new_agent_id, prompt_argv, CLAUDE)
+        prompt = _resolve_prompt(ctx, agent_id, new_agent_id, prompt_argv)
     except click.UsageError as exc:
         _rollback_register(
             new_agent_id,
@@ -647,7 +659,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
         pane_id = tmux.split_window(
             target_window_id=director_ctx.window_id,
             env=fwd_env,
-            command=CLAUDE.build_command(prompt, display_name=name),
+            command=_build_claude_command(prompt, display_name=name),
         )
     except tmux.TmuxError as exc:
         _rollback_register(
@@ -840,15 +852,10 @@ def _emit_member_delete_output(
 @member.command("list")
 @click.option("--agent-id", required=True, help="Director's agent ID")
 @click.pass_context
+@_client_command(text_formatter=output.format_member_list)
 def member_list(ctx, agent_id):
     """List member agents managed by this Director."""
-    _require_session_id(ctx)
-    with _handle_broker_errors():
-        members = broker.list_members(ctx.obj["session_id"], agent_id)
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(members))
-        else:
-            click.echo(output.format_member_list(members))
+    return broker.list_members(ctx.obj["session_id"], agent_id)
 
 
 @member.command("capture")

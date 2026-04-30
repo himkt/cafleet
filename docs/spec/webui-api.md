@@ -69,7 +69,7 @@ Returns agents belonging to the selected session. Every agent carries a `kind` d
 | `"builtin-administrator"` | The session's built-in Administrator agent. Exactly one per session. Derived from `agent_card_json.cafleet.kind == "builtin-administrator"`. |
 | `"user"` | Any other agent (human-registered, spawned member, etc.). |
 
-The discriminator is derived at read time from the stored `agent_card_json` blob — there is no dedicated column. `broker.list_session_agents` reads it in SQL via `json_extract(agent_card_json, '$.cafleet.kind')`, while `broker.get_agent` (which already loads the full ORM row) computes it via the `_is_administrator_card` helper.
+The discriminator is derived at read time from the stored `agent_card_json` blob — there is no dedicated column. `broker.list_session_agents` reads it in SQL via `json_extract(agent_card_json, '$.cafleet.kind')`, while `broker.get_agent` (which already loads the full ORM row) computes it via the `_is_administrator` helper.
 
 ### GET /ui/api/agents/{agent_id}/inbox — Inbox Messages
 
