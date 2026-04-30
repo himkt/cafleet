@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from typing import Any
 
 
@@ -43,7 +44,11 @@ def format_task(task: dict) -> str:
     return "\n".join(lines)
 
 
-def format_indexed_list(items: list, formatter, empty_msg: str) -> str:
+def format_indexed_list(
+    items: list[Any],
+    formatter: Callable[[Any], str],
+    empty_msg: str,
+) -> str:
     if not items:
         return empty_msg
     parts = []

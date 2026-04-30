@@ -1,6 +1,8 @@
 """FastAPI endpoints backing the admin WebUI."""
 
 import json
+from collections.abc import Callable
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -59,7 +61,7 @@ def _build_message(
     }
 
 
-def _raw_task_accessor(row: dict) -> dict:
+def _raw_task_accessor(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "task_id": row["task_id"],
         "from_id": row["from_agent_id"],
@@ -73,7 +75,7 @@ def _raw_task_accessor(row: dict) -> dict:
     }
 
 
-def _timeline_entry_accessor(entry: dict) -> dict:
+def _timeline_entry_accessor(entry: dict[str, Any]) -> dict[str, Any]:
     task = entry["task"]
     meta = task["metadata"]
     return {
@@ -89,7 +91,10 @@ def _timeline_entry_accessor(entry: dict) -> dict:
     }
 
 
-def _format_messages(rows, accessor) -> list[dict]:
+def _format_messages(
+    rows: list[dict[str, Any]],
+    accessor: Callable[[dict[str, Any]], dict[str, Any]],
+) -> list[dict[str, Any]]:
     if not rows:
         return []
     extracted = [accessor(row) for row in rows]

@@ -73,11 +73,7 @@ def _client_command(
     def decorator(func):
         @functools.wraps(func)
         def wrapper(ctx, *args, **kwargs):
-            if not ctx.obj.get("session_id"):
-                raise click.ClickException(
-                    "--session-id <uuid> is required for this subcommand. "
-                    "Create a session with 'cafleet session create' and pass its id."
-                )
+            _require_session_id(ctx)
             session_id = ctx.obj["session_id"]
             if requires_agent_session:
                 agent_id = kwargs["agent_id"]
