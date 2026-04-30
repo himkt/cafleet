@@ -1047,5 +1047,63 @@ def member_exec(ctx, agent_id, member_id, command):
         )
 
 
+@member.command("ping")
+@click.option("--agent-id", required=True, help="Director's agent ID")
+@click.option("--member-id", required=True, help="Target member's agent ID")
+@click.pass_context
+def member_ping(ctx, agent_id, member_id):
+    """Inject an inbox-poll keystroke into a member's pane (Director-only)."""
+    _require_session_id(ctx)
+    session_id = ctx.obj["session_id"]
+
+    try:
+        tmux.ensure_tmux_available()
+    except tmux.TmuxError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    target, placement = _load_authorized_member(
+        session_id,
+        agent_id,
+        member_id,
+        placement_missing_msg=(
+            f"agent {member_id} has no placement row; it was not "
+            f"spawned via `cafleet member create`."
+        ),
+    )
+    pane_id = placement["tmux_pane_id"]
+    if pane_id is None:
+        raise click.ClickException(
+            f"member {member_id} has no pane yet (pending placement) — nothing to send."
+        )
+
+    try:
+        ok = tmux.send_poll_trigger(
+            target_pane_id=pane_id,
+            session_id=session_id,
+            agent_id=member_id,
+        )
+    except tmux.TmuxError as exc:
+        raise click.ClickException(f"send failed: {exc}") from exc
+    if not ok:
+        raise click.ClickException(
+            f"send failed: tmux send-keys did not deliver the poll-trigger "
+            f"keystroke to pane {pane_id}."
+        )
+
+    if ctx.obj["json_output"]:
+        click.echo(
+            output.format_json(
+                {
+                    "member_agent_id": member_id,
+                    "pane_id": pane_id,
+                }
+            )
+        )
+    else:
+        click.echo(
+            f"Pinged member {target['name']} ({pane_id}) — poll keystroke dispatched."
+        )
+
+
 if __name__ == "__main__":
     cli()
