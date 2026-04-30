@@ -9,7 +9,6 @@ from click.testing import CliRunner
 
 from cafleet import broker, config
 from cafleet.cli import _resolve_prompt, cli
-from cafleet.coding_agent import CLAUDE
 from cafleet.db import engine as engine_mod
 from cafleet.tmux import DirectorContext
 
@@ -69,7 +68,6 @@ class TestDefaultPromptSubstitution:
             director_agent_id=director_agent_id,
             new_agent_id=new_agent_id,
             prompt_argv=(),
-            coding_agent_config=CLAUDE,
         )
         assert session_id in result
         assert new_agent_id in result
@@ -94,7 +92,6 @@ class TestCustomPromptPlaceholderSubstitution:
             director_agent_id=director_agent_id,
             new_agent_id=new_agent_id,
             prompt_argv=("message", "for", "{agent_id}"),
-            coding_agent_config=CLAUDE,
         )
         assert result == f"message for {new_agent_id}"
 
@@ -112,7 +109,6 @@ class TestCustomPromptNoPlaceholderPassThrough:
             director_agent_id=director_agent_id,
             new_agent_id=new_agent_id,
             prompt_argv=("no", "placeholders", "here"),
-            coding_agent_config=CLAUDE,
         )
         assert result == "no placeholders here"
 
@@ -140,7 +136,6 @@ class TestCustomPromptDoubledBraceEscape:
             director_agent_id=director_agent_id,
             new_agent_id=new_agent_id,
             prompt_argv=("data", "is", "{{not", "a", "placeholder}}", "closed"),
-            coding_agent_config=CLAUDE,
         )
         assert result == "data is {not a placeholder} closed"
         assert new_agent_id not in result
@@ -167,7 +162,6 @@ class TestCustomPromptMalformedRaisesUsageError:
                 director_agent_id=director_agent_id,
                 new_agent_id=new_agent_id,
                 prompt_argv=("hello", "{foo}"),
-                coding_agent_config=CLAUDE,
             )
         message = str(exc_info.value)
         assert "foo" in message
@@ -187,7 +181,6 @@ class TestCustomPromptMalformedRaisesUsageError:
                 director_agent_id=director_agent_id,
                 new_agent_id=new_agent_id,
                 prompt_argv=("hello", "{unclosed"),
-                coding_agent_config=CLAUDE,
             )
         message = str(exc_info.value)
         assert "{{" in message
@@ -210,7 +203,6 @@ class TestCustomPromptMalformedRaisesUsageError:
                 director_agent_id=director_agent_id,
                 new_agent_id=new_agent_id,
                 prompt_argv=("hello", "{agent_id.foo}"),
-                coding_agent_config=CLAUDE,
             )
         message = str(exc_info.value)
         assert "{{" in message
@@ -277,18 +269,17 @@ def split_window_recorder(monkeypatch):
 def stub_coding_agent_binaries(monkeypatch):
     """Pretend the claude binary is on PATH.
 
-    ``coding_agent_config.ensure_available()`` calls ``shutil.which(self.binary)``;
+    ``_ensure_claude_available()`` calls ``shutil.which(_CLAUDE_BINARY)``;
     patching it module-wide is the narrowest monkeypatch that keeps the
     spawn alive without a real binary.
     """
-    monkeypatch.setattr("cafleet.coding_agent.shutil.which", lambda _: "/usr/bin/stub")
+    monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: "/usr/bin/stub")
 
 
 class TestMemberCreatePassesDisplayName:
     """``cli.py`` threads ``--name`` as ``display_name`` into
-    ``coding_agent_config.build_command()``, which means the ``command``
-    kwarg handed to ``tmux.split_window`` contains ``"--name"`` + the
-    member name.
+    ``_build_claude_command()``, which means the ``command`` kwarg handed
+    to ``tmux.split_window`` contains ``"--name"`` + the member name.
     """
 
     def test_member_create_passes_member_name_as_display_name(

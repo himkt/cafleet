@@ -1,7 +1,7 @@
 # Codebase Simplification
 
 **Status**: Approved
-**Progress**: 4/60 tasks complete
+**Progress**: 14/60 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -301,22 +301,22 @@ Per `.claude/rules/design-doc-numbering.md`, documentation lands BEFORE code. Th
 - [x] Audit `README.md`: update "Project Structure" tree-block; verify CLI/HTTP feature bullets stay accurate. <!-- completed: 2026-04-30T00:00; no Project Structure tree-block exists, no coding_agent.py reference, no changes needed -->
 - [x] Audit `skills/cafleet/SKILL.md`, `skills/cafleet-monitoring/SKILL.md`, `skills/design-doc*/SKILL.md`: confirm no CLI invocations need updating. Note any deltas. <!-- completed: 2026-04-30T00:00; only delta: design-doc-create/SKILL.md mentioned coding_agent.py template — reworded to remove the file reference -->
 - [x] Audit `docs/spec/cli-options.md`, `docs/spec/webui-api.md`, `docs/spec/data-model.md`: confirm zero changes needed (or capture incidentals). <!-- completed: 2026-04-30T00:00; incidentals captured: FIXME(claude) reference removed from cli-options.md and data-model.md, _is_administrator_card renamed to _is_administrator in webui-api.md and data-model.md, _administrator_agent_card builder reference dropped per §C consolidation -->
-- [ ] Commit: `docs: prep for codebase simplification (design 0000041)`. <!-- completed: -->
+- [x] Commit: `docs: prep for codebase simplification (design 0000041)`. <!-- completed: 2026-04-30T12:09 -->
 
 ### Step 2: Baseline LOC + green-test snapshot
 
-- [ ] Run `mise //cafleet:test` and record pass count. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` — both green. <!-- completed: -->
-- [ ] Capture LOC of every file in `cafleet/src/cafleet/` (excluding `alembic/versions/`) via `wc -l`. Compare to the **Before LOC** column in the Background table; overwrite any cell that drifted between draft and execute. The **After LOC** column stays empty until Step 10. <!-- completed: -->
+- [x] Run `mise //cafleet:test` and record pass count. <!-- completed: 2026-04-30T00:00; 547 passed in 21.76s -->
+- [x] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` — both green. <!-- completed: 2026-04-30T00:00; ruff check + ruff format --check + ty check all green -->
+- [x] Capture LOC of every file in `cafleet/src/cafleet/` (excluding `alembic/versions/`) via `wc -l`. Compare to the **Before LOC** column in the Background table; overwrite any cell that drifted between draft and execute. The **After LOC** column stays empty until Step 10. <!-- completed: 2026-04-30T00:00; verified all 10 listed files match Before LOC exactly (cli.py 1110, broker.py 1013, tmux.py 227, webui_api.py 184, output.py 146, db/models.py 90, server.py 56, coding_agent.py 54, db/engine.py 47, config.py 29; total 2956). No cells overwritten — zero drift. -->
 
 ### Step 3: Inline `CodingAgentConfig` (§B)
 
-- [ ] Add `_CLAUDE_BINARY`, `_CLAUDE_PROMPT_TEMPLATE`, `_build_claude_command`, `_ensure_claude_available` to `cli.py`. <!-- completed: -->
-- [ ] Replace `CLAUDE.build_command(...)` and `CLAUDE.ensure_available()` and `CLAUDE.name` call sites in `cli.member_create`. <!-- completed: -->
-- [ ] In `cafleet/src/cafleet/broker.py`, drop the `# FIXME(claude): auto-detect ...` comment line directly above `_ROOT_DIRECTOR_CODING_AGENT = "unknown"`. The constant itself stays. <!-- completed: -->
-- [ ] Delete `cafleet/src/cafleet/coding_agent.py`. <!-- completed: -->
-- [ ] Update tests: delete or rewrite anything importing `cafleet.coding_agent`. <!-- completed: -->
-- [ ] `mise //cafleet:test` green. <!-- completed: -->
+- [x] Add `_CLAUDE_BINARY`, `_CLAUDE_PROMPT_TEMPLATE`, `_build_claude_command`, `_ensure_claude_available` to `cli.py`. <!-- completed: 2026-04-30T00:00; added with `import shutil` -->
+- [x] Replace `CLAUDE.build_command(...)` and `CLAUDE.ensure_available()` and `CLAUDE.name` call sites in `cli.member_create`. <!-- completed: 2026-04-30T00:00; also dropped the coding_agent_config parameter from _resolve_prompt -->
+- [x] In `cafleet/src/cafleet/broker.py`, drop the `# FIXME(claude): auto-detect ...` comment line directly above `_ROOT_DIRECTOR_CODING_AGENT = "unknown"`. The constant itself stays. <!-- completed: 2026-04-30T00:00 -->
+- [x] Delete `cafleet/src/cafleet/coding_agent.py`. <!-- completed: 2026-04-30T00:00; harness denied rm — Director dispatched via member exec -->
+- [x] Update tests: delete or rewrite anything importing `cafleet.coding_agent`. <!-- completed: 2026-04-30T00:00; old test_coding_agent.py was already deleted by the Tester's commit, replaced by test_cli_claude_helpers.py. test_cli_member.py: dropped CLAUDE import + 7x coding_agent_config kwargs + monkeypatch path swapped to cafleet.cli.shutil.which. -->
+- [x] `mise //cafleet:test` green. <!-- completed: 2026-04-30T00:00; 521 passed in 23.29s -->
 - [ ] Commit: `refactor: inline CodingAgentConfig into cli (design 0000041 §B)`. <!-- completed: -->
 
 ### Step 4: Consolidate broker admin-card helpers (§C)

@@ -4,6 +4,7 @@ import contextlib
 import importlib.resources
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import NoReturn
 
@@ -16,8 +17,34 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.url import make_url
 
 from cafleet import broker, output, tmux
-from cafleet.coding_agent import CLAUDE, CodingAgentConfig
 from cafleet.config import settings
+
+_CLAUDE_BINARY = "claude"
+_CLAUDE_PROMPT_TEMPLATE = (
+    "Load Skill(cafleet). Your session_id is {session_id} and your agent_id is {agent_id}.\n"
+    "You are a member of the team led by {director_name} ({director_agent_id}).\n"
+    "Wait for instructions via "
+    "`cafleet --session-id {session_id} message poll --agent-id {agent_id}`.\n"
+    "Your harness runs in dontAsk mode — your Bash tool is enabled and permission\n"
+    "prompts auto-resolve, so call cafleet (and any other shell command) directly\n"
+    "via the Bash tool."
+)
+
+
+def _build_claude_command(prompt: str, *, display_name: str) -> list[str]:
+    return [
+        _CLAUDE_BINARY,
+        "--permission-mode",
+        "dontAsk",
+        "--name",
+        display_name,
+        prompt,
+    ]
+
+
+def _ensure_claude_available() -> None:
+    if shutil.which(_CLAUDE_BINARY) is None:
+        raise RuntimeError(f"'{_CLAUDE_BINARY}' binary not found on PATH")
 
 
 def _require_session_id(ctx: click.Context) -> None:
@@ -544,23 +571,18 @@ def _resolve_prompt(
     director_agent_id: str,
     new_agent_id: str,
     prompt_argv: tuple[str, ...],
-    coding_agent_config: CodingAgentConfig,
 ) -> str:
     """Substitute ``session_id`` / ``agent_id`` / ``director_*`` into the spawn prompt.
 
-    Runs ``str.format`` on both the coding-agent default template and any
-    user-supplied ``prompt_argv``, so custom prompts must double literal
-    braces (``{{`` / ``}}``) to survive the substitution.
+    Runs ``str.format`` on both the default template and any user-supplied
+    ``prompt_argv``, so custom prompts must double literal braces
+    (``{{`` / ``}}``) to survive the substitution.
     """
     session_id = ctx.obj["session_id"]
     director = broker.get_agent(director_agent_id, session_id)
     if director is None:
         raise click.UsageError(f"Director agent {director_agent_id} not found")
-    template = (
-        " ".join(prompt_argv)
-        if prompt_argv
-        else coding_agent_config.default_prompt_template
-    )
+    template = " ".join(prompt_argv) if prompt_argv else _CLAUDE_PROMPT_TEMPLATE
     try:
         return template.format(
             session_id=session_id,
@@ -610,7 +632,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
 
     try:
         tmux.ensure_tmux_available()
-        CLAUDE.ensure_available()
+        _ensure_claude_available()
         director_ctx = tmux.director_context()
     except (tmux.TmuxError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -625,7 +647,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
                 "tmux_session": director_ctx.session,
                 "tmux_window_id": director_ctx.window_id,
                 "tmux_pane_id": None,
-                "coding_agent": CLAUDE.name,
+                "coding_agent": _CLAUDE_BINARY,
             },
         )
     except Exception as exc:
@@ -633,7 +655,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
     new_agent_id = result["agent_id"]
 
     try:
-        prompt = _resolve_prompt(ctx, agent_id, new_agent_id, prompt_argv, CLAUDE)
+        prompt = _resolve_prompt(ctx, agent_id, new_agent_id, prompt_argv)
     except click.UsageError as exc:
         _rollback_register(
             new_agent_id,
@@ -647,7 +669,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
         pane_id = tmux.split_window(
             target_window_id=director_ctx.window_id,
             env=fwd_env,
-            command=CLAUDE.build_command(prompt, display_name=name),
+            command=_build_claude_command(prompt, display_name=name),
         )
     except tmux.TmuxError as exc:
         _rollback_register(

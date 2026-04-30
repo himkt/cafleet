@@ -13,8 +13,8 @@ inlined into ``cafleet/src/cafleet/cli.py`` as four module-level symbols:
 import pytest
 
 from cafleet.cli import (
-    _build_claude_command,
     _CLAUDE_PROMPT_TEMPLATE,
+    _build_claude_command,
     _ensure_claude_available,
 )
 

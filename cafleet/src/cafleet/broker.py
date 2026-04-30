@@ -14,7 +14,6 @@ from cafleet.tmux import DirectorContext
 
 _DIRECTOR_NAME = "Director"
 _DIRECTOR_DESCRIPTION = "Root Director for this session"
-# FIXME(claude): auto-detect from $CLAUDECODE / $CLAUDE_CODE_ENTRYPOINT env vars.
 _ROOT_DIRECTOR_CODING_AGENT = "unknown"
 
 ADMINISTRATOR_KIND = "builtin-administrator"
