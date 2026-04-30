@@ -68,6 +68,11 @@ def _client_command(
     ``--session-id``, optionally validates ``--agent-id`` belongs to the
     session, wraps the body in the broker-error converter, and branches
     JSON-vs-text output via ``ctx.obj['json_output']`` and ``text_formatter``.
+
+    When ``text_formatter`` is None, non-JSON mode falls back to
+    ``output.format_json(result)`` so the result is always visible — this
+    rules out a silent-success failure mode where a misconfigured command
+    produces no output at all.
     """
 
     def decorator(func):
@@ -76,7 +81,13 @@ def _client_command(
             _require_session_id(ctx)
             session_id = ctx.obj["session_id"]
             if requires_agent_session:
-                agent_id = kwargs["agent_id"]
+                agent_id = kwargs.get("agent_id")
+                if agent_id is None:
+                    raise click.ClickException(
+                        "_client_command(requires_agent_session=True) but no "
+                        "'agent_id' kwarg was passed. Check the @click.option "
+                        "declaration on this command."
+                    )
                 if not broker.verify_agent_session(agent_id, session_id):
                     raise click.ClickException(
                         f"agent {agent_id} is not a member of session {session_id}."
@@ -87,6 +98,8 @@ def _client_command(
                     click.echo(output.format_json(result))
                 elif text_formatter is not None:
                     click.echo(text_formatter(result))
+                else:
+                    click.echo(output.format_json(result))
             except click.ClickException:
                 raise
             except Exception as exc:
