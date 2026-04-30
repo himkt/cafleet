@@ -22,7 +22,7 @@ Placed **before** the subcommand:
 | Flag | Required | Notes |
 |---|---|---|
 | `--json` | no | Emit JSON output. |
-| `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
+| `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
 ### Subcommands that require `--session-id`
