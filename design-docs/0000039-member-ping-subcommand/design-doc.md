@@ -1,6 +1,6 @@
 # `cafleet member ping` — extract poll-trigger dispatch into its own subcommand
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 23/23 tasks complete
 **Last Updated**: 2026-04-30
 
@@ -264,3 +264,4 @@ Per `.claude/rules/design-doc-numbering.md`, every documentation surface is upda
 | 2026-04-30 | Reviewer round 1. Applied 3 fixes. (1) Relabeled "Member-Lifecycle table" mentions to the actual ARCHITECTURE.md §"Operation Mapping" table heading (line 70, exec row at line 87) in both §6 doc-surface table and Step 1 ARCHITECTURE.md task. (2) Dropped the redundant Required Flags `--session-id` cell edit from the Step 1 SKILL.md task (the `member *` wildcard at SKILL.md line 27 already covers `member ping`). (3) Folded the `.claude/rules/removal.md` residue cleanup at `skills/cafleet/roles/director.md` line 39 into the existing Step 1 director.md task (drop the regression-style "no `--bash` flag, no `--choice` / `--freetext` interplay" sentence left behind by design 0000038's hard-rename). |
 | 2026-04-30 | Approved by user. Status flipped to Approved. |
 | 2026-04-30 | Copilot review on PR #42 (round 1). Applied 2 fixes. (1) Removed the redundant `Bash(cafleet --session-id * member ping *)` entry from `.claude/settings.json` — the existing broad `Bash(cafleet *)` entry in `permissions.allow` already covers `member ping`, and the design relies on rule specificity (the more specific `Bash(cafleet * member exec *)` `ask` rule takes precedence for `member exec`, while `member ping` falls through to the broad allow). (2) Updated SC line 19, the §0000038 predecessor row, §3 settings updates, and Step 1 task 9 wording to (a) reference the actual `Bash(cafleet * member exec *)` ask rule pattern (matching `.claude/settings.json` from design 0000038, not the speculative `Bash(cafleet --session-id * member exec *)` form) and (b) explain the no-edit-needed reasoning for the ping-side allow. |
+| 2026-04-30 | Copilot review loop exited quiescent after round 1 (5 consecutive ticks with no new Copilot activity). Status flipped to Complete. |
