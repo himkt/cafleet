@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet import broker
-from cafleet.broker import _is_administrator_card
+from cafleet.broker import _is_administrator
 from cafleet.db.models import (
     Agent,
     AgentPlacement,
@@ -119,8 +119,8 @@ class TestCreateSessionBootstrap:
         assert admin_row.status == "active"
         assert director_row.agent_id == result["director"]["agent_id"]
         assert admin_row.agent_id == result["administrator_agent_id"]
-        assert _is_administrator_card(admin_row.agent_card_json)
-        assert not _is_administrator_card(director_row.agent_card_json)
+        assert _is_administrator(admin_row.agent_card_json)
+        assert not _is_administrator(director_row.agent_card_json)
 
     def test_writes_one_placement_row_for_the_director_only(
         self, broker_session, director_context
