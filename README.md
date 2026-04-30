@@ -19,7 +19,7 @@ This adds 5 skills under the `cafleet` namespace: `cafleet`, `cafleet-monitoring
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
-cafleet db init             # one-time SQLite schema setup
+cafleet db init             # apply schema migrations (idempotent; rerun after upgrades)
 ```
 
 The default database is `~/.local/share/cafleet/registry.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
@@ -40,7 +40,7 @@ Want more? See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for the raw 
 
 | Command group | One-line purpose |
 |---|---|
-| `cafleet db init` | Apply schema migrations (one-time) |
+| `cafleet db init` | Apply schema migrations (idempotent; rerun after upgrades) |
 | `cafleet session *` | Create / list / show / delete sessions |
 | `cafleet agent *` | Register / deregister / list / show agents |
 | `cafleet message *` | Send / broadcast / poll / ack / cancel / show messages |
@@ -48,7 +48,7 @@ Want more? See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for the raw 
 | `cafleet server` | Start the admin WebUI on `127.0.0.1:8000` |
 | `cafleet doctor` | Print the calling pane's tmux identifiers |
 
-> Full per-subcommand reference: [docs/spec/cli-options.md](docs/spec/cli-options.md).
+> CLI reference (per-command sections for `session`, `member`, `doctor`, `server`; `agent` / `message` / `db init` covered via the option-source table and `cafleet <cmd> --help`): [docs/spec/cli-options.md](docs/spec/cli-options.md).
 
 ## Architecture
 
