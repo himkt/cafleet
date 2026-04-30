@@ -573,7 +573,7 @@ When `silence_ticks >= 30` (≈ 30 minutes since the last Copilot activity AND n
 | 3. Finalize now | Exit loop → Step 8 (accept the current state of Copilot review as-is) |
 | 4. *(Other)* | Intent judgment; abort-intent → Abort Flow |
 
-The 30-tick threshold is conservative: Copilot's first review after a `--add-reviewer` typically lands within 3–5 minutes. 30 minutes is enough that Copilot is highly unlikely to still be composing, while leaving the *decision* to the user instead of the loop. The user retains the option to keep waiting indefinitely — the loop never finalises on its own based on silence.
+The 30-tick threshold is conservative: Copilot's first review after a `--add-reviewer` typically lands within 3–5 minutes. 30 minutes is enough that Copilot is highly unlikely to still be composing, while leaving the *decision* to the user instead of the loop. The user retains the option to keep waiting indefinitely — the loop never finalizes on its own based on silence.
 
 #### Augmented Loop Prompt
 
