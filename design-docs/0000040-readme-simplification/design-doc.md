@@ -1,6 +1,6 @@
 # README simplification — anchor on the Claude Code plugin journey
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 23/23 tasks complete
 **Last Updated**: 2026-04-30
 
@@ -297,3 +297,4 @@ Read each file in full and searched (case-sensitive) for the four literal string
 | 2026-04-30 | Initial draft |
 | 2026-04-30 | Reviewer round 1: fix Progress count to 0/23, split Step 1 (draft) and Step 2 (apply) to remove duplication, reorder steps to honor design-doc-numbering rule (ARCH/docs apply before README rewrite), pin verbatim README content for §3 example block, name the canonical Claude Code plugins documentation URL for §2 plugin install verification. |
 | 2026-04-30 | Approved by user. Status set to Approved; ready for /design-doc-execute. |
+| 2026-04-30 | Implementation complete (PR #43). All 23 tasks checked. README.md cut from 333 to 80 lines (Features removed entirely, single 7-row CLI cheatsheet, plugin install verified canonical hyphen form `cafleet@himkt-cafleet`). 0 hard gaps in ARCH/docs audit; 0 matches in SKILL.md sweep. Copilot review round 1: 3 comments addressed (design-doc fence depth + slash-vs-hyphen text in §2; README mise lint comment expanded to include `ruff format --check`). Round 2 quiescent — Copilot did not return new comments after the fix-push. Status set to Complete. |
