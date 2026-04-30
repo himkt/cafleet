@@ -83,15 +83,14 @@ def _client_command(
                     )
             try:
                 result = func(ctx, *args, **kwargs)
+                if ctx.obj["json_output"]:
+                    click.echo(output.format_json(result))
+                elif text_formatter is not None:
+                    click.echo(text_formatter(result))
             except click.ClickException:
                 raise
             except Exception as exc:
                 raise click.ClickException(str(exc)) from exc
-
-            if ctx.obj["json_output"]:
-                click.echo(output.format_json(result))
-            elif text_formatter is not None:
-                click.echo(text_formatter(result))
             return result
 
         return wrapper
