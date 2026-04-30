@@ -548,7 +548,7 @@ For review-level comments (body text not attached to a specific line), route by 
    - Tester fixes: `git commit -m "fix: address Copilot test review - <short summary>"`
    - Director doc fixes: `git commit -m "docs: address Copilot review - <short summary>"`
 3. `git push` (no flags — the branch already tracks origin from Step 6).
-4. Update `last_push_ts` to the post-push wall-clock timestamp and increment `round`.
+4. Update `last_push_ts` to the post-push wall-clock timestamp, reset `silence_ticks = 0` (any silence before the push is no longer relevant — the new push restarts the review window), and increment `round`.
 5. Re-request Copilot review: `gh pr edit <pr-number> --add-reviewer @copilot`. Re-adding the same reviewer triggers a fresh Copilot pass.
 6. Continue the loop.
 
