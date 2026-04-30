@@ -23,29 +23,14 @@ class AdministratorProtectedError(Exception):
     """Raised when an operation targets a built-in Administrator agent."""
 
 
-def _administrator_agent_card(session_id: str) -> dict:
-    short_id = session_id[:8]
-    return {
-        "name": "Administrator",
-        "description": f"Built-in administrator agent for session {short_id}",
-        "skills": [],
-        "cafleet": {"kind": ADMINISTRATOR_KIND},
-    }
-
-
-def _is_administrator_card(agent_card_json: str | None) -> bool:
+def _is_administrator(agent_card_json: str | None) -> bool:
     if not agent_card_json:
         return False
     try:
-        card = json.loads(agent_card_json)
-    except (ValueError, TypeError):
+        kind = json.loads(agent_card_json).get("cafleet", {}).get("kind")
+    except (ValueError, TypeError, AttributeError):
         return False
-    if not isinstance(card, dict):
-        return False
-    cafleet_ns = card.get("cafleet")
-    if not isinstance(cafleet_ns, dict):
-        return False
-    return cafleet_ns.get("kind") == ADMINISTRATOR_KIND
+    return kind == ADMINISTRATOR_KIND
 
 
 def _now_iso() -> str:
@@ -119,7 +104,12 @@ def create_session(
     created_at = _now_iso()
     director_agent_id = str(uuid.uuid4())
     administrator_agent_id = str(uuid.uuid4())
-    administrator_card = _administrator_agent_card(session_id)
+    administrator_card = {
+        "name": "Administrator",
+        "description": f"Built-in administrator agent for session {session_id[:8]}",
+        "skills": [],
+        "cafleet": {"kind": ADMINISTRATOR_KIND},
+    }
     director_card = {
         "name": _DIRECTOR_NAME,
         "description": _DIRECTOR_DESCRIPTION,
@@ -345,7 +335,7 @@ def register_agent(
                     f"Director agent '{director_id}' not found or not active "
                     f"in session '{session_id}'."
                 )
-            if _is_administrator_card(director_card):
+            if _is_administrator(director_card):
                 raise AdministratorProtectedError("Administrator cannot be a director")
 
         session.add(
@@ -405,9 +395,7 @@ def get_agent(agent_id: str, session_id: str) -> dict | None:
         "status": agent.status,
         "registered_at": agent.registered_at,
         "kind": (
-            ADMINISTRATOR_KIND
-            if _is_administrator_card(agent.agent_card_json)
-            else "user"
+            ADMINISTRATOR_KIND if _is_administrator(agent.agent_card_json) else "user"
         ),
         "placement": None,
     }
@@ -465,7 +453,7 @@ def deregister_agent(agent_id: str) -> bool:
         card_json = session.execute(
             select(Agent.agent_card_json).where(Agent.agent_id == agent_id)
         ).scalar_one_or_none()
-        if card_json is not None and _is_administrator_card(card_json):
+        if card_json is not None and _is_administrator(card_json):
             raise AdministratorProtectedError("Administrator cannot be deregistered")
         deregistered = session.execute(
             update(Agent)

@@ -1,7 +1,7 @@
 # Codebase Simplification
 
 **Status**: Approved
-**Progress**: 14/60 tasks complete
+**Progress**: 19/60 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -317,14 +317,14 @@ Per `.claude/rules/design-doc-numbering.md`, documentation lands BEFORE code. Th
 - [x] Delete `cafleet/src/cafleet/coding_agent.py`. <!-- completed: 2026-04-30T00:00; harness denied rm — Director dispatched via member exec -->
 - [x] Update tests: delete or rewrite anything importing `cafleet.coding_agent`. <!-- completed: 2026-04-30T00:00; old test_coding_agent.py was already deleted by the Tester's commit, replaced by test_cli_claude_helpers.py. test_cli_member.py: dropped CLAUDE import + 7x coding_agent_config kwargs + monkeypatch path swapped to cafleet.cli.shutil.which. -->
 - [x] `mise //cafleet:test` green. <!-- completed: 2026-04-30T00:00; 521 passed in 23.29s -->
-- [ ] Commit: `refactor: inline CodingAgentConfig into cli (design 0000041 §B)`. <!-- completed: -->
+- [x] Commit: `refactor: inline CodingAgentConfig into cli (design 0000041 §B)`. <!-- completed: 2026-04-30T12:45 -->
 
 ### Step 4: Consolidate broker admin-card helpers (§C)
 
-- [ ] Replace `_is_administrator_card` with `_is_administrator`; rename call sites in `register_agent`, `deregister_agent`, `get_agent`, `list_session_agents`. <!-- completed: -->
-- [ ] Inline `_administrator_agent_card` into `create_session` (single caller). <!-- completed: -->
-- [ ] Verify SQL-side `func.json_extract(...) != ADMINISTRATOR_KIND` filter unchanged in `broadcast_message` and `list_session_agents`. <!-- completed: -->
-- [ ] `mise //cafleet:test` green. <!-- completed: -->
+- [x] Replace `_is_administrator_card` with `_is_administrator`; rename call sites in `register_agent`, `deregister_agent`, `get_agent`, `list_session_agents`. <!-- completed: 2026-04-30T00:00; rewrote body per design spec (chained .get with AttributeError catch); 3 call sites renamed at lines 338/399/458 -->
+- [x] Inline `_administrator_agent_card` into `create_session` (single caller). <!-- completed: 2026-04-30T00:00; inlined the dict literal at line 107; old helper deleted -->
+- [x] Verify SQL-side `func.json_extract(...) != ADMINISTRATOR_KIND` filter unchanged in `broadcast_message` and `list_session_agents`. <!-- completed: 2026-04-30T00:00; SQL filter at lines 683 and 868 left intact -->
+- [x] `mise //cafleet:test` green. <!-- completed: 2026-04-30T00:00; 512 passed in 22.73s; ruff format applied to broker.py; lint and typecheck green -->
 - [ ] Commit: `refactor: consolidate broker admin-card helpers (design 0000041 §C)`. <!-- completed: -->
 
 ### Step 5: Merge webui_api formatters (§D)
