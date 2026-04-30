@@ -1,10 +1,11 @@
-"""Tests for the merged webui_api formatter (design 0000041 §D).
+"""Tests for the ``webui_api`` message formatter.
 
-The Programmer will replace ``_format_raw_tasks`` and
-``_format_timeline_entries`` with a single
-``_format_messages(rows, accessor)`` plus two shape-specific accessors
-(``_raw_task_accessor`` for ``broker.list_inbox`` / ``list_sent`` rows and
-``_timeline_entry_accessor`` for ``broker.list_timeline`` entries).
+``_format_messages(rows, accessor)`` produces the canonical 11-key
+message dict shape consumed by the ``/ui/api`` inbox / sent / timeline
+endpoints, batching the agent-name lookup once per call.
+``_raw_task_accessor`` adapts ``broker.list_inbox`` / ``list_sent`` rows
+and ``_timeline_entry_accessor`` adapts ``broker.list_timeline`` entries
+to the merger's expected per-row shape.
 """
 
 import pytest

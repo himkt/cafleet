@@ -1,11 +1,11 @@
-"""Tests for the merged output-list helper (design 0000041 §E).
+"""Tests for ``format_indexed_list``.
 
-The Programmer replaces ``format_task_list`` and ``format_agent_list``
-with a single ``format_indexed_list(items, formatter, empty_msg)`` and
-inlines ``format_session_show`` into ``cli.session_show``.
+``format_indexed_list(items, formatter, empty_msg)`` returns the
+``empty_msg`` verbatim when ``items`` is empty, and otherwise produces a
+newline-joined block of one-based ``[i]`` markers interleaved with each
+item's ``formatter(item)`` rendering.
 """
 
-from cafleet import output
 from cafleet.output import format_agent, format_indexed_list, format_task
 
 
@@ -76,8 +76,3 @@ class TestFormatIndexedList:
             ]
         )
         assert result == expected
-
-
-class TestFormatSessionShowRemoved:
-    def test_format_session_show_no_longer_in_module(self):
-        assert not hasattr(output, "format_session_show")
