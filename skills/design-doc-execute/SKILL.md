@@ -492,7 +492,6 @@ The Director holds three **PR-review-specific** in-context variables across loop
 | Variable | Meaning | Update rule |
 |:--|:--|:--|
 | `last_push_ts` | ISO 8601 timestamp of the most recent push to the PR branch | Reset on every `git push` from 6b-step 2 or 7d-step 3 |
-| `round` | Fix-round counter (push → Copilot review → fix cycle) | Increment after every push from 7d; reset only via 7e "Continue" |
 | `silence_ticks` | Consecutive loop ticks with 0 new Copilot items since the last activity | Increment each tick with 0 new items; reset to 0 when new Copilot items arrive OR after a fix-push from 7d |
 
 #### 7a. Replace the monitoring `/loop` (create-before-delete)
@@ -550,21 +549,11 @@ For review-level comments (body text not attached to a specific line), route by 
    - Tester fixes: `git commit -m "fix: address Copilot test review - <short summary>"`
    - Director doc fixes: `git commit -m "docs: address Copilot review - <short summary>"`
 3. `git push` (no flags — the branch already tracks origin from Step 6).
-4. Update `last_push_ts` to the post-push wall-clock timestamp, reset `silence_ticks = 0` (any silence before the push is no longer relevant — the new push restarts the review window), and increment `round`.
+4. Update `last_push_ts` to the post-push wall-clock timestamp and reset `silence_ticks = 0` (any silence before the push is no longer relevant — the new push restarts the review window).
 5. Re-request Copilot review: `gh pr edit <pr-number> --add-reviewer @copilot`. Re-adding the same reviewer triggers a fresh Copilot pass.
 6. Continue the loop.
 
-#### 7e. Round limit
-
-When `round >= 5`, break the auto-loop and escalate to the user via `AskUserQuestion`:
-
-| Option | Behavior |
-|:--|:--|
-| 1. Continue | Reset `round = 0`, resume Step 7 |
-| 2. Finalize now | Exit loop → Step 8 (accept remaining Copilot comments as-is) |
-| 3. *(Other)* | Intent judgment; abort-intent → Abort Flow |
-
-#### 7f. Silence escalation
+#### 7e. Silence escalation
 
 When `silence_ticks >= 30` (≈ 30 minutes since the last Copilot activity AND no new items this tick), escalate to the user via `AskUserQuestion`:
 
@@ -596,12 +585,11 @@ PR REVIEW:
 7. Filter to entries where the appropriate login field (`author.login` for GraphQL reviews, `user.login` for REST inline comments) starts with `copilot` (case-insensitive) and the appropriate timestamp (`submittedAt` / `created_at`) > `last_push_ts` (the in-context state variable defined under "PR Review Loop State").
 8. If the most recent Copilot-authored entry **in the filtered (post-push) set from step 7** has `state == "APPROVED"`: signal Step 7 exit (success). An older approval (i.e., one with `submittedAt <= last_push_ts`) must NOT trigger this exit.
 9. If filter returned 0 entries AND `silence_ticks < 30`: increment `silence_ticks`, continue waiting (do nothing this tick). The loop never auto-exits on Copilot silence.
-10. If filter returned 0 entries AND `silence_ticks >= 30`: silence-escalation per 7f — AskUserQuestion (Keep waiting / Re-request review / Finalize now / Other). Reset `silence_ticks = 0` if the user picks Keep waiting or Re-request review; otherwise honor the user's choice.
+10. If filter returned 0 entries AND `silence_ticks >= 30`: silence-escalation per 7e — AskUserQuestion (Keep waiting / Re-request review / Finalize now / Other). Reset `silence_ticks = 0` if the user picks Keep waiting or Re-request review; otherwise honor the user's choice.
 11. If filter returned ≥ 1 entries: reset `silence_ticks = 0`, classify by file path, and dispatch via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`.
 
 ESCALATION:
 12. If any member has been nudged 2 times with no progress, escalate to the user.
-13. If `round >= 5`, escalate to the user with the Continue / Finalize-now / Other prompt.
 ```
 
 #### Error Handling (Steps 6–7)
@@ -614,8 +602,7 @@ ESCALATION:
 | `git push` rejected | stderr of `git push` | Report exact stderr to user, skip Step 7, go to Step 8 local-finalize. NEVER force-push. |
 | `gh pr create` fails | stderr of `gh pr create` | Report, skip Step 7, go to Step 8 local-finalize |
 | `@copilot` reviewer unavailable | `gh api .../requested_reviewers` shows no Copilot AND no prior Copilot review | Report `Copilot reviewer unavailable for this PR`; skip Step 7; go to Step 8 |
-| Fix-push fails mid-loop (`round > 0`) | stderr of `git push` | Escalate to user (AskUserQuestion: retry / finalize now / abort) |
-| Round limit reached (`round >= 5`) | Counter check in loop | AskUserQuestion — see 7e above |
+| Fix-push fails mid-loop (any subsequent push after the initial one) | stderr of `git push` | Escalate to user (AskUserQuestion: retry / finalize now / abort) |
 | User selects "Other" in Step 5 with abort-intent text | Existing LLM intent judgment | Abort Flow (unchanged — no push) |
 | User selects "Other" in Step 5 with approve-local intent | Existing LLM intent judgment, extended | Skip Steps 6 + 7; go to Step 8 local-finalize |
 
