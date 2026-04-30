@@ -1,7 +1,7 @@
 # `cafleet member exec` — extract bash dispatch into its own subcommand
 
 **Status**: Approved
-**Progress**: 8/28 tasks complete
+**Progress**: 14/28 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -277,12 +277,12 @@ Per `.claude/rules/design-doc-numbering.md`, every documentation surface is upda
 
 ### Step 3: Tests — `cafleet/tests/test_cli_member_send_input.py`
 
-- [ ] Delete the `TestBashFlag` class entirely. <!-- completed: -->
-- [ ] Delete the `bash_recorder` fixture. <!-- completed: -->
-- [ ] Update `TestFlagValidation::test_no_flag_supplied_exits_two`: remove the `assert "--bash" in out` assertion; update to assert the new wording `"--choice and --freetext are mutually exclusive"`. <!-- completed: -->
-- [ ] Update `TestFlagValidation::test_choice_and_freetext_combo_exits_two`: remove the `assert "--bash" in out` assertion. <!-- completed: -->
-- [ ] Add `TestBashFlagRemoved` class with one regression test asserting `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --bash "x"` exits 2 with Click `No such option` error containing the literal substring `--bash`. <!-- completed: -->
-- [ ] Add `TestFreetextBangRejection` class with the six tests enumerated in §6 Test surface. <!-- completed: -->
+- [x] Delete the `TestBashFlag` class entirely. <!-- completed: 2026-04-30T13:06 -->
+- [x] Delete the `bash_recorder` fixture. <!-- completed: 2026-04-30T13:06 -->
+- [x] Update `TestFlagValidation::test_no_flag_supplied_exits_two`: remove the `assert "--bash" in out` assertion; update to assert the new wording `"--choice and --freetext are mutually exclusive"`. <!-- completed: 2026-04-30T13:06 -->
+- [x] Update `TestFlagValidation::test_choice_and_freetext_combo_exits_two`: remove the `assert "--bash" in out` assertion. <!-- completed: 2026-04-30T13:06 -->
+- [x] Add `TestBashFlagRemoved` class with one regression test asserting `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --bash "x"` exits 2 with Click `No such option` error containing the literal substring `--bash`. <!-- completed: 2026-04-30T13:06 -->
+- [x] Add `TestFreetextBangRejection` class with the six tests enumerated in §6 Test surface. <!-- completed: 2026-04-30T13:06 -->
 
 ### Step 4: Tests — `cafleet/tests/test_cli_member_exec.py` (new)
 
