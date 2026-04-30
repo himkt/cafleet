@@ -1,7 +1,7 @@
 # `cafleet member ping` — extract poll-trigger dispatch into its own subcommand
 
 **Status**: Approved
-**Progress**: 10/23 tasks complete
+**Progress**: 17/23 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -240,13 +240,13 @@ Per `.claude/rules/design-doc-numbering.md`, every documentation surface is upda
 
 ### Step 3: Tests — `cafleet/tests/test_cli_member_ping.py` (new)
 
-- [ ] Create `cafleet/tests/test_cli_member_ping.py`. Mirror the fixture pattern from `test_cli_member_exec.py`: `_placement`, `_agent`, `_UNSET`, `session_id`, `runner`, `_stub_tmux_available` (autouse), `happy_path_agent`, and a new `poll_recorder` fixture (records calls to `tmux.send_poll_trigger`; defaults to returning `True`; uses `raising=False` on the monkeypatch). <!-- completed: -->
-- [ ] Add the `_invoke` helper for `cafleet --session-id <s> member ping --agent-id <d> --member-id <m>` (no positional argument). <!-- completed: -->
-- [ ] Add `TestPingDispatch` class with: `test_poll_trigger_called_with_correct_kwargs`, `test_text_output`, `test_json_output_two_keys`. <!-- completed: -->
-- [ ] Add `TestSendFailure` class with: `test_send_poll_trigger_returns_false_exits_one`, `test_send_poll_trigger_raises_tmux_error_exits_one`. <!-- completed: -->
-- [ ] Add `TestAuthorizationBoundary` class with: `test_missing_agent_exits_one`, `test_placement_none_exits_one_with_exact_message`, `test_cross_director_exits_one_with_exact_message`, `test_pending_pane_exits_one_with_exact_message`. Wording mirrors `test_cli_member_exec.py::TestAuthorizationBoundary` verbatim. <!-- completed: -->
-- [ ] Add `TestTmuxUnavailable` class with `test_tmux_not_available_exits_one`. <!-- completed: -->
-- [ ] Add `TestInputValidation` class with `test_missing_agent_id_exits_two` and `test_missing_member_id_exits_two` (Click built-in `Missing option` errors). No positional / freetext validation tests because the subcommand has no operator-controlled keystroke body. <!-- completed: -->
+- [x] Create `cafleet/tests/test_cli_member_ping.py`. Mirror the fixture pattern from `test_cli_member_exec.py`: `_placement`, `_agent`, `_UNSET`, `session_id`, `runner`, `_stub_tmux_available` (autouse), `happy_path_agent`, and a new `poll_recorder` fixture (records calls to `tmux.send_poll_trigger`; defaults to returning `True`; uses `raising=False` on the monkeypatch). <!-- completed: 2026-04-30T07:13 -->
+- [x] Add the `_invoke` helper for `cafleet --session-id <s> member ping --agent-id <d> --member-id <m>` (no positional argument). <!-- completed: 2026-04-30T07:13 -->
+- [x] Add `TestPingDispatch` class with: `test_poll_trigger_called_with_correct_kwargs`, `test_text_output`, `test_json_output_two_keys`. <!-- completed: 2026-04-30T07:13 -->
+- [x] Add `TestSendFailure` class with: `test_send_poll_trigger_returns_false_exits_one`, `test_send_poll_trigger_raises_tmux_error_exits_one`. <!-- completed: 2026-04-30T07:13 -->
+- [x] Add `TestAuthorizationBoundary` class with: `test_missing_agent_exits_one`, `test_placement_none_exits_one_with_exact_message`, `test_cross_director_exits_one_with_exact_message`, `test_pending_pane_exits_one_with_exact_message`. Wording mirrors `test_cli_member_exec.py::TestAuthorizationBoundary` verbatim. <!-- completed: 2026-04-30T07:13 -->
+- [x] Add `TestTmuxUnavailable` class with `test_tmux_not_available_exits_one`. <!-- completed: 2026-04-30T07:13 -->
+- [x] Add `TestInputValidation` class with `test_missing_agent_id_exits_two` and `test_missing_member_id_exits_two` (Click built-in `Missing option` errors). No positional / freetext validation tests because the subcommand has no operator-controlled keystroke body. <!-- completed: 2026-04-30T07:13 -->
 
 ### Step 4: Quality gates
 
