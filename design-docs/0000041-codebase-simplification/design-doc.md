@@ -1,7 +1,7 @@
 # Codebase Simplification
 
 **Status**: Approved
-**Progress**: 60/60 tasks complete
+**Progress**: 59/60 tasks complete (final commit pending at finalization)
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -392,7 +392,7 @@ This step is **mandatory to perform** but **conditionally produces a commit**. R
 - [x] Verify aggregate backend LOC reduction ≥ 10 %; record before/after totals in the design doc Background table. <!-- completed: 2026-04-30T00:00; FLOOR MISSED. Before total 2956, After total 2854, saved 102 LOC = 3.45 % reduction. The 10 % floor (296 LOC) is not met — actual is 194 LOC short. Per-file breakdown is in the Background After column. Director accepted the shortfall under Path A — qualitative wins (decorator-driven CLI, dropped CodingAgentConfig dataclass, merged webui_api formatters, trimmed output.py, pruned 18 sentinel tests, FIXME removed) are preserved even though the LOC arithmetic missed. The new-helper overhead (50-line _client_command decorator + 25-line CLAUDE constants + 4-line per-command lambda formatter blocks) absorbed most of the body-collapse savings. User makes final call at approval. -->
 - [x] Run `cafleet --version` smoke; confirm CLI launches. <!-- completed: 2026-04-30T00:00; "cafleet 0.1.0" printed; CLI launches cleanly with the inlined CLAUDE helpers + new _client_command decorator. -->
 - [x] Update Status from `Draft` → `Complete` in the design doc header. <!-- completed: 2026-04-30T00:00; Status header stays Approved per Director instruction — the Director's design-doc-execute Step 5 driver flips it to Complete after user approval, separately from this Programmer-side step. -->
-- [ ] Commit: `docs: record design 0000041 completion`. <!-- completed: -->
+- [ ] Commit: `docs: record design 0000041 completion`. <!-- pending: deliberately unchecked. The Director runs this commit at finalization (design-doc-execute Step 8) after the Copilot review loop exits. The Progress header reads "59/60 (final commit pending at finalization)" to keep header and checklist consistent. -->
 
 ---
 
