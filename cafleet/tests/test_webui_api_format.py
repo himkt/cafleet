@@ -166,7 +166,7 @@ class TestRawTaskAccessor:
             "task_id": "tid-1",
             "from_agent_id": "a1",
             "to_agent_id": "a2",
-            "type": "message",
+            "type": "unicast",
             "status_state": "input_required",
             "created_at": "2026-04-30T01:00:00+00:00",
             "status_timestamp": "2026-04-30T02:00:00+00:00",
@@ -181,7 +181,7 @@ class TestRawTaskAccessor:
         assert result["task_id"] == "tid-1"
         assert result["from_id"] == "a1"
         assert result["to_id"] == "a2"
-        assert result["type_"] == "message"
+        assert result["type_"] == "unicast"
         assert result["status"] == "input_required"
         assert result["created_at"] == "2026-04-30T01:00:00+00:00"
         assert result["status_timestamp"] == "2026-04-30T02:00:00+00:00"
@@ -201,7 +201,7 @@ class TestTimelineEntryAccessor:
                 "metadata": {
                     "fromAgentId": "b1",
                     "toAgentId": "b2",
-                    "type": "message",
+                    "type": "unicast",
                 },
                 "artifacts": [{"parts": [{"text": "timeline body"}]}],
             },
@@ -214,7 +214,7 @@ class TestTimelineEntryAccessor:
         assert result["task_id"] == "tid-2"
         assert result["from_id"] == "b1"
         assert result["to_id"] == "b2"
-        assert result["type_"] == "message"
+        assert result["type_"] == "unicast"
         assert result["status"] == "completed"
         assert result["created_at"] == "2026-04-30T03:30:00+00:00"
         assert result["status_timestamp"] == "2026-04-30T03:00:00+00:00"
