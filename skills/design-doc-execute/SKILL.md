@@ -487,12 +487,13 @@ Once the PR exists and Copilot has been invited, the Director runs a cron-driven
 
 #### PR Review Loop State
 
-The Director holds two in-context variables across loop firings. They are NOT persisted to disk — the Director carries them in its own working memory.
+The Director holds three **PR-review-specific** in-context variables across loop firings (separate from the team-health `--since` timestamp tracked by `Skill(cafleet-monitoring)` for `cafleet message poll`). They are NOT persisted to disk — the Director carries them in its own working memory.
 
 | Variable | Meaning | Update rule |
 |:--|:--|:--|
 | `last_push_ts` | ISO 8601 timestamp of the most recent push to the PR branch | Reset on every `git push` from 6b-step 2 or 7d-step 3 |
 | `round` | Fix-round counter (push → Copilot review → fix cycle) | Increment after every push from 7d; reset only via 7e "Continue" |
+| `silence_ticks` | Consecutive loop ticks with 0 new Copilot items since the last activity | Increment each tick with 0 new items; reset to 0 when new Copilot items arrive OR after a fix-push from 7d |
 
 #### 7a. Replace the monitoring `/loop` (create-before-delete)
 
@@ -519,10 +520,11 @@ On each 1-minute wake-up, the Director runs — in order:
 | Result | Action |
 |:--|:--|
 | The most recent Copilot-authored entry in `reviews` has `state == "APPROVED"` | Exit loop (success) → Step 8 |
-| 0 new Copilot items | Continue waiting (do nothing this tick) |
-| ≥ 1 new Copilot items | Go to 7c |
+| 0 new Copilot items AND `silence_ticks < 30` | Increment `silence_ticks`, continue waiting |
+| 0 new Copilot items AND `silence_ticks >= 30` | Silence-escalation: see 7f |
+| ≥ 1 new Copilot items | Reset `silence_ticks = 0`, go to 7c |
 
-**Why no quiescent exit**: a silent Copilot is NOT proof Copilot is done. Copilot may take longer than expected to re-review after a fix-push, may not have been re-triggered yet, or may be back-pressured. Exiting on silence risks finalizing a PR while Copilot is still composing comments. The loop only exits on an explicit `state == "APPROVED"` signal, on user-driven escalation (round limit at 7e, or "Stop means stop"), or on the cron's natural 7-day expiry. The user can always interrupt to finalize early.
+**Why no auto-exit on silence**: a silent Copilot is NOT proof Copilot is done. Copilot may take longer than expected to re-review after a fix-push, may not have been re-triggered yet, or may be back-pressured. **Auto-exiting** on silence risks finalizing a PR while Copilot is still composing comments. The loop never auto-exits on silence; it instead **escalates to the user** via 7f after 30 consecutive silent ticks (~30 minutes), so the user — not the loop — chooses whether to keep waiting, re-request the review, or finalize. Outside that user gate, the loop only exits on an explicit `state == "APPROVED"` signal, on the round-limit escalation at 7e, on "Stop means stop", or on the cron's natural 7-day expiry.
 
 **Why not `reviewDecision`**: the PR-level `reviewDecision` only reflects required reviewers (typically CODEOWNERS). Copilot is usually not a CODEOWNER, so an approve from Copilot alone leaves `reviewDecision` null/REVIEW_REQUIRED. Reading the Copilot-specific entry in the `reviews` array is the reliable signal.
 
@@ -560,6 +562,19 @@ When `round >= 5`, break the auto-loop and escalate to the user via `AskUserQues
 | 2. Finalize now | Exit loop → Step 8 (accept remaining Copilot comments as-is) |
 | 3. *(Other)* | Intent judgment; abort-intent → Abort Flow |
 
+#### 7f. Silence escalation
+
+When `silence_ticks >= 30` (≈ 30 minutes since the last Copilot activity AND no new items this tick), escalate to the user via `AskUserQuestion`:
+
+| Option | Behavior |
+|:--|:--|
+| 1. Keep waiting | Reset `silence_ticks = 0`, continue Step 7 |
+| 2. Re-request review | Run `gh pr edit <pr-number> --add-reviewer @copilot` to re-trigger Copilot, reset `silence_ticks = 0`, continue Step 7 |
+| 3. Finalize now | Exit loop → Step 8 (accept the current state of Copilot review as-is) |
+| 4. *(Other)* | Intent judgment; abort-intent → Abort Flow |
+
+The 30-tick threshold is conservative: Copilot's first review after a `--add-reviewer` typically lands within 3–5 minutes. 30 minutes is enough that Copilot is highly unlikely to still be composing, while leaving the *decision* to the user instead of the loop. The user retains the option to keep waiting indefinitely — the loop never finalises on its own based on silence.
+
 #### Augmented Loop Prompt
 
 Use this as the `/loop` prompt for Step 7. Substitute the literal UUIDs and the literal PR number before passing the prompt to `/loop` — no shell variables.
@@ -578,12 +593,13 @@ PR REVIEW:
 6. Run `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST shape: `user.login`, `body`, `path`, `line`, `created_at`).
 7. Filter to entries where the appropriate login field (`author.login` for GraphQL reviews, `user.login` for REST inline comments) starts with `copilot` (case-insensitive) and the appropriate timestamp (`submittedAt` / `created_at`) > `<last-push-timestamp>`.
 8. If the most recent Copilot-authored entry in `reviews` has `state == "APPROVED"`: signal Step 7 exit (success).
-9. If filter returned 0 entries: continue waiting (do nothing this tick). The loop never exits on Copilot silence — only on explicit APPROVED, on the round-limit escalation at 7e, on user "Stop means stop", or on the cron's natural 7-day expiry.
-10. If filter returned ≥ 1 entries: classify by file path and dispatch via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`.
+9. If filter returned 0 entries AND `silence_ticks < 30`: increment `silence_ticks`, continue waiting (do nothing this tick). The loop never auto-exits on Copilot silence.
+10. If filter returned 0 entries AND `silence_ticks >= 30`: silence-escalation per 7f — AskUserQuestion (Keep waiting / Re-request review / Finalize now / Other). Reset `silence_ticks = 0` if the user picks Keep waiting or Re-request review; otherwise honor the user's choice.
+11. If filter returned ≥ 1 entries: reset `silence_ticks = 0`, classify by file path, and dispatch via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`.
 
 ESCALATION:
-11. If any member has been nudged 2 times with no progress, escalate to the user.
-12. If `round >= 5`, escalate to the user with the Continue / Finalize-now / Other prompt.
+12. If any member has been nudged 2 times with no progress, escalate to the user.
+13. If `round >= 5`, escalate to the user with the Continue / Finalize-now / Other prompt.
 ```
 
 #### Error Handling (Steps 6–7)
