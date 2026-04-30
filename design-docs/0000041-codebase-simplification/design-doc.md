@@ -1,7 +1,7 @@
 # Codebase Simplification
 
 **Status**: Approved
-**Progress**: 33/60 tasks complete
+**Progress**: 43/60 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -352,18 +352,18 @@ This is the largest step — split into two sub-commits to keep diffs reviewable
 
 - [x] Add `_client_command(*, requires_agent_session: bool = False, text_formatter: Callable[[Any], str] | None = None)` to `cli.py`. The decorator: validates session-id, optionally validates `--agent-id` belongs to session, wraps body in broker-error converter, branches output by `ctx.obj["json_output"]`. <!-- completed: 2026-04-30T00:00; uses functools.wraps; agent_id read from kwargs (Click guarantees presence when --agent-id is required); imports updated with functools, Callable, Any -->
 - [x] Migrate ONE simple command (`agent_list`) as a proof point and run tests. <!-- completed: 2026-04-30T00:00; agent_list now @_client_command(requires_agent_session=True, text_formatter=…) and the body is one line (return broker.list_agents(...)). 531 tests pass, lint green, typecheck green. -->
-- [ ] Commit: `refactor: introduce _client_command decorator (design 0000041 §A.1)`. <!-- completed: -->
+- [x] Commit: `refactor: introduce _client_command decorator (design 0000041 §A.1)`. <!-- completed: 2026-04-30T13:20 -->
 
 #### 7b. Migrate remaining simple commands
 
-- [ ] Migrate `agent_register` (no `requires_agent_session` — `register` does not take an existing `--agent-id`). <!-- completed: -->
-- [ ] Migrate `agent_show`, `agent_deregister` (both `requires_agent_session=True`). <!-- completed: -->
-- [ ] Migrate `message_send`, `message_broadcast`, `message_poll`, `message_ack`, `message_cancel`, `message_show` (all `requires_agent_session=True`). <!-- completed: -->
-- [ ] Migrate `member_list` (the only member command that fits the pattern; `requires_agent_session=False` because the `--agent-id` here is the Director's, validated implicitly via the placement query the broker runs). <!-- completed: -->
-- [ ] Excluded — do NOT migrate (rationale per command): `session_create`, `session_list`, `session_show`, `session_delete` (the `session` group is in the `db init` / `session *` / `server` / `doctor` family that explicitly accepts-and-ignores `--session-id`; pushing `_require_session_id` through the decorator would re-introduce the very prompt these commands were designed to skip). `db init`, `server`, `doctor` (same family). `member_create`, `member_delete`, `member_capture`, `member_send_input`, `member_exec`, `member_ping` (orchestrate side effects — tmux split, /exit wait, rollback — that the decorator's broker-error converter would obscure; they only adopt the JSON-vs-text branch helper from §E). <!-- completed: -->
-- [ ] Delete `_handle_broker_errors` (no remaining call sites). <!-- completed: -->
-- [ ] Delete `_require_session_id` if no remaining direct call sites; otherwise keep for the decorator's internal use. <!-- completed: -->
-- [ ] `mise //cafleet:test` green. <!-- completed: -->
+- [x] Migrate `agent_register` (no `requires_agent_session` — `register` does not take an existing `--agent-id`). <!-- completed: 2026-04-30T00:00; text_formatter=output.format_register; skills JSON parse stays inside the body, ClickException re-raised by the decorator -->
+- [x] Migrate `agent_show`, `agent_deregister` (both `requires_agent_session=True`). <!-- completed: 2026-04-30T00:00; agent_show keeps the post-broker None-check via raise ValueError (decorator wraps as ClickException). agent_deregister returns {"status": "deregistered"} for JSON, text_formatter ignores the result and returns the fixed "Agent deregistered successfully." string. -->
+- [x] Migrate `message_send`, `message_broadcast`, `message_poll`, `message_ack`, `message_cancel`, `message_show`. <!-- completed: 2026-04-30T00:00; PATH-A CORRECTION: per Director, message_send and message_broadcast use requires_agent_session=False (matches Section A canonical enumeration and original behavior — broker.send_message and broker.broadcast_message enforce sender membership at the broker layer with their own wording). The other four (poll, ack, cancel, show) use requires_agent_session=True per Section A. text_formatter lambdas preserve byte-for-byte output: send → "Message sent.\n" + format_task; broadcast → "Broadcast sent.\n" + format_indexed_list; poll → format_indexed_list; ack → "Message acknowledged.\n" + format_task; cancel → "Task canceled.\n" + format_task; show → format_task. -->
+- [x] Migrate `member_list` (the only member command that fits the pattern; `requires_agent_session=False` because the `--agent-id` here is the Director's, validated implicitly via the placement query the broker runs). <!-- completed: 2026-04-30T00:00; text_formatter=output.format_member_list. -->
+- [x] Excluded — do NOT migrate (rationale per command): `session_create`, `session_list`, `session_show`, `session_delete` (the `session` group is in the `db init` / `session *` / `server` / `doctor` family that explicitly accepts-and-ignores `--session-id`; pushing `_require_session_id` through the decorator would re-introduce the very prompt these commands were designed to skip). `db init`, `server`, `doctor` (same family). `member_create`, `member_delete`, `member_capture`, `member_send_input`, `member_exec`, `member_ping` (orchestrate side effects — tmux split, /exit wait, rollback — that the decorator's broker-error converter would obscure; they only adopt the JSON-vs-text branch helper from §E). <!-- completed: 2026-04-30T00:00; verified — none of the excluded commands were touched. -->
+- [x] Delete `_handle_broker_errors` (no remaining call sites). <!-- completed: 2026-04-30T00:00; verified zero callers via git grep, function definition removed. -->
+- [x] Delete `_require_session_id` if no remaining direct call sites; otherwise keep for the decorator's internal use. <!-- completed: 2026-04-30T00:00; KEPT — 6 direct callers remain (member_create, member_delete, member_capture, member_send_input, member_exec, member_ping; all explicitly excluded from the migration per the bullet above). The decorator inlines its own session-id check, so `_require_session_id` survives only as the helper for the 6 member commands. -->
+- [x] `mise //cafleet:test` green. <!-- completed: 2026-04-30T00:00; 531 passed in 22.62s; lint and typecheck green; ruff format applied. -->
 - [ ] Commit: `refactor: migrate CLI commands to _client_command (design 0000041 §A.2)`. <!-- completed: -->
 
 ### Step 8: Tests pruning (§F)
