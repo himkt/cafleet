@@ -1,12 +1,14 @@
 """cafleet CLI."""
 
 import contextlib
+import functools
 import importlib.resources
 import json
 import os
 import shutil
+from collections.abc import Callable
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import click
 from alembic import command
@@ -68,6 +70,52 @@ def _handle_broker_errors():
         raise
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+def _client_command(
+    *,
+    requires_agent_session: bool = False,
+    text_formatter: Callable[[Any], str] | None = None,
+):
+    """Subsume the four boilerplate blocks shared by client subcommands.
+
+    The wrapped function returns the broker result. The decorator validates
+    ``--session-id``, optionally validates ``--agent-id`` belongs to the
+    session, wraps the body in the broker-error converter, and branches
+    JSON-vs-text output via ``ctx.obj['json_output']`` and ``text_formatter``.
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(ctx, *args, **kwargs):
+            if not ctx.obj.get("session_id"):
+                raise click.ClickException(
+                    "--session-id <uuid> is required for this subcommand. "
+                    "Create a session with 'cafleet session create' and pass its id."
+                )
+            session_id = ctx.obj["session_id"]
+            if requires_agent_session:
+                agent_id = kwargs["agent_id"]
+                if not broker.verify_agent_session(agent_id, session_id):
+                    raise click.ClickException(
+                        f"agent {agent_id} is not a member of session {session_id}."
+                    )
+            try:
+                result = func(ctx, *args, **kwargs)
+            except click.ClickException:
+                raise
+            except Exception as exc:
+                raise click.ClickException(str(exc)) from exc
+
+            if ctx.obj["json_output"]:
+                click.echo(output.format_json(result))
+            elif text_formatter is not None:
+                click.echo(text_formatter(result))
+            return result
+
+        return wrapper
+
+    return decorator
 
 
 def _sync_db_url() -> str:
@@ -484,23 +532,15 @@ def message_show(ctx, agent_id, task_id):
 @agent.command("list")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.pass_context
+@_client_command(
+    requires_agent_session=True,
+    text_formatter=lambda agents: output.format_indexed_list(
+        agents, output.format_agent, "No agents found."
+    ),
+)
 def agent_list(ctx, agent_id):
     """List registered agents in the session."""
-    _require_session_id(ctx)
-    with _handle_broker_errors():
-        if not broker.verify_agent_session(agent_id, ctx.obj["session_id"]):
-            raise click.ClickException(
-                f"agent {agent_id} is not a member of session {ctx.obj['session_id']}."
-            )
-        agents = broker.list_agents(ctx.obj["session_id"])
-        if ctx.obj["json_output"]:
-            click.echo(output.format_json(agents))
-        else:
-            click.echo(
-                output.format_indexed_list(
-                    agents, output.format_agent, "No agents found."
-                )
-            )
+    return broker.list_agents(ctx.obj["session_id"])
 
 
 @agent.command("show")

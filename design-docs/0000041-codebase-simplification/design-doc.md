@@ -1,7 +1,7 @@
 # Codebase Simplification
 
 **Status**: Approved
-**Progress**: 30/60 tasks complete
+**Progress**: 33/60 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -342,7 +342,7 @@ Per `.claude/rules/design-doc-numbering.md`, documentation lands BEFORE code. Th
 - [x] Delete the two old helpers. <!-- completed: 2026-04-30T00:00; format_task_list and format_agent_list removed from output.py -->
 - [x] Inline `format_session_show` into `cli.session_show`. <!-- completed: 2026-04-30T00:00; the 5-line builder (session_id / label / created_at / optional deleted_at) inlined at the single call site, then format_session_show deleted from output.py -->
 - [x] `mise //cafleet:test` green. <!-- completed: 2026-04-30T00:00; 524 passed in 23.03s. ruff format applied to cli.py for the inlined session_show block; lint and typecheck green. -->
-- [ ] Commit: `refactor: trim output.py (design 0000041 §E)`. <!-- completed: -->
+- [x] Commit: `refactor: trim output.py (design 0000041 §E)`. <!-- completed: 2026-04-30T13:11 -->
 
 ### Step 7: CLI command boilerplate consolidation (§A)
 
@@ -350,8 +350,8 @@ This is the largest step — split into two sub-commits to keep diffs reviewable
 
 #### 7a. Introduce `_client_command` decorator
 
-- [ ] Add `_client_command(*, requires_agent_session: bool = False, text_formatter: Callable[[Any], str] | None = None)` to `cli.py`. The decorator: validates session-id, optionally validates `--agent-id` belongs to session, wraps body in broker-error converter, branches output by `ctx.obj["json_output"]`. <!-- completed: -->
-- [ ] Migrate ONE simple command (`agent_list`) as a proof point and run tests. <!-- completed: -->
+- [x] Add `_client_command(*, requires_agent_session: bool = False, text_formatter: Callable[[Any], str] | None = None)` to `cli.py`. The decorator: validates session-id, optionally validates `--agent-id` belongs to session, wraps body in broker-error converter, branches output by `ctx.obj["json_output"]`. <!-- completed: 2026-04-30T00:00; uses functools.wraps; agent_id read from kwargs (Click guarantees presence when --agent-id is required); imports updated with functools, Callable, Any -->
+- [x] Migrate ONE simple command (`agent_list`) as a proof point and run tests. <!-- completed: 2026-04-30T00:00; agent_list now @_client_command(requires_agent_session=True, text_formatter=…) and the body is one line (return broker.list_agents(...)). 531 tests pass, lint green, typecheck green. -->
 - [ ] Commit: `refactor: introduce _client_command decorator (design 0000041 §A.1)`. <!-- completed: -->
 
 #### 7b. Migrate remaining simple commands
