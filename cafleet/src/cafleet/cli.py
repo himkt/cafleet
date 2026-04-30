@@ -80,19 +80,19 @@ def _client_command(
         def wrapper(ctx, *args, **kwargs):
             _require_session_id(ctx)
             session_id = ctx.obj["session_id"]
-            if requires_agent_session:
-                agent_id = kwargs.get("agent_id")
-                if agent_id is None:
-                    raise click.ClickException(
-                        "_client_command(requires_agent_session=True) but no "
-                        "'agent_id' kwarg was passed. Check the @click.option "
-                        "declaration on this command."
-                    )
-                if not broker.verify_agent_session(agent_id, session_id):
-                    raise click.ClickException(
-                        f"agent {agent_id} is not a member of session {session_id}."
-                    )
             try:
+                if requires_agent_session:
+                    agent_id = kwargs.get("agent_id")
+                    if agent_id is None:
+                        raise click.ClickException(
+                            "_client_command(requires_agent_session=True) but no "
+                            "'agent_id' kwarg was passed. Check the @click.option "
+                            "declaration on this command."
+                        )
+                    if not broker.verify_agent_session(agent_id, session_id):
+                        raise click.ClickException(
+                            f"agent {agent_id} is not a member of session {session_id}."
+                        )
                 result = func(ctx, *args, **kwargs)
                 if ctx.obj["json_output"]:
                     click.echo(output.format_json(result))
