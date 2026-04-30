@@ -1,7 +1,7 @@
 # README simplification — anchor on the Claude Code plugin journey
 
 **Status**: Approved
-**Progress**: 3/23 tasks complete
+**Progress**: 12/23 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -233,18 +233,18 @@ Expected scope: based on the SKILL.md files already inspected (`cafleet`, `cafle
 
 ### Step 2: Apply ARCHITECTURE.md / docs/spec/ patches
 
-- [ ] Apply each Step 1 proposed patch (if any) to its target file using the location-anchor recorded in Step 1. If Step 1 found zero gaps, this step is a no-op and is checked off without changes. <!-- completed: -->
-- [ ] After applying patches, re-grep the touched files plus `README.md` for the patched sentences and confirm each appears in exactly one place. The Removal rule forbids the cut content from appearing in two places after Step 3 lands. <!-- completed: -->
+- [x] Apply each Step 1 proposed patch (if any) to its target file using the location-anchor recorded in Step 1. If Step 1 found zero gaps, this step is a no-op and is checked off without changes. <!-- completed: 2026-04-30T12:05 (no-op: Step 1 found 0 gaps, 0 patches to apply) -->
+- [x] After applying patches, re-grep the touched files plus `README.md` for the patched sentences and confirm each appears in exactly one place. The Removal rule forbids the cut content from appearing in two places after Step 3 lands. <!-- completed: 2026-04-30T12:05 (no-op: 0 patched sentences to verify; vacuous when patch list is empty) -->
 
 ### Step 3: Rewrite README.md
 
-- [ ] Delete the current Features list (L11–L28) and replace with ≤ 6 high-level bullets, OR drop the section entirely if the example prompt in §3 carries the value. Record the choice in the commit message. <!-- completed: -->
-- [ ] Replace the Architecture block (L30–L49) with one paragraph + a single `ARCHITECTURE.md` link. <!-- completed: -->
-- [ ] Replace the Quick Start block (L51–L182) with the new Install section (§2 of this doc) followed by the Try it section (§3 of this doc). Run the §2 mandatory `WebFetch` verification against `https://docs.claude.com/en/docs/claude-code/plugins` BEFORE committing the wording, and record the verified command shape in the commit message. <!-- completed: -->
-- [ ] Replace the two CLI tables (L207–L238) with the single consolidated table (§4 of this doc) + the `docs/spec/cli-options.md` link. <!-- completed: -->
-- [ ] Delete the API Overview / Message Lifecycle / Tech Stack / Project Structure blocks (L240–L286). <!-- completed: -->
-- [ ] Trim the Development block (L288–L328): keep the mise commands, drop the per-section explanation paragraphs, drop the Build the WebUI prose. <!-- completed: -->
-- [ ] Confirm final line count is ≤ 180 (`wc -l README.md`). <!-- completed: -->
+- [x] Delete the current Features list (L11–L28) and replace with ≤ 6 high-level bullets, OR drop the section entirely if the example prompt in §3 carries the value. Record the choice in the commit message. <!-- completed: 2026-04-30T12:30 (chose path B: removed entirely; example prompt + cheatsheet carry the value) -->
+- [x] Replace the Architecture block (L30–L49) with one paragraph + a single `ARCHITECTURE.md` link. <!-- completed: 2026-04-30T12:30 -->
+- [x] Replace the Quick Start block (L51–L182) with the new Install section (§2 of this doc) followed by the Try it section (§3 of this doc). Run the §2 mandatory `WebFetch` verification against `https://docs.claude.com/en/docs/claude-code/plugins` BEFORE committing the wording, and record the verified command shape in the commit message. <!-- completed: 2026-04-30T12:30 (WebFetched 2x: docs.claude.com → 301 → code.claude.com/docs/en/plugins, then code.claude.com/docs/en/discover-plugins; verified: marketplace add takes `owner/repo` GitHub shorthand, install uses `<plugin>@<marketplace-name>` where marketplace name auto-derives from `owner-repo` (hyphenated). Corrected design-doc's `cafleet@himkt/cafleet` to canonical `cafleet@himkt-cafleet`.) -->
+- [x] Replace the two CLI tables (L207–L238) with the single consolidated table (§4 of this doc) + the `docs/spec/cli-options.md` link. <!-- completed: 2026-04-30T12:30 -->
+- [x] Delete the API Overview / Message Lifecycle / Tech Stack / Project Structure blocks (L240–L286). <!-- completed: 2026-04-30T12:30 -->
+- [x] Trim the Development block (L288–L328): keep the mise commands, drop the per-section explanation paragraphs, drop the Build the WebUI prose. <!-- completed: 2026-04-30T12:30 -->
+- [x] Confirm final line count is ≤ 180 (`wc -l README.md`). <!-- completed: 2026-04-30T12:30 (final: 80 lines) -->
 
 ### Step 4: SKILL.md sweep
 
