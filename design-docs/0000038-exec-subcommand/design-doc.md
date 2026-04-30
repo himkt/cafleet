@@ -1,7 +1,7 @@
 # `cafleet member exec` — extract bash dispatch into its own subcommand
 
 **Status**: Approved
-**Progress**: 16/28 tasks complete
+**Progress**: 22/28 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -286,12 +286,12 @@ Per `.claude/rules/design-doc-numbering.md`, every documentation surface is upda
 
 ### Step 4: Tests — `cafleet/tests/test_cli_member_exec.py` (new)
 
-- [ ] Create `cafleet/tests/test_cli_member_exec.py`. Mirror the fixture pattern from `test_cli_member_send_input.py`: `_placement`, `_agent`, `_UNSET`, `session_id`, `runner`, `_stub_tmux_available` (autouse), `happy_path_agent`, `bash_recorder` (records calls to `tmux.send_bash_command`). <!-- completed: -->
-- [ ] Add the `_invoke` helper for `cafleet --session-id <s> member exec --agent-id <d> --member-id <m> <command>`. <!-- completed: -->
-- [ ] Add `TestExecDispatch` class with: `test_positional_cmd_dispatched_with_pane_and_command`, `test_text_output`, `test_json_output_three_keys`. <!-- completed: -->
-- [ ] Add `TestInputValidation` class with: `test_missing_positional_exits_two` (Click `Missing argument`), `test_empty_command_exits_two`, `test_whitespace_only_command_exits_two`, `test_command_with_newline_exits_two` (parametrized over `\n`, `\r`, `\r\n`, leading `\n`, trailing `\n`). <!-- completed: -->
-- [ ] Add `TestAuthorizationBoundary` class with: `test_missing_agent_exits_one`, `test_placement_none_exits_one_with_exact_message`, `test_cross_director_exits_one_with_exact_message`, `test_pending_pane_exits_one_with_exact_message`. Wording mirrors `test_cli_member_send_input.py::TestAuthorizationBoundary` verbatim. <!-- completed: -->
-- [ ] Add `TestTmuxUnavailable` class with `test_tmux_not_available_exits_one`. <!-- completed: -->
+- [x] Create `cafleet/tests/test_cli_member_exec.py`. Mirror the fixture pattern from `test_cli_member_send_input.py`: `_placement`, `_agent`, `_UNSET`, `session_id`, `runner`, `_stub_tmux_available` (autouse), `happy_path_agent`, `bash_recorder` (records calls to `tmux.send_bash_command`). <!-- completed: 2026-04-30T13:14 -->
+- [x] Add the `_invoke` helper for `cafleet --session-id <s> member exec --agent-id <d> --member-id <m> <command>`. <!-- completed: 2026-04-30T13:14 -->
+- [x] Add `TestExecDispatch` class with: `test_positional_cmd_dispatched_with_pane_and_command`, `test_text_output`, `test_json_output_three_keys`. <!-- completed: 2026-04-30T13:14 -->
+- [x] Add `TestInputValidation` class with: `test_missing_positional_exits_two` (Click `Missing argument`), `test_empty_command_exits_two`, `test_whitespace_only_command_exits_two`, `test_command_with_newline_exits_two` (parametrized over `\n`, `\r`, `\r\n`, leading `\n`, trailing `\n`). <!-- completed: 2026-04-30T13:14 -->
+- [x] Add `TestAuthorizationBoundary` class with: `test_missing_agent_exits_one`, `test_placement_none_exits_one_with_exact_message`, `test_cross_director_exits_one_with_exact_message`, `test_pending_pane_exits_one_with_exact_message`. Wording mirrors `test_cli_member_send_input.py::TestAuthorizationBoundary` verbatim. <!-- completed: 2026-04-30T13:14 -->
+- [x] Add `TestTmuxUnavailable` class with `test_tmux_not_available_exits_one`. <!-- completed: 2026-04-30T13:14 -->
 
 ### Step 5: Quality gates
 
