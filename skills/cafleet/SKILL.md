@@ -17,6 +17,7 @@ Use the `cafleet` CLI to register as an agent, send and receive messages, and di
 - Deregistering from the broker
 - Spawning and managing member agents in tmux panes (Director only)
 - Inspecting a stalled member's terminal output (Director only)
+- Triggering a member's inbox poll without dispatching a shell command (Director only)
 
 ## Required Flags
 
@@ -509,6 +510,78 @@ Output (`--json`):
 
 Three keys: `member_agent_id`, `pane_id`, `command`. No `action` field — the subcommand name IS the action.
 
+### Member Ping
+
+Director-only manual inbox-poll nudge. Keystrokes the same `cafleet --session-id <s> message poll --agent-id <m>` + `Enter` sequence the broker auto-fires after every `cafleet message send`, but as an operator-driven entry-point: failures surface as exit 1 (the broker auto-fire path swallows `False` silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
+
+```bash
+cafleet --session-id <session-id> member ping --agent-id <director-agent-id> \
+  --member-id <member-agent-id>
+
+cafleet --session-id <session-id> --json member ping --agent-id <director-agent-id> \
+  --member-id <member-agent-id>
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
+| `--member-id` | yes | The target member's agent ID |
+
+#### Key sequence sent to the pane
+
+| Invocation | tmux calls issued in order |
+|---|---|
+| `member ping` | `tmux.send_poll_trigger(target_pane_id=<pane>, session_id=<sid>, agent_id=<member_id>)` — types `cafleet --session-id <sid> message poll --agent-id <member_id>` + `Enter` into the pane (same helper as the broker auto-fire). |
+
+#### Validation rules
+
+| Input | Result |
+|---|---|
+| Missing `--agent-id` | Click built-in `Error: Missing option '--agent-id'.` (exit 2). |
+| Missing `--member-id` | Click built-in `Error: Missing option '--member-id'.` (exit 2). |
+| Outside a tmux session (`TMUX` env var unset) | Exit 1 with `Error: cafleet member commands must be run inside a tmux session`. |
+| `tmux` binary not on `PATH` | Exit 1 via `tmux.ensure_tmux_available()`. |
+
+The subcommand has no positional argument and no other flags. There is no operator-controlled keystroke body to validate.
+
+#### Authorization boundary
+
+Mirrors `cafleet member exec` step-for-step:
+
+1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+2. If `target["placement"]` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
+3. If `placement["director_agent_id"] != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
+4. If `placement["tmux_pane_id"]` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
+
+Cross-Director write attempts are rejected before any tmux call is made. Wording reuses the existing `_load_authorized_member` strings verbatim.
+
+Output (text):
+
+```
+Pinged member Claude-B (%7) — poll keystroke dispatched.
+```
+
+Output (`--json`):
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7"
+}
+```
+
+Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name IS the action). No `polled` field — failures surface via exit 1.
+
+#### Exit code summary
+
+| Outcome | Exit | Source |
+|---|---|---|
+| Dispatch success | `0` | normal return |
+| Missing `--agent-id` or `--member-id` | `2` | Click built-in `Missing option` |
+| `tmux` unavailable / `TMUX` env var missing | `1` | `tmux.ensure_tmux_available()` → wrapped `ClickException` |
+| Agent not found / missing placement / cross-Director / pending placement | `1` | `_load_authorized_member` (existing wording) |
+| `tmux send-keys` subprocess error | `1` | wrapped `ClickException` (`send failed: ...`) — covers both the `TmuxError` branch and the `send_poll_trigger` returning `False` branch |
+
 ### Server
 
 Start the admin WebUI FastAPI app via uvicorn. The server is only needed for the admin WebUI at `/ui/` and the `/ui/api/*` endpoints — every other `cafleet` subcommand accesses SQLite directly and does not require the server to be running.
@@ -721,6 +794,8 @@ The CLI validates input (`--choice` is `IntRange(1, 3)`; `--freetext` rejects ne
 Members spawn with `--permission-mode dontAsk` — the Bash tool is enabled and permission prompts auto-resolve, so a member runs cafleet (and any other shell command) directly via the Bash tool. No prefix, no Director routing required by default.
 
 The bash-via-Director protocol is the **fallback when the Claude Code harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). In that case the member auto-routes: it sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via `cafleet member exec` — Claude Code's `!` CLI shortcut handles execution natively. No new broker primitives, no extra helper machinery: just the existing message-passing + tmux-keystroke infrastructure plus the dedicated `member exec` subcommand.
+
+`member exec` is the **shell-dispatch** primitive — operator-controlled `COMMAND` argument, strict `permissions.ask` per call. For the **inbox-poll-only** nudge case (e.g. a monitoring loop nudging a stalled member that missed its auto-fire), use `cafleet member ping` instead — see [Member Ping](#member-ping). It is fixed-action (no positional argument), pre-approved in `permissions.allow`, and is the manually-invokable counterpart of the broker's auto-fire.
 
 Before routing, the member MUST reconsider the command. Most denials happen because the underlying command is wrong — wrong flag, wrong path, or unnecessary altogether. Fix the command first; only route a command that is genuinely correct AND genuinely needed AND still rejected by the harness.
 

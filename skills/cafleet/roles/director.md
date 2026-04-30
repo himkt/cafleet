@@ -36,7 +36,7 @@ You receive a member-originated bash request when **both** of the following are 
 
    The CLI prepends `! ` and appends `Enter` for you (two `tmux send-keys` calls: literal `! <command>`, then the `Enter` keystroke). Claude Code's `!` shortcut intercepts the line, runs the command via the harness's native CLI primitive (bypassing the Bash tool permission system), and prints the captured output back into the member's pane. The member's next prompt iteration sees the output as context.
 
-3. **`member exec` mechanics:** the command is a single required positional argument — there is no `--bash` flag, no `--choice` / `--freetext` interplay, and no AskUserQuestion `4` digit prepended. The subcommand works on any pane that is at the Claude Code input prompt. Empty / whitespace-only commands and commands containing newlines are rejected by the CLI handler with exit 2.
+3. **`member exec` mechanics:** the command is a single required positional argument. The subcommand works on any pane that is at the Claude Code input prompt. Empty / whitespace-only commands and commands containing newlines are rejected by the CLI handler with exit 2.
 
 4. **Acknowledge the request.** ACK the member's message via `cafleet message ack --agent-id <director-agent-id> --task-id <task-id>` once you have dispatched (or refused). Leaving the message un-ACKed pollutes the inbox and breaks serialization.
 
@@ -61,8 +61,32 @@ The `cafleet member exec` CLI verifies `placement.director_agent_id` matches `--
 
 This protocol is **member → Director only**. Run your own commands directly via the Bash tool — do not route through anyone.
 
+## Nudging an idle member
+
+`cafleet member ping` is your pre-approved primitive for poking a stalled member's inbox. It is a fixed-action subcommand — there is no operator-controlled `COMMAND` argument and no positional input — so it sits in `permissions.allow` and fires without per-call confirmation, which is exactly what a `/loop` monitoring tick needs.
+
+```bash
+cafleet --session-id <session-id> member ping \
+  --agent-id <director-agent-id> --member-id <member-agent-id>
+```
+
+This injects the same `cafleet --session-id <s> message poll --agent-id <m>` + Enter keystroke that the broker auto-fires after every `cafleet message send` — they share `tmux.send_poll_trigger`. The auto-fire is best-effort and silent on failure; `member ping` converts a failure to exit 1 so a monitoring loop sees it.
+
+When to use:
+
+- A `/loop` health-check tick observed a member that is stalled despite a recent `message send` (the broker's auto-fire was missed, lost, or the pane was busy when it arrived).
+- A long idle window has elapsed since the member last polled, and you want to nudge it without sending a new message.
+
+When NOT to use:
+
+- The member is paused on an `AskUserQuestion` prompt — use `cafleet member send-input` after the canonical AskUserQuestion delegation pattern (see `skills/cafleet/SKILL.md`).
+- You need to dispatch a shell command — that is what `cafleet member exec` is for. `member ping` does NOT take a command argument.
+- There is no message in the queue for the member — `member ping` only triggers a poll; if the inbox is empty, the keystroke is a no-op.
+
+`member exec` and `member ping` partition cleanly: **exec = arbitrary shell, `permissions.ask` per call; ping = fixed inbox-poll keystroke, pre-approved.** The asymmetry is enforced by rule specificity in `.claude/settings.json`: the `permissions.ask` entry for `member exec` is more specific than the broad `Bash(cafleet *)` allow, so `member exec` matches the ask rule and prompts; `member ping` falls through to the broad allow and fires without confirmation. Do not use `member exec "cafleet ... message poll ..."` as a poll-trigger workaround — it inherits the strict approval prompt and defeats the carve-out.
+
 ## Why this works
 
 - **Members spawn with `--permission-mode dontAsk`**, so under the default flow they run cafleet (and any other shell command) themselves via the Bash tool. The bash-via-Director path fires only when the member's harness deny-list rejects the command.
 - **Claude Code's `!` shortcut is the dispatch primitive** — `cafleet member exec` keystrokes `! <command>` + Enter into the member's pane, and Claude Code's `!` shortcut runs the command. The captured stdout/stderr lands in the member's next-turn context.
-- **You stay in control of fallback dispatches.** Every fallback request surfaces as a plain message in your inbox; you (with the operator at your keyboard) choose whether to fulfill it. The operator's `permissions.ask` for `cafleet --session-id * member exec *` controls the per-call confirmation UX.
+- **You stay in control of fallback dispatches.** Every fallback request surfaces as a plain message in your inbox; you (with the operator at your keyboard) choose whether to fulfill it. The operator's `permissions.ask` rule for `member exec` (currently `Bash(cafleet * member exec *)` in `.claude/settings.json`) controls the per-call confirmation UX.

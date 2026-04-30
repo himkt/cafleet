@@ -96,6 +96,13 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
     does not interpret ``Enter`` as the Enter key. It is sent literally
     instead of producing the submit keypress that prompts such as the
     Claude Code input box expect.
+
+    Two callers share this helper: ``broker._try_notify_recipient``
+    auto-fires after every ``cafleet message send`` and swallows
+    ``False`` silently (the message queue remains the source of truth);
+    ``cafleet member ping`` is the manual Director-only entry-point and
+    converts ``False`` to a ``ClickException`` (exit 1) so an operator
+    or monitoring loop sees the failure.
     """
     if shutil.which("tmux") is None:
         return False
