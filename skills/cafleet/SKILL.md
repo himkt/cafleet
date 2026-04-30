@@ -485,11 +485,11 @@ cafleet --session-id <session-id> --json member exec --agent-id <director-agent-
 |---|---|---|
 | `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | The target member's agent ID |
-| *(positional `COMMAND`)* | yes | Single shell command. Forwarded to `tmux.send_bash_command` opaquely; pipes, `&&`, `;`, `$(...)`, and backticks are not special-cased. |
+| *(positional `COMMAND`)* | yes | Single shell command. Leading and trailing whitespace are stripped before dispatch to `tmux.send_bash_command` (the JSON `command` field and the text echo both reflect the trimmed form). Otherwise pipes, `&&`, `;`, `$(...)`, and backticks are not special-cased — the command is forwarded opaquely. |
 
 Validation: missing positional `COMMAND` exits 2 with Click's built-in `Error: Missing argument 'COMMAND'.`. An empty / whitespace-only command exits 2 with `Error: command may not be empty.`. A `\n` or `\r` in the command exits 2 with `Error: command may not contain newlines.`.
 
-Cross-Director send is rejected with the same wording as `member capture` / `member send-input`. Missing-placement and pending-placement rejections also reuse the existing strings verbatim. An unavailable `tmux` binary exits 1 with `Error: cafleet member commands must be run inside a tmux session`.
+Cross-Director send is rejected with the same wording as `member capture` / `member send-input`. Missing-placement and pending-placement rejections also reuse the existing strings verbatim. Outside a tmux session (the `TMUX` env var is unset) the command exits 1 with `Error: cafleet member commands must be run inside a tmux session`. If the `tmux` binary is not on `PATH`, the error reflects that the binary was not found on `PATH` (raised from `tmux.ensure_tmux_available()` and wrapped as a `ClickException`).
 
 Output (text):
 

@@ -445,7 +445,7 @@ cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | Target member's agent ID |
-| *(positional `COMMAND`)* | yes | Single shell command. Forwarded to `tmux.send_bash_command` opaquely; pipes, `&&`, `;`, `$(...)`, and backticks are not special-cased. |
+| *(positional `COMMAND`)* | yes | Single shell command. Leading and trailing whitespace are stripped before dispatch to `tmux.send_bash_command` (the JSON `command` field and the text echo both reflect the trimmed form). Otherwise pipes, `&&`, `;`, `$(...)`, and backticks are not special-cased — the command is forwarded opaquely. |
 
 #### Key sequence sent to the pane
 
@@ -462,7 +462,8 @@ Two separate tmux invocations because tmux's `-l` (literal) flag is per-invocati
 | Missing positional `COMMAND` | Click built-in `Error: Missing argument 'COMMAND'.` (exit 2). |
 | `command` empty after `.strip()` (`""` or whitespace-only) | `Error: command may not be empty.` (exit 2; `click.UsageError`). |
 | `command` containing `\n` or `\r` | `Error: command may not contain newlines.` (exit 2; `click.UsageError`). |
-| Any input with tmux unavailable | Exit 1 via `tmux.ensure_tmux_available()` (same surface as `member capture` / `member send-input`). |
+| Outside a tmux session (`TMUX` env var unset) | Exit 1 with `Error: cafleet member commands must be run inside a tmux session` (raised from `tmux.ensure_tmux_available()` and wrapped as a `ClickException`). |
+| `tmux` binary not on `PATH` | Exit 1 with the corresponding "binary not found" error from `tmux.ensure_tmux_available()`, wrapped as a `ClickException`. |
 
 #### Authorization boundary
 

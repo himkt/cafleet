@@ -1004,6 +1004,7 @@ def member_exec(ctx, agent_id, member_id, command):
         raise click.UsageError("command may not contain newlines.")
     if not command.strip():
         raise click.UsageError("command may not be empty.")
+    command = command.strip()
 
     try:
         tmux.ensure_tmux_available()
