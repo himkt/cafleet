@@ -487,13 +487,13 @@ Once the PR exists and Copilot has been invited, the Director runs a cron-driven
 
 #### PR Review Loop State
 
-The Director holds three in-context variables across loop firings. They are NOT persisted to disk — the Director carries them in its own working memory.
+The Director holds three **PR-review-specific** in-context variables across loop firings (separate from the team-health `--since` timestamp tracked by `Skill(cafleet-monitoring)` for `cafleet message poll`). They are NOT persisted to disk — the Director carries them in its own working memory.
 
 | Variable | Meaning | Update rule |
 |:--|:--|:--|
 | `last_push_ts` | ISO 8601 timestamp of the most recent push to the PR branch | Reset on every `git push` from 6b-step 2 or 7d-step 3 |
-| `ticks_since_last_new_review` | Number of consecutive loop ticks with 0 new Copilot items | Increment each tick; reset to 0 when new Copilot items arrive |
 | `round` | Fix-round counter (push → Copilot review → fix cycle) | Increment after every push from 7d; reset only via 7e "Continue" |
+| `silence_ticks` | Consecutive loop ticks with 0 new Copilot items since the last activity | Increment each tick with 0 new items; reset to 0 when new Copilot items arrive OR after a fix-push from 7d |
 
 #### 7a. Replace the monitoring `/loop` (create-before-delete)
 
@@ -519,12 +519,14 @@ On each 1-minute wake-up, the Director runs — in order:
 
 | Result | Action |
 |:--|:--|
-| The most recent Copilot-authored entry in `reviews` has `state == "APPROVED"` | Exit loop (success) → Step 8 |
-| 0 new Copilot items AND `ticks_since_last_new_review >= 5` | Exit loop (quiescent) → Step 8 |
-| 0 new Copilot items AND `ticks_since_last_new_review < 5` | Increment `ticks_since_last_new_review`, continue |
-| ≥ 1 new Copilot items | Go to 7c |
+| The most recent **post-push** Copilot-authored entry in `reviews` (i.e., one with `submittedAt > last_push_ts`) has `state == "APPROVED"` | Exit loop (success) → Step 8 |
+| 0 new Copilot items AND `silence_ticks < 30` | Increment `silence_ticks`, continue waiting |
+| 0 new Copilot items AND `silence_ticks >= 30` | Silence-escalation: see 7f |
+| ≥ 1 new Copilot items | Reset `silence_ticks = 0`, go to 7c |
 
-**Why 5 ticks (not 3)**: Copilot's first review after a push can take 3–5 minutes. 3 ticks risks declaring quiescence while Copilot is still composing its response. 5 ticks (~5 minutes) gives the model comfortable headroom without dragging the session out indefinitely.
+The APPROVED check MUST be qualified by the post-push filter (`submittedAt > last_push_ts`). An older approval — say, from a Copilot pass before the most recent fix-push — must NOT be treated as approval of the current HEAD; otherwise a single early approve followed by additional commits would silently finalize the PR.
+
+**Why no auto-exit on silence**: a silent Copilot is NOT proof Copilot is done. Copilot may take longer than expected to re-review after a fix-push, may not have been re-triggered yet, or may be back-pressured. **Auto-exiting** on silence risks finalizing a PR while Copilot is still composing comments. The loop never auto-exits on silence; it instead **escalates to the user** via 7f after 30 consecutive silent ticks (~30 minutes), so the user — not the loop — chooses whether to keep waiting, re-request the review, or finalize. Outside that user gate, the loop only exits on an explicit `state == "APPROVED"` signal, on the round-limit escalation at 7e, on "Stop means stop", or on the cron's natural 7-day expiry.
 
 **Why not `reviewDecision`**: the PR-level `reviewDecision` only reflects required reviewers (typically CODEOWNERS). Copilot is usually not a CODEOWNER, so an approve from Copilot alone leaves `reviewDecision` null/REVIEW_REQUIRED. Reading the Copilot-specific entry in the `reviews` array is the reliable signal.
 
@@ -548,7 +550,7 @@ For review-level comments (body text not attached to a specific line), route by 
    - Tester fixes: `git commit -m "fix: address Copilot test review - <short summary>"`
    - Director doc fixes: `git commit -m "docs: address Copilot review - <short summary>"`
 3. `git push` (no flags — the branch already tracks origin from Step 6).
-4. Update `last_push_ts` to the post-push wall-clock timestamp, reset `ticks_since_last_new_review = 0`, and increment `round`.
+4. Update `last_push_ts` to the post-push wall-clock timestamp, reset `silence_ticks = 0` (any silence before the push is no longer relevant — the new push restarts the review window), and increment `round`.
 5. Re-request Copilot review: `gh pr edit <pr-number> --add-reviewer @copilot`. Re-adding the same reviewer triggers a fresh Copilot pass.
 6. Continue the loop.
 
@@ -561,6 +563,19 @@ When `round >= 5`, break the auto-loop and escalate to the user via `AskUserQues
 | 1. Continue | Reset `round = 0`, resume Step 7 |
 | 2. Finalize now | Exit loop → Step 8 (accept remaining Copilot comments as-is) |
 | 3. *(Other)* | Intent judgment; abort-intent → Abort Flow |
+
+#### 7f. Silence escalation
+
+When `silence_ticks >= 30` (≈ 30 minutes since the last Copilot activity AND no new items this tick), escalate to the user via `AskUserQuestion`:
+
+| Option | Behavior |
+|:--|:--|
+| 1. Keep waiting | Reset `silence_ticks = 0`, continue Step 7 |
+| 2. Re-request review | Run `gh pr edit <pr-number> --add-reviewer @copilot` to re-trigger Copilot, reset `silence_ticks = 0`, continue Step 7 |
+| 3. Finalize now | Exit loop → Step 8 (accept the current state of Copilot review as-is) |
+| 4. *(Other)* | Intent judgment; abort-intent → Abort Flow |
+
+The 30-tick threshold is conservative: Copilot's first review after a `--add-reviewer` typically lands within 3–5 minutes. 30 minutes is enough that Copilot is highly unlikely to still be composing, while leaving the *decision* to the user instead of the loop. The user retains the option to keep waiting indefinitely — the loop never finalizes on its own based on silence.
 
 #### Augmented Loop Prompt
 
@@ -578,14 +593,15 @@ TEAM HEALTH:
 PR REVIEW:
 5. Run `gh pr view <pr-number> --json reviews` (GraphQL shape: `author.login`, `state`, `submittedAt`, `body`).
 6. Run `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST shape: `user.login`, `body`, `path`, `line`, `created_at`).
-7. Filter to entries where the appropriate login field (`author.login` for GraphQL reviews, `user.login` for REST inline comments) starts with `copilot` (case-insensitive) and the appropriate timestamp (`submittedAt` / `created_at`) > `<last-push-timestamp>`.
-8. If the most recent Copilot-authored entry in `reviews` has `state == "APPROVED"`: signal Step 7 exit (success).
-9. If filter returned 0 entries for 5 consecutive ticks: signal Step 7 exit (quiescent).
-10. If filter returned ≥ 1 entries: classify by file path and dispatch via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`.
+7. Filter to entries where the appropriate login field (`author.login` for GraphQL reviews, `user.login` for REST inline comments) starts with `copilot` (case-insensitive) and the appropriate timestamp (`submittedAt` / `created_at`) > `last_push_ts` (the in-context state variable defined under "PR Review Loop State").
+8. If the most recent Copilot-authored entry **in the filtered (post-push) set from step 7** has `state == "APPROVED"`: signal Step 7 exit (success). An older approval (i.e., one with `submittedAt <= last_push_ts`) must NOT trigger this exit.
+9. If filter returned 0 entries AND `silence_ticks < 30`: increment `silence_ticks`, continue waiting (do nothing this tick). The loop never auto-exits on Copilot silence.
+10. If filter returned 0 entries AND `silence_ticks >= 30`: silence-escalation per 7f — AskUserQuestion (Keep waiting / Re-request review / Finalize now / Other). Reset `silence_ticks = 0` if the user picks Keep waiting or Re-request review; otherwise honor the user's choice.
+11. If filter returned ≥ 1 entries: reset `silence_ticks = 0`, classify by file path, and dispatch via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`.
 
 ESCALATION:
-11. If any member has been nudged 2 times with no progress, escalate to the user.
-12. If `round >= 5`, escalate to the user with the Continue / Finalize-now / Other prompt.
+12. If any member has been nudged 2 times with no progress, escalate to the user.
+13. If `round >= 5`, escalate to the user with the Continue / Finalize-now / Other prompt.
 ```
 
 #### Error Handling (Steps 6–7)
