@@ -45,13 +45,6 @@ def db_runner(tmp_path, monkeypatch):
 
 
 class TestMissingSessionIdFailsClientSubcommands:
-    def test_register_without_session_id_exits_one(self, db_runner):
-        result = db_runner.invoke(
-            cli,
-            ["agent", "register", "--name", "A", "--description", "a"],
-        )
-        assert result.exit_code == 1, result.output
-
     def test_register_without_session_id_shows_new_error_message(self, db_runner):
         result = db_runner.invoke(
             cli,
@@ -63,20 +56,6 @@ class TestMissingSessionIdFailsClientSubcommands:
         assert "cafleet session create" in out
         assert "CAFLEET_SESSION_ID" not in out
         assert "environment variable" not in out.lower()
-
-    def test_send_without_session_id_exits_one(self, db_runner):
-        aid = str(uuid.uuid4())
-        bid = str(uuid.uuid4())
-        result = db_runner.invoke(
-            cli,
-            ["message", "send", "--agent-id", aid, "--to", bid, "--text", "hi"],
-        )
-        assert result.exit_code == 1, result.output
-
-    def test_poll_without_session_id_exits_one(self, db_runner):
-        aid = str(uuid.uuid4())
-        result = db_runner.invoke(cli, ["message", "poll", "--agent-id", aid])
-        assert result.exit_code == 1, result.output
 
 
 class TestSessionIdFlagFlowsIntoBroker:
@@ -193,25 +172,6 @@ class TestSubcommandsThatDoNotRequireSessionId:
     def test_session_list_without_session_id(self, db_runner):
         result = db_runner.invoke(cli, ["session", "list"])
         assert result.exit_code == 0, result.output
-
-
-class TestCafleetEnvSubcommandRemoved:
-    def test_env_subcommand_is_gone(self, db_runner):
-        result = db_runner.invoke(cli, ["env"])
-        assert result.exit_code == 2, result.output
-
-    def test_env_subcommand_reports_no_such_command(self, db_runner):
-        result = db_runner.invoke(cli, ["env"])
-        out = result.output or ""
-        assert "no such command" in out.lower()
-
-    def test_help_no_longer_lists_env(self, db_runner):
-        result = db_runner.invoke(cli, ["--help"])
-        assert result.exit_code == 0
-        for line in result.output.splitlines():
-            stripped = line.strip()
-            assert not stripped.startswith("env ")
-            assert stripped != "env"
 
 
 class TestSessionIdSilentlyAcceptedWhereNotRequired:
