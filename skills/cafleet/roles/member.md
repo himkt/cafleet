@@ -81,7 +81,7 @@ The harness injects `<session-id>`, `<my-agent-id>`, and `<director-agent-id>` i
 
 You do **not** ask the operator for them. If they are genuinely missing, the cafleet call will fail with a CLI error — let that surface. Do not pre-empt it with operator questions.
 
-You do **not** invoke `cafleet member ping` — it is a Director-only primitive used by your Director (or its monitoring loop) to nudge a stalled member's inbox. As a member, you poll your own inbox via `cafleet message poll` (and the broker's auto-fire injects that same poll keystroke into your pane after every `message send`).
+You do **not** invoke `cafleet member ping` — it is a Director-only primitive used by your Director (or its monitoring loop) to nudge a stalled member's inbox. As a member, you poll your own inbox via `cafleet message poll`. The broker also auto-fires the same poll keystroke into the **recipient's** pane after every `cafleet message send` (self-sends are skipped) — so when someone else sends a message addressed to you, your pane receives the auto-fire; when you send a message to someone else, their pane receives it.
 
 ---
 

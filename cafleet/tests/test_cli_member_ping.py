@@ -293,3 +293,22 @@ class TestInputValidation:
         out = result.output or ""
         assert "Missing option" in out
         assert "--member-id" in out
+
+    def test_unexpected_positional_argument_exits_two(self, runner, session_id):
+        result = runner.invoke(
+            cli,
+            [
+                "--session-id",
+                session_id,
+                "member",
+                "ping",
+                "--agent-id",
+                DIRECTOR_ID,
+                "--member-id",
+                MEMBER_ID,
+                "extra",
+            ],
+        )
+        assert result.exit_code == 2, result.output
+        out = result.output or ""
+        assert "unexpected extra argument" in out.lower() or "got unexpected" in out.lower()

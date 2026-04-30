@@ -83,7 +83,7 @@ When NOT to use:
 - You need to dispatch a shell command — that is what `cafleet member exec` is for. `member ping` does NOT take a command argument.
 - There is no message in the queue for the member — `member ping` only triggers a poll; if the inbox is empty, the keystroke is a no-op.
 
-`member exec` and `member ping` partition cleanly: **exec = arbitrary shell, `permissions.ask` per call; ping = fixed inbox-poll keystroke, pre-approved.** Do not use `member exec "cafleet ... message poll ..."` as a poll-trigger workaround — it inherits the strict approval prompt and defeats the carve-out.
+`member exec` and `member ping` partition cleanly: **exec = arbitrary shell, `permissions.ask` per call; ping = fixed inbox-poll keystroke, pre-approved.** The asymmetry is enforced by rule specificity in `.claude/settings.json`: the `permissions.ask` entry for `member exec` is more specific than the broad `Bash(cafleet *)` allow, so `member exec` matches the ask rule and prompts; `member ping` falls through to the broad allow and fires without confirmation. Do not use `member exec "cafleet ... message poll ..."` as a poll-trigger workaround — it inherits the strict approval prompt and defeats the carve-out.
 
 ## Why this works
 
