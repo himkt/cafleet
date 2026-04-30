@@ -27,7 +27,7 @@ Placed **before** the subcommand:
 
 ### Subcommands that require `--session-id`
 
-`agent register`, `agent deregister`, `agent list`, `agent show`, `message send`, `message broadcast`, `message poll`, `message ack`, `message cancel`, `message show`, `member create`, `member delete`, `member list`, `member capture`, `member send-input`, `member exec`.
+`agent register`, `agent deregister`, `agent list`, `agent show`, `message send`, `message broadcast`, `message poll`, `message ack`, `message cancel`, `message show`, `member create`, `member delete`, `member list`, `member capture`, `member send-input`, `member exec`, `member ping`.
 
 ### Subcommands that do NOT require `--session-id`
 
@@ -65,6 +65,7 @@ Then pass the printed UUID as `--session-id <uuid>` on every client + member com
 - `member capture` — Capture the last N lines of a member's pane (Director only)
 - `member send-input` — Forward a restricted keystroke (digit 1/2/3 or free text) to a member's pane (Director only)
 - `member exec` — Dispatch a shell command into a member's pane via Claude Code's `!` shortcut (Director only)
+- `member ping` — Inject an inbox-poll keystroke into a member's pane (Director only)
 
 ### Commands that do NOT require `--agent-id`
 
@@ -511,6 +512,80 @@ Three keys: `member_agent_id`, `pane_id`, `command`. No `action` field — the s
 | Pending placement (tmux_pane_id is None) | `1` | dedicated check in handler (existing wording) |
 | `tmux send-keys` subprocess error | `1` | wrapped `ClickException` (`send failed: ...`) |
 
+### `member ping`
+
+Director-only manual inbox-poll nudge. Keystrokes the same `cafleet --session-id <s> message poll --agent-id <m>` + `Enter` sequence that `broker._try_notify_recipient` auto-fires today, but as an operator-driven entry-point: failures surface as exit 1 (the auto-fire path swallows `False` silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
+
+```bash
+cafleet --session-id <session-id> member ping --agent-id <director-agent-id> \
+  --member-id <member-agent-id>
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
+| `--member-id` | yes | Target member's agent ID |
+
+#### Key sequence sent to the pane
+
+| Invocation | tmux calls issued in order |
+|---|---|
+| `member ping` | `tmux.send_poll_trigger(target_pane_id=<pane>, session_id=<sid>, agent_id=<member_id>)` — types `cafleet --session-id <sid> message poll --agent-id <member_id>` + `Enter` into the pane (same helper as the broker auto-fire). |
+
+#### Validation rules
+
+| Input | Result |
+|---|---|
+| Missing `--agent-id` | Click built-in `Error: Missing option '--agent-id'.` (exit 2). |
+| Missing `--member-id` | Click built-in `Error: Missing option '--member-id'.` (exit 2). |
+| Outside a tmux session (`TMUX` env var unset) | Exit 1 with `Error: cafleet member commands must be run inside a tmux session` (raised from `tmux.ensure_tmux_available()` and wrapped as a `ClickException`). |
+| `tmux` binary not on `PATH` | Exit 1 with the corresponding "binary not found" error from `tmux.ensure_tmux_available()`, wrapped as a `ClickException`. |
+
+The subcommand has no positional argument and no other flags. There is no operator-controlled keystroke body to validate.
+
+#### Authorization boundary
+
+Mirrors `cafleet member exec` step-for-step:
+
+1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+2. If `target["placement"]` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
+3. If `placement["director_agent_id"] != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
+4. If `placement["tmux_pane_id"]` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
+
+Cross-Director write attempts are rejected before any tmux call is made. Wording reuses the existing `_load_authorized_member` strings verbatim.
+
+#### Output format
+
+Text:
+
+```
+Pinged member Claude-B (%7) — poll keystroke dispatched.
+```
+
+JSON (`cafleet --json ... member ping ...`):
+
+```json
+{
+  "member_agent_id": "<uuid>",
+  "pane_id": "%7"
+}
+```
+
+Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name IS the action). No `polled` field — failures surface via exit 1, not via a `polled: false` field.
+
+#### Exit code summary
+
+| Outcome | Exit | Source |
+|---|---|---|
+| Dispatch success | `0` | normal return |
+| Missing `--agent-id` or `--member-id` | `2` | Click built-in `Missing option` |
+| `tmux` unavailable / `TMUX` env var missing | `1` | `tmux.ensure_tmux_available()` → wrapped `ClickException` |
+| Agent not found | `1` | `_load_authorized_member` → wrapped `ClickException` |
+| Missing placement row | `1` | `_load_authorized_member` (existing wording) |
+| Cross-Director (placement.director_agent_id mismatch) | `1` | `_load_authorized_member` (existing wording) |
+| Pending placement (tmux_pane_id is None) | `1` | dedicated check in handler (existing wording) |
+| `tmux send-keys` subprocess error | `1` | wrapped `ClickException` (`send failed: ...`) — covers both the `TmuxError` branch and the `send_poll_trigger` returning `False` branch |
+
 ## Error Messages
 
 | Situation | Error Message |
@@ -534,3 +609,6 @@ Three keys: `member_agent_id`, `pane_id`, `command`. No `action` field — the s
 | `member exec` with `\n` or `\r` | `Error: command may not contain newlines.` (exit 2) |
 | `member exec` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
 | `member exec` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
+| `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
+| `member ping` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
+| `member ping` when `tmux send-keys` fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |

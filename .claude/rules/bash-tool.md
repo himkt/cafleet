@@ -65,7 +65,16 @@ The Bash tool is the entry point for every shell-execution request. If you can p
 
 ## Director side (for completeness)
 
-If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you. In that case, dispatch the requested command via:
+If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you.
+
+For the **inbox-poll-only nudge case** (the monitoring loop wants the member to re-check its inbox after a missed broker auto-fire, or after a long idle window), the Director's primitive is `cafleet member ping`. This subcommand takes no positional argument — its action is fixed (it injects `cafleet --session-id <s> message poll --agent-id <m>` + Enter into the member's pane via the existing `tmux.send_poll_trigger` helper) — so it is pre-approved in `permissions.allow` and fires without a per-call confirmation prompt:
+
+```bash
+cafleet --session-id <session-id> member ping \
+  --agent-id <director-agent-id> --member-id <member-agent-id>
+```
+
+For the **shell-dispatch fallback** (a member auto-routed a denied command and needs the Director to dispatch arbitrary shell on its behalf), the Director's primitive is `cafleet member exec`. This subcommand carries the operator-controlled command as a positional argument, so it remains under `permissions.ask` for per-call confirmation:
 
 ```bash
 cafleet --session-id <session-id> member exec \
@@ -73,4 +82,4 @@ cafleet --session-id <session-id> member exec \
   "<command>"
 ```
 
-See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full protocol, serialization rules, and cross-Director boundary.
+See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full shell-dispatch protocol, serialization rules, and cross-Director boundary.

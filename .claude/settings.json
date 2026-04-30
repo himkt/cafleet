@@ -14,7 +14,8 @@
       "Skill(cafleet:design-doc)",
       "Skill(cafleet:design-doc-create)",
       "Skill(cafleet:design-doc-execute)",
-      "Bash(cafleet *)"
+      "Bash(cafleet *)",
+      "Bash(cafleet --session-id * member ping *)"
     ],
     "deny": [
       "Bash(uv run pytest *)",
@@ -35,7 +36,7 @@
       "Bash(mise build *)"
     ],
     "ask": [
-      "Bash(cafleet --session-id * member exec *)"
+      "Bash(cafleet * member exec *)"
     ]
   },
   "enabledPlugins": {
