@@ -519,10 +519,12 @@ On each 1-minute wake-up, the Director runs — in order:
 
 | Result | Action |
 |:--|:--|
-| The most recent Copilot-authored entry in `reviews` has `state == "APPROVED"` | Exit loop (success) → Step 8 |
+| The most recent **post-push** Copilot-authored entry in `reviews` (i.e., one with `submittedAt > last_push_ts`) has `state == "APPROVED"` | Exit loop (success) → Step 8 |
 | 0 new Copilot items AND `silence_ticks < 30` | Increment `silence_ticks`, continue waiting |
 | 0 new Copilot items AND `silence_ticks >= 30` | Silence-escalation: see 7f |
 | ≥ 1 new Copilot items | Reset `silence_ticks = 0`, go to 7c |
+
+The APPROVED check MUST be qualified by the post-push filter (`submittedAt > last_push_ts`). An older approval — say, from a Copilot pass before the most recent fix-push — must NOT be treated as approval of the current HEAD; otherwise a single early approve followed by additional commits would silently finalize the PR.
 
 **Why no auto-exit on silence**: a silent Copilot is NOT proof Copilot is done. Copilot may take longer than expected to re-review after a fix-push, may not have been re-triggered yet, or may be back-pressured. **Auto-exiting** on silence risks finalizing a PR while Copilot is still composing comments. The loop never auto-exits on silence; it instead **escalates to the user** via 7f after 30 consecutive silent ticks (~30 minutes), so the user — not the loop — chooses whether to keep waiting, re-request the review, or finalize. Outside that user gate, the loop only exits on an explicit `state == "APPROVED"` signal, on the round-limit escalation at 7e, on "Stop means stop", or on the cron's natural 7-day expiry.
 
@@ -592,7 +594,7 @@ PR REVIEW:
 5. Run `gh pr view <pr-number> --json reviews` (GraphQL shape: `author.login`, `state`, `submittedAt`, `body`).
 6. Run `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST shape: `user.login`, `body`, `path`, `line`, `created_at`).
 7. Filter to entries where the appropriate login field (`author.login` for GraphQL reviews, `user.login` for REST inline comments) starts with `copilot` (case-insensitive) and the appropriate timestamp (`submittedAt` / `created_at`) > `last_push_ts` (the in-context state variable defined under "PR Review Loop State").
-8. If the most recent Copilot-authored entry in `reviews` has `state == "APPROVED"`: signal Step 7 exit (success).
+8. If the most recent Copilot-authored entry **in the filtered (post-push) set from step 7** has `state == "APPROVED"`: signal Step 7 exit (success). An older approval (i.e., one with `submittedAt <= last_push_ts`) must NOT trigger this exit.
 9. If filter returned 0 entries AND `silence_ticks < 30`: increment `silence_ticks`, continue waiting (do nothing this tick). The loop never auto-exits on Copilot silence.
 10. If filter returned 0 entries AND `silence_ticks >= 30`: silence-escalation per 7f — AskUserQuestion (Keep waiting / Re-request review / Finalize now / Other). Reset `silence_ticks = 0` if the user picks Keep waiting or Re-request review; otherwise honor the user's choice.
 11. If filter returned ≥ 1 entries: reset `silence_ticks = 0`, classify by file path, and dispatch via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`.
