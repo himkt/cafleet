@@ -986,11 +986,64 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
             )
         )
     else:
-        if action == "choice":
-            label = f"choice {value}"
-        else:
-            label = "free text"
+        label = f"choice {value}" if action == "choice" else "free text"
         click.echo(f"Sent {label} to member {target['name']} ({pane_id}).")
+
+
+@member.command("exec")
+@click.option("--agent-id", required=True, help="Director's agent ID")
+@click.option("--member-id", required=True, help="Target member's agent ID")
+@click.argument("command")
+@click.pass_context
+def member_exec(ctx, agent_id, member_id, command):
+    """Dispatch a shell command into a member's pane via Claude Code's `!` shortcut."""
+    _require_session_id(ctx)
+    session_id = ctx.obj["session_id"]
+
+    if "\n" in command or "\r" in command:
+        raise click.UsageError("command may not contain newlines.")
+    if not command.strip():
+        raise click.UsageError("command may not be empty.")
+
+    try:
+        tmux.ensure_tmux_available()
+    except tmux.TmuxError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    target, placement = _load_authorized_member(
+        session_id,
+        agent_id,
+        member_id,
+        placement_missing_msg=(
+            f"agent {member_id} has no placement row; it was not "
+            f"spawned via `cafleet member create`."
+        ),
+    )
+    pane_id = placement["tmux_pane_id"]
+    if pane_id is None:
+        raise click.ClickException(
+            f"member {member_id} has no pane yet (pending placement) — nothing to send."
+        )
+
+    try:
+        tmux.send_bash_command(target_pane_id=pane_id, command=command)
+    except tmux.TmuxError as exc:
+        raise click.ClickException(f"send failed: {exc}") from exc
+
+    if ctx.obj["json_output"]:
+        click.echo(
+            output.format_json(
+                {
+                    "member_agent_id": member_id,
+                    "pane_id": pane_id,
+                    "command": command,
+                }
+            )
+        )
+    else:
+        click.echo(
+            f"Sent bash command {command!r} to member {target['name']} ({pane_id})."
+        )
 
 
 if __name__ == "__main__":

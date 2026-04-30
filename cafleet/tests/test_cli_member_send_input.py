@@ -439,9 +439,7 @@ class TestFreetextBangRejection:
     the new ``cafleet member exec`` boundary.
     """
 
-    def test_freetext_leading_bang_rejected(
-        self, runner, session_id, happy_path_agent
-    ):
+    def test_freetext_leading_bang_rejected(self, runner, session_id, happy_path_agent):
         result = _invoke(runner, session_id, "--freetext", "!ls")
         assert result.exit_code == 2, result.output
         assert "--freetext may not start with" in (result.output or "")
@@ -453,9 +451,7 @@ class TestFreetextBangRejection:
         assert result.exit_code == 2, result.output
         assert "--freetext may not start with" in (result.output or "")
 
-    def test_freetext_lone_bang_rejected(
-        self, runner, session_id, happy_path_agent
-    ):
+    def test_freetext_lone_bang_rejected(self, runner, session_id, happy_path_agent):
         result = _invoke(runner, session_id, "--freetext", "!")
         assert result.exit_code == 2, result.output
         assert "--freetext may not start with" in (result.output or "")

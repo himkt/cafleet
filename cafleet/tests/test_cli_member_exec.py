@@ -124,9 +124,7 @@ class TestExecDispatch:
         assert call["target_pane_id"] == PANE_ID
         assert call["command"] == "git log -1 --oneline"
 
-    def test_text_output(
-        self, runner, session_id, happy_path_agent, bash_recorder
-    ):
+    def test_text_output(self, runner, session_id, happy_path_agent, bash_recorder):
         result = _invoke(runner, session_id, "git log -1 --oneline")
         assert result.exit_code == 0, result.output
         out = result.output or ""
@@ -163,16 +161,12 @@ class TestExecDispatch:
 
 
 class TestInputValidation:
-    def test_missing_positional_exits_two(
-        self, runner, session_id, happy_path_agent
-    ):
+    def test_missing_positional_exits_two(self, runner, session_id, happy_path_agent):
         result = _invoke(runner, session_id)
         assert result.exit_code == 2, result.output
         assert "Missing argument" in (result.output or "")
 
-    def test_empty_command_exits_two(
-        self, runner, session_id, happy_path_agent
-    ):
+    def test_empty_command_exits_two(self, runner, session_id, happy_path_agent):
         result = _invoke(runner, session_id, "")
         assert result.exit_code == 2, result.output
         assert "command may not be empty." in (result.output or "")
