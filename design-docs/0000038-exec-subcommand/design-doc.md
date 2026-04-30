@@ -1,7 +1,7 @@
 # `cafleet member exec` — extract bash dispatch into its own subcommand
 
 **Status**: Approved
-**Progress**: 14/28 tasks complete
+**Progress**: 16/28 tasks complete
 **Last Updated**: 2026-04-30
 
 ## Overview
@@ -262,8 +262,8 @@ Per `.claude/rules/design-doc-numbering.md`, every documentation surface is upda
 
 ### Step 2: Implementation — `cafleet/src/cafleet/cli.py`
 
-- [ ] Remove the `@click.option("--bash", "bash_command", ...)` decorator from `member_send_input`. Remove `bash_command` from the function signature. Remove the `bash_command is not None` arm of the dispatch logic. Update the `supplied = sum(...)` count to span `(choice, freetext)` only. Update the mutual-exclusion `UsageError` wording to `"--choice and --freetext are mutually exclusive; supply exactly one."`. Remove the `--bash` mention from the audit-log `action` enum (it is now only `"choice"` or `"freetext"`). Update the text-output `label` ladder (drop the `bash` arm). <!-- completed: -->
-- [ ] Add the bang-prefix guardrail at the top of `member_send_input`, BEFORE the existing newline rejection: `if freetext is not None and freetext.lstrip().startswith("!"): raise click.UsageError("--freetext may not start with '!' — that triggers Claude Code's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.")`. <!-- completed: -->
+- [x] Remove the `@click.option("--bash", "bash_command", ...)` decorator from `member_send_input`. Remove `bash_command` from the function signature. Remove the `bash_command is not None` arm of the dispatch logic. Update the `supplied = sum(...)` count to span `(choice, freetext)` only. Update the mutual-exclusion `UsageError` wording to `"--choice and --freetext are mutually exclusive; supply exactly one."`. Remove the `--bash` mention from the audit-log `action` enum (it is now only `"choice"` or `"freetext"`). Update the text-output `label` ladder (drop the `bash` arm). <!-- completed: 2026-04-30T13:30 -->
+- [x] Add the bang-prefix guardrail at the top of `member_send_input`, BEFORE the existing newline rejection: `if freetext is not None and freetext.lstrip().startswith("!"): raise click.UsageError("--freetext may not start with '!' — that triggers Claude Code's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.")`. <!-- completed: 2026-04-30T13:30 -->
 - [ ] Add the new `member_exec` subcommand. Place it directly after `member_send_input` to keep related Director-only commands clustered. Implementation outline:
   1. `_require_session_id(ctx)`.
   2. Validate `command`: `if not command.strip(): raise click.UsageError("command may not be empty.")`. `if "\n" in command or "\r" in command: raise click.UsageError("command may not contain newlines.")`.
