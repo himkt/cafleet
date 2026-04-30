@@ -410,12 +410,13 @@ Output (`--json`):
 
 ### Member Send-Input
 
-Safely forward a restricted keystroke to a member's tmux pane. This is the write-path companion to `member capture`. Three input modes:
+Safely forward a restricted keystroke to a member's tmux pane. This is the write-path companion to `member capture`. Two input modes — both AskUserQuestion-only:
 
-- `--choice` / `--freetext` answer an `AskUserQuestion` prompt (or any prompt with the same "3 choices + Type something" shape) — `--freetext` is **AskUserQuestion-only** because it prepends the digit `4`.
-- `--bash` routes a shell command via Claude Code's `!` keystroke — no AskUserQuestion gate. See [Routing Bash via the Director](#routing-bash-via-the-director).
+- `--choice` / `--freetext` answer an `AskUserQuestion` prompt (or any prompt with the same "3 choices + Type something" shape) — `--freetext` prepends the digit `4`.
 
-Exactly one of the three flags must be supplied.
+For shell dispatch use [`Member Exec`](#member-exec) — `--freetext` rejects values whose first non-whitespace character is `!` so the AskUserQuestion path cannot smuggle a Claude Code `!`-shortcut.
+
+Exactly one of the two flags must be supplied.
 
 ```bash
 cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
@@ -423,9 +424,6 @@ cafleet --session-id <session-id> member send-input --agent-id <director-agent-i
 
 cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
   --member-id <member-agent-id> --freetext "please prioritize correctness"
-
-cafleet --session-id <session-id> member send-input --agent-id <director-agent-id> \
-  --member-id <member-agent-id> --bash "git log -1 --oneline"
 
 cafleet --session-id <session-id> --json member send-input --agent-id <director-agent-id> \
   --member-id <member-agent-id> --choice 2
@@ -436,21 +434,19 @@ cafleet --session-id <session-id> --json member send-input --agent-id <director-
 | `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | The target member's agent ID |
 | `--choice` | one-of | Integer `1`, `2`, or `3`. Sends the matching digit key to the pane (no Enter). Validated via `click.IntRange(1, 3)`. |
-| `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. Newlines are rejected. AskUserQuestion-only. |
-| `--bash` | one-of | Shell command for Claude Code's bash-input mode. Sends `! <command>` via `tmux send-keys -l`, then `Enter`. No AskUserQuestion gate. Newlines and empty strings are rejected. |
+| `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. Newlines are rejected. Values whose first non-whitespace character is `!` are rejected — use `member exec` for shell dispatch. AskUserQuestion-only. |
 
-Supplying zero or two-or-more of `--choice` / `--freetext` / `--bash` exits 2 with `Error: --choice, --freetext, --bash are mutually exclusive; supply exactly one.`.
+Supplying zero or both of `--choice` / `--freetext` exits 2 with `Error: --choice and --freetext are mutually exclusive; supply exactly one.`.
 
 Cross-Director send is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before making any tmux call (same wording as `member capture`). A missing placement row, a pending pane (`tmux_pane_id is None`), or an unavailable `tmux` binary each exit 1 with a dedicated message.
 
-**Why three tmux calls for `--freetext`** (and two for `--bash`): tmux's `-l` (literal) flag is per-invocation — one `send-keys` call cannot mix literal characters with the `Enter` key name. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the text (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are all delivered as plain characters. The CLI calls `subprocess.run([...], shell=False)`, so no shell ever interprets the text. Newlines in `--freetext` and `--bash` are rejected because a literal newline would submit a second prompt without a following Enter — the single-action contract is "one CLI call = one prompt submission."
+**Why three tmux calls for `--freetext`**: tmux's `-l` (literal) flag is per-invocation — one `send-keys` call cannot mix literal characters with the `Enter` key name. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the text (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are all delivered as plain characters. The CLI calls `subprocess.run([...], shell=False)`, so no shell ever interprets the text. Newlines in `--freetext` are rejected because a literal newline would submit a second prompt without a following Enter — the single-action contract is "one CLI call = one prompt submission."
 
 Output (text):
 
 ```
 Sent choice 1 to member Claude-B (%7).
 Sent free text to member Claude-B (%7).
-Sent bash command 'git log -1 --oneline' to member Claude-B (%7).
 ```
 
 Output (`--json`):
@@ -473,14 +469,45 @@ Output (`--json`):
 }
 ```
 
+### Member Exec
+
+Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane via `tmux.send_bash_command` so Claude Code's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). This is the dispatch surface for the bash-via-Director fallback — see [Routing Bash via the Director](#routing-bash-via-the-director).
+
+```bash
+cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \
+  --member-id <member-agent-id> "git log -1 --oneline"
+
+cafleet --session-id <session-id> --json member exec --agent-id <director-agent-id> \
+  --member-id <member-agent-id> "git status --short"
+```
+
+| Flag / argument | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The Director's agent ID (used for the cross-Director authorization check) |
+| `--member-id` | yes | The target member's agent ID |
+| *(positional `COMMAND`)* | yes | Single shell command. Forwarded to `tmux.send_bash_command` opaquely; pipes, `&&`, `;`, `$(...)`, and backticks are not special-cased. |
+
+Validation: missing positional `COMMAND` exits 2 with Click's built-in `Error: Missing argument 'COMMAND'.`. An empty / whitespace-only command exits 2 with `Error: command may not be empty.`. A `\n` or `\r` in the command exits 2 with `Error: command may not contain newlines.`.
+
+Cross-Director send is rejected with the same wording as `member capture` / `member send-input`. Missing-placement and pending-placement rejections also reuse the existing strings verbatim. An unavailable `tmux` binary exits 1 with `Error: cafleet member commands must be run inside a tmux session`.
+
+Output (text):
+
+```
+Sent bash command 'git log -1 --oneline' to member Claude-B (%7).
+```
+
+Output (`--json`):
+
 ```json
 {
   "member_agent_id": "<uuid>",
   "pane_id": "%7",
-  "action": "bash",
-  "value": "<command as-sent>"
+  "command": "<command as-sent>"
 }
 ```
+
+Three keys: `member_agent_id`, `pane_id`, `command`. No `action` field — the subcommand name IS the action.
 
 ### Server
 
@@ -693,14 +720,14 @@ The CLI validates input (`--choice` is `IntRange(1, 3)`; `--freetext` rejects ne
 
 Members spawn with `--permission-mode dontAsk` — the Bash tool is enabled and permission prompts auto-resolve, so a member runs cafleet (and any other shell command) directly via the Bash tool. No prefix, no Director routing required by default.
 
-The bash-via-Director protocol is the **fallback when the Claude Code harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). In that case the member auto-routes: it sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via `cafleet member send-input --bash` — Claude Code's `!` CLI shortcut handles execution natively. No new broker primitives, no separate helper subcommand: just the existing message-passing + tmux-keystroke infrastructure.
+The bash-via-Director protocol is the **fallback when the Claude Code harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). In that case the member auto-routes: it sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via `cafleet member exec` — Claude Code's `!` CLI shortcut handles execution natively. No new broker primitives, no extra helper machinery: just the existing message-passing + tmux-keystroke infrastructure plus the dedicated `member exec` subcommand.
 
 Before routing, the member MUST reconsider the command. Most denials happen because the underlying command is wrong — wrong flag, wrong path, or unnecessary altogether. Fix the command first; only route a command that is genuinely correct AND genuinely needed AND still rejected by the harness.
 
 The fallback has two perspectives. Read **only the file matching your role**:
 
 - **If you are a member** (spawned by `cafleet member create`) → read [`roles/member.md`](roles/member.md). Covers: the default "run it yourself via Bash" path, the reconsider-then-route protocol when Bash is denied, and forbidden behaviors (no fake `<bash-input>` markup, no fabrication, no silent stalling, no operator-routing-prompts).
-- **If you are a Director** (you bootstrapped the session via `cafleet session create` and spawn members) → read [`roles/director.md`](roles/director.md). Covers: how to recognize a member's denial-fallback request, the `cafleet member send-input --bash` dispatch, serialization (one request at a time in poll order), and the cross-Director boundary.
+- **If you are a Director** (you bootstrapped the session via `cafleet session create` and spawn members) → read [`roles/director.md`](roles/director.md). Covers: how to recognize a member's denial-fallback request, the `cafleet member exec` dispatch, serialization (one request at a time in poll order), and the cross-Director boundary.
 
 ## Message Lifecycle
 
