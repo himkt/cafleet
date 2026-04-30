@@ -66,7 +66,7 @@ mise //cafleet:sync       # install dependencies
 mise //cafleet:install    # editable uv tool install of the cafleet CLI
 cafleet db init           # one-time schema setup
 
-mise //cafleet:lint       # ruff check
+mise //cafleet:lint       # ruff check + ruff format --check
 mise //cafleet:format     # ruff format
 mise //cafleet:typecheck  # ty
 mise //cafleet:test       # pytest
