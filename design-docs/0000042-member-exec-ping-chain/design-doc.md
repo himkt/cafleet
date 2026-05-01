@@ -1,7 +1,7 @@
 # Member Exec then Ping Chain Protocol
 
 **Status**: Approved
-**Progress**: 13/19 tasks complete
+**Progress**: 17/19 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -123,16 +123,16 @@ Target table: the escalation table inside `## Stall Response`. The table current
 
 End-to-end live verification is required so the chain rule is observed working in a real session, not just asserted in docs. A Director (or a member acting as Director within its own team) issues exec then ping against a live member and confirms the member begins its next turn without waiting for the 1-minute monitoring tick.
 
-- [ ] In an existing CAFleet session, run `cafleet --session-id <session-id> member exec --agent-id <director-agent-id> --member-id <test-member-id> "echo hello"` against a live member that is at the Claude Code input prompt. <!-- completed: -->
-- [ ] Immediately follow with `cafleet --session-id <session-id> member ping --agent-id <director-agent-id> --member-id <test-member-id>` against the same member. <!-- completed: -->
-- [ ] Capture the member's pane via `cafleet --session-id <session-id> member capture --agent-id <director-agent-id> --member-id <test-member-id> --lines 60` and confirm the member began its next turn within seconds — NOT waiting for the 1-minute monitoring tick. <!-- completed: -->
-- [ ] Record the verification outcome (timestamp, member id, captured first-turn snippet) in the Verification log subsection below. <!-- completed: -->
+- [x] In an existing CAFleet session, run `cafleet --session-id <session-id> member exec --agent-id <director-agent-id> --member-id <test-member-id> "echo hello"` against a live member that is at the Claude Code input prompt. <!-- completed: 2026-05-01T00:15 -->
+- [x] Immediately follow with `cafleet --session-id <session-id> member ping --agent-id <director-agent-id> --member-id <test-member-id>` against the same member. <!-- completed: 2026-05-01T00:15 -->
+- [x] Capture the member's pane via `cafleet --session-id <session-id> member capture --agent-id <director-agent-id> --member-id <test-member-id> --lines 60` and confirm the member began its next turn within seconds — NOT waiting for the 1-minute monitoring tick. <!-- completed: 2026-05-01T00:15 -->
+- [x] Record the verification outcome (timestamp, member id, captured first-turn snippet) in the Verification log subsection below. <!-- completed: 2026-05-01T00:15 -->
 
 #### Verification log
 
 | Date (UTC) | Member id | First-turn snippet | Notes |
 |---|---|---|---|
-| _pending_ | _pending_ | _pending_ | _pending_ |
+| 2026-05-01T00:14:33Z | f0340c69-a40b-4869-bf95-1a92fa75655b (Programmer) | echo hello / hello / cafleet message poll / Running 1 shell command / Flowing 4s | Member began next turn within seconds, well under the 1-minute monitoring tick. exec then ping chain confirmed working as documented. |
 
 ### Step 5: Cross-document consistency check
 
