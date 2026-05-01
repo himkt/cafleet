@@ -214,6 +214,12 @@ The injected text lands in the coding agent's input prompt. If the agent is idle
 
 **Manual entry-point**: `tmux.send_poll_trigger` has two callers — `broker._try_notify_recipient` (the auto-fire path triggered after every `cafleet message send`, best-effort and silent on failure) and `cafleet member ping` (the Director-only manual nudge subcommand, which converts a `False` return to exit 1 so an operator or monitoring loop sees the failure). Both inject the same `cafleet --session-id <s> message poll --agent-id <r>` keystroke + Enter; only the failure-handling differs.
 
+## CLI Message Body Truncation
+
+Every `cafleet message *` subcommand (`send`, `broadcast`, `poll`, `ack`, `cancel`, `show`) truncates the delivery's `text` body to the first 10 Unicode codepoints with a literal `...` suffix in both text and `--json` output by default. Empty bodies and bodies whose codepoint length is at most 10 pass through unchanged with no marker. A per-subcommand `--full` flag restores the un-truncated body. Truncation runs in `cafleet/src/cafleet/output.py` via `truncate_text` and `truncate_task_text` helpers and is wired into the message subcommands through the shared `_client_command` decorator before either the text formatter or `format_json` runs, so `--full` and `--json` compose orthogonally.
+
+The truncation applies to CLI emit sites only. FastAPI `/ui/api/*` responses are unchanged — the WebUI is human-facing and renders full bodies. `member capture` content, `agent.description`, `skills[].description`, and `agent_card_json` sub-fields are also untouched in this release.
+
 ## Key Design Decisions
 
 ### contextId Convention

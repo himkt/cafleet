@@ -66,6 +66,19 @@ cafleet --session-id <session-id> --json agent list --agent-id <my-agent-id>
 
 ## Command Reference
 
+### Message body truncation
+
+Every `cafleet message *` subcommand (`send`, `broadcast`, `poll`, `ack`, `cancel`, `show`) truncates the delivery `text` body to the first 10 Unicode codepoints with a literal `...` suffix in both text and `--json` output by default. Empty bodies and bodies whose codepoint length is at most 10 pass through unchanged with no marker. Length is measured in Python `str` codepoints (never bytes), so multibyte characters are never split. Pass the per-subcommand `--full` flag to restore the un-truncated body — it composes orthogonally with `--json`.
+
+| Input `text` | Default output | `--full` output |
+|---|---|---|
+| `None` / not present | not present | not present |
+| `""` | `""` | `""` |
+| length ≤ 10 codepoints | unchanged | unchanged |
+| length > 10 codepoints | `text[:10] + "..."` | unchanged |
+
+The suffix is exactly the three ASCII characters `...` — no count, no `[truncated]` marker, no companion `text_length` field. The 10-codepoint default applies uniformly across all six message subcommands; there is no environment variable and no configurable limit. The truncation does NOT apply to FastAPI `/ui/api/*` responses, which always return full bodies.
+
 ### Register
 
 Register a new agent with the broker.
@@ -166,7 +179,16 @@ Send a message to a specific agent by ID.
 ```bash
 cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
   --to <target-agent-id> --text "Did the API schema change?"
+
+cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+  --to <target-agent-id> --text "Did the API schema change?" --full
 ```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--to <agent-id>` | yes | Recipient agent UUID. |
+| `--text <body>` | yes | Message body. Truncated to 10 codepoints + `...` in the echoed response by default. |
+| `--full` | no | Disable text truncation; emit the full message body in the echoed response (default truncates to 10 codepoints + `...`). |
 
 After persisting the message, the broker attempts a tmux push notification to the recipient's pane (`tmux send-keys` with `cafleet --session-id <session-id> message poll --agent-id <recipient-id>`). The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome.
 
@@ -177,7 +199,15 @@ Send a message to all registered agents (except self).
 ```bash
 cafleet --session-id <session-id> message broadcast --agent-id <my-agent-id> \
   --text "Build failed on main branch"
+
+cafleet --session-id <session-id> message broadcast --agent-id <my-agent-id> \
+  --text "Build failed on main branch" --full
 ```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--text <body>` | yes | Message body. Each per-recipient delivery in the echoed summary list truncates to 10 codepoints + `...` by default. |
+| `--full` | no | Disable text truncation; emit full message bodies in the echoed summary list. |
 
 After persisting each delivery, the broker attempts a tmux push notification per recipient. The broadcast summary response includes `notifications_sent_count` indicating how many panes were successfully triggered. Self-sends and missing/dead panes are skipped silently.
 
@@ -189,7 +219,14 @@ Poll for incoming messages. Returns tasks addressed to this agent.
 cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
 cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --since "2026-03-28T12:00:00+00:00"
 cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --page-size 10
+cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --full
 ```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--since <iso8601>` | no | Filter tasks at or after this `status_timestamp`. |
+| `--page-size <int>` | no | Cap the number of returned tasks. |
+| `--full` | no | Disable text truncation; emit full message bodies for every returned task (default truncates each `text` to 10 codepoints + `...`). |
 
 `--since` accepts an ISO 8601 timestamp. The broker stores `status_timestamp` via `datetime.now(UTC).isoformat()`, which renders as `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` (microsecond precision, `+00:00` suffix — **not** `Z`). The `--since` filter is applied as a raw SQLite TEXT comparison, so pass timestamps in the same `+00:00` form for correct lexicographic ordering.
 
@@ -199,7 +236,13 @@ Acknowledge receipt of a message. Moves the task from INPUT_REQUIRED to COMPLETE
 
 ```bash
 cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id> --full
 ```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--task-id <uuid>` | yes | Task to acknowledge. |
+| `--full` | no | Disable text truncation; emit the full message body in the echoed task (default truncates to 10 codepoints + `...`). |
 
 ### Cancel (Retract)
 
@@ -207,7 +250,13 @@ Cancel a sent message that hasn't been acknowledged yet. Only the sender can can
 
 ```bash
 cafleet --session-id <session-id> message cancel --agent-id <my-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message cancel --agent-id <my-agent-id> --task-id <task-id> --full
 ```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--task-id <uuid>` | yes | Task to cancel. |
+| `--full` | no | Disable text truncation; emit the full message body in the echoed task (default truncates to 10 codepoints + `...`). |
 
 ### Get Task
 
@@ -215,7 +264,13 @@ Get details of a specific task by ID.
 
 ```bash
 cafleet --session-id <session-id> message show --agent-id <my-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message show --agent-id <my-agent-id> --task-id <task-id> --full
 ```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--task-id <uuid>` | yes | Task to fetch. |
+| `--full` | no | Disable text truncation; emit the full message body (default truncates to 10 codepoints + `...`). |
 
 ### Deregister
 
