@@ -527,7 +527,7 @@ cafleet --session-id <session-id> member ping \
 
 The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll`. `cafleet message poll --agent-id <director-agent-id>` polls the **Director's** inbox over SQLite and does not wake the member; `cafleet member ping --agent-id <director-agent-id> --member-id <member-agent-id>` keystrokes a fresh `cafleet ... message poll --agent-id <member>` line into the **member's** pane via `tmux.send_poll_trigger` so the keystroke lands as the member's next user message.
 
-Run `cafleet member ping` after any `cafleet member exec` invocation that exits 0. Skip the ping only on non-zero exit — the dispatch never reached the pane, and the 1-minute `cafleet-monitoring` tick is the safety net.
+Run `cafleet member ping` after any `cafleet member exec` invocation that exits 0. Skip the ping only on non-zero exit — the dispatch did not complete successfully (its `tmux send-keys` sequence may have failed mid-way), so we cannot assume the bang command was submitted, and the 1-minute `cafleet-monitoring` tick is the safety net.
 
 For a series of `member exec` calls on the same member, the ping follows each exec, not only the last. Every bang command stages its own output as context, and the member needs a turn to consume each before the Director's next dispatch is meaningful.
 
