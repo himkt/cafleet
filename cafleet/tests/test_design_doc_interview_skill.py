@@ -1,9 +1,10 @@
-"""Structural tests for Step 1 of design 0000045 (cafleet design-doc-interview port).
+"""Structural tests for design 0000045 (cafleet design-doc-interview port).
 
-Step 1 is documentation-only. It updates two CLAUDE.md files to advertise the new
-``cafleet:design-doc-interview`` skill and confirms ``cafleet:design-doc-create``
-no longer marks interview as global-only. These tests assert the Step-1
-specification verbatim, not implementation details.
+The design document is documentation-only: it adds skill markdown files and
+edits two CLAUDE.md files. These tests assert the design spec verbatim
+(file presence, YAML front-matter validity, required-section presence,
+COMMENT-marker compatibility, CLAUDE.md skill-list entries) — not the
+contents of any prior untrusted draft.
 """
 
 from pathlib import Path
@@ -15,6 +16,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 ROOT_CLAUDE_MD = PROJECT_ROOT / "CLAUDE.md"
 DOTCLAUDE_CLAUDE_MD = PROJECT_ROOT / ".claude" / "CLAUDE.md"
 DESIGN_DOC_CREATE_SKILL = PROJECT_ROOT / "skills" / "design-doc-create" / "SKILL.md"
+SKILL_DIR = PROJECT_ROOT / "skills" / "design-doc-interview"
+SKILL_MD = SKILL_DIR / "SKILL.md"
+ANALYZER_MD = SKILL_DIR / "roles" / "analyzer.md"
 
 
 @pytest.fixture
@@ -128,4 +132,160 @@ def test_design_doc_create_skill_does_not_mark_interview_as_global_only(
     assert not matches, (
         f"skills/design-doc-create/SKILL.md still flags interview as global-only: {matches!r}; "
         "design 0000045 Step 1.c requires this language to be removed"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Step 2: Skill scaffolding (skills/design-doc-interview/SKILL.md + analyzer.md)
+# ---------------------------------------------------------------------------
+
+
+def _split_front_matter(text: str) -> tuple[dict[str, str], str]:
+    """Parse a leading ``---``-delimited YAML block by hand (no PyYAML dep).
+
+    Returns ``(front_matter_dict, body)``. Raises AssertionError if no
+    front-matter block is present or it is not properly closed.
+    """
+    lines = text.splitlines()
+    assert lines and lines[0].strip() == "---", (
+        "front-matter must begin with a '---' line on the very first line"
+    )
+    closing = None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            closing = index
+            break
+    assert closing is not None, (
+        "front-matter is not closed — expected a second '---' line"
+    )
+    body = "\n".join(lines[closing + 1 :])
+    front_matter: dict[str, str] = {}
+    for raw in lines[1:closing]:
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        assert ":" in raw, f"front-matter line missing ':': {raw!r}"
+        key, _, value = raw.partition(":")
+        front_matter[key.strip()] = value.strip()
+    return front_matter, body
+
+
+@pytest.fixture
+def skill_md_text() -> str:
+    return SKILL_MD.read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def analyzer_md_text() -> str:
+    return ANALYZER_MD.read_text(encoding="utf-8")
+
+
+def test_skill_dir_exists():
+    """Design 0000045 Step 2.a: skills/design-doc-interview/ exists as a directory."""
+    assert SKILL_DIR.is_dir(), f"missing skill directory: {SKILL_DIR}"
+
+
+def test_skill_md_exists():
+    """Design 0000045 Step 2.b: SKILL.md exists."""
+    assert SKILL_MD.is_file(), f"missing skill file: {SKILL_MD}"
+
+
+def test_skill_md_front_matter_has_required_keys(skill_md_text):
+    """Design 0000045 Step 2.b: front-matter has name=design-doc-interview, description, allowed-tools."""
+    front_matter, _body = _split_front_matter(skill_md_text)
+    assert "name" in front_matter, "front-matter missing 'name'"
+    assert "description" in front_matter, "front-matter missing 'description'"
+    assert "allowed-tools" in front_matter, "front-matter missing 'allowed-tools'"
+    assert front_matter["name"] == "design-doc-interview", (
+        f"front-matter name must be 'design-doc-interview', got {front_matter['name']!r}"
+    )
+    assert front_matter["description"], "front-matter description must not be empty"
+    assert front_matter["allowed-tools"], "front-matter allowed-tools must not be empty"
+
+
+def test_skill_md_front_matter_allowed_tools_is_exact_six_tool_set(skill_md_text):
+    """Design 0000045 Step 2.b: allowed-tools must be exactly the 6 tools listed in the spec.
+
+    The design document specifies: ``Read, Write, Edit, Grep, AskUserQuestion, Bash``.
+    Comparison is order-independent (set equality) but allows no extras and no omissions.
+    """
+    front_matter, _body = _split_front_matter(skill_md_text)
+    raw = front_matter["allowed-tools"]
+    actual = {tool.strip() for tool in raw.split(",") if tool.strip()}
+    expected = {"Read", "Write", "Edit", "Grep", "AskUserQuestion", "Bash"}
+    assert actual == expected, (
+        f"front-matter allowed-tools must equal {sorted(expected)} (order-independent). "
+        f"Got {sorted(actual)}. Extras: {sorted(actual - expected)}. "
+        f"Missing: {sorted(expected - actual)}."
+    )
+
+
+def test_skill_md_body_has_process_section_and_step_headings(skill_md_text):
+    """Design 0000045 Step 2.b: body has Process section heading + Step 0..Step 5 sub-headings."""
+    _front_matter, body = _split_front_matter(skill_md_text)
+    body_lower = body.lower()
+    assert "## process" in body_lower, "missing top-level '## Process' heading"
+    for step_index in range(6):  # 0..5 inclusive
+        needle = f"### step {step_index}"
+        assert needle in body_lower, (
+            f"missing '### Step {step_index}' sub-heading under Process section"
+        )
+
+
+def test_skill_md_body_has_comment_annotation_format_section(skill_md_text):
+    """Design 0000045 Step 2.b: body has a COMMENT annotation format section."""
+    _front_matter, body = _split_front_matter(skill_md_text)
+    lower = body.lower()
+    assert "comment annotation format" in lower or "comment(claude) annotation format" in lower, (
+        "missing 'COMMENT Annotation Format' section heading"
+    )
+    assert "COMMENT(claude)" in body, (
+        "COMMENT annotation section must include the literal 'COMMENT(claude)' marker — "
+        "this is what /design-doc-create resume mode greps for"
+    )
+
+
+def test_skill_md_body_has_question_md_format_section(skill_md_text):
+    """Design 0000045 Step 2.b: body has a question.md format section."""
+    _front_matter, body = _split_front_matter(skill_md_text)
+    lower = body.lower()
+    assert "question.md" in lower, "body must reference question.md"
+    has_section_heading = any(
+        line.lstrip().startswith("##") and "question.md" in line.lower()
+        for line in body.splitlines()
+    )
+    assert has_section_heading, (
+        "missing a markdown heading (## or ###) that names 'question.md' — design 0000045 requires "
+        "a dedicated question.md format section"
+    )
+    assert "interview-progress" in lower, (
+        "question.md format section must document the <!-- interview-progress: [...] --> marker"
+    )
+
+
+def test_skill_md_ends_with_arguments_footer(skill_md_text):
+    """Design 0000045 Step 2.b: SKILL.md body ends with the literal $ARGUMENTS token."""
+    stripped = skill_md_text.rstrip()
+    assert stripped.endswith("$ARGUMENTS"), (
+        f"SKILL.md must end with the $ARGUMENTS footer (Claude Code skill template injection); "
+        f"last 40 chars are {stripped[-40:]!r}"
+    )
+
+
+def test_analyzer_md_exists():
+    """Design 0000045 Step 2.c: analyzer.md exists."""
+    assert ANALYZER_MD.is_file(), f"missing analyzer role file: {ANALYZER_MD}"
+
+
+def test_analyzer_md_describes_required_role_behaviors(analyzer_md_text):
+    """Design 0000045 Step 2.c: role file describes read-doc, return numbered list, idle pending shutdown."""
+    lower = analyzer_md_text.lower()
+    assert "design document" in lower or "design doc" in lower, (
+        "analyzer.md must instruct the Analyzer to read the design document"
+    )
+    assert "read" in lower, "analyzer.md must describe reading"
+    assert "numbered" in lower and ("question" in lower or "list" in lower), (
+        "analyzer.md must describe returning a numbered question list"
+    )
+    assert "idle" in lower and "shutdown" in lower, (
+        "analyzer.md must describe idling pending shutdown"
     )
