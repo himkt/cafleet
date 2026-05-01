@@ -44,159 +44,162 @@ def db_runner(tmp_path, monkeypatch):
     return runner
 
 
-class TestMissingSessionIdFailsClientSubcommands:
-    def test_register_without_session_id_shows_new_error_message(self, db_runner):
-        result = db_runner.invoke(
-            cli,
-            ["agent", "register", "--name", "A", "--description", "a"],
-        )
-        out = result.output or ""
-        assert "--session-id" in out
-        assert "is required" in out
-        assert "cafleet session create" in out
-        assert "CAFLEET_SESSION_ID" not in out
-        assert "environment variable" not in out.lower()
+def test_missing_session_id_fails_client_subcommands__register_without_session_id_shows_new_error_message(db_runner):
+    result = db_runner.invoke(
+        cli,
+        ["agent", "register", "--name", "A", "--description", "a"],
+    )
+    out = result.output or ""
+    assert "--session-id" in out
+    assert "is required" in out
+    assert "cafleet session create" in out
+    assert "CAFLEET_SESSION_ID" not in out
+    assert "environment variable" not in out.lower()
 
 
-class TestSessionIdFlagFlowsIntoBroker:
-    def test_register_passes_session_id_to_broker(self, db_runner, monkeypatch):
-        captured: dict = {}
+def test_session_id_flag_flows_into_broker__register_passes_session_id_to_broker(db_runner, monkeypatch):
+    captured: dict = {}
 
-        def fake_register_agent(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return {
-                "agent_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
-                "name": "A",
-                "registered_at": "2026-01-01T00:00:00+00:00",
+    def fake_register_agent(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return {
+            "agent_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            "name": "A",
+            "registered_at": "2026-01-01T00:00:00+00:00",
+        }
+
+    monkeypatch.setattr(broker, "register_agent", fake_register_agent)
+
+    sid = str(uuid.uuid4())
+    result = db_runner.invoke(
+        cli,
+        [
+            "--session-id",
+            sid,
+            "agent",
+            "register",
+            "--name",
+            "A",
+            "--description",
+            "a",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    all_values = list(captured["args"]) + list(captured["kwargs"].values())
+    assert sid in all_values
+
+
+def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(db_runner, monkeypatch):
+    captured: dict = {}
+
+    def fake_send_message(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        sender = args[1] if len(args) > 1 else kwargs.get("agent_id")
+        recipient = args[2] if len(args) > 2 else kwargs.get("to")
+        return {
+            "task": {
+                "id": "tttttttt-tttt-tttt-tttt-tttttttttttt",
+                "contextId": recipient,
+                "status": {
+                    "state": "input_required",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                },
+                "artifacts": [],
+                "metadata": {
+                    "fromAgentId": sender,
+                    "toAgentId": recipient,
+                    "type": "unicast",
+                },
             }
+        }
 
-        monkeypatch.setattr(broker, "register_agent", fake_register_agent)
+    monkeypatch.setattr(broker, "send_message", fake_send_message)
 
-        sid = str(uuid.uuid4())
-        result = db_runner.invoke(
-            cli,
-            [
-                "--session-id",
-                sid,
-                "agent",
-                "register",
-                "--name",
-                "A",
-                "--description",
-                "a",
-            ],
-        )
+    sid = str(uuid.uuid4())
+    aid = str(uuid.uuid4())
+    bid = str(uuid.uuid4())
+    result = db_runner.invoke(
+        cli,
+        [
+            "--session-id",
+            sid,
+            "message",
+            "send",
+            "--agent-id",
+            aid,
+            "--to",
+            bid,
+            "--text",
+            "hi",
+        ],
+    )
 
-        assert result.exit_code == 0, result.output
-        all_values = list(captured["args"]) + list(captured["kwargs"].values())
-        assert sid in all_values
-
-    def test_send_passes_session_id_to_broker(self, db_runner, monkeypatch):
-        captured: dict = {}
-
-        def fake_send_message(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            sender = args[1] if len(args) > 1 else kwargs.get("agent_id")
-            recipient = args[2] if len(args) > 2 else kwargs.get("to")
-            return {
-                "task": {
-                    "id": "tttttttt-tttt-tttt-tttt-tttttttttttt",
-                    "contextId": recipient,
-                    "status": {
-                        "state": "input_required",
-                        "timestamp": "2026-01-01T00:00:00+00:00",
-                    },
-                    "artifacts": [],
-                    "metadata": {
-                        "fromAgentId": sender,
-                        "toAgentId": recipient,
-                        "type": "unicast",
-                    },
-                }
-            }
-
-        monkeypatch.setattr(broker, "send_message", fake_send_message)
-
-        sid = str(uuid.uuid4())
-        aid = str(uuid.uuid4())
-        bid = str(uuid.uuid4())
-        result = db_runner.invoke(
-            cli,
-            [
-                "--session-id",
-                sid,
-                "message",
-                "send",
-                "--agent-id",
-                aid,
-                "--to",
-                bid,
-                "--text",
-                "hi",
-            ],
-        )
-
-        assert result.exit_code == 0, result.output
-        all_values = list(captured["args"]) + list(captured["kwargs"].values())
-        assert sid in all_values
-
-    def test_session_id_not_read_from_environment(self, db_runner, monkeypatch):
-        """The env var CAFLEET_SESSION_ID was removed; only the CLI flag works."""
-        monkeypatch.setenv("CAFLEET_SESSION_ID", str(uuid.uuid4()))
-        result = db_runner.invoke(
-            cli,
-            ["agent", "register", "--name", "A", "--description", "a"],
-        )
-        assert result.exit_code == 1, result.output
+    assert result.exit_code == 0, result.output
+    all_values = list(captured["args"]) + list(captured["kwargs"].values())
+    assert sid in all_values
 
 
-class TestSubcommandsThatDoNotRequireSessionId:
-    def test_db_init_without_session_id(self, tmp_path, monkeypatch):
-        db_file = tmp_path / "registry.db"
-        monkeypatch.setattr(
-            config.settings,
-            "database_url",
-            f"sqlite+aiosqlite:///{db_file}",
-        )
-        runner = CliRunner()
-        result = runner.invoke(cli, ["db", "init"])
-        assert result.exit_code == 0, result.output
-
-    def test_session_create_without_session_id(self, db_runner):
-        """session create mints a session, so it cannot itself require one."""
-        result = db_runner.invoke(cli, ["session", "create", "--label", "smoke"])
-        assert result.exit_code == 0, result.output
-
-    def test_session_list_without_session_id(self, db_runner):
-        result = db_runner.invoke(cli, ["session", "list"])
-        assert result.exit_code == 0, result.output
+def test_session_id_flag_flows_into_broker__session_id_not_read_from_environment(db_runner, monkeypatch):
+    """The env var CAFLEET_SESSION_ID was removed; only the CLI flag works."""
+    monkeypatch.setenv("CAFLEET_SESSION_ID", str(uuid.uuid4()))
+    result = db_runner.invoke(
+        cli,
+        ["agent", "register", "--name", "A", "--description", "a"],
+    )
+    assert result.exit_code == 1, result.output
 
 
-class TestSessionIdSilentlyAcceptedWhereNotRequired:
-    def test_db_init_accepts_session_id_silently(self, tmp_path, monkeypatch):
-        db_file = tmp_path / "registry.db"
-        monkeypatch.setattr(
-            config.settings,
-            "database_url",
-            f"sqlite+aiosqlite:///{db_file}",
-        )
-        runner = CliRunner()
-        sid = str(uuid.uuid4())
-        result = runner.invoke(cli, ["--session-id", sid, "db", "init"])
-        assert result.exit_code == 0, result.output
-        combined = (result.output or "").lower()
-        assert "unused" not in combined
-        assert "unexpected" not in combined
+def test_subcommands_that_do_not_require_session_id__db_init_without_session_id(tmp_path, monkeypatch):
+    db_file = tmp_path / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli, ["db", "init"])
+    assert result.exit_code == 0, result.output
 
-    def test_session_create_accepts_session_id_silently(self, db_runner):
-        sid = str(uuid.uuid4())
-        result = db_runner.invoke(
-            cli,
-            ["--session-id", sid, "session", "create", "--label", "x"],
-        )
-        assert result.exit_code == 0, result.output
+
+def test_subcommands_that_do_not_require_session_id__session_create_without_session_id(db_runner):
+    """session create mints a session, so it cannot itself require one."""
+    result = db_runner.invoke(cli, ["session", "create", "--label", "smoke"])
+    assert result.exit_code == 0, result.output
+
+
+def test_subcommands_that_do_not_require_session_id__session_list_without_session_id(db_runner):
+    result = db_runner.invoke(cli, ["session", "list"])
+    assert result.exit_code == 0, result.output
+
+
+def test_session_id_silently_accepted_where_not_required__db_init_accepts_session_id_silently(
+    tmp_path, monkeypatch
+):
+    db_file = tmp_path / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+    runner = CliRunner()
+    sid = str(uuid.uuid4())
+    result = runner.invoke(cli, ["--session-id", sid, "db", "init"])
+    assert result.exit_code == 0, result.output
+    combined = (result.output or "").lower()
+    assert "unused" not in combined
+    assert "unexpected" not in combined
+
+
+def test_session_id_silently_accepted_where_not_required__session_create_accepts_session_id_silently(db_runner):
+    sid = str(uuid.uuid4())
+    result = db_runner.invoke(
+        cli,
+        ["--session-id", sid, "session", "create", "--label", "x"],
+    )
+    assert result.exit_code == 0, result.output
 
 
 def _create_session_via_cli(runner: CliRunner) -> tuple[str, str]:
@@ -221,92 +224,98 @@ def _fetch_agent_status(db_file, agent_id: str) -> tuple[str, str | None]:
     return row[0], row[1]
 
 
-class TestDeregisterAdministratorCliGuard:
-    def test_cli_deregister_admin_exits_nonzero(self, tmp_path, monkeypatch):
-        db_file = tmp_path / "registry.db"
-        monkeypatch.setattr(
-            config.settings,
-            "database_url",
-            f"sqlite+aiosqlite:///{db_file}",
-        )
-        runner = CliRunner()
-        init = runner.invoke(cli, ["db", "init"])
-        assert init.exit_code == 0
+def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(tmp_path, monkeypatch):
+    db_file = tmp_path / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+    runner = CliRunner()
+    init = runner.invoke(cli, ["db", "init"])
+    assert init.exit_code == 0
 
-        session_id, admin_id = _create_session_via_cli(runner)
+    session_id, admin_id = _create_session_via_cli(runner)
 
-        result = runner.invoke(
-            cli,
-            ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
-        )
-        assert result.exit_code == 1, result.output
+    result = runner.invoke(
+        cli,
+        ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
+    )
+    assert result.exit_code == 1, result.output
 
-    def test_cli_deregister_admin_message_is_user_friendly(self, tmp_path, monkeypatch):
-        db_file = tmp_path / "registry.db"
-        monkeypatch.setattr(
-            config.settings,
-            "database_url",
-            f"sqlite+aiosqlite:///{db_file}",
-        )
-        runner = CliRunner()
-        init = runner.invoke(cli, ["db", "init"])
-        assert init.exit_code == 0
 
-        session_id, admin_id = _create_session_via_cli(runner)
+def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_user_friendly(
+    tmp_path, monkeypatch
+):
+    db_file = tmp_path / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+    runner = CliRunner()
+    init = runner.invoke(cli, ["db", "init"])
+    assert init.exit_code == 0
 
-        result = runner.invoke(
-            cli,
-            ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
-        )
-        out = result.output or ""
-        assert "Administrator cannot be deregistered" in out
-        assert "Traceback" not in out
+    session_id, admin_id = _create_session_via_cli(runner)
 
-    def test_cli_deregister_unknown_agent_exits_nonzero(self, tmp_path, monkeypatch):
-        db_file = tmp_path / "registry.db"
-        monkeypatch.setattr(
-            config.settings,
-            "database_url",
-            f"sqlite+aiosqlite:///{db_file}",
-        )
-        runner = CliRunner()
-        init = runner.invoke(cli, ["db", "init"])
-        assert init.exit_code == 0
+    result = runner.invoke(
+        cli,
+        ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
+    )
+    out = result.output or ""
+    assert "Administrator cannot be deregistered" in out
+    assert "Traceback" not in out
 
-        session_id, _admin_id = _create_session_via_cli(runner)
-        bogus_agent_id = str(uuid.uuid4())
 
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "agent",
-                "deregister",
-                "--agent-id",
-                bogus_agent_id,
-            ],
-        )
-        assert result.exit_code == 1, result.output
-        assert "is not a member of session" in (result.output or "")
+def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_nonzero(
+    tmp_path, monkeypatch
+):
+    db_file = tmp_path / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+    runner = CliRunner()
+    init = runner.invoke(cli, ["db", "init"])
+    assert init.exit_code == 0
 
-    def test_cli_deregister_admin_leaves_row_active(self, tmp_path, monkeypatch):
-        db_file = tmp_path / "registry.db"
-        monkeypatch.setattr(
-            config.settings,
-            "database_url",
-            f"sqlite+aiosqlite:///{db_file}",
-        )
-        runner = CliRunner()
-        init = runner.invoke(cli, ["db", "init"])
-        assert init.exit_code == 0
+    session_id, _admin_id = _create_session_via_cli(runner)
+    bogus_agent_id = str(uuid.uuid4())
 
-        session_id, admin_id = _create_session_via_cli(runner)
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "agent",
+            "deregister",
+            "--agent-id",
+            bogus_agent_id,
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    assert "is not a member of session" in (result.output or "")
 
-        runner.invoke(
-            cli,
-            ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
-        )
-        status, deregistered_at = _fetch_agent_status(db_file, admin_id)
-        assert status == "active"
-        assert deregistered_at is None
+
+def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_active(tmp_path, monkeypatch):
+    db_file = tmp_path / "registry.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+    runner = CliRunner()
+    init = runner.invoke(cli, ["db", "init"])
+    assert init.exit_code == 0
+
+    session_id, admin_id = _create_session_via_cli(runner)
+
+    runner.invoke(
+        cli,
+        ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
+    )
+    status, deregistered_at = _fetch_agent_status(db_file, admin_id)
+    assert status == "active"
+    assert deregistered_at is None

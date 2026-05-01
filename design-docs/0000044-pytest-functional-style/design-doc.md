@@ -1,7 +1,7 @@
 # Refactor Test Suite to Functional Pytest Style
 
 **Status**: Approved
-**Progress**: 21/44 tasks complete
+**Progress**: 26/44 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -188,11 +188,11 @@ Apply the §A recipe to:
 
 ### Step 5: Refactor session + bootstrap tests
 
-- [ ] `cafleet/tests/test_cli_session_bootstrap.py` — 5 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_cli_session_flag.py` — 5 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_session_bootstrap.py` — 7 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_session_cli.py` — 6 classes <!-- completed: -->
-- [ ] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: -->
+- [x] `cafleet/tests/test_cli_session_bootstrap.py` — 5 classes <!-- completed: 2026-05-01T14:00 -->
+- [x] `cafleet/tests/test_cli_session_flag.py` — 5 classes <!-- completed: 2026-05-01T14:00 -->
+- [x] `cafleet/tests/test_session_bootstrap.py` — 7 classes <!-- completed: 2026-05-01T14:00 -->
+- [x] `cafleet/tests/test_session_cli.py` — 6 classes <!-- completed: 2026-05-01T14:00 -->
+- [x] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: 2026-05-01T14:00 -->
 
 ### Step 6: Refactor alembic migration tests
 
