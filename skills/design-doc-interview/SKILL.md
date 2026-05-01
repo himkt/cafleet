@@ -267,7 +267,7 @@ Rules:
 - One COMMENT per discrepancy (do not combine unrelated issues)
 - Description must be actionable — state what is wrong AND what the correct behavior should be
 
-The format matches `cafleet:design-doc-create` resume-mode expectations exactly, so a follow-up `/cafleet:design-doc-create <doc-path>` invocation auto-detects the markers and routes them to the Drafter.
+The format matches `/cafleet:design-doc-create` resume-mode expectations exactly, so a follow-up `/cafleet:design-doc-create <doc-path>` invocation auto-detects the markers and routes them to the Drafter.
 
 ## `question.md` Format
 

@@ -10,12 +10,12 @@ Port the global `design-doc-interview` skill into this repository as `skills/des
 
 ## Success Criteria
 
-- [ ] `skills/design-doc-interview/SKILL.md` exists and is loaded automatically as `cafleet:design-doc-interview` (visible in the system-reminder skill list when the cafleet plugin is active)
-- [ ] Invoking `/cafleet:design-doc-interview <doc-path-or-slug>` on a fresh design document drives a multi-round Q&A and writes a `question.md` file alongside the doc
-- [ ] Discrepancies surface as `COMMENT(claude): ...` annotations inline in the design document, identical in shape to the global skill's output (so `cafleet:design-doc-create` resume mode keeps working unchanged)
-- [ ] Resume invocation on a doc with an existing `question.md` skips already-reviewed sections via the `<!-- interview-progress: [...] -->` marker
-- [ ] All inter-agent communication is auditable in the admin WebUI message timeline (no hidden in-process Agent subagent calls)
-- [ ] CLAUDE.md in both `/` and `.claude/` lists the new skill in the project skills section
+- [x] `skills/design-doc-interview/SKILL.md` exists and is loaded automatically as `cafleet:design-doc-interview` (visible in the system-reminder skill list when the cafleet plugin is active)
+- [x] Invoking `/cafleet:design-doc-interview <doc-path-or-slug>` on a fresh design document drives a multi-round Q&A and writes a `question.md` file alongside the doc
+- [x] Discrepancies surface as `COMMENT(claude): ...` annotations inline in the design document, identical in shape to the global skill's output (so `/cafleet:design-doc-create` resume mode keeps working unchanged)
+- [x] Resume invocation on a doc with an existing `question.md` skips already-reviewed sections via the `<!-- interview-progress: [...] -->` marker
+- [x] All inter-agent communication is auditable in the admin WebUI message timeline (no hidden in-process Agent subagent calls)
+- [x] CLAUDE.md in both `/` and `.claude/` lists the new skill in the project skills section
 
 ---
 
@@ -85,7 +85,7 @@ User
 |---|---|
 | **Input** | Design document path or slug (via `$ARGUMENTS`), resolved through `Skill(base-dir)` |
 | **Created** | `{dir_path}/question.md` (Questions section + Answers section + `<!-- interview-progress: [...] -->` HTML comment marker) |
-| **Edited** | Inline `# COMMENT(claude): ...` annotations in the design document, immediately before the affected section |
+| **Edited** | Inline `COMMENT(claude): ...` annotations in the design document, immediately before the affected section |
 | **Allowed tools (Director)** | `Read`, `Write`, `Edit`, `Grep`, `AskUserQuestion`, `Bash` (for `cafleet` CLI) |
 | **Allowed tools (Analyzer)** | `Read`, `Bash` (for `cafleet message send`/`poll`/`ack`) |
 

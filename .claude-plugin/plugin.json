@@ -13,6 +13,7 @@
     "./skills/cafleet-monitoring",
     "./skills/design-doc",
     "./skills/design-doc-create",
-    "./skills/design-doc-execute"
+    "./skills/design-doc-execute",
+    "./skills/design-doc-interview"
   ]
 }
