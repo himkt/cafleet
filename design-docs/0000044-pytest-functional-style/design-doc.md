@@ -1,6 +1,6 @@
 # Refactor Test Suite to Functional Pytest Style
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 44/44 tasks complete
 **Last Updated**: 2026-05-01
 
@@ -230,3 +230,4 @@ Apply the §A recipe to:
 | 2026-05-01 | Initial draft |
 | 2026-05-01 | Reviewer round 1: corrected file count to 32 (28 class-style + 4 already-functional); added §G opt-in cleanup criteria with explicit "no candidates" evaluation; fixed progress denominator to match checkbox count; replaced bypass `uv run pytest --collect-only` with mise-routed `mise //cafleet:test -- --collect-only -q`; added §A step 5 verification grep into Step 1 |
 | 2026-05-01 | Approved by user — Status flipped Draft → Approved |
+| 2026-05-01 | Implementation complete. All 8 steps green, 557 tests pass, Success Criteria satisfied, ruff lint + format + ty typecheck all clean. Copilot review cycles: round 1 surfaced 3 nits (2 design-doc clarifications about pre/post-refactor invariants, 1 source-rename `test_broker_host_default__broker_port_default_is_8000` → `test_broker_port_default__is_8000`); round 1 fix-push prompted 1 follow-up nit (symmetric rename of `cafleet_env_var_is_read` → `cafleet_broker_port_env_var_is_read` to mirror the host sister test); round 2 fix-push received 0 new Copilot comments. PR #47 finalized with user approval — Status flipped Approved → Complete. |
