@@ -1,7 +1,7 @@
 # Message text truncation by default
 
 **Status**: Approved
-**Progress**: 16/28 tasks complete
+**Progress**: 22/28 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -224,12 +224,12 @@ The `README.md` upgrade note must call this out explicitly. There is no soft-lau
 
 ### Step 4: Per-command tests
 
-- [ ] `message poll`: default truncates `text` in both text and `--json`; `--full` emits full body. Cover empty inbox, single task, list of three tasks. <!-- completed: -->
-- [ ] `message show`: default truncates; `--full` emits full body. Cover both text and `--json`. <!-- completed: -->
-- [ ] `message send`: echo of just-sent message is truncated by default; `--full` echoes full. Cover both text and `--json`. <!-- completed: -->
-- [ ] `message broadcast`: each task in the broadcast summary list is truncated by default; `--full` emits full bodies. Cover both text and `--json`. <!-- completed: -->
-- [ ] Each per-command test asserts that non-`text` fields (`id`, `status.state`, `metadata.fromAgentId`, `metadata.toAgentId`, `metadata.type`) are byte-identical between default and `--full` output — a regression guard against the helper accidentally mutating siblings. <!-- completed: -->
-- [ ] `message ack` and `message cancel` reuse the same `_client_command` wiring as `message send`, and the `truncate_task_text` helper-level tests in Step 2 cover the truncation behavior on the same task shape. No additional per-command tests are required for `ack` / `cancel` — the wiring test is the integration point, and adding ack/cancel-specific tests would duplicate Step 2 without exercising new code. <!-- completed: -->
+- [x] `message poll`: default truncates `text` in both text and `--json`; `--full` emits full body. Cover empty inbox, single task, list of three tasks. <!-- completed: 2026-05-01T12:30 -->
+- [x] `message show`: default truncates; `--full` emits full body. Cover both text and `--json`. <!-- completed: 2026-05-01T12:30 -->
+- [x] `message send`: echo of just-sent message is truncated by default; `--full` echoes full. Cover both text and `--json`. <!-- completed: 2026-05-01T12:30 -->
+- [x] `message broadcast`: each task in the broadcast summary list is truncated by default; `--full` emits full bodies. Cover both text and `--json`. <!-- completed: 2026-05-01T12:30 -->
+- [x] Each per-command test asserts that non-`text` fields (`id`, `status.state`, `metadata.fromAgentId`, `metadata.toAgentId`, `metadata.type`) are byte-identical between default and `--full` output — a regression guard against the helper accidentally mutating siblings. <!-- completed: 2026-05-01T12:30 -->
+- [x] `message ack` and `message cancel` reuse the same `_client_command` wiring as `message send`, and the `truncate_task_text` helper-level tests in Step 2 cover the truncation behavior on the same task shape. No additional per-command tests are required for `ack` / `cancel` — the wiring test is the integration point, and adding ack/cancel-specific tests would duplicate Step 2 without exercising new code. <!-- completed: 2026-05-01T12:30 -->
 
 ### Step 5: Verify
 
