@@ -68,7 +68,9 @@ cafleet --session-id <session-id> --json agent list --agent-id <my-agent-id>
 
 ### Message body truncation
 
-Every `cafleet message *` subcommand (`send`, `broadcast`, `poll`, `ack`, `cancel`, `show`) truncates the delivery `text` body to the first 10 Unicode codepoints with a literal `...` suffix in both text and `--json` output by default. Empty bodies and bodies whose codepoint length is at most 10 pass through unchanged with no marker. Length is measured in Python `str` codepoints (never bytes), so multibyte characters are never split. Pass the per-subcommand `--full` flag to restore the un-truncated body — it composes orthogonally with `--json`.
+The five subcommands that emit a user-supplied delivery body — `cafleet message {send,poll,ack,cancel,show}` — truncate the delivery `text` body to the first 10 Unicode codepoints with a literal `...` suffix in both text and `--json` output by default. Empty bodies and bodies whose codepoint length is at most 10 pass through unchanged with no marker. Length is measured in Python `str` codepoints (never bytes), so multibyte characters are never split. Pass the per-subcommand `--full` flag to restore the un-truncated body — it composes orthogonally with `--json`.
+
+`cafleet message broadcast` is different — `broker.broadcast_message` returns a `broadcast_summary` task whose `artifacts[].parts[].text` is a generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. Truncating that summary would hide the recipient count, so `message broadcast` runs without truncation and its summary always emits in full. The `--full` flag is preserved on `message broadcast` for surface consistency but is a no-op there.
 
 The table describes the resulting `text` value AFTER truncation. Text mode omits the `text:` line entirely when the resulting value is empty, while `--json` always includes it.
 
@@ -201,17 +203,14 @@ Send a message to all registered agents (except self).
 ```bash
 cafleet --session-id <session-id> message broadcast --agent-id <my-agent-id> \
   --text "Build failed on main branch"
-
-cafleet --session-id <session-id> message broadcast --agent-id <my-agent-id> \
-  --text "Build failed on main branch" --full
 ```
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--text <body>` | yes | Message body. Each per-recipient delivery in the echoed summary list truncates to 10 codepoints + `...` by default. |
-| `--full` | no | Disable text truncation; emit full message bodies in the echoed summary list. |
+| `--text <body>` | yes | Message body delivered to every active recipient in the session (except the sender and the built-in Administrator). |
+| `--full` | no | Accepted for surface consistency with the other message subcommands; no-op here because `message broadcast` does not truncate. |
 
-After persisting each delivery, the broker attempts a tmux push notification per recipient. The broadcast summary response includes `notifications_sent_count` indicating how many panes were successfully triggered. Self-sends and missing/dead panes are skipped silently.
+`broker.broadcast_message` fans out the body to every recipient as individual delivery tasks (each visible to the recipient via `cafleet message poll`) and returns a single `broadcast_summary` envelope to the caller. The summary's `artifacts[].parts[].text` is a generated string (e.g. `Broadcast sent to N recipients`), not the original body, and the response carries `notifications_sent_count` indicating how many recipient panes were successfully triggered by the tmux push notification. Truncating that summary would hide the recipient count, so the CLI emits the broadcast summary in full regardless of `--full`. Self-sends and missing/dead panes are skipped silently during notification.
 
 ### Poll (Check Inbox)
 

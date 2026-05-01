@@ -433,7 +433,7 @@ def message_send(ctx, agent_id, to, text, full):
         "Broadcast sent.\n"
         + output.format_indexed_list(r, output.format_task, "No messages found.")
     ),
-    truncates_task_text=True,
+    truncates_task_text=False,
 )
 def message_broadcast(ctx, agent_id, text, full):
     """Broadcast a message to all agents."""
