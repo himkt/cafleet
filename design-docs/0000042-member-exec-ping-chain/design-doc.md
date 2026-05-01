@@ -1,7 +1,7 @@
 # Member Exec then Ping Chain Protocol
 
 **Status**: Approved
-**Progress**: 10/19 tasks complete
+**Progress**: 13/19 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -115,9 +115,9 @@ Target list: the "What you MUST do" numbered list inside the bash-routing protoc
 
 Target table: the escalation table inside `## Stall Response`. The table currently has a `cafleet ... member ping ...` row documenting the "stalled despite a recent message send" use case.
 
-- [ ] Locate the existing `cafleet ... member ping ...` row in the escalation table. <!-- completed: -->
-- [ ] Extend the "When to use" cell of that row to enumerate two use cases: (a) the existing post-message-send recovery (member appears stalled despite a recent `message send`, or after a long idle window), and (b) the new post-exec chain (Director MUST follow every successful `cafleet member exec` with this ping). For (b), cross-reference `Skill(cafleet)` § Member Exec for the chain definition rather than duplicating wording. <!-- completed: -->
-- [ ] Do NOT add a second ping row. Do NOT add a separate cell-level note in the `member exec` row beyond a short pointer phrase such as "see ping row for the required follow-up". <!-- completed: -->
+- [x] Locate the existing `cafleet ... member ping ...` row in the escalation table. <!-- completed: 2026-05-01T00:30 -->
+- [x] Extend the "When to use" cell of that row to enumerate two use cases: (a) the existing post-message-send recovery (member appears stalled despite a recent `message send`, or after a long idle window), and (b) the new post-exec chain (Director MUST follow every successful `cafleet member exec` with this ping). For (b), cross-reference `Skill(cafleet)` § Member Exec for the chain definition rather than duplicating wording. <!-- completed: 2026-05-01T00:30 -->
+- [x] Do NOT add a second ping row. Do NOT add a separate cell-level note in the `member exec` row beyond a short pointer phrase such as "see ping row for the required follow-up". <!-- completed: 2026-05-01T00:30 -->
 
 ### Step 4: Live verification
 
