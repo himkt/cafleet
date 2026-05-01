@@ -32,3 +32,7 @@ description = "Install the cafleet CLI as an editable uv tool (source edits take
 [tasks.build]
 run = "uv build --wheel"
 description = "Build the cafleet wheel"
+
+[tasks.publish]
+run = "uv publish"
+description = "Publish cafleet"
