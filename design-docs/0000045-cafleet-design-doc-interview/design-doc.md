@@ -1,7 +1,7 @@
 # Port `design-doc-interview` Skill to CAFleet
 
 **Status**: Approved
-**Progress**: 10/14 tasks complete
+**Progress**: 11/14 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -267,7 +267,7 @@ The user-visible Q&A flow (4-questions-per-`AskUserQuestion`, round counter, man
 
 ### Step 5: Resume-mode parity
 
-- [ ] Verify the COMMENT annotation format matches what `cafleet:design-doc-create` resume mode greps for (`COMMENT(`). The format is already specified in this design doc; no change to `cafleet:design-doc-create` should be needed. <!-- completed: -->
+- [x] Verify the COMMENT annotation format matches what `cafleet:design-doc-create` resume mode greps for (`COMMENT(`). The format is already specified in this design doc; no change to `cafleet:design-doc-create` should be needed. <!-- completed: 2026-05-01T12:49 -->
 
 ### Step 6: Smoke test
 
