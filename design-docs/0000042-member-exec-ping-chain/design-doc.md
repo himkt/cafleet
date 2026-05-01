@@ -22,7 +22,7 @@ After every successful `cafleet member exec`, the Director MUST follow up with `
 
 `cafleet member exec` keystrokes `! <command>` + `Enter` into a member's pane via `tmux.send_bash_command`. Claude Code's `!` shortcut runs the command and stages its captured stdout/stderr as context for the member's next turn — but **staging context is not the same as advancing a turn**. Without an additional user-message keystroke, the member sits at the input prompt waiting.
 
-`cafleet member ping` is the primitive that solves this: it keystrokes a fresh `cafleet --session-id <s> message poll --agent-id <m>` line into the member's pane via `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py:83`). The fresh keystroke lands as the next user message after the bang output is staged, forcing the member's next turn.
+`cafleet member ping` is the primitive that solves this: it keystrokes a fresh `cafleet --session-id <s> message poll --agent-id <m>` line into the member's pane via `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py`). The fresh keystroke lands as the next user message after the bang output is staged, forcing the member's next turn.
 
 The 1-minute `cafleet-monitoring` `/loop` tick eventually fires the same `tmux.send_poll_trigger` keystroke and wakes the member, so this is a latency issue, not a correctness one. But re-using the monitor as the wake-up path is wasteful when the Director already knows it just dispatched a command.
 
@@ -45,7 +45,7 @@ The doc must make this distinction explicit so the rule is not miscopied as `caf
 | Primitive | Effect | Wakes the member? |
 |---|---|---|
 | `cafleet message poll --agent-id <director-agent-id>` | Polls the **Director's** inbox over SQLite. Returns messages addressed to the Director. | No. |
-| `cafleet member ping --agent-id <director-agent-id> --member-id <member-agent-id>` | Keystrokes `cafleet --session-id <s> message poll --agent-id <m>` + `Enter` into the **member's** pane via `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py:83`). | Yes — the keystroke lands as the member's next user message. |
+| `cafleet member ping --agent-id <director-agent-id> --member-id <member-agent-id>` | Keystrokes `cafleet --session-id <s> message poll --agent-id <m>` + `Enter` into the **member's** pane via `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py`). | Yes — the keystroke lands as the member's next user message. |
 
 Documents that mention the chain MUST name `cafleet member ping` explicitly. They MUST NOT abbreviate to "poll", "message poll", or "the poll trigger".
 
@@ -106,7 +106,7 @@ Target subsection: "Member Exec" (under `## Command Reference`).
 Target list: the "What you MUST do" numbered list inside the bash-routing protocol (currently 5 items, items 1-5).
 
 - [x] Insert a new step 3 between the existing step 2 ("If fulfilling, dispatch via `cafleet member exec`") and the existing step 3 ("`member exec` mechanics"). Title it "After dispatch, ping the member." <!-- completed: 2026-05-01T00:20 -->
-- [x] In the new step 3, name the `cafleet member ping` invocation with literal `--agent-id` / `--member-id` flags and reference `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py:83`) once. <!-- completed: 2026-05-01T00:20 -->
+- [x] In the new step 3, name the `cafleet member ping` invocation with literal `--agent-id` / `--member-id` flags and reference `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py`) once. <!-- completed: 2026-05-01T00:20 -->
 - [x] In the new step 3, make explicit that ping (not `message poll`) is the right primitive, that ping is required after any `cafleet member exec` that exits 0, and that exec-failure cases (non-zero exit) skip the ping (the 1-minute monitor is the safety net). <!-- completed: 2026-05-01T00:20 -->
 - [x] Renumber the existing items: step 3 (`member exec` mechanics) → step 4, step 4 (Acknowledge the request) → step 5, step 5 (Refusing a request) → step 6. <!-- completed: 2026-05-01T00:20 -->
 - [x] Verify no in-file cross-references point at the old step numbers — if any do, update them to the renumbered targets. <!-- completed: 2026-05-01T00:20 -->
@@ -150,3 +150,4 @@ End-to-end live verification is required so the chain rule is observed working i
 | 2026-05-01 | Address second Copilot review pass on PR #45: rephrase Step 1 task 4 and Step 2 task 3 checklist items to use the exit-0 / non-zero-exit phrasing in line with the spec rewrite. Reword Step 5 task 1 to drop the "ping-failure handling (non-fatal warning)" clause from the consistency-check criteria — the public skill files intentionally do not duplicate that internal-doc rule, so the consistency check should not assert it. |
 | 2026-05-01 | Address third Copilot review pass on PR #45: correct the no-`&&` rationale in the Canonical exec-then-ping pairing section. The previous wording claimed shell operators "break `permissions.allow` literal matching"; Copilot pointed out that a `Bash(cafleet *)` allow pattern can in fact match a compound command. The accurate reason is precedence: a chained `member exec && member ping` invocation matches the more-specific `permissions.ask` rule for `member exec`, so the `member ping` half cannot use its `permissions.allow` carve-out. Splitting them across two Bash calls also exposes each subcommand's exit code independently, which is what the skip-on-non-zero-exit rule depends on. |
 | 2026-05-01 | Mark Status: Complete after all 19 implementation tasks land and the live verification has been recorded. |
+| 2026-05-01 | Address fourth Copilot review pass on PR #45: drop the volatile `:83` line number from every `cafleet/src/cafleet/tmux.py:83` citation across the design doc, `skills/cafleet/SKILL.md`, and `skills/cafleet/roles/director.md`. The function symbol `tmux.send_poll_trigger` is already named in the surrounding prose, so the bare path `cafleet/src/cafleet/tmux.py` is sufficient and no longer drifts when unrelated edits shift line numbers. |
