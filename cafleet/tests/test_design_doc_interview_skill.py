@@ -573,3 +573,75 @@ def test_skill_md_question_md_section_documents_round_heading_format(skill_md_te
         "question.md Answers section example must show a 'Round X' heading with a question-number "
         "range like '(Questions 1-4)'. Got section:\n" + section
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 5: Resume-mode parity (COMMENT marker is grep-compatible with design-doc-create)
+# ---------------------------------------------------------------------------
+
+
+def _comment_format_section(skill_text: str) -> str:
+    """Return the body under the 'COMMENT Annotation Format' heading, ignoring fence-nested headings."""
+    lines = skill_text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("## ") and "comment" in stripped.lower() and "annotation" in stripped.lower():
+            start = index
+            break
+    assert start is not None, "SKILL.md missing the 'COMMENT Annotation Format' ## heading"
+    end = len(lines)
+    in_fence = False
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if stripped.startswith("## "):
+            end = index
+            break
+    return "\n".join(lines[start:end])
+
+
+def test_skill_md_comment_section_shows_literal_comment_claude_marker(skill_md_text):
+    """Design 0000045 Step 5: COMMENT annotation format section shows the literal 'COMMENT(claude):' marker.
+
+    Resume mode in /cafleet:design-doc-create greps for the literal 'COMMENT(' substring,
+    so the example marker in the interview SKILL.md must use that exact prefix
+    — not 'COMMENT_CLAUDE', 'COMMENT/claude', 'CLAUDE-COMMENT', etc.
+    """
+    section = _comment_format_section(skill_md_text)
+    assert "COMMENT(claude):" in section, (
+        "COMMENT annotation format section must show the literal example marker "
+        "'COMMENT(claude):' (with open-paren) so it is byte-compatible with what "
+        "/cafleet:design-doc-create resume mode greps for. Section was:\n" + section
+    )
+
+
+def test_design_doc_create_skill_md_grep_target_covers_comment_open_paren():
+    """Design 0000045 Step 5: design-doc-create SKILL.md references COMMENT( so resume-mode grep is real."""
+    text = DESIGN_DOC_CREATE_SKILL.read_text(encoding="utf-8")
+    assert "COMMENT(" in text, (
+        "skills/design-doc-create/SKILL.md must reference 'COMMENT(' somewhere — the resume-mode "
+        "grep target. Without it, the interview SKILL.md's COMMENT(claude) annotations have "
+        "no consumer and the round-trip is broken."
+    )
+
+
+def test_skill_md_links_comment_marker_to_design_doc_create_resume_mode(skill_md_text):
+    """Design 0000045 Step 5: interview SKILL.md ties COMMENT(claude) to design-doc-create resume mode."""
+    lower = skill_md_text.lower()
+    has_consumed_by = "consumed by" in lower or "consumes" in lower
+    has_resume_mode = "resume mode" in lower or "resume-mode" in lower
+    has_create_reference = "design-doc-create" in lower
+    assert has_create_reference, (
+        "interview SKILL.md must reference '/cafleet:design-doc-create' (or 'design-doc-create') "
+        "so the round-trip is documented"
+    )
+    assert has_consumed_by or has_resume_mode, (
+        "interview SKILL.md must say either 'consumed by' or 'resume mode' (or 'resume-mode') "
+        "alongside the design-doc-create reference, to make the COMMENT(claude) round-trip explicit"
+    )
