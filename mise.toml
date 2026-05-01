@@ -11,6 +11,7 @@ run = [
   { "task" = "//admin:install" },
   { "task" = "//admin:build" },
   { "task" = "//cafleet:build" },
+  { "task" = "//cafleet:publish" },
 ]
 
 [tools]
