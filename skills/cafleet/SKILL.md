@@ -70,10 +70,12 @@ cafleet --session-id <session-id> --json agent list --agent-id <my-agent-id>
 
 Every `cafleet message *` subcommand (`send`, `broadcast`, `poll`, `ack`, `cancel`, `show`) truncates the delivery `text` body to the first 10 Unicode codepoints with a literal `...` suffix in both text and `--json` output by default. Empty bodies and bodies whose codepoint length is at most 10 pass through unchanged with no marker. Length is measured in Python `str` codepoints (never bytes), so multibyte characters are never split. Pass the per-subcommand `--full` flag to restore the un-truncated body — it composes orthogonally with `--json`.
 
+The table describes the resulting `text` value AFTER truncation. Text mode omits the `text:` line entirely when the resulting value is empty, while `--json` always includes it.
+
 | Input `text` | Default output | `--full` output |
 |---|---|---|
 | `None` / not present | not present | not present |
-| `""` | `""` | `""` |
+| `""` | text mode: `text:` line omitted, `--json`: empty string | text mode: `text:` line omitted, `--json`: empty string |
 | length ≤ 10 codepoints | unchanged | unchanged |
 | length > 10 codepoints | `text[:10] + "..."` | unchanged |
 

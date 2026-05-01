@@ -75,10 +75,12 @@ Then pass the printed UUID as `--session-id <uuid>` on every client + member com
 
 Every `cafleet message *` subcommand (`send`, `broadcast`, `poll`, `ack`, `cancel`, `show`) truncates the delivery `text` body to the first 10 Unicode codepoints plus a literal `...` suffix by default. The truncation applies in both text and `--json` output and is implemented in `cafleet/src/cafleet/output.py` (`truncate_text`, `truncate_task_text`) wired into the shared `_client_command` decorator.
 
+The table describes the resulting `text` value AFTER truncation. Text mode omits the `text:` line entirely when the resulting value is empty, while `--json` always includes it.
+
 | Input `text` | Default output | `--full` output |
 |---|---|---|
 | `None` / not present | not present | not present |
-| `""` | `""` | `""` |
+| `""` | text mode: `text:` line omitted, `--json`: empty string | text mode: `text:` line omitted, `--json`: empty string |
 | length ≤ 10 codepoints | unchanged | unchanged |
 | length > 10 codepoints | `text[:10] + "..."` | unchanged |
 
