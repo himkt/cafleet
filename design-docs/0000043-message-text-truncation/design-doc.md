@@ -218,7 +218,7 @@ The `README.md` upgrade note must call this out explicitly. There is no soft-lau
 
 - [x] Extend `_client_command` in `cafleet/src/cafleet/cli.py:60-111` with a `truncates_task_text: bool = False` parameter. When True, the wrapper reads `kwargs.get("full", False)` and calls `output.truncate_task_text(result, full=full)` before both formatters. <!-- completed: 2026-05-01T13:00 -->
 - [x] Add `--full` option + `truncates_task_text=True` to `message_send`. <!-- completed: 2026-05-01T13:00 -->
-- [x] Add `--full` option + `truncates_task_text=True` to `message_broadcast`. <!-- completed: 2026-05-01T13:00 -->
+- [x] Add `--full` option + `truncates_task_text=False` to `message_broadcast` (broadcast is exempt — its `broadcast_summary` text is a generated summary and must stay visible; the flag is exposed only for surface consistency across the six subcommands). <!-- completed: 2026-05-01T13:00 -->
 - [x] Add `--full` option + `truncates_task_text=True` to `message_poll`. <!-- completed: 2026-05-01T13:00 -->
 - [x] Add `--full` option + `truncates_task_text=True` to `message_ack`. <!-- completed: 2026-05-01T13:00 -->
 - [x] Add `--full` option + `truncates_task_text=True` to `message_cancel`. <!-- completed: 2026-05-01T13:00 -->
@@ -229,7 +229,7 @@ The `README.md` upgrade note must call this out explicitly. There is no soft-lau
 - [x] `message poll`: default truncates `text` in both text and `--json`; `--full` emits full body. Cover empty inbox, single task, list of three tasks. <!-- completed: 2026-05-01T12:30 -->
 - [x] `message show`: default truncates; `--full` emits full body. Cover both text and `--json`. <!-- completed: 2026-05-01T12:30 -->
 - [x] `message send`: echo of just-sent message is truncated by default; `--full` echoes full. Cover both text and `--json`. <!-- completed: 2026-05-01T12:30 -->
-- [x] `message broadcast`: each task in the broadcast summary list is truncated by default; `--full` emits full bodies. Cover both text and `--json`. <!-- completed: 2026-05-01T12:30 -->
+- [x] `message broadcast`: the generated `broadcast_summary` text is never truncated in either text or `--json` output; `--full` is a no-op for this subcommand. Tests stub the real broker shape (single envelope with `metadata.type == "broadcast_summary"` and a `notifications_sent_count` sibling) and assert verbatim summary text in both default and `--full` modes. <!-- completed: 2026-05-01T12:30 -->
 - [x] Each per-command test asserts that non-`text` fields (`id`, `status.state`, `metadata.fromAgentId`, `metadata.toAgentId`, `metadata.type`) are byte-identical between default and `--full` output — a regression guard against the helper accidentally mutating siblings. <!-- completed: 2026-05-01T12:30 -->
 - [x] `message ack` and `message cancel` reuse the same `_client_command` wiring as `message send`, and the `truncate_task_text` helper-level tests in Step 2 cover the truncation behavior on the same task shape. No additional per-command tests are required for `ack` / `cancel` — the wiring test is the integration point, and adding ack/cancel-specific tests would duplicate Step 2 without exercising new code. <!-- completed: 2026-05-01T12:30 -->
 
@@ -240,7 +240,7 @@ The `README.md` upgrade note must call this out explicitly. There is no soft-lau
 - [x] `mise //cafleet:typecheck` passes. <!-- completed: 2026-05-01T12:35 -->
 - [x] `mise //cafleet:test` passes (full suite). <!-- completed: 2026-05-01T12:35 -->
 - [x] Manual smoke: `cafleet --session-id <s> message poll --agent-id <a>` shows `text:  abcdefghij...` for an 11+ codepoint body and the same body verbatim with `--full`. <!-- completed: 2026-05-01T12:35 -->
-- [x] Manual smoke: `cafleet message poll --help` (and the same for `send` / `broadcast` / `ack` / `cancel` / `show`) lists `--full` with the help text "Disable text truncation; emit full message body." <!-- completed: 2026-05-01T12:35 -->
+- [x] Manual smoke: `cafleet message poll --help` (and the same for `send` / `ack` / `cancel` / `show`) lists `--full` with the help text "Disable text truncation; emit full message body." `cafleet message broadcast --help` lists `--full` with the help text "No-op for broadcast output; included for consistency with other message commands." reflecting its no-op status. <!-- completed: 2026-05-01T12:35 -->
 
 ---
 
