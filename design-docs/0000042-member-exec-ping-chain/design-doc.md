@@ -36,7 +36,7 @@ Today the chain is missing from the canonical Director protocol docs. Operators 
 
 > **Run `cafleet member ping` against the same member after every `cafleet member exec` invocation that exits 0.**
 >
-> Skip the ping only when `cafleet member exec` exits non-zero — the dispatch never reached the pane, and the 1-minute `cafleet-monitoring` tick is the safety net.
+> Skip the ping only when `cafleet member exec` exits non-zero — the dispatch did not complete successfully (its `tmux send-keys` sequence may have failed mid-way), so we cannot assume the bang command was submitted, and the 1-minute `cafleet-monitoring` tick is the safety net.
 
 ### Why ping, not poll
 
@@ -151,3 +151,4 @@ End-to-end live verification is required so the chain rule is observed working i
 | 2026-05-01 | Address third Copilot review pass on PR #45: correct the no-`&&` rationale in the Canonical exec-then-ping pairing section. The previous wording claimed shell operators "break `permissions.allow` literal matching"; Copilot pointed out that a `Bash(cafleet *)` allow pattern can in fact match a compound command. The accurate reason is precedence: a chained `member exec && member ping` invocation matches the more-specific `permissions.ask` rule for `member exec`, so the `member ping` half cannot use its `permissions.allow` carve-out. Splitting them across two Bash calls also exposes each subcommand's exit code independently, which is what the skip-on-non-zero-exit rule depends on. |
 | 2026-05-01 | Mark Status: Complete after all 19 implementation tasks land and the live verification has been recorded. |
 | 2026-05-01 | Address fourth Copilot review pass on PR #45: drop the volatile `:83` line number from every `cafleet/src/cafleet/tmux.py:83` citation across the design doc, `skills/cafleet/SKILL.md`, and `skills/cafleet/roles/director.md`. The function symbol `tmux.send_poll_trigger` is already named in the surrounding prose, so the bare path `cafleet/src/cafleet/tmux.py` is sufficient and no longer drifts when unrelated edits shift line numbers. |
+| 2026-05-01 | Address fifth Copilot review pass on PR #45: weaken the "dispatch never reached the pane" rationale to "the dispatch did not complete successfully (its `tmux send-keys` sequence may have failed mid-way), so we cannot assume the bang command was submitted". `tmux.send_bash_command` issues two `tmux send-keys` calls (literal `! <cmd>` then `Enter`), so a non-zero exec exit does not strictly imply zero keystrokes landed — partial dispatch is possible. The skip-on-non-zero rule and the monitoring-tick safety net are unchanged. |
