@@ -1,6 +1,6 @@
 # Message text truncation by default
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 28/28 tasks complete
 **Last Updated**: 2026-05-01
 
@@ -267,3 +267,4 @@ A follow-up design (suggested slug: `agent-description-truncation`) should pick 
 | 2026-05-01 | Initial draft. |
 | 2026-05-01 | Reviewer round 1 revisions. Added (a) explicit "configurable limit deliberately rejected" entry under Out of scope. (b) Risks and migration section flagging the breaking change. (c) Step 4 note that ack / cancel reuse the same wiring and do not need per-command tests. (d) Sentence under Flag placement that `--full` and `--json` compose orthogonally. (e) Reworded the in-place-mutation note to clarify the reference is unchanged but its contents are mutated. (f) Threshold rationale ("ten codepoints because…") in Overview. (g) Reworded the broadcast clause to avoid the undefined `broadcast_summary` term. (h) Added a non-text-fields-byte-identical assertion to Step 4. (i) Added a `--help` surface check to Step 5. Task count rose from 22 to 28. |
 | 2026-05-01 | User approved. Status flipped Draft → Approved. No spec content changes. |
+| 2026-05-01 | Implementation complete (PR #46). All 28 tasks ticked. Five Copilot review rounds addressed: (1) clarify text-mode vs `--json` rendering of empty bodies in three doc surfaces; (2) add explicit-`None`-text helper test; (3) substantive — `broadcast_message` returns a `broadcast_summary` task whose text is generated summary, so `truncates_task_text=False` on `message_broadcast` to keep the recipient count visible. `--full` is preserved for surface consistency but is a no-op for broadcast; (4) thread `full` through `truncate_task_text`; broadcast-specific `--full` help text; rewrite SKILL.md uniform-six sentence to reflect broadcast exemption; (5) remove dead `_run` helper. Final Copilot pass returned zero new comments — accepted as practical approval. Status flipped Approved → Complete. |
