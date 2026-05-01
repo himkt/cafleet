@@ -1,7 +1,7 @@
 # Message text truncation by default
 
 **Status**: Approved
-**Progress**: 5/28 tasks complete
+**Progress**: 9/28 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -207,10 +207,10 @@ The `README.md` upgrade note must call this out explicitly. There is no soft-lau
 
 ### Step 2: Truncation helpers
 
-- [ ] Add `truncate_text(value, *, full, limit=10)` to `cafleet/src/cafleet/output.py`. <!-- completed: -->
-- [ ] Add `truncate_task_text(result, *, full, limit=10)` to `cafleet/src/cafleet/output.py`, handling single-task / `{"task": ...}` envelope / list-of-tasks shapes. <!-- completed: -->
-- [ ] Add unit tests in `cafleet/tests/test_output.py`: empty string, `None`, 10-codepoint string (no truncation), 11-codepoint ASCII (truncation), 11-codepoint multibyte (truncation by codepoint not byte), `--full` pass-through. <!-- completed: -->
-- [ ] Add unit tests for `truncate_task_text`: single-task shape, `{"task": {...}}` envelope shape, list-of-tasks shape, missing `artifacts`, missing `parts`, missing `text` key in a part, mixed (some parts have text, some do not). <!-- completed: -->
+- [x] Add `truncate_text(value, *, full, limit=10)` to `cafleet/src/cafleet/output.py`. <!-- completed: 2026-05-01T12:30 -->
+- [x] Add `truncate_task_text(result, *, full, limit=10)` to `cafleet/src/cafleet/output.py`, handling single-task / `{"task": ...}` envelope / list-of-tasks shapes. <!-- completed: 2026-05-01T12:30 -->
+- [x] Add unit tests in `cafleet/tests/test_output.py`: empty string, `None`, 10-codepoint string (no truncation), 11-codepoint ASCII (truncation), 11-codepoint multibyte (truncation by codepoint not byte), `--full` pass-through. <!-- completed: 2026-05-01T12:30 -->
+- [x] Add unit tests for `truncate_task_text`: single-task shape, `{"task": {...}}` envelope shape, list-of-tasks shape, missing `artifacts`, missing `parts`, missing `text` key in a part, mixed (some parts have text, some do not). <!-- completed: 2026-05-01T12:30 -->
 
 ### Step 3: Wire `--full` into the message subcommands
 
