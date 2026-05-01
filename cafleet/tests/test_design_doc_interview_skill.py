@@ -401,3 +401,175 @@ def test_skill_md_spawn_prompt_has_no_unescaped_curly_braces(skill_md_text):
         f"Leftover '{{' count: {leftover_open}, leftover '}}' count: {leftover_close}. "
         f"Block:\n{block}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 4: Director-side helpers (CLI invocations + question.md schema)
+# ---------------------------------------------------------------------------
+
+
+import re  # noqa: E402  (kept here to scope to the Step 4 block)
+
+
+_REQUIRED_CAFLEET_INVOCATIONS = (
+    "cafleet session create",
+    "cafleet member create",
+    "cafleet message send",
+    "cafleet message poll",
+    "cafleet message ack",
+    "cafleet member delete",
+    "cafleet session delete",
+)
+
+
+def _question_md_format_section(skill_text: str) -> str:
+    """Return the body under the question.md format heading, ignoring headings inside fenced blocks."""
+    lines = skill_text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if (
+            stripped.startswith("## ")
+            and "question.md" in stripped.lower()
+        ):
+            start = index
+            break
+    assert start is not None, "SKILL.md missing the question.md format ## heading"
+    end = len(lines)
+    in_fence = False
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if stripped.startswith("## ") and "question.md" not in stripped.lower():
+            end = index
+            break
+    return "\n".join(lines[start:end])
+
+
+def _example_lines_for(text: str, verb: str) -> list[str]:
+    """Return code-block lines (lines starting with ``cafleet``) that contain ``verb``.
+
+    Skips prose-style mentions like inline backtick references — examples in this
+    SKILL.md are line-leading ``cafleet`` invocations inside fenced code blocks.
+    """
+    matches = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("cafleet ") and verb in line:
+            matches.append(line)
+    return matches
+
+
+def _has_cafleet_invocation_line(text: str, verb_phrase: str) -> bool:
+    """True if any line in ``text`` contains both ``cafleet`` and the verb phrase."""
+    return any("cafleet" in line and verb_phrase in line for line in text.splitlines())
+
+
+def test_skill_md_documents_all_required_cafleet_invocations(skill_md_text):
+    """Design 0000045 Step 4.a: SKILL.md mentions every required Director-side cafleet invocation.
+
+    The CLI carries flags like ``--session-id`` between ``cafleet`` and the verb,
+    so a strict ``cafleet message poll`` substring would miss real examples.
+    Match each invocation as ``cafleet`` + verb-phrase on the same line.
+    """
+    invocation_to_verb = {
+        "cafleet session create": "session create",
+        "cafleet member create": "member create",
+        "cafleet message send": "message send",
+        "cafleet message poll": "message poll",
+        "cafleet message ack": "message ack",
+        "cafleet member delete": "member delete",
+        "cafleet session delete": "session delete",
+    }
+    missing = [
+        invocation
+        for invocation, verb in invocation_to_verb.items()
+        if not _has_cafleet_invocation_line(skill_md_text, verb)
+    ]
+    assert not missing, (
+        f"SKILL.md is missing required cafleet invocation(s): {missing!r}; "
+        f"design 0000045 Step 4.a requires all 7 to be documented: "
+        f"{list(_REQUIRED_CAFLEET_INVOCATIONS)!r}"
+    )
+
+
+def test_skill_md_session_create_example_uses_json_flag(skill_md_text):
+    """Design 0000045 Step 4.a: cafleet session create example must use --json (Director parses agent_id)."""
+    examples = _example_lines_for(skill_md_text, "session create")
+    assert examples, (
+        "SKILL.md has no line-leading 'cafleet ... session create' example "
+        "(prose mentions in inline backticks do not count)"
+    )
+    assert any("--json" in line for line in examples), (
+        f"At least one cafleet session create example must include --json so the Director can "
+        f"parse the JSON response. Found examples: {examples!r}"
+    )
+
+
+def test_skill_md_member_create_example_uses_json_flag(skill_md_text):
+    """Design 0000045 Step 4.a: cafleet member create example must use --json."""
+    examples = _example_lines_for(skill_md_text, "member create")
+    assert examples, (
+        "SKILL.md has no line-leading 'cafleet ... member create' example "
+        "(prose mentions in inline backticks do not count)"
+    )
+    assert any("--json" in line for line in examples), (
+        f"At least one cafleet member create example must include --json so the Director can "
+        f"parse the new member's agent_id. Found examples: {examples!r}"
+    )
+
+
+def test_skill_md_message_send_example_uses_to_and_text_flags(skill_md_text):
+    """Design 0000045 Step 4.a: Director-to-Analyzer message-send example must show --to and --text."""
+    send_lines = [
+        line for line in skill_md_text.splitlines() if "cafleet" in line and "message send" in line
+    ]
+    assert send_lines, "SKILL.md has no 'cafleet ... message send' example"
+    has_to_and_text = any("--to" in line and "--text" in line for line in send_lines)
+    assert has_to_and_text, (
+        "SKILL.md must show a cafleet message send example with both --to and --text flags. "
+        f"Found send lines: {send_lines!r}"
+    )
+
+
+def test_skill_md_question_md_section_documents_interview_progress_marker(skill_md_text):
+    """Design 0000045 Step 4.b: question.md schema includes the interview-progress HTML comment marker."""
+    section = _question_md_format_section(skill_md_text)
+    assert "<!-- interview-progress:" in section, (
+        "question.md format section must show the literal '<!-- interview-progress:' "
+        "HTML comment opener so readers see the marker is an HTML comment, not a heading"
+    )
+    assert "-->" in section, (
+        "question.md format section must show the closing '-->' of the HTML comment marker"
+    )
+    assert "[" in section and "]" in section, (
+        "interview-progress marker must contain a JSON array (square brackets) of section names"
+    )
+
+
+def test_skill_md_question_md_section_documents_questions_and_answers_headers(skill_md_text):
+    """Design 0000045 Step 4.b: question.md schema documents ## Questions and ## Answers headers."""
+    section = _question_md_format_section(skill_md_text)
+    assert "## Questions" in section, (
+        "question.md format section must document the literal '## Questions' header"
+    )
+    assert "## Answers" in section, (
+        "question.md format section must document the literal '## Answers' header"
+    )
+
+
+def test_skill_md_question_md_section_documents_round_heading_format(skill_md_text):
+    """Design 0000045 Step 4.b: round heading format with question-number range is documented."""
+    section = _question_md_format_section(skill_md_text)
+    assert "Round" in section, (
+        "question.md Answers section example must include the literal text 'Round'"
+    )
+    range_match = re.search(r"Round\s+\d+.*\d+\s*-\s*\d+", section)
+    assert range_match is not None, (
+        "question.md Answers section example must show a 'Round X' heading with a question-number "
+        "range like '(Questions 1-4)'. Got section:\n" + section
+    )
