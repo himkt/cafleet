@@ -185,6 +185,11 @@ class TestTruncateTaskText:
         assert task == {"artifacts": [{"parts": [{"data": "binary"}]}]}
         assert "text" not in task["artifacts"][0]["parts"][0]
 
+    def test_part_with_explicit_none_text_is_left_untouched(self):
+        task = {"artifacts": [{"parts": [{"text": None}]}]}
+        truncate_task_text(task, full=False)
+        assert task["artifacts"][0]["parts"][0]["text"] is None
+
     def test_mixed_parts_only_truncates_text_bearing(self):
         task = {
             "artifacts": [
