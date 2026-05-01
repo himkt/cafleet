@@ -1,7 +1,7 @@
 ---
 name: design-doc-interview
-description: Validate an existing design document through fine-grained multi-round Q&A using CAFleet-native orchestration. Spawns a short-lived Analyzer member that reads the document and returns a numbered question list; the Director then drives AskUserQuestion rounds and writes COMMENT(claude) annotations inline. Supports multi-session splitting via question.md progress tracking. Use after /cafleet:design-doc-create and before /cafleet:design-doc-execute. Takes document path as argument. Do NOT use this to create or execute design documents — use the dedicated skills instead.
-allowed-tools: Read, Write, Edit, Grep, AskUserQuestion, Bash
+description: Validate an existing design document through fine-grained multi-round Q&A using CAFleet-native orchestration. Spawns a short-lived Analyzer member that reads the document and returns a numbered question list; the Director then drives AskUserQuestion rounds and writes COMMENT(claude) annotations inline. Supports multi-session splitting via question.md progress tracking. Use after /design-doc-create and before /design-doc-execute. Takes document path as argument. Do NOT use this to create or execute design documents — use the dedicated skills instead.
+allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Bash
 ---
 
 # Design Doc Interview (CAFleet Edition)
@@ -17,7 +17,7 @@ Validate an existing design document through structured, fine-grained Q&A across
 
 - For the document template, see: [../design-doc/template.md](../design-doc/template.md)
 - For section guidelines and quality standards, see: [../design-doc/guidelines.md](../design-doc/guidelines.md)
-- Output of `/cafleet:design-doc-create` is the input to this skill; this skill's `COMMENT(claude)` markers are consumed by `/cafleet:design-doc-create` resume mode.
+- Output of `/design-doc-create` is the input to this skill; this skill's `COMMENT(claude)` markers are consumed by `/design-doc-create` resume mode.
 
 ## Architecture
 
@@ -242,9 +242,9 @@ Present a session summary to the user:
 
 | State | Suggested next step |
 |:--|:--|
-| Sections remain (with or without COMMENT markers) | Re-invoke `/cafleet:design-doc-interview <doc-path>` for the next session |
-| All sections covered, COMMENT markers present in document | Run `/cafleet:design-doc-create <doc-path>` to fix annotations (resume mode auto-detects markers and routes to the Drafter), then `/cafleet:design-doc-execute` |
-| All sections covered, no COMMENT markers in document | Run `/cafleet:design-doc-execute <doc-path>` to implement |
+| Sections remain (with or without COMMENT markers) | Re-invoke `/design-doc-interview <doc-path>` for the next session |
+| All sections covered, COMMENT markers present in document | Run `/design-doc-create <doc-path>` to fix annotations (resume mode auto-detects markers and routes to the Drafter), then `/design-doc-execute` |
+| All sections covered, no COMMENT markers in document | Run `/design-doc-execute <doc-path>` to implement |
 
 ## COMMENT Annotation Format
 
@@ -267,7 +267,7 @@ Rules:
 - One COMMENT per discrepancy (do not combine unrelated issues)
 - Description must be actionable — state what is wrong AND what the correct behavior should be
 
-The format matches `/cafleet:design-doc-create` resume-mode expectations exactly, so a follow-up `/cafleet:design-doc-create <doc-path>` invocation auto-detects the markers and routes them to the Drafter.
+The format matches `/design-doc-create` resume-mode expectations exactly, so a follow-up `/design-doc-create <doc-path>` invocation auto-detects the markers and routes them to the Drafter.
 
 ## `question.md` Format
 
