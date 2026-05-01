@@ -111,163 +111,162 @@ def db_at_0007(tmp_path):
     return db_path
 
 
-class TestMigration0008Upgrade:
-    def test_renames_root_director_name_and_card(self, db_at_0007):
-        sid = str(uuid.uuid4())
-        director_id = str(uuid.uuid4())
-        created_at = "2026-04-01T00:00:00+00:00"
+def test_migration_0008_upgrade__renames_root_director_name_and_card(db_at_0007):
+    sid = str(uuid.uuid4())
+    director_id = str(uuid.uuid4())
+    created_at = "2026-04-01T00:00:00+00:00"
 
-        engine = create_engine(f"sqlite:///{db_at_0007}")
-        try:
-            _insert_session_with_director(
-                engine,
-                session_id=sid,
-                created_at=created_at,
-                director_agent_id=director_id,
-            )
-        finally:
-            engine.dispose()
+    engine = create_engine(f"sqlite:///{db_at_0007}")
+    try:
+        _insert_session_with_director(
+            engine,
+            session_id=sid,
+            created_at=created_at,
+            director_agent_id=director_id,
+        )
+    finally:
+        engine.dispose()
 
-        cfg = _make_alembic_cfg(db_at_0007)
-        command.upgrade(cfg, "head")
+    cfg = _make_alembic_cfg(db_at_0007)
+    command.upgrade(cfg, "head")
 
-        engine = create_engine(f"sqlite:///{db_at_0007}")
-        try:
-            name, card_json = _fetch_agent(engine, director_id)
-            assert name == "Director"
-            card = json.loads(card_json)
-            assert card["name"] == "Director"
-        finally:
-            engine.dispose()
-
-    def test_leaves_user_agents_named_director_untouched(self, db_at_0007):
-        sid = str(uuid.uuid4())
-        director_id = str(uuid.uuid4())
-        user_id = str(uuid.uuid4())
-        created_at = "2026-04-02T00:00:00+00:00"
-
-        engine = create_engine(f"sqlite:///{db_at_0007}")
-        try:
-            _insert_session_with_director(
-                engine,
-                session_id=sid,
-                created_at=created_at,
-                director_agent_id=director_id,
-            )
-            _insert_user_agent(
-                engine,
-                agent_id=user_id,
-                session_id=sid,
-                name="director-1",
-                registered_at=created_at,
-            )
-        finally:
-            engine.dispose()
-
-        cfg = _make_alembic_cfg(db_at_0007)
-        command.upgrade(cfg, "head")
-
-        engine = create_engine(f"sqlite:///{db_at_0007}")
-        try:
-            user_name, user_card_json = _fetch_agent(engine, user_id)
-            assert user_name == "director-1"
-            user_card = json.loads(user_card_json)
-            assert user_card["name"] == "director-1"
-        finally:
-            engine.dispose()
-
-    def test_renames_director_across_multiple_sessions(self, db_at_0007):
-        sid_a = str(uuid.uuid4())
-        sid_b = str(uuid.uuid4())
-        dir_a = str(uuid.uuid4())
-        dir_b = str(uuid.uuid4())
-        created_at = "2026-04-03T00:00:00+00:00"
-
-        engine = create_engine(f"sqlite:///{db_at_0007}")
-        try:
-            _insert_session_with_director(
-                engine,
-                session_id=sid_a,
-                created_at=created_at,
-                director_agent_id=dir_a,
-            )
-            _insert_session_with_director(
-                engine,
-                session_id=sid_b,
-                created_at=created_at,
-                director_agent_id=dir_b,
-            )
-        finally:
-            engine.dispose()
-
-        cfg = _make_alembic_cfg(db_at_0007)
-        command.upgrade(cfg, "head")
-
-        engine = create_engine(f"sqlite:///{db_at_0007}")
-        try:
-            for aid in (dir_a, dir_b):
-                name, card_json = _fetch_agent(engine, aid)
-                assert name == "Director"
-                assert json.loads(card_json)["name"] == "Director"
-        finally:
-            engine.dispose()
+    engine = create_engine(f"sqlite:///{db_at_0007}")
+    try:
+        name, card_json = _fetch_agent(engine, director_id)
+        assert name == "Director"
+        card = json.loads(card_json)
+        assert card["name"] == "Director"
+    finally:
+        engine.dispose()
 
 
-class TestMigration0008Idempotent:
-    def test_double_upgrade_is_noop(self, db_at_0007):
-        sid = str(uuid.uuid4())
-        director_id = str(uuid.uuid4())
-        created_at = "2026-04-04T00:00:00+00:00"
+def test_migration_0008_upgrade__leaves_user_agents_named_director_untouched(db_at_0007):
+    sid = str(uuid.uuid4())
+    director_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
+    created_at = "2026-04-02T00:00:00+00:00"
 
-        engine = create_engine(f"sqlite:///{db_at_0007}")
-        try:
-            _insert_session_with_director(
-                engine,
-                session_id=sid,
-                created_at=created_at,
-                director_agent_id=director_id,
-            )
-        finally:
-            engine.dispose()
+    engine = create_engine(f"sqlite:///{db_at_0007}")
+    try:
+        _insert_session_with_director(
+            engine,
+            session_id=sid,
+            created_at=created_at,
+            director_agent_id=director_id,
+        )
+        _insert_user_agent(
+            engine,
+            agent_id=user_id,
+            session_id=sid,
+            name="director-1",
+            registered_at=created_at,
+        )
+    finally:
+        engine.dispose()
 
-        cfg = _make_alembic_cfg(db_at_0007)
-        command.upgrade(cfg, "head")
-        command.upgrade(cfg, "head")
+    cfg = _make_alembic_cfg(db_at_0007)
+    command.upgrade(cfg, "head")
 
-        engine = create_engine(f"sqlite:///{db_at_0007}")
-        try:
-            name, card_json = _fetch_agent(engine, director_id)
+    engine = create_engine(f"sqlite:///{db_at_0007}")
+    try:
+        user_name, user_card_json = _fetch_agent(engine, user_id)
+        assert user_name == "director-1"
+        user_card = json.loads(user_card_json)
+        assert user_card["name"] == "director-1"
+    finally:
+        engine.dispose()
+
+
+def test_migration_0008_upgrade__renames_director_across_multiple_sessions(db_at_0007):
+    sid_a = str(uuid.uuid4())
+    sid_b = str(uuid.uuid4())
+    dir_a = str(uuid.uuid4())
+    dir_b = str(uuid.uuid4())
+    created_at = "2026-04-03T00:00:00+00:00"
+
+    engine = create_engine(f"sqlite:///{db_at_0007}")
+    try:
+        _insert_session_with_director(
+            engine,
+            session_id=sid_a,
+            created_at=created_at,
+            director_agent_id=dir_a,
+        )
+        _insert_session_with_director(
+            engine,
+            session_id=sid_b,
+            created_at=created_at,
+            director_agent_id=dir_b,
+        )
+    finally:
+        engine.dispose()
+
+    cfg = _make_alembic_cfg(db_at_0007)
+    command.upgrade(cfg, "head")
+
+    engine = create_engine(f"sqlite:///{db_at_0007}")
+    try:
+        for aid in (dir_a, dir_b):
+            name, card_json = _fetch_agent(engine, aid)
             assert name == "Director"
             assert json.loads(card_json)["name"] == "Director"
-        finally:
-            engine.dispose()
+    finally:
+        engine.dispose()
 
 
-class TestMigration0008Downgrade:
-    def test_downgrade_restores_lowercase_name(self, db_at_0007):
-        sid = str(uuid.uuid4())
-        director_id = str(uuid.uuid4())
-        created_at = "2026-04-05T00:00:00+00:00"
+def test_migration_0008_idempotent__double_upgrade_is_noop(db_at_0007):
+    sid = str(uuid.uuid4())
+    director_id = str(uuid.uuid4())
+    created_at = "2026-04-04T00:00:00+00:00"
 
-        engine = create_engine(f"sqlite:///{db_at_0007}")
-        try:
-            _insert_session_with_director(
-                engine,
-                session_id=sid,
-                created_at=created_at,
-                director_agent_id=director_id,
-            )
-        finally:
-            engine.dispose()
+    engine = create_engine(f"sqlite:///{db_at_0007}")
+    try:
+        _insert_session_with_director(
+            engine,
+            session_id=sid,
+            created_at=created_at,
+            director_agent_id=director_id,
+        )
+    finally:
+        engine.dispose()
 
-        cfg = _make_alembic_cfg(db_at_0007)
-        command.upgrade(cfg, "0008")
-        command.downgrade(cfg, "0007")
+    cfg = _make_alembic_cfg(db_at_0007)
+    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "head")
 
-        engine = create_engine(f"sqlite:///{db_at_0007}")
-        try:
-            name, card_json = _fetch_agent(engine, director_id)
-            assert name == "director"
-            assert json.loads(card_json)["name"] == "director"
-        finally:
-            engine.dispose()
+    engine = create_engine(f"sqlite:///{db_at_0007}")
+    try:
+        name, card_json = _fetch_agent(engine, director_id)
+        assert name == "Director"
+        assert json.loads(card_json)["name"] == "Director"
+    finally:
+        engine.dispose()
+
+
+def test_migration_0008_downgrade__downgrade_restores_lowercase_name(db_at_0007):
+    sid = str(uuid.uuid4())
+    director_id = str(uuid.uuid4())
+    created_at = "2026-04-05T00:00:00+00:00"
+
+    engine = create_engine(f"sqlite:///{db_at_0007}")
+    try:
+        _insert_session_with_director(
+            engine,
+            session_id=sid,
+            created_at=created_at,
+            director_agent_id=director_id,
+        )
+    finally:
+        engine.dispose()
+
+    cfg = _make_alembic_cfg(db_at_0007)
+    command.upgrade(cfg, "0008")
+    command.downgrade(cfg, "0007")
+
+    engine = create_engine(f"sqlite:///{db_at_0007}")
+    try:
+        name, card_json = _fetch_agent(engine, director_id)
+        assert name == "director"
+        assert json.loads(card_json)["name"] == "director"
+    finally:
+        engine.dispose()

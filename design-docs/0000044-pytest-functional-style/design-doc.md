@@ -1,7 +1,7 @@
 # Refactor Test Suite to Functional Pytest Style
 
 **Status**: Approved
-**Progress**: 26/44 tasks complete
+**Progress**: 30/44 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -196,10 +196,10 @@ Apply the §A recipe to:
 
 ### Step 6: Refactor alembic migration tests
 
-- [ ] `cafleet/tests/test_alembic_0002_upgrade.py` — 2 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_alembic_0006_upgrade.py` — 3 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_alembic_0008_upgrade.py` — 3 classes <!-- completed: -->
-- [ ] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: -->
+- [x] `cafleet/tests/test_alembic_0002_upgrade.py` — 2 classes <!-- completed: 2026-05-01T14:30 -->
+- [x] `cafleet/tests/test_alembic_0006_upgrade.py` — 3 classes <!-- completed: 2026-05-01T14:30 -->
+- [x] `cafleet/tests/test_alembic_0008_upgrade.py` — 3 classes <!-- completed: 2026-05-01T14:30 -->
+- [x] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: 2026-05-01T14:30 -->
 
 ### Step 7: Refactor remaining tests
 
