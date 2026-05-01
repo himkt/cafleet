@@ -1,7 +1,7 @@
 # Member Exec then Ping Chain Protocol
 
 **Status**: Approved
-**Progress**: 5/19 tasks complete
+**Progress**: 10/19 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -105,11 +105,11 @@ Target subsection: "Member Exec" (under `## Command Reference`).
 
 Target list: the "What you MUST do" numbered list inside the bash-routing protocol (currently 5 items, items 1-5).
 
-- [ ] Insert a new step 3 between the existing step 2 ("If fulfilling, dispatch via `cafleet member exec`") and the existing step 3 ("`member exec` mechanics"). Title it "After dispatch, ping the member." <!-- completed: -->
-- [ ] In the new step 3, name the `cafleet member ping` invocation with literal `--agent-id` / `--member-id` flags and reference `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py:83`) once. <!-- completed: -->
-- [ ] In the new step 3, make explicit that ping (not `message poll`) is the right primitive, that it is unconditional on exec success, and that exec-failure cases skip the ping (the 1-minute monitor is the safety net). <!-- completed: -->
-- [ ] Renumber the existing items: step 3 (`member exec` mechanics) → step 4, step 4 (Acknowledge the request) → step 5, step 5 (Refusing a request) → step 6. <!-- completed: -->
-- [ ] Verify no in-file cross-references point at the old step numbers — if any do, update them to the renumbered targets. <!-- completed: -->
+- [x] Insert a new step 3 between the existing step 2 ("If fulfilling, dispatch via `cafleet member exec`") and the existing step 3 ("`member exec` mechanics"). Title it "After dispatch, ping the member." <!-- completed: 2026-05-01T00:20 -->
+- [x] In the new step 3, name the `cafleet member ping` invocation with literal `--agent-id` / `--member-id` flags and reference `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py:83`) once. <!-- completed: 2026-05-01T00:20 -->
+- [x] In the new step 3, make explicit that ping (not `message poll`) is the right primitive, that it is unconditional on exec success, and that exec-failure cases skip the ping (the 1-minute monitor is the safety net). <!-- completed: 2026-05-01T00:20 -->
+- [x] Renumber the existing items: step 3 (`member exec` mechanics) → step 4, step 4 (Acknowledge the request) → step 5, step 5 (Refusing a request) → step 6. <!-- completed: 2026-05-01T00:20 -->
+- [x] Verify no in-file cross-references point at the old step numbers — if any do, update them to the renumbered targets. <!-- completed: 2026-05-01T00:20 -->
 
 ### Step 3: Document the chain in skills/cafleet-monitoring/SKILL.md
 
