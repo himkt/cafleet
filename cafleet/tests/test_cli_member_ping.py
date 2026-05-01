@@ -115,203 +115,205 @@ def _invoke(runner, session_id, **invoke_kwargs):
     )
 
 
-class TestPingDispatch:
-    def test_poll_trigger_called_with_correct_kwargs(
-        self, runner, session_id, happy_path_agent, poll_recorder
-    ):
-        result = _invoke(runner, session_id)
-        assert result.exit_code == 0, result.output
-        assert len(poll_recorder) == 1
-        call = poll_recorder[0]
-        assert call["target_pane_id"] == PANE_ID
-        assert call["session_id"] == session_id
-        assert call["agent_id"] == MEMBER_ID
-
-    def test_text_output(self, runner, session_id, happy_path_agent, poll_recorder):
-        result = _invoke(runner, session_id)
-        assert result.exit_code == 0, result.output
-        out = result.output or ""
-        assert "Pinged member" in out
-        assert MEMBER_NAME in out
-        assert PANE_ID in out
-        assert "poll keystroke dispatched" in out
-
-    def test_json_output_two_keys(
-        self, runner, session_id, happy_path_agent, poll_recorder
-    ):
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "--json",
-                "member",
-                "ping",
-                "--agent-id",
-                DIRECTOR_ID,
-                "--member-id",
-                MEMBER_ID,
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
-        assert set(data.keys()) == {"member_agent_id", "pane_id"}
-        assert data["member_agent_id"] == MEMBER_ID
-        assert data["pane_id"] == PANE_ID
+def test_ping_dispatch__poll_trigger_called_with_correct_kwargs(
+    runner, session_id, happy_path_agent, poll_recorder
+):
+    result = _invoke(runner, session_id)
+    assert result.exit_code == 0, result.output
+    assert len(poll_recorder) == 1
+    call = poll_recorder[0]
+    assert call["target_pane_id"] == PANE_ID
+    assert call["session_id"] == session_id
+    assert call["agent_id"] == MEMBER_ID
 
 
-class TestSendFailure:
-    def test_send_poll_trigger_returns_false_exits_one(
-        self, runner, session_id, happy_path_agent, monkeypatch
-    ):
-        monkeypatch.setattr(
-            tmux, "send_poll_trigger", lambda **_kw: False, raising=False
-        )
-        result = _invoke(runner, session_id)
-        assert result.exit_code == 1, result.output
-        out = result.output or ""
-        assert "send failed" in out
-        assert "tmux send-keys did not deliver the poll-trigger keystroke" in out
-        assert PANE_ID in out
-
-    def test_send_poll_trigger_raises_tmux_error_exits_one(
-        self, runner, session_id, happy_path_agent, monkeypatch
-    ):
-        def raise_err(**_kw):
-            raise tmux.TmuxError("simulated")
-
-        monkeypatch.setattr(tmux, "send_poll_trigger", raise_err, raising=False)
-        result = _invoke(runner, session_id)
-        assert result.exit_code == 1, result.output
-        assert "send failed: simulated" in (result.output or "")
+def test_ping_dispatch__text_output(
+    runner, session_id, happy_path_agent, poll_recorder
+):
+    result = _invoke(runner, session_id)
+    assert result.exit_code == 0, result.output
+    out = result.output or ""
+    assert "Pinged member" in out
+    assert MEMBER_NAME in out
+    assert PANE_ID in out
+    assert "poll keystroke dispatched" in out
 
 
-class TestAuthorizationBoundary:
-    def test_missing_agent_exits_one(self, runner, session_id, monkeypatch):
-        monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
-        result = _invoke(runner, session_id)
-        assert result.exit_code == 1, result.output
-        assert MEMBER_ID in (result.output or "")
-        assert "not found" in (result.output or "").lower()
-
-    def test_placement_none_exits_one_with_exact_message(
-        self, runner, session_id, monkeypatch
-    ):
-        monkeypatch.setattr(
-            broker,
-            "get_agent",
-            lambda *_a, **_kw: _agent(placement=None),
-        )
-        result = _invoke(runner, session_id)
-        assert result.exit_code == 1, result.output
-        out = result.output or ""
-        assert f"agent {MEMBER_ID}" in out
-        assert "has no placement row" in out
-        assert "cafleet member create" in out
-
-    def test_cross_director_exits_one_with_exact_message(
-        self, runner, session_id, monkeypatch
-    ):
-        monkeypatch.setattr(
-            broker,
-            "get_agent",
-            lambda *_a, **_kw: _agent(
-                placement=_placement(director_agent_id=OTHER_DIRECTOR_ID)
-            ),
-        )
-        result = _invoke(runner, session_id)
-        assert result.exit_code == 1, result.output
-        out = result.output or ""
-        assert f"agent {MEMBER_ID}" in out
-        assert "is not a member of your team" in out
-        assert OTHER_DIRECTOR_ID in out
-
-    def test_pending_pane_exits_one_with_exact_message(
-        self, runner, session_id, monkeypatch
-    ):
-        monkeypatch.setattr(
-            broker,
-            "get_agent",
-            lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
-        )
-        result = _invoke(runner, session_id)
-        assert result.exit_code == 1, result.output
-        out = result.output or ""
-        assert f"member {MEMBER_ID}" in out
-        assert "has no pane yet" in out
-        assert "pending placement" in out
+def test_ping_dispatch__json_output_two_keys(
+    runner, session_id, happy_path_agent, poll_recorder
+):
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "--json",
+            "member",
+            "ping",
+            "--agent-id",
+            DIRECTOR_ID,
+            "--member-id",
+            MEMBER_ID,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert set(data.keys()) == {"member_agent_id", "pane_id"}
+    assert data["member_agent_id"] == MEMBER_ID
+    assert data["pane_id"] == PANE_ID
 
 
-class TestTmuxUnavailable:
-    def test_tmux_not_available_exits_one(
-        self, runner, session_id, happy_path_agent, monkeypatch
-    ):
-        def raise_unavailable():
-            raise tmux.TmuxError(
-                "cafleet member commands must be run inside a tmux session"
-            )
+def test_send_failure__send_poll_trigger_returns_false_exits_one(
+    runner, session_id, happy_path_agent, monkeypatch
+):
+    monkeypatch.setattr(tmux, "send_poll_trigger", lambda **_kw: False, raising=False)
+    result = _invoke(runner, session_id)
+    assert result.exit_code == 1, result.output
+    out = result.output or ""
+    assert "send failed" in out
+    assert "tmux send-keys did not deliver the poll-trigger keystroke" in out
+    assert PANE_ID in out
 
-        monkeypatch.setattr(tmux, "ensure_tmux_available", raise_unavailable)
-        result = _invoke(runner, session_id)
-        assert result.exit_code == 1, result.output
-        assert "cafleet member commands must be run inside a tmux session" in (
-            result.output or ""
+
+def test_send_failure__send_poll_trigger_raises_tmux_error_exits_one(
+    runner, session_id, happy_path_agent, monkeypatch
+):
+    def raise_err(**_kw):
+        raise tmux.TmuxError("simulated")
+
+    monkeypatch.setattr(tmux, "send_poll_trigger", raise_err, raising=False)
+    result = _invoke(runner, session_id)
+    assert result.exit_code == 1, result.output
+    assert "send failed: simulated" in (result.output or "")
+
+
+def test_authorization_boundary__missing_agent_exits_one(
+    runner, session_id, monkeypatch
+):
+    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
+    result = _invoke(runner, session_id)
+    assert result.exit_code == 1, result.output
+    assert MEMBER_ID in (result.output or "")
+    assert "not found" in (result.output or "").lower()
+
+
+def test_authorization_boundary__placement_none_exits_one_with_exact_message(
+    runner, session_id, monkeypatch
+):
+    monkeypatch.setattr(
+        broker,
+        "get_agent",
+        lambda *_a, **_kw: _agent(placement=None),
+    )
+    result = _invoke(runner, session_id)
+    assert result.exit_code == 1, result.output
+    out = result.output or ""
+    assert f"agent {MEMBER_ID}" in out
+    assert "has no placement row" in out
+    assert "cafleet member create" in out
+
+
+def test_authorization_boundary__cross_director_exits_one_with_exact_message(
+    runner, session_id, monkeypatch
+):
+    monkeypatch.setattr(
+        broker,
+        "get_agent",
+        lambda *_a, **_kw: _agent(
+            placement=_placement(director_agent_id=OTHER_DIRECTOR_ID)
+        ),
+    )
+    result = _invoke(runner, session_id)
+    assert result.exit_code == 1, result.output
+    out = result.output or ""
+    assert f"agent {MEMBER_ID}" in out
+    assert "is not a member of your team" in out
+    assert OTHER_DIRECTOR_ID in out
+
+
+def test_authorization_boundary__pending_pane_exits_one_with_exact_message(
+    runner, session_id, monkeypatch
+):
+    monkeypatch.setattr(
+        broker,
+        "get_agent",
+        lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
+    )
+    result = _invoke(runner, session_id)
+    assert result.exit_code == 1, result.output
+    out = result.output or ""
+    assert f"member {MEMBER_ID}" in out
+    assert "has no pane yet" in out
+    assert "pending placement" in out
+
+
+def test_tmux_unavailable__tmux_not_available_exits_one(
+    runner, session_id, happy_path_agent, monkeypatch
+):
+    def raise_unavailable():
+        raise tmux.TmuxError(
+            "cafleet member commands must be run inside a tmux session"
         )
 
+    monkeypatch.setattr(tmux, "ensure_tmux_available", raise_unavailable)
+    result = _invoke(runner, session_id)
+    assert result.exit_code == 1, result.output
+    assert "cafleet member commands must be run inside a tmux session" in (
+        result.output or ""
+    )
 
-class TestInputValidation:
-    def test_missing_agent_id_exits_two(self, runner, session_id):
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "member",
-                "ping",
-                "--member-id",
-                MEMBER_ID,
-            ],
-        )
-        assert result.exit_code == 2, result.output
-        out = result.output or ""
-        assert "Missing option" in out
-        assert "--agent-id" in out
 
-    def test_missing_member_id_exits_two(self, runner, session_id):
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "member",
-                "ping",
-                "--agent-id",
-                DIRECTOR_ID,
-            ],
-        )
-        assert result.exit_code == 2, result.output
-        out = result.output or ""
-        assert "Missing option" in out
-        assert "--member-id" in out
+def test_input_validation__missing_agent_id_exits_two(runner, session_id):
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "ping",
+            "--member-id",
+            MEMBER_ID,
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    out = result.output or ""
+    assert "Missing option" in out
+    assert "--agent-id" in out
 
-    def test_unexpected_positional_argument_exits_two(self, runner, session_id):
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "member",
-                "ping",
-                "--agent-id",
-                DIRECTOR_ID,
-                "--member-id",
-                MEMBER_ID,
-                "extra",
-            ],
-        )
-        assert result.exit_code == 2, result.output
-        out = result.output or ""
-        assert (
-            "unexpected extra argument" in out.lower()
-            or "got unexpected" in out.lower()
-        )
+
+def test_input_validation__missing_member_id_exits_two(runner, session_id):
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "ping",
+            "--agent-id",
+            DIRECTOR_ID,
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    out = result.output or ""
+    assert "Missing option" in out
+    assert "--member-id" in out
+
+
+def test_input_validation__unexpected_positional_argument_exits_two(runner, session_id):
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "ping",
+            "--agent-id",
+            DIRECTOR_ID,
+            "--member-id",
+            MEMBER_ID,
+            "extra",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    out = result.output or ""
+    assert "unexpected extra argument" in out.lower() or "got unexpected" in out.lower()
