@@ -194,7 +194,7 @@ def test_broker_host_default__broker_host_default_is_loopback(monkeypatch):
     assert s.broker_host == "127.0.0.1"
 
 
-def test_broker_host_default__broker_port_default_is_8000(monkeypatch):
+def test_broker_port_default__is_8000(monkeypatch):
     """Asserted alongside broker_host so any accidental regression in
     the Field() rewrite is caught.
     """
@@ -211,7 +211,7 @@ def test_broker_host_default__cafleet_broker_host_env_var_is_read(monkeypatch):
     assert s.broker_host == "10.20.30.40"
 
 
-def test_broker_host_default__cafleet_broker_port_env_var_is_read(monkeypatch):
+def test_broker_port_default__cafleet_env_var_is_read(monkeypatch):
     monkeypatch.delenv("BROKER_PORT", raising=False)
     monkeypatch.setenv("CAFLEET_BROKER_PORT", "9876")
     s = Settings()
