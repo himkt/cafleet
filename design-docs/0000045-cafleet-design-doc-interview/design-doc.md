@@ -1,7 +1,7 @@
 # Port `design-doc-interview` Skill to CAFleet
 
 **Status**: Approved
-**Progress**: 8/14 tasks complete
+**Progress**: 10/14 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -262,8 +262,8 @@ The user-visible Q&A flow (4-questions-per-`AskUserQuestion`, round counter, man
 
 ### Step 4: Director-side helpers
 
-- [ ] Document in SKILL.md the exact `cafleet` invocations for spawn / poll / ack / member delete / session delete with literal placeholder UUIDs. <!-- completed: -->
-- [ ] Document the `question.md` schema (interview-progress marker placement, Questions and Answers sections, round heading format) so the same parser logic the global skill uses works unchanged. <!-- completed: -->
+- [x] Document in SKILL.md the exact `cafleet` invocations for spawn / poll / ack / member delete / session delete with literal placeholder UUIDs. <!-- completed: 2026-05-01T12:47 -->
+- [x] Document the `question.md` schema (interview-progress marker placement, Questions and Answers sections, round heading format) so the same parser logic the global skill uses works unchanged. <!-- completed: 2026-05-01T12:47 -->
 
 ### Step 5: Resume-mode parity
 
