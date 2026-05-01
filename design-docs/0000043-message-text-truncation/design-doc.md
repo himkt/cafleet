@@ -10,7 +10,7 @@ The `cafleet` CLI emits a `text` field carrying the full message body in both te
 
 ## Success Criteria
 
-- [x] `cafleet ... message {send,broadcast,poll,ack,cancel,show}` truncate the `text` body to 10 codepoints + `...` by default in both text and `--json` output.
+- [x] `cafleet ... message {send,poll,ack,cancel,show}` truncate the `text` body to 10 codepoints + `...` by default in both text and `--json` output. `cafleet ... message broadcast` is exempt: it returns a `broadcast_summary` task whose `text` is a generated summary string (`"Broadcast sent to N recipients"`), so its wiring uses `truncates_task_text=False` to keep the recipient count visible.
 - [x] `--full` (per-subcommand option, placed after the subcommand name) restores the un-truncated body in both text and `--json` output.
 - [x] Empty `text` and `text` whose codepoint length is ≤ 10 pass through unchanged with no `...` marker.
 - [x] Multibyte / non-ASCII text is truncated by Python `str` length (codepoints), never bytes — no character is split.
@@ -87,7 +87,7 @@ def truncate_task_text(result, *, full: bool, limit: int = 10):
     return result
 ```
 
-The broadcast result is a top-level list of task envelopes (each with the same `artifacts[].parts[].text` shape that `format_task` already unwraps), so the list-handling branch of `truncate_task_text` covers it. A single helper covers all six message subcommands.
+The list-handling branch of `truncate_task_text` covers any future emit site that returns a list of task envelopes. The current `broker.broadcast_message` returns a single-element list whose only task is a `broadcast_summary` envelope with `text` set to a generated summary string (`"Broadcast sent to N recipients"`) — NOT the original message body. To keep the recipient count visible, `message broadcast`'s wiring uses `truncates_task_text=False`; the `--full` Click option is still exposed for flag-surface uniformity across the six subcommands but is a no-op on the current envelope shape. The remaining five message subcommands wire `truncates_task_text=True`.
 
 ### Emit-site enumeration
 
@@ -96,7 +96,7 @@ Every CLI emit site that produces a `text` field (the focus of this design):
 | Subcommand | File:line | Output mode | Source of `text` | In scope |
 |---|---|---|---|---|
 | `message send` | `cafleet/src/cafleet/cli.py:385-400` | text via `format_task`, json via `format_json` | `task.artifacts[].parts[].text` | yes |
-| `message broadcast` | `cafleet/src/cafleet/cli.py:403-419` | text via `format_indexed_list(format_task)`, json via `format_json` | per task in list | yes |
+| `message broadcast` | `cafleet/src/cafleet/cli.py:403-419` | text via `format_indexed_list(format_task)`, json via `format_json` | single `broadcast_summary` task; `text` is the generated summary string (`"Broadcast sent to N recipients"`), NOT the original body | no — `truncates_task_text=False` on the wiring so the recipient count stays visible. `--full` is still exposed on the subcommand for flag-surface consistency but is a no-op against the current envelope shape. |
 | `message poll` | `cafleet/src/cafleet/cli.py:422-439` | text via `format_indexed_list(format_task)`, json via `format_json` | per task in list | yes |
 | `message ack` | `cafleet/src/cafleet/cli.py:442-452` | text via `format_task`, json via `format_json` | task | yes |
 | `message cancel` | `cafleet/src/cafleet/cli.py:455-465` | text via `format_task`, json via `format_json` | task | yes |
