@@ -5,3 +5,7 @@ config_roots = [
   "cafleet",
   "admin",
 ]
+
+[tools]
+"aqua:astral-sh/uv" = "latest"
+"core:bun" = "latest"

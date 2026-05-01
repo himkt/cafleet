@@ -28,3 +28,7 @@ description = "Sync cafleet project dependencies"
 [tasks.install]
 run = "uv tool install --reinstall --editable ."
 description = "Install the cafleet CLI as an editable uv tool (source edits take effect without a second reinstall)"
+
+[tasks.build]
+run = "uv build --wheel"
+description = "Build the cafleet wheel"
