@@ -1,7 +1,7 @@
 # Refactor Test Suite to Functional Pytest Style
 
 **Status**: Approved
-**Progress**: 3/44 tasks complete
+**Progress**: 8/44 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -161,11 +161,11 @@ Baseline test count: 557
 
 Apply the §A recipe to:
 
-- [ ] `cafleet/tests/test_broker_administrator.py` — 5 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_broker_messaging.py` — 7 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_broker_registry.py` — 11 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_broker_webui.py` — 8 classes <!-- completed: -->
-- [ ] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: -->
+- [x] `cafleet/tests/test_broker_administrator.py` — 5 classes <!-- completed: 2026-05-01T12:30 -->
+- [x] `cafleet/tests/test_broker_messaging.py` — 7 classes <!-- completed: 2026-05-01T12:30 -->
+- [x] `cafleet/tests/test_broker_registry.py` — 11 classes <!-- completed: 2026-05-01T12:30 -->
+- [x] `cafleet/tests/test_broker_webui.py` — 8 classes <!-- completed: 2026-05-01T12:30 -->
+- [x] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: 2026-05-01T12:30 -->
 
 ### Step 3: Refactor CLI agent / message / generic tests
 
