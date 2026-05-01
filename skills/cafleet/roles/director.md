@@ -36,7 +36,7 @@ You receive a member-originated bash request when **both** of the following are 
 
    The CLI prepends `! ` and appends `Enter` for you (two `tmux send-keys` calls: literal `! <command>`, then the `Enter` keystroke). Claude Code's `!` shortcut intercepts the line, runs the command via the harness's native CLI primitive (bypassing the Bash tool permission system), and prints the captured output back into the member's pane. The member's next prompt iteration sees the output as context.
 
-3. **After dispatch, ping the member.** `member exec` only stages the bang command's stdout/stderr as the member's next-turn context — it does not advance the turn. Immediately follow every successful `cafleet member exec` with `cafleet member ping` against the same member so the keystroke fires `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py:83`) and the member begins its next turn:
+3. **After dispatch, ping the member.** `member exec` only stages the bang command's stdout/stderr as the member's next-turn context — it does not advance the turn. Immediately follow every successful `cafleet member exec` with `cafleet member ping` against the same member so the keystroke fires `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py`) and the member begins its next turn:
 
    ```bash
    cafleet --session-id <session-id> member ping \
