@@ -62,7 +62,7 @@ cafleet --session-id <session-id> member ping \
   --agent-id <director-agent-id> --member-id <member-agent-id>
 ```
 
-Each call is a separate Bash invocation. Do not chain with `&&` — shell operators break `permissions.allow` literal matching for CAFleet commands, so each command must be issued as its own Bash call.
+Each call is a separate Bash invocation. Do not chain with `&&` — a chained `cafleet … member exec … && cafleet … member ping …` invocation matches the more-specific `permissions.ask` rule for `member exec`, so the `member ping` half cannot benefit from its `permissions.allow` carve-out. Splitting them across two Bash calls also lets the Director read each subcommand's exit code independently, which is how the skip-on-non-zero-exit rule above is enforced.
 
 ### Series of exec calls
 
@@ -148,3 +148,4 @@ End-to-end live verification is required so the chain rule is observed working i
 | 2026-04-30 | Initial draft |
 | 2026-05-01 | Address Copilot review on PR #45: rephrase the "chain rule" callout to remove the apparently-contradictory "unconditional on exec success" wording (now: run ping after any `member exec` that exits 0; skip on non-zero exit), and drop the stale `.claude/rules/bash-command.md` path citation in favor of stating the no-`&&` rule directly. Same wording fix applied to `skills/cafleet/SKILL.md` and `skills/cafleet/roles/director.md`. |
 | 2026-05-01 | Address second Copilot review pass on PR #45: rephrase Step 1 task 4 and Step 2 task 3 checklist items to use the exit-0 / non-zero-exit phrasing in line with the spec rewrite. Reword Step 5 task 1 to drop the "ping-failure handling (non-fatal warning)" clause from the consistency-check criteria — the public skill files intentionally do not duplicate that internal-doc rule, so the consistency check should not assert it. |
+| 2026-05-01 | Address third Copilot review pass on PR #45: correct the no-`&&` rationale in the Canonical exec-then-ping pairing section. The previous wording claimed shell operators "break `permissions.allow` literal matching"; Copilot pointed out that a `Bash(cafleet *)` allow pattern can in fact match a compound command. The accurate reason is precedence: a chained `member exec && member ping` invocation matches the more-specific `permissions.ask` rule for `member exec`, so the `member ping` half cannot use its `permissions.allow` carve-out. Splitting them across two Bash calls also exposes each subcommand's exit code independently, which is what the skip-on-non-zero-exit rule depends on. |
