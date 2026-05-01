@@ -5,3 +5,15 @@ config_roots = [
   "cafleet",
   "admin",
 ]
+
+[tasks.publish]
+run = [
+  { "task" = "//admin:install" },
+  { "task" = "//admin:build" },
+  { "task" = "//cafleet:build" },
+  { "task" = "//cafleet:publish" },
+]
+
+[tools]
+"aqua:astral-sh/uv" = "latest"
+"core:bun" = "latest"
