@@ -211,7 +211,7 @@ def test_broker_host_default__cafleet_broker_host_env_var_is_read(monkeypatch):
     assert s.broker_host == "10.20.30.40"
 
 
-def test_broker_port_default__cafleet_env_var_is_read(monkeypatch):
+def test_broker_port_default__cafleet_broker_port_env_var_is_read(monkeypatch):
     monkeypatch.delenv("BROKER_PORT", raising=False)
     monkeypatch.setenv("CAFLEET_BROKER_PORT", "9876")
     s = Settings()
