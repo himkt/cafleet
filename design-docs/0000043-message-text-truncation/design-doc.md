@@ -1,7 +1,7 @@
 # Message text truncation by default
 
 **Status**: Approved
-**Progress**: 22/28 tasks complete
+**Progress**: 28/28 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -233,12 +233,12 @@ The `README.md` upgrade note must call this out explicitly. There is no soft-lau
 
 ### Step 5: Verify
 
-- [ ] `mise //cafleet:lint` passes. <!-- completed: -->
-- [ ] `mise //cafleet:format` clean. <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` passes. <!-- completed: -->
-- [ ] `mise //cafleet:test` passes (full suite). <!-- completed: -->
-- [ ] Manual smoke: `cafleet --session-id <s> message poll --agent-id <a>` shows `text:  abcdefghij...` for an 11+ codepoint body and the same body verbatim with `--full`. <!-- completed: -->
-- [ ] Manual smoke: `cafleet message poll --help` (and the same for `send` / `broadcast` / `ack` / `cancel` / `show`) lists `--full` with the help text "Disable text truncation; emit full message body." <!-- completed: -->
+- [x] `mise //cafleet:lint` passes. <!-- completed: 2026-05-01T12:35 -->
+- [x] `mise //cafleet:format` clean. <!-- completed: 2026-05-01T12:35 -->
+- [x] `mise //cafleet:typecheck` passes. <!-- completed: 2026-05-01T12:35 -->
+- [x] `mise //cafleet:test` passes (full suite). <!-- completed: 2026-05-01T12:35 -->
+- [x] Manual smoke: `cafleet --session-id <s> message poll --agent-id <a>` shows `text:  abcdefghij...` for an 11+ codepoint body and the same body verbatim with `--full`. <!-- completed: 2026-05-01T12:35 -->
+- [x] Manual smoke: `cafleet message poll --help` (and the same for `send` / `broadcast` / `ack` / `cancel` / `show`) lists `--full` with the help text "Disable text truncation; emit full message body." <!-- completed: 2026-05-01T12:35 -->
 
 ---
 
