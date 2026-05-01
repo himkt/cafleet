@@ -8,6 +8,7 @@ config_roots = [
 
 [tasks.publish]
 run = [
+  { "task" = "//admin:install" },
   { "task" = "//admin:build" },
   { "task" = "//cafleet:build" },
 ]

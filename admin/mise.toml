@@ -4,5 +4,8 @@ run = "bun lint"
 [tasks.dev]
 run = "bun dev"
 
+[tasks.install]
+run = "bun install --frozen-lockfile"
+
 [tasks.build]
 run = "bun run build"
