@@ -132,7 +132,7 @@ End-to-end live verification is required so the chain rule is observed working i
 
 | Date (UTC) | Member id | First-turn snippet | Notes |
 |---|---|---|---|
-| 2026-05-01T00:14:33Z | f0340c69-a40b-4869-bf95-1a92fa75655b (Programmer) | echo hello / hello / cafleet message poll / Running 1 shell command / Flowing 4s | Member began next turn within seconds, well under the 1-minute monitoring tick. exec then ping chain confirmed working as documented. |
+| 2026-05-01T00:14:33Z | `<test-member-id>` (a Programmer member spawned for this verification) | echo hello / hello / cafleet message poll / Running 1 shell command / Flowing 4s | Member began next turn within seconds, well under the 1-minute monitoring tick. exec then ping chain confirmed working as documented. |
 
 ### Step 5: Cross-document consistency check
 
@@ -152,3 +152,4 @@ End-to-end live verification is required so the chain rule is observed working i
 | 2026-05-01 | Mark Status: Complete after all 19 implementation tasks land and the live verification has been recorded. |
 | 2026-05-01 | Address fourth Copilot review pass on PR #45: drop the volatile `:83` line number from every `cafleet/src/cafleet/tmux.py:83` citation across the design doc, `skills/cafleet/SKILL.md`, and `skills/cafleet/roles/director.md`. The function symbol `tmux.send_poll_trigger` is already named in the surrounding prose, so the bare path `cafleet/src/cafleet/tmux.py` is sufficient and no longer drifts when unrelated edits shift line numbers. |
 | 2026-05-01 | Address fifth Copilot review pass on PR #45: weaken the "dispatch never reached the pane" rationale to "the dispatch did not complete successfully (its `tmux send-keys` sequence may have failed mid-way), so we cannot assume the bang command was submitted". `tmux.send_bash_command` issues two `tmux send-keys` calls (literal `! <cmd>` then `Enter`), so a non-zero exec exit does not strictly imply zero keystrokes landed — partial dispatch is possible. The skip-on-non-zero rule and the monitoring-tick safety net are unchanged. |
+| 2026-05-01 | Address sixth Copilot review pass on PR #45: redact the live agent-id from the Verification log row, replacing the literal UUID with the `<test-member-id>` placeholder convention used elsewhere in this design doc. The committed evidence (timestamp + first-turn snippet + notes) still demonstrates the chain working; the ephemeral session-scoped UUID adds no verification value once the session is torn down. |
