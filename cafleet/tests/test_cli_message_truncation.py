@@ -79,13 +79,6 @@ def _task_payload(task_id, *, sender, recipient, text, type_="unicast"):
     }
 
 
-def _run(runner, args, *, json_output: bool):
-    base = ["--session-id", args["session_id"]]
-    if json_output:
-        base.append("--json")
-    return runner.invoke(cli, base + args["cmd"])
-
-
 class TestMessagePollTruncation:
     def test_default_truncates_text_in_text_output(
         self, runner, session_id, agent_id, monkeypatch
