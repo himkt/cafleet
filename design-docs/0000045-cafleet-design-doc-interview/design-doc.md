@@ -1,7 +1,7 @@
 # Port `design-doc-interview` Skill to CAFleet
 
 **Status**: Approved
-**Progress**: 6/14 tasks complete
+**Progress**: 8/14 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -257,8 +257,8 @@ The user-visible Q&A flow (4-questions-per-`AskUserQuestion`, round counter, man
 
 ### Step 3: Analyzer prompt template
 
-- [ ] Lock the Analyzer's question-generation prompt (categories, priority order, output format spec, `Total: N questions` footer) verbatim from the global skill — the categories and format must be byte-identical so the question list parses the same way. <!-- completed: -->
-- [ ] Verify any literal `{` or `}` characters in the spawn prompt are doubled per the `cafleet member create` template-safety rule. <!-- completed: -->
+- [x] Lock the Analyzer's question-generation prompt (categories, priority order, output format spec, `Total: N questions` footer) verbatim from the global skill — the categories and format must be byte-identical so the question list parses the same way. <!-- completed: 2026-05-01T12:43 -->
+- [x] Verify any literal `{` or `}` characters in the spawn prompt are doubled per the `cafleet member create` template-safety rule. <!-- completed: 2026-05-01T12:43 -->
 
 ### Step 4: Director-side helpers
 
