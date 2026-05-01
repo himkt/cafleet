@@ -289,3 +289,115 @@ def test_analyzer_md_describes_required_role_behaviors(analyzer_md_text):
     assert "idle" in lower and "shutdown" in lower, (
         "analyzer.md must describe idling pending shutdown"
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 3: Analyzer prompt template (categories, priority order, footer, brace safety)
+# ---------------------------------------------------------------------------
+
+
+_REQUIRED_CATEGORIES = (
+    "Intent alignment",
+    "Ambiguity",
+    "Missing requirements",
+    "Implicit assumptions",
+    "Design decisions",
+    "Internal consistency",
+    "Implementation actionability",
+)
+
+_REQUIRED_PRIORITY_ITEMS = (
+    "intent confirmation",
+    "ambiguous",
+    "implicit assumptions",
+    "missing requirements",
+    "design challenges",
+    "implementation clarity",
+)
+
+
+def _spawn_prompt_block(skill_text: str) -> str:
+    """Return the Step 2d spawn-prompt fenced code block, sans the fences."""
+    lines = skill_text.splitlines()
+    step_2d_index = next(
+        (i for i, line in enumerate(lines) if line.startswith("#### 2d")),
+        None,
+    )
+    assert step_2d_index is not None, "SKILL.md missing '#### 2d' sub-heading"
+
+    fence_starts = [
+        i
+        for i in range(step_2d_index, len(lines))
+        if lines[i].lstrip().startswith("```")
+    ]
+    assert len(fence_starts) >= 2, (
+        "Step 2d section must contain at least one fenced code block (open + close fences)"
+    )
+    open_idx = fence_starts[0]
+    close_idx = fence_starts[1]
+    body = "\n".join(lines[open_idx + 1 : close_idx])
+    return body
+
+
+def test_analyzer_md_contains_all_seven_question_categories(analyzer_md_text):
+    """Design 0000045 Step 3.a: analyzer.md must list all 7 question-generation categories."""
+    lower = analyzer_md_text.lower()
+    missing = [name for name in _REQUIRED_CATEGORIES if name.lower() not in lower]
+    assert not missing, (
+        f"analyzer.md is missing required category name(s): {missing!r}; "
+        f"all 7 must appear: {list(_REQUIRED_CATEGORIES)!r}"
+    )
+
+
+def test_analyzer_md_documents_priority_order_with_six_items(analyzer_md_text):
+    """Design 0000045 Step 3.a: analyzer.md must document the 6-item priority ordering."""
+    lower = analyzer_md_text.lower()
+    has_priority_heading_or_label = (
+        "priority order" in lower
+        or "priority ordering" in lower
+        or "priority:" in lower
+    )
+    assert has_priority_heading_or_label, (
+        "analyzer.md must include a 'Priority order' heading or label so the priority "
+        "ranking is visible to the reader"
+    )
+    missing = [item for item in _REQUIRED_PRIORITY_ITEMS if item not in lower]
+    assert not missing, (
+        f"analyzer.md priority ordering is missing item(s): {missing!r}; "
+        f"expected all 6: {list(_REQUIRED_PRIORITY_ITEMS)!r}"
+    )
+
+
+def test_analyzer_md_specifies_total_n_questions_footer(analyzer_md_text):
+    """Design 0000045 Step 3.a: analyzer.md must specify the literal 'Total: N questions' footer."""
+    assert "Total: N questions" in analyzer_md_text, (
+        "analyzer.md must specify the literal output-format footer 'Total: N questions' "
+        "(capital T, capital N) so the Director can verify the question list is complete"
+    )
+
+
+def test_skill_md_spawn_prompt_has_no_unescaped_curly_braces(skill_md_text):
+    """Design 0000045 Step 3.b: spawn-prompt template must double any literal `{` / `}` per cafleet member-create rule.
+
+    The cafleet member-create CLI runs every prompt through ``str.format()`` with
+    ``session_id`` / ``agent_id`` / ``director_name`` / ``director_agent_id`` as kwargs.
+    Any other literal brace must be doubled (``{{`` / ``}}``) or it will trip
+    ``str.format`` at spawn time. The Director's instruction restricts the allowed
+    unescaped placeholder to ``{agent_id}`` for this skill.
+    """
+    block = _spawn_prompt_block(skill_md_text)
+
+    # Strip the only allowed unescaped placeholder, then collapse doubled braces.
+    cleaned = block.replace("{agent_id}", "")
+    cleaned = cleaned.replace("{{", "").replace("}}", "")
+
+    leftover_open = cleaned.count("{")
+    leftover_close = cleaned.count("}")
+
+    assert leftover_open == 0 and leftover_close == 0, (
+        "Step 2d spawn-prompt template contains unescaped curly braces that are not the "
+        "permitted '{agent_id}' placeholder. cafleet member-create runs this through "
+        "str.format(); literal braces must be doubled ('{{' / '}}'). "
+        f"Leftover '{{' count: {leftover_open}, leftover '}}' count: {leftover_close}. "
+        f"Block:\n{block}"
+    )
