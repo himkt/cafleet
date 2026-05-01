@@ -10,7 +10,7 @@ Validate an existing design document through structured, fine-grained Q&A across
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director (Interviewer)** | Main Claude | Resolve doc path, parse `question.md` progress, spawn Analyzer, drive `AskUserQuestion` rounds, write answers + COMMENT annotations + progress marker | Read the document for question generation (delegated to Analyzer); communicate with the user except via `AskUserQuestion` | (inline in this SKILL.md) |
+| **Director (Interviewer)** | Main Claude | Resolve doc path, parse `question.md` progress, spawn Analyzer, drive `AskUserQuestion` rounds, write answers + COMMENT annotations + progress marker | Read the document for question generation (delegated to Analyzer); conduct the Q&A rounds outside `AskUserQuestion` | (inline in this SKILL.md) |
 | **Analyzer** | CAFleet member spawned via `cafleet member create` | Read the design doc, return a flat numbered question list covering uncovered sections, then idle pending shutdown | Talk to the user; edit any file; persist state across spawns | [roles/analyzer.md](roles/analyzer.md) |
 
 ## Additional resources
