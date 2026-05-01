@@ -43,7 +43,7 @@ You receive a member-originated bash request when **both** of the following are 
      --agent-id <director-agent-id> --member-id <member-agent-id>
    ```
 
-   The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll` — `message poll` reads your own Director inbox over SQLite and does not wake the member. The chain is unconditional on exec success: every successful `member exec` is paired with a `member ping`. Skip the ping only when `cafleet member exec` exits non-zero — the dispatch never reached the pane, and the 1-minute `cafleet-monitoring` tick is the safety net.
+   The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll` — `message poll` reads your own Director inbox over SQLite and does not wake the member. Run `cafleet member ping` after any `cafleet member exec` invocation that exits 0. Skip the ping only on non-zero exit — the dispatch never reached the pane, and the 1-minute `cafleet-monitoring` tick is the safety net.
 
 4. **`member exec` mechanics:** the command is a single required positional argument. The subcommand works on any pane that is at the Claude Code input prompt. Empty / whitespace-only commands and commands containing newlines are rejected by the CLI handler with exit 2.
 
