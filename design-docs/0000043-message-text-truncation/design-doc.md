@@ -33,10 +33,12 @@ Members typically only need the body's existence + a few leading characters to d
 
 ### Truncation rule
 
+The table describes the resulting `text` value after truncation. Note: `format_task` (text mode) omits the `text:` line entirely when the resulting value is empty (existing pre-truncation behavior preserved), while `--json` always emits the field including an empty string.
+
 | Input `text` | Default output | `--full` output |
 |---|---|---|
 | `None` / not present | not present | not present |
-| `""` | `""` | `""` |
+| `""` | text mode: `text:` line omitted; `--json`: `""` | text mode: `text:` line omitted; `--json`: `""` |
 | length ≤ 10 codepoints | unchanged | unchanged |
 | length > 10 codepoints | `text[:10] + "..."` | unchanged |
 
