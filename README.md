@@ -50,6 +50,10 @@ Want more? See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for the raw 
 
 > CLI reference (per-command sections for `session`, `member`, `doctor`, `server`; `agent` / `message` / `db init` covered via the option-source table and `cafleet <cmd> --help`): [docs/spec/cli-options.md](docs/spec/cli-options.md).
 
+### Message body truncation
+
+`cafleet message {send,poll,ack,cancel,show}` truncate the message `text` body to the first 10 Unicode codepoints with a literal `...` suffix in both text and `--json` output by default. This collapses per-poll token cost for inbox-polling agents whose bodies typically run 200–500 characters. Pass `--full` (per-subcommand option, placed after the subcommand name) to restore the un-truncated body. Empty bodies and bodies of 10 codepoints or fewer pass through unchanged with no `...` marker. `cafleet message broadcast` is different — it returns a `broadcast_summary` task whose text is generated summary text (e.g. `Broadcast sent to N recipients`), not the original body, so its summary always emits in full. The `--full` flag still exists on `message broadcast` for surface consistency but is a no-op. The `/ui/api/*` WebUI responses are not truncated.
+
 ## Architecture
 
 CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Sessions partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.

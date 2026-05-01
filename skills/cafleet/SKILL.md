@@ -66,6 +66,23 @@ cafleet --session-id <session-id> --json agent list --agent-id <my-agent-id>
 
 ## Command Reference
 
+### Message body truncation
+
+The five subcommands that emit a user-supplied delivery body — `cafleet message {send,poll,ack,cancel,show}` — truncate the delivery `text` body to the first 10 Unicode codepoints with a literal `...` suffix in both text and `--json` output by default. Empty bodies and bodies whose codepoint length is at most 10 pass through unchanged with no marker. Length is measured in Python `str` codepoints (never bytes), so multibyte characters are never split. Pass the per-subcommand `--full` flag to restore the un-truncated body — it composes orthogonally with `--json`.
+
+`cafleet message broadcast` is different — `broker.broadcast_message` returns a `broadcast_summary` task whose `artifacts[].parts[].text` is a generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. Truncating that summary would hide the recipient count, so `message broadcast` runs without truncation and its summary always emits in full. The `--full` flag is preserved on `message broadcast` for surface consistency but is a no-op there.
+
+The table describes the resulting `text` value AFTER truncation. Text mode omits the `text:` line entirely when the resulting value is empty, while `--json` always includes it.
+
+| Input `text` | Default output | `--full` output |
+|---|---|---|
+| `None` / not present | not present | not present |
+| `""` | text mode: `text:` line omitted, `--json`: empty string | text mode: `text:` line omitted, `--json`: empty string |
+| length ≤ 10 codepoints | unchanged | unchanged |
+| length > 10 codepoints | `text[:10] + "..."` | unchanged |
+
+The suffix is exactly the three ASCII characters `...` — no count, no `[truncated]` marker, no companion `text_length` field. The 10-codepoint default applies to the five body-echoing message subcommands. `cafleet message broadcast` is exempt and always emits its generated summary in full. The `--full` flag exists on all six message subcommands, but for `cafleet message broadcast` it is a no-op. There is no environment variable and no configurable limit. The truncation does NOT apply to FastAPI `/ui/api/*` responses, which always return full bodies.
+
 ### Register
 
 Register a new agent with the broker.
@@ -166,7 +183,16 @@ Send a message to a specific agent by ID.
 ```bash
 cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
   --to <target-agent-id> --text "Did the API schema change?"
+
+cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+  --to <target-agent-id> --text "Did the API schema change?" --full
 ```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--to <agent-id>` | yes | Recipient agent UUID. |
+| `--text <body>` | yes | Message body. Truncated to 10 codepoints + `...` in the echoed response by default. |
+| `--full` | no | Disable text truncation; emit the full message body in the echoed response (default truncates to 10 codepoints + `...`). |
 
 After persisting the message, the broker attempts a tmux push notification to the recipient's pane (`tmux send-keys` with `cafleet --session-id <session-id> message poll --agent-id <recipient-id>`). The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome.
 
@@ -179,7 +205,12 @@ cafleet --session-id <session-id> message broadcast --agent-id <my-agent-id> \
   --text "Build failed on main branch"
 ```
 
-After persisting each delivery, the broker attempts a tmux push notification per recipient. The broadcast summary response includes `notifications_sent_count` indicating how many panes were successfully triggered. Self-sends and missing/dead panes are skipped silently.
+| Flag | Required | Notes |
+|---|---|---|
+| `--text <body>` | yes | Message body delivered to every active recipient in the session (except the sender and the built-in Administrator). |
+| `--full` | no | Accepted for surface consistency with the other message subcommands; no-op here because `message broadcast` does not truncate. |
+
+`broker.broadcast_message` fans out the body to every recipient as individual delivery tasks (each visible to the recipient via `cafleet message poll`) and returns a single `broadcast_summary` envelope to the caller. The summary's `artifacts[].parts[].text` is a generated string (e.g. `Broadcast sent to N recipients`), not the original body, and the response carries `notifications_sent_count` indicating how many recipient panes were successfully triggered by the tmux push notification. Truncating that summary would hide the recipient count, so the CLI emits the broadcast summary in full regardless of `--full`. Self-sends and missing/dead panes are skipped silently during notification.
 
 ### Poll (Check Inbox)
 
@@ -189,7 +220,14 @@ Poll for incoming messages. Returns tasks addressed to this agent.
 cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
 cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --since "2026-03-28T12:00:00+00:00"
 cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --page-size 10
+cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --full
 ```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--since <iso8601>` | no | Filter tasks at or after this `status_timestamp`. |
+| `--page-size <int>` | no | Cap the number of returned tasks. |
+| `--full` | no | Disable text truncation; emit full message bodies for every returned task (default truncates each `text` to 10 codepoints + `...`). |
 
 `--since` accepts an ISO 8601 timestamp. The broker stores `status_timestamp` via `datetime.now(UTC).isoformat()`, which renders as `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` (microsecond precision, `+00:00` suffix — **not** `Z`). The `--since` filter is applied as a raw SQLite TEXT comparison, so pass timestamps in the same `+00:00` form for correct lexicographic ordering.
 
@@ -199,7 +237,13 @@ Acknowledge receipt of a message. Moves the task from INPUT_REQUIRED to COMPLETE
 
 ```bash
 cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id> --full
 ```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--task-id <uuid>` | yes | Task to acknowledge. |
+| `--full` | no | Disable text truncation; emit the full message body in the echoed task (default truncates to 10 codepoints + `...`). |
 
 ### Cancel (Retract)
 
@@ -207,7 +251,13 @@ Cancel a sent message that hasn't been acknowledged yet. Only the sender can can
 
 ```bash
 cafleet --session-id <session-id> message cancel --agent-id <my-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message cancel --agent-id <my-agent-id> --task-id <task-id> --full
 ```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--task-id <uuid>` | yes | Task to cancel. |
+| `--full` | no | Disable text truncation; emit the full message body in the echoed task (default truncates to 10 codepoints + `...`). |
 
 ### Get Task
 
@@ -215,7 +265,13 @@ Get details of a specific task by ID.
 
 ```bash
 cafleet --session-id <session-id> message show --agent-id <my-agent-id> --task-id <task-id>
+cafleet --session-id <session-id> message show --agent-id <my-agent-id> --task-id <task-id> --full
 ```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--task-id <uuid>` | yes | Task to fetch. |
+| `--full` | no | Disable text truncation; emit the full message body (default truncates to 10 codepoints + `...`). |
 
 ### Deregister
 

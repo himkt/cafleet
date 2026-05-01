@@ -7,6 +7,27 @@ def format_json(data: Any) -> str:
     return json.dumps(data, indent=2)
 
 
+def truncate_text(value: str | None, *, full: bool, limit: int = 10) -> str | None:
+    if full or value is None or len(value) <= limit:
+        return value
+    return value[:limit] + "..."
+
+
+def truncate_task_text(result: Any, *, full: bool, limit: int = 10) -> Any:
+    if full:
+        return result
+    items = result if isinstance(result, list) else [result]
+    for item in items:
+        task = item.get("task", item) if isinstance(item, dict) else None
+        if not isinstance(task, dict):
+            continue
+        for artifact in task.get("artifacts", []) or []:
+            for part in artifact.get("parts", []) or []:
+                if "text" in part:
+                    part["text"] = truncate_text(part["text"], full=full, limit=limit)
+    return result
+
+
 def format_register(data: dict) -> str:
     lines = [
         "Agent registered successfully!",
