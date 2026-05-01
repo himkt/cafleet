@@ -10,6 +10,7 @@ When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE 
 - `/cafleet-monitoring` — Mandatory supervision protocol for a Director managing member agents via CAFleet. Defines monitoring loop, spawn protocol, and stall response.
 - `/design-doc` — Standardized design document format with template and guidelines. Load when writing or editing a design document.
 - `/design-doc-create` — Create a new design document using CAFleet-native orchestration (Director / Drafter / Reviewer). Use when the user wants to create a specification with CAFleet message broker coordination.
+- `/design-doc-interview` — Validate an existing design document through fine-grained Q&A using CAFleet-native orchestration (Director + short-lived Analyzer). Adds `COMMENT(claude)` annotations consumed by `/design-doc-create` resume mode. Use after `/design-doc-create` and before `/design-doc-execute`.
 - `/design-doc-execute` — Implement features based on a design document using CAFleet-native orchestration with TDD cycle (Director / Programmer / Tester / optional Verifier).
 
 ## Project: CAFleet
