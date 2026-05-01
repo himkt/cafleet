@@ -1,7 +1,7 @@
 # Port `design-doc-interview` Skill to CAFleet
 
 **Status**: Approved
-**Progress**: 3/14 tasks complete
+**Progress**: 6/14 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -251,9 +251,9 @@ The user-visible Q&A flow (4-questions-per-`AskUserQuestion`, round counter, man
 
 ### Step 2: Skill scaffolding
 
-- [ ] Create directory `skills/design-doc-interview/`. <!-- completed: -->
-- [ ] Create `skills/design-doc-interview/SKILL.md` with the full Process section from this design doc, the YAML front-matter (`name: design-doc-interview`, `description: ...`, `allowed-tools: Read, Write, Edit, Grep, AskUserQuestion, Bash`), and the `$ARGUMENTS` footer. <!-- completed: -->
-- [ ] Create `skills/design-doc-interview/roles/analyzer.md` with the role definition (read doc, return numbered list, idle pending shutdown). <!-- completed: -->
+- [x] Create directory `skills/design-doc-interview/`. <!-- completed: 2026-05-01T12:37 -->
+- [x] Create `skills/design-doc-interview/SKILL.md` with the full Process section from this design doc, the YAML front-matter (`name: design-doc-interview`, `description: ...`, `allowed-tools: Read, Write, Edit, Grep, AskUserQuestion, Bash`), and the `$ARGUMENTS` footer. <!-- completed: 2026-05-01T12:37 -->
+- [x] Create `skills/design-doc-interview/roles/analyzer.md` with the role definition (read doc, return numbered list, idle pending shutdown). <!-- completed: 2026-05-01T12:37 -->
 
 ### Step 3: Analyzer prompt template
 
