@@ -1,7 +1,7 @@
 # Message text truncation by default
 
 **Status**: Approved
-**Progress**: 9/28 tasks complete
+**Progress**: 16/28 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -214,13 +214,13 @@ The `README.md` upgrade note must call this out explicitly. There is no soft-lau
 
 ### Step 3: Wire `--full` into the message subcommands
 
-- [ ] Extend `_client_command` in `cafleet/src/cafleet/cli.py:60-111` with a `truncates_task_text: bool = False` parameter. When True, the wrapper reads `kwargs.get("full", False)` and calls `output.truncate_task_text(result, full=full)` before both formatters. <!-- completed: -->
-- [ ] Add `--full` option + `truncates_task_text=True` to `message_send`. <!-- completed: -->
-- [ ] Add `--full` option + `truncates_task_text=True` to `message_broadcast`. <!-- completed: -->
-- [ ] Add `--full` option + `truncates_task_text=True` to `message_poll`. <!-- completed: -->
-- [ ] Add `--full` option + `truncates_task_text=True` to `message_ack`. <!-- completed: -->
-- [ ] Add `--full` option + `truncates_task_text=True` to `message_cancel`. <!-- completed: -->
-- [ ] Add `--full` option + `truncates_task_text=True` to `message_show`. <!-- completed: -->
+- [x] Extend `_client_command` in `cafleet/src/cafleet/cli.py:60-111` with a `truncates_task_text: bool = False` parameter. When True, the wrapper reads `kwargs.get("full", False)` and calls `output.truncate_task_text(result, full=full)` before both formatters. <!-- completed: 2026-05-01T13:00 -->
+- [x] Add `--full` option + `truncates_task_text=True` to `message_send`. <!-- completed: 2026-05-01T13:00 -->
+- [x] Add `--full` option + `truncates_task_text=True` to `message_broadcast`. <!-- completed: 2026-05-01T13:00 -->
+- [x] Add `--full` option + `truncates_task_text=True` to `message_poll`. <!-- completed: 2026-05-01T13:00 -->
+- [x] Add `--full` option + `truncates_task_text=True` to `message_ack`. <!-- completed: 2026-05-01T13:00 -->
+- [x] Add `--full` option + `truncates_task_text=True` to `message_cancel`. <!-- completed: 2026-05-01T13:00 -->
+- [x] Add `--full` option + `truncates_task_text=True` to `message_show`. <!-- completed: 2026-05-01T13:00 -->
 
 ### Step 4: Per-command tests
 

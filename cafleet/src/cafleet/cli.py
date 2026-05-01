@@ -61,6 +61,7 @@ def _client_command(
     *,
     requires_agent_session: bool = False,
     text_formatter: Callable[[Any], str] | None = None,
+    truncates_task_text: bool = False,
 ):
     """Subsume the four boilerplate blocks shared by client subcommands.
 
@@ -73,6 +74,12 @@ def _client_command(
     ``output.format_json(result)`` so the result is always visible — this
     rules out a silent-success failure mode where a misconfigured command
     produces no output at all.
+
+    When ``truncates_task_text=True``, the wrapper reads ``kwargs.get("full",
+    False)`` and calls ``output.truncate_task_text(result, full=full)`` before
+    either ``format_json(result)`` or ``text_formatter(result)`` runs. The
+    helper mutates in place; the wrapped function still returns the same
+    reference.
     """
 
     def decorator(func):
@@ -94,6 +101,8 @@ def _client_command(
                             f"agent {agent_id} is not a member of session {session_id}."
                         )
                 result = func(ctx, *args, **kwargs)
+                if truncates_task_text:
+                    output.truncate_task_text(result, full=kwargs.get("full", False))
                 if ctx.obj["json_output"]:
                     click.echo(output.format_json(result))
                 elif text_formatter is not None:
@@ -386,11 +395,19 @@ def agent_register(ctx, name, description, skills):
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--to", required=True, help="Recipient agent ID")
 @click.option("--text", required=True, help="Message text")
+@click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    default=False,
+    help="Disable text truncation; emit full message body.",
+)
 @click.pass_context
 @_client_command(
     text_formatter=lambda r: "Message sent.\n" + output.format_task(r),
+    truncates_task_text=True,
 )
-def message_send(ctx, agent_id, to, text):
+def message_send(ctx, agent_id, to, text, full):
     """Send a unicast message to another agent."""
     return broker.send_message(
         ctx.obj["session_id"],
@@ -403,14 +420,22 @@ def message_send(ctx, agent_id, to, text):
 @message.command("broadcast")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--text", required=True, help="Message text")
+@click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    default=False,
+    help="Disable text truncation; emit full message body.",
+)
 @click.pass_context
 @_client_command(
     text_formatter=lambda r: (
         "Broadcast sent.\n"
         + output.format_indexed_list(r, output.format_task, "No messages found.")
     ),
+    truncates_task_text=True,
 )
-def message_broadcast(ctx, agent_id, text):
+def message_broadcast(ctx, agent_id, text, full):
     """Broadcast a message to all agents."""
     return broker.broadcast_message(
         ctx.obj["session_id"],
@@ -423,14 +448,22 @@ def message_broadcast(ctx, agent_id, text):
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--since", default=None, help="Filter tasks since timestamp")
 @click.option("--page-size", default=None, type=int, help="Number of tasks")
+@click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    default=False,
+    help="Disable text truncation; emit full message body.",
+)
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
     text_formatter=lambda r: output.format_indexed_list(
         r, output.format_task, "No messages found."
     ),
+    truncates_task_text=True,
 )
-def message_poll(ctx, agent_id, since, page_size):
+def message_poll(ctx, agent_id, since, page_size, full):
     """Poll inbox for messages."""
     return broker.poll_tasks(
         agent_id,
@@ -442,12 +475,20 @@ def message_poll(ctx, agent_id, since, page_size):
 @message.command("ack")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to acknowledge")
+@click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    default=False,
+    help="Disable text truncation; emit full message body.",
+)
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
     text_formatter=lambda r: "Message acknowledged.\n" + output.format_task(r),
+    truncates_task_text=True,
 )
-def message_ack(ctx, agent_id, task_id):
+def message_ack(ctx, agent_id, task_id, full):
     """Acknowledge receipt of a message."""
     return broker.ack_task(agent_id, task_id)
 
@@ -455,12 +496,20 @@ def message_ack(ctx, agent_id, task_id):
 @message.command("cancel")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to cancel")
+@click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    default=False,
+    help="Disable text truncation; emit full message body.",
+)
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
     text_formatter=lambda r: "Task canceled.\n" + output.format_task(r),
+    truncates_task_text=True,
 )
-def message_cancel(ctx, agent_id, task_id):
+def message_cancel(ctx, agent_id, task_id, full):
     """Cancel (retract) a sent message."""
     return broker.cancel_task(agent_id, task_id)
 
@@ -468,9 +517,20 @@ def message_cancel(ctx, agent_id, task_id):
 @message.command("show")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to retrieve")
+@click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    default=False,
+    help="Disable text truncation; emit full message body.",
+)
 @click.pass_context
-@_client_command(requires_agent_session=True, text_formatter=output.format_task)
-def message_show(ctx, agent_id, task_id):
+@_client_command(
+    requires_agent_session=True,
+    text_formatter=output.format_task,
+    truncates_task_text=True,
+)
+def message_show(ctx, agent_id, task_id, full):
     """Get details of a specific task."""
     return broker.get_task(ctx.obj["session_id"], task_id)
 
