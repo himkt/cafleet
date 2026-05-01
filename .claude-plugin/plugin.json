@@ -1,6 +1,6 @@
 {
   "name": "cafleet",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A2A-inspired message broker CLI and design document orchestration skills for coding agents.",
   "author": {
     "name": "himkt"

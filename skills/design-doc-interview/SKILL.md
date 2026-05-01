@@ -109,7 +109,7 @@ Capture `session_id` and `director.agent_id` from the JSON response. Substitute 
 
 #### 2b. Start the monitoring `/loop`
 
-BEFORE spawning the Analyzer, follow `Skill(cafleet-monitoring)`'s Monitoring Mandate and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. The loop stays active until the Analyzer is torn down at the end of this step.
+BEFORE spawning the Analyzer, follow `Skill(cafleet-monitoring)`'s Monitoring Mandate and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. **Record the cron job ID returned by `/loop` (and by any `CronCreate` it issues underneath) — Step 2f references this exact ID when tearing the loop down via `CronDelete`.** The loop stays active until the Analyzer is torn down at the end of this step.
 
 #### 2c. Read the Analyzer role file
 
@@ -127,14 +127,14 @@ You are the Analyzer in a design document interview team (CAFleet-native).
 Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
 
-SESSION ID: <session-id>
-DIRECTOR AGENT ID: <director-agent-id>
-YOUR AGENT ID: <my-agent-id>     (will be filled in literally by member create)
+SESSION ID: {session_id}
+DIRECTOR AGENT ID: {director_agent_id}
+YOUR AGENT ID: {agent_id}
 DESIGN DOCUMENT: [INSERT doc_path]
 ALREADY-REVIEWED SECTIONS: [INSERT JSON array from interview-progress, or "none" on fresh start]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "your numbered question list"
+- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your numbered question list"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 Read the design document, generate a numbered question list per the role definition,
@@ -154,9 +154,9 @@ Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-i
 
 #### 2e. Wait for the Analyzer's question list
 
-Poll `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>` until the Analyzer's reply arrives. Acknowledge with `cafleet --session-id <session-id> message ack --agent-id <director-agent-id> --task-id <task-id>`.
+Poll `cafleet --session-id <session-id> message poll --agent-id <director-agent-id> --full` until the Analyzer's reply arrives. **The `--full` flag is required**: `cafleet message poll` truncates each message body to 10 codepoints + `...` by default, which would silently mangle the Analyzer's numbered question list. Acknowledge with `cafleet --session-id <session-id> message ack --agent-id <director-agent-id> --task-id <task-id>`.
 
-The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again. After 2 corrective rounds, escalate to the user.
+The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll --full`. After 2 corrective rounds, escalate to the user.
 
 #### 2f. Tear down the Analyzer
 
