@@ -425,7 +425,7 @@ def message_send(ctx, agent_id, to, text, full):
     "full",
     is_flag=True,
     default=False,
-    help="Disable text truncation; emit full message body.",
+    help="No-op for broadcast output; included for consistency with other message commands.",
 )
 @click.pass_context
 @_client_command(

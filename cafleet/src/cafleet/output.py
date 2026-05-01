@@ -24,7 +24,7 @@ def truncate_task_text(result: Any, *, full: bool, limit: int = 10) -> Any:
         for artifact in task.get("artifacts", []) or []:
             for part in artifact.get("parts", []) or []:
                 if "text" in part:
-                    part["text"] = truncate_text(part["text"], full=False, limit=limit)
+                    part["text"] = truncate_text(part["text"], full=full, limit=limit)
     return result
 
 

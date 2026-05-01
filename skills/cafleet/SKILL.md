@@ -81,7 +81,7 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 | length ≤ 10 codepoints | unchanged | unchanged |
 | length > 10 codepoints | `text[:10] + "..."` | unchanged |
 
-The suffix is exactly the three ASCII characters `...` — no count, no `[truncated]` marker, no companion `text_length` field. The 10-codepoint default applies uniformly across all six message subcommands; there is no environment variable and no configurable limit. The truncation does NOT apply to FastAPI `/ui/api/*` responses, which always return full bodies.
+The suffix is exactly the three ASCII characters `...` — no count, no `[truncated]` marker, no companion `text_length` field. The 10-codepoint default applies to the five body-echoing message subcommands. `cafleet message broadcast` is exempt and always emits its generated summary in full. The `--full` flag exists on all six message subcommands, but for `cafleet message broadcast` it is a no-op. There is no environment variable and no configurable limit. The truncation does NOT apply to FastAPI `/ui/api/*` responses, which always return full bodies.
 
 ### Register
 
