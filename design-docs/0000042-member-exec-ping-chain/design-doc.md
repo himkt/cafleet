@@ -1,7 +1,7 @@
 # Member Exec then Ping Chain Protocol
 
 **Status**: Approved
-**Progress**: 17/19 tasks complete
+**Progress**: 19/19 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -10,11 +10,11 @@ After every successful `cafleet member exec`, the Director MUST follow up with `
 
 ## Success Criteria
 
-- [ ] `skills/cafleet/SKILL.md` Member Exec subsection documents the chain rule with one canonical exec-then-ping bash snippet, placed after the JSON output example and before the Member Ping subsection.
-- [ ] `skills/cafleet/roles/director.md` "What you MUST do" list contains a step explicitly requiring `cafleet member ping` after every successful `cafleet member exec`, with subsequent steps renumbered.
-- [ ] `skills/cafleet-monitoring/SKILL.md` escalation-table ping row enumerates both the original "stalled despite recent message send" use case AND the new post-exec chain use case in a single row.
-- [ ] An end-to-end live verification has been performed where a Director (or member acting as Director) issues `cafleet member exec` followed by `cafleet member ping` and observes the member begin its next turn without waiting for the 1-minute monitoring tick.
-- [ ] No surface mentions `cafleet message poll` as the chain primitive — the miscopy guard.
+- [x] `skills/cafleet/SKILL.md` Member Exec subsection documents the chain rule with one canonical exec-then-ping bash snippet, placed after the JSON output example and before the Member Ping subsection.
+- [x] `skills/cafleet/roles/director.md` "What you MUST do" list contains a step explicitly requiring `cafleet member ping` after every successful `cafleet member exec`, with subsequent steps renumbered.
+- [x] `skills/cafleet-monitoring/SKILL.md` escalation-table ping row enumerates both the original "stalled despite recent message send" use case AND the new post-exec chain use case in a single row.
+- [x] An end-to-end live verification has been performed where a Director (or member acting as Director) issues `cafleet member exec` followed by `cafleet member ping` and observes the member begin its next turn without waiting for the 1-minute monitoring tick.
+- [x] No surface mentions `cafleet message poll` as the chain primitive — the miscopy guard.
 
 ---
 
@@ -136,8 +136,8 @@ End-to-end live verification is required so the chain rule is observed working i
 
 ### Step 5: Cross-document consistency check
 
-- [ ] Re-read `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md`, and `skills/cafleet-monitoring/SKILL.md` end-to-end and confirm the chain rule is consistent across them — same primitive name (`cafleet member ping`), same conditional (after every successful `member exec`), same skip rule (skip on exec exit-non-zero), same ping-failure handling (non-fatal warning). <!-- completed: -->
-- [ ] Confirm no surface mentions `cafleet message poll` (or any abbreviation thereof) as the chain primitive — the miscopy guard. <!-- completed: -->
+- [x] Re-read `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md`, and `skills/cafleet-monitoring/SKILL.md` end-to-end and confirm the chain rule is consistent across them — same primitive name (`cafleet member ping`), same conditional (after every successful `member exec`), same skip rule (skip on exec exit-non-zero), same ping-failure handling (non-fatal warning). <!-- completed: 2026-05-01T00:25 -->
+- [x] Confirm no surface mentions `cafleet message poll` (or any abbreviation thereof) as the chain primitive — the miscopy guard. <!-- completed: 2026-05-01T00:25 -->
 
 ---
 
