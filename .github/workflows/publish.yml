@@ -1,4 +1,4 @@
-name: Publish
+name: CI
 
 on:
   release:
@@ -20,6 +20,3 @@ jobs:
         experimental: true
     - run: |
         mise publish
-    - uses: actions/upload-artifact@v7
-      with:
-        path: ./cafleet/dist
