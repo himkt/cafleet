@@ -36,11 +36,20 @@ You receive a member-originated bash request when **both** of the following are 
 
    The CLI prepends `! ` and appends `Enter` for you (two `tmux send-keys` calls: literal `! <command>`, then the `Enter` keystroke). Claude Code's `!` shortcut intercepts the line, runs the command via the harness's native CLI primitive (bypassing the Bash tool permission system), and prints the captured output back into the member's pane. The member's next prompt iteration sees the output as context.
 
-3. **`member exec` mechanics:** the command is a single required positional argument. The subcommand works on any pane that is at the Claude Code input prompt. Empty / whitespace-only commands and commands containing newlines are rejected by the CLI handler with exit 2.
+3. **After dispatch, ping the member.** `member exec` only stages the bang command's stdout/stderr as the member's next-turn context — it does not advance the turn. Immediately follow every successful `cafleet member exec` with `cafleet member ping` against the same member so the keystroke fires `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py`) and the member begins its next turn:
 
-4. **Acknowledge the request.** ACK the member's message via `cafleet message ack --agent-id <director-agent-id> --task-id <task-id>` once you have dispatched (or refused). Leaving the message un-ACKed pollutes the inbox and breaks serialization.
+   ```bash
+   cafleet --session-id <session-id> member ping \
+     --agent-id <director-agent-id> --member-id <member-agent-id>
+   ```
 
-5. **Refusing a request.** If you choose not to run the command, send a CAFleet message back to the member explaining why. The member is waiting on either `! <command>` output OR a follow-up message — silence breaks the workflow.
+   The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll` — `message poll` reads your own Director inbox over SQLite and does not wake the member. Run `cafleet member ping` after any `cafleet member exec` invocation that exits 0. Skip the ping only on non-zero exit — the dispatch did not complete successfully (its `tmux send-keys` sequence may have failed mid-way), so we cannot assume the bang command was submitted, and the 1-minute `cafleet-monitoring` tick is the safety net.
+
+4. **`member exec` mechanics:** the command is a single required positional argument. The subcommand works on any pane that is at the Claude Code input prompt. Empty / whitespace-only commands and commands containing newlines are rejected by the CLI handler with exit 2.
+
+5. **Acknowledge the request.** ACK the member's message via `cafleet message ack --agent-id <director-agent-id> --task-id <task-id>` once you have dispatched (or refused). Leaving the message un-ACKed pollutes the inbox and breaks serialization.
+
+6. **Refusing a request.** If you choose not to run the command, send a CAFleet message back to the member explaining why. The member is waiting on either `! <command>` output OR a follow-up message — silence breaks the workflow.
 
 ## Serialization — process one request at a time
 
