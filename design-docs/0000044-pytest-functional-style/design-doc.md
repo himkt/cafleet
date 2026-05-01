@@ -10,13 +10,13 @@ The cafleet test suite currently uses pytest class-style flavor (`class Test...:
 
 ## Success Criteria
 
-- [ ] `git grep "^class Test"` inside `cafleet/tests/` returns no matches
-- [ ] `pytest --collect-only -q` reports the **same number of tests** as the pre-refactor baseline
-- [ ] `mise //cafleet:test` passes
-- [ ] `mise //cafleet:lint` passes
-- [ ] `mise //cafleet:format` reports no changes
-- [ ] `mise //cafleet:typecheck` passes
-- [ ] No new tests are added; the existing suite is the oracle
+- [x] `git grep "^class Test"` inside `cafleet/tests/` returns no matches
+- [x] `pytest --collect-only -q` reports the **same number of tests** as the pre-refactor baseline
+- [x] `mise //cafleet:test` passes
+- [x] `mise //cafleet:lint` passes
+- [x] `mise //cafleet:format` reports no changes
+- [x] `mise //cafleet:typecheck` passes
+- [x] No new tests are added; the existing suite is the oracle
 
 ---
 
