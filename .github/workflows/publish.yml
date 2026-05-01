@@ -1,4 +1,4 @@
-name: publish
+name: CI
 
 on:
   release:
@@ -7,7 +7,7 @@ on:
   pull_request: {}
 
 jobs:
-  deploy:
+  publish:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -20,3 +20,5 @@ jobs:
         experimental: true
     - run: |
         mise publish
+    - uses: actions/upload-artifact@v7
+      path: ./cafleet/dist
