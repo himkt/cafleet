@@ -98,7 +98,7 @@ Target subsection: "Member Exec" (under `## Command Reference`).
 - [x] Add a paragraph titled "Required follow-up: cafleet member ping" placed AFTER the existing JSON output example for `member exec` and BEFORE the next subsection (`### Member Ping`). <!-- completed: 2026-05-01T00:10 -->
 - [x] Inside that paragraph, embed the canonical exec-then-ping bash snippet from this design doc's Specification section verbatim. <!-- completed: 2026-05-01T00:10 -->
 - [x] State explicitly that `cafleet member ping` (not `cafleet message poll`) is the correct follow-up primitive, with a one-line distinction summarizing the table from the Specification. <!-- completed: 2026-05-01T00:10 -->
-- [x] State that the ping is unconditional on exec success and is skipped on exec exit-non-zero. <!-- completed: 2026-05-01T00:10 -->
+- [x] State that the ping is required after any `cafleet member exec` invocation that exits 0, and is skipped on non-zero exit. <!-- completed: 2026-05-01T00:10 -->
 - [x] State that for a series of exec calls on the same member, the ping follows each exec, not only the last. <!-- completed: 2026-05-01T00:10 -->
 
 ### Step 2: Document the chain in skills/cafleet/roles/director.md
@@ -107,7 +107,7 @@ Target list: the "What you MUST do" numbered list inside the bash-routing protoc
 
 - [x] Insert a new step 3 between the existing step 2 ("If fulfilling, dispatch via `cafleet member exec`") and the existing step 3 ("`member exec` mechanics"). Title it "After dispatch, ping the member." <!-- completed: 2026-05-01T00:20 -->
 - [x] In the new step 3, name the `cafleet member ping` invocation with literal `--agent-id` / `--member-id` flags and reference `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py:83`) once. <!-- completed: 2026-05-01T00:20 -->
-- [x] In the new step 3, make explicit that ping (not `message poll`) is the right primitive, that it is unconditional on exec success, and that exec-failure cases skip the ping (the 1-minute monitor is the safety net). <!-- completed: 2026-05-01T00:20 -->
+- [x] In the new step 3, make explicit that ping (not `message poll`) is the right primitive, that ping is required after any `cafleet member exec` that exits 0, and that exec-failure cases (non-zero exit) skip the ping (the 1-minute monitor is the safety net). <!-- completed: 2026-05-01T00:20 -->
 - [x] Renumber the existing items: step 3 (`member exec` mechanics) → step 4, step 4 (Acknowledge the request) → step 5, step 5 (Refusing a request) → step 6. <!-- completed: 2026-05-01T00:20 -->
 - [x] Verify no in-file cross-references point at the old step numbers — if any do, update them to the renumbered targets. <!-- completed: 2026-05-01T00:20 -->
 
@@ -136,7 +136,7 @@ End-to-end live verification is required so the chain rule is observed working i
 
 ### Step 5: Cross-document consistency check
 
-- [x] Re-read `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md`, and `skills/cafleet-monitoring/SKILL.md` end-to-end and confirm the chain rule is consistent across them — same primitive name (`cafleet member ping`), same conditional (after every successful `member exec`), same skip rule (skip on exec exit-non-zero), same ping-failure handling (non-fatal warning). <!-- completed: 2026-05-01T00:25 -->
+- [x] Re-read `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md`, and `skills/cafleet-monitoring/SKILL.md` end-to-end and confirm the chain rule is consistent across them — same primitive name (`cafleet member ping`), same conditional (ping required after any `cafleet member exec` that exits 0), and same skip rule (skip on non-zero exit). The "Behavior on ping failure" non-fatal-warning rule lives in this design doc's Specification section and is intentionally not duplicated in the public skill files. <!-- completed: 2026-05-01T00:25 -->
 - [x] Confirm no surface mentions `cafleet message poll` (or any abbreviation thereof) as the chain primitive — the miscopy guard. <!-- completed: 2026-05-01T00:25 -->
 
 ---
@@ -147,3 +147,4 @@ End-to-end live verification is required so the chain rule is observed working i
 |------|---------|
 | 2026-04-30 | Initial draft |
 | 2026-05-01 | Address Copilot review on PR #45: rephrase the "chain rule" callout to remove the apparently-contradictory "unconditional on exec success" wording (now: run ping after any `member exec` that exits 0; skip on non-zero exit), and drop the stale `.claude/rules/bash-command.md` path citation in favor of stating the no-`&&` rule directly. Same wording fix applied to `skills/cafleet/SKILL.md` and `skills/cafleet/roles/director.md`. |
+| 2026-05-01 | Address second Copilot review pass on PR #45: rephrase Step 1 task 4 and Step 2 task 3 checklist items to use the exit-0 / non-zero-exit phrasing in line with the spec rewrite. Reword Step 5 task 1 to drop the "ping-failure handling (non-fatal warning)" clause from the consistency-check criteria — the public skill files intentionally do not duplicate that internal-doc rule, so the consistency check should not assert it. |
