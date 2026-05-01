@@ -10,14 +10,14 @@ The `cafleet` CLI emits a `text` field carrying the full message body in both te
 
 ## Success Criteria
 
-- [ ] `cafleet ... message {send,broadcast,poll,ack,cancel,show}` truncate the `text` body to 10 codepoints + `...` by default in both text and `--json` output.
-- [ ] `--full` (per-subcommand option, placed after the subcommand name) restores the un-truncated body in both text and `--json` output.
-- [ ] Empty `text` and `text` whose codepoint length is ≤ 10 pass through unchanged with no `...` marker.
-- [ ] Multibyte / non-ASCII text is truncated by Python `str` length (codepoints), never bytes — no character is split.
-- [ ] FastAPI `/ui/api/*` HTTP responses are unchanged (out of scope; the WebUI is human-facing).
-- [ ] All other long fields (`agent.description`, `skills[].description`, `agent_card_json` sub-fields, `member capture` content) are unchanged in this release.
-- [ ] Documentation (`README.md`, `ARCHITECTURE.md`, `docs/`, `skills/cafleet/SKILL.md`) reflects the new default and the `--full` opt-out before code lands.
-- [ ] Unit tests cover the truncation helper for the four edge cases (empty, ≤10 cp, >10 cp ASCII, >10 cp multibyte). Per-command tests cover `message poll`, `message show`, `message send`, `message broadcast` in both default and `--full` modes, both text and `--json`.
+- [x] `cafleet ... message {send,broadcast,poll,ack,cancel,show}` truncate the `text` body to 10 codepoints + `...` by default in both text and `--json` output.
+- [x] `--full` (per-subcommand option, placed after the subcommand name) restores the un-truncated body in both text and `--json` output.
+- [x] Empty `text` and `text` whose codepoint length is ≤ 10 pass through unchanged with no `...` marker.
+- [x] Multibyte / non-ASCII text is truncated by Python `str` length (codepoints), never bytes — no character is split.
+- [x] FastAPI `/ui/api/*` HTTP responses are unchanged (out of scope; the WebUI is human-facing).
+- [x] All other long fields (`agent.description`, `skills[].description`, `agent_card_json` sub-fields, `member capture` content) are unchanged in this release.
+- [x] Documentation (`README.md`, `ARCHITECTURE.md`, `docs/`, `skills/cafleet/SKILL.md`) reflects the new default and the `--full` opt-out before code lands.
+- [x] Unit tests cover the truncation helper for the four edge cases (empty, ≤10 cp, >10 cp ASCII, >10 cp multibyte). Per-command tests cover `message poll`, `message show`, `message send`, `message broadcast` in both default and `--full` modes, both text and `--json`.
 
 ---
 
