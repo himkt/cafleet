@@ -34,9 +34,9 @@ Today the chain is missing from the canonical Director protocol docs. Operators 
 
 ### The chain rule
 
-> **After every successful `cafleet member exec` invocation, the Director MUST immediately invoke `cafleet member ping` against the same member.**
+> **Run `cafleet member ping` against the same member after every `cafleet member exec` invocation that exits 0.**
 >
-> The chain is unconditional on exec success. It is skipped only when `cafleet member exec` exits non-zero — in that case the dispatch never reached the pane, and the 1-minute `cafleet-monitoring` tick is the safety net.
+> Skip the ping only when `cafleet member exec` exits non-zero — the dispatch never reached the pane, and the 1-minute `cafleet-monitoring` tick is the safety net.
 
 ### Why ping, not poll
 
@@ -62,7 +62,7 @@ cafleet --session-id <session-id> member ping \
   --agent-id <director-agent-id> --member-id <member-agent-id>
 ```
 
-Each call is a separate Bash invocation. Do not chain with `&&` — the project's `.claude/rules/bash-command.md` prohibits shell operators in CAFleet command invocations because they break `permissions.allow` literal matching. Issuing them as two consecutive Bash calls is correct.
+Each call is a separate Bash invocation. Do not chain with `&&` — shell operators break `permissions.allow` literal matching for CAFleet commands, so each command must be issued as its own Bash call.
 
 ### Series of exec calls
 
@@ -146,3 +146,4 @@ End-to-end live verification is required so the chain rule is observed working i
 | Date | Changes |
 |------|---------|
 | 2026-04-30 | Initial draft |
+| 2026-05-01 | Address Copilot review on PR #45: rephrase the "chain rule" callout to remove the apparently-contradictory "unconditional on exec success" wording (now: run ping after any `member exec` that exits 0; skip on non-zero exit), and drop the stale `.claude/rules/bash-command.md` path citation in favor of stating the no-`&&` rule directly. Same wording fix applied to `skills/cafleet/SKILL.md` and `skills/cafleet/roles/director.md`. |
