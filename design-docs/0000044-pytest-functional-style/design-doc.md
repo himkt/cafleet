@@ -1,7 +1,7 @@
 # Refactor Test Suite to Functional Pytest Style
 
 **Status**: Approved
-**Progress**: 30/44 tasks complete
+**Progress**: 37/44 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -203,13 +203,13 @@ Apply the §A recipe to:
 
 ### Step 7: Refactor remaining tests
 
-- [ ] `cafleet/tests/test_output.py` — 4 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_output_indexed_list.py` — 1 class <!-- completed: -->
-- [ ] `cafleet/tests/test_server_cli.py` — 5 classes; promote `_WARNING_PREFIX` to module-level (§C) <!-- completed: -->
-- [ ] `cafleet/tests/test_tmux.py` — 12 `Test*` classes; **preserve `class _FakeClock`** untouched (§C) <!-- completed: -->
-- [ ] `cafleet/tests/test_tmux_send_helpers.py` — 1 class <!-- completed: -->
-- [ ] `cafleet/tests/test_webui_api_format.py` — 7 classes <!-- completed: -->
-- [ ] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: -->
+- [x] `cafleet/tests/test_output.py` — 4 classes <!-- completed: 2026-05-01T15:00 -->
+- [x] `cafleet/tests/test_output_indexed_list.py` — 1 class <!-- completed: 2026-05-01T15:00 -->
+- [x] `cafleet/tests/test_server_cli.py` — 5 classes; promote `_WARNING_PREFIX` to module-level (§C) <!-- completed: 2026-05-01T15:00 -->
+- [x] `cafleet/tests/test_tmux.py` — 12 `Test*` classes; **preserve `class _FakeClock`** untouched (§C) <!-- completed: 2026-05-01T15:00 -->
+- [x] `cafleet/tests/test_tmux_send_helpers.py` — 1 class <!-- completed: 2026-05-01T15:00 -->
+- [x] `cafleet/tests/test_webui_api_format.py` — 7 classes <!-- completed: 2026-05-01T15:00 -->
+- [x] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: 2026-05-01T15:00 -->
 
 ### Step 8: Final verification
 
