@@ -54,159 +54,147 @@ def mock_get_agent(monkeypatch):
     return fake_get_agent
 
 
-class TestDefaultPromptSubstitution:
-    def test_default_path_substitutes_all_placeholders(
-        self,
+def test_default_prompt_substitution__default_path_substitutes_all_placeholders(
+    ctx,
+    director_agent_id,
+    new_agent_id,
+    mock_get_agent,
+    session_id,
+):
+    result = _resolve_prompt(
         ctx,
-        director_agent_id,
-        new_agent_id,
-        mock_get_agent,
-        session_id,
-    ):
-        result = _resolve_prompt(
+        director_agent_id=director_agent_id,
+        new_agent_id=new_agent_id,
+        prompt_argv=(),
+    )
+    assert session_id in result
+    assert new_agent_id in result
+    assert director_agent_id in result
+    assert "Director-X" in result
+    assert "{session_id}" not in result
+    assert "{agent_id}" not in result
+    assert "{director_name}" not in result
+    assert "{director_agent_id}" not in result
+
+
+def test_custom_prompt_placeholder_substitution__custom_prompt_with_agent_id_placeholder_substitutes(
+    ctx,
+    director_agent_id,
+    new_agent_id,
+    mock_get_agent,
+):
+    result = _resolve_prompt(
+        ctx,
+        director_agent_id=director_agent_id,
+        new_agent_id=new_agent_id,
+        prompt_argv=("message", "for", "{agent_id}"),
+    )
+    assert result == f"message for {new_agent_id}"
+
+
+def test_custom_prompt_no_placeholder_pass_through__custom_prompt_without_placeholders_unchanged(
+    ctx,
+    director_agent_id,
+    new_agent_id,
+    mock_get_agent,
+):
+    result = _resolve_prompt(
+        ctx,
+        director_agent_id=director_agent_id,
+        new_agent_id=new_agent_id,
+        prompt_argv=("no", "placeholders", "here"),
+    )
+    assert result == "no placeholders here"
+
+
+# --- custom_prompt_doubled_brace_escape: design doc 2.2(d): ``{{...}}``
+# collapses to ``{...}`` without substitution. Callers embedding literal JSON
+# snippets must double their braces, and ``.format`` then collapses each pair
+# to a single literal brace. No placeholder substitution is attempted on the
+# inner tokens. Against pre-fix code this test FAILS because the custom path
+# never calls ``.format`` and returns the raw doubled-brace string. ---
+
+
+def test_custom_prompt_doubled_brace_escape__custom_prompt_with_doubled_braces_collapses_to_single(
+    ctx,
+    director_agent_id,
+    new_agent_id,
+    mock_get_agent,
+):
+    result = _resolve_prompt(
+        ctx,
+        director_agent_id=director_agent_id,
+        new_agent_id=new_agent_id,
+        prompt_argv=("data", "is", "{{not", "a", "placeholder}}", "closed"),
+    )
+    assert result == "data is {not a placeholder} closed"
+    assert new_agent_id not in result
+    assert director_agent_id not in result
+
+
+# --- custom_prompt_malformed_raises_usage_error: ``str.format`` errors must
+# convert to ``click.UsageError``. ``member_create``'s rollback path only
+# catches ``UsageError``, so a raw ``KeyError`` / ``ValueError`` would orphan
+# the just-registered agent. ---
+
+
+def test_custom_prompt_malformed_raises_usage_error__unknown_placeholder_raises_usage_error(
+    ctx,
+    director_agent_id,
+    new_agent_id,
+    mock_get_agent,
+):
+    with pytest.raises(click.UsageError) as exc_info:
+        _resolve_prompt(
             ctx,
             director_agent_id=director_agent_id,
             new_agent_id=new_agent_id,
-            prompt_argv=(),
+            prompt_argv=("hello", "{foo}"),
         )
-        assert session_id in result
-        assert new_agent_id in result
-        assert director_agent_id in result
-        assert "Director-X" in result
-        assert "{session_id}" not in result
-        assert "{agent_id}" not in result
-        assert "{director_name}" not in result
-        assert "{director_agent_id}" not in result
+    message = str(exc_info.value)
+    assert "foo" in message
+    assert "{session_id}" in message
+    assert "{agent_id}" in message
 
 
-class TestCustomPromptPlaceholderSubstitution:
-    def test_custom_prompt_with_agent_id_placeholder_substitutes(
-        self,
-        ctx,
-        director_agent_id,
-        new_agent_id,
-        mock_get_agent,
-    ):
-        result = _resolve_prompt(
+def test_custom_prompt_malformed_raises_usage_error__unmatched_brace_raises_usage_error(
+    ctx,
+    director_agent_id,
+    new_agent_id,
+    mock_get_agent,
+):
+    with pytest.raises(click.UsageError) as exc_info:
+        _resolve_prompt(
             ctx,
             director_agent_id=director_agent_id,
             new_agent_id=new_agent_id,
-            prompt_argv=("message", "for", "{agent_id}"),
+            prompt_argv=("hello", "{unclosed"),
         )
-        assert result == f"message for {new_agent_id}"
+    message = str(exc_info.value)
+    assert "{{" in message
+    assert "}}" in message
 
 
-class TestCustomPromptNoPlaceholderPassThrough:
-    def test_custom_prompt_without_placeholders_unchanged(
-        self,
-        ctx,
-        director_agent_id,
-        new_agent_id,
-        mock_get_agent,
-    ):
-        result = _resolve_prompt(
+def test_custom_prompt_malformed_raises_usage_error__attribute_access_raises_usage_error(
+    ctx,
+    director_agent_id,
+    new_agent_id,
+    mock_get_agent,
+):
+    # PR #25 3rd review: ``{agent_id.foo}`` triggers str.format attribute
+    # access on the substituted string; ``str`` has no ``.foo`` so Python
+    # raises ``AttributeError``. Must be caught and converted to
+    # ``UsageError`` so the rollback path in ``member_create`` still runs.
+    with pytest.raises(click.UsageError) as exc_info:
+        _resolve_prompt(
             ctx,
             director_agent_id=director_agent_id,
             new_agent_id=new_agent_id,
-            prompt_argv=("no", "placeholders", "here"),
+            prompt_argv=("hello", "{agent_id.foo}"),
         )
-        assert result == "no placeholders here"
-
-
-class TestCustomPromptDoubledBraceEscape:
-    """Design doc 2.2(d): ``{{...}}`` collapses to ``{...}`` without substitution.
-
-    Callers embedding literal JSON snippets must double their braces, and
-    ``.format`` then collapses each pair to a single literal brace.
-    No placeholder substitution is attempted on the inner tokens.
-
-    Against pre-fix code this test FAILS because the custom path never
-    calls ``.format`` and returns the raw doubled-brace string.
-    """
-
-    def test_custom_prompt_with_doubled_braces_collapses_to_single(
-        self,
-        ctx,
-        director_agent_id,
-        new_agent_id,
-        mock_get_agent,
-    ):
-        result = _resolve_prompt(
-            ctx,
-            director_agent_id=director_agent_id,
-            new_agent_id=new_agent_id,
-            prompt_argv=("data", "is", "{{not", "a", "placeholder}}", "closed"),
-        )
-        assert result == "data is {not a placeholder} closed"
-        assert new_agent_id not in result
-        assert director_agent_id not in result
-
-
-class TestCustomPromptMalformedRaisesUsageError:
-    """``str.format`` errors must convert to ``click.UsageError``.
-
-    ``member_create``'s rollback path only catches ``UsageError``, so a raw
-    ``KeyError`` / ``ValueError`` would orphan the just-registered agent.
-    """
-
-    def test_unknown_placeholder_raises_usage_error(
-        self,
-        ctx,
-        director_agent_id,
-        new_agent_id,
-        mock_get_agent,
-    ):
-        with pytest.raises(click.UsageError) as exc_info:
-            _resolve_prompt(
-                ctx,
-                director_agent_id=director_agent_id,
-                new_agent_id=new_agent_id,
-                prompt_argv=("hello", "{foo}"),
-            )
-        message = str(exc_info.value)
-        assert "foo" in message
-        assert "{session_id}" in message
-        assert "{agent_id}" in message
-
-    def test_unmatched_brace_raises_usage_error(
-        self,
-        ctx,
-        director_agent_id,
-        new_agent_id,
-        mock_get_agent,
-    ):
-        with pytest.raises(click.UsageError) as exc_info:
-            _resolve_prompt(
-                ctx,
-                director_agent_id=director_agent_id,
-                new_agent_id=new_agent_id,
-                prompt_argv=("hello", "{unclosed"),
-            )
-        message = str(exc_info.value)
-        assert "{{" in message
-        assert "}}" in message
-
-    def test_attribute_access_raises_usage_error(
-        self,
-        ctx,
-        director_agent_id,
-        new_agent_id,
-        mock_get_agent,
-    ):
-        # PR #25 3rd review: ``{agent_id.foo}`` triggers str.format attribute
-        # access on the substituted string; ``str`` has no ``.foo`` so Python
-        # raises ``AttributeError``. Must be caught and converted to
-        # ``UsageError`` so the rollback path in ``member_create`` still runs.
-        with pytest.raises(click.UsageError) as exc_info:
-            _resolve_prompt(
-                ctx,
-                director_agent_id=director_agent_id,
-                new_agent_id=new_agent_id,
-                prompt_argv=("hello", "{agent_id.foo}"),
-            )
-        message = str(exc_info.value)
-        assert "{{" in message
-        assert "}}" in message
+    message = str(exc_info.value)
+    assert "{{" in message
+    assert "}}" in message
 
 
 _CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
@@ -276,88 +264,83 @@ def stub_coding_agent_binaries(monkeypatch):
     monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: "/usr/bin/stub")
 
 
-class TestMemberCreatePassesDisplayName:
-    """``cli.py`` threads ``--name`` as ``display_name`` into
-    ``_build_claude_command()``, which means the ``command`` kwarg handed
-    to ``tmux.split_window`` contains ``"--name"`` + the member name.
-    """
-
-    def test_member_create_passes_member_name_as_display_name(
-        self,
-        bootstrapped_session,
-        split_window_recorder,
-        stub_coding_agent_binaries,
-    ):
-        session_id, director_id, runner = bootstrapped_session
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "member",
-                "create",
-                "--agent-id",
-                director_id,
-                "--name",
-                "Drafter",
-                "--description",
-                "Drafter for PR #42",
-                "--",
-                "hello",
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        assert len(split_window_recorder) == 1
-        command = split_window_recorder[0]["command"]
-        assert isinstance(command, list)
-        assert "--name" in command
-        name_index = command.index("--name")
-        assert command[name_index + 1] == "Drafter"
-        assert command[name_index + 2] == "hello"
-        assert command[0] == "claude"
+# --- member_create_passes_display_name: ``cli.py`` threads ``--name`` as
+# ``display_name`` into ``_build_claude_command()``, which means the ``command``
+# kwarg handed to ``tmux.split_window`` contains ``"--name"`` + the member name. ---
 
 
-class TestPermissionMode:
-    """Spawn argv carries ``--permission-mode dontAsk``.
+def test_member_create_passes_display_name__member_create_passes_member_name_as_display_name(
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    session_id, director_id, runner = bootstrapped_session
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "create",
+            "--agent-id",
+            director_id,
+            "--name",
+            "Drafter",
+            "--description",
+            "Drafter for PR #42",
+            "--",
+            "hello",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert len(split_window_recorder) == 1
+    command = split_window_recorder[0]["command"]
+    assert isinstance(command, list)
+    assert "--name" in command
+    name_index = command.index("--name")
+    assert command[name_index + 1] == "Drafter"
+    assert command[name_index + 2] == "hello"
+    assert command[0] == "claude"
 
-    Members spawn with the Bash tool enabled and permission prompts auto-resolve.
-    """
 
-    def test_claude_default_injects_dontask_permission_mode(
-        self,
-        bootstrapped_session,
-        split_window_recorder,
-        stub_coding_agent_binaries,
-    ):
-        session_id, director_id, runner = bootstrapped_session
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "member",
-                "create",
-                "--agent-id",
-                director_id,
-                "--name",
-                "Drafter",
-                "--description",
-                "Drafter for PR #42",
-                "--",
-                "hello",
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        assert len(split_window_recorder) == 1
-        command = split_window_recorder[0]["command"]
-        assert "--permission-mode" in command
-        perm_index = command.index("--permission-mode")
-        assert command[perm_index + 1] == "dontAsk"
-        assert command[0] == "claude"
-        assert "--disallowedTools" not in command
-        assert "Bash" not in command
-        # Pinned argv ordering: permission tokens before name args.
-        name_index = command.index("--name")
-        assert perm_index < name_index, (
-            f"--permission-mode must precede --name; got {command!r}"
-        )
+# --- permission_mode: spawn argv carries ``--permission-mode dontAsk``.
+# Members spawn with the Bash tool enabled and permission prompts auto-resolve. ---
+
+
+def test_permission_mode__claude_default_injects_dontask_permission_mode(
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    session_id, director_id, runner = bootstrapped_session
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "create",
+            "--agent-id",
+            director_id,
+            "--name",
+            "Drafter",
+            "--description",
+            "Drafter for PR #42",
+            "--",
+            "hello",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert len(split_window_recorder) == 1
+    command = split_window_recorder[0]["command"]
+    assert "--permission-mode" in command
+    perm_index = command.index("--permission-mode")
+    assert command[perm_index + 1] == "dontAsk"
+    assert command[0] == "claude"
+    assert "--disallowedTools" not in command
+    assert "Bash" not in command
+    # Pinned argv ordering: permission tokens before name args.
+    name_index = command.index("--name")
+    assert perm_index < name_index, (
+        f"--permission-mode must precede --name; got {command!r}"
+    )

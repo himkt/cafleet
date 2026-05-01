@@ -1,7 +1,7 @@
 # Refactor Test Suite to Functional Pytest Style
 
 **Status**: Approved
-**Progress**: 15/44 tasks complete
+**Progress**: 21/44 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -179,12 +179,12 @@ Apply the §A recipe to:
 
 ### Step 4: Refactor CLI member-family tests
 
-- [ ] `cafleet/tests/test_cli_member.py` — 7 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_cli_member_delete.py` — 8 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_cli_member_exec.py` — 4 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_cli_member_ping.py` — 5 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_cli_member_send_input.py` — 8 classes <!-- completed: -->
-- [ ] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: -->
+- [x] `cafleet/tests/test_cli_member.py` — 7 classes <!-- completed: 2026-05-01T13:30 -->
+- [x] `cafleet/tests/test_cli_member_delete.py` — 8 classes <!-- completed: 2026-05-01T13:30 -->
+- [x] `cafleet/tests/test_cli_member_exec.py` — 4 classes <!-- completed: 2026-05-01T13:30 -->
+- [x] `cafleet/tests/test_cli_member_ping.py` — 5 classes <!-- completed: 2026-05-01T13:30 -->
+- [x] `cafleet/tests/test_cli_member_send_input.py` — 8 classes <!-- completed: 2026-05-01T13:30 -->
+- [x] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: 2026-05-01T13:30 -->
 
 ### Step 5: Refactor session + bootstrap tests
 
