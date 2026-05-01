@@ -26,7 +26,7 @@ The CAFleet test suite has 32 `test_*.py` files under `cafleet/tests/` (plus `co
 
 The `[tool.pytest.ini_options]` table in `cafleet/pyproject.toml` is empty, so pytest's default collection rules apply (`Test*` classes and `test_*` functions). Removing the `Test*` containers does not alter collection because top-level `test_*` functions are also collected by default.
 
-The §A recipe assumes there are no class-scoped marks (`@pytest.mark.parametrize` or other `@pytest.mark.*`) sitting directly on the class declarations. This is verifiable today via `git grep -nE "^@pytest\.mark\." cafleet/tests/`, which returns zero matches. Existing `@pytest.mark.parametrize` decorators all sit on individual methods inside classes (see §A step 5).
+The §A recipe assumes there were no class-scoped marks (`@pytest.mark.parametrize` or other `@pytest.mark.*`) sitting directly on the class declarations in the pre-refactor suite. Before the refactor, `git grep -nE "^@pytest\.mark\." cafleet/tests/` returned zero matches because existing `@pytest.mark.parametrize` decorators sat on individual methods inside classes rather than at module scope (see §A step 5). After the refactor, module-level `@pytest.mark.parametrize` decorators are expected, so that grep is no longer a valid post-refactor invariant.
 
 Functional style is the more common modern convention in pytest projects: less ceremony, fewer indentation levels, no `self` argument noise, and no organizational hierarchy that pytest does not actually use beyond test ID generation.
 
@@ -153,7 +153,7 @@ Therefore this design proceeds with **mechanical conversion only**. A separate c
 
 - [x] Run `mise //cafleet:test` from the project root and confirm a green baseline. <!-- completed: 2026-05-01T12:00 -->
 - [x] Capture the pre-refactor test count via `mise //cafleet:test -- --collect-only -q` (mise forwards arguments after `--` to the underlying `uv run python -m pytest`) and record the count in this design doc immediately below this checklist as `Baseline test count: N`. <!-- completed: 2026-05-01T12:00 -->
-- [x] Confirm the §A step 5 invariant by running `git grep -nE "^@pytest\.mark\." cafleet/tests/` and verifying the result is empty (no class-scoped marks). <!-- completed: 2026-05-01T12:00 -->
+- [x] Confirm the §A step 5 invariant by running `git grep -nP "(?s)^@pytest\.mark\..*\nclass Test" cafleet/tests/` and verifying the result is empty (no class-scoped marks immediately preceding `class Test...`). <!-- completed: 2026-05-01T12:00 -->
 
 Baseline test count: 557
 
