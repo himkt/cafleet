@@ -31,74 +31,75 @@ def runner():
     return CliRunner()
 
 
-class TestAgentDeregisterAuthCheck:
-    """``agent deregister`` must call ``broker.verify_agent_session`` BEFORE
-    ``broker.deregister_agent``. Without the gate, a caller can deregister
-    any agent in the database by supplying an unrelated ``--session-id``.
-    """
+# --- agent_deregister_auth_check: ``agent deregister`` must call
+# ``broker.verify_agent_session`` BEFORE ``broker.deregister_agent``. Without
+# the gate, a caller can deregister any agent in the database by supplying an
+# unrelated ``--session-id``. ---
 
-    def test_rejects_unknown_agent(self, runner, session_id, agent_id, monkeypatch):
-        deregister_calls: list[tuple] = []
 
-        def fake_verify(aid, sid):
-            assert aid == agent_id
-            assert sid == session_id
-            return False
+def test_agent_deregister_auth_check__rejects_unknown_agent(runner, session_id, agent_id, monkeypatch):
+    deregister_calls: list[tuple] = []
 
-        def fake_deregister(*args, **kwargs):
-            deregister_calls.append((args, kwargs))
-            return True
+    def fake_verify(aid, sid):
+        assert aid == agent_id
+        assert sid == session_id
+        return False
 
-        monkeypatch.setattr(broker, "verify_agent_session", fake_verify)
-        monkeypatch.setattr(broker, "deregister_agent", fake_deregister)
+    def fake_deregister(*args, **kwargs):
+        deregister_calls.append((args, kwargs))
+        return True
 
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "agent",
-                "deregister",
-                "--agent-id",
-                agent_id,
-            ],
-        )
-        assert result.exit_code == 1, result.output
-        out = result.output or ""
-        assert agent_id in out
-        assert "not a member of session" in out
-        assert session_id in out
-        assert deregister_calls == [], (
-            "broker.deregister_agent must not be invoked when "
-            "verify_agent_session fails"
-        )
+    monkeypatch.setattr(broker, "verify_agent_session", fake_verify)
+    monkeypatch.setattr(broker, "deregister_agent", fake_deregister)
 
-    def test_accepts_valid_agent(self, runner, session_id, agent_id, monkeypatch):
-        verify_calls: list[tuple] = []
-        deregister_calls: list[tuple] = []
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "agent",
+            "deregister",
+            "--agent-id",
+            agent_id,
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    out = result.output or ""
+    assert agent_id in out
+    assert "not a member of session" in out
+    assert session_id in out
+    assert deregister_calls == [], (
+        "broker.deregister_agent must not be invoked when "
+        "verify_agent_session fails"
+    )
 
-        def fake_verify(aid, sid):
-            verify_calls.append((aid, sid))
-            return True
 
-        def fake_deregister(aid):
-            deregister_calls.append(aid)
-            return True
+def test_agent_deregister_auth_check__accepts_valid_agent(runner, session_id, agent_id, monkeypatch):
+    verify_calls: list[tuple] = []
+    deregister_calls: list[tuple] = []
 
-        monkeypatch.setattr(broker, "verify_agent_session", fake_verify)
-        monkeypatch.setattr(broker, "deregister_agent", fake_deregister)
+    def fake_verify(aid, sid):
+        verify_calls.append((aid, sid))
+        return True
 
-        result = runner.invoke(
-            cli,
-            [
-                "--session-id",
-                session_id,
-                "agent",
-                "deregister",
-                "--agent-id",
-                agent_id,
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        assert verify_calls == [(agent_id, session_id)]
-        assert deregister_calls == [agent_id]
+    def fake_deregister(aid):
+        deregister_calls.append(aid)
+        return True
+
+    monkeypatch.setattr(broker, "verify_agent_session", fake_verify)
+    monkeypatch.setattr(broker, "deregister_agent", fake_deregister)
+
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "agent",
+            "deregister",
+            "--agent-id",
+            agent_id,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert verify_calls == [(agent_id, session_id)]
+    assert deregister_calls == [agent_id]

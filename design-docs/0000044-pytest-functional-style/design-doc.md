@@ -1,7 +1,7 @@
 # Refactor Test Suite to Functional Pytest Style
 
 **Status**: Approved
-**Progress**: 8/44 tasks complete
+**Progress**: 15/44 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -169,13 +169,13 @@ Apply the §A recipe to:
 
 ### Step 3: Refactor CLI agent / message / generic tests
 
-- [ ] `cafleet/tests/test_cli_agent.py` — 1 class <!-- completed: -->
-- [ ] `cafleet/tests/test_cli_claude_helpers.py` — 3 classes; promote `_STANDARD_KWARGS` to module-level (§C) <!-- completed: -->
-- [ ] `cafleet/tests/test_cli_client_command.py` — 4 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_cli_doctor.py` — 4 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_cli_message.py` — 4 classes <!-- completed: -->
-- [ ] `cafleet/tests/test_cli_message_truncation.py` — 4 classes <!-- completed: -->
-- [ ] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: -->
+- [x] `cafleet/tests/test_cli_agent.py` — 1 class <!-- completed: 2026-05-01T13:00 -->
+- [x] `cafleet/tests/test_cli_claude_helpers.py` — 3 classes; promote `_STANDARD_KWARGS` to module-level (§C) <!-- completed: 2026-05-01T13:00 -->
+- [x] `cafleet/tests/test_cli_client_command.py` — 4 classes <!-- completed: 2026-05-01T13:00 -->
+- [x] `cafleet/tests/test_cli_doctor.py` — 4 classes <!-- completed: 2026-05-01T13:00 -->
+- [x] `cafleet/tests/test_cli_message.py` — 4 classes <!-- completed: 2026-05-01T13:00 -->
+- [x] `cafleet/tests/test_cli_message_truncation.py` — 4 classes <!-- completed: 2026-05-01T13:00 -->
+- [x] After this step, run `mise //cafleet:test` and confirm green. <!-- completed: 2026-05-01T13:00 -->
 
 ### Step 4: Refactor CLI member-family tests
 
