@@ -205,7 +205,9 @@ def test_session_create__each_create_mints_unique_id(tmp_path, monkeypatch):
     assert len(rows) == 2
 
 
-def test_session_create__json_output_includes_administrator_agent_id(tmp_path, monkeypatch):
+def test_session_create__json_output_includes_administrator_agent_id(
+    tmp_path, monkeypatch
+):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,
@@ -223,7 +225,9 @@ def test_session_create__json_output_includes_administrator_agent_id(tmp_path, m
     uuid.UUID(data["administrator_agent_id"])
 
 
-def test_session_create__json_administrator_agent_id_matches_db_row(tmp_path, monkeypatch):
+def test_session_create__json_administrator_agent_id_matches_db_row(
+    tmp_path, monkeypatch
+):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,
@@ -438,7 +442,9 @@ def test_session_show__missing_session_exits_nonzero(tmp_path, monkeypatch):
     assert "not found" in output_lower
 
 
-def test_session_show__soft_deleted_session_surfaces_deleted_at_line(tmp_path, monkeypatch):
+def test_session_show__soft_deleted_session_surfaces_deleted_at_line(
+    tmp_path, monkeypatch
+):
     """Design 0000026: ``get_session`` intentionally returns soft-deleted
     rows (exposing ``deleted_at`` for audit), but pre-fix the text output
     dropped that field, so a soft-deleted session was visually identical
@@ -476,7 +482,9 @@ def test_session_show__soft_deleted_session_surfaces_deleted_at_line(tmp_path, m
     assert "2026-04-16T10:00:00+00:00" in result.output
 
 
-def test_session_show__active_session_does_not_print_deleted_at_line(tmp_path, monkeypatch):
+def test_session_show__active_session_does_not_print_deleted_at_line(
+    tmp_path, monkeypatch
+):
     """Symmetric check: an active (``deleted_at IS NULL``) session must
     NOT show a ``deleted_at:`` line — otherwise users would see a blank
     or misleading field on every healthy session.
@@ -539,7 +547,9 @@ def test_session_delete__delete_nonexistent_session(tmp_path, monkeypatch):
     assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
-def test_session_delete__delete_session_with_active_agents_succeeds(tmp_path, monkeypatch):
+def test_session_delete__delete_session_with_active_agents_succeeds(
+    tmp_path, monkeypatch
+):
     """Session with active agents soft-deletes successfully and flips them
     to ``deregistered``.
 
@@ -568,7 +578,9 @@ def test_session_delete__delete_session_with_active_agents_succeeds(tmp_path, mo
     assert _session_deleted_at(db_file, sid) is not None
 
 
-def test_session_delete__delete_session_with_deregistered_agents_succeeds(tmp_path, monkeypatch):
+def test_session_delete__delete_session_with_deregistered_agents_succeeds(
+    tmp_path, monkeypatch
+):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,

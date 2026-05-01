@@ -243,7 +243,9 @@ def test_migration_0006_upgrade_idempotent__double_upgrade_is_idempotent(db_at_0
         engine.dispose()
 
 
-def test_migration_0006_upgrade_idempotent__idempotent_preserves_original_administrator_id(db_at_0005):
+def test_migration_0006_upgrade_idempotent__idempotent_preserves_original_administrator_id(
+    db_at_0005,
+):
     sid = str(uuid.uuid4())
     created_at = "2026-04-04T04:04:04+00:00"
 
@@ -281,7 +283,9 @@ def test_migration_0006_upgrade_idempotent__idempotent_preserves_original_admini
 # FK enforcement, not our migration. ---
 
 
-def test_migration_0006_downgrade_smoke__downgrade_removes_administrator_on_empty_session(db_at_0005):
+def test_migration_0006_downgrade_smoke__downgrade_removes_administrator_on_empty_session(
+    db_at_0005,
+):
     sid = str(uuid.uuid4())
     created_at = "2026-05-05T05:05:05+00:00"
 

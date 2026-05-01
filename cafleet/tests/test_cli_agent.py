@@ -37,7 +37,9 @@ def runner():
 # unrelated ``--session-id``. ---
 
 
-def test_agent_deregister_auth_check__rejects_unknown_agent(runner, session_id, agent_id, monkeypatch):
+def test_agent_deregister_auth_check__rejects_unknown_agent(
+    runner, session_id, agent_id, monkeypatch
+):
     deregister_calls: list[tuple] = []
 
     def fake_verify(aid, sid):
@@ -69,12 +71,13 @@ def test_agent_deregister_auth_check__rejects_unknown_agent(runner, session_id, 
     assert "not a member of session" in out
     assert session_id in out
     assert deregister_calls == [], (
-        "broker.deregister_agent must not be invoked when "
-        "verify_agent_session fails"
+        "broker.deregister_agent must not be invoked when verify_agent_session fails"
     )
 
 
-def test_agent_deregister_auth_check__accepts_valid_agent(runner, session_id, agent_id, monkeypatch):
+def test_agent_deregister_auth_check__accepts_valid_agent(
+    runner, session_id, agent_id, monkeypatch
+):
     verify_calls: list[tuple] = []
     deregister_calls: list[tuple] = []
 

@@ -82,7 +82,9 @@ def test_requires_agent_session__false_does_not_call_verify(runner, monkeypatch)
     assert verify_calls == []
 
 
-def test_requires_agent_session__true_calls_verify_and_raises_on_false(runner, monkeypatch):
+def test_requires_agent_session__true_calls_verify_and_raises_on_false(
+    runner, monkeypatch
+):
     verify_calls = []
 
     def fake_verify(aid, sid):
@@ -106,7 +108,9 @@ def test_requires_agent_session__true_calls_verify_and_raises_on_false(runner, m
     assert verify_calls == [("agent-1", "session-1")]
 
 
-def test_requires_agent_session__true_proceeds_when_verify_returns_true(runner, monkeypatch):
+def test_requires_agent_session__true_proceeds_when_verify_returns_true(
+    runner, monkeypatch
+):
     monkeypatch.setattr(broker, "verify_agent_session", lambda _a, _s: True)
 
     result = runner.invoke(

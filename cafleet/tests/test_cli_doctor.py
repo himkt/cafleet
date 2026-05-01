@@ -67,7 +67,9 @@ def test_doctor_outside_tmux__outside_tmux_exits_one(runner, monkeypatch):
     assert "cafleet member commands must be run inside a tmux session" in combined
 
 
-def test_doctor_session_id_silently_ignored__session_id_flag_silently_ignored(runner, mock_tmux_ok):
+def test_doctor_session_id_silently_ignored__session_id_flag_silently_ignored(
+    runner, mock_tmux_ok
+):
     result = runner.invoke(
         cli,
         [

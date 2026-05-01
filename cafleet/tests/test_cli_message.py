@@ -137,7 +137,9 @@ def test_message_show_auth_check__accepts_valid_agent(
 # they like. ---
 
 
-def test_message_poll_auth_check__rejects_unknown_agent(runner, session_id, agent_id, monkeypatch):
+def test_message_poll_auth_check__rejects_unknown_agent(
+    runner, session_id, agent_id, monkeypatch
+):
     poll_calls: list[tuple] = []
 
     def fake_verify(aid, sid):
@@ -173,7 +175,9 @@ def test_message_poll_auth_check__rejects_unknown_agent(runner, session_id, agen
     )
 
 
-def test_message_poll_auth_check__accepts_valid_agent(runner, session_id, agent_id, monkeypatch):
+def test_message_poll_auth_check__accepts_valid_agent(
+    runner, session_id, agent_id, monkeypatch
+):
     verify_calls: list[tuple] = []
     poll_calls: list[tuple] = []
 

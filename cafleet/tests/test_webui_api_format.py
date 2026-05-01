@@ -89,7 +89,9 @@ def test_format_messages_empty__empty_rows_returns_empty_and_skips_lookup(monkey
     assert accessor_calls == []
 
 
-def test_format_messages_batches_lookup__calls_accessor_per_row_and_batches_agent_lookup(monkeypatch):
+def test_format_messages_batches_lookup__calls_accessor_per_row_and_batches_agent_lookup(
+    monkeypatch,
+):
     rows = [
         {"row_index": 0, "from": "a1", "to": "a2"},
         {"row_index": 1, "from": "a1", "to": "a3"},

@@ -138,7 +138,9 @@ def broker_db(sync_sessionmaker, _patch_broker):
     return sync_sessionmaker
 
 
-def test_deregister_administrator_guard__raises_administrator_protected_error(broker_db):
+def test_deregister_administrator_guard__raises_administrator_protected_error(
+    broker_db,
+):
     session = _create_session_with_ctx()
     admin_id = session["administrator_agent_id"]
 
@@ -148,7 +150,9 @@ def test_deregister_administrator_guard__raises_administrator_protected_error(br
     assert "Administrator cannot be deregistered" in str(exc_info.value)
 
 
-def test_deregister_administrator_guard__admin_row_still_active_after_failed_deregister(broker_db):
+def test_deregister_administrator_guard__admin_row_still_active_after_failed_deregister(
+    broker_db,
+):
     session = _create_session_with_ctx()
     admin_id = session["administrator_agent_id"]
 
@@ -161,12 +165,12 @@ def test_deregister_administrator_guard__admin_row_still_active_after_failed_der
     assert row.deregistered_at is None
 
 
-def test_deregister_administrator_guard__deregistering_user_agent_still_works(broker_db):
+def test_deregister_administrator_guard__deregistering_user_agent_still_works(
+    broker_db,
+):
     session = _create_session_with_ctx()
     sid = session["session_id"]
-    user = broker.register_agent(
-        session_id=sid, name="user", description="A test user"
-    )
+    user = broker.register_agent(session_id=sid, name="user", description="A test user")
 
     result = broker.deregister_agent(user["agent_id"])
     assert result is True
@@ -175,7 +179,9 @@ def test_deregister_administrator_guard__deregistering_user_agent_still_works(br
     assert names == {"Director", "Administrator"}
 
 
-def test_register_agent_placement_administrator_guard__raises_when_director_is_administrator(broker_db):
+def test_register_agent_placement_administrator_guard__raises_when_director_is_administrator(
+    broker_db,
+):
     session = _create_session_with_ctx()
     sid = session["session_id"]
     admin_id = session["administrator_agent_id"]
@@ -198,7 +204,9 @@ def test_register_agent_placement_administrator_guard__raises_when_director_is_a
     assert "Administrator cannot be a director" in str(exc_info.value)
 
 
-def test_register_agent_placement_administrator_guard__admin_director_rejection_does_not_create_member(broker_db):
+def test_register_agent_placement_administrator_guard__admin_director_rejection_does_not_create_member(
+    broker_db,
+):
     session = _create_session_with_ctx()
     sid = session["session_id"]
     admin_id = session["administrator_agent_id"]
@@ -223,7 +231,9 @@ def test_register_agent_placement_administrator_guard__admin_director_rejection_
     assert names == {"Director", "Administrator"}
 
 
-def test_register_agent_placement_administrator_guard__placement_with_user_agent_director_still_works(broker_db):
+def test_register_agent_placement_administrator_guard__placement_with_user_agent_director_still_works(
+    broker_db,
+):
     session = _create_session_with_ctx()
     sid = session["session_id"]
 

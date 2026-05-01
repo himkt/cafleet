@@ -694,9 +694,7 @@ def test_get_task__verifies_agent_belongs_to_session():
     sender = _register_agent(sid_a, name="sender")
     recipient = _register_agent(sid_a, name="recipient")
 
-    sent = broker.send_message(
-        sid_a, sender["agent_id"], recipient["agent_id"], "Hi"
-    )
+    sent = broker.send_message(sid_a, sender["agent_id"], recipient["agent_id"], "Hi")
     task_id = sent["task"]["id"]
 
     # Should succeed with the correct session

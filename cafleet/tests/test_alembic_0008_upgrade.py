@@ -140,7 +140,9 @@ def test_migration_0008_upgrade__renames_root_director_name_and_card(db_at_0007)
         engine.dispose()
 
 
-def test_migration_0008_upgrade__leaves_user_agents_named_director_untouched(db_at_0007):
+def test_migration_0008_upgrade__leaves_user_agents_named_director_untouched(
+    db_at_0007,
+):
     sid = str(uuid.uuid4())
     director_id = str(uuid.uuid4())
     user_id = str(uuid.uuid4())

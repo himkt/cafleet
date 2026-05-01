@@ -227,9 +227,7 @@ def test_happy_path__call_ordering_send_exit_then_wait_then_deregister_then_layo
         "select_layout",
     ]
 
-    assert send_exit_recorder == [
-        {"target_pane_id": PANE_ID, "ignore_missing": True}
-    ]
+    assert send_exit_recorder == [{"target_pane_id": PANE_ID, "ignore_missing": True}]
     assert deregister_recorder == [MEMBER_ID]
 
     out = result.output
@@ -400,9 +398,7 @@ def test_force__force_kills_pane_then_deregisters(
     assert send_exit_recorder == []
     assert wait_for_pane_gone_recorder.calls == []
 
-    assert kill_pane_recorder == [
-        {"target_pane_id": PANE_ID, "ignore_missing": True}
-    ]
+    assert kill_pane_recorder == [{"target_pane_id": PANE_ID, "ignore_missing": True}]
     assert deregister_recorder == [MEMBER_ID]
 
     names = [name for (name, *_) in call_log]
@@ -430,9 +426,7 @@ def test_force__force_short_flag_works(
     result = _invoke(runner, session_id, "-f")
     assert result.exit_code == 0, result.output
     assert send_exit_recorder == []
-    assert kill_pane_recorder == [
-        {"target_pane_id": PANE_ID, "ignore_missing": True}
-    ]
+    assert kill_pane_recorder == [{"target_pane_id": PANE_ID, "ignore_missing": True}]
 
 
 def test_force__force_json_output_pane_status_killed(
@@ -516,9 +510,7 @@ def test_authorization_boundary__fetch_db_error_surfaces_failed_to_fetch_wording
 def test_authorization_boundary__placement_none_exits_one_with_deregister_hint(
     runner, session_id, monkeypatch, deregister_recorder
 ):
-    monkeypatch.setattr(
-        broker, "get_agent", lambda *_a, **_kw: _agent(placement=None)
-    )
+    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
     result = _invoke(runner, session_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""

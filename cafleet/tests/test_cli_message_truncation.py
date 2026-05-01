@@ -86,9 +86,7 @@ def test_message_poll_truncation__default_truncates_text_in_text_output(
         broker,
         "poll_tasks",
         lambda *_a, **_k: [
-            _task_payload(
-                "t-1", sender="from-1", recipient=agent_id, text=LONG_BODY
-            )
+            _task_payload("t-1", sender="from-1", recipient=agent_id, text=LONG_BODY)
         ],
     )
     result = runner.invoke(
@@ -114,9 +112,7 @@ def test_message_poll_truncation__full_emits_full_text_in_text_output(
         broker,
         "poll_tasks",
         lambda *_a, **_k: [
-            _task_payload(
-                "t-1", sender="from-1", recipient=agent_id, text=LONG_BODY
-            )
+            _task_payload("t-1", sender="from-1", recipient=agent_id, text=LONG_BODY)
         ],
     )
     result = runner.invoke(
@@ -143,9 +139,7 @@ def test_message_poll_truncation__default_truncates_text_in_json_output(
         broker,
         "poll_tasks",
         lambda *_a, **_k: [
-            _task_payload(
-                "t-1", sender="from-1", recipient=agent_id, text=LONG_BODY
-            )
+            _task_payload("t-1", sender="from-1", recipient=agent_id, text=LONG_BODY)
         ],
     )
     result = runner.invoke(
@@ -172,9 +166,7 @@ def test_message_poll_truncation__full_emits_full_text_in_json_output(
         broker,
         "poll_tasks",
         lambda *_a, **_k: [
-            _task_payload(
-                "t-1", sender="from-1", recipient=agent_id, text=LONG_BODY
-            )
+            _task_payload("t-1", sender="from-1", recipient=agent_id, text=LONG_BODY)
         ],
     )
     result = runner.invoke(
@@ -265,9 +257,7 @@ def test_message_poll_truncation__non_text_fields_byte_identical_between_default
 ):
     def fresh_payload():
         return [
-            _task_payload(
-                "t-1", sender="from-1", recipient=agent_id, text=LONG_BODY
-            )
+            _task_payload("t-1", sender="from-1", recipient=agent_id, text=LONG_BODY)
         ]
 
     monkeypatch.setattr(broker, "poll_tasks", lambda *_a, **_k: fresh_payload())
@@ -304,12 +294,9 @@ def test_message_poll_truncation__non_text_fields_byte_identical_between_default
     assert default_task["id"] == full_task["id"]
     assert default_task["status"]["state"] == full_task["status"]["state"]
     assert (
-        default_task["metadata"]["fromAgentId"]
-        == full_task["metadata"]["fromAgentId"]
+        default_task["metadata"]["fromAgentId"] == full_task["metadata"]["fromAgentId"]
     )
-    assert (
-        default_task["metadata"]["toAgentId"] == full_task["metadata"]["toAgentId"]
-    )
+    assert default_task["metadata"]["toAgentId"] == full_task["metadata"]["toAgentId"]
     assert default_task["metadata"]["type"] == full_task["metadata"]["type"]
 
 
@@ -484,12 +471,9 @@ def test_message_show_truncation__non_text_fields_byte_identical_between_default
     assert default_task["id"] == full_task["id"]
     assert default_task["status"]["state"] == full_task["status"]["state"]
     assert (
-        default_task["metadata"]["fromAgentId"]
-        == full_task["metadata"]["fromAgentId"]
+        default_task["metadata"]["fromAgentId"] == full_task["metadata"]["fromAgentId"]
     )
-    assert (
-        default_task["metadata"]["toAgentId"] == full_task["metadata"]["toAgentId"]
-    )
+    assert default_task["metadata"]["toAgentId"] == full_task["metadata"]["toAgentId"]
     assert default_task["metadata"]["type"] == full_task["metadata"]["type"]
 
 
@@ -657,12 +641,9 @@ def test_message_send_truncation__non_text_fields_byte_identical_between_default
     assert default_task["id"] == full_task["id"]
     assert default_task["status"]["state"] == full_task["status"]["state"]
     assert (
-        default_task["metadata"]["fromAgentId"]
-        == full_task["metadata"]["fromAgentId"]
+        default_task["metadata"]["fromAgentId"] == full_task["metadata"]["fromAgentId"]
     )
-    assert (
-        default_task["metadata"]["toAgentId"] == full_task["metadata"]["toAgentId"]
-    )
+    assert default_task["metadata"]["toAgentId"] == full_task["metadata"]["toAgentId"]
     assert default_task["metadata"]["type"] == full_task["metadata"]["type"]
 
 
@@ -712,9 +693,7 @@ def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_in_text_
     monkeypatch.setattr(
         broker,
         "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_payload(
-            task_id, sender=agent_id, count=3
-        ),
+        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
     )
     result = runner.invoke(
         cli,
@@ -741,9 +720,7 @@ def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_with_ful
     monkeypatch.setattr(
         broker,
         "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_payload(
-            task_id, sender=agent_id, count=3
-        ),
+        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
     )
     result = runner.invoke(
         cli,
@@ -769,9 +746,7 @@ def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_in_json_
     monkeypatch.setattr(
         broker,
         "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_payload(
-            task_id, sender=agent_id, count=3
-        ),
+        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
     )
     result = runner.invoke(
         cli,
@@ -799,9 +774,7 @@ def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_with_ful
     monkeypatch.setattr(
         broker,
         "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_payload(
-            task_id, sender=agent_id, count=3
-        ),
+        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
     )
     result = runner.invoke(
         cli,
@@ -829,9 +802,7 @@ def test_message_broadcast_no_truncation__notifications_sent_count_preserved_in_
     monkeypatch.setattr(
         broker,
         "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_payload(
-            task_id, sender=agent_id, count=7
-        ),
+        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=7),
     )
     result = runner.invoke(
         cli,
@@ -859,9 +830,7 @@ def test_message_broadcast_no_truncation__default_and_full_json_output_byte_iden
     def fresh_payload():
         return _broadcast_summary_payload(task_id, sender=agent_id, count=5)
 
-    monkeypatch.setattr(
-        broker, "broadcast_message", lambda *_a, **_k: fresh_payload()
-    )
+    monkeypatch.setattr(broker, "broadcast_message", lambda *_a, **_k: fresh_payload())
     common = [
         "--json",
         "message",

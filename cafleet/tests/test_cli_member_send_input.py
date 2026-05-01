@@ -130,7 +130,9 @@ def _invoke(runner, session_id, *extra_args, **invoke_kwargs):
     )
 
 
-def test_flag_validation__no_flag_supplied_exits_two(runner, session_id, happy_path_agent):
+def test_flag_validation__no_flag_supplied_exits_two(
+    runner, session_id, happy_path_agent
+):
     result = _invoke(runner, session_id)
     assert result.exit_code == 2, result.output
     out = result.output or ""
@@ -192,7 +194,9 @@ def test_flag_validation__freetext_empty_string_is_accepted(
     assert freetext_recorder[0]["text"] == ""
 
 
-def test_authorization_boundary__missing_agent_exits_one(runner, session_id, monkeypatch):
+def test_authorization_boundary__missing_agent_exits_one(
+    runner, session_id, monkeypatch
+):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
     result = _invoke(runner, session_id, "--choice", "1")
     assert result.exit_code == 1, result.output
@@ -443,7 +447,9 @@ def test_bash_flag_removed__old_bash_flag_form_errors_with_no_such_option(
 # ``cafleet member exec`` boundary. ---
 
 
-def test_freetext_bang_rejection__freetext_leading_bang_rejected(runner, session_id, happy_path_agent):
+def test_freetext_bang_rejection__freetext_leading_bang_rejected(
+    runner, session_id, happy_path_agent
+):
     result = _invoke(runner, session_id, "--freetext", "!ls")
     assert result.exit_code == 2, result.output
     assert "--freetext may not start with" in (result.output or "")
@@ -457,7 +463,9 @@ def test_freetext_bang_rejection__freetext_whitespace_then_bang_rejected(
     assert "--freetext may not start with" in (result.output or "")
 
 
-def test_freetext_bang_rejection__freetext_lone_bang_rejected(runner, session_id, happy_path_agent):
+def test_freetext_bang_rejection__freetext_lone_bang_rejected(
+    runner, session_id, happy_path_agent
+):
     result = _invoke(runner, session_id, "--freetext", "!")
     assert result.exit_code == 2, result.output
     assert "--freetext may not start with" in (result.output or "")

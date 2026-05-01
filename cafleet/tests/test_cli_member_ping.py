@@ -127,7 +127,9 @@ def test_ping_dispatch__poll_trigger_called_with_correct_kwargs(
     assert call["agent_id"] == MEMBER_ID
 
 
-def test_ping_dispatch__text_output(runner, session_id, happy_path_agent, poll_recorder):
+def test_ping_dispatch__text_output(
+    runner, session_id, happy_path_agent, poll_recorder
+):
     result = _invoke(runner, session_id)
     assert result.exit_code == 0, result.output
     out = result.output or ""
@@ -164,9 +166,7 @@ def test_ping_dispatch__json_output_two_keys(
 def test_send_failure__send_poll_trigger_returns_false_exits_one(
     runner, session_id, happy_path_agent, monkeypatch
 ):
-    monkeypatch.setattr(
-        tmux, "send_poll_trigger", lambda **_kw: False, raising=False
-    )
+    monkeypatch.setattr(tmux, "send_poll_trigger", lambda **_kw: False, raising=False)
     result = _invoke(runner, session_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
@@ -187,7 +187,9 @@ def test_send_failure__send_poll_trigger_raises_tmux_error_exits_one(
     assert "send failed: simulated" in (result.output or "")
 
 
-def test_authorization_boundary__missing_agent_exits_one(runner, session_id, monkeypatch):
+def test_authorization_boundary__missing_agent_exits_one(
+    runner, session_id, monkeypatch
+):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
     result = _invoke(runner, session_id)
     assert result.exit_code == 1, result.output
@@ -314,7 +316,4 @@ def test_input_validation__unexpected_positional_argument_exits_two(runner, sess
     )
     assert result.exit_code == 2, result.output
     out = result.output or ""
-    assert (
-        "unexpected extra argument" in out.lower()
-        or "got unexpected" in out.lower()
-    )
+    assert "unexpected extra argument" in out.lower() or "got unexpected" in out.lower()

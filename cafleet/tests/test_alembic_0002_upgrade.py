@@ -118,9 +118,7 @@ def test_migration_0002_upgrade__session_seeded_from_api_key(db_at_0001):
 
 
 def test_migration_0002_upgrade__agent_fk_valid_after_upgrade(db_at_0001):
-    api_key_hash = (
-        "beef0000beef0000beef0000beef0000beef0000beef0000beef0000beef0000"
-    )
+    api_key_hash = "beef0000beef0000beef0000beef0000beef0000beef0000beef0000beef0000"
     agent_id = "agent-migration-test"
     now = _now_iso()
 
@@ -261,9 +259,7 @@ def test_migration_0002_upgrade__idx_agents_session_status_exists(db_at_0001):
     try:
         insp = inspect(engine)
         indexes = insp.get_indexes("agents")
-        match = [
-            idx for idx in indexes if idx["name"] == "idx_agents_session_status"
-        ]
+        match = [idx for idx in indexes if idx["name"] == "idx_agents_session_status"]
         assert len(match) == 1
         assert "session_id" in match[0]["column_names"]
         assert "status" in match[0]["column_names"]

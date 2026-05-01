@@ -124,7 +124,9 @@ def test_exec_dispatch__positional_cmd_dispatched_with_pane_and_command(
     assert call["command"] == "git log -1 --oneline"
 
 
-def test_exec_dispatch__text_output(runner, session_id, happy_path_agent, bash_recorder):
+def test_exec_dispatch__text_output(
+    runner, session_id, happy_path_agent, bash_recorder
+):
     result = _invoke(runner, session_id, "git log -1 --oneline")
     assert result.exit_code == 0, result.output
     out = result.output or ""
@@ -161,13 +163,17 @@ def test_exec_dispatch__json_output_three_keys(
     assert data["command"] == payload
 
 
-def test_input_validation__missing_positional_exits_two(runner, session_id, happy_path_agent):
+def test_input_validation__missing_positional_exits_two(
+    runner, session_id, happy_path_agent
+):
     result = _invoke(runner, session_id)
     assert result.exit_code == 2, result.output
     assert "Missing argument" in (result.output or "")
 
 
-def test_input_validation__empty_command_exits_two(runner, session_id, happy_path_agent):
+def test_input_validation__empty_command_exits_two(
+    runner, session_id, happy_path_agent
+):
     result = _invoke(runner, session_id, "")
     assert result.exit_code == 2, result.output
     assert "command may not be empty." in (result.output or "")
@@ -199,7 +205,9 @@ def test_input_validation__command_with_newline_exits_two(
     assert "command may not contain newlines." in (result.output or "")
 
 
-def test_authorization_boundary__missing_agent_exits_one(runner, session_id, monkeypatch):
+def test_authorization_boundary__missing_agent_exits_one(
+    runner, session_id, monkeypatch
+):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
     result = _invoke(runner, session_id, "git log -1")
     assert result.exit_code == 1, result.output

@@ -189,7 +189,9 @@ def test_session_create_json_output__director_sub_dict(db_file, mock_tmux_ok):
     uuid.UUID(director["agent_id"])
 
 
-def test_session_create_json_output__placement_sub_dict_matches_spec(db_file, mock_tmux_ok):
+def test_session_create_json_output__placement_sub_dict_matches_spec(
+    db_file, mock_tmux_ok
+):
     runner = CliRunner()
     result = runner.invoke(cli, ["session", "create", "--json"])
     assert result.exit_code == 0

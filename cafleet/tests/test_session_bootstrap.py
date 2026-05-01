@@ -57,7 +57,9 @@ def _bootstrap(label: str | None = None, ctx: DirectorContext | None = None) -> 
 # Director + placement + Admin. ---
 
 
-def test_create_session_bootstrap__returns_nested_dict_with_required_top_level_keys(director_context):
+def test_create_session_bootstrap__returns_nested_dict_with_required_top_level_keys(
+    director_context,
+):
     result = _bootstrap(label="bootstrap-1", ctx=director_context)
     assert isinstance(result, dict)
     for key in (
@@ -70,14 +72,18 @@ def test_create_session_bootstrap__returns_nested_dict_with_required_top_level_k
         assert key in result, f"missing top-level key {key!r} in {result!r}"
 
 
-def test_create_session_bootstrap__director_sub_dict_has_required_keys(director_context):
+def test_create_session_bootstrap__director_sub_dict_has_required_keys(
+    director_context,
+):
     result = _bootstrap(ctx=director_context)
     director = result["director"]
     for key in ("agent_id", "name", "description", "registered_at", "placement"):
         assert key in director, f"missing director key {key!r} in {director!r}"
 
 
-def test_create_session_bootstrap__director_name_and_description_are_hardcoded(director_context):
+def test_create_session_bootstrap__director_name_and_description_are_hardcoded(
+    director_context,
+):
     result = _bootstrap(ctx=director_context)
     assert result["director"]["name"] == "Director"
     assert result["director"]["description"] == "Root Director for this session"
@@ -96,7 +102,9 @@ def test_create_session_bootstrap__placement_sub_dict_matches_director_context_a
     assert "created_at" in placement
 
 
-def test_create_session_bootstrap__writes_exactly_one_session_row(broker_session, director_context):
+def test_create_session_bootstrap__writes_exactly_one_session_row(
+    broker_session, director_context
+):
     result = _bootstrap(ctx=director_context)
     with broker_session() as s:
         rows = s.query(SessionModel).all()
@@ -169,9 +177,7 @@ def test_create_session_bootstrap__administrator_registered_at_equals_session_cr
     admin_id = result["administrator_agent_id"]
 
     with broker_session() as s:
-        session_row = (
-            s.query(SessionModel).filter(SessionModel.session_id == sid).one()
-        )
+        session_row = s.query(SessionModel).filter(SessionModel.session_id == sid).one()
         admin_row = s.query(Agent).filter(Agent.agent_id == admin_id).one()
 
     assert admin_row.registered_at == session_row.created_at
@@ -306,7 +312,9 @@ def test_delete_session_cascade__tasks_are_preserved_after_soft_delete(
     assert any(t.task_id == task_id for t in tasks)
 
 
-def test_delete_session_cascade__idempotent_rerun_returns_zero_deregistered(director_context):
+def test_delete_session_cascade__idempotent_rerun_returns_zero_deregistered(
+    director_context,
+):
     result = _bootstrap(ctx=director_context)
     sid = result["session_id"]
 
@@ -370,7 +378,9 @@ def test_register_agent_on_soft_deleted_session__unknown_session_still_says_not_
     assert "not found" in str(exc_info.value).lower()
 
 
-def test_list_sessions_filters_soft_deleted__hides_soft_deleted_sessions(director_context):
+def test_list_sessions_filters_soft_deleted__hides_soft_deleted_sessions(
+    director_context,
+):
     alive = _bootstrap(label="alive", ctx=director_context)
     dead = _bootstrap(label="dead", ctx=director_context)
     broker.delete_session(dead["session_id"])
@@ -394,7 +404,9 @@ def test_list_sessions_filters_soft_deleted__get_session_still_returns_soft_dele
     assert row["deleted_at"] is not None
 
 
-def test_deregister_agent_root_director__rejects_root_director_with_specific_error(director_context):
+def test_deregister_agent_root_director__rejects_root_director_with_specific_error(
+    director_context,
+):
     result = _bootstrap(ctx=director_context)
     director_id = result["director"]["agent_id"]
 
@@ -406,7 +418,9 @@ def test_deregister_agent_root_director__rejects_root_director_with_specific_err
     assert "cafleet session delete" in msg
 
 
-def test_deregister_agent_root_director__state_unchanged_after_rejection(broker_session, director_context):
+def test_deregister_agent_root_director__state_unchanged_after_rejection(
+    broker_session, director_context
+):
     result = _bootstrap(ctx=director_context)
     director_id = result["director"]["agent_id"]
     sid = result["session_id"]
@@ -417,13 +431,9 @@ def test_deregister_agent_root_director__state_unchanged_after_rejection(broker_
     with broker_session() as s:
         d_row = s.query(Agent).filter(Agent.agent_id == director_id).one()
         p_row = (
-            s.query(AgentPlacement)
-            .filter(AgentPlacement.agent_id == director_id)
-            .one()
+            s.query(AgentPlacement).filter(AgentPlacement.agent_id == director_id).one()
         )
-        sess_row = (
-            s.query(SessionModel).filter(SessionModel.session_id == sid).one()
-        )
+        sess_row = s.query(SessionModel).filter(SessionModel.session_id == sid).one()
 
     assert d_row.status == "active"
     assert d_row.deregistered_at is None
@@ -431,7 +441,9 @@ def test_deregister_agent_root_director__state_unchanged_after_rejection(broker_
     assert sess_row.director_agent_id == director_id
 
 
-def test_deregister_agent_root_director__non_root_director_agent_can_still_be_deregistered(director_context):
+def test_deregister_agent_root_director__non_root_director_agent_can_still_be_deregistered(
+    director_context,
+):
     result = _bootstrap(ctx=director_context)
     sid = result["session_id"]
 
@@ -454,9 +466,7 @@ def test_member_to_director_notification__send_message_invokes_send_poll_trigger
     mock_trigger = Mock(return_value=True)
     monkeypatch.setattr("cafleet.tmux.send_poll_trigger", mock_trigger)
 
-    result = broker.create_session(
-        label="notify", director_context=director_context
-    )
+    result = broker.create_session(label="notify", director_context=director_context)
     sid = result["session_id"]
     root_director_id = result["director"]["agent_id"]
 

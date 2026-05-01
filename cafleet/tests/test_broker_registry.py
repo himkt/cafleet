@@ -113,7 +113,9 @@ def test_create_session_administrator_seed__administrator_agent_id_is_valid_uuid
     uuid.UUID(result["administrator_agent_id"])
 
 
-def test_create_session_administrator_seed__administrator_row_exists_in_db_and_is_active(broker_session):
+def test_create_session_administrator_seed__administrator_row_exists_in_db_and_is_active(
+    broker_session,
+):
     """After create_session, exactly one active Administrator agent exists
     for that session in the agents table.
 
@@ -151,9 +153,7 @@ def test_create_session_administrator_seed__administrator_registered_at_equals_s
     admin_id = result["administrator_agent_id"]
 
     with broker_session() as s:
-        session_row = (
-            s.query(SessionModel).filter(SessionModel.session_id == sid).one()
-        )
+        session_row = s.query(SessionModel).filter(SessionModel.session_id == sid).one()
         agent_row = s.query(Agent).filter(Agent.agent_id == admin_id).one()
 
     assert agent_row.registered_at == session_row.created_at
@@ -579,16 +579,14 @@ def test_verify_agent_session__returns_false_for_agent_in_different_session():
     agent = _register_agent(session_a["session_id"], name="there")
 
     assert (
-        broker.verify_agent_session(agent["agent_id"], session_b["session_id"])
-        is False
+        broker.verify_agent_session(agent["agent_id"], session_b["session_id"]) is False
     )
 
 
 def test_verify_agent_session__returns_false_for_nonexistent_agent():
     session = _create_session()
     assert (
-        broker.verify_agent_session(str(uuid.uuid4()), session["session_id"])
-        is False
+        broker.verify_agent_session(str(uuid.uuid4()), session["session_id"]) is False
     )
 
 

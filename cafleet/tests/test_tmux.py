@@ -257,8 +257,7 @@ def test_send_poll_trigger__pane_not_found_returns_false(monkeypatch):
 
     def mock_run(args, **kwargs):
         raise tmux.TmuxError(
-            "tmux command failed: tmux send-keys -t %99\n"
-            "stderr: can't find pane: %99"
+            "tmux command failed: tmux send-keys -t %99\nstderr: can't find pane: %99"
         )
 
     monkeypatch.setattr(tmux, "_run", mock_run)
@@ -399,8 +398,7 @@ def test_kill_pane__invokes_correct_args(monkeypatch):
 def test_kill_pane__ignore_missing_swallows_pane_gone(monkeypatch):
     def mock_run(args):
         raise tmux.TmuxError(
-            "tmux command failed: tmux kill-pane -t %99\n"
-            "stderr: can't find pane: %99"
+            "tmux command failed: tmux kill-pane -t %99\nstderr: can't find pane: %99"
         )
 
     monkeypatch.setattr(tmux, "_run", mock_run)
@@ -422,8 +420,7 @@ def test_kill_pane__ignore_missing_does_not_swallow_other_errors(monkeypatch):
 def test_kill_pane__default_raises_even_for_pane_gone(monkeypatch):
     def mock_run(args):
         raise tmux.TmuxError(
-            "tmux command failed: tmux kill-pane -t %99\n"
-            "stderr: can't find pane: %99"
+            "tmux command failed: tmux kill-pane -t %99\nstderr: can't find pane: %99"
         )
 
     monkeypatch.setattr(tmux, "_run", mock_run)
@@ -449,7 +446,9 @@ class _FakeClock:
         self.now += secs
 
 
-def test_wait_for_pane_gone__returns_true_immediately_when_pane_already_gone(monkeypatch):
+def test_wait_for_pane_gone__returns_true_immediately_when_pane_already_gone(
+    monkeypatch,
+):
     clock = _FakeClock()
     monkeypatch.setattr("time.monotonic", clock.monotonic)
     monkeypatch.setattr("time.sleep", clock.sleep)
@@ -608,7 +607,9 @@ def test_send_bash_command__rejects_empty_command(monkeypatch):
     "whitespace_command",
     [" ", "   ", "\t", " \t ", "\t\t"],
 )
-def test_send_bash_command__rejects_whitespace_only_command(monkeypatch, whitespace_command):
+def test_send_bash_command__rejects_whitespace_only_command(
+    monkeypatch, whitespace_command
+):
     run_calls: list[list[str]] = []
 
     def mock_run(args, **_kwargs):

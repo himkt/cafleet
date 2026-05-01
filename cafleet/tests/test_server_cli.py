@@ -28,7 +28,9 @@ def test_server_command_help__server_help_mentions_port_flag():
     assert "--port" in result.output
 
 
-def test_server_command_flag_parsing__default_flags_pass_settings_defaults_to_uvicorn(monkeypatch):
+def test_server_command_flag_parsing__default_flags_pass_settings_defaults_to_uvicorn(
+    monkeypatch,
+):
     captured: dict = {}
 
     def fake_run(*args, **kwargs):
@@ -68,7 +70,9 @@ def test_server_command_flag_parsing__explicit_flags_override_defaults(monkeypat
     assert kwargs["port"] == 9000
 
 
-def test_server_command_flag_parsing__app_import_string_passed_as_first_positional(monkeypatch):
+def test_server_command_flag_parsing__app_import_string_passed_as_first_positional(
+    monkeypatch,
+):
     captured: dict = {}
 
     def fake_run(*args, **kwargs):
@@ -114,7 +118,9 @@ def test_server_does_not_require_session_id__server_help_with_session_id_silentl
     assert "no such option" not in combined
 
 
-def test_server_does_not_require_session_id__server_invocation_without_session_id_runs_handler(monkeypatch):
+def test_server_does_not_require_session_id__server_invocation_without_session_id_runs_handler(
+    monkeypatch,
+):
     """Regression guard: the handler must NOT call _require_session_id,
     so invoking without --session-id must reach uvicorn.run (patched out).
     """
@@ -170,7 +176,9 @@ def test_webui_dist_warning__warning_suppressed_on_explicit_override(
     assert _WARNING_PREFIX not in captured.err
 
 
-def test_webui_dist_warning__no_warning_when_default_dir_exists(tmp_path, monkeypatch, capsys):
+def test_webui_dist_warning__no_warning_when_default_dir_exists(
+    tmp_path, monkeypatch, capsys
+):
     built = tmp_path / "dist"
     built.mkdir()
     monkeypatch.setattr(server_mod, "default_webui_dist_dir", lambda: built)

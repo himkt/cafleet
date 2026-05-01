@@ -44,7 +44,9 @@ def db_runner(tmp_path, monkeypatch):
     return runner
 
 
-def test_missing_session_id_fails_client_subcommands__register_without_session_id_shows_new_error_message(db_runner):
+def test_missing_session_id_fails_client_subcommands__register_without_session_id_shows_new_error_message(
+    db_runner,
+):
     result = db_runner.invoke(
         cli,
         ["agent", "register", "--name", "A", "--description", "a"],
@@ -57,7 +59,9 @@ def test_missing_session_id_fails_client_subcommands__register_without_session_i
     assert "environment variable" not in out.lower()
 
 
-def test_session_id_flag_flows_into_broker__register_passes_session_id_to_broker(db_runner, monkeypatch):
+def test_session_id_flag_flows_into_broker__register_passes_session_id_to_broker(
+    db_runner, monkeypatch
+):
     captured: dict = {}
 
     def fake_register_agent(*args, **kwargs):
@@ -91,7 +95,9 @@ def test_session_id_flag_flows_into_broker__register_passes_session_id_to_broker
     assert sid in all_values
 
 
-def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(db_runner, monkeypatch):
+def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(
+    db_runner, monkeypatch
+):
     captured: dict = {}
 
     def fake_send_message(*args, **kwargs):
@@ -142,7 +148,9 @@ def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(db_
     assert sid in all_values
 
 
-def test_session_id_flag_flows_into_broker__session_id_not_read_from_environment(db_runner, monkeypatch):
+def test_session_id_flag_flows_into_broker__session_id_not_read_from_environment(
+    db_runner, monkeypatch
+):
     """The env var CAFLEET_SESSION_ID was removed; only the CLI flag works."""
     monkeypatch.setenv("CAFLEET_SESSION_ID", str(uuid.uuid4()))
     result = db_runner.invoke(
@@ -152,7 +160,9 @@ def test_session_id_flag_flows_into_broker__session_id_not_read_from_environment
     assert result.exit_code == 1, result.output
 
 
-def test_subcommands_that_do_not_require_session_id__db_init_without_session_id(tmp_path, monkeypatch):
+def test_subcommands_that_do_not_require_session_id__db_init_without_session_id(
+    tmp_path, monkeypatch
+):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,
@@ -164,13 +174,17 @@ def test_subcommands_that_do_not_require_session_id__db_init_without_session_id(
     assert result.exit_code == 0, result.output
 
 
-def test_subcommands_that_do_not_require_session_id__session_create_without_session_id(db_runner):
+def test_subcommands_that_do_not_require_session_id__session_create_without_session_id(
+    db_runner,
+):
     """session create mints a session, so it cannot itself require one."""
     result = db_runner.invoke(cli, ["session", "create", "--label", "smoke"])
     assert result.exit_code == 0, result.output
 
 
-def test_subcommands_that_do_not_require_session_id__session_list_without_session_id(db_runner):
+def test_subcommands_that_do_not_require_session_id__session_list_without_session_id(
+    db_runner,
+):
     result = db_runner.invoke(cli, ["session", "list"])
     assert result.exit_code == 0, result.output
 
@@ -193,7 +207,9 @@ def test_session_id_silently_accepted_where_not_required__db_init_accepts_sessio
     assert "unexpected" not in combined
 
 
-def test_session_id_silently_accepted_where_not_required__session_create_accepts_session_id_silently(db_runner):
+def test_session_id_silently_accepted_where_not_required__session_create_accepts_session_id_silently(
+    db_runner,
+):
     sid = str(uuid.uuid4())
     result = db_runner.invoke(
         cli,
@@ -224,7 +240,9 @@ def _fetch_agent_status(db_file, agent_id: str) -> tuple[str, str | None]:
     return row[0], row[1]
 
 
-def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(tmp_path, monkeypatch):
+def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(
+    tmp_path, monkeypatch
+):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,
@@ -299,7 +317,9 @@ def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_
     assert "is not a member of session" in (result.output or "")
 
 
-def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_active(tmp_path, monkeypatch):
+def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_active(
+    tmp_path, monkeypatch
+):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,

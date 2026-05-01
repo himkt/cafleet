@@ -72,7 +72,9 @@ def test_tmux_helpers__send_freetext_and_submit_three_calls_in_order(run_recorde
     ]
 
 
-def test_tmux_helpers__send_freetext_and_submit_uses_literal_flag_for_text(run_recorder):
+def test_tmux_helpers__send_freetext_and_submit_uses_literal_flag_for_text(
+    run_recorder,
+):
     tmux.send_freetext_and_submit(target_pane_id="%7", text="hello")
     second = run_recorder[1]["args"]
     assert "-l" in second
@@ -104,7 +106,9 @@ def test_tmux_helpers__send_freetext_and_submit_empty_string_accepted(run_record
         "mixed\r\nCRLF",
     ],
 )
-def test_tmux_helpers__send_freetext_and_submit_rejects_newlines(run_recorder, bad_text):
+def test_tmux_helpers__send_freetext_and_submit_rejects_newlines(
+    run_recorder, bad_text
+):
     with pytest.raises(tmux.TmuxError, match="(?i)newline"):
         tmux.send_freetext_and_submit(target_pane_id="%7", text=bad_text)
     assert len(run_recorder) == 0

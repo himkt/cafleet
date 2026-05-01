@@ -1,7 +1,7 @@
 # Refactor Test Suite to Functional Pytest Style
 
 **Status**: Approved
-**Progress**: 37/44 tasks complete
+**Progress**: 44/44 tasks complete
 **Last Updated**: 2026-05-01
 
 ## Overview
@@ -213,13 +213,13 @@ Apply the §A recipe to:
 
 ### Step 8: Final verification
 
-- [ ] `git grep "^class Test" cafleet/tests/` returns no matches. <!-- completed: -->
-- [ ] `class _FakeClock` still present in `cafleet/tests/test_tmux.py` (helper class is preserved). <!-- completed: -->
-- [ ] `mise //cafleet:test -- --collect-only -q` count matches the Step 1 baseline test count exactly. <!-- completed: -->
-- [ ] `mise //cafleet:test` passes. <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes. <!-- completed: -->
-- [ ] `mise //cafleet:format` reports no changes (run as a check; no files should be modified). <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` passes. <!-- completed: -->
+- [x] `git grep "^class Test" cafleet/tests/` returns no matches. <!-- completed: 2026-05-01 -->
+- [x] `class _FakeClock` still present in `cafleet/tests/test_tmux.py` (helper class is preserved). <!-- completed: 2026-05-01 -->
+- [x] `mise //cafleet:test -- --collect-only -q` count matches the Step 1 baseline test count exactly. <!-- completed: 2026-05-01 -->
+- [x] `mise //cafleet:test` passes. <!-- completed: 2026-05-01 -->
+- [x] `mise //cafleet:lint` passes. <!-- completed: 2026-05-01 -->
+- [x] `mise //cafleet:format` reports no changes (run as a check; no files should be modified). <!-- completed: 2026-05-01 -->
+- [x] `mise //cafleet:typecheck` passes. <!-- completed: 2026-05-01 -->
 
 ---
 
