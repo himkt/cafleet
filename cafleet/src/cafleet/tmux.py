@@ -69,6 +69,14 @@ def select_layout(*, target_window_id: str, layout: str = "main-vertical") -> No
 
 _PANE_GONE_MARKERS = ("can't find pane", "no such pane")
 
+# Sleep between a literal-text ``send-keys -l`` call and the immediately
+# following ``send-keys Enter`` call. Required for the codex TUI: when the
+# two ``send-keys`` calls fire back-to-back (sub-millisecond apart), codex
+# treats the Enter as part of the bracketed-paste payload instead of a
+# submit. ~120ms is enough for codex to finalise the paste; Claude Code is
+# unaffected by the same pause.
+_SUBMIT_DELAY = 0.12
+
 
 def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
     """Send ``/exit`` + Enter, swallowing pane-gone errors when requested."""
@@ -97,6 +105,13 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
     instead of producing the submit keypress that prompts such as the
     Claude Code input box expect.
 
+    A small sleep between the literal-text send and the Enter send is
+    required for the codex TUI: when the two ``send-keys`` calls fire
+    back-to-back (sub-millisecond apart), codex absorbs the Enter into
+    the bracketed-paste payload and never produces a submit event.
+    Pacing the calls ~120ms apart lets codex finalise the paste before
+    the Enter arrives. Claude Code is unaffected by the same pause.
+
     Two callers share this helper: ``broker._try_notify_recipient``
     auto-fires after every ``cafleet message send`` and swallows
     ``False`` silently (the message queue remains the source of truth);
@@ -118,6 +133,7 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
             ],
             timeout=5,
         )
+        time.sleep(_SUBMIT_DELAY)
         _run(
             ["tmux", "send-keys", "-t", target_pane_id, "Enter"],
             timeout=5,
@@ -140,11 +156,15 @@ def send_freetext_and_submit(*, target_pane_id: str, text: str) -> None:
     tmux's ``-l`` (literal) flag is per-invocation, so a single call cannot
     mix literal characters with the ``Enter`` key name. Splitting also means
     embedded ``Enter`` / ``C-c`` / ``Esc`` in ``text`` land as plain chars.
+
+    See ``send_poll_trigger`` for why the pre-Enter sleep is required (codex
+    TUI absorbs Enter into the bracketed-paste payload otherwise).
     """
     if "\n" in text or "\r" in text:
         raise TmuxError("send_freetext_and_submit: text may not contain newlines")
     _run(["tmux", "send-keys", "-t", target_pane_id, "4"])
     _run(["tmux", "send-keys", "-t", target_pane_id, "-l", text])
+    time.sleep(_SUBMIT_DELAY)
     _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
 
 
@@ -154,6 +174,8 @@ def send_bash_command(*, target_pane_id: str, command: str) -> None:
     Used by ``cafleet member exec`` to route shell commands via Claude
     Code's ``!`` shortcut. Unlike ``send_freetext_and_submit``, there is
     NO leading ``4`` keystroke (no AskUserQuestion gate).
+
+    See ``send_poll_trigger`` for why the pre-Enter sleep is required.
     """
     normalized_command = command.strip()
     if not normalized_command:
@@ -161,6 +183,7 @@ def send_bash_command(*, target_pane_id: str, command: str) -> None:
     if "\n" in command or "\r" in command:
         raise TmuxError("send_bash_command: command may not contain newlines")
     _run(["tmux", "send-keys", "-t", target_pane_id, "-l", f"! {normalized_command}"])
+    time.sleep(_SUBMIT_DELAY)
     _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
 
 
