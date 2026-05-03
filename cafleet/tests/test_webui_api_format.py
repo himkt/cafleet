@@ -57,6 +57,7 @@ def broker_session(sync_sessionmaker, _patch_broker):
 def _create_session() -> dict:
     return broker.create_session(
         director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
+        coding_agent="claude",
     )
 
 
