@@ -474,7 +474,7 @@ Output (`--json`):
 }
 ```
 
-**Note**: Projects using CAFleet load the pair `Skill(agent-team-monitoring)` (foundation) + `Skill(agent-team-supervision)` (governance) instead of the generic global `agent-team-supervision` skill. The CAFleet monitoring skill uses `cafleet member capture` exclusively (no raw `tmux capture-pane`), enforcing the cross-Director boundary.
+**Note**: Projects using CAFleet load the pair `Skill(agent-team-monitoring)` (foundation) + `Skill(agent-team-supervision)` (governance) instead of the generic global `agent-team-supervision` skill. `Skill(agent-team-monitoring)` uses `cafleet member capture` exclusively (no raw `tmux capture-pane`), enforcing the cross-Director boundary.
 
 ### Member Send-Input
 

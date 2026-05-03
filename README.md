@@ -13,7 +13,7 @@ A2A-inspired message broker and agent registry for coding agents — a Claude Co
 /plugin install cafleet@himkt-cafleet
 ```
 
-This adds 7 skills under the `cafleet` namespace: `cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`. Run `/help` in Claude Code to see them.
+This adds 7 skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet:agent-team-monitoring`, `/cafleet:agent-team-supervision`, `/cafleet:design-doc`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`. Run `/help` in Claude Code to see them.
 
 ### Install the broker CLI (required for the plugin to function)
 
