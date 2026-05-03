@@ -1,7 +1,7 @@
 # CAFleet Agent Team Supervision & Monitoring Skills
 
 **Status**: Approved
-**Progress**: 6/16 tasks complete
+**Progress**: 8/28 tasks complete
 **Last Updated**: 2026-05-03
 
 ## Overview
@@ -233,7 +233,14 @@ means stop* for the project-wide policy this section enforces.
 | `CLAUDE.md` | Replace the `/cafleet-monitoring` skill bullet with two bullets: `/agent-team-monitoring` and `/agent-team-supervision`, in that order. Document the load order. |
 | `.claude/CLAUDE.md` | Same as above. |
 | `cafleet/pyproject.toml` (plugin manifest, if it enumerates skills) | Update skill list. |
+| `.claude-plugin/plugin.json` | Update the `skills` array — replace `./skills/cafleet-monitoring` with `./skills/agent-team-monitoring` and `./skills/agent-team-supervision`. |
+| `.claude/settings.json` | Update any `Skill(cafleet:cafleet-monitoring)` allow-list entry to the new pair. |
 | Any other `pyproject.toml` / plugin manifest that ships skills | Update skill list. |
+| `ARCHITECTURE.md` | Replace each `Skill(cafleet-monitoring)` mention with the loaded pair `Skill(agent-team-monitoring)` then `Skill(agent-team-supervision)` (in load order). |
+| `README.md` | Update the skills enumeration that lists `cafleet-monitoring` — replace with `agent-team-monitoring` and `agent-team-supervision` (preserve the surrounding skill count + list ordering). |
+| `skills/cafleet/roles/director.md` | Replace `cafleet-monitoring` references (e.g. the post-`exec` ping rule's "1-minute cafleet-monitoring tick" wording) with the new skill name(s) where the reference is to the active monitor; load-order comments should cite both new skills. |
+| `skills/design-doc-create/roles/director.md` | Replace `Skill(cafleet-monitoring)` references with the pair `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)` (in that order). |
+| `skills/design-doc-execute/roles/director.md` | Same pattern. |
 
 ### 7. Skill names and load directives
 
@@ -273,8 +280,8 @@ means stop* for the project-wide policy this section enforces.
 
 ### Step 3: Remove the old skill
 
-- [ ] Delete `skills/cafleet-monitoring/` (whole directory). <!-- completed: -->
-- [ ] Run `grep -rn "cafleet-monitoring" .` (excluding `.git/`, `design-docs/0000047-…/`) and confirm zero hits. Any hit is a missed reference. <!-- completed: -->
+- [x] Delete `skills/cafleet-monitoring/` (whole directory). <!-- completed: 2026-05-03T12:30 -->
+- [x] Run `grep -rn "cafleet-monitoring" .` (excluding `.git/`, `design-docs/0000047-…/`) and confirm zero hits. Any hit is a missed reference. <!-- completed: 2026-05-03T12:30 -->
 
 ### Step 4: Update cross-references in other skills
 
@@ -282,15 +289,22 @@ means stop* for the project-wide policy this section enforces.
 - [ ] Same pattern for `skills/design-doc-execute/SKILL.md`. <!-- completed: -->
 - [ ] Same pattern for `skills/design-doc-interview/SKILL.md`. <!-- completed: -->
 - [ ] Same for `skills/cafleet/SKILL.md` and any other `skills/*/SKILL.md` containing the string. <!-- completed: -->
+- [ ] In `skills/cafleet/roles/director.md`, replace each `cafleet-monitoring` mention. The post-`exec` ping rule's "1-minute cafleet-monitoring tick" wording becomes "1-minute agent-team-monitoring tick"; load-order callouts that previously named `Skill(cafleet-monitoring)` cite the pair `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)`. <!-- completed: -->
+- [ ] In `skills/design-doc-create/roles/director.md`, replace every `Skill(cafleet-monitoring)` reference with the pair `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)` (in load order). <!-- completed: -->
+- [ ] In `skills/design-doc-execute/roles/director.md`, same pattern. <!-- completed: -->
 
-### Step 5: Update project CLAUDE.md surfaces
+### Step 5: Update project CLAUDE.md surfaces and other current-state docs
 
 - [ ] In `CLAUDE.md`, remove the `/cafleet-monitoring` bullet under "Skills" and add two bullets in this order: `/agent-team-monitoring — Active monitoring mechanism. Documents the cron-like loop per backend (Claude Code uses CronCreate + /loop; codex has no in-session scheduling and uses fallback options) and the team-facilitation instructions. Foundation layer — load first.` and `/agent-team-supervision — Governance layer that loads agent-team-monitoring as a prerequisite. Defines Core Principle, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, and User Delegation. Load second.` <!-- completed: -->
 - [ ] Apply the identical change in `.claude/CLAUDE.md`. <!-- completed: -->
+- [ ] In `ARCHITECTURE.md`, replace each `Skill(cafleet-monitoring)` mention with the loaded pair `Skill(agent-team-monitoring)` then `Skill(agent-team-supervision)` (in load order). Surrounding prose can be lightly adapted for clarity; preserve the Authorization-Scope Guard / `/loop` references. <!-- completed: -->
+- [ ] In `README.md`, update the skills enumeration that lists `cafleet-monitoring` so it lists the two new skills (`agent-team-monitoring`, `agent-team-supervision`) in load order. Update the surrounding skill count if the README states one. <!-- completed: -->
 
 ### Step 6: Update packaging / plugin manifest
 
 - [ ] Inspect `cafleet/pyproject.toml` and any plugin metadata file (e.g. anything enumerating shipped skills under `[tool.*]` or a plugin manifest). If a skill list exists, add `agent-team-monitoring` and `agent-team-supervision`, remove `cafleet-monitoring`. If no enumeration exists, document that fact in this checkbox and skip. <!-- completed: -->
+- [ ] In `.claude-plugin/plugin.json`, update the `skills` array — replace `./skills/cafleet-monitoring` with `./skills/agent-team-monitoring` and `./skills/agent-team-supervision` (in load order). <!-- completed: -->
+- [ ] In `.claude/settings.json`, replace any `Skill(cafleet:cafleet-monitoring)` allow-list entry with the two new entries `Skill(cafleet:agent-team-monitoring)` and `Skill(cafleet:agent-team-supervision)`. <!-- completed: -->
 - [ ] If the plugin is built / installed via `mise //cafleet:install` or similar, run the install task and confirm both new skills are discoverable (the user can verify via `Skill` listing on their next session). <!-- completed: -->
 
 ### Step 7: Regression checks
@@ -310,3 +324,4 @@ means stop* for the project-wide policy this section enforces.
 | 2026-05-03 | Initial draft (single-skill design — absorbed monitoring into supervision). |
 | 2026-05-03 | Revised to two-skill split mirroring the global pair (supervision = always-load, monitoring = loop companion). Authorization-Scope Guard moved to supervision. |
 | 2026-05-03 | User feedback (1) the monitoring skill is essentially a cron wrapper and codex compat must be addressed since design 0000046 adds codex; (2) supervision depends on monitoring (dependency arrow reversed from the global pair). Added the codex survey (no in-session scheduling primitive in codex CLI; cloud automations are app-only). Reorganized: monitoring = foundation layer with backend-aware mechanism section + team-facilitation instructions; supervision = governance layer that loads monitoring as a prerequisite + holds the Authorization-Scope Guard. Added codex fallback options table (out-of-band cron driver, MCP scheduling server, user-driven nudges, no-active-monitor synchronous mode). Implementation step count grew to 0/16 across 7 steps. |
+| 2026-05-03 | Scope expansion during execution — Programmer's regression-grep at end of Step 3 surfaced 8 occurrences of `cafleet-monitoring` in current-state docs that §6 had missed: `ARCHITECTURE.md`, `README.md`, `skills/cafleet/roles/director.md`, `skills/design-doc-create/roles/director.md`, `skills/design-doc-execute/roles/director.md`. Per `.claude/rules/design-doc-numbering.md` (README and ARCHITECTURE are first-class doc surfaces; SKILL drift is blocking) these are in scope. Also expanded §6 with the explicit packaging targets the Programmer flagged: `.claude-plugin/plugin.json` and `.claude/settings.json`. Implementation steps updated accordingly: Step 4 grew from 4 to 7 tasks (+3 roles/director.md targets); Step 5 grew from 2 to 4 tasks (+ARCHITECTURE.md, +README.md) and was renamed to "Update project CLAUDE.md surfaces and other current-state docs"; Step 6 grew from 2 to 4 tasks (+plugin.json, +settings.json). New total: 28 tasks across 7 steps. |
