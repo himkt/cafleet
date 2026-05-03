@@ -47,7 +47,7 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 | `Agent(team_name=..., subagent_type=...)` | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
 | `SendMessage(to="Drafter")` | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from member) | `cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `agent-team-supervision` `/loop` | `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)` `/loop` |
+| `agent-team-supervision` `/loop` | Load `Skill(agent-team-monitoring)` (mechanism + `/loop`) and `Skill(agent-team-supervision)` (governance), then run `/loop` from agent-team-monitoring |
 | `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` for each member, then `cafleet session delete <session-id>` (soft-deletes the session, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `session delete` is the only supported teardown. |
 | Auto message delivery | Push notification injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into member's tmux pane |
 

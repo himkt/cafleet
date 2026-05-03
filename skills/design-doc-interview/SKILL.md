@@ -67,7 +67,7 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 | `Agent(subagent_type="Explore", prompt=...)` (Analyzer) | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "Analyzer" --description "..." -- "<prompt>"` |
 | `SendMessage(to="Analyzer")` | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <analyzer-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from Analyzer) | `cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `agent-team-supervision` `/loop` | `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)` `/loop` |
+| `agent-team-supervision` `/loop` | Load `Skill(agent-team-monitoring)` (mechanism + `/loop`) and `Skill(agent-team-supervision)` (governance), then run `/loop` from agent-team-monitoring |
 | `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <analyzer-agent-id>`, then `cafleet session delete <session-id>` |
 | Auto message delivery | Push notification injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into member's tmux pane |
 
