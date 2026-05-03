@@ -1,7 +1,7 @@
 # Codex Coding Agent
 
-**Status**: Approved
-**Progress**: 28/29 tasks complete
+**Status**: Complete
+**Progress**: 29/29 tasks complete
 **Last Updated**: 2026-05-03
 
 ## Overview
@@ -19,7 +19,7 @@ Add the OpenAI `codex` CLI as a second supported coding-agent binary alongside `
 - [x] `member send-input --freetext` continues to reject values whose first non-whitespace character is `!` for both backends.
 - [x] `ARCHITECTURE.md`, `README.md`, `docs/codex-members.md` (new), `docs/spec/cli-options.md` (if it exists), and every affected `skills/*/SKILL.md` describe the current dual-backend surface before code lands.
 - [x] Unit tests cover the command builders (`claude`, `codex`) and the binary-not-found guard for both.
-- [ ] §11 manual smoke recipe runs end-to-end on a workstation with both `claude` and `codex` installed.
+- [x] §11 manual smoke recipe runs end-to-end on a workstation with both `claude` and `codex` installed.
 
 ---
 
@@ -273,7 +273,7 @@ The redesign assumes a `codex` CLI version that supports `--ask-for-approval` an
 - [x] Run `mise //cafleet:test`. All tests pass. <!-- completed: 2026-05-03T18:30 — 577 passed in 24.16s -->
 - [x] Run `mise //cafleet:lint`. Clean. <!-- completed: 2026-05-03T18:30 — All checks passed; 54 files already formatted -->
 - [x] Run `mise //cafleet:typecheck`. Clean. <!-- completed: 2026-05-03T18:30 — All checks passed -->
-- [ ] Manually run the §11 smoke recipe on a workstation with both `claude` and `codex` installed. Capture the output and attach to the PR. <!-- completed: -->
+- [x] Manually run the §11 smoke recipe on a workstation with both `claude` and `codex` installed. Capture the output and attach to the PR. <!-- completed: 2026-05-03T11:55 (smoke surfaced two bugs — bracketed-paste timing and sandbox writable_roots — both fixed in this PR; second smoke run had a real codex member edit docs/codex-members.md and `cafleet message send` back to the Director, validating end-to-end) -->
 
 ---
 
@@ -285,3 +285,4 @@ The redesign assumes a `codex` CLI version that supports `--ask-for-approval` an
 | 2026-05-03 | Reviewer round 1: corrected task count (0/27 → 0/29), reworded §7 `server_default` rationale, added Click `--help` text in §1, added root-Director vs member semantic split in §1, added pane-discovery reinforcement for mixed teams in §3, added codex install-instructions pointer in §12, added two Step 5 tasks for broker test-fixture and prompt-template-symbol/body update. |
 | 2026-05-03 | User comment (TDD): moved Tests step from Step 5 to Step 2; renumbered Steps 2-5 accordingly. Task count unchanged at 0/29. |
 | 2026-05-03 | User approved. Status: Draft -> Approved. |
+| 2026-05-03 | Implementation merged via PR #50. §11 manual smoke validated end-to-end with a real codex member contributing a docs edit (commit 2b07a6e); the smoke surfaced two bugs that landed as fixes in the same PR — `tmux.py` 120ms pre-Enter pause for codex's bracketed-paste TUI (commit 91adeb9) and a `~/.codex/config.toml` `sandbox_workspace_write.writable_roots` workaround so codex can write to the cafleet DB outside the workspace (README + `docs/codex-members.md`, commits 53583db / e7bac81 / 2b07a6e). Status: Approved -> Complete. |
