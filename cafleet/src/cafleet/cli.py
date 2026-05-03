@@ -244,7 +244,7 @@ def session() -> None:
     type=click.Choice(["claude", "codex"]),
     default="claude",
     show_default=True,
-    help="Coding-agent binary to spawn / declare for the placement (default: claude).",
+    help="Coding-agent binary to spawn / declare for the placement.",
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
@@ -707,7 +707,7 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
     type=click.Choice(["claude", "codex"]),
     default="claude",
     show_default=True,
-    help="Coding-agent binary to spawn / declare for the placement (default: claude).",
+    help="Coding-agent binary to spawn / declare for the placement.",
 )
 @click.argument("prompt_argv", nargs=-1)
 @click.pass_context
