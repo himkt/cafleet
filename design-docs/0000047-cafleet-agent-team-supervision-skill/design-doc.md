@@ -1,7 +1,7 @@
 # CAFleet Agent Team Supervision & Monitoring Skills
 
 **Status**: Approved
-**Progress**: 15/28 tasks complete
+**Progress**: 19/28 tasks complete
 **Last Updated**: 2026-05-03
 
 ## Overview
@@ -295,10 +295,10 @@ means stop* for the project-wide policy this section enforces.
 
 ### Step 5: Update project CLAUDE.md surfaces and other current-state docs
 
-- [ ] In `CLAUDE.md`, remove the `/cafleet-monitoring` bullet under "Skills" and add two bullets in this order: `/agent-team-monitoring — Active monitoring mechanism. Documents the cron-like loop per backend (Claude Code uses CronCreate + /loop; codex has no in-session scheduling and uses fallback options) and the team-facilitation instructions. Foundation layer — load first.` and `/agent-team-supervision — Governance layer that loads agent-team-monitoring as a prerequisite. Defines Core Principle, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, and User Delegation. Load second.` <!-- completed: -->
-- [ ] Apply the identical change in `.claude/CLAUDE.md`. <!-- completed: -->
-- [ ] In `ARCHITECTURE.md`, replace each `Skill(cafleet-monitoring)` mention with the loaded pair `Skill(agent-team-monitoring)` then `Skill(agent-team-supervision)` (in load order). Surrounding prose can be lightly adapted for clarity; preserve the Authorization-Scope Guard / `/loop` references. <!-- completed: -->
-- [ ] In `README.md`, update the skills enumeration that lists `cafleet-monitoring` so it lists the two new skills (`agent-team-monitoring`, `agent-team-supervision`) in load order. Update the surrounding skill count if the README states one. <!-- completed: -->
+- [x] In `CLAUDE.md`, remove the `/cafleet-monitoring` bullet under "Skills" and add two bullets in this order: `/agent-team-monitoring — Active monitoring mechanism. Documents the cron-like loop per backend (Claude Code uses CronCreate + /loop; codex has no in-session scheduling and uses fallback options) and the team-facilitation instructions. Foundation layer — load first.` and `/agent-team-supervision — Governance layer that loads agent-team-monitoring as a prerequisite. Defines Core Principle, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, and User Delegation. Load second.` <!-- completed: 2026-05-03T13:30 -->
+- [x] Apply the identical change in `.claude/CLAUDE.md`. <!-- completed: 2026-05-03T13:30 -->
+- [x] In `ARCHITECTURE.md`, replace each `Skill(cafleet-monitoring)` mention with the loaded pair `Skill(agent-team-monitoring)` then `Skill(agent-team-supervision)` (in load order). Surrounding prose can be lightly adapted for clarity; preserve the Authorization-Scope Guard / `/loop` references. <!-- completed: 2026-05-03T13:30 -->
+- [x] In `README.md`, update the skills enumeration that lists `cafleet-monitoring` so it lists the two new skills (`agent-team-monitoring`, `agent-team-supervision`) in load order. Update the surrounding skill count if the README states one. <!-- completed: 2026-05-03T13:30 -->
 
 ### Step 6: Update packaging / plugin manifest
 

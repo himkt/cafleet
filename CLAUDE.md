@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE taking any other action. Pay attention to override instructions (what NOT to do) in each entry.
 
 - `/cafleet` — Interact with the CAFleet A2A message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
-- `/cafleet-monitoring` — Mandatory supervision protocol for a Director managing member agents via CAFleet. Defines monitoring loop, spawn protocol, and stall response.
+- `/agent-team-monitoring` — Active monitoring mechanism. Documents the cron-like loop per backend (Claude Code uses CronCreate + /loop; codex has no in-session scheduling and uses fallback options) and the team-facilitation instructions. Foundation layer — load first.
+- `/agent-team-supervision` — Governance layer that loads agent-team-monitoring as a prerequisite. Defines Core Principle, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, and User Delegation. Load second.
 - `/design-doc` — Standardized design document format with template and guidelines. Load when writing or editing a design document.
 - `/design-doc-create` — Create a new design document using CAFleet-native orchestration (Director / Drafter / Reviewer). Use when the user wants to create a specification with CAFleet message broker coordination.
 - `/design-doc-interview` — Validate an existing design document through fine-grained Q&A using CAFleet-native orchestration (Director + short-lived Analyzer). Adds `COMMENT(claude)` annotations consumed by `/design-doc-create` resume mode. Use after `/design-doc-create` and before `/design-doc-execute`.
