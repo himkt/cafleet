@@ -83,7 +83,7 @@ disambiguating a teammate's question), use `AskUserQuestion` — do **not**
 emit a passive hold and wait. The hold message produces nothing; the question
 unblocks you within seconds.
 
-See `~/.claude/rules/skill-discovery.md` § *Authorization scope* and § *Stop
+See `.claude/rules/skill-discovery.md` § *Authorization scope* and § *Stop
 means stop* for the project-wide policy this section enforces.
 
 ## Spawn Protocol
