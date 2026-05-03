@@ -41,14 +41,20 @@ Want more? See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for the raw 
 | Command group | One-line purpose |
 |---|---|
 | `cafleet db init` | Apply schema migrations (idempotent; rerun after upgrades) |
-| `cafleet session *` | Create / list / show / delete sessions |
+| `cafleet session create [--coding-agent {claude,codex}]` | Create a session; declare the root Director's coding-agent backend (default `claude`) |
+| `cafleet session *` | List / show / delete sessions |
 | `cafleet agent *` | Register / deregister / list / show agents |
 | `cafleet message *` | Send / broadcast / poll / ack / cancel / show messages |
-| `cafleet member *` | Spawn / delete / list / capture / send-input / exec / ping member panes (Director only) |
+| `cafleet member create [--coding-agent {claude,codex}]` | Spawn a member pane running `claude` (default) or `codex` |
+| `cafleet member *` | Delete / list / capture / send-input / exec / ping member panes (Director only) |
 | `cafleet server` | Start the admin WebUI on `127.0.0.1:8000` |
 | `cafleet doctor` | Print the calling pane's tmux identifiers |
 
 > CLI reference (per-command sections for `session`, `member`, `doctor`, `server`; `agent` / `message` / `db init` covered via the option-source table and `cafleet <cmd> --help`): [docs/spec/cli-options.md](docs/spec/cli-options.md).
+
+### Coding agents
+
+cafleet supports two coding-agent binaries for member panes: `claude` (Claude Code) and `codex` (OpenAI Codex CLI). Pass `--coding-agent {claude,codex}` on `cafleet session create` (operator-declared metadata for the root Director) and `cafleet member create` (selects the spawn-command builder and records the placement). The default is `claude`, so existing invocations are unchanged. A single Director may spawn both `claude` and `codex` members in the same session. Operational details for codex members — including the codex CLI version pin and verification recipe — live in [docs/codex-members.md](docs/codex-members.md).
 
 ### Message body truncation
 

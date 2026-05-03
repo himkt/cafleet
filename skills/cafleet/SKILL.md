@@ -298,7 +298,7 @@ After soft-delete, the session is hidden from `cafleet session list` and further
 
 ### Member Create
 
-Register a new member agent and spawn a claude pane in the Director's own tmux window. Must be run inside a tmux session. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
+Register a new member agent and spawn a coding-agent pane in the Director's own tmux window. Must be run inside a tmux session. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
 
 ```bash
 cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
@@ -307,6 +307,9 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42" \
   -- "Review PR #42, post feedback via cafleet message send, and deregister on completion."
+
+cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+  --name Codex-A --description "Reviewer for PR #42" --coding-agent codex
 ```
 
 | Flag | Required | Notes |
@@ -314,13 +317,21 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 | `--agent-id` | yes | The Director's agent ID |
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
-| *(positional, after `--`)* | no | Prompt for the spawned claude process. If omitted, the default prompt template is used. BOTH the default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_name` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
+| `--coding-agent` | no | One of `claude` (default) or `codex`. Both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(["claude", "codex"])`. Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
+| *(positional, after `--`)* | no | Prompt for the spawned coding-agent process. If omitted, the default prompt template is used. BOTH the default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_name` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
 
-The spawned `claude` process is always launched with `--permission-mode dontAsk`, so the member's Bash tool is enabled and permission prompts auto-resolve silently. Members run cafleet (and any shell command) directly via the Bash tool. See `## Routing Bash via the Director` below for the fallback path that fires when the harness deny-list (destructive operations such as `git push`) rejects a Bash invocation.
+The spawn argv depends on the chosen backend:
+
+| Backend | Spawn command |
+|---|---|
+| `claude` (default) | `claude --permission-mode dontAsk --name <member-name> <prompt>` |
+| `codex` | `codex --ask-for-approval never --sandbox workspace-write <prompt>` |
+
+In both modes the member's Bash tool is enabled and routine permission prompts auto-resolve silently. Members run cafleet (and any shell command) directly via the Bash tool. See `## Routing Bash via the Director` below for the fallback path that fires when the harness deny-list (destructive operations such as `git push`) rejects a Bash invocation. For codex-specific operational details — install pointer, version pin, pane-title asymmetry, verification recipe — see [`docs/codex-members.md`](../../docs/codex-members.md).
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`) — `.format()` collapses each `{{` / `}}` pair to a single literal brace and, critically, does not attempt placeholder substitution on the inner tokens. This matters for prompts that embed JSON snippets, shell expansions, or other content with literal curly braces. Pre-substituting the dynamic values in shell does NOT exempt the prompt from this rule — even a placeholder-free prompt is still passed through `str.format()`, so any literal braces must still be doubled or removed.
 
-**Pane title**: the `--name` flag is forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the tmux pane title (`#{pane_title}`) shows the member name internally. Operators should locate a specific member's pane via `cafleet member list --agent-id <director-agent-id>` (the output column `pane_id` carries the same pane identifier without requiring any raw `tmux` command).
+**Pane title (claude backend only)**: when `--coding-agent claude`, the `--name` flag is forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the tmux pane title (`#{pane_title}`) shows the member name internally. The `codex` backend has no `--name` analog and so codex panes display the codex default title. Operators should locate a specific member's pane via `cafleet member list --agent-id <director-agent-id>` (the output column `pane_id` carries the same pane identifier without requiring any raw `tmux` command) — this works uniformly for both backends and is the recommended approach for mixed-backend teams.
 
 If the tmux `split-window` fails, the registered agent is rolled back. If the placement PATCH fails, the pane is `/exit`'d and the agent rolled back.
 
@@ -471,7 +482,7 @@ Safely forward a restricted keystroke to a member's tmux pane. This is the write
 
 - `--choice` / `--freetext` answer an `AskUserQuestion` prompt (or any prompt with the same "3 choices + Type something" shape) — `--freetext` prepends the digit `4`.
 
-For shell dispatch use [`Member Exec`](#member-exec) — `--freetext` rejects values whose first non-whitespace character is `!` so the AskUserQuestion path cannot smuggle a Claude Code `!`-shortcut.
+For shell dispatch use [`Member Exec`](#member-exec) — `--freetext` rejects values whose first non-whitespace character is `!` so the AskUserQuestion path cannot smuggle the coding agent's `!`-shortcut.
 
 Exactly one of the two flags must be supplied.
 
@@ -528,7 +539,7 @@ Output (`--json`):
 
 ### Member Exec
 
-Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane via `tmux.send_bash_command` so Claude Code's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). This is the dispatch surface for the bash-via-Director fallback — see [Routing Bash via the Director](#routing-bash-via-the-director).
+Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane via `tmux.send_bash_command` so the coding agent's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). Both `claude` and `codex` honor the leading-`!` shortcut on their input line, so `member exec` works against either backend without modification. This is the dispatch surface for the bash-via-Director fallback — see [Routing Bash via the Director](#routing-bash-via-the-director).
 
 ```bash
 cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \
@@ -687,7 +698,10 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 
    ```bash
    cafleet session create --label "my-project"
+   cafleet session create --label "my-project" --coding-agent codex   # operator-declared metadata; default is 'claude'
    ```
+
+   `--coding-agent {claude,codex}` declares which coding-agent binary is running in the calling pane. cafleet does not spawn the root Director and cannot auto-detect, so the operator declares the value (default `claude`). It is recorded as `placement.coding_agent` for the root Director.
 
    Text output: line 1 is the `session_id`, line 2 is the root Director's `agent_id`, then a human-readable block:
 
@@ -723,14 +737,14 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
          "tmux_session": "main",
          "tmux_window_id": "@3",
          "tmux_pane_id": "%0",
-         "coding_agent": "unknown",
+         "coding_agent": "claude",
          "created_at": "2026-04-16T08:50:00+00:00"
        }
      }
    }
    ```
 
-   `placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is literally `"unknown"` — auto-detection from `$CLAUDECODE` / `$CLAUDE_CODE_ENTRYPOINT` env vars is deferred.
+   `placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` reflects the value of `--coding-agent` (default `"claude"`); pass `--coding-agent codex` if the calling pane is running the codex CLI. cafleet does not auto-detect the binary running in the calling pane.
 
    Outside tmux the command fails fast with `Error: cafleet session create must be run inside a tmux session` and exit 1 — nothing is written to the DB.
 
@@ -866,11 +880,25 @@ The pane is ALWAYS on the AskUserQuestion 4-option frame when `send-input` is ap
 
 The CLI validates input (`--choice` is `IntRange(1, 3)`; `--freetext` rejects newlines to preserve the one-call-one-submission contract), enforces the same cross-Director authorization boundary as `member capture`, and issues three separate `tmux send-keys` invocations for `--freetext` (`4` → `-l "<text>"` → `Enter`) so shell meta, key names, and multi-byte characters all pass through as literal input.
 
+## For codex members
+
+cafleet supports two coding-agent binaries inside member panes: `claude` (Claude Code, the default) and `codex` (OpenAI Codex CLI). The Director selects the backend per member at create time via `--coding-agent {claude,codex}`. A single team may contain both backends — there is no broker-level restriction on mixing.
+
+### Director-side orientation
+
+- **Reading the placement.** `cafleet member list --agent-id <director-agent-id>` prints a `backend` column (and `placement.coding_agent` in `--json` output) that shows `claude` or `codex` per member. Use this column to find a member's backend; do not infer from the pane title (codex panes do not carry the member's name).
+- **Mixed teams.** When a Director runs both `claude` and `codex` members, every cafleet primitive (`message send`, `message poll`, `member capture`, `member send-input`, `member exec`, `member ping`, `member delete`) behaves identically against either backend. The only operational difference an operator notices is the pane title (codex panes show the codex default title) and the spawn argv shape.
+- **Pane discovery.** Always go through `cafleet member list` — the `pane_id` column is ground truth for both backends. Title-based scanning is unreliable for codex.
+- **Spawn argv asymmetry.** `claude` is spawned with `claude --permission-mode dontAsk --name <member-name> <prompt>`; `codex` is spawned with `codex --ask-for-approval never --sandbox workspace-write <prompt>`. The codex flags are the upstream-recommended workspace-scoped auto-approval combo. Claude's `--permission-mode dontAsk` and codex's `--ask-for-approval never --sandbox workspace-write` are functionally equivalent for cafleet's purposes — Bash tool enabled, routine permission prompts auto-resolved.
+- **`!` shell shortcut.** Both backends honor a leading-`!` shortcut on the input line, so `cafleet member exec` (which keystrokes `! <cmd>` + Enter) works uniformly against either backend.
+
+For the full operational doc — install pointer, codex CLI version pin, the `!` shortcut convention, the verification recipe — see [`docs/codex-members.md`](../../docs/codex-members.md). New codex members spawned by `cafleet member create --coding-agent codex` are automatically pointed at that file in their spawn prompt; codex does not load Claude Code's `Skill()` tool, so the prompt instructs the member to read the file directly.
+
 ## Routing Bash via the Director
 
-Members spawn with `--permission-mode dontAsk` — the Bash tool is enabled and permission prompts auto-resolve, so a member runs cafleet (and any other shell command) directly via the Bash tool. No prefix, no Director routing required by default.
+Members spawn with workspace-scoped auto-approval enabled — `claude` uses `--permission-mode dontAsk`, `codex` uses `--ask-for-approval never --sandbox workspace-write`. The Bash tool is enabled and routine permission prompts auto-resolve, so a member runs cafleet (and any other shell command) directly via the Bash tool. No prefix, no Director routing required by default.
 
-The bash-via-Director protocol is the **fallback when the Claude Code harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). In that case the member auto-routes: it sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via `cafleet member exec` — Claude Code's `!` CLI shortcut handles execution natively. No new broker primitives, no extra helper machinery: just the existing message-passing + tmux-keystroke infrastructure plus the dedicated `member exec` subcommand.
+The bash-via-Director protocol is the **fallback when the coding agent's harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). In that case the member auto-routes: it sends a plain CAFleet message to its Director asking for the command, and the Director dispatches the command into the member's pane via `cafleet member exec` — the coding agent's `!` CLI shortcut (honored by both `claude` and `codex`) handles execution natively. No new broker primitives, no extra helper machinery: just the existing message-passing + tmux-keystroke infrastructure plus the dedicated `member exec` subcommand.
 
 `member exec` is the **shell-dispatch** primitive — operator-controlled `COMMAND` argument, strict `permissions.ask` per call. For the **inbox-poll-only** nudge case (e.g. a monitoring loop nudging a stalled member that missed its auto-fire), use `cafleet member ping` instead — see [Member Ping](#member-ping). It is fixed-action (no positional argument), pre-approved in `permissions.allow`, and is the manually-invokable counterpart of the broker's auto-fire.
 

@@ -1,8 +1,8 @@
 # Director Role — Bash Routing
 
-You are a **Director** managing one or more members in a CAFleet team. Members spawn with `--permission-mode dontAsk`, so by default they run shell commands themselves via the Bash tool — no Director routing required.
+You are a **Director** managing one or more members in a CAFleet team. Members spawn with workspace-scoped auto-approval (Claude Code's `--permission-mode dontAsk`, or codex's `--ask-for-approval never --sandbox workspace-write` — selected per member via `--coding-agent`), so by default they run shell commands themselves via the Bash tool — no Director routing required.
 
-The bash-via-Director protocol is the fallback when a member's Bash invocation is rejected by the Claude Code harness deny-list (destructive operations such as `git push`, `rm -rf`). In that case the member sends you a plain CAFleet message asking for the command. You decide whether to fulfill, and dispatch the command into the member's pane via `cafleet member exec`.
+The bash-via-Director protocol is the fallback when a member's Bash invocation is rejected by the coding agent's harness deny-list (destructive operations such as `git push`, `rm -rf`). In that case the member sends you a plain CAFleet message asking for the command. You decide whether to fulfill, and dispatch the command into the member's pane via `cafleet member exec`.
 
 This file covers the **Director side** of the fallback. The member side lives in `skills/cafleet/roles/member.md`.
 
@@ -34,7 +34,7 @@ You receive a member-originated bash request when **both** of the following are 
      "<command>"
    ```
 
-   The CLI prepends `! ` and appends `Enter` for you (two `tmux send-keys` calls: literal `! <command>`, then the `Enter` keystroke). Claude Code's `!` shortcut intercepts the line, runs the command via the harness's native CLI primitive (bypassing the Bash tool permission system), and prints the captured output back into the member's pane. The member's next prompt iteration sees the output as context.
+   The CLI prepends `! ` and appends `Enter` for you (two `tmux send-keys` calls: literal `! <command>`, then the `Enter` keystroke). The coding agent's `!` shortcut (honored by both `claude` and `codex`) intercepts the line, runs the command via the harness's native CLI primitive (bypassing the Bash tool permission system), and prints the captured output back into the member's pane. The member's next prompt iteration sees the output as context.
 
 3. **After dispatch, ping the member.** `member exec` only stages the bang command's stdout/stderr as the member's next-turn context — it does not advance the turn. Immediately follow every successful `cafleet member exec` with `cafleet member ping` against the same member so the keystroke fires `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py`) and the member begins its next turn:
 
@@ -45,7 +45,7 @@ You receive a member-originated bash request when **both** of the following are 
 
    The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll` — `message poll` reads your own Director inbox over SQLite and does not wake the member. Run `cafleet member ping` after any `cafleet member exec` invocation that exits 0. Skip the ping only on non-zero exit — the dispatch did not complete successfully (its `tmux send-keys` sequence may have failed mid-way), so we cannot assume the bang command was submitted, and the 1-minute `cafleet-monitoring` tick is the safety net.
 
-4. **`member exec` mechanics:** the command is a single required positional argument. The subcommand works on any pane that is at the Claude Code input prompt. Empty / whitespace-only commands and commands containing newlines are rejected by the CLI handler with exit 2.
+4. **`member exec` mechanics:** the command is a single required positional argument. The subcommand works on any pane that is at the coding agent's input prompt (`claude` or `codex`). Empty / whitespace-only commands and commands containing newlines are rejected by the CLI handler with exit 2.
 
 5. **Acknowledge the request.** ACK the member's message via `cafleet message ack --agent-id <director-agent-id> --task-id <task-id>` once you have dispatched (or refused). Leaving the message un-ACKed pollutes the inbox and breaks serialization.
 
@@ -96,6 +96,6 @@ When NOT to use:
 
 ## Why this works
 
-- **Members spawn with `--permission-mode dontAsk`**, so under the default flow they run cafleet (and any other shell command) themselves via the Bash tool. The bash-via-Director path fires only when the member's harness deny-list rejects the command.
-- **Claude Code's `!` shortcut is the dispatch primitive** — `cafleet member exec` keystrokes `! <command>` + Enter into the member's pane, and Claude Code's `!` shortcut runs the command. The captured stdout/stderr lands in the member's next-turn context.
+- **Members spawn with workspace-scoped auto-approval** (Claude Code's `--permission-mode dontAsk`, or codex's `--ask-for-approval never --sandbox workspace-write`), so under the default flow they run cafleet (and any other shell command) themselves via the Bash tool. The bash-via-Director path fires only when the member's harness deny-list rejects the command.
+- **The coding agent's `!` shortcut is the dispatch primitive** — `cafleet member exec` keystrokes `! <command>` + Enter into the member's pane, and the coding agent's `!` shortcut (honored by both `claude` and `codex`) runs the command. The captured stdout/stderr lands in the member's next-turn context.
 - **You stay in control of fallback dispatches.** Every fallback request surfaces as a plain message in your inbox; you (with the operator at your keyboard) choose whether to fulfill it. The operator's `permissions.ask` rule for `member exec` (currently `Bash(cafleet * member exec *)` in `.claude/settings.json`) controls the per-call confirmation UX.

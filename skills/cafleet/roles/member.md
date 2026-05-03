@@ -1,6 +1,6 @@
 # Member Role — Bash Routing
 
-You are a **member** spawned by `cafleet member create`. Your harness runs in `--permission-mode dontAsk`, so your Bash tool is **enabled** and permission prompts auto-resolve silently.
+You are a **member** spawned by `cafleet member create`. Your harness runs in workspace-scoped auto-approval mode — Claude Code's `--permission-mode dontAsk` if your backend is `claude`, or codex's `--ask-for-approval never --sandbox workspace-write` if your backend is `codex`. Either way your Bash tool is **enabled** and routine permission prompts auto-resolve silently.
 
 This file covers the **member side** of how shell commands are handled in a CAFleet team. The Director side of the bash-via-Director fallback lives in `skills/cafleet/roles/director.md`.
 
@@ -49,7 +49,7 @@ These are normal Bash invocations — nothing special. The dontAsk mode auto-res
 
 ## WHEN YOUR BASH TOOL DENIES A COMMAND — RECONSIDER, THEN AUTO-ROUTE TO THE DIRECTOR
 
-`dontAsk` mode auto-resolves most permission prompts, but the Claude Code harness has its own deny list above dontAsk for destructive operations (e.g. `git push`, `rm -rf`, etc.). When the harness denies a Bash invocation:
+Workspace-scoped auto-approval (Claude Code's `--permission-mode dontAsk`, codex's `--ask-for-approval never --sandbox workspace-write`) auto-resolves most permission prompts, but the coding agent's harness still has its own deny list above auto-approval for destructive operations (e.g. `git push`, `rm -rf`, etc.). When the harness denies a Bash invocation:
 
 1. **First, reconsider the command.** Most denials happen because the command is wrong — wrong flag, wrong path, typo, command that does not need to run at all because you already have the answer in context. Do NOT route to the Director just because something was denied. Fix the command and try again. Skip the routing entirely if you realize the command is unnecessary.
 
@@ -65,7 +65,7 @@ cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
   --text "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
 ```
 
-Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member exec <command>`, which keystrokes `! <command>` + Enter into your pane and triggers Claude Code's `!` CLI shortcut. The captured stdout/stderr lands in your next-turn context.
+Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member exec <command>`, which keystrokes `! <command>` + Enter into your pane and triggers the coding agent's `!` CLI shortcut (honored by both `claude` and `codex`). The captured stdout/stderr lands in your next-turn context.
 
 If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member exec <command>` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
 

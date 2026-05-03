@@ -59,12 +59,12 @@ Then pass the printed UUID as `--session-id <uuid>` on every client + member com
 - `message ack` — Acknowledge a received message
 - `message cancel` — Cancel a sent message
 - `message show` — Get task details
-- `member create` — Register a new member and spawn its claude pane (Director only)
+- `member create` — Register a new member and spawn its coding-agent pane (Director only)
 - `member delete` — Deregister a member and close its pane (Director only)
 - `member list` — List members spawned by this Director
 - `member capture` — Capture the last N lines of a member's pane (Director only)
 - `member send-input` — Forward a restricted keystroke (digit 1/2/3 or free text) to a member's pane (Director only)
-- `member exec` — Dispatch a shell command into a member's pane via Claude Code's `!` shortcut (Director only)
+- `member exec` — Dispatch a shell command into a member's pane via the coding agent's `!` shortcut (Director only)
 - `member ping` — Inject an inbox-poll keystroke into a member's pane (Director only)
 
 ### Commands that do NOT require `--agent-id`
@@ -108,6 +108,7 @@ The `cafleet session` subgroup manages sessions. These commands write directly t
 | Flag | Required | Notes |
 |---|---|---|
 | `--label` | no | Free-form text label for the session |
+| `--coding-agent` | no | One of `claude` (default) or `codex`. Operator-declared metadata only — `session create` does not spawn the root Director's coding-agent process and cannot auto-detect the binary running in the calling pane. The value is recorded as `placement.coding_agent` for the root Director. Validated via `click.Choice(["claude", "codex"])`. Help text: `Coding-agent binary to spawn / declare for the placement (default: claude).` |
 | `--json` | no | Output as JSON |
 
 There are no `--name` / `--description` flags. The root Director's name and description are hardcoded (`name="Director"`, `description="Root Director for this session"`).
@@ -116,7 +117,7 @@ Creates a new session with a UUIDv4 identifier. **Must be run inside a tmux sess
 
 1. `INSERT INTO sessions (...)` with `deleted_at=NULL`, `director_agent_id=NULL`.
 2. `INSERT INTO agents (...)` for the hardcoded root Director.
-3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` and `coding_agent="unknown"`.
+3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` and `coding_agent=<value of --coding-agent>` (default `"claude"`).
 4. `UPDATE sessions SET director_agent_id = <director_agent_id>`.
 5. `INSERT INTO agents (...)` for the built-in `Administrator` (see [data-model.md](./data-model.md) for the Administrator's distinguishing `agent_card_json.cafleet.kind` flag).
 
@@ -152,14 +153,14 @@ administrator:    <administrator_agent_id>
       "tmux_session": "main",
       "tmux_window_id": "@3",
       "tmux_pane_id": "%0",
-      "coding_agent": "unknown",
+      "coding_agent": "claude",
       "created_at": "2026-04-15T10:00:00+00:00"
     }
   }
 }
 ```
 
-`placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is the string `"unknown"` — auto-detection of the actual coding agent binary at bootstrap time is deferred.
+`placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is the value of `--coding-agent` (default `"claude"`); operators running the codex CLI in the calling pane should pass `--coding-agent codex` so the placement metadata is accurate. cafleet does not spawn the root Director's coding-agent process and cannot auto-detect what is running in the calling pane.
 
 Attempting `cafleet --session-id <session_id> agent deregister --agent-id <director_agent_id>` is rejected by the broker with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` and exits 1. Attempting `cafleet --session-id <session_id> agent deregister --agent-id <administrator_agent_id>` is rejected with `Error: Administrator cannot be deregistered` (exit 1) via the `AdministratorProtectedError` path from design 0000025.
 
@@ -315,11 +316,19 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | Flag | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID |
-| `--name` | yes | Display name of the new member. Forwarded to the spawned process as `claude --name <member-name> <prompt>`, so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. |
+| `--name` | yes | Display name of the new member. Forwarded to the spawned `claude` process as `claude --name <member-name> <prompt>` so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. The codex backend has no `--name` analog — codex panes display the codex default title and operators discover them via `cafleet member list` instead. |
 | `--description` | yes | One-sentence purpose |
-| *(positional, after `--`)* | no | Prompt text for the spawned claude process |
+| `--coding-agent` | no | One of `claude` (default) or `codex`. Both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(["claude", "codex"])`. Help text: `Coding-agent binary to spawn / declare for the placement (default: claude).` Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
+| *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. Both backends receive the same prompt; the prompt template is backend-neutral. |
 
-The spawn argv always carries `--permission-mode dontAsk`, so the member's Bash tool is enabled and permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no Director routing required by default. The bash-via-Director protocol fires as a fallback when the harness deny-list rejects a Bash invocation (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director).
+#### Spawn command per backend
+
+| Backend | Spawn command |
+|---|---|
+| `claude` | `claude --permission-mode dontAsk --name <member-name> <prompt>` |
+| `codex`  | `codex --ask-for-approval never --sandbox workspace-write <prompt>` |
+
+The `claude` spawn carries `--permission-mode dontAsk`; the `codex` spawn carries `--ask-for-approval never --sandbox workspace-write`. In both modes the member's Bash tool is enabled and routine permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no Director routing required by default. The bash-via-Director protocol fires as a fallback when the harness deny-list rejects a Bash invocation (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director). Operational details for codex members live in [`docs/codex-members.md`](../codex-members.md).
 
 ### `member delete`
 
@@ -333,7 +342,7 @@ Cross-Director delete is rejected: the CLI verifies `placement.director_agent_id
 
 #### Polling contract (default path)
 
-The default path sends `/exit` via `tmux send-keys`, then polls `tmux list-panes -a -F "#{pane_id}"` for the target pane every **500 ms** until the pane disappears or a **15.0 s** timeout elapses. Typical `claude /exit` completes in 1–3 s; operators who need faster escalation pass `--force`. On timeout, the pane buffer tail (last 80 lines) is captured via `tmux capture-pane` and printed on stderr, followed by a recovery hint, and the command exits **2**. The timeout output shape:
+The default path sends `/exit` via `tmux send-keys`, then polls `tmux list-panes -a -F "#{pane_id}"` for the target pane every **500 ms** until the pane disappears or a **15.0 s** timeout elapses. A typical coding-agent `/exit` completes in 1–3 s; operators who need faster escalation pass `--force`. On timeout, the pane buffer tail (last 80 lines) is captured via `tmux capture-pane` and printed on stderr, followed by a recovery hint, and the command exits **2**. The timeout output shape:
 
 ```
 Error: pane %7 did not close within 15.0s after /exit.
@@ -399,7 +408,7 @@ Three separate tmux invocations for `--freetext` because tmux's `-l` (literal) f
 | `--choice 0` / `--choice 4` / `--choice a` | Exit 2 via click's built-in `IntRange(1, 3)` validator |
 | `--freetext ""` (empty) | Allowed — sends `4` + empty literal + `Enter` (submits an empty answer; AskUserQuestion's own UI decides whether to accept it) |
 | `--freetext "   "` (whitespace-only) | Allowed — `lstrip()` empties the string before the `startswith("!")` check, so the bang-prefix guard does not fire. |
-| `--freetext` whose first non-whitespace character is `!` | Exit 2 with `Error: --freetext may not start with '!' — that triggers Claude Code's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` |
+| `--freetext` whose first non-whitespace character is `!` | Exit 2 with `Error: --freetext may not start with '!' — that triggers the coding agent's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` |
 | `--freetext` containing `\n` or `\r` | Exit 2 with `Error: free text may not contain newlines.` (single-action contract — one prompt submission per call) |
 | Any input with tmux unavailable | Exit 1 via `tmux.ensure_tmux_available()` (same surface as `member capture`) |
 
@@ -463,7 +472,7 @@ The canonical Director-side workflow is three-beat and AskUserQuestion-delegated
 
 ### `member exec`
 
-Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane via `tmux.send_bash_command` so Claude Code's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). The fallback path for the bash-via-Director protocol — see [Routing Bash via the Director](../../skills/cafleet/SKILL.md#routing-bash-via-the-director).
+Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane so the coding agent's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). Both `claude` and `codex` honor the leading-`!` shortcut on their input line, so `member exec` works against either backend without modification. The fallback path for the bash-via-Director protocol — see [Routing Bash via the Director](../../skills/cafleet/SKILL.md#routing-bash-via-the-director).
 
 ```bash
 cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \
@@ -628,7 +637,7 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `agent list` / `agent show` / `agent deregister` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--session-id` | `Error: agent <id> is not a member of session <sid>.` (exit 1) — gate is `broker.verify_agent_session` and runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different session" apart and treats both as not-a-member). |
 | `member send-input` with zero or both of `--choice` / `--freetext` | `Error: --choice and --freetext are mutually exclusive; supply exactly one.` (exit 2) |
 | `member send-input --choice` outside `1..3` | Click `IntRange(1, 3)` built-in (exit 2) |
-| `member send-input --freetext` whose first non-whitespace character is `!` | `Error: --freetext may not start with '!' — that triggers Claude Code's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` (exit 2) |
+| `member send-input --freetext` whose first non-whitespace character is `!` | `Error: --freetext may not start with '!' — that triggers the coding agent's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` (exit 2) |
 | `member send-input --freetext` with `\n` or `\r` | `Error: free text may not contain newlines.` (exit 2) |
 | `member send-input` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
 | `member send-input` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
