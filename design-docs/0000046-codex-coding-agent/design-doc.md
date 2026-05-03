@@ -52,7 +52,7 @@ This redesign is a clean re-introduction tailored to the codebase as it stands t
 | `cafleet member create` | `--coding-agent {claude,codex}` | `claude` | Sets `placement.coding_agent` for the new member and selects the spawn-command builder. |
 
 - `--coding-agent` is validated via `click.Choice(["claude", "codex"])` at the CLI layer.
-- Click `--help` text on both subcommands: `Coding-agent binary to spawn / declare for the placement (default: claude).`
+- Click `--help` text on both subcommands: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically via `show_default=True`.)
 - The placement column remains free-text `String` at the DB layer (`cafleet/db/models.py:60-62`); the enum is enforced only at input.
 - There is **no** environment-variable fallback (e.g. `CAFLEET_DEFAULT_CODING_AGENT`). cafleet's literal-flag philosophy (every invocation that touches agents/messages must carry literal flags) is incompatible with implicit env-var defaults that change behavior. The default is hardcoded at the `click.Option` level.
 - Mixed-backend teams are allowed: a Director may spawn `claude` and `codex` members side-by-side in one session with no broker-level restrictions.
@@ -217,7 +217,7 @@ This recipe lives in `docs/codex-members.md` § Verification and is referenced f
 
 ### 12. Codex CLI version requirement
 
-The redesign assumes a `codex` CLI version that supports `--ask-for-approval` and `--sandbox`. The exact minimum version is recorded as **"latest as of 2026-05"** in `docs/codex-members.md` and in the binary-not-found-path error guidance; the Implementer fills in the precise version string at execute time after running `codex --version` against a workstation install. `docs/codex-members.md` also includes a pointer to the upstream codex install instructions (<https://developers.openai.com/codex/>) so operators can find and install the binary; the Implementer verifies the URL is still canonical at execute time.
+The redesign assumes a `codex` CLI version that supports `--ask-for-approval` and `--sandbox`. The pinned minimum is **`codex-cli 0.128.0`** (the version installed on the implementer's workstation when this design landed), recorded in `docs/codex-members.md`. `docs/codex-members.md` also includes a pointer to the upstream codex install instructions (<https://developers.openai.com/codex/>) so operators can find and install the binary; the Implementer verifies the URL is still canonical at execute time.
 
 ---
 
