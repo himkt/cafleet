@@ -47,7 +47,7 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 | `Agent(team_name=..., subagent_type=...)` | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
 | `SendMessage(to="Drafter")` | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from member) | `cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `agent-team-supervision` `/loop` | `Skill(cafleet-monitoring)` `/loop` |
+| `agent-team-supervision` `/loop` | `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)` `/loop` |
 | `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` for each member, then `cafleet session delete <session-id>` (soft-deletes the session, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `session delete` is the only supported teardown. |
 | Auto message delivery | Push notification injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into member's tmux pane |
 
@@ -75,7 +75,7 @@ Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt.
 
 ### Step 1: Register & Spawn Members (Director)
 
-Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`.
+Load `Skill(cafleet)`, `Skill(agent-team-monitoring)`, and `Skill(agent-team-supervision)` (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it).
 
 #### 1a. Establish a CAFleet session and capture the root Director's `agent_id`
 
@@ -104,7 +104,7 @@ If you already have a running session (e.g. an outer orchestration), reuse its `
 
 #### 1b. Start the monitoring `/loop`
 
-BEFORE spawning any member, follow `Skill(cafleet-monitoring)`'s Monitoring Mandate and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. The loop must stay active from the first `member create` until Step 6's shutdown cleanup.
+BEFORE spawning any member, follow `Skill(agent-team-monitoring)`'s facilitation instructions and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. The loop must stay active from the first `member create` until Step 6's shutdown cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from `Skill(agent-team-supervision)`, which loads agent-team-monitoring as a hard prerequisite.
 
 #### 1c. Read role definitions
 

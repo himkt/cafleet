@@ -67,7 +67,7 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 | `Agent(subagent_type="Explore", prompt=...)` (Analyzer) | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "Analyzer" --description "..." -- "<prompt>"` |
 | `SendMessage(to="Analyzer")` | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <analyzer-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from Analyzer) | `cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `agent-team-supervision` `/loop` | `Skill(cafleet-monitoring)` `/loop` |
+| `agent-team-supervision` `/loop` | `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)` `/loop` |
 | `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <analyzer-agent-id>`, then `cafleet session delete <session-id>` |
 | Auto message delivery | Push notification injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into member's tmux pane |
 
@@ -109,7 +109,7 @@ Capture `session_id` and `director.agent_id` from the JSON response. Substitute 
 
 #### 2b. Start the monitoring `/loop`
 
-BEFORE spawning the Analyzer, follow `Skill(cafleet-monitoring)`'s Monitoring Mandate and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. **Record the cron job ID returned by `/loop` (and by any `CronCreate` it issues underneath) — Step 2f references this exact ID when tearing the loop down via `CronDelete`.** The loop stays active until the Analyzer is torn down at the end of this step.
+BEFORE spawning the Analyzer, load both `Skill(agent-team-monitoring)` and `Skill(agent-team-supervision)` (in that order) and follow agent-team-monitoring's facilitation instructions to start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. **Record the cron job ID returned by `/loop` (and by any `CronCreate` it issues underneath) — Step 2f references this exact ID when tearing the loop down via `CronDelete`.** The loop stays active until the Analyzer is torn down at the end of this step.
 
 #### 2c. Read the Analyzer role file
 

@@ -474,7 +474,7 @@ Output (`--json`):
 }
 ```
 
-**Note**: Projects using CAFleet use `Skill(cafleet-monitoring)` instead of the generic `agent-team-supervision` skill. The cafleet-monitoring skill uses `cafleet member capture` exclusively (no raw `tmux capture-pane`), enforcing the cross-Director boundary.
+**Note**: Projects using CAFleet load the pair `Skill(agent-team-monitoring)` (foundation) + `Skill(agent-team-supervision)` (governance) instead of the generic global `agent-team-supervision` skill. The CAFleet monitoring skill uses `cafleet member capture` exclusively (no raw `tmux capture-pane`), enforcing the cross-Director boundary.
 
 ### Member Send-Input
 
@@ -579,7 +579,7 @@ Three keys: `member_agent_id`, `pane_id`, `command`. No `action` field — the s
 
 #### Required follow-up: `cafleet member ping`
 
-After every successful `cafleet member exec`, the Director MUST immediately invoke `cafleet member ping` against the same member. `member exec` only stages the bang command's stdout/stderr as context for the member's next turn — it does not advance the turn. Without the follow-up ping, the member sits at the input prompt waiting for the 1-minute `cafleet-monitoring` tick to wake it.
+After every successful `cafleet member exec`, the Director MUST immediately invoke `cafleet member ping` against the same member. `member exec` only stages the bang command's stdout/stderr as context for the member's next turn — it does not advance the turn. Without the follow-up ping, the member sits at the input prompt waiting for the 1-minute `agent-team-monitoring` tick to wake it.
 
 ```bash
 # 1. Dispatch the shell command into the member's pane.
@@ -594,7 +594,7 @@ cafleet --session-id <session-id> member ping \
 
 The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll`. `cafleet message poll --agent-id <director-agent-id>` polls the **Director's** inbox over SQLite and does not wake the member; `cafleet member ping --agent-id <director-agent-id> --member-id <member-agent-id>` keystrokes a fresh `cafleet ... message poll --agent-id <member>` line into the **member's** pane via `tmux.send_poll_trigger` so the keystroke lands as the member's next user message.
 
-Run `cafleet member ping` after any `cafleet member exec` invocation that exits 0. Skip the ping only on non-zero exit — the dispatch did not complete successfully (its `tmux send-keys` sequence may have failed mid-way), so we cannot assume the bang command was submitted, and the 1-minute `cafleet-monitoring` tick is the safety net.
+Run `cafleet member ping` after any `cafleet member exec` invocation that exits 0. Skip the ping only on non-zero exit — the dispatch did not complete successfully (its `tmux send-keys` sequence may have failed mid-way), so we cannot assume the bang command was submitted, and the 1-minute `agent-team-monitoring` tick is the safety net.
 
 For a series of `member exec` calls on the same member, the ping follows each exec, not only the last. Every bang command stages its own output as context, and the member needs a turn to consume each before the Director's next dispatch is meaningful.
 
@@ -789,9 +789,9 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 
 ### Monitoring mandate (Director only)
 
-Before spawning **any** member, the Director MUST load `Skill(cafleet-monitoring)` and start a `/loop` monitor as that skill instructs. Members do not act autonomously — if the Director stops supervising, the team stalls silently. Keep the `/loop` active until the final shutdown step.
+Before spawning **any** member, the Director MUST load both `Skill(agent-team-monitoring)` (foundation) and `Skill(agent-team-supervision)` (governance) — in that order — and start a `/loop` monitor as agent-team-monitoring instructs. Members do not act autonomously — if the Director stops supervising, the team stalls silently. Keep the `/loop` active until the final shutdown step.
 
-To inspect a stalled member, follow the 2-stage health check in `Skill(cafleet-monitoring)`: first check `cafleet message poll` for messages, then fall back to `cafleet member capture`:
+To inspect a stalled member, follow the 2-stage health check in `Skill(agent-team-monitoring)`: first check `cafleet message poll` for messages, then fall back to `cafleet member capture`:
 
 ```bash
 cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
@@ -830,7 +830,7 @@ The teardown MUST run in this exact order. Skipping any step leaves crons firing
 
 **Rule: use cafleet primitives only.** All tmux interactions — write, inspect, and metadata — are encapsulated by cafleet commands. For tmux session/window/pane metadata at Director startup, use `cafleet doctor`. Never invoke `tmux send-keys`, `tmux kill-pane`, `tmux list-panes`, `tmux capture-pane`, or `tmux display-message` directly from the Director. If a workflow appears to need a raw tmux call, file a gap in `cafleet member *` or `cafleet doctor` — NOT a raw tmux invocation.
 
-1. **Stop every background `/loop` monitor FIRST.** Any `/loop` cron the Director started during the session must be cancelled with `CronDelete <job-id>` **before** members are deleted. A cron that keeps firing after members are gone will issue `cafleet member list` / `poll` against a tearing-down session, spam `Error: session is deleted`, and (worse) race with the member-delete path and nudge agents that are mid-`/exit`. Fixed-cadence `/loop`s (e.g. the 1-minute team-health monitor from `Skill(cafleet-monitoring)`) and any augmented loops you created (PR review loops, verifier loops, etc.) all fall under this rule. Stop them all.
+1. **Stop every background `/loop` monitor FIRST.** Any `/loop` cron the Director started during the session must be cancelled with `CronDelete <job-id>` **before** members are deleted. A cron that keeps firing after members are gone will issue `cafleet member list` / `poll` against a tearing-down session, spam `Error: session is deleted`, and (worse) race with the member-delete path and nudge agents that are mid-`/exit`. Fixed-cadence `/loop`s (e.g. the 1-minute team-health monitor from `Skill(agent-team-monitoring)`) and any augmented loops you created (PR review loops, verifier loops, etc.) all fall under this rule. Stop them all.
 2. **Delete every member** via `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>`. This call now blocks until the target pane is actually gone (15 s default timeout). If the pane is stuck on a prompt, the command exits 2 with the pane buffer tail on stderr — inspect with `cafleet member capture`, answer the prompt with `cafleet member send-input --choice N` or `--freetext`, then re-run `cafleet member delete`. If the pane is truly wedged, escalate to `cafleet member delete --force`, which skips `/exit` and kill-panes immediately. Do NOT fall back to raw `tmux kill-pane`. Do this per member, not via `session delete` alone — `session delete` deregisters agents in the DB but does NOT send `/exit` to panes.
 3. **Verify every member is gone via cafleet.** Run `cafleet --session-id <session-id> member list --agent-id <director-agent-id>`. The team's member roster should be empty. Any agent still present means step 2 failed — re-run `cafleet member delete` on that member, inspect with `cafleet member capture` if needed, and report to the user if it still refuses to leave. Do NOT use raw tmux to "check" or "force" anything.
 4. **Run `cafleet session delete <session-id>`** (positional, no `--session-id` flag). This deregisters the root Director, deregisters the Administrator, sweeps any agent rows that survived step 2, and physically deletes every `agent_placements` row. Plain `cafleet --session-id <session-id> agent deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` — always use `session delete` for the final teardown step.

@@ -1,7 +1,7 @@
 # CAFleet Agent Team Supervision & Monitoring Skills
 
 **Status**: Approved
-**Progress**: 8/28 tasks complete
+**Progress**: 15/28 tasks complete
 **Last Updated**: 2026-05-03
 
 ## Overview
@@ -285,13 +285,13 @@ means stop* for the project-wide policy this section enforces.
 
 ### Step 4: Update cross-references in other skills
 
-- [ ] In `skills/design-doc-create/SKILL.md`, replace every `Skill(cafleet-monitoring)` load directive with the pair `Skill(agent-team-monitoring)` followed by `Skill(agent-team-supervision)` (in that order). Verify by re-grep. <!-- completed: -->
-- [ ] Same pattern for `skills/design-doc-execute/SKILL.md`. <!-- completed: -->
-- [ ] Same pattern for `skills/design-doc-interview/SKILL.md`. <!-- completed: -->
-- [ ] Same for `skills/cafleet/SKILL.md` and any other `skills/*/SKILL.md` containing the string. <!-- completed: -->
-- [ ] In `skills/cafleet/roles/director.md`, replace each `cafleet-monitoring` mention. The post-`exec` ping rule's "1-minute cafleet-monitoring tick" wording becomes "1-minute agent-team-monitoring tick"; load-order callouts that previously named `Skill(cafleet-monitoring)` cite the pair `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)`. <!-- completed: -->
-- [ ] In `skills/design-doc-create/roles/director.md`, replace every `Skill(cafleet-monitoring)` reference with the pair `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)` (in load order). <!-- completed: -->
-- [ ] In `skills/design-doc-execute/roles/director.md`, same pattern. <!-- completed: -->
+- [x] In `skills/design-doc-create/SKILL.md`, replace every `Skill(cafleet-monitoring)` load directive with the pair `Skill(agent-team-monitoring)` followed by `Skill(agent-team-supervision)` (in that order). Verify by re-grep. <!-- completed: 2026-05-03T13:00 -->
+- [x] Same pattern for `skills/design-doc-execute/SKILL.md`. <!-- completed: 2026-05-03T13:00 -->
+- [x] Same pattern for `skills/design-doc-interview/SKILL.md`. <!-- completed: 2026-05-03T13:00 -->
+- [x] Same for `skills/cafleet/SKILL.md` and any other `skills/*/SKILL.md` containing the string. <!-- completed: 2026-05-03T13:00 -->
+- [x] In `skills/cafleet/roles/director.md`, replace each `cafleet-monitoring` mention. The post-`exec` ping rule's "1-minute cafleet-monitoring tick" wording becomes "1-minute agent-team-monitoring tick"; load-order callouts that previously named `Skill(cafleet-monitoring)` cite the pair `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)`. <!-- completed: 2026-05-03T13:00 -->
+- [x] In `skills/design-doc-create/roles/director.md`, replace every `Skill(cafleet-monitoring)` reference with the pair `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)` (in load order). <!-- completed: 2026-05-03T13:00 -->
+- [x] In `skills/design-doc-execute/roles/director.md`, same pattern. <!-- completed: 2026-05-03T13:00 -->
 
 ### Step 5: Update project CLAUDE.md surfaces and other current-state docs
 
