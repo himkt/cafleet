@@ -26,6 +26,16 @@ codex --ask-for-approval never --sandbox workspace-write <prompt>
 - `--ask-for-approval never` disables interactive approval prompts. Combined with `--sandbox workspace-write`, this is the codex equivalent of Claude Code's `--permission-mode dontAsk`: routine permission prompts auto-resolve, the Bash tool is enabled, and the member runs cafleet (and any other shell command) directly.
 - `--sandbox workspace-write` confines codex to writing files within the current workspace. See <https://developers.openai.com/codex/agent-approvals-security> for the upstream description of the approval / sandbox combo.
 
+> [!IMPORTANT]
+> Codex's `--sandbox workspace-write` blocks writes outside the workspace, including cafleet's default SQLite DB at `~/.local/share/cafleet/registry.db`. Operators must add the cafleet DB directory to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads, such as `~/.codex/config.toml`:
+>
+> ```toml
+> [sandbox_workspace_write]
+> writable_roots = ["/home/<you>/.local/share/cafleet"]
+> ```
+>
+> Use the absolute path matching `CAFLEET_DATABASE_URL` or the default XDG location.
+
 Refer to the same upstream page for the canonical write-up of the `--ask-for-approval` and `--sandbox` flags.
 
 ## Required codex CLI version
