@@ -161,3 +161,4 @@ Manual operator verification is the only acceptance check. There is no JSON-sche
 |------|---------|
 | 2026-05-03 | Initial draft |
 | 2026-05-03 | Reviewer round 1: fix progress count (now 0/7), correct Step 4 fallback path math (`../../`, not `../`), make GitHub-push prerequisite explicit, fold version/description/skill invariants into a Constraints & invariants subsection, list the 7 skills in Success Criteria. |
+| 2026-05-03 | User approved. Status → Approved. |
