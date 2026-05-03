@@ -57,7 +57,7 @@ The fallback in use must be documented in the session's launch instructions. The
 
 ## Team-facilitation instructions
 
-On every supervision tick — whether fired by `/loop` (Claude Code) or by a fallback (codex), or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team to make tasks finished**, not merely to detect stalls.
+On every supervision tick — whether fired by `/loop` (Claude Code) or by a fallback (codex), or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
 
 1. **Poll inbox.** `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>` (optionally with `--since <iso8601>` to filter to messages received since the last tick).
 2. **ACK every message** that requires no further action: `cafleet --session-id <session-id> message ack --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.

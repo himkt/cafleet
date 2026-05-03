@@ -15,6 +15,7 @@
       "Skill(cafleet:design-doc)",
       "Skill(cafleet:design-doc-create)",
       "Skill(cafleet:design-doc-execute)",
+      "Skill(cafleet:design-doc-interview)",
       "Bash(cafleet *)"
     ],
     "deny": [
