@@ -25,10 +25,15 @@ import pytest
 
 
 def _cli():
-    """Re-import ``cafleet.cli`` and return the module.
+    """Return the ``cafleet.cli`` module via ``importlib.import_module``.
 
-    ``importlib.reload`` ensures monkeypatches applied to ``cafleet.cli``
-    attributes earlier in the run-time do not leak between tests.
+    A function-level lookup keeps the import deferred until test run-time,
+    so collection succeeds even when the module is missing symbols that the
+    test references (e.g. before Step 4 lands ``_MEMBER_PROMPT_TEMPLATE``).
+    Tests then fail cleanly with ``AttributeError`` rather than aborting the
+    whole suite at collection time. Per-test monkeypatches are scoped to
+    pytest's ``monkeypatch`` fixture, which auto-reverts between tests, so
+    no module reload is needed.
     """
     return importlib.import_module("cafleet.cli")
 
