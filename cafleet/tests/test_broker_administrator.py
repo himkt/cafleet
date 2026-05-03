@@ -20,7 +20,9 @@ _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0
 
 
 def _create_session_with_ctx():
-    return broker.create_session(director_context=_FAKE_DIRECTOR_CTX)
+    return broker.create_session(
+        director_context=_FAKE_DIRECTOR_CTX, coding_agent="claude"
+    )
 
 
 def test_administrator_kind_constant__constant_exists_and_is_importable():

@@ -22,14 +22,17 @@ from cafleet import broker, output, tmux
 from cafleet.config import settings
 
 _CLAUDE_BINARY = "claude"
-_CLAUDE_PROMPT_TEMPLATE = (
-    "Load Skill(cafleet). Your session_id is {session_id} and your agent_id is {agent_id}.\n"
+_CODEX_BINARY = "codex"
+_MEMBER_PROMPT_TEMPLATE = (
+    "Load the 'cafleet' skill (Claude Code: via the Skill tool; Codex: read "
+    "docs/codex-members.md in the cafleet repo). Your session_id is {session_id} "
+    "and your agent_id is {agent_id}.\n"
     "You are a member of the team led by {director_name} ({director_agent_id}).\n"
     "Wait for instructions via "
     "`cafleet --session-id {session_id} message poll --agent-id {agent_id}`.\n"
-    "Your harness runs in dontAsk mode — your Bash tool is enabled and permission\n"
-    "prompts auto-resolve, so call cafleet (and any other shell command) directly\n"
-    "via the Bash tool."
+    "Your harness runs in workspace-scoped auto-approve mode — your Bash tool is\n"
+    "enabled and routine permission prompts auto-resolve, so call cafleet (and any\n"
+    "other shell command) directly via the Bash tool."
 )
 
 
@@ -44,9 +47,20 @@ def _build_claude_command(prompt: str, *, display_name: str) -> list[str]:
     ]
 
 
-def _ensure_claude_available() -> None:
-    if shutil.which(_CLAUDE_BINARY) is None:
-        raise RuntimeError(f"'{_CLAUDE_BINARY}' binary not found on PATH")
+def _build_codex_command(prompt: str) -> list[str]:
+    return [
+        _CODEX_BINARY,
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "workspace-write",
+        prompt,
+    ]
+
+
+def _ensure_coding_agent_available(binary_name: str) -> None:
+    if shutil.which(binary_name) is None:
+        raise RuntimeError(f"binary {binary_name} not found on PATH")
 
 
 def _require_session_id(ctx: click.Context) -> None:
@@ -224,9 +238,19 @@ def session() -> None:
 
 @session.command("create")
 @click.option("--label", default=None, help="Optional human-readable label.")
+@click.option(
+    "--coding-agent",
+    "coding_agent",
+    type=click.Choice(["claude", "codex"]),
+    default="claude",
+    show_default=True,
+    help="Coding-agent binary to spawn / declare for the placement.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
-def session_create(ctx: click.Context, label: str | None, as_json: bool) -> None:
+def session_create(
+    ctx: click.Context, label: str | None, coding_agent: str, as_json: bool
+) -> None:
     """Create a new session (must be run inside a tmux session)."""
     try:
         tmux.ensure_tmux_available()
@@ -236,7 +260,11 @@ def session_create(ctx: click.Context, label: str | None, as_json: bool) -> None
             "cafleet session create must be run inside a tmux session"
         ) from exc
 
-    result = broker.create_session(label=label, director_context=director_ctx)
+    result = broker.create_session(
+        label=label,
+        director_context=director_ctx,
+        coding_agent=coding_agent,
+    )
 
     if as_json or ctx.obj.get("json_output"):
         click.echo(output.format_json(result))
@@ -632,7 +660,7 @@ def _resolve_prompt(
     director = broker.get_agent(director_agent_id, session_id)
     if director is None:
         raise click.UsageError(f"Director agent {director_agent_id} not found")
-    template = " ".join(prompt_argv) if prompt_argv else _CLAUDE_PROMPT_TEMPLATE
+    template = " ".join(prompt_argv) if prompt_argv else _MEMBER_PROMPT_TEMPLATE
     try:
         return template.format(
             session_id=session_id,
@@ -673,16 +701,26 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
 @click.option("--agent-id", required=True, help="Director's agent ID")
 @click.option("--name", required=True, help="Member name")
 @click.option("--description", required=True, help="Member description")
+@click.option(
+    "--coding-agent",
+    "coding_agent",
+    type=click.Choice(["claude", "codex"]),
+    default="claude",
+    show_default=True,
+    help="Coding-agent binary to spawn / declare for the placement.",
+)
 @click.argument("prompt_argv", nargs=-1)
 @click.pass_context
-def member_create(ctx, agent_id, name, description, prompt_argv):
-    """Register a new member and spawn its claude pane in the Director's window."""
+def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
+    """Register a new member and spawn its coding-agent pane in the Director's window."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
+    binary_name = _CLAUDE_BINARY if coding_agent == "claude" else _CODEX_BINARY
+
     try:
         tmux.ensure_tmux_available()
-        _ensure_claude_available()
+        _ensure_coding_agent_available(binary_name)
         director_ctx = tmux.director_context()
     except (tmux.TmuxError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -697,7 +735,7 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
                 "tmux_session": director_ctx.session,
                 "tmux_window_id": director_ctx.window_id,
                 "tmux_pane_id": None,
-                "coding_agent": _CLAUDE_BINARY,
+                "coding_agent": coding_agent,
             },
         )
     except Exception as exc:
@@ -713,13 +751,18 @@ def member_create(ctx, agent_id, name, description, prompt_argv):
             reason=f"prompt resolution failed: {exc}",
         )
 
+    if coding_agent == "claude":
+        spawn_command = _build_claude_command(prompt, display_name=name)
+    else:
+        spawn_command = _build_codex_command(prompt)
+
     try:
         db_url = os.environ.get("CAFLEET_DATABASE_URL")
         fwd_env = {"CAFLEET_DATABASE_URL": db_url} if db_url else {}
         pane_id = tmux.split_window(
             target_window_id=director_ctx.window_id,
             env=fwd_env,
-            command=_build_claude_command(prompt, display_name=name),
+            command=spawn_command,
         )
     except tmux.TmuxError as exc:
         _rollback_register(
@@ -998,7 +1041,7 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
 
     if freetext is not None and freetext.lstrip().startswith("!"):
         raise click.UsageError(
-            "--freetext may not start with '!' — that triggers Claude Code's "
+            "--freetext may not start with '!' — that triggers the coding agent's "
             "shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead."
         )
 
@@ -1063,7 +1106,7 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
 @click.argument("command")
 @click.pass_context
 def member_exec(ctx, agent_id, member_id, command):
-    """Dispatch a shell command into a member's pane via Claude Code's `!` shortcut."""
+    """Dispatch a shell command into a member's pane via the coding agent's `!` shortcut."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 

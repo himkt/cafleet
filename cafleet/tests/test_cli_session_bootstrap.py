@@ -199,11 +199,62 @@ def test_session_create_json_output__placement_sub_dict_matches_spec(
     placement = data["director"]["placement"]
 
     assert placement["director_agent_id"] is None
-    assert placement["coding_agent"] == "unknown"
+    # Default --coding-agent is 'claude' (design 0000046 §1).
+    assert placement["coding_agent"] == "claude"
     assert placement["tmux_session"] == _FAKE_DIRECTOR_CTX.session
     assert placement["tmux_window_id"] == _FAKE_DIRECTOR_CTX.window_id
     assert placement["tmux_pane_id"] == _FAKE_DIRECTOR_CTX.pane_id
     assert "created_at" in placement
+
+
+# --- session_create_coding_agent: design 0000046 §1. ``--coding-agent``
+# on ``cafleet session create`` is operator-declared metadata that lands in
+# ``placement.coding_agent`` for the root Director. The session-create path
+# does NOT spawn anything, so the test does not need a fake codex binary.
+# ---
+
+
+def test_session_create_coding_agent__codex_records_codex_in_placement_text(
+    db_file, mock_tmux_ok
+):
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["session", "create", "--coding-agent", "codex", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["director"]["placement"]["coding_agent"] == "codex"
+
+
+def test_session_create_coding_agent__claude_records_claude_in_placement(
+    db_file, mock_tmux_ok
+):
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["session", "create", "--coding-agent", "claude", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["director"]["placement"]["coding_agent"] == "claude"
+
+
+def test_session_create_coding_agent__default_is_claude(db_file, mock_tmux_ok):
+    """No flag → 'claude' (design 0000046 §9). 'unknown' must not appear
+    for newly-created sessions.
+    """
+    runner = CliRunner()
+    result = runner.invoke(cli, ["session", "create", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["director"]["placement"]["coding_agent"] == "claude"
+
+
+def test_session_create_coding_agent__unknown_value_rejected(db_file, mock_tmux_ok):
+    """``click.Choice(['claude','codex'])`` rejects anything else (exit 2)."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["session", "create", "--coding-agent", "foo"])
+    assert result.exit_code == 2, result.output
+    assert "--coding-agent" in (result.output or "")
 
 
 def test_session_create_json_output__label_propagates_to_json(db_file, mock_tmux_ok):

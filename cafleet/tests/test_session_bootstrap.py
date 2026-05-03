@@ -45,11 +45,16 @@ def director_context():
     return DirectorContext(session="main", window_id="@1", pane_id="%0")
 
 
-def _bootstrap(label: str | None = None, ctx: DirectorContext | None = None) -> dict:
+def _bootstrap(
+    label: str | None = None,
+    ctx: DirectorContext | None = None,
+    coding_agent: str = "claude",
+) -> dict:
     return broker.create_session(
         label=label,
         director_context=ctx
         or DirectorContext(session="main", window_id="@1", pane_id="%0"),
+        coding_agent=coding_agent,
     )
 
 
@@ -89,7 +94,7 @@ def test_create_session_bootstrap__director_name_and_description_are_hardcoded(
     assert result["director"]["description"] == "Root Director for this session"
 
 
-def test_create_session_bootstrap__placement_sub_dict_matches_director_context_and_unknown_coding_agent(
+def test_create_session_bootstrap__placement_sub_dict_matches_director_context_and_coding_agent(
     director_context,
 ):
     result = _bootstrap(ctx=director_context)
@@ -98,8 +103,18 @@ def test_create_session_bootstrap__placement_sub_dict_matches_director_context_a
     assert placement["tmux_session"] == director_context.session
     assert placement["tmux_window_id"] == director_context.window_id
     assert placement["tmux_pane_id"] == director_context.pane_id
-    assert placement["coding_agent"] == "unknown"
+    # The bootstrap helper passes ``coding_agent='claude'``; the broker stores
+    # it verbatim (design 0000046 §1, §5).
+    assert placement["coding_agent"] == "claude"
     assert "created_at" in placement
+
+
+def test_create_session_bootstrap__coding_agent_codex_records_codex(director_context):
+    """``broker.create_session(coding_agent='codex')`` writes 'codex' into
+    the root Director's placement row (design 0000046 §1, §5).
+    """
+    result = _bootstrap(ctx=director_context, coding_agent="codex")
+    assert result["director"]["placement"]["coding_agent"] == "codex"
 
 
 def test_create_session_bootstrap__writes_exactly_one_session_row(
@@ -153,7 +168,7 @@ def test_create_session_bootstrap__writes_one_placement_row_for_the_director_onl
     assert placement.tmux_session == director_context.session
     assert placement.tmux_window_id == director_context.window_id
     assert placement.tmux_pane_id == director_context.pane_id
-    assert placement.coding_agent == "unknown"
+    assert placement.coding_agent == "claude"
 
 
 def test_create_session_bootstrap__sessions_director_agent_id_is_set_to_the_director(
@@ -234,7 +249,11 @@ def test_create_session_rollback__rollback_when_placement_insert_fails_leaves_no
     monkeypatch.setattr(broker, "AgentPlacement", _BoomPlacement)
 
     with pytest.raises(RuntimeError, match="injected failure"):
-        broker.create_session(label="rollback", director_context=director_context)
+        broker.create_session(
+            label="rollback",
+            director_context=director_context,
+            coding_agent="claude",
+        )
 
     with broker_session() as s:
         sessions = s.query(SessionModel).count()
@@ -466,7 +485,9 @@ def test_member_to_director_notification__send_message_invokes_send_poll_trigger
     mock_trigger = Mock(return_value=True)
     monkeypatch.setattr("cafleet.tmux.send_poll_trigger", mock_trigger)
 
-    result = broker.create_session(label="notify", director_context=director_context)
+    result = broker.create_session(
+        label="notify", director_context=director_context, coding_agent="claude"
+    )
     sid = result["session_id"]
     root_director_id = result["director"]["agent_id"]
 

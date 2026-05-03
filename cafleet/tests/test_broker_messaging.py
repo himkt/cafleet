@@ -33,6 +33,7 @@ def _create_session(label: str | None = None) -> dict:
     return broker.create_session(
         label=label,
         director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
+        coding_agent="claude",
     )
 
 

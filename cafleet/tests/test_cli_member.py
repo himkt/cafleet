@@ -255,11 +255,12 @@ def split_window_recorder(monkeypatch):
 
 @pytest.fixture
 def stub_coding_agent_binaries(monkeypatch):
-    """Pretend the claude binary is on PATH.
+    """Pretend every coding-agent binary is on PATH.
 
-    ``_ensure_claude_available()`` calls ``shutil.which(_CLAUDE_BINARY)``;
-    patching it module-wide is the narrowest monkeypatch that keeps the
-    spawn alive without a real binary.
+    ``_ensure_coding_agent_available(<name>)`` calls
+    ``shutil.which(<name>)``; patching it module-wide is the narrowest
+    monkeypatch that keeps the spawn alive for every backend without a real
+    binary on disk.
     """
     monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: "/usr/bin/stub")
 
@@ -344,3 +345,254 @@ def test_permission_mode__claude_default_injects_dontask_permission_mode(
     assert perm_index < name_index, (
         f"--permission-mode must precede --name; got {command!r}"
     )
+
+
+# --- coding_agent_codex: design 0000046 §2. ``--coding-agent codex`` selects
+# the codex spawn-command builder; the resulting command list passed to
+# ``tmux.split_window`` matches the codex shape from the design doc and the
+# placement row records ``coding_agent='codex'``. ---
+
+
+def test_coding_agent_codex__spawn_command_matches_codex_shape(
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    session_id, director_id, runner = bootstrapped_session
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "create",
+            "--agent-id",
+            director_id,
+            "--name",
+            "Codex-Member",
+            "--description",
+            "codex member for PR #42",
+            "--coding-agent",
+            "codex",
+            "--",
+            "hello",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert len(split_window_recorder) == 1
+    command = split_window_recorder[0]["command"]
+    assert command == [
+        "codex",
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "workspace-write",
+        "hello",
+    ]
+
+
+def test_coding_agent_codex__no_dash_dash_name_in_codex_argv(
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    """Codex has no ``--name`` analog (design 0000046 §3). The argv must NOT
+    carry ``--name`` even though the operator supplied ``--name Codex-Member``.
+    """
+    session_id, director_id, runner = bootstrapped_session
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "create",
+            "--agent-id",
+            director_id,
+            "--name",
+            "Codex-Member",
+            "--description",
+            "codex member",
+            "--coding-agent",
+            "codex",
+            "--",
+            "hello",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    command = split_window_recorder[0]["command"]
+    assert "--name" not in command
+    assert "Codex-Member" not in command
+
+
+def test_coding_agent_codex__placement_records_codex(
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    """``placement.coding_agent`` is recorded as ``'codex'`` for codex
+    members so ``cafleet member list`` and the WebUI surface the backend
+    correctly. The CLI passes the flag value into ``broker.register_agent``'s
+    placement payload.
+    """
+    session_id, director_id, runner = bootstrapped_session
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "--json",
+            "member",
+            "create",
+            "--agent-id",
+            director_id,
+            "--name",
+            "Codex-Member",
+            "--description",
+            "codex member",
+            "--coding-agent",
+            "codex",
+            "--",
+            "hello",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["placement"]["coding_agent"] == "codex"
+
+
+def test_coding_agent_default_is_claude__no_flag_keeps_claude_argv(
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    """Regression guard: omitting ``--coding-agent`` must keep the claude
+    argv shape so existing operators see no behavior change.
+    """
+    session_id, director_id, runner = bootstrapped_session
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "create",
+            "--agent-id",
+            director_id,
+            "--name",
+            "Default-Claude",
+            "--description",
+            "default claude member",
+            "--",
+            "hello",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    command = split_window_recorder[0]["command"]
+    assert command[0] == "claude"
+    assert "--permission-mode" in command
+    assert "--ask-for-approval" not in command
+    assert "--sandbox" not in command
+
+
+def test_coding_agent_unknown_value_rejected__click_choice_exits_two(
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    """``--coding-agent foo`` is rejected by ``click.Choice`` (exit 2)."""
+    session_id, director_id, runner = bootstrapped_session
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "create",
+            "--agent-id",
+            director_id,
+            "--name",
+            "Bad",
+            "--description",
+            "bad",
+            "--coding-agent",
+            "foo",
+            "--",
+            "hello",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    assert "--coding-agent" in (result.output or "")
+    # No spawn happened — Click rejected the input before we reached split_window.
+    assert len(split_window_recorder) == 0
+
+
+def test_coding_agent_codex_binary_missing__exits_with_codex_message(
+    bootstrapped_session,
+    split_window_recorder,
+    monkeypatch,
+):
+    """``--coding-agent codex`` and codex absent on PATH → exit 1 with
+    ``binary codex not found on PATH``. The check must be backend-aware:
+    when codex is the requested binary, the error names codex (not claude)
+    even if claude happens to also be missing.
+    """
+    monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: None)
+    session_id, director_id, runner = bootstrapped_session
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "create",
+            "--agent-id",
+            director_id,
+            "--name",
+            "Codex",
+            "--description",
+            "codex member",
+            "--coding-agent",
+            "codex",
+            "--",
+            "hello",
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    assert "binary codex not found on PATH" in (result.output or "")
+    assert len(split_window_recorder) == 0
+
+
+def test_default_path_claude_binary_missing__exits_with_claude_message(
+    bootstrapped_session,
+    split_window_recorder,
+    monkeypatch,
+):
+    """No ``--coding-agent`` flag (default-claude path) and claude absent
+    on PATH → exit 1 with ``binary claude not found on PATH``. Symmetric
+    to the codex case above; guards the default-path error-message
+    contract from regressing now that the binary-availability check goes
+    through the generic ``_ensure_coding_agent_available(binary_name)``.
+    """
+    monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: None)
+    session_id, director_id, runner = bootstrapped_session
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "create",
+            "--agent-id",
+            director_id,
+            "--name",
+            "Claude",
+            "--description",
+            "default-claude member",
+            "--",
+            "hello",
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    assert "binary claude not found on PATH" in (result.output or "")
+    assert len(split_window_recorder) == 0

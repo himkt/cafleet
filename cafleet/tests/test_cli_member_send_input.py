@@ -455,6 +455,25 @@ def test_freetext_bang_rejection__freetext_leading_bang_rejected(
     assert "--freetext may not start with" in (result.output or "")
 
 
+# --- freetext_bang_rejection_message_is_backend_neutral: design 0000046 §5/§10.
+# The error wording must reference "the coding agent's shell-execution shortcut"
+# (not "Claude Code's") so the message is accurate for both backends. The
+# guidance to use ``cafleet member exec`` for shell dispatch is preserved. ---
+
+
+def test_freetext_bang_rejection__error_wording_is_backend_neutral(
+    runner, session_id, happy_path_agent
+):
+    result = _invoke(runner, session_id, "--freetext", "! pwd")
+    assert result.exit_code == 2, result.output
+    out = result.output or ""
+    assert "the coding agent's shell-execution shortcut" in out
+    # The guidance to use ``cafleet member exec`` for shell dispatch is preserved.
+    assert "cafleet member exec" in out
+    # The old, claude-specific phrasing must not survive the softening.
+    assert "Claude Code's shell-execution shortcut" not in out
+
+
 def test_freetext_bang_rejection__freetext_whitespace_then_bang_rejected(
     runner, session_id, happy_path_agent
 ):

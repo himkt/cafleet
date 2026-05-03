@@ -149,7 +149,7 @@ The `cafleet member` CLI subgroup wraps the two-step "register an agent + spawn 
 **Atomic create flow** (`cafleet member create`):
 
 1. Register the member agent with a pending placement (`tmux_pane_id = NULL`, `coding_agent` field) via `broker.register_agent(placement=...)`.
-2. Spawn the claude member pane in the Director's own tmux window via `tmux split-window -t <window_id>`, capturing the new pane ID.
+2. Spawn the member pane in the Director's own tmux window via `tmux split-window -t <window_id>`, capturing the new pane ID. The spawn argv is built per backend (see § Coding Agents).
 3. Patch the placement row with the real pane ID via `broker.update_placement_pane_id()`.
 4. Rebalance the window layout via `tmux select-layout main-vertical`.
 
@@ -157,7 +157,7 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 **Delete ordering** (default path): send `/exit`, poll `list-panes` until the pane disappears (15 s timeout), then deregister, then rebalance layout. On timeout, capture the pane tail and fail loudly with exit code 2; operator reruns with `--force` for an atomic kill+deregister. This overrides the 0000014 deregister-first invariant — see `design-docs/0000032-robust-member-teardown/design-doc.md` §4.
 
-**Pane display-name propagation**: `member_create` builds the spawn argv as `claude --permission-mode dontAsk --name <member-name> <prompt>` directly from `cli.py` constants, so the `--name` flag is forwarded to the spawned process and Claude Code re-emits the name via the terminal title escape sequence. `tmux display-message -p -t <pane> "#{pane_title}"` returns the member name for the lifetime of the pane.
+**Pane display-name propagation (claude backend only)**: when the placement is created with `coding_agent="claude"`, `member_create` builds the spawn argv as `claude --permission-mode dontAsk --name <member-name> <prompt>` directly from `cli.py` constants, so the `--name` flag is forwarded to the spawned process and Claude Code re-emits the name via the terminal title escape sequence. The `codex` backend has no `--name` analog and so panes show whatever default title `codex` emits — see § Coding Agents for the asymmetry note. `tmux display-message -p -t <pane> "#{pane_title}"` returns the member name for the lifetime of a `claude` pane.
 
 **Commands**: `member create`, `member delete`, `member list`, `member capture`, `member send-input`, `member exec`, `member ping`. All require `--agent-id` (the Director's ID). The tmux helper module (`cafleet/src/cafleet/tmux.py`) isolates all subprocess interaction with tmux. Primitives for pane lifecycle inspection and forced teardown — `pane_exists`, `kill_pane`, and `wait_for_pane_gone` — live here so the CLI never calls tmux directly. Director-side usage of `member send-input --choice` / `--freetext` is AskUserQuestion-delegated (capture → Director-side `AskUserQuestion` → direct Bash invocation of the resolved command); see [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) "Answer a member's AskUserQuestion prompt" for the canonical three-beat workflow and pane-shapes table. `member exec` is the bash-routing primitive — see § Routing Bash via the Director below.
 
@@ -169,11 +169,31 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 **Supervision skill**: The Director's monitoring obligations are defined in `skills/cafleet-monitoring/SKILL.md`. This skill must be loaded (`Skill(cafleet-monitoring)`) before spawning any members. It provides a 2-stage health check protocol (message poll then terminal capture) and a ready-to-use `/loop` prompt template.
 
+## Coding Agents
+
+cafleet supports two coding-agent binaries inside member panes: `claude` (Claude Code) and `codex` (OpenAI Codex CLI). The backend is selected at session-create and member-create time via `--coding-agent {claude,codex}`; the default is `claude` so existing invocations behave unchanged.
+
+| Backend | Spawn command | Notes |
+|---|---|---|
+| `claude` | `claude --permission-mode dontAsk --name <member-name> <prompt>` | Pane title derives from `--name` via Claude Code's terminal-title escape. |
+| `codex`  | `codex --ask-for-approval never --sandbox workspace-write <prompt>` | No `--name` analog; pane title is whatever `codex` emits by default. Operators locate panes via `cafleet member list`. |
+
+Both backends honor a leading-`!` shell shortcut on the coding agent's input line, so `cafleet member exec` keystrokes `! <command>` + Enter into either pane shape and the command runs natively. The `--coding-agent` value is recorded in `agent_placements.coding_agent` (free-text `String` column; the CLI's `click.Choice(["claude", "codex"])` is the only enum gate). Mixed-backend teams are allowed: a single Director may spawn both `claude` and `codex` members in the same session with no broker-level differences.
+
+For `cafleet session create`, the `--coding-agent` flag is operator-declared metadata only — cafleet does not spawn the root Director's coding-agent process and cannot auto-detect what is already running, so the operator declares which binary is in the pane. For `cafleet member create`, the flag both selects the spawn-command builder AND is recorded as placement metadata.
+
+**Known asymmetries (intentional non-goals):**
+
+- **Pane title.** Only the `claude` spawn argv carries `--name`, so codex panes do not display the member name in their pane title. Use `cafleet member list --agent-id <director>` to find a specific member's pane id; the `pane_id` column is ground truth for both backends.
+- **Bash-disable parity.** Codex has no `--disallowedTools` analog. The bash-via-Director protocol is a fallback for harness-deny-listed destructive commands (e.g. `git push`), not a tool-permission gate, so the asymmetry does not affect the routing protocol.
+
+Operational details for codex members — including the codex CLI version pin, install pointer, and verification recipe — live in [docs/codex-members.md](docs/codex-members.md).
+
 ## Bash Routing via Director
 
-Members spawn with `--permission-mode dontAsk` (always, no flag pair to opt in/out). The Bash tool is enabled and permission prompts auto-resolve silently, so members run cafleet (and any shell command) directly via the Bash tool. The default spawn-prompt template tells the member explicitly that its harness runs in dontAsk mode.
+Members spawn with workspace-scoped auto-approval enabled — `claude` uses `--permission-mode dontAsk` and `codex` uses `--ask-for-approval never --sandbox workspace-write`. The Bash tool is enabled and routine permission prompts auto-resolve silently, so members run cafleet (and any shell command) directly via the Bash tool. The default spawn-prompt template tells the member explicitly that its harness runs in workspace-scoped auto-approve mode.
 
-The bash-via-Director protocol is the **fallback** for the harness deny-list: dontAsk does not auto-resolve everything — destructive operations such as `git push` and `rm -rf` are still rejected at the Claude Code harness layer. When a member's Bash invocation is denied, the member auto-routes by sending a plain CAFleet message to its Director, and the Director dispatches the command into the member's pane via `cafleet member exec "<cmd>"`, which keystrokes literal `! <cmd>` + `Enter` and triggers Claude Code's `!` CLI shortcut on the receiving side. Members must first reconsider whether the rejected command is correct and necessary — most denials are caused by a wrong command, not a missing privilege. See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) § Routing Bash via the Director for the full convention.
+The bash-via-Director protocol is the **fallback** for the harness deny-list: workspace-scoped auto-approval does not auto-resolve everything — destructive operations such as `git push` and `rm -rf` are still rejected at the coding agent's harness layer. When a member's Bash invocation is denied, the member auto-routes by sending a plain CAFleet message to its Director, and the Director dispatches the command into the member's pane via `cafleet member exec "<cmd>"`, which keystrokes literal `! <cmd>` + `Enter` and triggers the coding agent's `!` CLI shortcut on the receiving side (honored by both `claude` and `codex`). Members must first reconsider whether the rejected command is correct and necessary — most denials are caused by a wrong command, not a missing privilege. See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) § Routing Bash via the Director for the full convention.
 
 ## Design Document Orchestration Skills
 

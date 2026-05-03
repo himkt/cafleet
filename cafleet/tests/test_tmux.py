@@ -97,13 +97,14 @@ def test_split_window__claude_style_command(monkeypatch):
         command=[
             "claude",
             (
-                "Load Skill(cafleet). Your agent_id is "
+                "Load the 'cafleet' skill. Your agent_id is "
                 "7ba91234-5678-90ab-cdef-112233445566."
             ),
         ],
     )
     assert captured_args[-2] == "claude"
-    assert "Load Skill(cafleet)" in captured_args[-1]
+    assert "cafleet" in captured_args[-1]
+    assert "7ba91234" in captured_args[-1]
 
 
 def test_split_window__env_vars_forwarded_as_flags(monkeypatch):
