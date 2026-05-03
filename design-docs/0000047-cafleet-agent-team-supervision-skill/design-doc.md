@@ -1,7 +1,7 @@
 # CAFleet Agent Team Supervision & Monitoring Skills
 
 **Status**: Approved
-**Progress**: 0/16 tasks complete
+**Progress**: 3/16 tasks complete
 **Last Updated**: 2026-05-03
 
 ## Overview
@@ -261,9 +261,9 @@ means stop* for the project-wide policy this section enforces.
 
 ### Step 1: Author the monitoring skill (foundation layer first)
 
-- [ ] Read `skills/cafleet-monitoring/SKILL.md` (current source) and both `~/.claude/skills/agent-team-supervision/SKILL.md` and `~/.claude/skills/agent-team-monitoring/SKILL.md` (global counterparts) end to end. <!-- completed: -->
-- [ ] Create `skills/agent-team-monitoring/SKILL.md` per Specification §2 with the section order listed there. The Mechanism by backend section (§3) MUST be embedded verbatim from §3 of this design doc, including the codex survey result and the fallback options table. <!-- completed: -->
-- [ ] Verify the file has the frontmatter from §7 (`name`, `description`) and contains both the Claude Code `/loop` Prompt Template AND the codex per-backend section. <!-- completed: -->
+- [x] Read `skills/cafleet-monitoring/SKILL.md` (current source) and both `~/.claude/skills/agent-team-supervision/SKILL.md` and `~/.claude/skills/agent-team-monitoring/SKILL.md` (global counterparts) end to end. <!-- completed: 2026-05-03T12:00 -->
+- [x] Create `skills/agent-team-monitoring/SKILL.md` per Specification §2 with the section order listed there. The Mechanism by backend section (§3) MUST be embedded verbatim from §3 of this design doc, including the codex survey result and the fallback options table. <!-- completed: 2026-05-03T12:00 -->
+- [x] Verify the file has the frontmatter from §7 (`name`, `description`) and contains both the Claude Code `/loop` Prompt Template AND the codex per-backend section. <!-- completed: 2026-05-03T12:00 -->
 
 ### Step 2: Author the supervision skill (governance layer second)
 
