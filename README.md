@@ -56,6 +56,20 @@ Want more? See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for the raw 
 
 cafleet supports two coding-agent binaries for member panes: `claude` (Claude Code) and `codex` (OpenAI Codex CLI). Pass `--coding-agent {claude,codex}` on `cafleet session create` (operator-declared metadata for the root Director) and `cafleet member create` (selects the spawn-command builder and records the placement). The default is `claude`, so existing invocations are unchanged. A single Director may spawn both `claude` and `codex` members in the same session. Operational details for codex members — including the codex CLI version pin and verification recipe — live in [docs/codex-members.md](docs/codex-members.md).
 
+> [!IMPORTANT]
+> **Codex members require a project-local `.codex/config.toml` to write to the cafleet DB.**
+>
+> codex spawns model-generated shell commands inside a `bubblewrap` sandbox whose `workspace-write` profile only mounts the workdir as read-write. The cafleet SQLite DB lives outside the workdir (default `~/.local/share/cafleet/`), so codex members cannot `cafleet message send` / `ack` without an extra writable root. The CLI flag `codex --add-dir <DIR>` is *advertised* as the fix but is broken in codex 0.128.0 — the path is listed in the sandbox profile yet `bwrap` still mounts it read-only. The TOML config key works.
+>
+> Create `<repo-root>/.codex/config.toml` once, before spawning any codex member:
+>
+> ```toml
+> [sandbox_workspace_write]
+> writable_roots = ["/home/<you>/.local/share/cafleet"]
+> ```
+>
+> Use the absolute path that matches your `CAFLEET_DATABASE_URL` (or the default XDG location if unset). The repo (`/home/<you>/work/.../cafleet`) must be marked `trust_level = "trusted"` in `~/.codex/config.toml` for codex to load the project-local config — see [Codex configuration precedence](https://developers.openai.com/codex/config-basic#configuration-precedence). Tracked upstream: [openai/codex#3303](https://github.com/openai/codex/issues/3303), [openai/codex#12284](https://github.com/openai/codex/issues/12284).
+
 ### Message body truncation
 
 `cafleet message {send,poll,ack,cancel,show}` truncate the message `text` body to the first 10 Unicode codepoints with a literal `...` suffix in both text and `--json` output by default. This collapses per-poll token cost for inbox-polling agents whose bodies typically run 200–500 characters. Pass `--full` (per-subcommand option, placed after the subcommand name) to restore the un-truncated body. Empty bodies and bodies of 10 codepoints or fewer pass through unchanged with no `...` marker. `cafleet message broadcast` is different — it returns a `broadcast_summary` task whose text is generated summary text (e.g. `Broadcast sent to N recipients`), not the original body, so its summary always emits in full. The `--full` flag still exists on `message broadcast` for surface consistency but is a no-op. The `/ui/api/*` WebUI responses are not truncated.
