@@ -561,3 +561,38 @@ def test_coding_agent_codex_binary_missing__exits_with_codex_message(
     assert result.exit_code == 1, result.output
     assert "binary codex not found on PATH" in (result.output or "")
     assert len(split_window_recorder) == 0
+
+
+def test_default_path_claude_binary_missing__exits_with_claude_message(
+    bootstrapped_session,
+    split_window_recorder,
+    monkeypatch,
+):
+    """No ``--coding-agent`` flag (default-claude path) and claude absent
+    on PATH → exit 1 with ``binary claude not found on PATH``. Symmetric
+    to the codex case above; guards the default-path error-message
+    contract from regressing now that the binary-availability check goes
+    through the generic ``_ensure_coding_agent_available(binary_name)``.
+    """
+    monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: None)
+    session_id, director_id, runner = bootstrapped_session
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "member",
+            "create",
+            "--agent-id",
+            director_id,
+            "--name",
+            "Claude",
+            "--description",
+            "default-claude member",
+            "--",
+            "hello",
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    assert "binary claude not found on PATH" in (result.output or "")
+    assert len(split_window_recorder) == 0
