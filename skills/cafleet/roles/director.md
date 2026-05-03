@@ -43,7 +43,7 @@ You receive a member-originated bash request when **both** of the following are 
      --agent-id <director-agent-id> --member-id <member-agent-id>
    ```
 
-   The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll` — `message poll` reads your own Director inbox over SQLite and does not wake the member. Run `cafleet member ping` after any `cafleet member exec` invocation that exits 0. Skip the ping only on non-zero exit — the dispatch did not complete successfully (its `tmux send-keys` sequence may have failed mid-way), so we cannot assume the bang command was submitted, and the 1-minute `cafleet-monitoring` tick is the safety net.
+   The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll` — `message poll` reads your own Director inbox over SQLite and does not wake the member. Run `cafleet member ping` after any `cafleet member exec` invocation that exits 0. Skip the ping only on non-zero exit — the dispatch did not complete successfully (its `tmux send-keys` sequence may have failed mid-way), so we cannot assume the bang command was submitted, and the next supervision tick (agent-team-monitoring `/loop` or configured fallback driver) is the safety net.
 
 4. **`member exec` mechanics:** the command is a single required positional argument. The subcommand works on any pane that is at the coding agent's input prompt (`claude` or `codex`). Empty / whitespace-only commands and commands containing newlines are rejected by the CLI handler with exit 2.
 

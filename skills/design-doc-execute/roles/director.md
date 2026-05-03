@@ -10,7 +10,7 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet session and monitor continuously.** Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`. Create a CAFleet session via `cafleet session create --json` (must be run inside a tmux session) — this bootstraps the session, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Start the monitoring `/loop` BEFORE spawning any member. Keep the loop running until shutdown.
+- **Bootstrap the CAFleet session and monitor continuously.** Load `Skill(cafleet)`, `Skill(agent-team-monitoring)`, and `Skill(agent-team-supervision)` (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it). Create a CAFleet session via `cafleet session create --json` (must be run inside a tmux session) — this bootstraps the session, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Start the monitoring `/loop` BEFORE spawning any member. Keep the loop running until shutdown.
 - **Validate the design document first.** Before spawning any teammates, read the document, check for COMMENT markers and FIXME(claude) markers. If COMMENTs exist, resolve them directly when they are clear: read each COMMENT marker, apply the requested changes to the document, and remove the markers before proceeding. If a COMMENT is ambiguous, conflicts with other parts of the design, or requires a product decision, ask the user for clarification via `AskUserQuestion` before resolving it.
 - **Judge team composition and spawn needed members.** Before spawning, analyze the nature of implementation tasks. Only spawn roles that are actually needed:
   - Code implementation → Programmer + Tester (TDD)
@@ -136,7 +136,7 @@ When the user selects "Other" and provides free text, use LLM reasoning to deter
 
 ## Progress Monitoring
 
-Track team progress via the `Skill(cafleet-monitoring)` `/loop` (1-minute interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next.
+Track team progress via the `Skill(agent-team-monitoring)` `/loop` (1-minute interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next. Supervision obligations (Authorization-Scope Guard, idle semantics) come from the paired `Skill(agent-team-supervision)`.
 
 ### User delegation for member send-input
 

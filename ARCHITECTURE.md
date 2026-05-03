@@ -167,7 +167,7 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 **Operator diagnostics**: `cafleet doctor` prints the calling pane's session/window/pane identifiers (plus `$TMUX_PANE`) for operators diagnosing placement issues without reaching for raw tmux commands. It is a top-level command — not a member-family command — but reuses `tmux.ensure_tmux_available()` so the TMUX-required wording stays consistent with the member surface.
 
-**Supervision skill**: The Director's monitoring obligations are defined in `skills/cafleet-monitoring/SKILL.md`. This skill must be loaded (`Skill(cafleet-monitoring)`) before spawning any members. It provides a 2-stage health check protocol (message poll then terminal capture) and a ready-to-use `/loop` prompt template.
+**Supervision skills**: The Director's monitoring obligations are split across two skills. `skills/agent-team-monitoring/SKILL.md` is the foundation layer — it documents the cron-like loop primitive per backend (Claude Code uses `CronCreate` + `/loop`; codex has no in-session scheduling and uses fallback options), the team-facilitation instructions, the 2-stage health check protocol (message poll then terminal capture), and the `/loop` prompt template. `skills/agent-team-supervision/SKILL.md` is the governance layer — it loads agent-team-monitoring as a hard prerequisite and adds the always-applicable obligations (Core Principle, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, User Delegation, Cleanup). Load both (`Skill(agent-team-monitoring)` then `Skill(agent-team-supervision)`) before spawning any members.
 
 ## Coding Agents
 
@@ -207,7 +207,7 @@ CAFleet ships CAFleet-native replicas of the global Agent Teams design document 
 
 **Role files**: Each `*-create` and `*-execute` skill ships a `roles/` directory with one Markdown file per role. The Director reads the relevant role file and embeds its content verbatim in the `cafleet member create` spawn prompt.
 
-**Communication pattern**: Director → member messages are delivered via `cafleet message send`, which triggers a tmux push notification that injects `cafleet message poll` into the member's pane. Member → Director replies use the same `cafleet message send` path. The Director runs the `Skill(cafleet-monitoring)` `/loop` to watch for incoming messages and stalled panes.
+**Communication pattern**: Director → member messages are delivered via `cafleet message send`, which triggers a tmux push notification that injects `cafleet message poll` into the member's pane. Member → Director replies use the same `cafleet message send` path. The Director runs the `Skill(agent-team-monitoring)` `/loop` to watch for incoming messages and stalled panes; supervision obligations come from the paired `Skill(agent-team-supervision)`.
 
 **Coexistence**: The global `/design-doc-create` and `/design-doc-execute` Agent Teams skills remain functional. A user picks between them based on whether they want ephemeral in-memory coordination (Agent Teams) or a persistent, auditable message trail in SQLite + WebUI (CAFleet).
 

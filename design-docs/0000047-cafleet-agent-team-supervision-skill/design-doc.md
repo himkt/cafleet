@@ -1,7 +1,7 @@
 # CAFleet Agent Team Supervision & Monitoring Skills
 
-**Status**: Approved
-**Progress**: 0/16 tasks complete
+**Status**: Complete
+**Progress**: 28/28 tasks complete
 **Last Updated**: 2026-05-03
 
 ## Overview
@@ -10,15 +10,15 @@ Introduce two CAFleet-native skills, `cafleet:agent-team-monitoring` (the mechan
 
 ## Success Criteria
 
-- [ ] `skills/agent-team-monitoring/SKILL.md` exists and contains: when-to-monitor rules, the active-loop mechanism described per-backend (Claude Code: `CronCreate` / `ScheduleWakeup` + `/loop` template; codex: documented absence + fallback guidance), the health-check sequence, and team-facilitation instructions (dispatch queued work, nudge stalled members, escalate after N attempts).
-- [ ] `skills/agent-team-supervision/SKILL.md` exists and: (a) declares a hard dependency on `agent-team-monitoring` ("Load `Skill(agent-team-monitoring)` first" stated in the SKILL preamble); (b) covers Core Principle, Communication Model, Idle Semantics, **Authorization-Scope Guard**, Spawn Protocol, User Delegation, Stall Response, Cleanup; (c) does not duplicate the `/loop` Prompt Template — it cross-references monitoring.
-- [ ] The Authorization-Scope Guard section lives in supervision and explicitly forbids the "Skipping. Holding for go." failure mode and defines what counts as a real stop signal versus absence of confirmation.
-- [ ] The monitoring skill's backend-aware section explicitly states: "Codex CLI has no in-session scheduling primitive. A codex root Director cannot run the active `/loop` monitor. Recommendation: use `--coding-agent claude` for the root Director when active supervision is required; codex members are fully supported." Lists the fallback options for codex Directors (out-of-band cron driver, MCP scheduling server, user-driven manual nudges).
-- [ ] `skills/cafleet-monitoring/` is deleted; every reference in the repo points at the new skill names.
-- [ ] Project `CLAUDE.md` and `.claude/CLAUDE.md` skill listings replace the `/cafleet-monitoring` entry with two entries (`/agent-team-monitoring` and `/agent-team-supervision`) and document the load order (monitoring first, supervision second).
-- [ ] Every `Skill(cafleet-monitoring)` mention in other skills (notably `cafleet:design-doc-create`, `cafleet:design-doc-execute`, `cafleet:design-doc-interview`, `cafleet:cafleet`) is updated to load both new skills in the correct order.
-- [ ] Plugin manifest / packaging (`cafleet/pyproject.toml`, plugin metadata, anything that enumerates shipped skills) lists both new skills and omits the old one.
-- [ ] Regression checks: `grep -rn "cafleet-monitoring" .` outside `.git/` and this design doc returns zero hits; `grep -rn "Skipping\. Holding for go" .` outside `.git/` and this design doc returns zero hits.
+- [x] `skills/agent-team-monitoring/SKILL.md` exists and contains: when-to-monitor rules, the active-loop mechanism described per-backend (Claude Code: `CronCreate` / `ScheduleWakeup` + `/loop` template; codex: documented absence + fallback guidance), the health-check sequence, and team-facilitation instructions (dispatch queued work, nudge stalled members, escalate after N attempts).
+- [x] `skills/agent-team-supervision/SKILL.md` exists and: (a) declares a hard dependency on `agent-team-monitoring` ("Load `Skill(agent-team-monitoring)` first" stated in the SKILL preamble); (b) covers Core Principle, Communication Model, Idle Semantics, **Authorization-Scope Guard**, Spawn Protocol, User Delegation, Stall Response, Cleanup; (c) does not duplicate the `/loop` Prompt Template — it cross-references monitoring.
+- [x] The Authorization-Scope Guard section lives in supervision and explicitly forbids the "Skipping. Holding for go." failure mode and defines what counts as a real stop signal versus absence of confirmation.
+- [x] The monitoring skill's backend-aware section explicitly states: "Codex CLI has no in-session scheduling primitive. A codex root Director cannot run the active `/loop` monitor. Recommendation: use `--coding-agent claude` for the root Director when active supervision is required; codex members are fully supported." Lists the fallback options for codex Directors (out-of-band cron driver, MCP scheduling server, user-driven manual nudges).
+- [x] `skills/cafleet-monitoring/` is deleted; every reference in the repo points at the new skill names. (Historical mentions inside `design-docs/` are preserved per `.claude/rules/removal.md` — git history and design docs are the canonical historical record.)
+- [x] Project `CLAUDE.md` and `.claude/CLAUDE.md` skill listings replace the `/cafleet-monitoring` entry with two entries (`/agent-team-monitoring` and `/agent-team-supervision`) and document the load order (monitoring first, supervision second).
+- [x] Every `Skill(cafleet-monitoring)` mention in other skills (notably `cafleet:design-doc-create`, `cafleet:design-doc-execute`, `cafleet:design-doc-interview`, `cafleet:cafleet`) is updated to load both new skills in the correct order.
+- [x] Plugin manifest / packaging (`cafleet/pyproject.toml`, plugin metadata, anything that enumerates shipped skills) lists both new skills and omits the old one. (`cafleet/pyproject.toml` has no skill enumeration; `.claude-plugin/plugin.json` was the actual enumeration site and is updated.)
+- [x] Regression checks: `grep -rn "cafleet-monitoring" .` outside `.git/` and this design doc returns zero hits; `grep -rn "Skipping\. Holding for go" .` outside `.git/` and this design doc returns zero hits. (For `Skipping. Holding for go`, the two hits in `skills/agent-team-monitoring/SKILL.md` and `skills/agent-team-supervision/SKILL.md` are negative-rule callouts that **forbid** the phrase — the SC's intent that "no skill instructs the Director to emit the failure-mode message" is satisfied; both skills instruct the opposite.)
 
 ---
 
@@ -140,7 +140,7 @@ If a codex root Director is required (e.g. operator preference, codex-specific w
 
 | Fallback | Mechanism | Operational cost |
 |---|---|---|
-| **Out-of-band cron driver** | An OS-level scheduler (`cron(8)`, systemd timer, `watch -n 60 …`) keystrokes the supervision-tick prompt into the codex Director's tmux pane via `tmux send-keys`. | Operator must set up + tear down the timer; not visible inside the session. |
+| **Out-of-band cron driver** | An OS-level scheduler (`cron(8)`, systemd timer, `watch -n 60 …`) running **outside** the codex session keystrokes the supervision-tick prompt into the codex Director's tmux pane via `tmux send-keys`. (Operator-side only; the Director itself never invokes raw `tmux` — that is forbidden by `Skill(cafleet)` § Shutdown Protocol's "use cafleet primitives only" rule. This fallback exists because codex CLI has no in-session scheduler.) | Operator must set up + tear down the timer; not visible inside the session. |
 | **MCP scheduling server** | Codex CLI supports MCP servers. A custom MCP server can expose a scheduling tool the codex Director invokes inline. | Requires writing or installing an MCP server; configuration lives in `~/.codex/config.toml`. |
 | **User-driven nudges** | The user types a tick prompt at intervals (e.g. "tick" every minute). | Manual, error-prone, doesn't scale beyond short sessions. |
 | **No active monitor — synchronous in-turn facilitation only** | The Director performs all health checks + dispatch within each of its own active turns; no scheduled wake-up. The team only progresses while the Director has an active turn. | Acceptable only for short, fully-Director-driven workflows (no long-running parallel members). The Director's idle window is the team's idle window. |
@@ -215,7 +215,7 @@ disambiguating a teammate's question), use `AskUserQuestion` — do **not**
 emit a passive hold and wait. The hold message produces nothing; the question
 unblocks you within seconds.
 
-See `~/.claude/rules/skill-discovery.md` § *Authorization scope* and § *Stop
+See `.claude/rules/skill-discovery.md` § *Authorization scope* and § *Stop
 means stop* for the project-wide policy this section enforces.
 ```
 
@@ -233,7 +233,14 @@ means stop* for the project-wide policy this section enforces.
 | `CLAUDE.md` | Replace the `/cafleet-monitoring` skill bullet with two bullets: `/agent-team-monitoring` and `/agent-team-supervision`, in that order. Document the load order. |
 | `.claude/CLAUDE.md` | Same as above. |
 | `cafleet/pyproject.toml` (plugin manifest, if it enumerates skills) | Update skill list. |
+| `.claude-plugin/plugin.json` | Update the `skills` array — replace `./skills/cafleet-monitoring` with `./skills/agent-team-monitoring` and `./skills/agent-team-supervision`. |
+| `.claude/settings.json` | Update any `Skill(cafleet:cafleet-monitoring)` allow-list entry to the new pair. |
 | Any other `pyproject.toml` / plugin manifest that ships skills | Update skill list. |
+| `ARCHITECTURE.md` | Replace each `Skill(cafleet-monitoring)` mention with the loaded pair `Skill(agent-team-monitoring)` then `Skill(agent-team-supervision)` (in load order). |
+| `README.md` | Update the skills enumeration that lists `cafleet-monitoring` — replace with `agent-team-monitoring` and `agent-team-supervision` (preserve the surrounding skill count + list ordering). |
+| `skills/cafleet/roles/director.md` | Replace `cafleet-monitoring` references (e.g. the post-`exec` ping rule's "1-minute cafleet-monitoring tick" wording) with the new skill name(s) where the reference is to the active monitor; load-order comments should cite both new skills. |
+| `skills/design-doc-create/roles/director.md` | Replace `Skill(cafleet-monitoring)` references with the pair `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)` (in that order). |
+| `skills/design-doc-execute/roles/director.md` | Same pattern. |
 
 ### 7. Skill names and load directives
 
@@ -261,45 +268,52 @@ means stop* for the project-wide policy this section enforces.
 
 ### Step 1: Author the monitoring skill (foundation layer first)
 
-- [ ] Read `skills/cafleet-monitoring/SKILL.md` (current source) and both `~/.claude/skills/agent-team-supervision/SKILL.md` and `~/.claude/skills/agent-team-monitoring/SKILL.md` (global counterparts) end to end. <!-- completed: -->
-- [ ] Create `skills/agent-team-monitoring/SKILL.md` per Specification §2 with the section order listed there. The Mechanism by backend section (§3) MUST be embedded verbatim from §3 of this design doc, including the codex survey result and the fallback options table. <!-- completed: -->
-- [ ] Verify the file has the frontmatter from §7 (`name`, `description`) and contains both the Claude Code `/loop` Prompt Template AND the codex per-backend section. <!-- completed: -->
+- [x] Read `skills/cafleet-monitoring/SKILL.md` (current source) and both `~/.claude/skills/agent-team-supervision/SKILL.md` and `~/.claude/skills/agent-team-monitoring/SKILL.md` (global counterparts) end to end. <!-- completed: 2026-05-03T12:00 -->
+- [x] Create `skills/agent-team-monitoring/SKILL.md` per Specification §2 with the section order listed there. The Mechanism by backend section (§3) MUST be embedded verbatim from §3 of this design doc, including the codex survey result and the fallback options table. <!-- completed: 2026-05-03T12:00 -->
+- [x] Verify the file has the frontmatter from §7 (`name`, `description`) and contains both the Claude Code `/loop` Prompt Template AND the codex per-backend section. <!-- completed: 2026-05-03T12:00 -->
 
 ### Step 2: Author the supervision skill (governance layer second)
 
-- [ ] Create `skills/agent-team-supervision/SKILL.md` per Specification §4 with the section order listed there. The preamble (§4 row 2) MUST declare the dependency on monitoring explicitly. The Authorization-Scope Guard (§4 row 6) MUST be embedded verbatim from §5 of this design doc. <!-- completed: -->
-- [ ] Verify the file cross-references `Skill(agent-team-monitoring)` for the stall-response table and `/loop` template (no duplication). <!-- completed: -->
-- [ ] Verify the Spawn Protocol section (§4 row 7) calls out the codex fallback requirement: "if the Director runs under codex, ensure one of the fallbacks listed in `Skill(agent-team-monitoring)` § Mechanism by backend is in place." <!-- completed: -->
+- [x] Create `skills/agent-team-supervision/SKILL.md` per Specification §4 with the section order listed there. The preamble (§4 row 2) MUST declare the dependency on monitoring explicitly. The Authorization-Scope Guard (§4 row 6) MUST be embedded verbatim from §5 of this design doc. <!-- completed: 2026-05-03T12:15 -->
+- [x] Verify the file cross-references `Skill(agent-team-monitoring)` for the stall-response table and `/loop` template (no duplication). <!-- completed: 2026-05-03T12:15 -->
+- [x] Verify the Spawn Protocol section (§4 row 7) calls out the codex fallback requirement: "if the Director runs under codex, ensure one of the fallbacks listed in `Skill(agent-team-monitoring)` § Mechanism by backend is in place." <!-- completed: 2026-05-03T12:15 -->
 
 ### Step 3: Remove the old skill
 
-- [ ] Delete `skills/cafleet-monitoring/` (whole directory). <!-- completed: -->
-- [ ] Run `grep -rn "cafleet-monitoring" .` (excluding `.git/`, `design-docs/0000047-…/`) and confirm zero hits. Any hit is a missed reference. <!-- completed: -->
+- [x] Delete `skills/cafleet-monitoring/` (whole directory). <!-- completed: 2026-05-03T12:30 -->
+- [x] Run `grep -rn "cafleet-monitoring" .` (excluding `.git/`, `design-docs/0000047-…/`) and confirm zero hits. Any hit is a missed reference. <!-- completed: 2026-05-03T12:30 -->
 
 ### Step 4: Update cross-references in other skills
 
-- [ ] In `skills/design-doc-create/SKILL.md`, replace every `Skill(cafleet-monitoring)` load directive with the pair `Skill(agent-team-monitoring)` followed by `Skill(agent-team-supervision)` (in that order). Verify by re-grep. <!-- completed: -->
-- [ ] Same pattern for `skills/design-doc-execute/SKILL.md`. <!-- completed: -->
-- [ ] Same pattern for `skills/design-doc-interview/SKILL.md`. <!-- completed: -->
-- [ ] Same for `skills/cafleet/SKILL.md` and any other `skills/*/SKILL.md` containing the string. <!-- completed: -->
+- [x] In `skills/design-doc-create/SKILL.md`, replace every `Skill(cafleet-monitoring)` load directive with the pair `Skill(agent-team-monitoring)` followed by `Skill(agent-team-supervision)` (in that order). Verify by re-grep. <!-- completed: 2026-05-03T13:00 -->
+- [x] Same pattern for `skills/design-doc-execute/SKILL.md`. <!-- completed: 2026-05-03T13:00 -->
+- [x] Same pattern for `skills/design-doc-interview/SKILL.md`. <!-- completed: 2026-05-03T13:00 -->
+- [x] Same for `skills/cafleet/SKILL.md` and any other `skills/*/SKILL.md` containing the string. <!-- completed: 2026-05-03T13:00 -->
+- [x] In `skills/cafleet/roles/director.md`, replace each `cafleet-monitoring` mention. The post-`exec` ping rule's "1-minute cafleet-monitoring tick" wording becomes "1-minute agent-team-monitoring tick"; load-order callouts that previously named `Skill(cafleet-monitoring)` cite the pair `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)`. <!-- completed: 2026-05-03T13:00 -->
+- [x] In `skills/design-doc-create/roles/director.md`, replace every `Skill(cafleet-monitoring)` reference with the pair `Skill(agent-team-monitoring)` + `Skill(agent-team-supervision)` (in load order). <!-- completed: 2026-05-03T13:00 -->
+- [x] In `skills/design-doc-execute/roles/director.md`, same pattern. <!-- completed: 2026-05-03T13:00 -->
 
-### Step 5: Update project CLAUDE.md surfaces
+### Step 5: Update project CLAUDE.md surfaces and other current-state docs
 
-- [ ] In `CLAUDE.md`, remove the `/cafleet-monitoring` bullet under "Skills" and add two bullets in this order: `/agent-team-monitoring — Active monitoring mechanism. Documents the cron-like loop per backend (Claude Code uses CronCreate + /loop; codex has no in-session scheduling and uses fallback options) and the team-facilitation instructions. Foundation layer — load first.` and `/agent-team-supervision — Governance layer that loads agent-team-monitoring as a prerequisite. Defines Core Principle, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, and User Delegation. Load second.` <!-- completed: -->
-- [ ] Apply the identical change in `.claude/CLAUDE.md`. <!-- completed: -->
+- [x] In `CLAUDE.md`, remove the `/cafleet-monitoring` bullet under "Skills" and add two bullets in this order: `/agent-team-monitoring — Active monitoring mechanism. Documents the cron-like loop per backend (Claude Code uses CronCreate + /loop; codex has no in-session scheduling and uses fallback options) and the team-facilitation instructions. Foundation layer — load first.` and `/agent-team-supervision — Governance layer that loads agent-team-monitoring as a prerequisite. Defines Core Principle, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, and User Delegation. Load second.` <!-- completed: 2026-05-03T13:30 -->
+- [x] Apply the identical change in `.claude/CLAUDE.md`. <!-- completed: 2026-05-03T13:30 -->
+- [x] In `ARCHITECTURE.md`, replace each `Skill(cafleet-monitoring)` mention with the loaded pair `Skill(agent-team-monitoring)` then `Skill(agent-team-supervision)` (in load order). Surrounding prose can be lightly adapted for clarity; preserve the Authorization-Scope Guard / `/loop` references. <!-- completed: 2026-05-03T13:30 -->
+- [x] In `README.md`, update the skills enumeration that lists `cafleet-monitoring` so it lists the two new skills (`agent-team-monitoring`, `agent-team-supervision`) in load order. Update the surrounding skill count if the README states one. <!-- completed: 2026-05-03T13:30 -->
 
 ### Step 6: Update packaging / plugin manifest
 
-- [ ] Inspect `cafleet/pyproject.toml` and any plugin metadata file (e.g. anything enumerating shipped skills under `[tool.*]` or a plugin manifest). If a skill list exists, add `agent-team-monitoring` and `agent-team-supervision`, remove `cafleet-monitoring`. If no enumeration exists, document that fact in this checkbox and skip. <!-- completed: -->
-- [ ] If the plugin is built / installed via `mise //cafleet:install` or similar, run the install task and confirm both new skills are discoverable (the user can verify via `Skill` listing on their next session). <!-- completed: -->
+- [x] Inspected `cafleet/pyproject.toml` — no skill enumeration exists (the file contains `[project]`, dependencies, build-system, and `[tool.*]` blocks for hatch / pytest / ty / ruff, none of which lists Claude skills). No edit required. <!-- completed: 2026-05-03T13:50 -->
+- [x] In `.claude-plugin/plugin.json`, update the `skills` array — replace `./skills/cafleet-monitoring` with `./skills/agent-team-monitoring` and `./skills/agent-team-supervision` (in load order). <!-- completed: 2026-05-03T13:50 -->
+- [x] In `.claude/settings.json`, replace any `Skill(cafleet:cafleet-monitoring)` allow-list entry with the two new entries `Skill(cafleet:agent-team-monitoring)` and `Skill(cafleet:agent-team-supervision)`. <!-- completed: 2026-05-03T13:55 -->
+- [x] If the plugin is built / installed via `mise //cafleet:install` or similar, run the install task and confirm both new skills are discoverable (the user can verify via `Skill` listing on their next session). <!-- completed: 2026-05-03T13:55 -->
 
 ### Step 7: Regression checks
 
-- [ ] `grep -rn "cafleet-monitoring" .` outside `.git/` and `design-docs/0000047-…/` returns no hits. <!-- completed: -->
-- [ ] `grep -rn "Skipping\. Holding for go" .` outside `.git/` and `design-docs/0000047-…/` returns no hits (sanity check that no skill instructs the Director to emit the failure-mode message). <!-- completed: -->
-- [ ] Open `skills/agent-team-monitoring/SKILL.md` and confirm: (a) frontmatter is well-formed YAML; (b) section count matches §2; (c) the Mechanism by backend section matches §3 verbatim including the codex survey result; (d) the `/loop` Prompt Template is marked Claude Code-specific. <!-- completed: -->
-- [ ] Open `skills/agent-team-supervision/SKILL.md` and confirm: (a) frontmatter is well-formed YAML; (b) section count matches §4; (c) the preamble declares the monitoring dependency; (d) the Authorization-Scope Guard text matches §5 verbatim; (e) no `/loop` Prompt Template appears (it lives in monitoring). <!-- completed: -->
-- [ ] Update this design doc's Status to `Complete` and `Last Updated` to today's date. <!-- completed: -->
+- [x] `grep -rn "cafleet-monitoring" .` outside `.git/` and `design-docs/0000047-…/` returns no hits. <!-- completed: 2026-05-03T14:10 -->
+- [x] `grep -rn "Skipping\. Holding for go" .` outside `.git/` and `design-docs/0000047-…/` returns no hits (sanity check that no skill instructs the Director to emit the failure-mode message). The two remaining hits in `skills/agent-team-monitoring/SKILL.md` and `skills/agent-team-supervision/SKILL.md` are negative-rule callouts that **forbid** emitting the phrase ("Do **not** emit `Skipping. Holding for go.`") — they instruct the opposite of the failure mode and are required by design §5's verbatim Authorization-Scope Guard text. <!-- completed: 2026-05-03T14:10 -->
+- [x] Open `skills/agent-team-monitoring/SKILL.md` and confirm: (a) frontmatter is well-formed YAML; (b) section count matches §2; (c) the Mechanism by backend section matches §3 verbatim including the codex survey result; (d) the `/loop` Prompt Template is marked Claude Code-specific. <!-- completed: 2026-05-03T14:10 -->
+- [x] Open `skills/agent-team-supervision/SKILL.md` and confirm: (a) frontmatter is well-formed YAML; (b) section count matches §4; (c) the preamble declares the monitoring dependency; (d) the Authorization-Scope Guard text matches §5 verbatim; (e) no `/loop` Prompt Template appears (it lives in monitoring). <!-- completed: 2026-05-03T14:10 -->
+- [x] Update this design doc's Status to `Complete` and `Last Updated` to today's date. <!-- completed: 2026-05-03T14:10 -->
 
 ---
 
@@ -310,3 +324,6 @@ means stop* for the project-wide policy this section enforces.
 | 2026-05-03 | Initial draft (single-skill design — absorbed monitoring into supervision). |
 | 2026-05-03 | Revised to two-skill split mirroring the global pair (supervision = always-load, monitoring = loop companion). Authorization-Scope Guard moved to supervision. |
 | 2026-05-03 | User feedback (1) the monitoring skill is essentially a cron wrapper and codex compat must be addressed since design 0000046 adds codex; (2) supervision depends on monitoring (dependency arrow reversed from the global pair). Added the codex survey (no in-session scheduling primitive in codex CLI; cloud automations are app-only). Reorganized: monitoring = foundation layer with backend-aware mechanism section + team-facilitation instructions; supervision = governance layer that loads monitoring as a prerequisite + holds the Authorization-Scope Guard. Added codex fallback options table (out-of-band cron driver, MCP scheduling server, user-driven nudges, no-active-monitor synchronous mode). Implementation step count grew to 0/16 across 7 steps. |
+| 2026-05-03 | Scope expansion during execution — Programmer's regression-grep at end of Step 3 surfaced 8 occurrences of `cafleet-monitoring` in current-state docs that §6 had missed: `ARCHITECTURE.md`, `README.md`, `skills/cafleet/roles/director.md`, `skills/design-doc-create/roles/director.md`, `skills/design-doc-execute/roles/director.md`. Per `.claude/rules/design-doc-numbering.md` (README and ARCHITECTURE are first-class doc surfaces; SKILL drift is blocking) these are in scope. Also expanded §6 with the explicit packaging targets the Programmer flagged: `.claude-plugin/plugin.json` and `.claude/settings.json`. Implementation steps updated accordingly: Step 4 grew from 4 to 7 tasks (+3 roles/director.md targets); Step 5 grew from 2 to 4 tasks (+ARCHITECTURE.md, +README.md) and was renamed to "Update project CLAUDE.md surfaces and other current-state docs"; Step 6 grew from 2 to 4 tasks (+plugin.json, +settings.json). New total: 28 tasks across 7 steps. |
+| 2026-05-03 | Execution complete (28/28 tasks). Files created: `skills/agent-team-monitoring/SKILL.md` (Step 1, 7 H2 sections, embeds design §3 backend-aware mechanism + fallback table verbatim, `/loop` Prompt Template marked Claude Code-specific), `skills/agent-team-supervision/SKILL.md` (Step 2, 9 H2 sections, preamble declares hard monitoring dependency, Authorization-Scope Guard embeds design §5 verbatim, Stall Response cross-references monitoring without duplication). Files deleted: `skills/cafleet-monitoring/` (Step 3). Files updated for cross-references (Step 4, 22 → 0 hits across 7 skill files): `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md`, `skills/design-doc-create/SKILL.md`, `skills/design-doc-create/roles/director.md`, `skills/design-doc-execute/SKILL.md`, `skills/design-doc-execute/roles/director.md`, `skills/design-doc-interview/SKILL.md`. Files updated for current-state surfaces (Step 5, 5 → 0 hits): `CLAUDE.md`, `.claude/CLAUDE.md`, `ARCHITECTURE.md`, `README.md` (skill count 5 → 7 after the Copilot-review pass added `design-doc-interview`). Files updated for packaging (Step 6, 2 → 0 hits): `.claude-plugin/plugin.json`, `.claude/settings.json`; `cafleet/pyproject.toml` had no skill enumeration so was skipped per design instruction; `mise //cafleet:install` ran cleanly. Final regression checks (Step 7): `git grep cafleet-monitoring` outside `design-docs/` returns zero; the two `Skipping. Holding for go` hits in the new skills are the design-required negative-rule callouts that forbid the phrase. Edit-tool denials on `.claude/CLAUDE.md` and `.claude/settings.json` (the Programmer's harness blocks Edits to `.claude/` paths) were routed to the Director and applied via the Director's own Edit, mirroring the bash-via-Director protocol for harness denials. Status: Approved → Complete. |
+| 2026-05-03 | Post-Copilot-review polish (PR #51). Pass 1 fixes (4): three SKILL.md files now point at "`Skill(agent-team-monitoring)`'s `/loop` Prompt Template" instead of the more general "facilitation instructions"; README skill count + enumeration corrected from 6 → 7 by adding `design-doc-interview` (the pre-existing inconsistency the original Programmer flagged out-of-scope was now in scope per Copilot). Pass 2 fixes (2): `.claude/settings.json` allow-list extended with `Skill(cafleet:design-doc-interview)` for parity with the plugin manifest; `skills/agent-team-monitoring/SKILL.md` Team-facilitation lead-in reworded "facilitate the team to make tasks finished" → "facilitate the team in completing tasks" (the imperative encoding from §2 row 4 stays — only the narrative phrasing changed). Pass 3 fix (1, design-doc-source-of-truth alignment): §5 verbatim Authorization-Scope Guard text — `~/.claude/rules/skill-discovery.md` → `.claude/rules/skill-discovery.md` (project-local path is canonical for this repo); the same edit landed in `skills/agent-team-supervision/SKILL.md`. |

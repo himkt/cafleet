@@ -10,7 +10,7 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet session and monitor continuously.** Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`. Create a CAFleet session via `cafleet session create --json` (must be run inside a tmux session) — this bootstraps the session, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Start the monitoring `/loop` BEFORE spawning any member. Keep the loop running until shutdown.
+- **Bootstrap the CAFleet session and monitor continuously.** Load `Skill(cafleet)`, `Skill(agent-team-monitoring)`, and `Skill(agent-team-supervision)` (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it). Create a CAFleet session via `cafleet session create --json` (must be run inside a tmux session) — this bootstraps the session, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Start the monitoring `/loop` BEFORE spawning any member. Keep the loop running until shutdown.
 - **Enforce the clarification gate.** The Drafter MUST ask clarifying questions before drafting. If the Drafter sends a draft without having asked questions first, reject it via `cafleet message send` and instruct the Drafter to ask questions first.
 - **Relay communication faithfully.** Members cannot communicate with the user directly. You relay the Drafter's questions to the user via `AskUserQuestion`, and relay the user's answers back to the Drafter via `cafleet message send`.
 - **Orchestrate the internal quality loop.** After the Drafter produces a draft, route it to the Reviewer via `cafleet message send`. If the Reviewer has feedback, route it back to the Drafter for refinement via `cafleet message send`, then back to the Reviewer. Repeat until the Reviewer explicitly signals satisfaction. Do NOT present the draft to the user until the Reviewer has approved it.
@@ -91,7 +91,7 @@ When the user selects "Other" and provides free text, use LLM reasoning to deter
 
 ## Progress Monitoring
 
-Track team progress via the `Skill(cafleet-monitoring)` `/loop` (1-minute interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next.
+Track team progress via the `Skill(agent-team-monitoring)` `/loop` (1-minute interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next. Supervision obligations (Authorization-Scope Guard, idle semantics) come from the paired `Skill(agent-team-supervision)`.
 
 ### User delegation for member send-input
 

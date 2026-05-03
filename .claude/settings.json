@@ -8,12 +8,15 @@
       "Skill(update-readme)",
       "Skill(design-doc-create)",
       "Skill(design-doc-execute)",
+      "Skill(design-doc-interview)",
       "Skill(design-doc)",
       "Skill(cafleet:cafleet)",
-      "Skill(cafleet:cafleet-monitoring)",
+      "Skill(cafleet:agent-team-monitoring)",
+      "Skill(cafleet:agent-team-supervision)",
       "Skill(cafleet:design-doc)",
       "Skill(cafleet:design-doc-create)",
       "Skill(cafleet:design-doc-execute)",
+      "Skill(cafleet:design-doc-interview)",
       "Bash(cafleet *)"
     ],
     "deny": [

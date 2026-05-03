@@ -51,7 +51,7 @@ User
 | `Agent(team_name=..., subagent_type=...)` | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
 | `SendMessage(to="Programmer")` | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from member) | `cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `agent-team-supervision` `/loop` | `Skill(cafleet-monitoring)` `/loop` |
+| `agent-team-supervision` `/loop` | Load `Skill(agent-team-monitoring)` (mechanism + `/loop`) and `Skill(agent-team-supervision)` (governance), then run `/loop` from agent-team-monitoring |
 | `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` for each member, then `cafleet session delete <session-id>` (soft-deletes the session and sweeps the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `session delete` is the only supported teardown. |
 | Auto message delivery | Push notification injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into member's tmux pane |
 
@@ -165,7 +165,7 @@ Before registering with CAFleet:
 
 ### Step 3: Register & Spawn Members (Director)
 
-Load `Skill(cafleet)` and `Skill(cafleet-monitoring)`.
+Load `Skill(cafleet)`, `Skill(agent-team-monitoring)`, and `Skill(agent-team-supervision)` (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it).
 
 #### 3a. Establish a CAFleet session and capture the root Director's `agent_id`
 
@@ -194,7 +194,7 @@ If you already have a running session (e.g. an outer orchestration), reuse its `
 
 #### 3b. Start the monitoring `/loop`
 
-BEFORE spawning any member, follow `Skill(cafleet-monitoring)`'s Monitoring Mandate and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. This is the **team-health loop** — it stays active through Steps 3–5 and, when Step 6 runs, is swapped (create-before-delete order in Step 7a) for the augmented team-health + PR-review loop. Whichever loop is active gets `CronDelete`d in Step 8's cleanup.
+BEFORE spawning any member, use `Skill(agent-team-monitoring)`'s `/loop` Prompt Template and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. This is the **team-health loop** — it stays active through Steps 3–5 and, when Step 6 runs, is swapped (create-before-delete order in Step 7a) for the augmented team-health + PR-review loop. Whichever loop is active gets `CronDelete`d in Step 8's cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from `Skill(agent-team-supervision)`, which loads agent-team-monitoring as a hard prerequisite.
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -483,11 +483,11 @@ After Step 5 Approve, the Director pushes the feature branch, opens a PR, and re
 
 ### Step 7: Copilot Review Loop (Director)
 
-Once the PR exists and Copilot has been invited, the Director runs a cron-driven review loop. The `cafleet-monitoring` team-health `/loop` is replaced by an **augmented** loop that keeps the team-health checks AND adds PR review polling.
+Once the PR exists and Copilot has been invited, the Director runs a cron-driven review loop. The `agent-team-monitoring` team-health `/loop` is replaced by an **augmented** loop that keeps the team-health checks AND adds PR review polling.
 
 #### PR Review Loop State
 
-The Director holds three **PR-review-specific** in-context variables across loop firings (separate from the team-health `--since` timestamp tracked by `Skill(cafleet-monitoring)` for `cafleet message poll`). They are NOT persisted to disk — the Director carries them in its own working memory.
+The Director holds three **PR-review-specific** in-context variables across loop firings (separate from the team-health `--since` timestamp tracked by `Skill(agent-team-monitoring)` for `cafleet message poll`). They are NOT persisted to disk — the Director carries them in its own working memory.
 
 | Variable | Meaning | Update rule |
 |:--|:--|:--|
@@ -510,7 +510,7 @@ On exit from Step 7 (any exit condition), keep the augmented loop running — St
 
 On each 1-minute wake-up, the Director runs — in order:
 
-1. **Team health** (unchanged from `cafleet-monitoring`): `member list` → `poll` → `member capture` fallback → nudge stalled members.
+1. **Team health** (unchanged from `agent-team-monitoring`): `member list` → `poll` → `member capture` fallback → nudge stalled members.
 2. **Fetch new PR reviews**: `gh pr view <pr-number> --json reviews` (GraphQL-shaped; fields are `author.login`, `state`, `submittedAt`, `body`) AND `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST-shaped; fields are `user.login`, `body`, `path`, `line`, `created_at`).
 3. **Filter Copilot-authored entries**: keep items where the login field (`author.login` for `gh pr view` reviews, `user.login` for `gh api` inline comments) matches the regex `^copilot` (case-insensitive). Copilot reviews currently post under a login that begins with `copilot` — the exact slug varies by account plan, so a prefix match is the safe filter.
 4. **New-since-push filter**: keep items whose timestamp (`submittedAt` for reviews, `created_at` for inline comments) is strictly later than `last_push_ts`.
