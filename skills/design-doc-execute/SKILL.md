@@ -194,7 +194,7 @@ If you already have a running session (e.g. an outer orchestration), reuse its `
 
 #### 3b. Start the monitoring `/loop`
 
-BEFORE spawning any member, follow `Skill(agent-team-monitoring)`'s facilitation instructions and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. This is the **team-health loop** — it stays active through Steps 3–5 and, when Step 6 runs, is swapped (create-before-delete order in Step 7a) for the augmented team-health + PR-review loop. Whichever loop is active gets `CronDelete`d in Step 8's cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from `Skill(agent-team-supervision)`, which loads agent-team-monitoring as a hard prerequisite.
+BEFORE spawning any member, use `Skill(agent-team-monitoring)`'s `/loop` Prompt Template and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. This is the **team-health loop** — it stays active through Steps 3–5 and, when Step 6 runs, is swapped (create-before-delete order in Step 7a) for the augmented team-health + PR-review loop. Whichever loop is active gets `CronDelete`d in Step 8's cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from `Skill(agent-team-supervision)`, which loads agent-team-monitoring as a hard prerequisite.
 
 #### 3c. Analyze implementation tasks to decide team composition
 

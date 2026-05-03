@@ -109,7 +109,7 @@ Capture `session_id` and `director.agent_id` from the JSON response. Substitute 
 
 #### 2b. Start the monitoring `/loop`
 
-BEFORE spawning the Analyzer, load both `Skill(agent-team-monitoring)` and `Skill(agent-team-supervision)` (in that order) and follow agent-team-monitoring's facilitation instructions to start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. **Record the cron job ID returned by `/loop` (and by any `CronCreate` it issues underneath) — Step 2f references this exact ID when tearing the loop down via `CronDelete`.** The loop stays active until the Analyzer is torn down at the end of this step.
+BEFORE spawning the Analyzer, load both `Skill(agent-team-monitoring)` and `Skill(agent-team-supervision)` (in that order) and use agent-team-monitoring's `/loop` Prompt Template to start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. **Record the cron job ID returned by `/loop` (and by any `CronCreate` it issues underneath) — Step 2f references this exact ID when tearing the loop down via `CronDelete`.** The loop stays active until the Analyzer is torn down at the end of this step.
 
 #### 2c. Read the Analyzer role file
 

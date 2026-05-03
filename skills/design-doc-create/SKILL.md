@@ -104,7 +104,7 @@ If you already have a running session (e.g. an outer orchestration), reuse its `
 
 #### 1b. Start the monitoring `/loop`
 
-BEFORE spawning any member, follow `Skill(agent-team-monitoring)`'s facilitation instructions and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. The loop must stay active from the first `member create` until Step 6's shutdown cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from `Skill(agent-team-supervision)`, which loads agent-team-monitoring as a hard prerequisite.
+BEFORE spawning any member, use `Skill(agent-team-monitoring)`'s `/loop` Prompt Template and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. The loop must stay active from the first `member create` until Step 6's shutdown cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from `Skill(agent-team-supervision)`, which loads agent-team-monitoring as a hard prerequisite.
 
 #### 1c. Read role definitions
 
