@@ -1,7 +1,7 @@
 # Codex Coding Agent
 
 **Status**: Approved
-**Progress**: 15/29 tasks complete
+**Progress**: 25/29 tasks complete
 **Last Updated**: 2026-05-03
 
 ## Overview
@@ -251,22 +251,22 @@ The redesign assumes a `codex` CLI version that supports `--ask-for-approval` an
 
 ### Step 3: CLI surface
 
-- [ ] Add `--coding-agent` (Click `Choice(["claude", "codex"])`, default `"claude"`) to the `session create` subcommand in `cafleet/src/cafleet/cli.py`. Plumb the value through to `broker.create_session(...)` via a new `coding_agent: str` keyword argument. <!-- completed: -->
-- [ ] Add `--coding-agent` (Click `Choice(["claude", "codex"])`, default `"claude"`) to the `member create` subcommand. Branch on the value to select the spawn-command builder; pass the value through to the placement insert. <!-- completed: -->
-- [ ] Replace the hardcoded `placement={"coding_agent": _CLAUDE_BINARY}` literal at `cafleet/src/cafleet/cli.py:700` with the value from `--coding-agent`. <!-- completed: -->
-- [ ] Soften the `member send-input --freetext` `!`-rejection error message from "Claude Code's shell-execution shortcut" to "the coding agent's shell-execution shortcut". Validation logic unchanged. <!-- completed: -->
+- [x] Add `--coding-agent` (Click `Choice(["claude", "codex"])`, default `"claude"`) to the `session create` subcommand in `cafleet/src/cafleet/cli.py`. Plumb the value through to `broker.create_session(...)` via a new `coding_agent: str` keyword argument. <!-- completed: 2026-05-03T18:20 -->
+- [x] Add `--coding-agent` (Click `Choice(["claude", "codex"])`, default `"claude"`) to the `member create` subcommand. Branch on the value to select the spawn-command builder; pass the value through to the placement insert. <!-- completed: 2026-05-03T18:20 -->
+- [x] Replace the hardcoded `placement={"coding_agent": _CLAUDE_BINARY}` literal at `cafleet/src/cafleet/cli.py:700` with the value from `--coding-agent`. <!-- completed: 2026-05-03T18:20 -->
+- [x] Soften the `member send-input --freetext` `!`-rejection error message from "Claude Code's shell-execution shortcut" to "the coding agent's shell-execution shortcut". Validation logic unchanged. <!-- completed: 2026-05-03T18:20 -->
 
 ### Step 4: Helpers
 
-- [ ] Add `_CODEX_BINARY = "codex"` alongside `_CLAUDE_BINARY = "claude"` in `cafleet/src/cafleet/cli.py`. <!-- completed: -->
-- [ ] Add `_build_codex_command(prompt: str) -> list[str]` returning `[_CODEX_BINARY, "--ask-for-approval", "never", "--sandbox", "workspace-write", prompt]`. <!-- completed: -->
-- [ ] Replace `_ensure_claude_available()` with `_ensure_coding_agent_available(binary_name: str)` that raises `RuntimeError(f"binary {binary_name} not found on PATH")` when `shutil.which(binary_name)` is `None`. Update the single call site in `member_create` to pass the chosen backend's binary name. <!-- completed: -->
-- [ ] Rename `_CLAUDE_PROMPT_TEMPLATE` → `_MEMBER_PROMPT_TEMPLATE` and replace `"Load Skill(cafleet)."` with the backend-neutral phrasing in §4. The substitution placeholder set is unchanged. <!-- completed: -->
+- [x] Add `_CODEX_BINARY = "codex"` alongside `_CLAUDE_BINARY = "claude"` in `cafleet/src/cafleet/cli.py`. <!-- completed: 2026-05-03T18:18 -->
+- [x] Add `_build_codex_command(prompt: str) -> list[str]` returning `[_CODEX_BINARY, "--ask-for-approval", "never", "--sandbox", "workspace-write", prompt]`. <!-- completed: 2026-05-03T18:18 -->
+- [x] Replace `_ensure_claude_available()` with `_ensure_coding_agent_available(binary_name: str)` that raises `RuntimeError(f"binary {binary_name} not found on PATH")` when `shutil.which(binary_name)` is `None`. Update the single call site in `member_create` to pass the chosen backend's binary name. <!-- completed: 2026-05-03T18:18 -->
+- [x] Rename `_CLAUDE_PROMPT_TEMPLATE` → `_MEMBER_PROMPT_TEMPLATE` and replace `"Load Skill(cafleet)."` with the backend-neutral phrasing in §4. The substitution placeholder set is unchanged. <!-- completed: 2026-05-03T18:18 -->
 
 ### Step 5: Broker
 
-- [ ] Drop `_ROOT_DIRECTOR_CODING_AGENT = "unknown"` from `cafleet/src/cafleet/broker.py:17`. <!-- completed: -->
-- [ ] Extend `broker.create_session(...)` to accept a `coding_agent: str` keyword (no default at the broker layer — the CLI is the only caller and always supplies it). Use the value when building `director_placement["coding_agent"]`. <!-- completed: -->
+- [x] Drop `_ROOT_DIRECTOR_CODING_AGENT = "unknown"` from `cafleet/src/cafleet/broker.py:17`. <!-- completed: 2026-05-03T18:22 -->
+- [x] Extend `broker.create_session(...)` to accept a `coding_agent: str` keyword (no default at the broker layer — the CLI is the only caller and always supplies it). Use the value when building `director_placement["coding_agent"]`. <!-- completed: 2026-05-03T18:22 -->
 
 ### Step 6: Verification
 

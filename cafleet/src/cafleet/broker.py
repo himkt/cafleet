@@ -14,7 +14,6 @@ from cafleet.tmux import DirectorContext
 
 _DIRECTOR_NAME = "Director"
 _DIRECTOR_DESCRIPTION = "Root Director for this session"
-_ROOT_DIRECTOR_CODING_AGENT = "unknown"
 
 ADMINISTRATOR_KIND = "builtin-administrator"
 
@@ -93,12 +92,17 @@ def create_session(
     label: str | None = None,
     *,
     director_context: DirectorContext,
+    coding_agent: str,
 ) -> dict:
     """Atomically bootstrap a session with its root Director and Administrator.
 
     The session row is written first with ``director_agent_id=NULL`` and
     back-filled once the Director's agent row exists, so the column is
     DB-nullable even though the post-bootstrap invariant is NOT NULL.
+
+    ``coding_agent`` is operator-declared metadata that lands in the root
+    Director's ``placement.coding_agent`` column. The CLI is the only caller
+    and always supplies it (default ``'claude'`` lives at the Click layer).
     """
     session_id = str(uuid.uuid4())
     created_at = _now_iso()
@@ -120,7 +124,7 @@ def create_session(
         "tmux_session": director_context.session,
         "tmux_window_id": director_context.window_id,
         "tmux_pane_id": director_context.pane_id,
-        "coding_agent": _ROOT_DIRECTOR_CODING_AGENT,
+        "coding_agent": coding_agent,
         "created_at": created_at,
     }
 
