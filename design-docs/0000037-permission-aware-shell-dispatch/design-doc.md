@@ -1,8 +1,8 @@
 # Permission-aware shell dispatch via `cafleet member safe-exec`
 
-**Status**: Approved
+**Status**: Aborted
 **Progress**: 0/20 tasks complete
-**Last Updated**: 2026-04-29
+**Last Updated**: 2026-05-03
 
 ## Overview
 
@@ -431,3 +431,4 @@ Write all tests for `cafleet/permissions.py` and `cafleet member safe-exec` BEFO
 | Date | Changes |
 |------|---------|
 | 2026-04-29 | Initial draft. |
+| 2026-05-03 | Status flipped to Aborted. Superseded by 0000038-exec-subcommand, 0000039-member-ping-subcommand, and 0000042-member-exec-ping-chain, which shipped `cafleet member exec` (positional CMD under `permissions.ask`) instead of the proposed `safe-exec --bash` permission-matching approach. Not implemented. |
