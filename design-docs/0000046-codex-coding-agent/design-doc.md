@@ -1,7 +1,7 @@
 # Codex Coding Agent
 
 **Status**: Approved
-**Progress**: 25/29 tasks complete
+**Progress**: 28/29 tasks complete
 **Last Updated**: 2026-05-03
 
 ## Overview
@@ -10,15 +10,15 @@ Add the OpenAI `codex` CLI as a second supported coding-agent binary alongside `
 
 ## Success Criteria
 
-- [ ] `cafleet session create --coding-agent codex` records `placement.coding_agent = "codex"` for the root Director and is reflected in `cafleet session create --json` output.
-- [ ] `cafleet member create --coding-agent codex` spawns a `codex --ask-for-approval never --sandbox workspace-write <prompt>` process in the new pane and records `placement.coding_agent = "codex"`.
-- [ ] `cafleet member create --coding-agent claude` continues to spawn a `claude --permission-mode dontAsk --name <name> <prompt>` process unchanged.
-- [ ] Mixed-backend teams work: a Director may spawn one `claude` member and one `codex` member in the same session with no broker / tmux interaction differences.
-- [ ] `cafleet member exec` dispatches `! <command>` keystrokes into both `claude` and `codex` panes successfully (the `!` shell shortcut is honored by both binaries).
-- [ ] `--coding-agent codex` exits with `binary codex not found on PATH` when the `codex` binary is absent; `--coding-agent claude` exits with `binary claude not found on PATH` when the `claude` binary is absent.
-- [ ] `member send-input --freetext` continues to reject values whose first non-whitespace character is `!` for both backends.
-- [ ] `ARCHITECTURE.md`, `README.md`, `docs/codex-members.md` (new), `docs/spec/cli-options.md` (if it exists), and every affected `skills/*/SKILL.md` describe the current dual-backend surface before code lands.
-- [ ] Unit tests cover the command builders (`claude`, `codex`) and the binary-not-found guard for both.
+- [x] `cafleet session create --coding-agent codex` records `placement.coding_agent = "codex"` for the root Director and is reflected in `cafleet session create --json` output.
+- [x] `cafleet member create --coding-agent codex` spawns a `codex --ask-for-approval never --sandbox workspace-write <prompt>` process in the new pane and records `placement.coding_agent = "codex"`.
+- [x] `cafleet member create --coding-agent claude` continues to spawn a `claude --permission-mode dontAsk --name <name> <prompt>` process unchanged.
+- [x] Mixed-backend teams work: a Director may spawn one `claude` member and one `codex` member in the same session with no broker / tmux interaction differences.
+- [x] `cafleet member exec` dispatches `! <command>` keystrokes into both `claude` and `codex` panes successfully (the `!` shell shortcut is honored by both binaries).
+- [x] `--coding-agent codex` exits with `binary codex not found on PATH` when the `codex` binary is absent; `--coding-agent claude` exits with `binary claude not found on PATH` when the `claude` binary is absent.
+- [x] `member send-input --freetext` continues to reject values whose first non-whitespace character is `!` for both backends.
+- [x] `ARCHITECTURE.md`, `README.md`, `docs/codex-members.md` (new), `docs/spec/cli-options.md` (if it exists), and every affected `skills/*/SKILL.md` describe the current dual-backend surface before code lands.
+- [x] Unit tests cover the command builders (`claude`, `codex`) and the binary-not-found guard for both.
 - [ ] §11 manual smoke recipe runs end-to-end on a workstation with both `claude` and `codex` installed.
 
 ---
@@ -270,9 +270,9 @@ The redesign assumes a `codex` CLI version that supports `--ask-for-approval` an
 
 ### Step 6: Verification
 
-- [ ] Run `mise //cafleet:test`. All tests pass. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint`. Clean. <!-- completed: -->
-- [ ] Run `mise //cafleet:typecheck`. Clean. <!-- completed: -->
+- [x] Run `mise //cafleet:test`. All tests pass. <!-- completed: 2026-05-03T18:30 — 577 passed in 24.16s -->
+- [x] Run `mise //cafleet:lint`. Clean. <!-- completed: 2026-05-03T18:30 — All checks passed; 54 files already formatted -->
+- [x] Run `mise //cafleet:typecheck`. Clean. <!-- completed: 2026-05-03T18:30 — All checks passed -->
 - [ ] Manually run the §11 smoke recipe on a workstation with both `claude` and `codex` installed. Capture the output and attach to the PR. <!-- completed: -->
 
 ---
