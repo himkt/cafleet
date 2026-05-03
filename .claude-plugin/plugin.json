@@ -10,7 +10,8 @@
   "keywords": ["a2a", "messaging", "broker", "agents", "cli", "design-doc"],
   "skills": [
     "./skills/cafleet",
-    "./skills/cafleet-monitoring",
+    "./skills/agent-team-monitoring",
+    "./skills/agent-team-supervision",
     "./skills/design-doc",
     "./skills/design-doc-create",
     "./skills/design-doc-execute",

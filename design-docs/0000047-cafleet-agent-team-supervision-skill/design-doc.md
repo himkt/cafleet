@@ -1,7 +1,7 @@
 # CAFleet Agent Team Supervision & Monitoring Skills
 
 **Status**: Approved
-**Progress**: 19/28 tasks complete
+**Progress**: 23/28 tasks complete
 **Last Updated**: 2026-05-03
 
 ## Overview
@@ -302,10 +302,10 @@ means stop* for the project-wide policy this section enforces.
 
 ### Step 6: Update packaging / plugin manifest
 
-- [ ] Inspect `cafleet/pyproject.toml` and any plugin metadata file (e.g. anything enumerating shipped skills under `[tool.*]` or a plugin manifest). If a skill list exists, add `agent-team-monitoring` and `agent-team-supervision`, remove `cafleet-monitoring`. If no enumeration exists, document that fact in this checkbox and skip. <!-- completed: -->
-- [ ] In `.claude-plugin/plugin.json`, update the `skills` array — replace `./skills/cafleet-monitoring` with `./skills/agent-team-monitoring` and `./skills/agent-team-supervision` (in load order). <!-- completed: -->
-- [ ] In `.claude/settings.json`, replace any `Skill(cafleet:cafleet-monitoring)` allow-list entry with the two new entries `Skill(cafleet:agent-team-monitoring)` and `Skill(cafleet:agent-team-supervision)`. <!-- completed: -->
-- [ ] If the plugin is built / installed via `mise //cafleet:install` or similar, run the install task and confirm both new skills are discoverable (the user can verify via `Skill` listing on their next session). <!-- completed: -->
+- [x] Inspected `cafleet/pyproject.toml` — no skill enumeration exists (the file contains `[project]`, dependencies, build-system, and `[tool.*]` blocks for hatch / pytest / ty / ruff, none of which lists Claude skills). No edit required. <!-- completed: 2026-05-03T13:50 -->
+- [x] In `.claude-plugin/plugin.json`, update the `skills` array — replace `./skills/cafleet-monitoring` with `./skills/agent-team-monitoring` and `./skills/agent-team-supervision` (in load order). <!-- completed: 2026-05-03T13:50 -->
+- [x] In `.claude/settings.json`, replace any `Skill(cafleet:cafleet-monitoring)` allow-list entry with the two new entries `Skill(cafleet:agent-team-monitoring)` and `Skill(cafleet:agent-team-supervision)`. <!-- completed: 2026-05-03T13:55 -->
+- [x] If the plugin is built / installed via `mise //cafleet:install` or similar, run the install task and confirm both new skills are discoverable (the user can verify via `Skill` listing on their next session). <!-- completed: 2026-05-03T13:55 -->
 
 ### Step 7: Regression checks
 
