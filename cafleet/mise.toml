@@ -36,3 +36,11 @@ description = "Build the cafleet wheel"
 [tasks.publish]
 run = "uv publish"
 description = "Publish cafleet"
+
+[tasks.bump]
+usage = '''
+arg "<target>" {
+  choices "major" "minor" "patch"
+}
+'''
+run   = "uv version --bump ${usage_target}"
