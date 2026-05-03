@@ -48,7 +48,7 @@ If a codex root Director is required (e.g. operator preference, codex-specific w
 
 | Fallback | Mechanism | Operational cost |
 |---|---|---|
-| **Out-of-band cron driver** | An OS-level scheduler (`cron(8)`, systemd timer, `watch -n 60 …`) keystrokes the supervision-tick prompt into the codex Director's tmux pane via `tmux send-keys`. | Operator must set up + tear down the timer; not visible inside the session. |
+| **Out-of-band cron driver** | An OS-level scheduler (`cron(8)`, systemd timer, `watch -n 60 …`) running **outside** the codex session keystrokes the supervision-tick prompt into the codex Director's tmux pane via `tmux send-keys`. (Operator-side; the Director itself never invokes raw tmux — that is forbidden by `Skill(cafleet)` § Shutdown Protocol's *use cafleet primitives only* rule. This fallback exists only because codex CLI has no in-session scheduler.) | Operator must set up + tear down the timer; not visible inside the session. |
 | **MCP scheduling server** | Codex CLI supports MCP servers. A custom MCP server can expose a scheduling tool the codex Director invokes inline. | Requires writing or installing an MCP server; configuration lives in `~/.codex/config.toml`. |
 | **User-driven nudges** | The user types a tick prompt at intervals (e.g. "tick" every minute). | Manual, error-prone, doesn't scale beyond short sessions. |
 | **No active monitor — synchronous in-turn facilitation only** | The Director performs all health checks + dispatch within each of its own active turns; no scheduled wake-up. The team only progresses while the Director has an active turn. | Acceptable only for short, fully-Director-driven workflows (no long-running parallel members). The Director's idle window is the team's idle window. |
