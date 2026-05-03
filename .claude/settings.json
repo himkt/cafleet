@@ -37,8 +37,5 @@
     "ask": [
       "Bash(cafleet * member exec *)"
     ]
-  },
-  "enabledPlugins": {
-    "cafleet@cafleet": true
   }
 }
