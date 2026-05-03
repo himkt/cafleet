@@ -1,7 +1,7 @@
 # CAFleet Agent Team Supervision & Monitoring Skills
 
 **Status**: Approved
-**Progress**: 3/16 tasks complete
+**Progress**: 6/16 tasks complete
 **Last Updated**: 2026-05-03
 
 ## Overview
@@ -267,9 +267,9 @@ means stop* for the project-wide policy this section enforces.
 
 ### Step 2: Author the supervision skill (governance layer second)
 
-- [ ] Create `skills/agent-team-supervision/SKILL.md` per Specification §4 with the section order listed there. The preamble (§4 row 2) MUST declare the dependency on monitoring explicitly. The Authorization-Scope Guard (§4 row 6) MUST be embedded verbatim from §5 of this design doc. <!-- completed: -->
-- [ ] Verify the file cross-references `Skill(agent-team-monitoring)` for the stall-response table and `/loop` template (no duplication). <!-- completed: -->
-- [ ] Verify the Spawn Protocol section (§4 row 7) calls out the codex fallback requirement: "if the Director runs under codex, ensure one of the fallbacks listed in `Skill(agent-team-monitoring)` § Mechanism by backend is in place." <!-- completed: -->
+- [x] Create `skills/agent-team-supervision/SKILL.md` per Specification §4 with the section order listed there. The preamble (§4 row 2) MUST declare the dependency on monitoring explicitly. The Authorization-Scope Guard (§4 row 6) MUST be embedded verbatim from §5 of this design doc. <!-- completed: 2026-05-03T12:15 -->
+- [x] Verify the file cross-references `Skill(agent-team-monitoring)` for the stall-response table and `/loop` template (no duplication). <!-- completed: 2026-05-03T12:15 -->
+- [x] Verify the Spawn Protocol section (§4 row 7) calls out the codex fallback requirement: "if the Director runs under codex, ensure one of the fallbacks listed in `Skill(agent-team-monitoring)` § Mechanism by backend is in place." <!-- completed: 2026-05-03T12:15 -->
 
 ### Step 3: Remove the old skill
 
