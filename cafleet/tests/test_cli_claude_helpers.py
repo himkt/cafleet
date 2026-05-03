@@ -134,9 +134,7 @@ def test_ensure_coding_agent_available__raises_when_missing(monkeypatch, binary_
 @pytest.mark.parametrize("binary_name", ["claude", "codex"])
 def test_ensure_coding_agent_available__silent_when_found(monkeypatch, binary_name):
     cli = _cli()
-    monkeypatch.setattr(
-        "cafleet.cli.shutil.which", lambda _: f"/usr/bin/{binary_name}"
-    )
+    monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: f"/usr/bin/{binary_name}")
     assert cli._ensure_coding_agent_available(binary_name) is None
 
 
@@ -147,7 +145,6 @@ def test_ensure_coding_agent_available__passes_binary_name_to_which(monkeypatch)
 
     def fake_which(name):
         seen.append(name)
-        return None
 
     monkeypatch.setattr("cafleet.cli.shutil.which", fake_which)
     with pytest.raises(RuntimeError):
