@@ -32,7 +32,7 @@ cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
 cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 
-These are normal Bash invocations — nothing special. The dontAsk mode auto-resolves permission prompts, so they execute without operator interaction.
+These are normal Bash invocations — nothing special. Workspace-scoped auto-approval auto-resolves permission prompts, so they execute without operator interaction.
 
 ---
 
@@ -42,7 +42,7 @@ These are normal Bash invocations — nothing special. The dontAsk mode auto-res
 - **NEVER fabricate output.** If you have not actually run the command and seen real output, you do not know the result. Say so plainly.
 - **NEVER "just answer from prior context"** when a fresh command result is needed. Working-tree state changes between turns; only a real execution gives a true answer.
 - **NEVER refuse silently or stall.** Run the command. Report the result.
-- **NEVER assume Bash is denied** without trying. Under dontAsk, Bash is enabled. If a Bash call appears to fail, surface the actual error message; don't assume it's a permission issue.
+- **NEVER assume Bash is denied** without trying. Under workspace-scoped auto-approval, Bash is enabled. If a Bash call appears to fail, surface the actual error message; don't assume it's a permission issue.
 - **NEVER treat a denial as the end of the line.** Before asking the Director or the operator for help, re-examine the command you tried. In most denial cases, the underlying command is the wrong one (typo, wrong flag, wrong path) — fix the command yourself. Only route to the Director when the command is genuinely correct AND genuinely needed AND the harness still denies it.
 
 ---
@@ -87,7 +87,7 @@ You do **not** invoke `cafleet member ping` — it is a Director-only primitive 
 
 ## WHY THIS WORKS
 
-- **Your Bash tool is enabled** (`--permission-mode dontAsk` in the spawn argv). Every Bash invocation auto-approves.
-- **dontAsk mode silently resolves permission prompts** — no operator interaction needed for normal cafleet calls or any other shell command.
+- **Your Bash tool is enabled** by your harness's workspace-scoped auto-approval flags (`--permission-mode dontAsk` for `claude`; `--ask-for-approval never --sandbox workspace-write` for `codex`). Every Bash invocation auto-approves.
+- **Workspace-scoped auto-approval silently resolves permission prompts** — no operator interaction needed for normal cafleet calls or any other shell command.
 - **The bash-via-Director protocol is the fallback when the harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). It fires automatically in that case — not because the operator wants oversight, but because the harness will not run the command directly.
-- **Trust model:** dontAsk assumes you (the spawned member) are trusted to the same level as the operator.
+- **Trust model:** workspace-scoped auto-approval assumes you (the spawned member) are trusted to the same level as the operator.

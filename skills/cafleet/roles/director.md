@@ -19,7 +19,7 @@ Substitute the literal UUID strings printed by `cafleet session create` / `cafle
 
 You receive a member-originated bash request when **both** of the following are true:
 
-1. `cafleet message poll --agent-id <director-agent-id>` surfaces a plain free-text message from a member asking you to run a command. There is no JSON envelope, no schema, no special `kind` field — just a natural-language request like "Please run `git push` for me — my Bash tool denied it." Recognize the pattern by content, not by structure. Members default to running commands themselves under dontAsk; a request reaching you means the member's harness deny-list rejected the command and the member auto-routed to you as the fallback.
+1. `cafleet message poll --agent-id <director-agent-id>` surfaces a plain free-text message from a member asking you to run a command. There is no JSON envelope, no schema, no special `kind` field — just a natural-language request like "Please run `git push` for me — my Bash tool denied it." Recognize the pattern by content, not by structure. Members default to running commands themselves under their workspace-scoped auto-approval mode (Claude Code's `--permission-mode dontAsk` or codex's `--ask-for-approval never --sandbox workspace-write`); a request reaching you means the member's harness deny-list rejected the command and the member auto-routed to you as the fallback.
 2. The sender's `placement.director_agent_id` matches your `<director-agent-id>`. Cross-Director requests are rejected at the CLI layer; you should also reject them at the protocol layer (do not dispatch on behalf of a member who is not yours).
 
 ## What you MUST do

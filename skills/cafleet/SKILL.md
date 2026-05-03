@@ -317,7 +317,7 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 | `--agent-id` | yes | The Director's agent ID |
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
-| `--coding-agent` | no | One of `claude` (default) or `codex`. Both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(["claude", "codex"])`. Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
+| `--coding-agent` | no | One of `claude` (default) or `codex`. The flag both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(["claude", "codex"])`. Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
 | *(positional, after `--`)* | no | Prompt for the spawned coding-agent process. If omitted, the default prompt template is used. BOTH the default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_name` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
 
 The spawn argv depends on the chosen backend:

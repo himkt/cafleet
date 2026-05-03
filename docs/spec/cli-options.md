@@ -318,7 +318,7 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `--agent-id` | yes | Director's agent ID |
 | `--name` | yes | Display name of the new member. Forwarded to the spawned `claude` process as `claude --name <member-name> <prompt>` so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. The codex backend has no `--name` analog — codex panes display the codex default title and operators discover them via `cafleet member list` instead. |
 | `--description` | yes | One-sentence purpose |
-| `--coding-agent` | no | One of `claude` (default) or `codex`. Both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(["claude", "codex"])`. Help text: `Coding-agent binary to spawn / declare for the placement (default: claude).` Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
+| `--coding-agent` | no | One of `claude` (default) or `codex`. The flag both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(["claude", "codex"])`. Help text: `Coding-agent binary to spawn / declare for the placement (default: claude).` Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
 | *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. Both backends receive the same prompt; the prompt template is backend-neutral. |
 
 #### Spawn command per backend
