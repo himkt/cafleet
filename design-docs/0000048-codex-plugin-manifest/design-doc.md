@@ -1,7 +1,7 @@
 # Codex Plugin Manifest
 
 **Status**: Approved
-**Progress**: 2/7 tasks complete
+**Progress**: 3/7 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -37,7 +37,7 @@ Minimal manifest. Codex's `skills` field accepts a directory string (`"./skills/
 {
   "name": "cafleet",
   "version": "0.3.0",
-  "description": "A2A-inspired message broker CLI and design document orchestration skills for coding agents.",
+  "description": "Message broker CLI and design document orchestration skills for coding agents.",
   "skills": "./skills/"
 }
 ```
@@ -139,7 +139,7 @@ Manual operator verification is the only acceptance check. There is no JSON-sche
 
 ### Step 2: Add the Codex plugin manifest
 
-- [ ] Create `.codex-plugin/plugin.json` with the exact JSON specified in §Specification → File 1. <!-- completed: -->
+- [x] Create `.codex-plugin/plugin.json` with the exact JSON specified in §Specification → File 1. <!-- completed: 2026-05-05T13:48 -->
 
 ### Step 3: Add the Codex marketplace catalog
 
@@ -162,3 +162,4 @@ Manual operator verification is the only acceptance check. There is no JSON-sche
 | 2026-05-03 | Initial draft |
 | 2026-05-03 | Reviewer round 1: fix progress count (now 0/7), correct Step 4 fallback path math (`../../`, not `../`), make GitHub-push prerequisite explicit, fold version/description/skill invariants into a Constraints & invariants subsection, list the 7 skills in Success Criteria. |
 | 2026-05-03 | User approved. Status → Approved. |
+| 2026-05-05 | Execute-time clarification: spec block's `description` updated to drop the `A2A-inspired ` prefix so it matches `.claude-plugin/plugin.json:description` byte-for-byte (preserves the lock-step `description` invariant; Claude manifest stays untouched). |
