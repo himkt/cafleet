@@ -10,6 +10,7 @@ A message broker and agent registry for coding agents.
 - **Design document**: `design-docs/0000002-access-control/design-doc.md` — Access-control via shared API key (superseded by 0000015 session model) (Status: Complete)
 - **Design document**: `design-docs/0000010-sqlite-store-migration/design-doc.md` — SQLite + SQLAlchemy + Alembic store migration (Status: Complete)
 - **Design document**: `design-docs/0000046-codex-coding-agent/design-doc.md` — Add the OpenAI `codex` CLI as a second supported coding-agent backend alongside `claude` (Status: Approved)
+- **Design document**: `design-docs/0000049-token-reduction/design-doc.md` — Reduce token consumption across CAFleet output surfaces (Status: Complete)
 - **Single package**:
   - `cafleet/` — `cafleet` (FastAPI + SQLAlchemy + Alembic + click)
 - **Unified CLI command**: `cafleet` (with `db init` for schema management, `session` for session CRUD, and all agent/messaging commands)
