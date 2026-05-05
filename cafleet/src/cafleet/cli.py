@@ -8,7 +8,7 @@ import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import NoReturn
 
 import click
 from alembic import command

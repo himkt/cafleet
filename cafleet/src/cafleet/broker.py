@@ -73,13 +73,15 @@ def _agent_is_active_in_session(session, agent_id: str, session_id: str) -> bool
 
 
 def _try_notify_recipient(
-    session, *, session_id: str, recipient_id: str, sender_id: str
+    session, *, recipient_id: str, sender_id: str, task_dict: dict
 ) -> bool:
-    """Best-effort ``tmux send-keys`` poll trigger for the recipient's pane.
+    """Best-effort inline-preview keystroke for the recipient's pane.
 
-    The literal ``cafleet --session-id <sid> poll --agent-id <aid>`` string
-    is injected so the recipient's ``permissions.allow`` matches it exactly;
-    failures are swallowed because the queue remains the source of truth.
+    Surface 15: replaces the legacy poll-command keystroke with a 2-line
+    preview of the message itself — the recipient's TUI processes the
+    keystrokes as a fresh user-turn input and the recipient acks via
+    ``cafleet message ack --task-id <id>``. The queue remains the source
+    of truth; failures are swallowed.
     """
     if recipient_id == sender_id:
         return False
@@ -90,14 +92,16 @@ def _try_notify_recipient(
     ).scalar_one_or_none()
     if pane_id is None:
         return False
-    # Local import so tests that monkeypatch ``cafleet.tmux.send_poll_trigger``
+    # Local import so tests that monkeypatch ``cafleet.tmux.send_inline_preview``
     # get picked up on every call rather than bound once at broker import.
-    from cafleet.tmux import send_poll_trigger
+    from cafleet.tmux import send_inline_preview
 
-    return send_poll_trigger(
+    return send_inline_preview(
         target_pane_id=pane_id,
-        session_id=session_id,
-        agent_id=recipient_id,
+        task_id_8=task_dict["task_id"][:8],
+        sender_8=sender_id[:8],
+        ts=task_dict["status_timestamp"],
+        text=task_dict["text"],
     )
 
 
@@ -658,9 +662,9 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
         _save_task(session, task_dict)
         notification_sent = _try_notify_recipient(
             session,
-            session_id=session_id,
             recipient_id=to,
             sender_id=agent_id,
+            task_dict=task_dict,
         )
 
     return {"task": task_dict, "notification_sent": notification_sent}
@@ -697,6 +701,7 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
             ).scalars()
         )
 
+        deliveries: list[tuple[str, dict]] = []
         for recipient_id in recipient_ids:
             delivery_dict = _unicast_task_dict(
                 recipient_id=recipient_id,
@@ -706,6 +711,7 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
                 origin_task_id=summary_task_id,
             )
             _save_task(session, delivery_dict)
+            deliveries.append((recipient_id, delivery_dict))
 
         now = _now_iso()
         summary_dict = {
@@ -725,11 +731,11 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
         notifications_sent_count = sum(
             _try_notify_recipient(
                 session,
-                session_id=session_id,
                 recipient_id=recipient_id,
                 sender_id=agent_id,
+                task_dict=delivery_dict,
             )
-            for recipient_id in recipient_ids
+            for recipient_id, delivery_dict in deliveries
         )
 
     return [

@@ -21,10 +21,7 @@ Design constraints exercised here:
 - ``send_poll_trigger`` is preserved unchanged for ``cafleet member ping``.
 """
 
-import pytest
-
 from cafleet import tmux
-
 
 # Spec-canonical bracketed envelope shape — used by every assertion below.
 # The literal payload sent via ``send-keys -l`` must contain this prefix.
@@ -201,8 +198,7 @@ def test_send_inline_preview__pane_not_found_returns_false(monkeypatch):
 
     def mock_run(args, **_kwargs):
         raise tmux.TmuxError(
-            "tmux command failed: tmux send-keys -t %99\n"
-            "stderr: can't find pane: %99"
+            "tmux command failed: tmux send-keys -t %99\nstderr: can't find pane: %99"
         )
 
     monkeypatch.setattr(tmux, "_run", mock_run)

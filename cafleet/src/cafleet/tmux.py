@@ -145,6 +145,54 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
     return True
 
 
+def send_inline_preview(
+    *,
+    target_pane_id: str,
+    task_id_8: str,
+    sender_8: str,
+    ts: str,
+    text: str,
+) -> bool:
+    """Best-effort inline-preview keystroke for the recipient's pane.
+
+    Replaces the auto-fire ``send_poll_trigger`` invocation made by
+    ``broker._try_notify_recipient``. Sends a 2-line preview as a single
+    bracketed-paste literal — the envelope ``[cafleet msg <id8> from
+    <sender8> <ts>]`` on line 1, the raw body on line 2 — followed by
+    Enter to submit.
+
+    NOT a reuse of ``send_freetext_and_submit``: that helper prepends a
+    literal ``"4"`` to route the AskUserQuestion option-4 freetext slot,
+    which would corrupt the recipient's input box when no AskUserQuestion
+    frame is active.
+
+    Returns ``False`` on any tmux failure or when the binary is missing,
+    never raising. ``send_poll_trigger`` is preserved for the manual
+    ``cafleet member ping`` re-poke primitive.
+
+    The ``_SUBMIT_DELAY`` between the literal-text send and the Enter send
+    is required for the codex TUI's bracketed-paste finalisation; see
+    ``send_poll_trigger`` for the rationale (applied unconditionally to
+    keep the helper backend-agnostic).
+    """
+    if shutil.which("tmux") is None:
+        return False
+    payload = f"[cafleet msg {task_id_8} from {sender_8} {ts}]\n{text}"
+    try:
+        _run(
+            ["tmux", "send-keys", "-t", target_pane_id, "-l", payload],
+            timeout=5,
+        )
+        time.sleep(_SUBMIT_DELAY)
+        _run(
+            ["tmux", "send-keys", "-t", target_pane_id, "Enter"],
+            timeout=5,
+        )
+    except TmuxError:
+        return False
+    return True
+
+
 def send_choice_key(*, target_pane_id: str, digit: int) -> None:
     """Send a single digit key in {1, 2, 3} to the pane (no Enter)."""
     if digit not in (1, 2, 3):

@@ -1,7 +1,7 @@
 # Reduce Token Consumption Across CAFleet Output Surfaces
 
 **Status**: Approved
-**Progress**: 32/118 tasks complete
+**Progress**: 37/118 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -457,11 +457,11 @@ Each surface ships independently. If any one regresses, revert just that step.
 
 ### Step 4: Inline message preview (Surface 15)
 
-- [ ] Implement new `tmux.send_inline_preview(target_pane_id, *, task_id_8, sender_8, ts, text)`. **Do not** reuse `send_freetext_and_submit` (it prepends literal `"4"`). <!-- completed: -->
-- [ ] Update `broker._try_notify_recipient` (`broker.py:62-88`) to call `send_inline_preview`. <!-- completed: -->
-- [ ] Keep `send_poll_trigger` for `cafleet member ping` (manual re-poke). <!-- completed: -->
-- [ ] Integration test: 3 sequential sends → 3 inline previews, no poll dumps. <!-- completed: -->
-- [ ] Integration test: simulated tmux failure → recipient catches up via manual poll on next cycle. <!-- completed: -->
+- [x] Implement new `tmux.send_inline_preview(target_pane_id, *, task_id_8, sender_8, ts, text)`. **Do not** reuse `send_freetext_and_submit` (it prepends literal `"4"`). <!-- completed: 2026-05-05T08:10 -->
+- [x] Update `broker._try_notify_recipient` (`broker.py:62-88`) to call `send_inline_preview`. <!-- completed: 2026-05-05T08:10 -->
+- [x] Keep `send_poll_trigger` for `cafleet member ping` (manual re-poke). <!-- completed: 2026-05-05T08:10 -->
+- [x] Integration test: 3 sequential sends → 3 inline previews, no poll dumps. <!-- completed: 2026-05-05T08:10 -->
+- [x] Integration test: simulated tmux failure → recipient catches up via manual poll on next cycle. <!-- completed: 2026-05-05T08:10 -->
 
 ### Step 5: `--since` as filter (Surface 2 — fallback path)
 

@@ -22,7 +22,6 @@ from cafleet import broker, tmux
 from cafleet.db.models import Base
 from cafleet.tmux import DirectorContext
 
-
 # ---------------------------------------------------------------------------
 # Fixtures (mirror ``test_broker_messaging.py``)
 # ---------------------------------------------------------------------------
@@ -97,11 +96,35 @@ def _register_agent(session_id: str, name: str) -> dict:
     )
 
 
+def _register_member(session_id: str, name: str, director_id: str, pane: str) -> dict:
+    """Register an agent with a placement so the auto-fire path resolves a pane."""
+    return broker.register_agent(
+        session_id=session_id,
+        name=name,
+        description=f"{name} description",
+        placement={
+            "director_agent_id": director_id,
+            "tmux_session": "main",
+            "tmux_window_id": "@3",
+            "tmux_pane_id": pane,
+            "coding_agent": "claude",
+        },
+    )
+
+
 def _setup_two_agents() -> tuple[str, str, str]:
+    """Bootstrap a session and register sender + recipient WITH placements.
+
+    Both agents carry a tmux ``pane_id`` so the broker's auto-fire path
+    actually keystrokes ``send_inline_preview``. The dedicated
+    ``test_recipient_without_placement__skips_inline_preview`` test below
+    overrides this setup to register a placement-less recipient.
+    """
     s = _create_session()
     sid = s["session_id"]
-    sender = _register_agent(sid, "sender")
-    recipient = _register_agent(sid, "recipient")
+    director_id = s["director"]["agent_id"]
+    sender = _register_member(sid, "sender", director_id, "%1")
+    recipient = _register_member(sid, "recipient", director_id, "%2")
     return sid, sender["agent_id"], recipient["agent_id"]
 
 
@@ -307,12 +330,17 @@ def test_recipient_without_placement__skips_inline_preview(inline_preview_calls)
     """When the recipient has no ``agent_placements`` row (no tmux pane),
     the broker auto-fire path skips notification silently — the message
     is still persisted to the queue."""
-    sid, sender, recipient = _setup_two_agents()
-    sent = broker.send_message(sid, sender, recipient, "to placement-less peer")
+    s = _create_session()
+    sid = s["session_id"]
+    director_id = s["director"]["agent_id"]
+    sender = _register_member(sid, "sender", director_id, "%1")
+    # Recipient registered without a placement — broker must skip preview.
+    recipient = _register_agent(sid, "lonely")
+    sent = broker.send_message(
+        sid, sender["agent_id"], recipient["agent_id"], "to placement-less peer"
+    )
 
-    # ``recipient`` was registered via ``_register_agent`` with no placement
-    # row — so the broker should skip the inline preview, not invoke it.
     assert inline_preview_calls == []
     # The message still landed in the queue.
-    [polled] = broker.poll_tasks(recipient)
+    [polled] = broker.poll_tasks(recipient["agent_id"])
     assert polled["task_id"] == sent["task"]["task_id"]
