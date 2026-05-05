@@ -1,7 +1,7 @@
 # Reduce Token Consumption Across CAFleet Output Surfaces
 
 **Status**: Approved
-**Progress**: 46/118 tasks complete
+**Progress**: 53/118 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -480,16 +480,16 @@ Each surface ships independently. If any one regresses, revert just that step.
 
 ### Step 7: Broadcast summary slim (Surface 4)
 
-- [ ] Add `output.render_broadcast_summary(task, *, full)` omitting `recipient_ids` when `full=False`. <!-- completed: -->
-- [ ] Wire into broadcast formatter. <!-- completed: -->
-- [ ] Unit test. <!-- completed: -->
+- [x] Add `output.render_broadcast_summary(task, *, full)` omitting `recipient_ids` when `full=False`. <!-- completed: 2026-05-05T08:40 (no helper needed: post-Surface-14 the persisted summary already excludes `recipient_ids`; verified by test_output_render_broadcast_summary.py guards) -->
+- [x] Wire into broadcast formatter. <!-- completed: 2026-05-05T08:40 (broadcast formatter already emits the slim 1-line summary from Step 6; no further wiring) -->
+- [x] Unit test. <!-- completed: 2026-05-05T08:40 (Tester's 5 Surface-4 tests pass on the current persisted shape) -->
 
 ### Step 8: Configurable truncation (Surface 5)
 
-- [ ] Add `Settings.max_text_len: int = 200`, alias `CAFLEET_MAX_TEXT_LEN`. <!-- completed: -->
-- [ ] Update `output.truncate_text` default `limit` to read from settings. <!-- completed: -->
-- [ ] Replace `"..."` with `"…"`. <!-- completed: -->
-- [ ] Apply truncation to `agent.description` (limit 60) and metadata strings (limit 80). <!-- completed: -->
+- [x] Add `Settings.max_text_len: int = 200`, alias `CAFLEET_MAX_TEXT_LEN`. <!-- completed: 2026-05-05T08:40 -->
+- [x] Update `output.truncate_text` default `limit` to read from settings. <!-- completed: 2026-05-05T08:40 -->
+- [x] Replace `"..."` with `"…"`. <!-- completed: 2026-05-05T08:40 -->
+- [x] Apply truncation to `agent.description` (limit 60) and metadata strings (limit 80). <!-- completed: 2026-05-05T08:40 (agent.description truncated at 60 in --full; metadata-strings target scope-reduced — no clean target post-Surface-14 per Director clarification) -->
 - [ ] Tokenizer cross-check: confirm `"…"` tokenizes to ≤1 token in target tokenizer. <!-- completed: -->
 - [ ] Unit test for env var override. <!-- completed: -->
 

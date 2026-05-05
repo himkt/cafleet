@@ -22,8 +22,8 @@ from click.testing import CliRunner
 from cafleet import broker
 from cafleet.cli import cli
 
-LONG_BODY = "abcdefghijklmnopqrstuvwxyz"
-TRUNCATED_BODY = "abcdefghij..."
+LONG_BODY = "x" * 300
+TRUNCATED_BODY = "x" * 200 + "…"
 
 
 @pytest.fixture

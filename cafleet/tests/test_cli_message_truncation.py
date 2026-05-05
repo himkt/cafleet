@@ -32,8 +32,8 @@ from click.testing import CliRunner
 from cafleet import broker
 from cafleet.cli import cli
 
-LONG_BODY = "abcdefghijklmnopqrstuvwxyz"
-TRUNCATED_BODY = "abcdefghij..."
+LONG_BODY = "x" * 300
+TRUNCATED_BODY = "x" * 200 + "…"
 
 
 @pytest.fixture
@@ -707,7 +707,6 @@ def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_in_text_
     # count; the verbose summary text is reserved for ``--full``.
     assert "broadcast id=" in result.output
     assert "recipients=" in result.output
-    assert SUMMARY_TEXT not in result.output
 
 
 def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_with_full_in_text_output(
@@ -761,10 +760,10 @@ def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_in_json_
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert len(payload) == 1
-    # Post-Step 6: default JSON emits the compact rendered envelope; the
-    # summary text is truncated to ``CAFLEET_MAX_TEXT_LEN`` codepoints.
-    assert payload[0]["task"]["text"].startswith("Broadcast")
-    assert payload[0]["task"]["text"] != SUMMARY_TEXT
+    # Post-Step 8: default ``CAFLEET_MAX_TEXT_LEN`` is 200 codepoints, so the
+    # 31-codepoint summary text passes through unchanged. ``--full`` keeps
+    # the summary text identical (it bypasses truncation regardless).
+    assert payload[0]["task"]["text"] == SUMMARY_TEXT
 
 
 def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_with_full_in_json_output(
@@ -852,6 +851,7 @@ def test_message_broadcast_no_truncation__default_and_full_json_output_diverge(
     assert "id" in default_task
     assert "task_id" not in default_task
     assert "task_id" in full_task
-    # Full mode preserves the un-truncated summary text; default truncates.
+    # Both modes carry the (short) summary text intact — it fits inside the
+    # 200-codepoint default limit, so neither mode truncates.
     assert full_task["text"] == SUMMARY_TEXT
-    assert default_task["text"] != SUMMARY_TEXT
+    assert default_task["text"] == SUMMARY_TEXT

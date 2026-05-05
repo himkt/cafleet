@@ -84,29 +84,29 @@ def test_format_member_list__empty_list_unchanged():
 
 
 def test_truncate_text__none_passes_through():
-    assert truncate_text(None, full=False) is None
+    assert truncate_text(None, full=False, limit=10) is None
 
 
 def test_truncate_text__empty_string_passes_through():
-    assert truncate_text("", full=False) == ""
+    assert truncate_text("", full=False, limit=10) == ""
 
 
 def test_truncate_text__exactly_ten_codepoints_unchanged():
     value = "abcdefghij"
     assert len(value) == 10
-    assert truncate_text(value, full=False) == "abcdefghij"
+    assert truncate_text(value, full=False, limit=10) == "abcdefghij"
 
 
 def test_truncate_text__eleven_codepoint_ascii_is_truncated():
     value = "abcdefghijk"
     assert len(value) == 11
-    assert truncate_text(value, full=False) == "abcdefghij..."
+    assert truncate_text(value, full=False, limit=10) == "abcdefghij…"
 
 
 def test_truncate_text__eleven_codepoint_multibyte_is_truncated_by_codepoint():
     value = "あいうえおかきくけこさ"
     assert len(value) == 11
-    assert truncate_text(value, full=False) == "あいうえおかきくけこ..."
+    assert truncate_text(value, full=False, limit=10) == "あいうえおかきくけこ…"
 
 
 def test_truncate_text__full_true_passes_long_string_through():
@@ -119,7 +119,7 @@ def test_truncate_text__full_true_passes_none_through():
 
 
 def test_truncate_text__custom_limit_is_respected():
-    assert truncate_text("abcdef", full=False, limit=3) == "abc..."
+    assert truncate_text("abcdef", full=False, limit=3) == "abc…"
 
 
 def _task(text: str | None = "the body of the message") -> dict:
@@ -142,30 +142,30 @@ def _task(text: str | None = "the body of the message") -> dict:
 
 def test_truncate_task_text__single_task_shape_truncates_text():
     task = _task("abcdefghijklmnop")
-    result = truncate_task_text(task, full=False)
+    result = truncate_task_text(task, full=False, limit=10)
     assert result is task
-    assert task["text"] == "abcdefghij..."
+    assert task["text"] == "abcdefghij…"
 
 
 def test_truncate_task_text__envelope_shape_truncates_text():
     envelope = {"task": _task("abcdefghijklmnop")}
-    result = truncate_task_text(envelope, full=False)
+    result = truncate_task_text(envelope, full=False, limit=10)
     assert result is envelope
-    assert envelope["task"]["text"] == "abcdefghij..."
+    assert envelope["task"]["text"] == "abcdefghij…"
 
 
 def test_truncate_task_text__list_of_tasks_truncates_each():
     tasks = [_task("abcdefghijklmnop"), _task("0123456789ABCDEF")]
-    result = truncate_task_text(tasks, full=False)
+    result = truncate_task_text(tasks, full=False, limit=10)
     assert result is tasks
-    assert tasks[0]["text"] == "abcdefghij..."
-    assert tasks[1]["text"] == "0123456789..."
+    assert tasks[0]["text"] == "abcdefghij…"
+    assert tasks[1]["text"] == "0123456789…"
 
 
 def test_truncate_task_text__list_of_envelopes_truncates_each():
     items = [{"task": _task("abcdefghijklmnop")}, {"task": _task("short")}]
-    truncate_task_text(items, full=False)
-    assert items[0]["task"]["text"] == "abcdefghij..."
+    truncate_task_text(items, full=False, limit=10)
+    assert items[0]["task"]["text"] == "abcdefghij…"
     assert items[1]["task"]["text"] == "short"
 
 
@@ -177,7 +177,7 @@ def test_truncate_task_text__full_true_does_not_mutate():
 
 def test_truncate_task_text__short_text_is_not_truncated():
     task = _task("hello")
-    truncate_task_text(task, full=False)
+    truncate_task_text(task, full=False, limit=10)
     assert task["text"] == "hello"
 
 
@@ -188,21 +188,21 @@ def test_truncate_task_text__missing_text_key_is_noop():
         "context_id": "ctx",
         "status_state": "input_required",
     }
-    result = truncate_task_text(task, full=False)
+    result = truncate_task_text(task, full=False, limit=10)
     assert result is task
     assert "text" not in task
 
 
 def test_truncate_task_text__non_dict_item_in_list_is_skipped():
     items = [None, _task("abcdefghijklmnop")]
-    truncate_task_text(items, full=False)
+    truncate_task_text(items, full=False, limit=10)
     assert items[0] is None
-    assert items[1]["text"] == "abcdefghij..."
+    assert items[1]["text"] == "abcdefghij…"
 
 
 def test_truncate_task_text__sibling_typed_column_fields_unchanged():
     task = _task("abcdefghijklmnop")
-    truncate_task_text(task, full=False)
+    truncate_task_text(task, full=False, limit=10)
     assert task["task_id"] == "task-001"
     assert task["status_state"] == "input_required"
     assert task["from_agent_id"] == "agent-from"

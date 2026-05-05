@@ -17,18 +17,18 @@ is no clean target post-Surface-14 — the typed-column shape no longer has
 free-form ``metadata`` strings to truncate. Flagged in the report rather
 than tested.
 
-Tests use ``monkeypatch.setenv`` + a fresh ``Settings()`` instance to
-exercise the env-var-driven default without polluting the process-wide
-``cafleet.config.settings`` singleton.
+Tests use ``monkeypatch.setenv`` + a fresh ``Settings()`` instance for the
+env-var contract, and ``monkeypatch.setattr`` on the ``cafleet.config.settings``
+singleton attribute for the truncate-time behaviour. ``importlib.reload``
+is avoided because it pollutes the process-wide ``cafleet.config`` /
+``cafleet.output`` modules and breaks subsequent tests that depend on the
+canonical singleton.
 """
-
-import importlib
 
 import pytest
 
 from cafleet import output
 from cafleet.config import Settings
-
 
 # ---------------------------------------------------------------------------
 # (a) Settings.max_text_len env-var-driven default is 200
@@ -51,7 +51,7 @@ def test_settings__max_text_len_env_var_must_be_integer(monkeypatch):
     """Pydantic-Settings should reject a non-integer env value (so callers
     fail loudly rather than silently degrading)."""
     monkeypatch.setenv("CAFLEET_MAX_TEXT_LEN", "not-a-number")
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="CAFLEET_MAX_TEXT_LEN"):
         Settings()
 
 
@@ -74,12 +74,7 @@ def test_settings__max_text_len_field_uses_validation_alias(monkeypatch):
 def test_truncate_text__no_limit_reads_settings_max_text_len(monkeypatch):
     """A 250-char body is truncated to 200 codepoints + suffix when no
     explicit ``limit`` is supplied."""
-    # Ensure default settings is loaded with default 200.
-    monkeypatch.delenv("CAFLEET_MAX_TEXT_LEN", raising=False)
-    from cafleet import config
-
-    importlib.reload(config)
-    importlib.reload(output)
+    monkeypatch.setattr("cafleet.config.settings.max_text_len", 200)
 
     body = "a" * 250
     result = output.truncate_text(body, full=False)
@@ -90,11 +85,7 @@ def test_truncate_text__no_limit_reads_settings_max_text_len(monkeypatch):
 
 
 def test_truncate_text__no_limit_under_settings_default_passes_through(monkeypatch):
-    monkeypatch.delenv("CAFLEET_MAX_TEXT_LEN", raising=False)
-    from cafleet import config
-
-    importlib.reload(config)
-    importlib.reload(output)
+    monkeypatch.setattr("cafleet.config.settings.max_text_len", 200)
 
     body = "a" * 150
     result = output.truncate_text(body, full=False)
@@ -102,13 +93,9 @@ def test_truncate_text__no_limit_under_settings_default_passes_through(monkeypat
 
 
 def test_truncate_text__env_var_override_changes_default_limit(monkeypatch):
-    """When ``CAFLEET_MAX_TEXT_LEN=50`` is set, ``truncate_text`` (no
+    """When ``settings.max_text_len`` is 50, ``truncate_text`` (no
     explicit limit) truncates at 50 codepoints."""
-    monkeypatch.setenv("CAFLEET_MAX_TEXT_LEN", "50")
-    from cafleet import config
-
-    importlib.reload(config)
-    importlib.reload(output)
+    monkeypatch.setattr("cafleet.config.settings.max_text_len", 50)
 
     body = "a" * 100
     result = output.truncate_text(body, full=False)
@@ -120,11 +107,7 @@ def test_truncate_text__env_var_override_changes_default_limit(monkeypatch):
 
 def test_truncate_text__explicit_limit_overrides_settings(monkeypatch):
     """An explicit ``limit`` argument wins over the env-driven default."""
-    monkeypatch.setenv("CAFLEET_MAX_TEXT_LEN", "200")
-    from cafleet import config
-
-    importlib.reload(config)
-    importlib.reload(output)
+    monkeypatch.setattr("cafleet.config.settings.max_text_len", 200)
 
     body = "a" * 100
     result = output.truncate_text(body, full=False, limit=10)
@@ -134,11 +117,7 @@ def test_truncate_text__explicit_limit_overrides_settings(monkeypatch):
 
 
 def test_truncate_text__full_true_bypasses_settings_limit(monkeypatch):
-    monkeypatch.setenv("CAFLEET_MAX_TEXT_LEN", "10")
-    from cafleet import config
-
-    importlib.reload(config)
-    importlib.reload(output)
+    monkeypatch.setattr("cafleet.config.settings.max_text_len", 10)
 
     body = "a" * 500
     assert output.truncate_text(body, full=True) == body
@@ -272,11 +251,7 @@ def test_format_agent_full__61_char_description_is_truncated_to_60_plus_ellipsis
 def test_truncate_task_text__full_true_bypasses_settings(monkeypatch):
     """``truncate_task_text(..., full=True)`` returns the input unchanged
     regardless of settings.max_text_len."""
-    monkeypatch.setenv("CAFLEET_MAX_TEXT_LEN", "10")
-    from cafleet import config
-
-    importlib.reload(config)
-    importlib.reload(output)
+    monkeypatch.setattr("cafleet.config.settings.max_text_len", 10)
 
     task = {
         "task_id": "tid",
@@ -296,12 +271,8 @@ def test_truncate_task_text__full_true_bypasses_settings(monkeypatch):
 
 def test_truncate_task_text__default_limit_truncates_to_settings_max(monkeypatch):
     """Without an explicit ``limit``, ``truncate_task_text`` honours the
-    env-driven default and applies the new ``"…"`` suffix."""
-    monkeypatch.setenv("CAFLEET_MAX_TEXT_LEN", "20")
-    from cafleet import config
-
-    importlib.reload(config)
-    importlib.reload(output)
+    settings default and applies the new ``"…"`` suffix."""
+    monkeypatch.setattr("cafleet.config.settings.max_text_len", 20)
 
     task = {
         "task_id": "tid",

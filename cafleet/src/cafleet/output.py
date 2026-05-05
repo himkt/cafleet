@@ -2,6 +2,10 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from cafleet.config import settings
+
+_TRUNCATION_SUFFIX = "…"
+
 
 def format_json(data: Any, *, pretty: bool = False) -> str:
     """Render ``data`` as JSON.
@@ -15,13 +19,24 @@ def format_json(data: Any, *, pretty: bool = False) -> str:
     return json.dumps(data, separators=(",", ":"))
 
 
-def truncate_text(value: str | None, *, full: bool, limit: int = 10) -> str | None:
-    if full or value is None or len(value) <= limit:
+def truncate_text(
+    value: str | None, *, full: bool, limit: int | None = None
+) -> str | None:
+    """Truncate ``value`` to ``limit`` codepoints + the ``…`` suffix.
+
+    When ``limit`` is ``None`` the helper falls back to
+    ``settings.max_text_len`` (env var ``CAFLEET_MAX_TEXT_LEN``, default
+    ``200``). ``full=True`` returns ``value`` unchanged.
+    """
+    if full or value is None:
         return value
-    return value[:limit] + "..."
+    effective_limit = limit if limit is not None else settings.max_text_len
+    if len(value) <= effective_limit:
+        return value
+    return value[:effective_limit] + _TRUNCATION_SUFFIX
 
 
-def truncate_task_text(result: Any, *, full: bool, limit: int = 10) -> Any:
+def truncate_task_text(result: Any, *, full: bool, limit: int | None = None) -> Any:
     if full:
         return result
     items = result if isinstance(result, list) else [result]
@@ -152,14 +167,16 @@ def format_agent(agent: dict, *, full: bool = False) -> str:
 
     ``full=False`` (default): 1-line compact ``<id8> <name> <status>``.
     ``full=True``: 4-line legacy block exposing the full ``agent_id``,
-    ``name``, ``description``, and ``status``.
+    ``name``, truncated ``description`` (60 codepoints + ``…`` per
+    Surface 5), and ``status``.
     """
     if not full:
         return f"{agent['agent_id'][:8]} {agent['name']} {agent['status']}"
+    description = truncate_text(agent["description"], full=False, limit=60)
     lines = [
         f"  agent_id:    {agent['agent_id']}",
         f"  name:        {agent['name']}",
-        f"  description: {agent['description']}",
+        f"  description: {description}",
         f"  status:      {agent['status']}",
     ]
     return "\n".join(lines)

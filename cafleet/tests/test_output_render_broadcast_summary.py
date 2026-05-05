@@ -81,7 +81,7 @@ def test_broadcast_summary_task__has_no_recipient_ids_field():
     )
 
 
-def test_broadcast_summary_task__has_no_recipientIds_camel_case_either():
+def test_broadcast_summary_task__has_no_recipientids_camelcase_either():  # noqa: N802 - asserts on the legacy camelCase key spelling
     """A defensive guard against the legacy camelCase form leaking back."""
     s = _create_session()
     sid = s["session_id"]

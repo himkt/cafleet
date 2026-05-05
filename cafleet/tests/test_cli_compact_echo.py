@@ -26,8 +26,8 @@ from click.testing import CliRunner
 from cafleet import broker, tmux
 from cafleet.cli import cli
 
-LONG_BODY = "abcdefghijklmnopqrstuvwxyz"
-TRUNCATED_BODY = "abcdefghij..."
+LONG_BODY = "x" * 300
+TRUNCATED_BODY = "x" * 200 + "…"
 
 DIRECTOR_ID = "11111111-1111-1111-1111-111111111111"
 MEMBER_ID = "22222222-2222-2222-2222-222222222222"
