@@ -10,11 +10,11 @@ Add a Codex plugin manifest at `.codex-plugin/plugin.json` plus a Codex marketpl
 
 ## Success Criteria
 
-- [ ] `.codex-plugin/plugin.json` exists at the repo root with the four required fields (`name`, `version`, `description`, `skills`).
-- [ ] `.agents/plugins/marketplace.json` exists and references the in-repo plugin so the repo itself is a Codex marketplace.
-- [ ] The Claude Code plugin under `.claude-plugin/` continues to function unchanged (same 7 skills, same `marketplace.json`, same versions).
-- [ ] `README.md` documents the Codex install path alongside the existing Claude Code install path.
-- [ ] `ARCHITECTURE.md` notes that CAFleet ships dual plugin manifests (Claude + Codex) over a shared `skills/` tree.
+- [x] `.codex-plugin/plugin.json` exists at the repo root with the four required fields (`name`, `version`, `description`, `skills`).
+- [x] `.agents/plugins/marketplace.json` exists and references the in-repo plugin so the repo itself is a Codex marketplace.
+- [x] The Claude Code plugin under `.claude-plugin/` continues to function unchanged (same 7 skills, same `marketplace.json`, same versions).
+- [x] `README.md` documents the Codex install path alongside the existing Claude Code install path.
+- [x] `ARCHITECTURE.md` notes that CAFleet ships dual plugin manifests (Claude + Codex) over a shared `skills/` tree.
 - [ ] Manual `codex plugin marketplace add himkt/cafleet` followed by an in-UI install succeeds and exposes all 7 skills: `cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview` (operator-verified at execute time).
 
 ---
