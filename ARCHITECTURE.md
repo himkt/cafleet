@@ -23,7 +23,7 @@ Admin WebUI  ──→  server.py (minimal FastAPI)         │
 └─────────────────────────────────────────────────────┘
 ```
 
-`broker.py` is the single data access layer. Both CLI and Admin WebUI call it. No async stores, no HTTP client, no A2A protocol layer.
+`broker.py` is the single data access layer. Both CLI and Admin WebUI call it. No async stores, no HTTP client, no protocol layer.
 
 ## Session Isolation
 
@@ -99,7 +99,7 @@ The default database path is `~/.local/share/cafleet/registry.db` (XDG state dir
 
 ### Relational + document hybrid model
 
-Indexed fields are columns; A2A-inspired payloads (`AgentCard`-shaped, `Task`-shaped) are stored verbatim as JSON `TEXT` blobs and never queried by content. This keeps hot lookups index-served while preserving the canonical internal shape for these payloads.
+Indexed fields are columns; structured payloads (`AgentCard`-shaped, `Task`-shaped) are stored verbatim as JSON `TEXT` blobs and never queried by content. This keeps hot lookups index-served while preserving the canonical internal shape for these payloads.
 
 | Table | Indexed columns | JSON blob |
 |---|---|---|
@@ -246,11 +246,11 @@ The truncation applies to CLI emit sites only. FastAPI `/ui/api/*` responses are
 
 ### contextId Convention
 
-The Broker sets `contextId = recipient_agent_id` on every delivery Task. This enables inbox discovery — recipients call `ListTasks(contextId=myAgentId)` to find all messages addressed to them. This trades per-conversation grouping (the typical contextId use case) for simple inbox discovery, which suits the fire-and-forget messaging pattern of coding agents. The A2A spec (Section 3.4.1) states that server-generated contextId values should be treated as opaque identifiers by clients, so this usage is compliant.
+The Broker sets `contextId = recipient_agent_id` on every delivery Task. This enables inbox discovery — recipients call `ListTasks(contextId=myAgentId)` to find all messages addressed to them. This trades per-conversation grouping (the typical contextId use case) for simple inbox discovery, which suits the fire-and-forget messaging pattern of coding agents. `contextId` is treated as an opaque routing key by both server and clients.
 
 ### Task Lifecycle Mapping
 
-Each message delivery is modeled as an A2A Task:
+Each message delivery is modeled as a Task:
 
 | Task State | Message Meaning |
 |---|---|
@@ -280,7 +280,7 @@ A browser-based dashboard served as a SPA at `/ui/`. No login is required. The f
 
 - **Frontend**: `admin/` — Vite + React 19 + TypeScript + Tailwind CSS 4
 - **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — all endpoints call `broker` for data access (sync `def` handlers, FastAPI runs them in a thread pool)
-- **Server**: `server.py` is a minimal FastAPI app — just `webui_router` + static files. No A2A handler, no JSON-RPC, no executor. Only needed for the WebUI; CLI commands work without it.
+- **Server**: `server.py` is a minimal FastAPI app — just `webui_router` + static files. No protocol handler, no JSON-RPC, no executor. Only needed for the WebUI; CLI commands work without it.
 - **Session scoping**: Session-scoped endpoints require `X-Session-Id` header. No authentication.
 - **Static serving**: `StaticFiles` mount at `/ui` serves the SPA bundled inside the package at `cafleet/src/cafleet/webui/` (production build). `mise //admin:build` must be run before `cafleet server` / `mise //cafleet:dev` for `/ui/` to be populated; without it, `create_app()` emits a one-line `warning: admin WebUI is not built. /ui/ will return 404. Run 'mise //admin:build'.` to stderr at startup, the server starts cleanly, and `/ui/` 404s until the SPA is built. The warning fires from `create_app()` so every startup path (`cafleet server`, `mise //cafleet:dev`, and any `uv run uvicorn cafleet.server:app`) sees it identically.
 

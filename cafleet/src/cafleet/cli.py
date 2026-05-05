@@ -151,7 +151,7 @@ def _sync_db_url() -> str:
 )
 @click.pass_context
 def cli(ctx, json_output, session_id):
-    """CAFleet — CLI for the A2A-inspired message broker."""
+    """CAFleet — CLI for the message broker and agent registry."""
     ctx.ensure_object(dict)
     ctx.obj["session_id"] = session_id
     ctx.obj["json_output"] = json_output

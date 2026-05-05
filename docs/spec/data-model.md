@@ -1,8 +1,8 @@
 # SQLite Data Model Specification
 
-All core data structures — `Task`, `Message`, `Part`, `Artifact`, `AgentCard`, `TaskStatus`, `TaskState` — follow an internal A2A-inspired shape, but CAFleet does not maintain Pydantic models for them. There is no dependency on `a2a-sdk` or any external A2A library. SQLite stores the `Task` and `AgentCard` payloads as JSON `TEXT` blobs that the broker layer serializes via `json.dumps` and reads back as plain Python dicts via `json.loads` (see `cafleet/src/cafleet/broker.py`). Broker-specific information (routing metadata, etc.) lives in indexed columns alongside the JSON blob.
+All core data structures — `Task`, `Message`, `Part`, `Artifact`, `AgentCard`, `TaskStatus`, `TaskState` — follow an internal CAFleet-defined shape, and CAFleet does not maintain Pydantic models for them. SQLite stores the `Task` and `AgentCard` payloads as JSON `TEXT` blobs that the broker layer serializes via `json.dumps` and reads back as plain Python dicts via `json.loads` (see `cafleet/src/cafleet/broker.py`). Broker-specific information (routing metadata, etc.) lives in indexed columns alongside the JSON blob.
 
-The model is a **relational + document hybrid**: indexed fields are columns, while the A2A-inspired payloads are stored as opaque JSON `TEXT`. The columns are queried; the JSON blobs are not.
+The model is a **relational + document hybrid**: indexed fields are columns, while the structured payloads are stored as opaque JSON `TEXT`. The columns are queried; the JSON blobs are not.
 
 Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver (see `cafleet/src/cafleet/db/engine.py`'s `get_sync_engine` / `get_sync_sessionmaker`). Operators apply migrations once via `cafleet db init` before starting the server.
 
@@ -47,7 +47,7 @@ The `tmux` context (`session`, `window_id`, `pane_id`) is read **before** the tr
 | `status` | `TEXT` | `NOT NULL` | `'active'` or `'deregistered'`. |
 | `registered_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
 | `deregistered_at` | `TEXT` | nullable | ISO-8601 timestamp; populated on soft-delete. |
-| `agent_card_json` | `TEXT` | `NOT NULL` | AgentCard-shaped blob (A2A-inspired, internal schema). |
+| `agent_card_json` | `TEXT` | `NOT NULL` | AgentCard-shaped blob (CAFleet-defined internal schema). |
 
 Indexes:
 
@@ -103,7 +103,7 @@ A future `rename_agent` broker function MUST apply the same guard. `broker.broad
 | `status_state` | `TEXT` | `NOT NULL` | TaskState enum value (e.g., `TASK_STATE_INPUT_REQUIRED`). |
 | `status_timestamp` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; updated on every state change. Used for `ORDER BY DESC`. |
 | `origin_task_id` | `TEXT` | nullable | Broadcast grouping link. `NULL` on unicast deliveries. On broadcast delivery rows, holds the summary task's `task_id`, shared across every delivery row in the same broadcast. On the broadcast summary row itself, holds its own `task_id` (self-reference) so the delivery rows and the summary row all share a single grouping value. Historical rows from before the migration are `NULL`. |
-| `task_json` | `TEXT` | `NOT NULL` | Task-shaped blob (A2A-inspired, internal schema). |
+| `task_json` | `TEXT` | `NOT NULL` | Task-shaped blob (CAFleet-defined internal schema). |
 
 Indexes:
 

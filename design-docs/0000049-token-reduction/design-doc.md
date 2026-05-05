@@ -1,7 +1,7 @@
 # Reduce Token Consumption Across CAFleet Output Surfaces
 
 **Status**: Approved
-**Progress**: 1/118 tasks complete
+**Progress**: 2/118 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -417,7 +417,7 @@ Each surface ships independently. If any one regresses, revert just that step.
 
 ### Step 1: Documentation first (with inherited-convention scrub)
 
-- [ ] **1.A** Scrub current-state mentions of "A2A" / "agent-to-agent" / "A2A-inspired" from: `README.md` (line 3), `ARCHITECTURE.md`, `CLAUDE.md` (root, lines 9 & 19), `skills/cafleet/SKILL.md`, all `skills/cafleet/roles/*.md`, all `docs/**/*.md`, all source-code docstrings/comments, and `admin/`. The `0000001-a2a-registry-broker/` directory stays as historical record. <!-- completed: -->
+- [x] **1.A** Scrub current-state mentions of "A2A" / "agent-to-agent" / "A2A-inspired" from: `README.md` (line 3), `ARCHITECTURE.md`, `CLAUDE.md` (root, lines 9 & 19), `skills/cafleet/SKILL.md`, all `skills/cafleet/roles/*.md`, all `docs/**/*.md`, all source-code docstrings/comments, and `admin/`. The `0000001-a2a-registry-broker/` directory stays as historical record. <!-- completed: 2026-05-05T05:51 -->
 - [ ] **1.B** Update `ARCHITECTURE.md` with the typed-column envelope shape, spawn-prompt slim, skill split, `member list --activity`, inline-preview keystroke, and persisted-shape simplification. <!-- completed: -->
 - [ ] **1.C** Update `docs/spec/cli-options.md` with `--pretty`, `--quiet`, `--full`, `--activity`, capture default change (80 → 30), `--ansi/--no-ansi`, `--tail`, and `CAFLEET_MAX_TEXT_LEN`. <!-- completed: -->
 - [ ] **1.D** Update / create `docs/spec/message-envelope.md` describing the typed-column shape, the rendered shape, and `--full`. No reference to the inherited convention. <!-- completed: -->

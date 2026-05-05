@@ -4,17 +4,17 @@
     "name": "himkt"
   },
   "metadata": {
-    "description": "CAFleet A2A message broker plugin marketplace",
+    "description": "CAFleet message broker plugin marketplace",
     "version": "0.3.0"
   },
   "plugins": [
     {
       "name": "cafleet",
       "source": "./",
-      "description": "A2A-inspired message broker CLI for coding agents.",
+      "description": "Message broker CLI for coding agents.",
       "version": "0.3.0",
       "author": { "name": "himkt" },
-      "tags": ["a2a", "messaging", "broker"]
+      "tags": ["messaging", "broker", "agents"]
     }
   ]
 }
