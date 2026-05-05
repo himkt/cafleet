@@ -1019,11 +1019,33 @@ def _emit_member_delete_output(
 
 @member.command("list")
 @click.option("--agent-id", required=True, help="Director's agent ID")
+@click.option(
+    "--activity",
+    "activity",
+    is_flag=True,
+    default=False,
+    help="Augment each row with last_sent/last_recv/last_ack/idle activity proxies.",
+)
 @click.pass_context
-@_client_command(text_formatter=output.format_member_list)
-def member_list(ctx, agent_id):
+def member_list(ctx, agent_id, activity):
     """List member agents managed by this Director."""
-    return broker.list_members(ctx.obj["session_id"], agent_id)
+    _require_session_id(ctx)
+    session_id = ctx.obj["session_id"]
+    try:
+        if activity:
+            rows = broker.list_members_with_activity(session_id, agent_id)
+        else:
+            rows = broker.list_members(session_id, agent_id)
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+    if ctx.obj["json_output"]:
+        click.echo(output.format_json(rows, pretty=ctx.obj["pretty"]))
+    elif activity:
+        click.echo(output.format_member_list_activity(rows))
+    else:
+        click.echo(output.format_member_list(rows))
 
 
 @member.command("capture")
@@ -1031,13 +1053,20 @@ def member_list(ctx, agent_id):
 @click.option("--member-id", required=True, help="Target member's agent ID")
 @click.option(
     "--lines",
+    "--tail",
+    "lines",
     type=int,
-    default=80,
+    default=30,
     show_default=True,
-    help="Number of trailing terminal lines to capture",
+    help="Trailing terminal lines to capture (alias: --tail).",
+)
+@click.option(
+    "--ansi/--no-ansi",
+    default=False,
+    help="Keep ANSI escape sequences (default strips them and merges \\r-rewritten lines).",
 )
 @click.pass_context
-def member_capture(ctx, agent_id, member_id, lines):
+def member_capture(ctx, agent_id, member_id, lines, ansi):
     """Capture the last N lines of a member pane's terminal buffer."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
@@ -1068,6 +1097,9 @@ def member_capture(ctx, agent_id, member_id, lines):
     except tmux.TmuxError as exc:
         raise click.ClickException(f"capture failed: {exc}") from exc
 
+    if not ansi:
+        content = output.strip_ansi(content)
+
     if ctx.obj["json_output"]:
         click.echo(
             output.format_json(
@@ -1081,7 +1113,10 @@ def member_capture(ctx, agent_id, member_id, lines):
             )
         )
     else:
-        click.echo(content, nl=False)
+        # color=True preserves ANSI escape sequences on non-TTY sinks (e.g.
+        # CliRunner-captured stdout). Without it, click.echo would re-strip
+        # the escapes the operator just opted into via --ansi.
+        click.echo(content, nl=False, color=True if ansi else None)
 
 
 @member.command("send-input")

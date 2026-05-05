@@ -551,6 +551,103 @@ def list_members(session_id: str, director_agent_id: str) -> list[dict]:
     ]
 
 
+def list_members_with_activity(session_id: str, director_agent_id: str) -> list[dict]:
+    """``list_members`` plus per-member activity proxies sourced from ``tasks``.
+
+    ``last_sent`` / ``last_recv`` / ``last_ack`` aggregate ``status_timestamp``
+    over the ``tasks`` table per agent. All three filter ``Task.type !=
+    'broadcast_summary'`` (mirrors ``poll_tasks``); broadcast_summary rows
+    land in the broadcaster's own context with ``status_state='completed'``
+    and would otherwise pollute every proxy for the broadcaster.
+
+    ``idle`` is the integer-second delta between ``now`` and the most recent
+    of ``last_sent`` / ``last_recv``; ``None`` when both are ``None``.
+    """
+    last_sent_sq = (
+        select(func.max(Task.status_timestamp))
+        .where(
+            Task.from_agent_id == Agent.agent_id,
+            Task.type != "broadcast_summary",
+        )
+        .correlate(Agent)
+        .scalar_subquery()
+    )
+    last_recv_sq = (
+        select(func.max(Task.status_timestamp))
+        .where(
+            Task.context_id == Agent.agent_id,
+            Task.type != "broadcast_summary",
+        )
+        .correlate(Agent)
+        .scalar_subquery()
+    )
+    last_ack_sq = (
+        select(func.max(Task.status_timestamp))
+        .where(
+            Task.context_id == Agent.agent_id,
+            Task.status_state == "completed",
+            Task.type != "broadcast_summary",
+        )
+        .correlate(Agent)
+        .scalar_subquery()
+    )
+    stmt = (
+        select(
+            Agent.agent_id,
+            Agent.name,
+            Agent.description,
+            Agent.status,
+            Agent.registered_at,
+            AgentPlacement.director_agent_id,
+            AgentPlacement.tmux_session,
+            AgentPlacement.tmux_window_id,
+            AgentPlacement.tmux_pane_id,
+            AgentPlacement.coding_agent,
+            AgentPlacement.created_at,
+            last_sent_sq.label("last_sent"),
+            last_recv_sq.label("last_recv"),
+            last_ack_sq.label("last_ack"),
+        )
+        .join(AgentPlacement, Agent.agent_id == AgentPlacement.agent_id)
+        .where(
+            Agent.session_id == session_id,
+            Agent.status == "active",
+            AgentPlacement.director_agent_id == director_agent_id,
+        )
+    )
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        rows = session.execute(stmt).all()
+
+    now = datetime.now(UTC)
+    return [
+        {
+            "agent_id": row.agent_id,
+            "name": row.name,
+            "description": row.description,
+            "status": row.status,
+            "registered_at": row.registered_at,
+            "placement": _placement_dict(row),
+            "last_sent": row.last_sent,
+            "last_recv": row.last_recv,
+            "last_ack": row.last_ack,
+            "idle": _idle_seconds(now, row.last_sent, row.last_recv),
+        }
+        for row in rows
+    ]
+
+
+def _idle_seconds(
+    now: datetime, last_sent: str | None, last_recv: str | None
+) -> int | None:
+    candidates = [t for t in (last_sent, last_recv) if t is not None]
+    if not candidates:
+        return None
+    most_recent = datetime.fromisoformat(max(candidates))
+    delta = (now - most_recent).total_seconds()
+    return max(0, int(delta))
+
+
 def verify_agent_session(agent_id: str, session_id: str) -> bool:
     """Return True iff the agent belongs to the session (any status)."""
     sm = get_sync_sessionmaker()

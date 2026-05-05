@@ -22,7 +22,6 @@ from cafleet.cli import cli
 from cafleet.db import engine as engine_mod
 from cafleet.tmux import DirectorContext
 
-
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 
@@ -157,9 +156,7 @@ def test_member_capture_explicit_lines__overrides_default(
 # --- --tail alias ---
 
 
-def test_member_capture_tail_alias__forwards_to_lines(
-    bootstrapped_member, monkeypatch
-):
+def test_member_capture_tail_alias__forwards_to_lines(bootstrapped_member, monkeypatch):
     """``--tail N`` is sugar for ``--lines N``. Both surfaces are wired
     through the same Click option so tmux receives the same ``-S -N``."""
     sid, director_id, member_id, _pane_id, runner = bootstrapped_member

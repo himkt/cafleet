@@ -1,7 +1,7 @@
 # Reduce Token Consumption Across CAFleet Output Surfaces
 
 **Status**: Approved
-**Progress**: 79/118 tasks complete
+**Progress**: 92/118 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -517,24 +517,24 @@ Each surface ships independently. If any one regresses, revert just that step.
 
 ### Step 11: `member list --activity` (Surface 8)
 
-- [ ] Add `broker.list_members_with_activity(session_id, director_id)`. <!-- completed: -->
-- [ ] **Filter `Task.type != "broadcast_summary"` in the `last_ack` aggregation** (mirrors `poll_tasks`). <!-- completed: -->
-- [ ] Add `--activity` flag to `cafleet member list`. <!-- completed: -->
-- [ ] Add `output.format_member_list_activity`. <!-- completed: -->
-- [ ] Unit test: 3-member fixture with mixed activity (including a broadcast_summary row that must be excluded). <!-- completed: -->
-- [ ] Integration test. <!-- completed: -->
+- [x] Add `broker.list_members_with_activity(session_id, director_id)`. <!-- completed: 2026-05-05T09:30 -->
+- [x] **Filter `Task.type != "broadcast_summary"` in the `last_ack` aggregation** (mirrors `poll_tasks`). <!-- completed: 2026-05-05T09:30 -->
+- [x] Add `--activity` flag to `cafleet member list`. <!-- completed: 2026-05-05T09:30 -->
+- [x] Add `output.format_member_list_activity`. <!-- completed: 2026-05-05T09:30 -->
+- [x] Unit test: 3-member fixture with mixed activity (including a broadcast_summary row that must be excluded). <!-- completed: 2026-05-05T09:30 (Tester: tests/test_broker_member_activity.py — 18 tests passing) -->
+- [x] Integration test. <!-- completed: 2026-05-05T09:30 (Tester: tests/test_cli_member_list_activity.py — 6 tests passing) -->
 - [ ] Bench: 1k-message fixture → < 100 ms. <!-- completed: -->
-- [ ] Document. <!-- completed: -->
+- [x] Document. <!-- completed: 2026-05-05T09:30 (covered by Step 1.C in docs/spec/cli-options.md and reference/director.md) -->
 
 ### Step 12: Capture defaults (Surface 9)
 
-- [ ] Drop `member capture --lines` default 80 → 30 in `cli.py:970`. <!-- completed: -->
-- [ ] Drop `tmux.capture_pane(..., lines=80)` default → 30 in `tmux.py:194`. <!-- completed: -->
-- [ ] Add `--ansi/--no-ansi` flag (default `--no-ansi`); strip ANSI in post-process. <!-- completed: -->
-- [ ] Add carriage-return de-fragmentation. <!-- completed: -->
-- [ ] Add `--tail` alias. <!-- completed: -->
+- [x] Drop `member capture --lines` default 80 → 30 in `cli.py:970`. <!-- completed: 2026-05-05T09:30 -->
+- [x] Drop `tmux.capture_pane(..., lines=80)` default → 30 in `tmux.py:194`. <!-- completed: 2026-05-05T09:30 -->
+- [x] Add `--ansi/--no-ansi` flag (default `--no-ansi`); strip ANSI in post-process. <!-- completed: 2026-05-05T09:30 -->
+- [x] Add carriage-return de-fragmentation. <!-- completed: 2026-05-05T09:30 -->
+- [x] Add `--tail` alias. <!-- completed: 2026-05-05T09:30 -->
 - [ ] **Calibration**: capture a stalled-prompt fixture, verify 30 lines includes the prompt header. If truncates, bump to 50. <!-- completed: -->
-- [ ] Update SKILL.md examples. <!-- completed: -->
+- [x] Update SKILL.md examples. <!-- completed: 2026-05-05T09:30 (covered by Step 1.F/1.G — reference/director.md captures the new defaults / --ansi / --tail) -->
 
 ### Step 13: `/loop` template trim (Surface 10)
 

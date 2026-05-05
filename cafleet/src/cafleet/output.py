@@ -1,10 +1,27 @@
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
 from cafleet.config import settings
 
 _TRUNCATION_SUFFIX = "…"
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def strip_ansi(text: str) -> str:
+    """Strip ANSI CSI escape sequences and collapse \\r-rewritten line segments.
+
+    Carriage-return de-fragmentation: TUI redraws emit ``...prefix\\rNEW``
+    sequences where ``NEW`` overwrites ``prefix`` on the same line. We keep
+    only the segment after the last ``\\r`` per line so the captured buffer
+    matches what an operator sees.
+    """
+    if not text:
+        return text
+    cleaned = _ANSI_ESCAPE_RE.sub("", text)
+    return "\n".join(line.rsplit("\r", 1)[-1] for line in cleaned.split("\n"))
 
 
 def format_json(data: Any, *, pretty: bool = False) -> str:
@@ -237,6 +254,56 @@ def format_member(data: dict, *, full: bool = False) -> str:
 
 
 _AGENT_ID_COLUMN_WIDTH = 14
+
+
+def format_member_list_activity(members: list) -> str:
+    """Render the activity-augmented member roster as text.
+
+    Surface 8 (design 0000049): one row per member with the four activity
+    proxies — ``last_sent`` / ``last_recv`` / ``last_ack`` / ``idle``.
+    Timestamps are rendered as ``HH:MM:SS`` (the time portion of the ISO
+    string); ``idle`` is humanized to ``Ns`` / ``Nm`` / ``Nh``.
+    """
+    if not members:
+        return "0 members."
+    count = len(members)
+    lines = [f"{count} member{'s' if count > 1 else ''}:"]
+    header = "  agent_id        name      status  last_sent  last_recv  last_ack   idle"
+    sep = "  --------------  --------  ------  ---------  ---------  ---------  -----"
+    lines.append(header)
+    lines.append(sep)
+    for m in members:
+        agent_id = m["agent_id"]
+        if len(agent_id) > _AGENT_ID_COLUMN_WIDTH:
+            agent_id = agent_id[: _AGENT_ID_COLUMN_WIDTH - 2] + "…"
+        lines.append(
+            f"  {agent_id:<{_AGENT_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
+            f"{m['status']:<6}  "
+            f"{_format_iso_hms(m['last_sent']):<9}  "
+            f"{_format_iso_hms(m['last_recv']):<9}  "
+            f"{_format_iso_hms(m['last_ack']):<9}  "
+            f"{_format_idle(m['idle'])}"
+        )
+    return "\n".join(lines)
+
+
+def _format_iso_hms(iso_ts: str | None) -> str:
+    if iso_ts is None:
+        return "-"
+    try:
+        return iso_ts.split("T")[1][:8]
+    except (IndexError, AttributeError):
+        return "-"
+
+
+def _format_idle(seconds: int | None) -> str:
+    if seconds is None:
+        return "-"
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    return f"{seconds // 3600}h"
 
 
 def format_member_list(members: list) -> str:

@@ -239,8 +239,13 @@ def send_bash_command(*, target_pane_id: str, command: str) -> None:
     _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
 
 
-def capture_pane(*, target_pane_id: str, lines: int = 80) -> str:
-    """Return the last ``lines`` lines of the pane's terminal buffer."""
+def capture_pane(*, target_pane_id: str, lines: int = 30) -> str:
+    """Return the last ``lines`` lines of the pane's terminal buffer.
+
+    Default lowered from 80 to 30 (Surface 9, design 0000049): per-tick
+    Director monitoring captures dominate token cost. Explicit ``lines``
+    overrides apply unchanged.
+    """
     if lines <= 0:
         raise TmuxError(f"capture_pane: lines must be positive, got {lines}")
     return _run(["tmux", "capture-pane", "-p", "-t", target_pane_id, "-S", f"-{lines}"])
