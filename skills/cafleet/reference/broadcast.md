@@ -10,11 +10,11 @@ cafleet --session-id <session-id> message broadcast --agent-id <my-agent-id> \
 | Flag | Required | Notes |
 |---|---|---|
 | `--text <body>` | yes | Message body fanned out to every active recipient (except the sender and the built-in Administrator). |
-| `--full` | no | Re-includes per-recipient envelopes and `recipient_ids` in the response. The default summary suppresses both — `recipient_count` is sufficient for the broadcaster's "did it go out?" check. |
+| `--full` | no | No-op on `message broadcast`. Preserved for surface consistency with the five `message {send,poll,ack,cancel,show}` subcommands; the broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper, regardless of the flag. |
 
 ## What the broker does
 
-`broker.broadcast_message` writes one row per recipient as an individual delivery task (each visible to its recipient via `cafleet message poll`) PLUS one `broadcast_summary` row addressed to the broadcaster. The summary's `text` is the human-readable string `"Broadcast sent to N recipients"`, written by the broker at insert time. Truncating that summary would hide the recipient count, so the CLI emits the broadcast summary in full regardless of `--full` (the `--full` flag controls only whether per-recipient envelopes and `recipient_ids` are included).
+`broker.broadcast_message` writes one row per recipient as an individual delivery task (each visible to its recipient via `cafleet message poll`) PLUS one `broadcast_summary` row addressed to the broadcaster. The summary's `text` is the human-readable string `"Broadcast sent to N recipients"`, written by the broker at insert time. The function returns a list containing exactly one envelope: the summary task plus a top-level `notifications_sent_count` field. The per-recipient delivery rows are NOT echoed back to the caller (they are observable only via the recipients' own `cafleet message poll`), and there is no `recipient_ids` list in the response — `--full` is a no-op for broadcast and does not change either omission.
 
 The response carries `notifications_sent_count` indicating how many recipient panes were successfully triggered by the inline-preview keystroke (see `reference/recovery.md` for the failure-mode chain when an inline preview misses).
 
@@ -26,7 +26,7 @@ The default broadcast echo is a one-line summary:
 broadcast id=<id8> recipients=<count>
 ```
 
-Per-recipient envelopes and the `recipient_ids` list are elided by default (added by design 0000049 Surface 3 + Surface 4). Pass `--full` to restore the legacy multi-envelope view.
+The default echo collapses the broker response to one operator-readable line. The per-recipient envelopes and a `recipient_ids` list are NOT in the broker response in the first place (the broker has only ever returned the single summary + `notifications_sent_count`), so `--full` is a no-op for `message broadcast` and does not restore them. To inspect per-recipient delivery rows, each recipient polls its own inbox via `cafleet message poll`.
 
 ## Threading via `origin_task_id`
 
@@ -54,4 +54,4 @@ The summary row is NOT acked by recipients — it is a sender-side artifact, add
 
 ## Flag-surface consistency
 
-`--full` is preserved on `message broadcast` for surface consistency with `message {send,poll,ack,cancel,show}`. On those five subcommands `--full` disables body truncation; on `message broadcast` body truncation does not apply (the summary's `text` is the broker-computed summary string and is emitted untruncated regardless, while the per-recipient envelopes carry the original body untruncated by the time they appear in `--full` output). The flag's only on-the-wire effect for broadcast is "include `recipient_ids` and per-recipient envelopes". See `reference/legacy-flags.md` for the cross-subcommand `--full` semantics table.
+`--full` is preserved on `message broadcast` for surface consistency with `message {send,poll,ack,cancel,show}`. On those five subcommands `--full` disables body truncation; on `message broadcast` it has no effect — the broker's return value is a single summary task plus `notifications_sent_count`, the summary's `text` is the broker-computed string and is emitted untruncated regardless, and there are no per-recipient envelopes or `recipient_ids` list in the response to gate. See `reference/legacy-flags.md` for the cross-subcommand `--full` semantics table.

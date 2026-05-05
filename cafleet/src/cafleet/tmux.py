@@ -177,11 +177,15 @@ def send_inline_preview(
     """
     if shutil.which("tmux") is None:
         return False
-    # Sanitize embedded newlines / carriage returns: under tmux ``-l`` (literal)
-    # they would type as actual Enter keystrokes, breaking the 2-line preview
-    # contract and prematurely submitting the body as multiple user-turn
-    # inputs. Replace with U+23CE (RETURN SYMBOL) so the visual hint survives
-    # in 1 codepoint without any keystroke side effect.
+    # Sanitize newlines / carriage returns IN THE USER-SUPPLIED BODY only.
+    # The single ``\n`` in the f-string below (between the envelope line and
+    # the body line) is the contract — it is what makes the preview 2 lines
+    # — and is intentionally NOT sanitized. By contrast, any newline that
+    # arrives inside ``text`` would type as an Enter keystroke under tmux
+    # ``-l`` (literal mode), submitting the body as multiple separate user-
+    # turn inputs and corrupting the 2-line shape. Replacing each with U+23CE
+    # (RETURN SYMBOL) keeps the visual hint in 1 codepoint with no keystroke
+    # side effect.
     sanitized_text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
     payload = f"[cafleet msg {task_id_8} from {sender_8} {ts}]\n{sanitized_text}"
     try:

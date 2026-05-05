@@ -126,7 +126,7 @@ abc12345 from xy23ef67 @2026-05-05T05:42:11.123456+00:00
   build OK
 ```
 
-`--full` switches to a six-line block that mirrors the `--full` JSON keys one-per-line. Text mode omits the `text:` line entirely when the resulting body is empty (broadcast summary rows; deliveries with empty bodies). The 10-codepoint `...` suffix from the pre-design-0049 era is replaced with the single Unicode codepoint `…` (U+2026) at the configured `CAFLEET_MAX_TEXT_LEN` codepoint count (default 200).
+`--full` switches to a six-line block that mirrors the `--full` JSON keys one-per-line. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. The 10-codepoint `...` suffix from the pre-design-0049 era is replaced with the single Unicode codepoint `…` (U+2026) at the configured `CAFLEET_MAX_TEXT_LEN` codepoint count (default 200).
 
 ## Flag cross-reference
 
