@@ -1,7 +1,7 @@
 # Codex Plugin Manifest
 
 **Status**: Approved
-**Progress**: 3/7 tasks complete
+**Progress**: 4/7 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -143,7 +143,7 @@ Manual operator verification is the only acceptance check. There is no JSON-sche
 
 ### Step 3: Add the Codex marketplace catalog
 
-- [ ] Create `.agents/plugins/marketplace.json` with the exact JSON specified in §Specification → File 2. <!-- completed: -->
+- [x] Create `.agents/plugins/marketplace.json` with the exact JSON specified in §Specification → File 2. <!-- completed: 2026-05-05T13:50 -->
 
 ### Step 4: Manual install verification
 
@@ -162,4 +162,4 @@ Manual operator verification is the only acceptance check. There is no JSON-sche
 | 2026-05-03 | Initial draft |
 | 2026-05-03 | Reviewer round 1: fix progress count (now 0/7), correct Step 4 fallback path math (`../../`, not `../`), make GitHub-push prerequisite explicit, fold version/description/skill invariants into a Constraints & invariants subsection, list the 7 skills in Success Criteria. |
 | 2026-05-03 | User approved. Status → Approved. |
-| 2026-05-05 | Execute-time clarification: spec block's `description` updated to drop the `A2A-inspired ` prefix so it matches `.claude-plugin/plugin.json:description` byte-for-byte (preserves the lock-step `description` invariant; Claude manifest stays untouched). |
+| 2026-05-05 | Executor round 1: spec drift fix — File 1 description string aligned with current `.claude-plugin/plugin.json:description` (dropped `"A2A-inspired "` prefix) per lock-step invariant + Claude-untouched constraint. |

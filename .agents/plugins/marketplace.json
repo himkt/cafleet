@@ -1,0 +1,15 @@
+{
+  "name": "cafleet",
+  "plugins": [
+    {
+      "name": "cafleet",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE"
+      }
+    }
+  ]
+}
