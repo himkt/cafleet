@@ -82,7 +82,7 @@ def test_aggregate_help_under_byte_budget():
     multi-line option help in the table above MUST collapse to a single
     line for this to pass."""
     total_bytes = sum(
-        len("\n".join(_help_lines(*subcommand)))
+        len("\n".join(_help_lines(*subcommand)).encode("utf-8"))
         for subcommand in _PER_SUBCOMMAND_BUDGETS
     )
     assert total_bytes <= 4500, (
