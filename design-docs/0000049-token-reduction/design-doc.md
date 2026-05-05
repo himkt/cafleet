@@ -1,7 +1,7 @@
 # Reduce Token Consumption Across CAFleet Output Surfaces
 
 **Status**: Approved
-**Progress**: 6/118 tasks complete
+**Progress**: 8/118 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -422,8 +422,8 @@ Each surface ships independently. If any one regresses, revert just that step.
 - [x] **1.C** Update `docs/spec/cli-options.md` with `--pretty`, `--quiet`, `--full`, `--activity`, capture default change (80 → 30), `--ansi/--no-ansi`, `--tail`, and `CAFLEET_MAX_TEXT_LEN`. <!-- completed: 2026-05-05T05:55 -->
 - [x] **1.D** Update / create `docs/spec/message-envelope.md` describing the typed-column shape, the rendered shape, and `--full`. No reference to the inherited convention. <!-- completed: 2026-05-05T05:59 -->
 - [x] **1.E** Update `docs/spec/data-model.md` with the new `Task.text` column, the dropped `task_json` column, migration / backup procedure. <!-- completed: 2026-05-05T05:55 -->
-- [ ] **1.F** Split `skills/cafleet/SKILL.md` into core (≤350 lines) + 5 reference files. <!-- completed: -->
-- [ ] **1.G** Update `skills/cafleet/roles/director.md` and `skills/cafleet/roles/member.md` to point at reference files. <!-- completed: -->
+- [x] **1.F** Split `skills/cafleet/SKILL.md` into core (≤350 lines) + 5 reference files. <!-- completed: 2026-05-05T06:05 -->
+- [x] **1.G** Update `skills/cafleet/roles/director.md` and `skills/cafleet/roles/member.md` to point at reference files. <!-- completed: 2026-05-05T06:05 -->
 - [ ] **1.H** Trim `/loop` template in `agent-team-monitoring/SKILL.md:86-96` to ≤9 lines (Surface 10). <!-- completed: -->
 - [ ] **1.I** Move Stall Response canonical version into `agent-team-monitoring`; reduce supervision to 1-line cross-ref. <!-- completed: -->
 - [ ] **1.J** Move Authorization-Scope canonical version into `.claude/rules/skill-discovery.md`; reduce supervision to 5-line summary. <!-- completed: -->

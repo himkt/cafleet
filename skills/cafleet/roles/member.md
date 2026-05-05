@@ -1,8 +1,14 @@
-# Member Role — Bash Routing
+# Member Role
 
 You are a **member** spawned by `cafleet member create`. Your harness runs in workspace-scoped auto-approval mode — Claude Code's `--permission-mode dontAsk` if your backend is `claude`, or codex's `--ask-for-approval never --sandbox workspace-write` if your backend is `codex`. Either way your Bash tool is **enabled** and routine permission prompts auto-resolve silently.
 
-This file covers the **member side** of how shell commands are handled in a CAFleet team. The Director side of the bash-via-Director fallback lives in `skills/cafleet/roles/director.md`.
+This file is the role-specific anchor. Protocol details live in dedicated reference files; this page tells you which reference to read for which decision.
+
+## Reading order
+
+1. **For the bash-via-Director fallback protocol** (when your harness deny-list rejects a Bash invocation), Read [`reference/exec-routing.md`](../reference/exec-routing.md). Covers reconsider-then-route, the message shape to send to your Director, and the forbidden behaviors (no fake `<bash-input>` markup, no fabrication, no operator-routing-prompts).
+2. **For the cafleet CLI surface you actually call** (poll / send / ack / cancel / show), the canonical reference is [`skills/cafleet/SKILL.md`](../SKILL.md) (the core).
+3. You do NOT need to read `reference/director.md`, `reference/recovery.md`, or `reference/broadcast.md` — those are Director-side concerns. Skip them.
 
 ---
 
@@ -44,34 +50,20 @@ These are normal Bash invocations — nothing special. Workspace-scoped auto-app
 - **NEVER refuse silently or stall.** Run the command. Report the result.
 - **NEVER assume Bash is denied** without trying. Under workspace-scoped auto-approval, Bash is enabled. If a Bash call appears to fail, surface the actual error message; don't assume it's a permission issue.
 - **NEVER treat a denial as the end of the line.** Before asking the Director or the operator for help, re-examine the command you tried. In most denial cases, the underlying command is the wrong one (typo, wrong flag, wrong path) — fix the command yourself. Only route to the Director when the command is genuinely correct AND genuinely needed AND the harness still denies it.
+- **NEVER offer the operator a list of routing options** ("(1) you run it via `!`, (2) route through Director, (3) skip"). The operator already implicitly answered by asking you to run the command — they wanted it run. Routing is implementation. The bash-via-Director protocol exists precisely to handle the harness-denied case without operator interaction.
 
 ---
 
-## WHEN YOUR BASH TOOL DENIES A COMMAND — RECONSIDER, THEN AUTO-ROUTE TO THE DIRECTOR
+## WHEN YOUR BASH TOOL DENIES A COMMAND
 
-Workspace-scoped auto-approval (Claude Code's `--permission-mode dontAsk`, codex's `--ask-for-approval never --sandbox workspace-write`) auto-resolves most permission prompts, but the coding agent's harness still has its own deny list above auto-approval for destructive operations (e.g. `git push`, `rm -rf`, etc.). When the harness denies a Bash invocation:
+Workspace-scoped auto-approval auto-resolves most permission prompts, but the coding agent's harness still has its own deny list above auto-approval for destructive operations (e.g. `git push`, `rm -rf`). When the harness denies a Bash invocation:
 
 1. **First, reconsider the command.** Most denials happen because the command is wrong — wrong flag, wrong path, typo, command that does not need to run at all because you already have the answer in context. Do NOT route to the Director just because something was denied. Fix the command and try again. Skip the routing entirely if you realize the command is unnecessary.
+2. **Only if the command is genuinely correct AND genuinely needed AND the harness still denies it**, follow the routing recipe in [`reference/exec-routing.md`](../reference/exec-routing.md) § Member-side fallback recipe.
 
-2. **Only if the command is genuinely correct AND genuinely needed AND the harness still denies it**, take the routing action below.
+When you do route, you MUST do so automatically — no operator prompts, no alternative-paths offers, no `!`-prefix workarounds suggested for the operator to run. The operator wanted the command run; the protocol handles the harness-denied case without operator interaction.
 
-> **When you do route, you MUST do so automatically. You MUST NOT ask the operator for a routing decision. You MUST NOT offer the operator alternative paths. You MUST NOT propose `!` prefix workarounds for the operator to run themselves.**
-
-The operator has already asked you to run the command. The Director is your fallback when your harness can't run it. Take the single action:
-
-```bash
-cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
-  --to <director-agent-id> \
-  --text "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
-```
-
-Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member exec <command>`, which keystrokes `! <command>` + Enter into your pane and triggers the coding agent's `!` CLI shortcut (honored by both `claude` and `codex`). The captured stdout/stderr lands in your next-turn context.
-
-If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member exec <command>` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
-
-### Why no operator-prompts-for-routing
-
-When you offer the operator a list of options ("(1) you run it via `!`, (2) route through Director, (3) skip"), you push a routing decision back to the operator that they already implicitly answered by asking you to run the command. They wanted it run. Routing is implementation. The bash-via-Director protocol exists precisely to handle the harness-denied case without operator interaction.
+If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member exec <command>` from your Director pane") — that is the **only** time you ask the operator for help.
 
 ---
 
@@ -81,7 +73,7 @@ The harness injects `<session-id>`, `<my-agent-id>`, and `<director-agent-id>` i
 
 You do **not** ask the operator for them. If they are genuinely missing, the cafleet call will fail with a CLI error — let that surface. Do not pre-empt it with operator questions.
 
-You do **not** invoke `cafleet member ping` — it is a Director-only primitive used by your Director (or its monitoring loop) to nudge a stalled member's inbox. As a member, you poll your own inbox via `cafleet message poll`. The broker also auto-fires the same poll keystroke into the **recipient's** pane after every `cafleet message send` (self-sends are skipped) — so when someone else sends a message addressed to you, your pane receives the auto-fire; when you send a message to someone else, their pane receives it.
+You do **not** invoke `cafleet member ping` or `cafleet member exec` — those are Director-only primitives. As a member you poll your own inbox via `cafleet message poll`. After design 0000049 Surface 15, the broker keystrokes a 2-line inline preview of every incoming message directly into your pane (no `cafleet message poll` invocation in the auto-fire path). If you missed an inline preview because your TUI was busy, your Director will re-poke you via `cafleet member ping`; the resulting `cafleet message poll` keystroke lands in your pane and you drain whatever has accumulated.
 
 ---
 
