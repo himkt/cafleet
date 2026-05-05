@@ -292,7 +292,7 @@ def session_create(
     )
 
     if as_json or ctx.obj.get("json_output"):
-        click.echo(output.format_json(result, pretty=True))
+        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
     else:
         click.echo(output.format_session_create(result, full=full))
 
@@ -305,7 +305,7 @@ def session_list(ctx: click.Context, as_json: bool) -> None:
     rows = broker.list_sessions()
 
     if as_json or ctx.obj.get("json_output"):
-        click.echo(output.format_json(rows, pretty=True))
+        click.echo(output.format_json(rows, pretty=ctx.obj["pretty"]))
     else:
         if not rows:
             click.echo("No sessions found.")
@@ -329,7 +329,7 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
         raise click.ClickException(f"session '{session_id}' not found.")
 
     if as_json or ctx.obj.get("json_output"):
-        click.echo(output.format_json(result, pretty=True))
+        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
     else:
         lines = [
             f"session_id: {result['session_id']}",
@@ -402,7 +402,7 @@ def doctor(ctx) -> None:
                         "tmux_pane_env": tmux_pane_env,
                     }
                 },
-                pretty=True,
+                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -878,7 +878,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, full, prompt_a
 
     result["placement"] = placement_view
     if ctx.obj["json_output"]:
-        click.echo(output.format_json(result, pretty=True))
+        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
     else:
         click.echo(output.format_member(result, full=full))
 
@@ -1010,7 +1010,8 @@ def member_delete(ctx, agent_id, member_id, force):
     if ctx.obj["json_output"]:
         click.echo(
             output.format_json(
-                {"agent_id": member_id, "pane_status": pane_status}, pretty=True
+                {"agent_id": member_id, "pane_status": pane_status},
+                pretty=ctx.obj["pretty"],
             )
         )
     ctx.exit(2)
@@ -1026,7 +1027,8 @@ def _emit_member_delete_output(
     if ctx.obj["json_output"]:
         click.echo(
             output.format_json(
-                {"agent_id": member_id, "pane_status": pane_status}, pretty=True
+                {"agent_id": member_id, "pane_status": pane_status},
+                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1127,7 +1129,7 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
                     "lines": lines,
                     "content": content,
                 },
-                pretty=True,
+                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1212,7 +1214,7 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
                     "action": action,
                     "value": value,
                 },
-                pretty=True,
+                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1269,7 +1271,7 @@ def member_exec(ctx, agent_id, member_id, command):
                     "pane_id": pane_id,
                     "command": command,
                 },
-                pretty=True,
+                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1335,7 +1337,7 @@ def member_ping(ctx, agent_id, member_id, quiet):
                     "member_agent_id": member_id,
                     "pane_id": pane_id,
                 },
-                pretty=True,
+                pretty=ctx.obj["pretty"],
             )
         )
     elif quiet:
