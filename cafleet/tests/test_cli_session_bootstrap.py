@@ -83,32 +83,36 @@ def _agent_rows(db_path) -> list[tuple]:
         conn.close()
 
 
-def test_session_create_text_output__line_1_is_session_id_and_line_2_is_director_agent_id(
+def test_session_create_text_output__compact_default_emits_session_id_and_id8_prefixes(
     db_file, mock_tmux_ok
 ):
+    """Post-Surface-3 default: 1-line compact ``<session_id> director=<id8> admin=<id8>``."""
     runner = CliRunner()
     result = runner.invoke(cli, ["session", "create"])
     assert result.exit_code == 0, result.output
 
-    lines = [ln for ln in result.output.splitlines() if ln.strip() != ""]
-    assert len(lines) >= 2
+    out = result.output.strip()
+    assert "\n" not in out, f"compact output must be 1 line; got:\n{result.output}"
 
-    sid_line = lines[0].strip()
-    uuid.UUID(sid_line)
-
-    director_line = lines[1].strip()
-    uuid.UUID(director_line)
-    assert director_line != sid_line
+    parts = out.split()
+    assert len(parts) == 3
+    sid = parts[0]
+    uuid.UUID(sid)
+    assert parts[1].startswith("director=")
+    assert parts[2].startswith("admin=")
 
     rows = _session_rows(db_file)
-    assert any(r[0] == sid_line for r in rows)
+    assert any(r[0] == sid for r in rows)
 
 
-def test_session_create_text_output__contains_label_director_name_pane_and_administrator_labels(
+def test_session_create_text_output__full_flag_restores_legacy_7_line_layout(
     db_file, mock_tmux_ok
 ):
+    """``--full`` brings back the legacy verbose layout with field labels."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["session", "create", "--label", "bootstrap-check"])
+    result = runner.invoke(
+        cli, ["session", "create", "--label", "bootstrap-check", "--full"]
+    )
     assert result.exit_code == 0
 
     text = result.output
@@ -126,11 +130,11 @@ def test_session_create_text_output__contains_label_director_name_pane_and_admin
     )
 
 
-def test_session_create_text_output__administrator_line_references_the_seeded_administrator(
+def test_session_create_text_output__full_administrator_line_references_seeded_administrator(
     db_file, mock_tmux_ok
 ):
     runner = CliRunner()
-    result = runner.invoke(cli, ["session", "create"])
+    result = runner.invoke(cli, ["session", "create", "--full"])
     assert result.exit_code == 0
 
     admin_line = next(

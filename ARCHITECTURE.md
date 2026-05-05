@@ -23,7 +23,7 @@ Admin WebUI  ──→  server.py (minimal FastAPI)         │
 └─────────────────────────────────────────────────────┘
 ```
 
-`broker.py` is the single data access layer. Both CLI and Admin WebUI call it. No async stores, no HTTP client, no A2A protocol layer.
+`broker.py` is the single data access layer. Both CLI and Admin WebUI call it. No async stores, no HTTP client, no protocol layer.
 
 ## Session Isolation
 
@@ -97,16 +97,18 @@ The default database path is `~/.local/share/cafleet/registry.db` (XDG state dir
 
 **Concurrency**: `PRAGMA busy_timeout=5000` is set on every connection. SQLite retries internally for up to 5 seconds before returning `SQLITE_BUSY`. Expected contention is low — CLI operations are short transactions (single INSERT or UPDATE), and multiple agents polling concurrently is read-only.
 
-### Relational + document hybrid model
+### Predominantly relational model
 
-Indexed fields are columns; A2A-inspired payloads (`AgentCard`-shaped, `Task`-shaped) are stored verbatim as JSON `TEXT` blobs and never queried by content. This keeps hot lookups index-served while preserving the canonical internal shape for these payloads.
+Indexed and routing fields are typed columns. The only remaining JSON `TEXT` blob is `agents.agent_card_json` (an `AgentCard`-shaped document, not queried by content). Tasks were document-blob-shaped pre-Surface-14; the `task_json` blob was dropped and every Task field now lives in a typed column (see the table below).
 
 | Table | Indexed columns | JSON blob |
 |---|---|---|
 | `sessions` | `session_id` (PK) | — |
 | `agents` | `agent_id` (PK), `session_id` (FK → `sessions`), `status` | `agent_card_json` |
-| `tasks` | `task_id` (PK), `context_id` (FK → `agents`), `from_agent_id`, `to_agent_id`, `status_state`, `status_timestamp` | `task_json` |
+| `tasks` | `task_id` (PK), `context_id` (FK → `agents`), `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text` | — |
 | `agent_placements` | `agent_id` (PK, FK → `agents` CASCADE), `director_agent_id` (nullable, FK → `agents` RESTRICT), `tmux_session`, `tmux_window_id`, `tmux_pane_id` (nullable) | — |
+
+`tasks.text` is the message body as a typed column. The legacy `task_json` blob was dropped in design 0000049 Surface 14 because the typed columns above (plus `text`) were sufficient to reconstruct every shape the broker, CLI, and WebUI need; the redundant blob added cost on every poll without unique data. See `docs/spec/data-model.md` §`tasks.task_json` removal for the single-Alembic-revision migration shape (pre-flight non-null check + backfill + drop) and the operator backup procedure (`cp registry.db registry.db.pre-0049.bak`).
 
 Four indexes serve the hot read paths:
 
@@ -159,7 +161,7 @@ If step 2 fails, the registered agent is rolled back via `broker.deregister_agen
 
 **Pane display-name propagation (claude backend only)**: when the placement is created with `coding_agent="claude"`, `member_create` builds the spawn argv as `claude --permission-mode dontAsk --name <member-name> <prompt>` directly from `cli.py` constants, so the `--name` flag is forwarded to the spawned process and Claude Code re-emits the name via the terminal title escape sequence. The `codex` backend has no `--name` analog and so panes show whatever default title `codex` emits — see § Coding Agents for the asymmetry note. `tmux display-message -p -t <pane> "#{pane_title}"` returns the member name for the lifetime of a `claude` pane.
 
-**Commands**: `member create`, `member delete`, `member list`, `member capture`, `member send-input`, `member exec`, `member ping`. All require `--agent-id` (the Director's ID). The tmux helper module (`cafleet/src/cafleet/tmux.py`) isolates all subprocess interaction with tmux. Primitives for pane lifecycle inspection and forced teardown — `pane_exists`, `kill_pane`, and `wait_for_pane_gone` — live here so the CLI never calls tmux directly. Director-side usage of `member send-input --choice` / `--freetext` is AskUserQuestion-delegated (capture → Director-side `AskUserQuestion` → direct Bash invocation of the resolved command); see [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) "Answer a member's AskUserQuestion prompt" for the canonical three-beat workflow and pane-shapes table. `member exec` is the bash-routing primitive — see § Routing Bash via the Director below.
+**Commands**: `member create`, `member delete`, `member list` (with `--activity` for per-member `last_sent` / `last_recv` / `last_ack` / `idle` aggregation, design 0000049 Surface 8), `member capture`, `member send-input`, `member exec`, `member ping`. All require `--agent-id` (the Director's ID). The tmux helper module (`cafleet/src/cafleet/tmux.py`) isolates all subprocess interaction with tmux. Primitives for pane lifecycle inspection and forced teardown — `pane_exists`, `kill_pane`, and `wait_for_pane_gone` — live here so the CLI never calls tmux directly. Director-side usage of `member send-input --choice` / `--freetext` is AskUserQuestion-delegated (capture → Director-side `AskUserQuestion` → direct Bash invocation of the resolved command); see [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) "Answer a member's AskUserQuestion prompt" for the canonical three-beat workflow and pane-shapes table. `member exec` is the bash-routing primitive — see § Routing Bash via the Director below.
 
 **Write-path authorization mirrors the read path**: `cafleet member send-input` — a safe `tmux send-keys` wrapper for answering an `AskUserQuestion` prompt — reuses the exact `member capture` authorization boundary (`placement.director_agent_id == --agent-id`, non-null `tmux_pane_id`, placement row present). The CLI accepts exactly one of `--choice {1,2,3}` (sends the matching digit key) or `--freetext "<text>"` (sends `4`, the literal text via tmux's `-l` flag, then `Enter` — `4` selects the "Type something" option). Both modes are AskUserQuestion-only. `--freetext` rejects values whose first non-whitespace character is `!` so the AskUserQuestion path cannot smuggle a Claude Code `!`-shortcut; shell dispatch goes through `cafleet member exec` instead. Newlines are rejected for `--freetext` at both the CLI layer and the helper, so each call is exactly one prompt submission. The helper never invokes a shell (`subprocess.run([...], shell=False)`), so shell meta, backticks, `$VAR`, and multi-byte characters pass through as literal input.
 
@@ -215,13 +217,18 @@ CAFleet ships CAFleet-native replicas of the global Agent Teams design document 
 
 CAFleet uses a pull-based delivery model by default: recipients discover messages via `cafleet message poll`. To reduce latency, the broker can also push a poll trigger into a recipient's tmux pane immediately after persisting a message.
 
-After `broker` saves a delivery task, it looks up the recipient's `agent_placements` row. Every agent spawned by `cafleet member create` has a placement row, and every session's root Director also gets one at `cafleet session create` time (its placement carries `director_agent_id=NULL` to indicate "no parent"). Because `_try_notify_recipient` resolves a pane by `agent_id` alone, Member → Director notifications work automatically once the root Director has a placement row. If the recipient has a non-null `tmux_pane_id` and is not the sender, the broker runs:
+After `broker` saves a delivery task, it looks up the recipient's `agent_placements` row. Every agent spawned by `cafleet member create` has a placement row, and every session's root Director also gets one at `cafleet session create` time (its placement carries `director_agent_id=NULL` to indicate "no parent"). Because `_try_notify_recipient` resolves a pane by `agent_id` alone, Member → Director notifications work automatically once the root Director has a placement row. If the recipient has a non-null `tmux_pane_id` and is not the sender, the broker keystrokes an inline preview of the message itself into the recipient's pane via `tmux.send_inline_preview`:
 
 ```
-tmux send-keys -t <tmux_pane_id> "cafleet --session-id <session_id> message poll --agent-id <recipient_agent_id>" Enter
+[cafleet msg <task_id_8> from <sender_8> <ts>]
+<text-truncated-to-CAFLEET_MAX_TEXT_LEN>
 ```
 
-The injected text lands in the coding agent's input prompt. If the agent is idle, it interprets the command immediately. If the agent is busy, tmux buffers the keystrokes until the agent returns to its prompt. Since `cafleet message poll` is idempotent, duplicate or late-arriving triggers are harmless.
+The recipient's coding agent processes the keystroked text as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path. The recipient acks via `cafleet message ack --task-id <task_id>` once it has consumed the message. This replaces the design-0000049-pre keystroke (the literal `cafleet --session-id <s> message poll --agent-id <r>` + Enter sequence, which forced the recipient to dump its full unacked-inbox envelope on every send and dominated per-message token cost).
+
+The new `tmux.send_inline_preview` helper is **NOT** a reuse of `send_freetext_and_submit` (which prepends a literal `4` for AskUserQuestion option-4 freetext semantics; reusing it would type a stray `4` into the recipient's input box). The new helper combines the literal-text-plus-Enter pattern from `send_poll_trigger` with the codex bracketed-paste delay so both backends see the preview as a single user-turn message.
+
+If the recipient's TUI is in a non-input state, the keystroked preview lands wherever the cursor is (same failure mode as the legacy auto-fire poll). The fallback chain is `cafleet member list --agent-id <d> --activity` (Director observes the recipient's `last_recv` column went stale), then `cafleet member ping --agent-id <d> --member-id <r>` (manual re-poke that injects the legacy poll command + Enter so the recipient catches up via a normal `message poll` round-trip).
 
 **Design principles**:
 
@@ -230,15 +237,32 @@ The injected text lands in the coding agent's input prompt. If the agent is idle
 - **Silent failure**: Missing placements, null `tmux_pane_id`, dead panes, and absent `tmux` binary all result in `False` — no exceptions propagate to the caller.
 - **No `TMUX` env var required**: `tmux send-keys -t <pane>` works from any process on the same host as long as the tmux server socket is accessible.
 
-**Response annotations**: Unicast responses include a top-level `notification_sent` boolean. Broadcast summary tasks include `notificationsSentCount` in their metadata, reflecting how many recipient panes were successfully triggered; the top-level response exposes this value as `notifications_sent_count`.
+**Response annotations**: Unicast responses include a top-level `notification_sent` boolean. Broadcast responses expose `notifications_sent_count` as a top-level wrapper field (returned alongside the `broadcast_summary` task), reflecting how many recipient panes were successfully triggered. Post-Surface-14 the `tasks` schema has no metadata blob — the count is NOT persisted on the summary row; it lives only in the broker return value.
 
-**Manual entry-point**: `tmux.send_poll_trigger` has two callers — `broker._try_notify_recipient` (the auto-fire path triggered after every `cafleet message send`, best-effort and silent on failure) and `cafleet member ping` (the Director-only manual nudge subcommand, which converts a `False` return to exit 1 so an operator or monitoring loop sees the failure). Both inject the same `cafleet --session-id <s> message poll --agent-id <r>` keystroke + Enter; only the failure-handling differs.
+**Manual entry-point**: `tmux.send_poll_trigger` survives as the helper for the **manual** poll-nudge path only — the sole caller is `cafleet member ping` (the Director-only manual nudge subcommand, which converts a `False` return to exit 1 so an operator or monitoring loop sees the failure). Auto-fire on every `cafleet message send` switched to `tmux.send_inline_preview` in design 0000049 Surface 15; the `member ping` path keeps the legacy "type the poll command + Enter" behavior because that primitive is exactly what an operator wants when the recipient missed an inline preview and needs to drain whatever has accumulated.
+
+## Token Reduction (design 0000049)
+
+CAFleet does not consume LLM tokens itself, but every byte it emits — member spawn prompts, message envelopes, poll output, broker auto-injected text, the `cafleet` skill, the project CLAUDE.md / rules files, the Director's `/loop` template, and (most expensively) the raw tmux pane content returned by `cafleet member capture` — lands in a coding agent's context and bills against its tokens. Design 0000049 enumerates 19 independently shippable surfaces that reduce per-message, per-spawn, per-Director-tick, and per-context-load cost. The architectural-shape changes are summarized below; the full list with measured savings lives in `design-docs/0000049-token-reduction/design-doc.md`.
+
+| Surface | Change | Architectural touch-points |
+|---|---|---|
+| 1 | Compact rendered envelope (`output.render_task`) | New global `--pretty` flag; default JSON output is now compact (no whitespace). Default text-mode envelope drops from 6 lines per task to 2. |
+| 6 | Slim member spawn prompt | `_MEMBER_PROMPT_TEMPLATE` shrinks from ~150 to ~60 tokens (single sentence + identity + skill-load directive + poll command). The `{director_name}` placeholder is removed from `_resolve_prompt`. |
+| 7 | Skill-file split | `skills/cafleet/SKILL.md` core trimmed to ≤ 350 lines (identity + poll/send/ack + minimal codex/claude branch); director-only, broadcast, exec-routing, recovery, and legacy-flag content moves to `skills/cafleet/reference/*.md` files loaded on demand via Read. Codex and Claude Code agents both load the core SKILL the same way; reference files are pulled only when the workflow needs them. |
+| 8 | `cafleet member list --activity` | Aggregates `tasks.status_timestamp` per member into `last_sent` / `last_recv` / `last_ack` / `idle` columns; the `last_ack` proxy filters `Task.type != 'broadcast_summary'`. Existing indexes `idx_tasks_context_status_ts` and `idx_tasks_from_agent_status_ts` cover the join. |
+| 9 | Capture defaults | `cafleet member capture --lines` default drops 80 → 30; new `--ansi/--no-ansi` (default `--no-ansi`, ANSI escapes stripped via `re.sub` plus carriage-return de-fragmentation); `--tail` alias for `--lines`. |
+| 14 | Persisted-shape simplification | `Task.task_json` blob dropped, `Task.text` typed column added. Single Alembic revision `0009_drop_task_json_add_text` with pre-flight non-null check + backfill; operator backup procedure documented in `docs/spec/data-model.md`. Six broker callers rewritten in lockstep (`_save_task`, `_read_task`, `_unicast_task_dict`, broadcast-summary builder, `poll_tasks`, `ack_task`/`cancel_task`). WebUI consumers update their type definitions. |
+| 15 | Inline message preview | `broker._try_notify_recipient` switches from the legacy poll-keystroke to `tmux.send_inline_preview`, which keystrokes a 2-line `[cafleet msg <id8> from <sender8> <ts>]` + body preview directly into the recipient's pane. Documented in [tmux Push Notifications](#tmux-push-notifications) above; `tmux.send_poll_trigger` survives only as the `member ping` re-poke primitive. |
+| 18 | Agent-card render slim | New `output.render_agent` projects `agent_card_json` to the minimum-required fields by default (`agent_id`, `name`, `description` truncated, `status`, `coding_agent`); full card returned on `--full`. Storage-side `agent_card_json` blob is unchanged in this release — render-side projection captures most of the win. |
+
+The token-budget regression suite under `tests/token_budget/` (Surface 13) checks character counts on representative outputs against checked-in baselines so future drift is caught at PR time. `tests/token_budget/scenarios/idle_3_member_baseline_stub.py` is the manually-runnable single-shot measurement stub for the per-tick cost of the Director monitoring commands (sleeps `SETTLE_SECONDS=30` and captures once; the originally-scoped 10-minute window was deferred when Surface 13 shipped char-anchored regression tests as the canonical contract).
 
 ## CLI Message Body Truncation
 
 Every `cafleet message *` subcommand that emits a user-supplied delivery body (`send`, `poll`, `ack`, `cancel`, `show`) truncates the `text` body to the first 10 Unicode codepoints with a literal `...` suffix in both text and `--json` output by default. Empty bodies and bodies whose codepoint length is at most 10 pass through unchanged with no marker. A per-subcommand `--full` flag restores the un-truncated body. Truncation runs in `cafleet/src/cafleet/output.py` via `truncate_text` and `truncate_task_text` helpers and is wired into the message subcommands through the shared `_client_command` decorator before either the text formatter or `format_json` runs, so `--full` and `--json` compose orthogonally.
 
-`cafleet message broadcast` is different — `broker.broadcast_message` returns a single envelope list containing a `broadcast_summary` task whose `artifacts[].parts[].text` is a generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. Truncating that summary would hide the recipient count, so `message_broadcast` is wired with `truncates_task_text=False`. The `--full` Click option is preserved on `message broadcast` for flag-surface consistency across all six subcommands but is a no-op there.
+`cafleet message broadcast` is different — `broker.broadcast_message` returns a single envelope list containing a `broadcast_summary` task whose top-level `text` column is the broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. Truncating that summary would hide the recipient count, so `message_broadcast` is wired with `truncates_task_text=False`. The `--full` Click option is preserved on `message broadcast` for flag-surface consistency across all six subcommands but is a no-op there.
 
 The truncation applies to CLI emit sites only. FastAPI `/ui/api/*` responses are unchanged — the WebUI is human-facing and renders full bodies. `member capture` content, `agent.description`, `skills[].description`, and `agent_card_json` sub-fields are also untouched in this release.
 
@@ -246,11 +270,11 @@ The truncation applies to CLI emit sites only. FastAPI `/ui/api/*` responses are
 
 ### contextId Convention
 
-The Broker sets `contextId = recipient_agent_id` on every delivery Task. This enables inbox discovery — recipients call `ListTasks(contextId=myAgentId)` to find all messages addressed to them. This trades per-conversation grouping (the typical contextId use case) for simple inbox discovery, which suits the fire-and-forget messaging pattern of coding agents. The A2A spec (Section 3.4.1) states that server-generated contextId values should be treated as opaque identifiers by clients, so this usage is compliant.
+The Broker sets `contextId = recipient_agent_id` on every delivery Task. This enables inbox discovery — recipients call `ListTasks(contextId=myAgentId)` to find all messages addressed to them. This trades per-conversation grouping (the typical contextId use case) for simple inbox discovery, which suits the fire-and-forget messaging pattern of coding agents. `contextId` is treated as an opaque routing key by both server and clients.
 
 ### Task Lifecycle Mapping
 
-Each message delivery is modeled as an A2A Task:
+Each message delivery is modeled as a Task:
 
 | Task State | Message Meaning |
 |---|---|
@@ -280,7 +304,7 @@ A browser-based dashboard served as a SPA at `/ui/`. No login is required. The f
 
 - **Frontend**: `admin/` — Vite + React 19 + TypeScript + Tailwind CSS 4
 - **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — all endpoints call `broker` for data access (sync `def` handlers, FastAPI runs them in a thread pool)
-- **Server**: `server.py` is a minimal FastAPI app — just `webui_router` + static files. No A2A handler, no JSON-RPC, no executor. Only needed for the WebUI; CLI commands work without it.
+- **Server**: `server.py` is a minimal FastAPI app — just `webui_router` + static files. No protocol handler, no JSON-RPC, no executor. Only needed for the WebUI; CLI commands work without it.
 - **Session scoping**: Session-scoped endpoints require `X-Session-Id` header. No authentication.
 - **Static serving**: `StaticFiles` mount at `/ui` serves the SPA bundled inside the package at `cafleet/src/cafleet/webui/` (production build). `mise //admin:build` must be run before `cafleet server` / `mise //cafleet:dev` for `/ui/` to be populated; without it, `create_app()` emits a one-line `warning: admin WebUI is not built. /ui/ will return 404. Run 'mise //admin:build'.` to stderr at startup, the server starts cleanly, and `/ui/` 404s until the SPA is built. The warning fires from `create_app()` so every startup path (`cafleet server`, `mise //cafleet:dev`, and any `uv run uvicorn cafleet.server:app`) sees it identically.
 

@@ -15,7 +15,6 @@ Do NOT use `.get("key", default)` or `|| "fallback"` when the key is guaranteed 
 **Exceptions** (where `.get()` without a fallback IS appropriate):
 - Checking whether an optional key exists: `if d.get("optional_key"):`
 - JSON from external/untrusted sources where the schema is not guaranteed
-- `metadata.get("toAgentId", "")` in `_save_task` — broadcast_summary genuinely lacks this key
 
 When in doubt, prefer a loud KeyError over a silent wrong value.
 

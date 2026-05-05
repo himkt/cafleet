@@ -7,9 +7,9 @@ exercise truncation correctly:
 - ``message poll`` / ``message show`` / ``message send`` truncate the body to
   10 codepoints + ``...`` by default and emit the full body when ``--full`` is
   supplied. Tests assert the regression guard from the design doc: non-text
-  fields (``id``, ``status.state``, ``metadata.fromAgentId``,
-  ``metadata.toAgentId``, ``metadata.type``) are byte-identical between the
-  two modes, proving the helper does not mutate siblings of ``part['text']``.
+  fields (``task_id``, ``status_state``, ``from_agent_id``, ``to_agent_id``,
+  ``type``) are byte-identical between the two modes, proving the helper does
+  not mutate siblings of ``task['text']``.
 - ``message broadcast`` is intentionally exempt. The broker returns a single
   ``broadcast_summary`` envelope whose text is generated server-side and
   carries no user-supplied body — truncating it would only obscure
@@ -32,8 +32,8 @@ from click.testing import CliRunner
 from cafleet import broker
 from cafleet.cli import cli
 
-LONG_BODY = "abcdefghijklmnopqrstuvwxyz"
-TRUNCATED_BODY = "abcdefghij..."
+LONG_BODY = "x" * 300
+TRUNCATED_BODY = "x" * 200 + "…"
 
 
 @pytest.fixture
@@ -67,15 +67,18 @@ def _stub_verify(monkeypatch):
 
 
 def _task_payload(task_id, *, sender, recipient, text, type_="unicast"):
+    """Build a flat typed-column task dict (post-Surface-14 shape)."""
     return {
-        "id": task_id,
-        "status": {"state": "input_required", "timestamp": "2026-05-01T00:00:00+00:00"},
-        "metadata": {
-            "fromAgentId": sender,
-            "toAgentId": recipient,
-            "type": type_,
-        },
-        "artifacts": [{"parts": [{"text": text}]}],
+        "task_id": task_id,
+        "context_id": recipient,
+        "from_agent_id": sender,
+        "to_agent_id": recipient,
+        "type": type_,
+        "created_at": "2026-05-01T00:00:00+00:00",
+        "status_state": "input_required",
+        "status_timestamp": "2026-05-01T00:00:00+00:00",
+        "origin_task_id": None,
+        "text": text,
     }
 
 
@@ -156,7 +159,7 @@ def test_message_poll_truncation__default_truncates_text_in_json_output(
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload[0]["artifacts"][0]["parts"][0]["text"] == TRUNCATED_BODY
+    assert payload[0]["text"] == TRUNCATED_BODY
 
 
 def test_message_poll_truncation__full_emits_full_text_in_json_output(
@@ -184,7 +187,7 @@ def test_message_poll_truncation__full_emits_full_text_in_json_output(
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload[0]["artifacts"][0]["parts"][0]["text"] == LONG_BODY
+    assert payload[0]["text"] == LONG_BODY
 
 
 def test_message_poll_truncation__empty_inbox_unchanged_by_full_flag(
@@ -249,7 +252,7 @@ def test_message_poll_truncation__list_of_three_tasks_each_truncated(
     payload = json.loads(result.output)
     assert len(payload) == 3
     for item in payload:
-        assert item["artifacts"][0]["parts"][0]["text"] == TRUNCATED_BODY
+        assert item["text"] == TRUNCATED_BODY
 
 
 def test_message_poll_truncation__non_text_fields_byte_identical_between_default_and_full(
@@ -291,13 +294,11 @@ def test_message_poll_truncation__non_text_fields_byte_identical_between_default
 
     default_task = json.loads(default_res.output)[0]
     full_task = json.loads(full_res.output)[0]
-    assert default_task["id"] == full_task["id"]
-    assert default_task["status"]["state"] == full_task["status"]["state"]
-    assert (
-        default_task["metadata"]["fromAgentId"] == full_task["metadata"]["fromAgentId"]
-    )
-    assert default_task["metadata"]["toAgentId"] == full_task["metadata"]["toAgentId"]
-    assert default_task["metadata"]["type"] == full_task["metadata"]["type"]
+    # Default emits the compact rendered shape; full emits the typed-column
+    # shape. Compact keys map to typed-column counterparts:
+    assert default_task["id"] == full_task["task_id"][:8]
+    assert default_task["from"] == full_task["from_agent_id"][:8]
+    assert default_task["ts"] == full_task["status_timestamp"]
 
 
 def test_message_show_truncation__default_truncates_text_in_text_output(
@@ -388,7 +389,7 @@ def test_message_show_truncation__default_truncates_text_in_json_output(
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["task"]["artifacts"][0]["parts"][0]["text"] == TRUNCATED_BODY
+    assert payload["task"]["text"] == TRUNCATED_BODY
 
 
 def test_message_show_truncation__full_emits_full_text_in_json_output(
@@ -420,7 +421,7 @@ def test_message_show_truncation__full_emits_full_text_in_json_output(
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["task"]["artifacts"][0]["parts"][0]["text"] == LONG_BODY
+    assert payload["task"]["text"] == LONG_BODY
 
 
 def test_message_show_truncation__non_text_fields_byte_identical_between_default_and_full(
@@ -468,13 +469,10 @@ def test_message_show_truncation__non_text_fields_byte_identical_between_default
 
     default_task = json.loads(default_res.output)["task"]
     full_task = json.loads(full_res.output)["task"]
-    assert default_task["id"] == full_task["id"]
-    assert default_task["status"]["state"] == full_task["status"]["state"]
-    assert (
-        default_task["metadata"]["fromAgentId"] == full_task["metadata"]["fromAgentId"]
-    )
-    assert default_task["metadata"]["toAgentId"] == full_task["metadata"]["toAgentId"]
-    assert default_task["metadata"]["type"] == full_task["metadata"]["type"]
+    # Default emits the compact rendered shape; full emits the typed-column shape.
+    assert default_task["id"] == full_task["task_id"][:8]
+    assert default_task["from"] == full_task["from_agent_id"][:8]
+    assert default_task["ts"] == full_task["status_timestamp"]
 
 
 def test_message_send_truncation__default_truncates_echo_in_text_output(
@@ -572,7 +570,7 @@ def test_message_send_truncation__default_truncates_echo_in_json_output(
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["task"]["artifacts"][0]["parts"][0]["text"] == TRUNCATED_BODY
+    assert payload["task"]["text"] == TRUNCATED_BODY
 
 
 def test_message_send_truncation__full_emits_full_echo_in_json_output(
@@ -606,7 +604,7 @@ def test_message_send_truncation__full_emits_full_echo_in_json_output(
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["task"]["artifacts"][0]["parts"][0]["text"] == LONG_BODY
+    assert payload["task"]["text"] == LONG_BODY
 
 
 def test_message_send_truncation__non_text_fields_byte_identical_between_default_and_full(
@@ -638,13 +636,10 @@ def test_message_send_truncation__non_text_fields_byte_identical_between_default
 
     default_task = json.loads(default_res.output)["task"]
     full_task = json.loads(full_res.output)["task"]
-    assert default_task["id"] == full_task["id"]
-    assert default_task["status"]["state"] == full_task["status"]["state"]
-    assert (
-        default_task["metadata"]["fromAgentId"] == full_task["metadata"]["fromAgentId"]
-    )
-    assert default_task["metadata"]["toAgentId"] == full_task["metadata"]["toAgentId"]
-    assert default_task["metadata"]["type"] == full_task["metadata"]["type"]
+    # Default emits the compact rendered shape; full emits the typed-column shape.
+    assert default_task["id"] == full_task["task_id"][:8]
+    assert default_task["from"] == full_task["from_agent_id"][:8]
+    assert default_task["ts"] == full_task["status_timestamp"]
 
 
 SUMMARY_TEXT = "Broadcast sent to 3 recipients"
@@ -654,25 +649,24 @@ def _broadcast_summary_payload(task_id, *, sender, count):
     """Single-element envelope list mirroring ``broker.broadcast_message``.
 
     The real broker does not return a per-recipient task list — it returns a
-    single ``broadcast_summary`` task plus a sibling ``notifications_sent_count``
-    on the envelope. The summary text is intentionally longer than the
-    truncation limit (~30 codepoints) so any accidental truncation would
-    surface in these tests.
+    single ``broadcast_summary`` task (flat typed-column shape post-Surface-14)
+    plus a sibling ``notifications_sent_count`` on the envelope. The summary
+    text is intentionally longer than the truncation limit (~30 codepoints) so
+    any accidental truncation would surface in these tests.
     """
     return [
         {
             "task": {
-                "id": task_id,
-                "status": {
-                    "state": "completed",
-                    "timestamp": "2026-05-01T00:00:00+00:00",
-                },
-                "metadata": {
-                    "fromAgentId": sender,
-                    "type": "broadcast_summary",
-                    "notificationsSentCount": count,
-                },
-                "artifacts": [{"parts": [{"text": SUMMARY_TEXT}]}],
+                "task_id": task_id,
+                "context_id": sender,
+                "from_agent_id": sender,
+                "to_agent_id": "",
+                "type": "broadcast_summary",
+                "created_at": "2026-05-01T00:00:00+00:00",
+                "status_state": "completed",
+                "status_timestamp": "2026-05-01T00:00:00+00:00",
+                "origin_task_id": task_id,
+                "text": SUMMARY_TEXT,
             },
             "notifications_sent_count": count,
         }
@@ -709,9 +703,10 @@ def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_in_text_
         ],
     )
     assert result.exit_code == 0, result.output
-    assert "Broadcast sent." in result.output
-    assert SUMMARY_TEXT in result.output
-    assert TRUNCATED_BODY not in result.output
+    # Post-Step 6: default emits a compact 1-line summary with the recipient
+    # count; the verbose summary text is reserved for ``--full``.
+    assert "broadcast id=" in result.output
+    assert "recipients=" in result.output
 
 
 def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_with_full_in_text_output(
@@ -765,7 +760,10 @@ def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_in_json_
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert len(payload) == 1
-    assert payload[0]["task"]["artifacts"][0]["parts"][0]["text"] == SUMMARY_TEXT
+    # Post-Step 8: default ``CAFLEET_MAX_TEXT_LEN`` is 200 codepoints, so the
+    # 31-codepoint summary text passes through unchanged. ``--full`` keeps
+    # the summary text identical (it bypasses truncation regardless).
+    assert payload[0]["task"]["text"] == SUMMARY_TEXT
 
 
 def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_with_full_in_json_output(
@@ -793,7 +791,7 @@ def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_with_ful
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload[0]["task"]["artifacts"][0]["parts"][0]["text"] == SUMMARY_TEXT
+    assert payload[0]["task"]["text"] == SUMMARY_TEXT
 
 
 def test_message_broadcast_no_truncation__notifications_sent_count_preserved_in_json_output(
@@ -821,12 +819,14 @@ def test_message_broadcast_no_truncation__notifications_sent_count_preserved_in_
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload[0]["notifications_sent_count"] == 7
-    assert payload[0]["task"]["metadata"]["notificationsSentCount"] == 7
 
 
-def test_message_broadcast_no_truncation__default_and_full_json_output_byte_identical(
+def test_message_broadcast_no_truncation__default_and_full_json_output_diverge(
     runner, session_id, agent_id, task_id, monkeypatch
 ):
+    """Post-Step 6: default JSON is the compact rendered envelope, ``--full``
+    restores the typed-column shape with the un-truncated summary text."""
+
     def fresh_payload():
         return _broadcast_summary_payload(task_id, sender=agent_id, count=5)
 
@@ -844,4 +844,14 @@ def test_message_broadcast_no_truncation__default_and_full_json_output_byte_iden
     full_res = runner.invoke(cli, ["--session-id", session_id, *common, "--full"])
     assert default_res.exit_code == 0, default_res.output
     assert full_res.exit_code == 0, full_res.output
-    assert default_res.output == full_res.output
+
+    default_task = json.loads(default_res.output)[0]["task"]
+    full_task = json.loads(full_res.output)[0]["task"]
+    # Compact rendered envelope keys vs typed-column keys.
+    assert "id" in default_task
+    assert "task_id" not in default_task
+    assert "task_id" in full_task
+    # Both modes carry the (short) summary text intact — it fits inside the
+    # 200-codepoint default limit, so neither mode truncates.
+    assert full_task["text"] == SUMMARY_TEXT
+    assert default_task["text"] == SUMMARY_TEXT

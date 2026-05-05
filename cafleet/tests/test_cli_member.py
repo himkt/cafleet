@@ -58,9 +58,12 @@ def test_default_prompt_substitution__default_path_substitutes_all_placeholders(
     ctx,
     director_agent_id,
     new_agent_id,
-    mock_get_agent,
     session_id,
 ):
+    """Post-Surface-6: the slim spawn prompt no longer references
+    ``{director_name}`` so the substitution surface is just the three
+    UUIDs. ``broker.get_agent`` is no longer called by ``_resolve_prompt``.
+    """
     result = _resolve_prompt(
         ctx,
         director_agent_id=director_agent_id,
@@ -70,10 +73,8 @@ def test_default_prompt_substitution__default_path_substitutes_all_placeholders(
     assert session_id in result
     assert new_agent_id in result
     assert director_agent_id in result
-    assert "Director-X" in result
     assert "{session_id}" not in result
     assert "{agent_id}" not in result
-    assert "{director_name}" not in result
     assert "{director_agent_id}" not in result
 
 

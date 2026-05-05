@@ -322,7 +322,7 @@ def test_delete_session_cascade__tasks_are_preserved_after_soft_delete(
     director_id = result["director"]["agent_id"]
 
     sent = broker.send_message(sid, admin_id, director_id, "audit me")
-    task_id = sent["task"]["id"]
+    task_id = sent["task"]["task_id"]
 
     broker.delete_session(sid)
 
@@ -479,11 +479,12 @@ def test_deregister_agent_root_director__non_root_director_agent_can_still_be_de
 # Director triggers a tmux push. ---
 
 
-def test_member_to_director_notification__send_message_invokes_send_poll_trigger_with_director_pane(
+def test_member_to_director_notification__send_message_invokes_inline_preview_with_director_pane(
     director_context, monkeypatch
 ):
-    mock_trigger = Mock(return_value=True)
-    monkeypatch.setattr("cafleet.tmux.send_poll_trigger", mock_trigger)
+    """Post-Surface-15: the auto-fire path keystrokes the inline preview."""
+    mock_preview = Mock(return_value=True)
+    monkeypatch.setattr("cafleet.tmux.send_inline_preview", mock_preview)
 
     result = broker.create_session(
         label="notify", director_context=director_context, coding_agent="claude"
@@ -509,8 +510,8 @@ def test_member_to_director_notification__send_message_invokes_send_poll_trigger
     )
 
     assert response["notification_sent"] is True
-    assert mock_trigger.call_count == 1
-    kwargs = mock_trigger.call_args.kwargs
+    assert mock_preview.call_count == 1
+    kwargs = mock_preview.call_args.kwargs
     assert kwargs["target_pane_id"] == director_context.pane_id
-    assert kwargs["session_id"] == sid
-    assert kwargs["agent_id"] == root_director_id
+    assert kwargs["sender_8"] == member["agent_id"][:8]
+    assert kwargs["text"] == "hi director"

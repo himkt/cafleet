@@ -1,10 +1,16 @@
-# Director Role — Bash Routing
+# Director Role
 
 You are a **Director** managing one or more members in a CAFleet team. Members spawn with workspace-scoped auto-approval (Claude Code's `--permission-mode dontAsk`, or codex's `--ask-for-approval never --sandbox workspace-write` — selected per member via `--coding-agent`), so by default they run shell commands themselves via the Bash tool — no Director routing required.
 
-The bash-via-Director protocol is the fallback when a member's Bash invocation is rejected by the coding agent's harness deny-list (destructive operations such as `git push`, `rm -rf`). In that case the member sends you a plain CAFleet message asking for the command. You decide whether to fulfill, and dispatch the command into the member's pane via `cafleet member exec`.
+This file is the role-specific anchor. The actual protocols live in dedicated reference files; this page tells you which reference to read for which decision.
 
-This file covers the **Director side** of the fallback. The member side lives in `skills/cafleet/roles/member.md`.
+## Reading order
+
+1. **Before spawning your first member**, Read [`reference/director.md`](../reference/director.md). Covers `member create`, `member delete`, `member list --activity`, `member capture`, `member send-input` (with the AskUserQuestion three-beat delegation workflow), `member exec`, and `member ping`. This is the authoritative reference for every Director-only command.
+2. **Before processing a member's denial-fallback request**, Read [`reference/exec-routing.md`](../reference/exec-routing.md). Covers how to recognize a member-originated bash request, the `cafleet member exec` dispatch shape, the required `cafleet member ping` follow-up, serialization (process one request at a time in poll order), and the cross-Director boundary.
+3. **Before tearing down a member or session**, Read [`reference/recovery.md`](../reference/recovery.md). Covers the 2-stage health check, stalled-member shape classification, recovery from a wedged `/exit`, and the full Shutdown Protocol (stop crons → delete members → verify → `session delete` → confirm).
+4. **Before broadcasting**, Read [`reference/broadcast.md`](../reference/broadcast.md). Covers fan-out semantics, the `broadcast_summary` envelope, and threading via `origin_task_id`.
+5. **For `--full` / `--pretty` opt-back-in semantics**, Read [`reference/legacy-flags.md`](../reference/legacy-flags.md).
 
 ## Placeholder convention
 
@@ -12,90 +18,35 @@ Substitute the literal UUID strings printed by `cafleet session create` / `cafle
 
 - `<session-id>` — the session UUID (from `cafleet session create`)
 - `<director-agent-id>` — your own UUID (the Director)
-- `<member-agent-id>` — the requesting member's UUID (from your `cafleet member list` output, or from the message metadata you polled)
-- `<command>` — the shell command the member asked you to run
+- `<member-agent-id>` — a member's UUID (from `cafleet member list`)
+- `<command>` — a shell command (only when dispatching via `cafleet member exec`)
 
-## When this protocol fires for you
+## Director-only summary
 
-You receive a member-originated bash request when **both** of the following are true:
+You own these primitives. Members do NOT call them.
 
-1. `cafleet message poll --agent-id <director-agent-id>` surfaces a plain free-text message from a member asking you to run a command. There is no JSON envelope, no schema, no special `kind` field — just a natural-language request like "Please run `git push` for me — my Bash tool denied it." Recognize the pattern by content, not by structure. Members default to running commands themselves under their workspace-scoped auto-approval mode (Claude Code's `--permission-mode dontAsk` or codex's `--ask-for-approval never --sandbox workspace-write`); a request reaching you means the member's harness deny-list rejected the command and the member auto-routed to you as the fallback.
-2. The sender's `placement.director_agent_id` matches your `<director-agent-id>`. Cross-Director requests are rejected at the CLI layer; you should also reject them at the protocol layer (do not dispatch on behalf of a member who is not yours).
+| Subcommand | Purpose | Permission gate |
+|---|---|---|
+| `cafleet member create` | Spawn a member pane and register the agent atomically. | `permissions.ask` |
+| `cafleet member delete` | Send `/exit` (15 s timeout) then deregister. `--force` skips the wait. | `permissions.ask` |
+| `cafleet member list [--activity]` | List your team. `--activity` adds `last_sent` / `last_recv` / `last_ack` / `idle` columns. | `permissions.allow` |
+| `cafleet member capture` | Read the last N lines of a member's pane (default `--lines 30`, `--no-ansi`). | `permissions.allow` |
+| `cafleet member send-input` | Forward a restricted keystroke (`--choice 1..3` or `--freetext`) — AskUserQuestion-only. | `permissions.allow` |
+| `cafleet member exec "<cmd>"` | Shell-dispatch via the coding agent's `!` shortcut. Operator-controlled `COMMAND` argument. | `permissions.ask` |
+| `cafleet member ping` | Fixed-action inbox-poll nudge. No `COMMAND` argument. | `permissions.allow` |
 
-## What you MUST do
-
-1. **Decide whether to fulfill.** You are the gate. Read the member's request and the reason. Refuse destructive, out-of-scope, or unsafe commands; ask the user via `AskUserQuestion` if unsure. The operator at your pane is the final authority — escalate when judgment is required.
-
-2. **If fulfilling, dispatch via `cafleet member exec`:**
-
-   ```bash
-   cafleet --session-id <session-id> member exec \
-     --agent-id <director-agent-id> --member-id <member-agent-id> \
-     "<command>"
-   ```
-
-   The CLI prepends `! ` and appends `Enter` for you (two `tmux send-keys` calls: literal `! <command>`, then the `Enter` keystroke). The coding agent's `!` shortcut (honored by both `claude` and `codex`) intercepts the line, runs the command via the harness's native CLI primitive (bypassing the Bash tool permission system), and prints the captured output back into the member's pane. The member's next prompt iteration sees the output as context.
-
-3. **After dispatch, ping the member.** `member exec` only stages the bang command's stdout/stderr as the member's next-turn context — it does not advance the turn. Immediately follow every successful `cafleet member exec` with `cafleet member ping` against the same member so the keystroke fires `tmux.send_poll_trigger` (`cafleet/src/cafleet/tmux.py`) and the member begins its next turn:
-
-   ```bash
-   cafleet --session-id <session-id> member ping \
-     --agent-id <director-agent-id> --member-id <member-agent-id>
-   ```
-
-   The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll` — `message poll` reads your own Director inbox over SQLite and does not wake the member. Run `cafleet member ping` after any `cafleet member exec` invocation that exits 0. Skip the ping only on non-zero exit — the dispatch did not complete successfully (its `tmux send-keys` sequence may have failed mid-way), so we cannot assume the bang command was submitted, and the next supervision tick (agent-team-monitoring `/loop` or configured fallback driver) is the safety net.
-
-4. **`member exec` mechanics:** the command is a single required positional argument. The subcommand works on any pane that is at the coding agent's input prompt (`claude` or `codex`). Empty / whitespace-only commands and commands containing newlines are rejected by the CLI handler with exit 2.
-
-5. **Acknowledge the request.** ACK the member's message via `cafleet message ack --agent-id <director-agent-id> --task-id <task-id>` once you have dispatched (or refused). Leaving the message un-ACKed pollutes the inbox and breaks serialization.
-
-6. **Refusing a request.** If you choose not to run the command, send a CAFleet message back to the member explaining why. The member is waiting on either `! <command>` output OR a follow-up message — silence breaks the workflow.
-
-## Serialization — process one request at a time
-
-Concurrent member requests serialize through the broker queue. You MUST process command-request messages one at a time in the order returned by `cafleet message poll`:
-
-1. Poll → take the first command-request in the returned list (the broker orders by `Task.status_timestamp.desc()` — newest-first).
-2. Dispatch via `member exec` (or refuse).
-3. ACK.
-4. Poll the next one.
-
-Do not interleave or batch. The poll order (newest-first today) is the serialization mechanism — no separate queueing primitive is needed. Batching dispatches across multiple members can cause `! <command>` keystrokes to land in the wrong pane state if a member is mid-prompt.
-
-## Cross-Director boundary
-
-The `cafleet member exec` CLI verifies `placement.director_agent_id` matches `--agent-id` before making any tmux call. An attempt to dispatch into another Director's member exits 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other-director>).` This is enforced at the broker; you do not need to re-check it, but you should not attempt cross-Director dispatch in the first place — it indicates a misconfigured monitoring loop or a confused team-graph.
+The asymmetry between `member exec` and `member ping` is the whole point of having two subcommands: exec carries an operator-controlled command and stays under per-call ask; ping has no operator-controlled body and is pre-approved so monitoring loops can fire it without prompts. See [`reference/exec-routing.md`](../reference/exec-routing.md) for the bash-via-Director fallback protocol that uses both.
 
 ## When you, as Director, want to run your own command
 
-This protocol is **member → Director only**. Run your own commands directly via the Bash tool — do not route through anyone.
+Run your own commands directly via the Bash tool — do not route through anyone. The bash-via-Director protocol is **member → Director only**.
 
-## Nudging an idle member
+## Authority and refusal
 
-`cafleet member ping` is your pre-approved primitive for poking a stalled member's inbox. It is a fixed-action subcommand — there is no operator-controlled `COMMAND` argument and no positional input — so it sits in `permissions.allow` and fires without per-call confirmation, which is exactly what a `/loop` monitoring tick needs.
+You are the gate for member-originated dispatch requests. Read the member's request, judge the command, and:
 
-```bash
-cafleet --session-id <session-id> member ping \
-  --agent-id <director-agent-id> --member-id <member-agent-id>
-```
+- **Fulfill** by running `cafleet member exec` then `cafleet member ping` (in that order — see [`reference/exec-routing.md`](../reference/exec-routing.md) § Director-side fallback recipe).
+- **Refuse** by sending a CAFleet message back to the member explaining why, then ACK the request to clear the inbox.
+- **Escalate** to the user via `AskUserQuestion` when judgment is required (the operator at your pane is the final authority).
 
-This injects the same `cafleet --session-id <s> message poll --agent-id <m>` + Enter keystroke that the broker auto-fires after every `cafleet message send` — they share `tmux.send_poll_trigger`. The auto-fire is best-effort and silent on failure; `member ping` converts a failure to exit 1 so a monitoring loop sees it.
-
-When to use:
-
-- A `/loop` health-check tick observed a member that is stalled despite a recent `message send` (the broker's auto-fire was missed, lost, or the pane was busy when it arrived).
-- A long idle window has elapsed since the member last polled, and you want to nudge it without sending a new message.
-
-When NOT to use:
-
-- The member is paused on an `AskUserQuestion` prompt — use `cafleet member send-input` after the canonical AskUserQuestion delegation pattern (see `skills/cafleet/SKILL.md`).
-- You need to dispatch a shell command — that is what `cafleet member exec` is for. `member ping` does NOT take a command argument.
-- There is no message in the queue for the member — `member ping` only triggers a poll; if the inbox is empty, the keystroke is a no-op.
-
-`member exec` and `member ping` partition cleanly: **exec = arbitrary shell, `permissions.ask` per call; ping = fixed inbox-poll keystroke, pre-approved.** The asymmetry is enforced by rule specificity in `.claude/settings.json`: the `permissions.ask` entry for `member exec` is more specific than the broad `Bash(cafleet *)` allow, so `member exec` matches the ask rule and prompts; `member ping` falls through to the broad allow and fires without confirmation. Do not use `member exec "cafleet ... message poll ..."` as a poll-trigger workaround — it inherits the strict approval prompt and defeats the carve-out.
-
-## Why this works
-
-- **Members spawn with workspace-scoped auto-approval** (Claude Code's `--permission-mode dontAsk`, or codex's `--ask-for-approval never --sandbox workspace-write`), so under the default flow they run cafleet (and any other shell command) themselves via the Bash tool. The bash-via-Director path fires only when the member's harness deny-list rejects the command.
-- **The coding agent's `!` shortcut is the dispatch primitive** — `cafleet member exec` keystrokes `! <command>` + Enter into the member's pane, and the coding agent's `!` shortcut (honored by both `claude` and `codex`) runs the command. The captured stdout/stderr lands in the member's next-turn context.
-- **You stay in control of fallback dispatches.** Every fallback request surfaces as a plain message in your inbox; you (with the operator at your keyboard) choose whether to fulfill it. The operator's `permissions.ask` rule for `member exec` (currently `Bash(cafleet * member exec *)` in `.claude/settings.json`) controls the per-call confirmation UX.
+Silence breaks the workflow — the member is waiting on either `! <command>` output OR a follow-up message. Always close the loop one way or the other.

@@ -3,9 +3,11 @@
 ``_format_messages(rows, accessor)`` produces the canonical 11-key
 message dict shape consumed by the ``/ui/api`` inbox / sent / timeline
 endpoints, batching the agent-name lookup once per call.
-``_raw_task_accessor`` adapts ``broker.list_inbox`` / ``list_sent`` rows
-and ``_timeline_entry_accessor`` adapts ``broker.list_timeline`` entries
-to the merger's expected per-row shape.
+
+Post-Surface-14, both ``broker.list_inbox`` / ``list_sent`` and
+``broker.list_timeline`` return flat typed-column task dicts, so
+``_flat_task_accessor`` adapts every shape — there is no longer a
+separate timeline-entry accessor.
 """
 
 import pytest
@@ -16,11 +18,7 @@ import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet import broker, webui_api
 from cafleet.db.models import Base
 from cafleet.tmux import DirectorContext
-from cafleet.webui_api import (
-    _format_messages,
-    _raw_task_accessor,
-    _timeline_entry_accessor,
-)
+from cafleet.webui_api import _flat_task_accessor, _format_messages
 
 _EXPECTED_KEYS = {
     "task_id",
@@ -160,9 +158,10 @@ def test_format_messages_shape__output_dict_shape_matches_contract(monkeypatch):
     assert set(result[0].keys()) == _EXPECTED_KEYS
 
 
-def test_raw_task_accessor__extracts_from_broker_inbox_row_shape():
+def test_flat_task_accessor__extracts_from_typed_column_row_shape():
     row = {
         "task_id": "tid-1",
+        "context_id": "a2",
         "from_agent_id": "a1",
         "to_agent_id": "a2",
         "type": "unicast",
@@ -170,12 +169,10 @@ def test_raw_task_accessor__extracts_from_broker_inbox_row_shape():
         "created_at": "2026-04-30T01:00:00+00:00",
         "status_timestamp": "2026-04-30T02:00:00+00:00",
         "origin_task_id": None,
-        "task_json": (
-            '{"id":"tid-1","artifacts":[{"parts":[{"text":"hello world"}]}]}'
-        ),
+        "text": "hello world",
     }
 
-    result = _raw_task_accessor(row)
+    result = _flat_task_accessor(row)
 
     assert result["task_id"] == "tid-1"
     assert result["from_id"] == "a1"
@@ -188,26 +185,22 @@ def test_raw_task_accessor__extracts_from_broker_inbox_row_shape():
     assert result["body"] == "hello world"
 
 
-def test_timeline_entry_accessor__extracts_from_broker_list_timeline_entry_shape():
-    entry = {
-        "task": {
-            "id": "tid-2",
-            "status": {
-                "state": "completed",
-                "timestamp": "2026-04-30T03:00:00+00:00",
-            },
-            "metadata": {
-                "fromAgentId": "b1",
-                "toAgentId": "b2",
-                "type": "unicast",
-            },
-            "artifacts": [{"parts": [{"text": "timeline body"}]}],
-        },
+def test_flat_task_accessor__extracts_from_timeline_row_shape():
+    """list_timeline returns the same flat typed-column dict as list_inbox/list_sent."""
+    row = {
+        "task_id": "tid-2",
+        "context_id": "b2",
+        "from_agent_id": "b1",
+        "to_agent_id": "b2",
+        "type": "unicast",
+        "status_state": "completed",
         "created_at": "2026-04-30T03:30:00+00:00",
+        "status_timestamp": "2026-04-30T03:00:00+00:00",
         "origin_task_id": "origin-1",
+        "text": "timeline body",
     }
 
-    result = _timeline_entry_accessor(entry)
+    result = _flat_task_accessor(row)
 
     assert result["task_id"] == "tid-2"
     assert result["from_id"] == "b1"
@@ -220,12 +213,12 @@ def test_timeline_entry_accessor__extracts_from_broker_list_timeline_entry_shape
     assert result["body"] == "timeline body"
 
 
-def test_format_messages_end_to_end_raw_task_accessor__inbox_rows_through_format_messages_match_contract():
+def test_format_messages_end_to_end_inbox__inbox_rows_through_format_messages_match_contract():
     sid, sender, recipient = _two_agents()
     broker.send_message(sid, sender, recipient, "snapshot body")
 
     rows = broker.list_inbox(recipient)
-    result = _format_messages(rows, _raw_task_accessor)
+    result = _format_messages(rows, _flat_task_accessor)
 
     assert len(result) == 1
     msg = result[0]
@@ -246,12 +239,12 @@ def test_format_messages_end_to_end_raw_task_accessor__inbox_rows_through_format
     assert msg["status_timestamp"]
 
 
-def test_format_messages_end_to_end_timeline_entry_accessor__timeline_entries_through_format_messages_match_contract():
+def test_format_messages_end_to_end_timeline__timeline_entries_through_format_messages_match_contract():
     sid, sender, recipient = _two_agents()
     broker.send_message(sid, sender, recipient, "timeline snapshot")
 
     entries = broker.list_timeline(sid)
-    result = _format_messages(entries, _timeline_entry_accessor)
+    result = _format_messages(entries, _flat_task_accessor)
 
     assert len(result) == 1
     msg = result[0]

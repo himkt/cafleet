@@ -22,8 +22,12 @@ class Settings(BaseSettings):
         default=8000,
         validation_alias="CAFLEET_BROKER_PORT",
     )
+    max_text_len: int = Field(
+        default=200,
+        validation_alias="CAFLEET_MAX_TEXT_LEN",
+    )
 
-    model_config = {"env_prefix": "", "populate_by_name": True}
+    model_config = {"env_prefix": ""}
 
 
 settings = Settings()

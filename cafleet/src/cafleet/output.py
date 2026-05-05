@@ -1,19 +1,59 @@
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
+from cafleet.config import settings
 
-def format_json(data: Any) -> str:
-    return json.dumps(data, indent=2)
+_TRUNCATION_SUFFIX = "…"
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
-def truncate_text(value: str | None, *, full: bool, limit: int = 10) -> str | None:
-    if full or value is None or len(value) <= limit:
+def strip_ansi(text: str) -> str:
+    """Strip ANSI CSI escape sequences and collapse \\r-rewritten line segments.
+
+    Carriage-return de-fragmentation: TUI redraws emit ``...prefix\\rNEW``
+    sequences where ``NEW`` overwrites ``prefix`` on the same line. We keep
+    only the segment after the last ``\\r`` per line so the captured buffer
+    matches what an operator sees.
+    """
+    if not text:
+        return text
+    cleaned = _ANSI_ESCAPE_RE.sub("", text)
+    return "\n".join(line.rsplit("\r", 1)[-1] for line in cleaned.split("\n"))
+
+
+def format_json(data: Any, *, pretty: bool = False) -> str:
+    """Render ``data`` as JSON.
+
+    Default is compact (no whitespace separators) so per-poll envelopes stay
+    short for agent consumers. Pass ``pretty=True`` for ``indent=2`` output
+    when a human is reading the result.
+    """
+    if pretty:
+        return json.dumps(data, indent=2)
+    return json.dumps(data, separators=(",", ":"))
+
+
+def truncate_text(
+    value: str | None, *, full: bool, limit: int | None = None
+) -> str | None:
+    """Truncate ``value`` to ``limit`` codepoints + the ``…`` suffix.
+
+    When ``limit`` is ``None`` the helper falls back to
+    ``settings.max_text_len`` (env var ``CAFLEET_MAX_TEXT_LEN``, default
+    ``200``). ``full=True`` returns ``value`` unchanged.
+    """
+    if full or value is None:
         return value
-    return value[:limit] + "..."
+    effective_limit = limit if limit is not None else settings.max_text_len
+    if len(value) <= effective_limit:
+        return value
+    return value[:effective_limit] + _TRUNCATION_SUFFIX
 
 
-def truncate_task_text(result: Any, *, full: bool, limit: int = 10) -> Any:
+def truncate_task_text(result: Any, *, full: bool, limit: int | None = None) -> Any:
     if full:
         return result
     items = result if isinstance(result, list) else [result]
@@ -21,11 +61,105 @@ def truncate_task_text(result: Any, *, full: bool, limit: int = 10) -> Any:
         task = item.get("task", item) if isinstance(item, dict) else None
         if not isinstance(task, dict):
             continue
-        for artifact in task.get("artifacts", []) or []:
-            for part in artifact.get("parts", []) or []:
-                if "text" in part:
-                    part["text"] = truncate_text(part["text"], full=full, limit=limit)
+        if "text" in task:
+            task["text"] = truncate_text(task["text"], full=full, limit=limit)
     return result
+
+
+def render_task(task: dict, *, full: bool = False) -> dict:
+    """Project a typed-column task dict to the compact rendered shape.
+
+    ``full=True`` returns the typed-column dict unchanged (no projection,
+    no UUID prefix-rendering). ``full=False`` (default) returns a new dict
+    with ``id`` (8-char prefix), ``from`` (8-char prefix), ``ts``, ``text``,
+    plus optional ``kind`` (when ``type`` ≠ ``"unicast"``) and ``origin``
+    (8-char prefix; only when ``origin_task_id`` is non-NULL).
+    """
+    if full:
+        return task
+    out: dict = {
+        "id": task["task_id"][:8],
+        "from": task["from_agent_id"][:8],
+        "ts": task["status_timestamp"],
+        "text": task["text"],
+    }
+    if task["type"] != "unicast":
+        out["kind"] = task["type"]
+    if task.get("origin_task_id"):
+        out["origin"] = task["origin_task_id"][:8]
+    return out
+
+
+def render_tasks_in_result(result: Any, *, full: bool) -> Any:
+    """Apply ``render_task`` to every task dict in a broker result structure.
+
+    ``full=True`` returns ``result`` unchanged. Otherwise walks lists,
+    ``{"task": ...}`` envelopes, and bare flat task dicts; returns a new
+    structure (does not mutate ``result``).
+    """
+    if full:
+        return result
+    if isinstance(result, list):
+        return [_render_item(item) for item in result]
+    return _render_item(result)
+
+
+def _render_item(item: Any) -> Any:
+    if not isinstance(item, dict):
+        return item
+    if "task" in item and isinstance(item["task"], dict) and "task_id" in item["task"]:
+        new = dict(item)
+        new["task"] = render_task(item["task"], full=False)
+        return new
+    if "task_id" in item:
+        return render_task(item, full=False)
+    return item
+
+
+def render_agent(agent: dict, *, full: bool = False) -> dict:
+    """Project a broker agent dict to the slim wire shape.
+
+    Slim shape (default): ``id`` (8-char prefix of ``agent_id``), ``name``,
+    ``description`` (truncated to 60 codepoints + ``…`` suffix), ``status``,
+    plus ``coding_agent`` when the source dict carries a ``placement`` with
+    that key. ``full=True`` returns ``agent`` unchanged.
+
+    Surface 18 (design 0000049): drops the per-row token cost on
+    ``cafleet agent list`` / ``agent show`` from ~300–500 tok to ≤80 tok by
+    omitting ``registered_at``, ``kind``, the nested ``placement`` blob, and
+    by prefix-rendering ``agent_id``.
+    """
+    if full:
+        return agent
+    out: dict = {
+        "id": agent["agent_id"][:8],
+        "name": agent["name"],
+        "description": truncate_text(agent["description"], full=False, limit=60),
+        "status": agent["status"],
+    }
+    placement = agent.get("placement")
+    if placement and "coding_agent" in placement:
+        out["coding_agent"] = placement["coding_agent"]
+    return out
+
+
+def render_agents_in_result(result: Any, *, full: bool) -> Any:
+    """Apply ``render_agent`` to every agent dict in a broker result structure.
+
+    ``full=True`` returns ``result`` unchanged. Otherwise walks lists and
+    bare flat agent dicts; returns a new structure (does not mutate ``result``).
+    """
+    if full:
+        return result
+    if isinstance(result, list):
+        return [_render_agent_item(item) for item in result]
+    return _render_agent_item(result)
+
+
+def _render_agent_item(item: Any) -> Any:
+    if isinstance(item, dict) and "agent_id" in item:
+        return render_agent(item, full=False)
+    return item
 
 
 def format_register(data: dict) -> str:
@@ -37,31 +171,41 @@ def format_register(data: dict) -> str:
     return "\n".join(lines)
 
 
-def format_task(task: dict) -> str:
-    if "task" in task:
+def format_task(task: dict, *, full: bool = False) -> str:
+    """Render a task as text.
+
+    ``full=False`` (default): 2-line compact render —
+    line 1 is ``[<id8> | from:<from8> | <ts>]`` (with optional
+    ``| kind:<kind>`` and ``| origin:<id8>`` segments), line 2 is the body.
+
+    ``full=True``: 6-line legacy verbose layout that exposes every typed
+    column (``id``, ``state``, ``from``, ``to``, ``type``, ``text``).
+    """
+    if "task" in task and isinstance(task["task"], dict):
         task = task["task"]
-    metadata = task["metadata"]
-    text = next(
-        (
-            part["text"]
-            for artifact in task["artifacts"]
-            for part in artifact["parts"]
-            if part.get("text")
-        ),
-        "",
-    )
+    if not full:
+        rendered = render_task(task, full=False)
+        segments = [f"[{rendered['id']} | from:{rendered['from']} | {rendered['ts']}"]
+        if "kind" in rendered:
+            segments.append(f" | kind:{rendered['kind']}")
+        if "origin" in rendered:
+            segments.append(f" | origin:{rendered['origin']}")
+        segments.append("]")
+        line1 = "".join(segments)
+        body = rendered.get("text", "")
+        if body:
+            return f"{line1}\n{body}"
+        return line1
     lines = [
-        f"  id:    {task['id']}",
-        f"  state: {task['status']['state']}",
-        f"  from:  {metadata['fromAgentId']}",
+        f"  id:    {task['task_id']}",
+        f"  state: {task['status_state']}",
+        f"  from:  {task['from_agent_id']}",
     ]
-    # ``toAgentId`` is absent on broadcast_summary tasks; elide the line
-    # rather than rendering a "?" placeholder that hides the distinction.
-    if "toAgentId" in metadata:
-        lines.append(f"  to:    {metadata['toAgentId']}")
-    lines.append(f"  type:  {metadata['type']}")
-    if text:
-        lines.append(f"  text:  {text}")
+    if task.get("to_agent_id"):
+        lines.append(f"  to:    {task['to_agent_id']}")
+    lines.append(f"  type:  {task['type']}")
+    if task.get("text"):
+        lines.append(f"  text:  {task['text']}")
     return "\n".join(lines)
 
 
@@ -70,27 +214,53 @@ def format_indexed_list(
     formatter: Callable[[Any], str],
     empty_msg: str,
 ) -> str:
+    """Join formatted items with a single blank line between them.
+
+    Surface 17 dropped the legacy ``[1]`` / ``[2]`` index markers — agents
+    reference tasks by ``task_id`` (8-char prefix), not list index, so the
+    markers cost tokens without surfacing useful information.
+    """
     if not items:
         return empty_msg
-    parts = []
-    for i, item in enumerate(items, start=1):
-        parts.append(f"[{i}]")
-        parts.append(formatter(item))
-    return "\n".join(parts)
+    return "\n\n".join(formatter(item) for item in items)
 
 
-def format_agent(agent: dict) -> str:
+def format_agent(agent: dict, *, full: bool = False) -> str:
+    """Render an agent as text.
+
+    ``full=False`` (default): 1-line compact ``<id8> <name> <status>``.
+    ``full=True``: 4-line legacy block exposing the full ``agent_id``,
+    ``name``, truncated ``description`` (60 codepoints + ``…`` per
+    Surface 5), and ``status``.
+    """
+    if not full:
+        return f"{agent['agent_id'][:8]} {agent['name']} {agent['status']}"
+    description = truncate_text(agent["description"], full=False, limit=60)
     lines = [
         f"  agent_id:    {agent['agent_id']}",
         f"  name:        {agent['name']}",
-        f"  description: {agent['description']}",
+        f"  description: {description}",
         f"  status:      {agent['status']}",
     ]
     return "\n".join(lines)
 
 
-def format_session_create(data: dict) -> str:
+def format_session_create(data: dict, *, full: bool = False) -> str:
+    """Render the session-create result as text.
+
+    ``full=False`` (default): 1-line compact form
+    ``<session_id> director=<id8> admin=<id8>``.
+    ``full=True``: 7-line legacy block (session_id + director_agent_id on
+    their own lines, plus ``label``, ``created_at``, ``director_name``,
+    ``pane``, ``administrator``).
+    """
     director = data["director"]
+    if not full:
+        return (
+            f"{data['session_id']} "
+            f"director={director['agent_id'][:8]} "
+            f"admin={data['administrator_agent_id'][:8]}"
+        )
     placement = director["placement"]
     lines = [
         data["session_id"],
@@ -104,8 +274,20 @@ def format_session_create(data: dict) -> str:
     return "\n".join(lines)
 
 
-def format_member(data: dict) -> str:
+def format_member(data: dict, *, full: bool = False) -> str:
+    """Render a member-create result as text.
+
+    ``full=False`` (default): 1-line compact form
+    ``<id8> <name> backend=<coding_agent> pane=<pane_id>``.
+    ``full=True``: 6-line legacy block.
+    """
     placement = data["placement"]
+    if not full:
+        pane = placement["tmux_pane_id"] or "(pending)"
+        return (
+            f"{data['agent_id'][:8]} {data['name']} "
+            f"backend={placement['coding_agent']} pane={pane}"
+        )
     lines = [
         "Member registered and spawned.",
         f"  agent_id:  {data['agent_id']}",
@@ -118,6 +300,56 @@ def format_member(data: dict) -> str:
 
 
 _AGENT_ID_COLUMN_WIDTH = 14
+
+
+def format_member_list_activity(members: list) -> str:
+    """Render the activity-augmented member roster as text.
+
+    Surface 8 (design 0000049): one row per member with the four activity
+    proxies — ``last_sent`` / ``last_recv`` / ``last_ack`` / ``idle``.
+    Timestamps are rendered as ``HH:MM:SS`` (the time portion of the ISO
+    string); ``idle`` is humanized to ``Ns`` / ``Nm`` / ``Nh``.
+    """
+    if not members:
+        return "0 members."
+    count = len(members)
+    lines = [f"{count} member{'s' if count > 1 else ''}:"]
+    header = "  agent_id        name      status  last_sent  last_recv  last_ack   idle"
+    sep = "  --------------  --------  ------  ---------  ---------  ---------  -----"
+    lines.append(header)
+    lines.append(sep)
+    for m in members:
+        agent_id = m["agent_id"]
+        if len(agent_id) > _AGENT_ID_COLUMN_WIDTH:
+            agent_id = agent_id[: _AGENT_ID_COLUMN_WIDTH - 2] + "…"
+        lines.append(
+            f"  {agent_id:<{_AGENT_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
+            f"{m['status']:<6}  "
+            f"{_format_iso_hms(m['last_sent']):<9}  "
+            f"{_format_iso_hms(m['last_recv']):<9}  "
+            f"{_format_iso_hms(m['last_ack']):<9}  "
+            f"{_format_idle(m['idle'])}"
+        )
+    return "\n".join(lines)
+
+
+def _format_iso_hms(iso_ts: str | None) -> str:
+    if iso_ts is None:
+        return "-"
+    try:
+        return iso_ts.split("T")[1][:8]
+    except (IndexError, AttributeError):
+        return "-"
+
+
+def _format_idle(seconds: int | None) -> str:
+    if seconds is None:
+        return "-"
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    return f"{seconds // 3600}h"
 
 
 def format_member_list(members: list) -> str:

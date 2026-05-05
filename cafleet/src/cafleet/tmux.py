@@ -145,6 +145,64 @@ def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) ->
     return True
 
 
+def send_inline_preview(
+    *,
+    target_pane_id: str,
+    task_id_8: str,
+    sender_8: str,
+    ts: str,
+    text: str,
+) -> bool:
+    """Best-effort inline-preview keystroke for the recipient's pane.
+
+    Replaces the auto-fire ``send_poll_trigger`` invocation made by
+    ``broker._try_notify_recipient``. Sends a 2-line preview as a single
+    bracketed-paste literal — the envelope ``[cafleet msg <id8> from
+    <sender8> <ts>]`` on line 1, the raw body on line 2 — followed by
+    Enter to submit.
+
+    NOT a reuse of ``send_freetext_and_submit``: that helper prepends a
+    literal ``"4"`` to route the AskUserQuestion option-4 freetext slot,
+    which would corrupt the recipient's input box when no AskUserQuestion
+    frame is active.
+
+    Returns ``False`` on any tmux failure or when the binary is missing,
+    never raising. ``send_poll_trigger`` is preserved for the manual
+    ``cafleet member ping`` re-poke primitive.
+
+    The ``_SUBMIT_DELAY`` between the literal-text send and the Enter send
+    is required for the codex TUI's bracketed-paste finalisation; see
+    ``send_poll_trigger`` for the rationale (applied unconditionally to
+    keep the helper backend-agnostic).
+    """
+    if shutil.which("tmux") is None:
+        return False
+    # Sanitize newlines / carriage returns IN THE USER-SUPPLIED BODY only.
+    # The single ``\n`` in the f-string below (between the envelope line and
+    # the body line) is the contract — it is what makes the preview 2 lines
+    # — and is intentionally NOT sanitized. By contrast, any newline that
+    # arrives inside ``text`` would type as an Enter keystroke under tmux
+    # ``-l`` (literal mode), submitting the body as multiple separate user-
+    # turn inputs and corrupting the 2-line shape. Replacing each with U+23CE
+    # (RETURN SYMBOL) keeps the visual hint in 1 codepoint with no keystroke
+    # side effect.
+    sanitized_text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
+    payload = f"[cafleet msg {task_id_8} from {sender_8} {ts}]\n{sanitized_text}"
+    try:
+        _run(
+            ["tmux", "send-keys", "-t", target_pane_id, "-l", payload],
+            timeout=5,
+        )
+        time.sleep(_SUBMIT_DELAY)
+        _run(
+            ["tmux", "send-keys", "-t", target_pane_id, "Enter"],
+            timeout=5,
+        )
+    except TmuxError:
+        return False
+    return True
+
+
 def send_choice_key(*, target_pane_id: str, digit: int) -> None:
     """Send a single digit key in {1, 2, 3} to the pane (no Enter)."""
     if digit not in (1, 2, 3):
@@ -191,8 +249,13 @@ def send_bash_command(*, target_pane_id: str, command: str) -> None:
     _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
 
 
-def capture_pane(*, target_pane_id: str, lines: int = 80) -> str:
-    """Return the last ``lines`` lines of the pane's terminal buffer."""
+def capture_pane(*, target_pane_id: str, lines: int = 30) -> str:
+    """Return the last ``lines`` lines of the pane's terminal buffer.
+
+    Default lowered from 80 to 30 (Surface 9, design 0000049): per-tick
+    Director monitoring captures dominate token cost. Explicit ``lines``
+    overrides apply unchanged.
+    """
     if lines <= 0:
         raise TmuxError(f"capture_pane: lines must be positive, got {lines}")
     return _run(["tmux", "capture-pane", "-p", "-t", target_pane_id, "-S", f"-{lines}"])

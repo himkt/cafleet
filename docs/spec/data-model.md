@@ -1,8 +1,8 @@
 # SQLite Data Model Specification
 
-All core data structures — `Task`, `Message`, `Part`, `Artifact`, `AgentCard`, `TaskStatus`, `TaskState` — follow an internal A2A-inspired shape, but CAFleet does not maintain Pydantic models for them. There is no dependency on `a2a-sdk` or any external A2A library. SQLite stores the `Task` and `AgentCard` payloads as JSON `TEXT` blobs that the broker layer serializes via `json.dumps` and reads back as plain Python dicts via `json.loads` (see `cafleet/src/cafleet/broker.py`). Broker-specific information (routing metadata, etc.) lives in indexed columns alongside the JSON blob.
+After [design 0000049 Surface 14](../../design-docs/0000049-token-reduction/design-doc.md), the `Task` payload is fully relational — the `tasks.task_json` blob was dropped and every routing field plus the message body lives in its own typed column (see `cafleet/src/cafleet/broker.py`). The only remaining JSON `TEXT` blob is `agents.agent_card_json`, which still stores an `AgentCard`-shaped document; CAFleet does not maintain Pydantic models for either shape.
 
-The model is a **relational + document hybrid**: indexed fields are columns, while the A2A-inspired payloads are stored as opaque JSON `TEXT`. The columns are queried; the JSON blobs are not.
+The model is now **predominantly relational**: every queried field on `tasks` is a typed column, and the only opaque payload is the `agent_card_json` document on `agents`. The previous "relational + document hybrid" framing applied to the pre-Surface-14 schema and no longer reflects the on-disk layout.
 
 Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver (see `cafleet/src/cafleet/db/engine.py`'s `get_sync_engine` / `get_sync_sessionmaker`). Operators apply migrations once via `cafleet db init` before starting the server.
 
@@ -47,7 +47,7 @@ The `tmux` context (`session`, `window_id`, `pane_id`) is read **before** the tr
 | `status` | `TEXT` | `NOT NULL` | `'active'` or `'deregistered'`. |
 | `registered_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
 | `deregistered_at` | `TEXT` | nullable | ISO-8601 timestamp; populated on soft-delete. |
-| `agent_card_json` | `TEXT` | `NOT NULL` | AgentCard-shaped blob (A2A-inspired, internal schema). |
+| `agent_card_json` | `TEXT` | `NOT NULL` | AgentCard-shaped blob (CAFleet-defined internal schema). |
 
 Indexes:
 
@@ -103,7 +103,7 @@ A future `rename_agent` broker function MUST apply the same guard. `broker.broad
 | `status_state` | `TEXT` | `NOT NULL` | TaskState enum value (e.g., `TASK_STATE_INPUT_REQUIRED`). |
 | `status_timestamp` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; updated on every state change. Used for `ORDER BY DESC`. |
 | `origin_task_id` | `TEXT` | nullable | Broadcast grouping link. `NULL` on unicast deliveries. On broadcast delivery rows, holds the summary task's `task_id`, shared across every delivery row in the same broadcast. On the broadcast summary row itself, holds its own `task_id` (self-reference) so the delivery rows and the summary row all share a single grouping value. Historical rows from before the migration are `NULL`. |
-| `task_json` | `TEXT` | `NOT NULL` | Task-shaped blob (A2A-inspired, internal schema). |
+| `text` | `TEXT` | `NOT NULL` | Message body. Replaces the legacy `task_json` blob's `artifacts[0].parts[0].text` round-trip. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time (the migration backfilled the same value via `json_extract` from the pre-Surface-14 JSON blob, which already carried that generated string). Added by Alembic revision `0009_drop_task_json_add_text` (design 0000049 Surface 14). |
 
 Indexes:
 
@@ -113,6 +113,38 @@ Indexes:
 | `idx_tasks_from_agent_status_ts` | `(from_agent_id, status_timestamp DESC)` | WebUI sender outbox: `WHERE from_agent_id = ? ORDER BY status_timestamp DESC`. |
 
 `status_state` and `status_timestamp` are promoted to columns so filtering and ordering execute on the database, not in Python after fetching every blob. The two task indexes serve the inbox listing query (`WHERE context_id = ? ORDER BY status_timestamp DESC`) and the WebUI sender outbox query (`WHERE from_agent_id = ? ORDER BY status_timestamp DESC`) directly from the index.
+
+#### `tasks.task_json` removal (Alembic `0009_drop_task_json_add_text`)
+
+The `task_json` JSON blob column was dropped in design 0000049 Surface 14. The columns above (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, plus the new `text`) are sufficient to reconstruct every shape the broker, CLI, and WebUI need; the redundant blob added cost on every poll without unique data.
+
+Migration shape — a **single Alembic revision** so no in-between binary version sees a column the other does not (see `cafleet/src/cafleet/alembic/versions/0009_drop_task_json_add_text.py` for the canonical implementation):
+
+1. **Pre-flight check** — assert every existing row has a non-NULL body at `json_extract(task_json, '$.artifacts[0].parts[0].text')`. The check is universal: broadcast-summary rows already carry a generated summary string at that JSON path (the broker wrote `"Broadcast sent to N recipients"` there pre-Surface-14), so they pass the check on real data without any special casing. Migration aborts with `RuntimeError` listing the offending `task_id`s if any row violates.
+2. `ALTER TABLE tasks ADD COLUMN text TEXT` (initially nullable so the backfill UPDATE can populate it before NOT NULL is enforced).
+3. Backfill: `UPDATE tasks SET text = json_extract(task_json, '$.artifacts[0].parts[0].text')` for **all** rows (including broadcast-summary, which inherits its existing summary string).
+4. `ALTER TABLE tasks ALTER COLUMN text SET NOT NULL` (or SQLite-compatible rebuild via `op.batch_alter_table`).
+5. `ALTER TABLE tasks DROP COLUMN task_json` (folded into the same `batch_alter_table` as step 4 so SQLite's table rebuild happens once).
+
+**Migration risk**: irreversible without backup. Operators MUST take a backup before running `cafleet db init` against a populated database:
+
+```bash
+cp ~/.local/share/cafleet/registry.db ~/.local/share/cafleet/registry.db.pre-0049.bak
+cafleet db init
+```
+
+Restore is `cp registry.db.pre-0049.bak registry.db` followed by re-running the older `cafleet` binary. There is no programmatic downgrade — the `task_json` blob is gone after upgrade and the typed columns do not preserve the historical `metadata.kind`, `artifactId`, or `contextId` constants the blob carried.
+
+Callers rewritten in lockstep (no bridge period — single Alembic revision plus a single broker-side commit):
+
+- `_save_task` (writes typed columns, no blob).
+- `_read_task` (reads typed columns, no blob).
+- `_unicast_task_dict` (returns the typed-column flat dict shape).
+- Broadcast-summary builder (writes `text="Broadcast sent to N recipients"` directly into the typed column at insert time, populates the other typed columns alongside).
+- `poll_tasks` (SELECTs typed columns; no `json.loads`).
+- `ack_task` and `cancel_task` (round-trip via `_read_task`/`_save_task`; no payload changes).
+
+WebUI consumers (`webui_api.py` + `admin/src/types.ts`) update their type definitions to the typed-column flat shape; the `/ui/api/*` JSON response shape changes correspondingly (no `metadata` / `artifacts` wrappers).
 
 ### `agent_placements`
 

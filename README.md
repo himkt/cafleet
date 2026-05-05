@@ -1,6 +1,6 @@
 # CAFleet
 
-A2A-inspired message broker and agent registry for coding agents — a Claude Code plugin plus a local broker CLI.
+A message broker and agent registry for coding agents — a Claude Code plugin plus a local broker CLI.
 
 > **CAFleet is a local-only tool.** It runs on a single developer machine without authentication. Do not expose the broker on a shared network unless you accept that every listener can see and act within every session.
 
@@ -50,7 +50,18 @@ Want more? See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for the raw 
 | `cafleet server` | Start the admin WebUI on `127.0.0.1:8000` |
 | `cafleet doctor` | Print the calling pane's tmux identifiers |
 
-> CLI reference (per-command sections for `session`, `member`, `doctor`, `server`; `agent` / `message` / `db init` covered via the option-source table and `cafleet <cmd> --help`): [docs/spec/cli-options.md](docs/spec/cli-options.md).
+> CLI reference (per-command sections for `session`, `member`, `doctor`, `server`; `agent` / `message` / `db init` covered via the option-source table and `cafleet <cmd> --help`): [docs/spec/cli-options.md](docs/spec/cli-options.md). Message envelope shape (compact rendered + `--full` typed-column): [docs/spec/message-envelope.md](docs/spec/message-envelope.md).
+
+### Notable flags
+
+| Flag / variable | Where | One-line purpose |
+|---|---|---|
+| `--pretty` | global, before subcommand | Switch JSON output from the compact default to indented (`json.dumps(..., indent=2)`). Pair with `--json`. |
+| `--quiet` | `message send` / `message ack` / `member ping` | Emit only the new task id (8-char prefix); silence the rest of the echo. |
+| `--full` | `message *` / `agent list` / `agent show` | Disable body / envelope / agent-card truncation; emit the full typed-column shape. |
+| `--activity` | `member list` | Add per-member `last_sent` / `last_recv` / `last_ack` / `idle` columns aggregated from `tasks`. |
+| `--lines` / `--tail` / `--ansi` / `--no-ansi` | `member capture` | Default `--lines 30` (was 80); `--tail` is an alias for `--lines`; `--no-ansi` (default) strips ANSI escapes. |
+| `CAFLEET_MAX_TEXT_LEN` | env var | Body-truncation codepoint limit (default `200`). See "Message body truncation" below. |
 
 ### Coding agents
 
@@ -68,7 +79,7 @@ cafleet supports two coding-agent binaries for member panes: `claude` (Claude Co
 
 ### Message body truncation
 
-`cafleet message {send,poll,ack,cancel,show}` truncate the message `text` body to the first 10 Unicode codepoints with a literal `...` suffix in both text and `--json` output by default. This collapses per-poll token cost for inbox-polling agents whose bodies typically run 200–500 characters. Pass `--full` (per-subcommand option, placed after the subcommand name) to restore the un-truncated body. Empty bodies and bodies of 10 codepoints or fewer pass through unchanged with no `...` marker. `cafleet message broadcast` is different — it returns a `broadcast_summary` task whose text is generated summary text (e.g. `Broadcast sent to N recipients`), not the original body, so its summary always emits in full. The `--full` flag still exists on `message broadcast` for surface consistency but is a no-op. The `/ui/api/*` WebUI responses are not truncated.
+`cafleet message {send,poll,ack,cancel,show}` truncate the message `text` body to the first `CAFLEET_MAX_TEXT_LEN` Unicode codepoints (default `200`) plus a single `…` codepoint suffix in both text and `--json` output by default. This collapses per-poll token cost for inbox-polling agents whose bodies typically run several hundred characters. Pass `--full` (per-subcommand option, placed after the subcommand name) to restore the un-truncated body and the full typed-column envelope. Empty bodies and bodies whose codepoint length is at most `CAFLEET_MAX_TEXT_LEN` pass through unchanged with no marker. `cafleet message broadcast` is different — it returns a `broadcast_summary` task whose text is a generated summary string (e.g. `Broadcast sent to N recipients`), not the original body, so its summary always emits in full. The `--full` flag is preserved on `message broadcast` for surface consistency but is a no-op. The `/ui/api/*` WebUI responses are not truncated. See [docs/spec/cli-options.md](docs/spec/cli-options.md) § Message Body Truncation and [docs/spec/message-envelope.md](docs/spec/message-envelope.md) for the full rendering rules.
 
 ## Architecture
 

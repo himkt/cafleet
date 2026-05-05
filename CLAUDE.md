@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE taking any other action. Pay attention to override instructions (what NOT to do) in each entry.
 
-- `/cafleet` — Interact with the CAFleet A2A message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
+- `/cafleet` — Interact with the CAFleet message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
 - `/agent-team-monitoring` — Active monitoring mechanism. Documents the cron-like loop per backend (Claude Code uses CronCreate + /loop; codex has no in-session scheduling and uses fallback options) and the team-facilitation instructions. Foundation layer — load first.
 - `/agent-team-supervision` — Governance layer that loads agent-team-monitoring as a prerequisite. Defines Core Principle, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, and User Delegation. Load second.
 - `/design-doc` — Standardized design document format with template and guidelines. Load when writing or editing a design document.
@@ -16,12 +16,13 @@ When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE 
 
 ## Project: CAFleet
 
-A2A-inspired message broker + agent registry for coding agents.
+A message broker and agent registry for coding agents.
 
 - **Design document**: `design-docs/0000001-a2a-registry-broker/design-doc.md` (Status: Complete)
 - **Design document**: `design-docs/0000002-access-control/design-doc.md` — Access-control via shared API key (superseded by 0000015 session model) (Status: Complete)
 - **Design document**: `design-docs/0000010-sqlite-store-migration/design-doc.md` — SQLite + SQLAlchemy + Alembic store migration (Status: Complete)
 - **Design document**: `design-docs/0000046-codex-coding-agent/design-doc.md` — Add the OpenAI `codex` CLI as a second supported coding-agent backend alongside `claude` (Status: Approved)
+- **Design document**: `design-docs/0000049-token-reduction/design-doc.md` — Reduce token consumption across CAFleet output surfaces (Status: Complete)
 - **Single package**:
   - `cafleet/` — `cafleet` (FastAPI + SQLAlchemy + Alembic + click)
 - **Unified CLI command**: `cafleet` (with `db init` for schema management, `session` for session CRUD, and all agent/messaging commands)

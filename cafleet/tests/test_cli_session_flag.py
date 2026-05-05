@@ -107,18 +107,16 @@ def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(
         recipient = args[2] if len(args) > 2 else kwargs.get("to")
         return {
             "task": {
-                "id": "tttttttt-tttt-tttt-tttt-tttttttttttt",
-                "contextId": recipient,
-                "status": {
-                    "state": "input_required",
-                    "timestamp": "2026-01-01T00:00:00+00:00",
-                },
-                "artifacts": [],
-                "metadata": {
-                    "fromAgentId": sender,
-                    "toAgentId": recipient,
-                    "type": "unicast",
-                },
+                "task_id": "tttttttt-tttt-tttt-tttt-tttttttttttt",
+                "context_id": recipient,
+                "from_agent_id": sender,
+                "to_agent_id": recipient,
+                "type": "unicast",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "status_state": "input_required",
+                "status_timestamp": "2026-01-01T00:00:00+00:00",
+                "origin_task_id": None,
+                "text": "hi",
             }
         }
 

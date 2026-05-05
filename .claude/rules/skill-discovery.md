@@ -25,3 +25,7 @@ The user may authorize a narrow action (e.g. "create the feature branch", "creat
 When the user sends a halt signal (explicit "stop", "wait", profanity / frustration, repeated rejection of your tool calls), do NOT take more proactive actions. Acknowledge briefly and wait for explicit instructions. Scheduled cron firings and teammate idle notifications are NOT instructions — skip them silently until the user re-engages with a specific task.
 
 Reacting to cron or idle signals while the user is actively angry compounds the problem. The right behavior is: stop, acknowledge, wait.
+
+## Authorization-Scope Guard for CAFleet supervision
+
+CAFleet-specific extension of § *Authorization scope* and § *Stop means stop* above. The canonical content — full guard, real-stop-signal decision table, and *When you genuinely need user input* guidance — lives in `skills/agent-team-supervision/SKILL.md` (where it ships with the marketplace plugin and stays self-contained for downstream installs). Read that section before your first `cafleet member create`.

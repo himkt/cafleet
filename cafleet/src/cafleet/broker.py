@@ -8,6 +8,7 @@ import click
 from sqlalchemy import and_, delete, exists, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from cafleet.config import settings
 from cafleet.db.engine import get_sync_sessionmaker
 from cafleet.db.models import Agent, AgentPlacement, Session, Task
 from cafleet.tmux import DirectorContext
@@ -16,6 +17,19 @@ _DIRECTOR_NAME = "Director"
 _DIRECTOR_DESCRIPTION = "Root Director for this session"
 
 ADMINISTRATOR_KIND = "builtin-administrator"
+
+_TASK_COLUMNS = (
+    "task_id",
+    "context_id",
+    "from_agent_id",
+    "to_agent_id",
+    "type",
+    "created_at",
+    "status_state",
+    "status_timestamp",
+    "origin_task_id",
+    "text",
+)
 
 
 class AdministratorProtectedError(Exception):
@@ -60,13 +74,15 @@ def _agent_is_active_in_session(session, agent_id: str, session_id: str) -> bool
 
 
 def _try_notify_recipient(
-    session, *, session_id: str, recipient_id: str, sender_id: str
+    session, *, recipient_id: str, sender_id: str, task_dict: dict
 ) -> bool:
-    """Best-effort ``tmux send-keys`` poll trigger for the recipient's pane.
+    """Best-effort inline-preview keystroke for the recipient's pane.
 
-    The literal ``cafleet --session-id <sid> poll --agent-id <aid>`` string
-    is injected so the recipient's ``permissions.allow`` matches it exactly;
-    failures are swallowed because the queue remains the source of truth.
+    Surface 15: replaces the legacy poll-command keystroke with a 2-line
+    preview of the message itself — the recipient's TUI processes the
+    keystrokes as a fresh user-turn input and the recipient acks via
+    ``cafleet message ack --task-id <id>``. The queue remains the source
+    of truth; failures are swallowed.
     """
     if recipient_id == sender_id:
         return False
@@ -77,14 +93,24 @@ def _try_notify_recipient(
     ).scalar_one_or_none()
     if pane_id is None:
         return False
-    # Local import so tests that monkeypatch ``cafleet.tmux.send_poll_trigger``
+    # Local import so tests that monkeypatch ``cafleet.tmux.send_inline_preview``
     # get picked up on every call rather than bound once at broker import.
-    from cafleet.tmux import send_poll_trigger
+    from cafleet.tmux import send_inline_preview
 
-    return send_poll_trigger(
+    # Truncate before keystroking so a multi-KB body cannot dump itself into
+    # the recipient's pane. Mirrors output.truncate_text's contract: same
+    # limit (``settings.max_text_len`` / ``CAFLEET_MAX_TEXT_LEN``, default
+    # 200) and same single-codepoint U+2026 suffix on overflow.
+    preview_text = task_dict["text"]
+    if len(preview_text) > settings.max_text_len:
+        preview_text = preview_text[: settings.max_text_len] + "…"
+
+    return send_inline_preview(
         target_pane_id=pane_id,
-        session_id=session_id,
-        agent_id=recipient_id,
+        task_id_8=task_dict["task_id"][:8],
+        sender_8=sender_id[:8],
+        ts=task_dict["status_timestamp"],
+        text=preview_text,
     )
 
 
@@ -534,6 +560,103 @@ def list_members(session_id: str, director_agent_id: str) -> list[dict]:
     ]
 
 
+def list_members_with_activity(session_id: str, director_agent_id: str) -> list[dict]:
+    """``list_members`` plus per-member activity proxies sourced from ``tasks``.
+
+    ``last_sent`` / ``last_recv`` / ``last_ack`` aggregate ``status_timestamp``
+    over the ``tasks`` table per agent. All three filter ``Task.type !=
+    'broadcast_summary'`` (mirrors ``poll_tasks``); broadcast_summary rows
+    land in the broadcaster's own context with ``status_state='completed'``
+    and would otherwise pollute every proxy for the broadcaster.
+
+    ``idle`` is the integer-second delta between ``now`` and the most recent
+    of ``last_sent`` / ``last_recv``; ``None`` when both are ``None``.
+    """
+    last_sent_sq = (
+        select(func.max(Task.status_timestamp))
+        .where(
+            Task.from_agent_id == Agent.agent_id,
+            Task.type != "broadcast_summary",
+        )
+        .correlate(Agent)
+        .scalar_subquery()
+    )
+    last_recv_sq = (
+        select(func.max(Task.status_timestamp))
+        .where(
+            Task.context_id == Agent.agent_id,
+            Task.type != "broadcast_summary",
+        )
+        .correlate(Agent)
+        .scalar_subquery()
+    )
+    last_ack_sq = (
+        select(func.max(Task.status_timestamp))
+        .where(
+            Task.context_id == Agent.agent_id,
+            Task.status_state == "completed",
+            Task.type != "broadcast_summary",
+        )
+        .correlate(Agent)
+        .scalar_subquery()
+    )
+    stmt = (
+        select(
+            Agent.agent_id,
+            Agent.name,
+            Agent.description,
+            Agent.status,
+            Agent.registered_at,
+            AgentPlacement.director_agent_id,
+            AgentPlacement.tmux_session,
+            AgentPlacement.tmux_window_id,
+            AgentPlacement.tmux_pane_id,
+            AgentPlacement.coding_agent,
+            AgentPlacement.created_at,
+            last_sent_sq.label("last_sent"),
+            last_recv_sq.label("last_recv"),
+            last_ack_sq.label("last_ack"),
+        )
+        .join(AgentPlacement, Agent.agent_id == AgentPlacement.agent_id)
+        .where(
+            Agent.session_id == session_id,
+            Agent.status == "active",
+            AgentPlacement.director_agent_id == director_agent_id,
+        )
+    )
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        rows = session.execute(stmt).all()
+
+    now = datetime.now(UTC)
+    return [
+        {
+            "agent_id": row.agent_id,
+            "name": row.name,
+            "description": row.description,
+            "status": row.status,
+            "registered_at": row.registered_at,
+            "placement": _placement_dict(row),
+            "last_sent": row.last_sent,
+            "last_recv": row.last_recv,
+            "last_ack": row.last_ack,
+            "idle": _idle_seconds(now, row.last_sent, row.last_recv),
+        }
+        for row in rows
+    ]
+
+
+def _idle_seconds(
+    now: datetime, last_sent: str | None, last_recv: str | None
+) -> int | None:
+    candidates = [t for t in (last_sent, last_recv) if t is not None]
+    if not candidates:
+        return None
+    most_recent = datetime.fromisoformat(max(candidates))
+    delta = (now - most_recent).total_seconds()
+    return max(0, int(delta))
+
+
 def verify_agent_session(agent_id: str, session_id: str) -> bool:
     """Return True iff the agent belongs to the session (any status)."""
     sm = get_sync_sessionmaker()
@@ -548,22 +671,23 @@ def verify_agent_session(agent_id: str, session_id: str) -> bool:
         ).scalar_one()
 
 
+def _row_to_task_dict(row) -> dict:
+    return {col: getattr(row, col) for col in _TASK_COLUMNS}
+
+
 def _save_task(session, task_dict: dict) -> None:
-    """UPSERT the task, promoting indexed fields from the metadata blob."""
-    metadata = task_dict["metadata"]
+    """UPSERT the task; ``created_at`` is preserved across conflicts."""
     stmt = sqlite_insert(Task).values(
-        task_id=task_dict["id"],
-        context_id=task_dict["contextId"],
-        from_agent_id=metadata["fromAgentId"],
-        # ``broadcast_summary`` has no recipient; store empty so the NOT NULL
-        # column stays satisfied and the row still shows up in sender queries.
-        to_agent_id=metadata.get("toAgentId", ""),
-        type=metadata["type"],
-        created_at=_now_iso(),
-        status_state=task_dict["status"]["state"],
-        status_timestamp=task_dict["status"]["timestamp"],
-        origin_task_id=metadata.get("originTaskId"),
-        task_json=json.dumps(task_dict),
+        task_id=task_dict["task_id"],
+        context_id=task_dict["context_id"],
+        from_agent_id=task_dict["from_agent_id"],
+        to_agent_id=task_dict["to_agent_id"],
+        type=task_dict["type"],
+        created_at=task_dict["created_at"],
+        status_state=task_dict["status_state"],
+        status_timestamp=task_dict["status_timestamp"],
+        origin_task_id=task_dict["origin_task_id"],
+        text=task_dict["text"],
     )
     stmt = stmt.on_conflict_do_update(
         index_elements=["task_id"],
@@ -571,17 +695,21 @@ def _save_task(session, task_dict: dict) -> None:
             "status_state": stmt.excluded.status_state,
             "status_timestamp": stmt.excluded.status_timestamp,
             "origin_task_id": stmt.excluded.origin_task_id,
-            "task_json": stmt.excluded.task_json,
+            "text": stmt.excluded.text,
         },
     )
     session.execute(stmt)
 
 
 def _read_task(session, task_id: str) -> dict | None:
-    task_json = session.execute(
-        select(Task.task_json).where(Task.task_id == task_id)
-    ).scalar_one_or_none()
-    return json.loads(task_json) if task_json is not None else None
+    row = session.execute(
+        select(*(getattr(Task, col) for col in _TASK_COLUMNS)).where(
+            Task.task_id == task_id
+        )
+    ).first()
+    if row is None:
+        return None
+    return _row_to_task_dict(row)
 
 
 def _unicast_task_dict(
@@ -592,25 +720,17 @@ def _unicast_task_dict(
     now: str,
     origin_task_id: str | None = None,
 ) -> dict:
-    metadata: dict = {
-        "fromAgentId": sender_id,
-        "toAgentId": recipient_id,
-        "type": "unicast",
-    }
-    if origin_task_id is not None:
-        metadata["originTaskId"] = origin_task_id
     return {
-        "id": str(uuid.uuid4()),
-        "contextId": recipient_id,
-        "status": {"state": "input_required", "timestamp": now},
-        "artifacts": [
-            {
-                "artifactId": str(uuid.uuid4()),
-                "parts": [{"kind": "text", "text": text}],
-            }
-        ],
-        "metadata": metadata,
-        "history": [],
+        "task_id": str(uuid.uuid4()),
+        "context_id": recipient_id,
+        "from_agent_id": sender_id,
+        "to_agent_id": recipient_id,
+        "type": "unicast",
+        "created_at": now,
+        "status_state": "input_required",
+        "status_timestamp": now,
+        "origin_task_id": origin_task_id,
+        "text": text,
     }
 
 
@@ -648,9 +768,9 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
         _save_task(session, task_dict)
         notification_sent = _try_notify_recipient(
             session,
-            session_id=session_id,
             recipient_id=to,
             sender_id=agent_id,
+            task_dict=task_dict,
         )
 
     return {"task": task_dict, "notification_sent": notification_sent}
@@ -687,6 +807,7 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
             ).scalars()
         )
 
+        deliveries: list[tuple[str, dict]] = []
         for recipient_id in recipient_ids:
             delivery_dict = _unicast_task_dict(
                 recipient_id=recipient_id,
@@ -696,48 +817,33 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
                 origin_task_id=summary_task_id,
             )
             _save_task(session, delivery_dict)
+            deliveries.append((recipient_id, delivery_dict))
 
         now = _now_iso()
         summary_dict = {
-            "id": summary_task_id,
-            "contextId": agent_id,
-            "status": {
-                "state": "completed",
-                "timestamp": now,
-            },
-            "artifacts": [
-                {
-                    "artifactId": str(uuid.uuid4()),
-                    "parts": [
-                        {
-                            "kind": "text",
-                            "text": f"Broadcast sent to {len(recipient_ids)} recipients",
-                        }
-                    ],
-                }
-            ],
-            "metadata": {
-                "fromAgentId": agent_id,
-                "type": "broadcast_summary",
-                "recipientCount": len(recipient_ids),
-                "recipientIds": recipient_ids,
-                "originTaskId": summary_task_id,
-            },
-            "history": [],
+            "task_id": summary_task_id,
+            "context_id": agent_id,
+            "from_agent_id": agent_id,
+            "to_agent_id": "",
+            "type": "broadcast_summary",
+            "created_at": now,
+            "status_state": "completed",
+            "status_timestamp": now,
+            "origin_task_id": summary_task_id,
+            "text": f"Broadcast sent to {len(recipient_ids)} recipients",
         }
         _save_task(session, summary_dict)
 
         notifications_sent_count = sum(
             _try_notify_recipient(
                 session,
-                session_id=session_id,
                 recipient_id=recipient_id,
                 sender_id=agent_id,
+                task_dict=delivery_dict,
             )
-            for recipient_id in recipient_ids
+            for recipient_id, delivery_dict in deliveries
         )
 
-    summary_dict["metadata"]["notificationsSentCount"] = notifications_sent_count
     return [
         {"task": summary_dict, "notifications_sent_count": notifications_sent_count}
     ]
@@ -751,7 +857,7 @@ def poll_tasks(
 ) -> list[dict]:
     """Return tasks addressed to ``agent_id`` in DESC timestamp order."""
     stmt = (
-        select(Task.task_json)
+        select(*(getattr(Task, col) for col in _TASK_COLUMNS))
         .where(
             Task.context_id == agent_id,
             Task.type != "broadcast_summary",
@@ -770,7 +876,7 @@ def poll_tasks(
     with sm() as session:
         rows = session.execute(stmt).all()
 
-    return [json.loads(row[0]) for row in rows]
+    return [_row_to_task_dict(row) for row in rows]
 
 
 def ack_task(agent_id: str, task_id: str) -> dict:
@@ -781,17 +887,14 @@ def ack_task(agent_id: str, task_id: str) -> dict:
         if task_dict is None:
             raise ValueError(f"Task {task_id} not found")
 
-        if task_dict["contextId"] != agent_id:
+        if task_dict["context_id"] != agent_id:
             raise PermissionError("Only the recipient can ACK a task")
 
-        if task_dict["status"]["state"] != "input_required":
-            raise ValueError(f"Cannot ACK task in state {task_dict['status']['state']}")
+        if task_dict["status_state"] != "input_required":
+            raise ValueError(f"Cannot ACK task in state {task_dict['status_state']}")
 
-        now = _now_iso()
-        task_dict["status"] = {
-            "state": "completed",
-            "timestamp": now,
-        }
+        task_dict["status_state"] = "completed"
+        task_dict["status_timestamp"] = _now_iso()
 
         _save_task(session, task_dict)
 
@@ -806,19 +909,14 @@ def cancel_task(agent_id: str, task_id: str) -> dict:
         if task_dict is None:
             raise ValueError(f"Task {task_id} not found")
 
-        if task_dict["metadata"]["fromAgentId"] != agent_id:
+        if task_dict["from_agent_id"] != agent_id:
             raise PermissionError("Only the sender can cancel a task")
 
-        if task_dict["status"]["state"] != "input_required":
-            raise ValueError(
-                f"Cannot cancel task in state {task_dict['status']['state']}"
-            )
+        if task_dict["status_state"] != "input_required":
+            raise ValueError(f"Cannot cancel task in state {task_dict['status_state']}")
 
-        now = _now_iso()
-        task_dict["status"] = {
-            "state": "canceled",
-            "timestamp": now,
-        }
+        task_dict["status_state"] = "canceled"
+        task_dict["status_timestamp"] = _now_iso()
 
         _save_task(session, task_dict)
 
@@ -876,39 +974,14 @@ def list_session_agents(session_id: str) -> list[dict]:
 
 def _list_tasks_where(*filters) -> list[dict]:
     stmt = (
-        select(
-            Task.task_id,
-            Task.context_id,
-            Task.from_agent_id,
-            Task.to_agent_id,
-            Task.type,
-            Task.created_at,
-            Task.status_state,
-            Task.status_timestamp,
-            Task.origin_task_id,
-            Task.task_json,
-        )
+        select(*(getattr(Task, col) for col in _TASK_COLUMNS))
         .where(*filters, Task.type != "broadcast_summary")
         .order_by(Task.status_timestamp.desc())
     )
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(stmt).all()
-    return [
-        {
-            "task_id": row.task_id,
-            "context_id": row.context_id,
-            "from_agent_id": row.from_agent_id,
-            "to_agent_id": row.to_agent_id,
-            "type": row.type,
-            "created_at": row.created_at,
-            "status_state": row.status_state,
-            "status_timestamp": row.status_timestamp,
-            "origin_task_id": row.origin_task_id,
-            "task_json": row.task_json,
-        }
-        for row in rows
-    ]
+    return [_row_to_task_dict(row) for row in rows]
 
 
 def list_inbox(agent_id: str) -> list[dict]:
@@ -922,15 +995,9 @@ def list_sent(agent_id: str) -> list[dict]:
 
 
 def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
-    """Return the session's recent tasks in DESC timestamp order."""
+    """Return the session's recent tasks (flat typed-column dicts) in DESC timestamp order."""
     stmt = (
-        select(
-            Task.task_id,
-            Task.origin_task_id,
-            Task.created_at,
-            Task.status_timestamp,
-            Task.task_json,
-        )
+        select(*(getattr(Task, col) for col in _TASK_COLUMNS))
         .join(Agent, Task.from_agent_id == Agent.agent_id)
         .where(
             Agent.session_id == session_id,
@@ -942,14 +1009,7 @@ def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(stmt).all()
-    return [
-        {
-            "task": json.loads(row.task_json),
-            "origin_task_id": row.origin_task_id,
-            "created_at": row.created_at,
-        }
-        for row in rows
-    ]
+    return [_row_to_task_dict(row) for row in rows]
 
 
 def get_agent_names(agent_ids: list[str]) -> dict[str, str]:
@@ -984,9 +1044,8 @@ def get_task(session_id: str, task_id: str) -> dict:
         if task_dict is None:
             raise ValueError(f"Task {task_id} not found")
 
-        metadata = task_dict["metadata"]
-        endpoint_ids = [metadata["fromAgentId"]]
-        to_id = metadata.get("toAgentId")
+        endpoint_ids = [task_dict["from_agent_id"]]
+        to_id = task_dict["to_agent_id"]
         if to_id:
             endpoint_ids.append(to_id)
         in_session = session.execute(

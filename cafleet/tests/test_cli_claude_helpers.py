@@ -169,41 +169,39 @@ _STANDARD_KWARGS = {
 
 
 def test_member_prompt_template__has_required_placeholders():
+    """Post-Surface-6: the slim spawn prompt drops ``{director_name}``."""
     cli = _cli()
     template = cli._MEMBER_PROMPT_TEMPLATE
     assert "{session_id}" in template
     assert "{agent_id}" in template
-    assert "{director_name}" in template
+    assert "{director_name}" not in template
     assert "{director_agent_id}" in template
 
 
-def test_member_prompt_template__phrasing_is_backend_neutral():
-    """The template no longer hardcodes 'Load Skill(cafleet).'.
-
-    Both backends must be addressed: Claude Code via its ``Skill()`` tool,
-    Codex via reading ``docs/codex-members.md`` directly. Per design 0000046 §4.
-    """
+def test_member_prompt_template__phrasing_is_short_and_backend_neutral():
+    """Post-Surface-6: the slim 2-line spawn prompt drops the codex/claude
+    branch from the template body. Codex orientation lives in the cafleet
+    skill core SKILL.md, not the spawn prompt itself."""
     cli = _cli()
     template = cli._MEMBER_PROMPT_TEMPLATE
-    # The bare directive that was claude-only must be gone.
-    assert "Load Skill(cafleet)." not in template
-    # Both backends must be addressed by name.
-    assert "Claude Code" in template
-    assert "Codex" in template
-    # The codex doc pointer must be present so codex members can self-orient.
-    assert "docs/codex-members.md" in template
+    # Surface 6 budget: ≤ 70 tokens post-substitution. Loose proxy: keep
+    # the template under 200 codepoints (excluding placeholders).
+    assert len(template) < 250, (
+        f"template too long ({len(template)} codepoints): {template!r}"
+    )
+    # The skill load directive remains backend-neutral.
+    assert "skill 'cafleet'" in template
 
 
 def test_member_prompt_template__format_succeeds_with_standard_kwargs():
     cli = _cli()
     template = cli._MEMBER_PROMPT_TEMPLATE
-    result = template.format(**_STANDARD_KWARGS)
+    kwargs = {k: v for k, v in _STANDARD_KWARGS.items() if k != "director_name"}
+    result = template.format(**kwargs)
     assert "550e8400-e29b-41d4-a716-446655440000" in result
     assert "7ba91234-5678-90ab-cdef-112233445566" in result
-    assert "Alice" in result
     assert "dir-001" in result
     # Substitution is total: no raw placeholders survive the .format() call.
     assert "{session_id}" not in result
     assert "{agent_id}" not in result
-    assert "{director_name}" not in result
     assert "{director_agent_id}" not in result

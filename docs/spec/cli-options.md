@@ -21,9 +21,21 @@ Placed **before** the subcommand:
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--json` | no | Emit JSON output. |
+| `--json` | no | Emit JSON output. Default JSON encoding is compact (`json.dumps(..., separators=(",",":"))`); pair with `--pretty` for indented output. |
+| `--pretty` | no | Switch JSON output from the compact default to indented (`json.dumps(..., indent=2)`). No effect on text-mode output. Composes orthogonally with `--json`. Added by design 0000049 Surface 1. |
 | `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
+
+### `--full` semantics (cross-subcommand escape hatch)
+
+`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch. A single flag covers four overloaded surfaces — design 0000049 Concerns §1 documents the deliberate decision to keep one flag rather than introduce `--full-envelope` / `--full-recipients` / `--full-card` / `--full-body` variants:
+
+| Subcommand | Default behavior | `--full` behavior |
+|---|---|---|
+| `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix (see [Message Body Truncation](#message-body-truncation)). Compact rendered envelope: `id` (8-char prefix), `from` (8-char prefix), `ts`, `text`, plus `kind`/`origin` only when present. | Untruncated `text` AND the full typed-column envelope (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text`). |
+| `message broadcast` | One-line summary (`broadcast id=<id8> recipients=<count>`). The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper — there are no per-recipient envelopes or `recipient_ids` list in the response. | No effect. `--full` is preserved for surface consistency with the five `message {send,poll,ack,cancel,show}` subcommands but is a no-op on broadcast. |
+| `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints; `agent_card_json` projected to the minimum-required fields. | Four-line per-agent block (the legacy view) including untruncated `description` and the full `agent_card_json` blob. |
+| `member capture` | Default `--lines 30` (down from 80); ANSI escape sequences stripped in post-process unless `--ansi` is supplied. | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
 
 ### Subcommands that require `--session-id`
 
@@ -73,9 +85,15 @@ Then pass the printed UUID as `--session-id <uuid>` on every client + member com
 
 ## Message Body Truncation
 
-The five subcommands that emit a user-supplied delivery body — `cafleet message {send,poll,ack,cancel,show}` — truncate the `text` body to the first 10 Unicode codepoints plus a literal `...` suffix by default. The truncation applies in both text and `--json` output and is implemented in `cafleet/src/cafleet/output.py` (`truncate_text`, `truncate_task_text`) wired into the shared `_client_command` decorator.
+The five subcommands that emit a user-supplied delivery body — `cafleet message {send,poll,ack,cancel,show}` — truncate the `text` body to the first `CAFLEET_MAX_TEXT_LEN` Unicode codepoints (default `200`) plus a single `…` codepoint suffix by default. The truncation applies in both text and `--json` output and is implemented in `cafleet/src/cafleet/output.py` (`truncate_text`, `truncate_task_text`) wired into the shared `_client_command` decorator.
 
-`cafleet message broadcast` is different — `broker.broadcast_message` returns a `broadcast_summary` task whose `artifacts[].parts[].text` is a generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. Truncating that summary would hide the recipient count, so `message_broadcast` runs with `truncates_task_text=False` and its summary always emits in full. The `--full` Click option is preserved on `message broadcast` for flag-surface consistency across all six subcommands but is a no-op there.
+| Variable | Settings field | Default | Notes |
+|---|---|---|---|
+| `CAFLEET_MAX_TEXT_LEN` | `Settings.max_text_len` | `200` | Maximum codepoint length of the rendered `text` body before the `…` suffix is appended. Wired via `Field(validation_alias="CAFLEET_MAX_TEXT_LEN")` on `Settings`, matching the `CAFLEET_`-prefixed convention already used by `CAFLEET_DATABASE_URL`, `CAFLEET_BROKER_HOST`, and `CAFLEET_BROKER_PORT`. Also used by `agent.description` truncation (limit `60`, hard-coded) and metadata-string truncation (limit `80`, hard-coded). |
+
+The suffix changed from the three ASCII characters `...` to the single Unicode codepoint `…` (U+2026 HORIZONTAL ELLIPSIS) in design 0000049 Surface 5; the suffix is exactly one codepoint with no count and no companion `text_length` field.
+
+`cafleet message broadcast` is different — `broker.broadcast_message` returns a `broadcast_summary` task whose top-level `text` column is a broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. Post-Surface-14 the task envelope is a flat typed-column dict with no `metadata` / `artifacts` wrappers; see [message-envelope.md](./message-envelope.md) for the canonical schema. Truncating that summary would hide the recipient count, so `message_broadcast` runs with `truncates_task_text=False` and its summary always emits in full. The `--full` Click option is preserved on `message broadcast` for flag-surface consistency across all six subcommands but is a no-op there.
 
 The table describes the resulting `text` value AFTER truncation. Text mode omits the `text:` line entirely when the resulting value is empty, while `--json` always includes it.
 
@@ -83,14 +101,15 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 |---|---|---|
 | `None` / not present | not present | not present |
 | `""` | text mode: `text:` line omitted, `--json`: empty string | text mode: `text:` line omitted, `--json`: empty string |
-| length ≤ 10 codepoints | unchanged | unchanged |
-| length > 10 codepoints | `text[:10] + "..."` | unchanged |
+| length ≤ `CAFLEET_MAX_TEXT_LEN` codepoints | unchanged | unchanged |
+| length > `CAFLEET_MAX_TEXT_LEN` codepoints | `text[:CAFLEET_MAX_TEXT_LEN] + "…"` | unchanged |
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--full` | no | Per-subcommand option (placed after the subcommand name, like `--agent-id` and `--task-id`). Disables truncation; emits the full message body. Composes orthogonally with `--json`. |
+| `--full` | no | Per-subcommand option (placed after the subcommand name, like `--agent-id` and `--task-id`). Disables truncation; emits the full message body and the full typed-column envelope. Composes orthogonally with `--json`. See [`--full` semantics](#full-semantics-cross-subcommand-escape-hatch) for the cross-subcommand summary. |
+| `--quiet` | no | On `message send`, `message ack`, and `member ping`: emit only the new task id (8-char prefix) on stdout, nothing else. Mutually exclusive with `--full`; the two are not expected to be combined. Added by design 0000049 Surface 3. |
 
-Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split. The suffix is exactly the three ASCII characters `...` with no count and no companion `text_length` field.
+Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split.
 
 ```bash
 cafleet --session-id <session-id> message poll --agent-id <my-agent-id>          # default: text truncated to 10 cp + "..."
@@ -365,6 +384,21 @@ Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet
 | Flag | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID |
+| `--activity` | no | Aggregate per-member activity timestamps from the `tasks` table and render `last_sent`, `last_recv`, `last_ack`, and `idle` columns alongside the default member columns. The aggregation filters `Task.type != 'broadcast_summary'` for the `last_ack` proxy (mirrors `poll_tasks`). Added by design 0000049 Surface 8 — primary inputs to the Director's `/loop` monitoring tick. |
+
+#### `member list --activity` output
+
+```
+$ cafleet --session-id <s> member list --agent-id <d> --activity
+3 members:
+  agent_id        name      state   last_sent    last_recv    last_ack     idle
+  --------------  --------  ------  -----------  -----------  -----------  -----
+  abc12345        alice     active  12:34:56     12:34:50     12:34:50     6s
+  def67890        bob       active  12:30:11     12:33:02     12:33:02     2m
+  ghi24680        carol     idle    -            12:20:00     12:20:00     14m
+```
+
+`last_sent` / `last_recv` come from `MAX(tasks.status_timestamp)` filtered by `from_agent_id` / `context_id`; `last_ack` is `MAX(tasks.status_timestamp WHERE status_state='completed' AND type != 'broadcast_summary')`. `idle` is wall-time minus `MAX(last_sent, last_recv)`. Existing indexes `idx_tasks_context_status_ts` and `idx_tasks_from_agent_status_ts` cover the aggregation joins; benchmark target is < 100 ms at 1k messages.
 
 ### `member capture`
 
@@ -372,7 +406,11 @@ Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID |
 | `--member-id` | yes | Target member's agent ID |
-| `--lines` | no | Number of trailing lines to capture (default: 80) |
+| `--lines` | no | Number of trailing lines to capture (default: **30**, lowered from 80 in design 0000049 Surface 9). |
+| `--tail` | no | Alias for `--lines`. Added by design 0000049 Surface 9 for muscle-memory consistency with `tail -n`. |
+| `--ansi` / `--no-ansi` | no | Default `--no-ansi`: ANSI escape sequences are stripped via `re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)` and carriage-return fragments are de-fragmented for TUI redraws. Pass `--ansi` to disable post-processing and emit the raw tmux capture. Added by design 0000049 Surface 9. |
+
+The lowered default reflects the per-tick cost analysis in design 0000049 (raw 200-line capture per member dominates Director token cost). `--lines 30` is calibrated to keep stalled `AskUserQuestion` prompt headers visible; if a stalled-prompt fixture truncates the prompt header, the default is bumped to 50.
 
 ### `member send-input`
 

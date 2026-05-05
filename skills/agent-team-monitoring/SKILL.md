@@ -86,12 +86,12 @@ Substitute the literal UUIDs into every `<session-id>`, `<director-agent-id>`, a
 ```
 Monitor team health (interval: 1 minute). For each member spawned via `cafleet member create`:
 
-1. Run `cafleet --session-id <session-id> --json member list --agent-id <director-agent-id>` to get all members.
-2. Run `cafleet --session-id <session-id> --json message poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check, with +00:00 suffix — not Z>"` to check for incoming messages. ACK any progress reports.
+1. Run `cafleet --session-id <session-id> --json member list --agent-id <director-agent-id>` to enumerate members.
+2. Run `cafleet --session-id <session-id> --json message poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check, with +00:00 suffix — not Z>"` to check incoming. ACK any progress reports.
 3. For each member that has NOT sent a message since last check, run `cafleet --session-id <session-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id> --lines 200` to inspect their terminal.
-4. If a member's terminal shows no forward progress since last check, send them a specific instruction via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Report your progress now. If blocked, state what is blocking you."` (the broker auto-fires a `cafleet message poll` keystroke into the member's pane to pick up the message).
-5. If a member appears stalled despite a recent `message send` (the broker auto-fire was missed or arrived while the pane was busy), or after a long idle window with a queued message still unread, fire `cafleet --session-id <session-id> member ping --agent-id <director-agent-id> --member-id <member-agent-id>` to manually inject the same poll keystroke. This is the dedicated re-poke primitive — pre-approved in `permissions.allow`, no positional argument. Do NOT use `cafleet member exec` for this purpose; that is for shell dispatch only.
-6. If all members have reported completion (via messages or visible in terminal output), report to the user: "All deliverables are ready for review."
+4. If a member's terminal shows no forward progress, send a specific instruction via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Report your progress now. If blocked, state what is blocking you."`.
+5. If a member appears stalled despite a recent `message send` (auto-fire missed or pane was busy), re-poke its inbox via `cafleet --session-id <session-id> member ping --agent-id <director-agent-id> --member-id <member-agent-id>`.
+6. If all members have reported completion, report to the user: "All deliverables are ready for review."
 7. If a member has been nudged 2 times with no progress, escalate to the user.
 ```
 
