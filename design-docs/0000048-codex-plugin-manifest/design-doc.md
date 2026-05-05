@@ -1,7 +1,7 @@
 # Codex Plugin Manifest
 
 **Status**: Approved
-**Progress**: 4/7 tasks complete
+**Progress**: 5/7 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -149,7 +149,7 @@ Manual operator verification is the only acceptance check. There is no JSON-sche
 
 `codex plugin marketplace add himkt/cafleet` fetches the marketplace from GitHub, so the implementation branch MUST be reachable on the public repo before this step runs. Either land the changes on the default branch (`main`), or push the branch and pass the appropriate ref to the marketplace-add command per Codex's documented syntax. Local-only changes will not satisfy this step.
 
-- [ ] Push the implementation branch to GitHub so `codex plugin marketplace add himkt/cafleet` can fetch it. The simplest path is to merge to `main`; alternatively, push the branch and pass its ref to the marketplace-add command. Local commits alone do NOT satisfy this task. <!-- completed: -->
+- [x] Push the implementation branch to GitHub so `codex plugin marketplace add himkt/cafleet` can fetch it. The simplest path is to merge to `main`; alternatively, push the branch and pass its ref to the marketplace-add command. Local commits alone do NOT satisfy this task. <!-- completed: 2026-05-05T13:51 -->
 - [ ] Operator runs `codex plugin marketplace add himkt/cafleet` against the now-public branch and completes the in-UI install. Confirms that all 7 skills (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) are exposed. <!-- completed: -->
 - [ ] If the install fails because Codex cannot resolve `plugins[0].source.path`, patch `.agents/plugins/marketplace.json`. The spec'd value is `"./"`; the documented fallback is `"../../"` (since the marketplace parent is `.agents/plugins/`, two levels deep from the repo root). Try the fallback, re-run the marketplace-add + UI install, and update §Specification → File 2 to match the value that works. This is the only known implementation risk; the operator's first smoke test resolves it. <!-- completed: -->
 
