@@ -322,7 +322,7 @@ def test_delete_session_cascade__tasks_are_preserved_after_soft_delete(
     director_id = result["director"]["agent_id"]
 
     sent = broker.send_message(sid, admin_id, director_id, "audit me")
-    task_id = sent["task"]["id"]
+    task_id = sent["task"]["task_id"]
 
     broker.delete_session(sid)
 

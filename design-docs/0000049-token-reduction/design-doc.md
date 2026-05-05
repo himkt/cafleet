@@ -1,7 +1,7 @@
 # Reduce Token Consumption Across CAFleet Output Surfaces
 
 **Status**: Approved
-**Progress**: 13/118 tasks complete
+**Progress**: 25/118 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -432,18 +432,18 @@ Each surface ships independently. If any one regresses, revert just that step.
 
 ### Step 2: Persisted shape simplification (Surface 14)
 
-- [ ] Add `Task.text: str` column via Alembic migration. <!-- completed: -->
-- [ ] Pre-flight check: assert every existing row's `task_json.artifacts[0].parts[0].text` is non-null. <!-- completed: -->
-- [ ] Backfill: copy body text into `Task.text`. <!-- completed: -->
-- [ ] Drop `Task.task_json` column in the **same** Alembic revision. <!-- completed: -->
-- [ ] Rewrite `_save_task` (`broker.py:551-577`) to write typed columns. <!-- completed: -->
-- [ ] Rewrite `_read_task` (`broker.py:580-584`) to read typed columns. <!-- completed: -->
-- [ ] Rewrite `_unicast_task_dict` (`broker.py:587-614`) to return the typed-column shape. <!-- completed: -->
-- [ ] Rewrite the broadcast-summary builder (`broker.py:700-727`). <!-- completed: -->
-- [ ] Rewrite `poll_tasks` (`broker.py:746-773`) to `SELECT` typed columns directly. <!-- completed: -->
-- [ ] Find and rewrite `ack_task` and `cancel_task` (Grep `task_json` in `broker.py`). <!-- completed: -->
-- [ ] Update WebUI type definitions and any `admin/` consumers. <!-- completed: -->
-- [ ] Update tests that load fixture rows with the old shape. <!-- completed: -->
+- [x] Add `Task.text: str` column via Alembic migration. <!-- completed: 2026-05-05T07:00 -->
+- [x] Pre-flight check: assert every existing row's `task_json.artifacts[0].parts[0].text` is non-null. <!-- completed: 2026-05-05T07:00 -->
+- [x] Backfill: copy body text into `Task.text`. <!-- completed: 2026-05-05T07:00 -->
+- [x] Drop `Task.task_json` column in the **same** Alembic revision. <!-- completed: 2026-05-05T07:00 -->
+- [x] Rewrite `_save_task` (`broker.py:551-577`) to write typed columns. <!-- completed: 2026-05-05T07:00 -->
+- [x] Rewrite `_read_task` (`broker.py:580-584`) to read typed columns. <!-- completed: 2026-05-05T07:00 -->
+- [x] Rewrite `_unicast_task_dict` (`broker.py:587-614`) to return the typed-column shape. <!-- completed: 2026-05-05T07:00 -->
+- [x] Rewrite the broadcast-summary builder (`broker.py:700-727`). <!-- completed: 2026-05-05T07:00 -->
+- [x] Rewrite `poll_tasks` (`broker.py:746-773`) to `SELECT` typed columns directly. <!-- completed: 2026-05-05T07:00 -->
+- [x] Find and rewrite `ack_task` and `cancel_task` (Grep `task_json` in `broker.py`). <!-- completed: 2026-05-05T07:00 -->
+- [x] Update WebUI type definitions and any `admin/` consumers. <!-- completed: 2026-05-05T07:00 -->
+- [x] Update tests that load fixture rows with the old shape. <!-- completed: 2026-05-05T07:00 -->
 
 ### Step 3: Compact rendered envelope (Surface 1) + bridge adapter
 

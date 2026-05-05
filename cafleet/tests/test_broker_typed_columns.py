@@ -310,16 +310,16 @@ def test_task_table__has_text_column_no_task_json_column():
     finally:
         engine.dispose()
     assert "text" in columns, f"text column missing; got {sorted(columns)}"
-    assert (
-        "task_json" not in columns
-    ), f"task_json column should be dropped; got {sorted(columns)}"
+    assert "task_json" not in columns, (
+        f"task_json column should be dropped; got {sorted(columns)}"
+    )
 
 
 def test_task_model__has_text_attribute_no_task_json_attribute():
     assert hasattr(Task, "text"), "Task.text mapped attribute is missing"
-    assert not hasattr(
-        Task, "task_json"
-    ), "Task.task_json should be removed from the ORM model"
+    assert not hasattr(Task, "task_json"), (
+        "Task.task_json should be removed from the ORM model"
+    )
 
 
 def test_save_task__writes_text_column_directly():

@@ -265,7 +265,7 @@ def test_list_inbox__only_returns_tasks_where_context_id_matches():
     assert len(sender_inbox) == 0
 
 
-def test_list_inbox__returns_raw_dicts():
+def test_list_inbox__returns_typed_column_dicts():
     sid, sender, recipient = _setup_two_agents()
     broker.send_message(sid, sender, recipient, "raw")
 
@@ -273,7 +273,9 @@ def test_list_inbox__returns_raw_dicts():
     assert len(result) == 1
     entry = result[0]
     assert isinstance(entry, dict)
-    assert "task_id" in entry or "task_json" in entry
+    assert "task_id" in entry
+    assert "text" in entry
+    assert "task_json" not in entry
 
 
 def test_list_sent__returns_sent_tasks():
@@ -321,7 +323,7 @@ def test_list_sent__only_returns_tasks_from_agent():
     assert len(recipient_sent) == 0
 
 
-def test_list_sent__returns_raw_dicts():
+def test_list_sent__returns_typed_column_dicts():
     sid, sender, recipient = _setup_two_agents()
     broker.send_message(sid, sender, recipient, "raw")
 
@@ -329,7 +331,9 @@ def test_list_sent__returns_raw_dicts():
     assert len(result) == 1
     entry = result[0]
     assert isinstance(entry, dict)
-    assert "task_id" in entry or "task_json" in entry
+    assert "task_id" in entry
+    assert "text" in entry
+    assert "task_json" not in entry
 
 
 def test_list_timeline__returns_timeline_entries():
@@ -346,15 +350,17 @@ def test_list_timeline__returns_empty_for_no_tasks():
     assert result == []
 
 
-def test_list_timeline__entry_has_required_keys():
+def test_list_timeline__entry_has_typed_column_keys():
     sid, sender, recipient = _setup_two_agents()
     broker.send_message(sid, sender, recipient, "structured")
 
     result = broker.list_timeline(sid)
     assert len(result) == 1
     entry = result[0]
-    assert "task" in entry
-    assert "origin_task_id" in entry or "created_at" in entry
+    assert "task_id" in entry
+    assert "origin_task_id" in entry
+    assert "created_at" in entry
+    assert "text" in entry
 
 
 def test_list_timeline__ordered_by_status_timestamp_desc():
@@ -373,7 +379,7 @@ def test_list_timeline__filters_broadcast_summary():
 
     result = broker.list_timeline(sid)
     for entry in result:
-        assert entry["task"]["metadata"]["type"] != "broadcast_summary"
+        assert entry["type"] != "broadcast_summary"
 
 
 def test_list_timeline__scoped_to_session():
@@ -464,8 +470,8 @@ def test_get_task_created_ats__returns_created_at_mapping():
     sid, sender, recipient = _setup_two_agents()
     sent1 = broker.send_message(sid, sender, recipient, "first")
     sent2 = broker.send_message(sid, sender, recipient, "second")
-    tid1 = sent1["task"]["id"]
-    tid2 = sent2["task"]["id"]
+    tid1 = sent1["task"]["task_id"]
+    tid2 = sent2["task"]["task_id"]
 
     result = broker.get_task_created_ats([tid1, tid2])
     assert isinstance(result, dict)
@@ -485,7 +491,7 @@ def test_get_task_created_ats__empty_input_returns_empty_dict():
 def test_get_task_created_ats__nonexistent_task_id_absent_from_result():
     sid, sender, recipient = _setup_two_agents()
     sent = broker.send_message(sid, sender, recipient, "real")
-    tid = sent["task"]["id"]
+    tid = sent["task"]["task_id"]
     fake_id = str(uuid.uuid4())
 
     result = broker.get_task_created_ats([tid, fake_id])
@@ -496,7 +502,7 @@ def test_get_task_created_ats__nonexistent_task_id_absent_from_result():
 def test_get_task_created_ats__single_task():
     sid, sender, recipient = _setup_two_agents()
     sent = broker.send_message(sid, sender, recipient, "one")
-    tid = sent["task"]["id"]
+    tid = sent["task"]["task_id"]
 
     result = broker.get_task_created_ats([tid])
     assert len(result) == 1
@@ -506,7 +512,7 @@ def test_get_task_created_ats__single_task():
 def test_get_task_created_ats__created_at_is_iso8601():
     sid, sender, recipient = _setup_two_agents()
     sent = broker.send_message(sid, sender, recipient, "timestamped")
-    tid = sent["task"]["id"]
+    tid = sent["task"]["task_id"]
 
     result = broker.get_task_created_ats([tid])
     created_at = result[tid]

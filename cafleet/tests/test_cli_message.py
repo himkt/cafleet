@@ -93,14 +93,16 @@ def test_message_show_auth_check__accepts_valid_agent(
 
     fake_task = {
         "task": {
-            "id": task_id,
-            "kind": "user",
-            "status": "submitted",
-            "history": [],
-            "metadata": {
-                "fromAgentId": agent_id,
-                "toAgentId": str(uuid.uuid4()),
-            },
+            "task_id": task_id,
+            "context_id": agent_id,
+            "from_agent_id": agent_id,
+            "to_agent_id": str(uuid.uuid4()),
+            "type": "unicast",
+            "created_at": "2026-05-01T00:00:00+00:00",
+            "status_state": "input_required",
+            "status_timestamp": "2026-05-01T00:00:00+00:00",
+            "origin_task_id": None,
+            "text": "hello",
         }
     }
 
@@ -266,14 +268,16 @@ def test_message_ack_auth_check__accepts_valid_agent(
 
     fake_task = {
         "task": {
-            "id": task_id,
-            "kind": "user",
-            "status": "acknowledged",
-            "history": [],
-            "metadata": {
-                "fromAgentId": str(uuid.uuid4()),
-                "toAgentId": agent_id,
-            },
+            "task_id": task_id,
+            "context_id": agent_id,
+            "from_agent_id": str(uuid.uuid4()),
+            "to_agent_id": agent_id,
+            "type": "unicast",
+            "created_at": "2026-05-01T00:00:00+00:00",
+            "status_state": "completed",
+            "status_timestamp": "2026-05-01T00:00:00+00:00",
+            "origin_task_id": None,
+            "text": "ack-me",
         }
     }
 
@@ -360,14 +364,16 @@ def test_message_cancel_auth_check__accepts_valid_agent(
 
     fake_task = {
         "task": {
-            "id": task_id,
-            "kind": "user",
-            "status": "canceled",
-            "history": [],
-            "metadata": {
-                "fromAgentId": agent_id,
-                "toAgentId": str(uuid.uuid4()),
-            },
+            "task_id": task_id,
+            "context_id": str(uuid.uuid4()),
+            "from_agent_id": agent_id,
+            "to_agent_id": str(uuid.uuid4()),
+            "type": "unicast",
+            "created_at": "2026-05-01T00:00:00+00:00",
+            "status_state": "canceled",
+            "status_timestamp": "2026-05-01T00:00:00+00:00",
+            "origin_task_id": None,
+            "text": "cancel-me",
         }
     }
 

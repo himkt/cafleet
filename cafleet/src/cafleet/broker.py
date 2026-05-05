@@ -17,6 +17,19 @@ _DIRECTOR_DESCRIPTION = "Root Director for this session"
 
 ADMINISTRATOR_KIND = "builtin-administrator"
 
+_TASK_COLUMNS = (
+    "task_id",
+    "context_id",
+    "from_agent_id",
+    "to_agent_id",
+    "type",
+    "created_at",
+    "status_state",
+    "status_timestamp",
+    "origin_task_id",
+    "text",
+)
+
 
 class AdministratorProtectedError(Exception):
     """Raised when an operation targets a built-in Administrator agent."""
@@ -548,22 +561,23 @@ def verify_agent_session(agent_id: str, session_id: str) -> bool:
         ).scalar_one()
 
 
+def _row_to_task_dict(row) -> dict:
+    return {col: getattr(row, col) for col in _TASK_COLUMNS}
+
+
 def _save_task(session, task_dict: dict) -> None:
-    """UPSERT the task, promoting indexed fields from the metadata blob."""
-    metadata = task_dict["metadata"]
+    """UPSERT the task; ``created_at`` is preserved across conflicts."""
     stmt = sqlite_insert(Task).values(
-        task_id=task_dict["id"],
-        context_id=task_dict["contextId"],
-        from_agent_id=metadata["fromAgentId"],
-        # ``broadcast_summary`` has no recipient; store empty so the NOT NULL
-        # column stays satisfied and the row still shows up in sender queries.
-        to_agent_id=metadata.get("toAgentId", ""),
-        type=metadata["type"],
-        created_at=_now_iso(),
-        status_state=task_dict["status"]["state"],
-        status_timestamp=task_dict["status"]["timestamp"],
-        origin_task_id=metadata.get("originTaskId"),
-        task_json=json.dumps(task_dict),
+        task_id=task_dict["task_id"],
+        context_id=task_dict["context_id"],
+        from_agent_id=task_dict["from_agent_id"],
+        to_agent_id=task_dict["to_agent_id"],
+        type=task_dict["type"],
+        created_at=task_dict["created_at"],
+        status_state=task_dict["status_state"],
+        status_timestamp=task_dict["status_timestamp"],
+        origin_task_id=task_dict["origin_task_id"],
+        text=task_dict["text"],
     )
     stmt = stmt.on_conflict_do_update(
         index_elements=["task_id"],
@@ -571,17 +585,21 @@ def _save_task(session, task_dict: dict) -> None:
             "status_state": stmt.excluded.status_state,
             "status_timestamp": stmt.excluded.status_timestamp,
             "origin_task_id": stmt.excluded.origin_task_id,
-            "task_json": stmt.excluded.task_json,
+            "text": stmt.excluded.text,
         },
     )
     session.execute(stmt)
 
 
 def _read_task(session, task_id: str) -> dict | None:
-    task_json = session.execute(
-        select(Task.task_json).where(Task.task_id == task_id)
-    ).scalar_one_or_none()
-    return json.loads(task_json) if task_json is not None else None
+    row = session.execute(
+        select(*(getattr(Task, col) for col in _TASK_COLUMNS)).where(
+            Task.task_id == task_id
+        )
+    ).first()
+    if row is None:
+        return None
+    return _row_to_task_dict(row)
 
 
 def _unicast_task_dict(
@@ -592,25 +610,17 @@ def _unicast_task_dict(
     now: str,
     origin_task_id: str | None = None,
 ) -> dict:
-    metadata: dict = {
-        "fromAgentId": sender_id,
-        "toAgentId": recipient_id,
-        "type": "unicast",
-    }
-    if origin_task_id is not None:
-        metadata["originTaskId"] = origin_task_id
     return {
-        "id": str(uuid.uuid4()),
-        "contextId": recipient_id,
-        "status": {"state": "input_required", "timestamp": now},
-        "artifacts": [
-            {
-                "artifactId": str(uuid.uuid4()),
-                "parts": [{"kind": "text", "text": text}],
-            }
-        ],
-        "metadata": metadata,
-        "history": [],
+        "task_id": str(uuid.uuid4()),
+        "context_id": recipient_id,
+        "from_agent_id": sender_id,
+        "to_agent_id": recipient_id,
+        "type": "unicast",
+        "created_at": now,
+        "status_state": "input_required",
+        "status_timestamp": now,
+        "origin_task_id": origin_task_id,
+        "text": text,
     }
 
 
@@ -699,31 +709,16 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
 
         now = _now_iso()
         summary_dict = {
-            "id": summary_task_id,
-            "contextId": agent_id,
-            "status": {
-                "state": "completed",
-                "timestamp": now,
-            },
-            "artifacts": [
-                {
-                    "artifactId": str(uuid.uuid4()),
-                    "parts": [
-                        {
-                            "kind": "text",
-                            "text": f"Broadcast sent to {len(recipient_ids)} recipients",
-                        }
-                    ],
-                }
-            ],
-            "metadata": {
-                "fromAgentId": agent_id,
-                "type": "broadcast_summary",
-                "recipientCount": len(recipient_ids),
-                "recipientIds": recipient_ids,
-                "originTaskId": summary_task_id,
-            },
-            "history": [],
+            "task_id": summary_task_id,
+            "context_id": agent_id,
+            "from_agent_id": agent_id,
+            "to_agent_id": "",
+            "type": "broadcast_summary",
+            "created_at": now,
+            "status_state": "completed",
+            "status_timestamp": now,
+            "origin_task_id": summary_task_id,
+            "text": f"Broadcast sent to {len(recipient_ids)} recipients",
         }
         _save_task(session, summary_dict)
 
@@ -737,7 +732,6 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
             for recipient_id in recipient_ids
         )
 
-    summary_dict["metadata"]["notificationsSentCount"] = notifications_sent_count
     return [
         {"task": summary_dict, "notifications_sent_count": notifications_sent_count}
     ]
@@ -751,7 +745,7 @@ def poll_tasks(
 ) -> list[dict]:
     """Return tasks addressed to ``agent_id`` in DESC timestamp order."""
     stmt = (
-        select(Task.task_json)
+        select(*(getattr(Task, col) for col in _TASK_COLUMNS))
         .where(
             Task.context_id == agent_id,
             Task.type != "broadcast_summary",
@@ -770,7 +764,7 @@ def poll_tasks(
     with sm() as session:
         rows = session.execute(stmt).all()
 
-    return [json.loads(row[0]) for row in rows]
+    return [_row_to_task_dict(row) for row in rows]
 
 
 def ack_task(agent_id: str, task_id: str) -> dict:
@@ -781,17 +775,14 @@ def ack_task(agent_id: str, task_id: str) -> dict:
         if task_dict is None:
             raise ValueError(f"Task {task_id} not found")
 
-        if task_dict["contextId"] != agent_id:
+        if task_dict["context_id"] != agent_id:
             raise PermissionError("Only the recipient can ACK a task")
 
-        if task_dict["status"]["state"] != "input_required":
-            raise ValueError(f"Cannot ACK task in state {task_dict['status']['state']}")
+        if task_dict["status_state"] != "input_required":
+            raise ValueError(f"Cannot ACK task in state {task_dict['status_state']}")
 
-        now = _now_iso()
-        task_dict["status"] = {
-            "state": "completed",
-            "timestamp": now,
-        }
+        task_dict["status_state"] = "completed"
+        task_dict["status_timestamp"] = _now_iso()
 
         _save_task(session, task_dict)
 
@@ -806,19 +797,14 @@ def cancel_task(agent_id: str, task_id: str) -> dict:
         if task_dict is None:
             raise ValueError(f"Task {task_id} not found")
 
-        if task_dict["metadata"]["fromAgentId"] != agent_id:
+        if task_dict["from_agent_id"] != agent_id:
             raise PermissionError("Only the sender can cancel a task")
 
-        if task_dict["status"]["state"] != "input_required":
-            raise ValueError(
-                f"Cannot cancel task in state {task_dict['status']['state']}"
-            )
+        if task_dict["status_state"] != "input_required":
+            raise ValueError(f"Cannot cancel task in state {task_dict['status_state']}")
 
-        now = _now_iso()
-        task_dict["status"] = {
-            "state": "canceled",
-            "timestamp": now,
-        }
+        task_dict["status_state"] = "canceled"
+        task_dict["status_timestamp"] = _now_iso()
 
         _save_task(session, task_dict)
 
@@ -876,39 +862,14 @@ def list_session_agents(session_id: str) -> list[dict]:
 
 def _list_tasks_where(*filters) -> list[dict]:
     stmt = (
-        select(
-            Task.task_id,
-            Task.context_id,
-            Task.from_agent_id,
-            Task.to_agent_id,
-            Task.type,
-            Task.created_at,
-            Task.status_state,
-            Task.status_timestamp,
-            Task.origin_task_id,
-            Task.task_json,
-        )
+        select(*(getattr(Task, col) for col in _TASK_COLUMNS))
         .where(*filters, Task.type != "broadcast_summary")
         .order_by(Task.status_timestamp.desc())
     )
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(stmt).all()
-    return [
-        {
-            "task_id": row.task_id,
-            "context_id": row.context_id,
-            "from_agent_id": row.from_agent_id,
-            "to_agent_id": row.to_agent_id,
-            "type": row.type,
-            "created_at": row.created_at,
-            "status_state": row.status_state,
-            "status_timestamp": row.status_timestamp,
-            "origin_task_id": row.origin_task_id,
-            "task_json": row.task_json,
-        }
-        for row in rows
-    ]
+    return [_row_to_task_dict(row) for row in rows]
 
 
 def list_inbox(agent_id: str) -> list[dict]:
@@ -922,15 +883,9 @@ def list_sent(agent_id: str) -> list[dict]:
 
 
 def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
-    """Return the session's recent tasks in DESC timestamp order."""
+    """Return the session's recent tasks (flat typed-column dicts) in DESC timestamp order."""
     stmt = (
-        select(
-            Task.task_id,
-            Task.origin_task_id,
-            Task.created_at,
-            Task.status_timestamp,
-            Task.task_json,
-        )
+        select(*(getattr(Task, col) for col in _TASK_COLUMNS))
         .join(Agent, Task.from_agent_id == Agent.agent_id)
         .where(
             Agent.session_id == session_id,
@@ -942,14 +897,7 @@ def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(stmt).all()
-    return [
-        {
-            "task": json.loads(row.task_json),
-            "origin_task_id": row.origin_task_id,
-            "created_at": row.created_at,
-        }
-        for row in rows
-    ]
+    return [_row_to_task_dict(row) for row in rows]
 
 
 def get_agent_names(agent_ids: list[str]) -> dict[str, str]:
@@ -984,9 +932,8 @@ def get_task(session_id: str, task_id: str) -> dict:
         if task_dict is None:
             raise ValueError(f"Task {task_id} not found")
 
-        metadata = task_dict["metadata"]
-        endpoint_ids = [metadata["fromAgentId"]]
-        to_id = metadata.get("toAgentId")
+        endpoint_ids = [task_dict["from_agent_id"]]
+        to_id = task_dict["to_agent_id"]
         if to_id:
             endpoint_ids.append(to_id)
         in_session = session.execute(

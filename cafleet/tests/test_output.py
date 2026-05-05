@@ -122,135 +122,88 @@ def test_truncate_text__custom_limit_is_respected():
 
 
 def _task(text: str | None = "the body of the message") -> dict:
-    parts: list[dict] = [{"text": text}] if text is not None else [{}]
-    return {
-        "id": "task-001",
-        "status": {"state": "input_required"},
-        "metadata": {
-            "fromAgentId": "agent-from",
-            "toAgentId": "agent-to",
-            "type": "unicast",
-        },
-        "artifacts": [{"parts": parts}],
+    """Build a flat typed-column task dict (post-Surface-14 shape)."""
+    base: dict = {
+        "task_id": "task-001",
+        "context_id": "agent-to",
+        "from_agent_id": "agent-from",
+        "to_agent_id": "agent-to",
+        "type": "unicast",
+        "created_at": "2026-05-05T12:00:00.000000+00:00",
+        "status_state": "input_required",
+        "status_timestamp": "2026-05-05T12:00:00.000000+00:00",
+        "origin_task_id": None,
     }
+    if text is not None:
+        base["text"] = text
+    return base
 
 
 def test_truncate_task_text__single_task_shape_truncates_text():
     task = _task("abcdefghijklmnop")
     result = truncate_task_text(task, full=False)
     assert result is task
-    assert task["artifacts"][0]["parts"][0]["text"] == "abcdefghij..."
+    assert task["text"] == "abcdefghij..."
 
 
 def test_truncate_task_text__envelope_shape_truncates_text():
     envelope = {"task": _task("abcdefghijklmnop")}
     result = truncate_task_text(envelope, full=False)
     assert result is envelope
-    assert envelope["task"]["artifacts"][0]["parts"][0]["text"] == "abcdefghij..."
+    assert envelope["task"]["text"] == "abcdefghij..."
 
 
 def test_truncate_task_text__list_of_tasks_truncates_each():
     tasks = [_task("abcdefghijklmnop"), _task("0123456789ABCDEF")]
     result = truncate_task_text(tasks, full=False)
     assert result is tasks
-    assert tasks[0]["artifacts"][0]["parts"][0]["text"] == "abcdefghij..."
-    assert tasks[1]["artifacts"][0]["parts"][0]["text"] == "0123456789..."
+    assert tasks[0]["text"] == "abcdefghij..."
+    assert tasks[1]["text"] == "0123456789..."
 
 
 def test_truncate_task_text__list_of_envelopes_truncates_each():
     items = [{"task": _task("abcdefghijklmnop")}, {"task": _task("short")}]
     truncate_task_text(items, full=False)
-    assert items[0]["task"]["artifacts"][0]["parts"][0]["text"] == "abcdefghij..."
-    assert items[1]["task"]["artifacts"][0]["parts"][0]["text"] == "short"
+    assert items[0]["task"]["text"] == "abcdefghij..."
+    assert items[1]["task"]["text"] == "short"
 
 
 def test_truncate_task_text__full_true_does_not_mutate():
     task = _task("abcdefghijklmnop")
     truncate_task_text(task, full=True)
-    assert task["artifacts"][0]["parts"][0]["text"] == "abcdefghijklmnop"
+    assert task["text"] == "abcdefghijklmnop"
 
 
 def test_truncate_task_text__short_text_is_not_truncated():
     task = _task("hello")
     truncate_task_text(task, full=False)
-    assert task["artifacts"][0]["parts"][0]["text"] == "hello"
+    assert task["text"] == "hello"
 
 
-def test_truncate_task_text__missing_artifacts_key_is_noop():
-    task = {
-        "id": "task-001",
-        "status": {"state": "input_required"},
-        "metadata": {"fromAgentId": "a", "type": "unicast"},
+def test_truncate_task_text__missing_text_key_is_noop():
+    """Tasks without a 'text' key (e.g. legacy partial fixtures) pass through unchanged."""
+    task: dict = {
+        "task_id": "task-001",
+        "context_id": "ctx",
+        "status_state": "input_required",
     }
     result = truncate_task_text(task, full=False)
     assert result is task
-    assert "artifacts" not in task
-
-
-def test_truncate_task_text__missing_parts_key_is_noop():
-    task = {"artifacts": [{}]}
-    truncate_task_text(task, full=False)
-    assert task == {"artifacts": [{}]}
-
-
-def test_truncate_task_text__missing_text_key_in_part_is_noop():
-    task = {"artifacts": [{"parts": [{"data": "binary"}]}]}
-    truncate_task_text(task, full=False)
-    assert task == {"artifacts": [{"parts": [{"data": "binary"}]}]}
-    assert "text" not in task["artifacts"][0]["parts"][0]
-
-
-def test_truncate_task_text__part_with_explicit_none_text_is_left_untouched():
-    task = {"artifacts": [{"parts": [{"text": None}]}]}
-    truncate_task_text(task, full=False)
-    assert task["artifacts"][0]["parts"][0]["text"] is None
-
-
-def test_truncate_task_text__mixed_parts_only_truncates_text_bearing():
-    task = {
-        "artifacts": [
-            {
-                "parts": [
-                    {"text": "abcdefghijklmnop"},
-                    {"data": "binary"},
-                    {"text": "short"},
-                ]
-            }
-        ]
-    }
-    truncate_task_text(task, full=False)
-    parts = task["artifacts"][0]["parts"]
-    assert parts[0]["text"] == "abcdefghij..."
-    assert parts[1] == {"data": "binary"}
-    assert parts[2]["text"] == "short"
-
-
-def test_truncate_task_text__multiple_artifacts_each_processed():
-    task = {
-        "artifacts": [
-            {"parts": [{"text": "abcdefghijklmnop"}]},
-            {"parts": [{"text": "0123456789ABC"}]},
-        ]
-    }
-    truncate_task_text(task, full=False)
-    assert task["artifacts"][0]["parts"][0]["text"] == "abcdefghij..."
-    assert task["artifacts"][1]["parts"][0]["text"] == "0123456789..."
+    assert "text" not in task
 
 
 def test_truncate_task_text__non_dict_item_in_list_is_skipped():
     items = [None, _task("abcdefghijklmnop")]
     truncate_task_text(items, full=False)
     assert items[0] is None
-    assert items[1]["artifacts"][0]["parts"][0]["text"] == "abcdefghij..."
+    assert items[1]["text"] == "abcdefghij..."
 
 
-def test_truncate_task_text__sibling_metadata_fields_unchanged():
+def test_truncate_task_text__sibling_typed_column_fields_unchanged():
     task = _task("abcdefghijklmnop")
     truncate_task_text(task, full=False)
-    assert task["id"] == "task-001"
-    assert task["status"] == {"state": "input_required"}
-    assert task["metadata"] == {
-        "fromAgentId": "agent-from",
-        "toAgentId": "agent-to",
-        "type": "unicast",
-    }
+    assert task["task_id"] == "task-001"
+    assert task["status_state"] == "input_required"
+    assert task["from_agent_id"] == "agent-from"
+    assert task["to_agent_id"] == "agent-to"
+    assert task["type"] == "unicast"

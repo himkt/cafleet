@@ -76,8 +76,7 @@ def _seed_session_and_two_agents(
             )
         conn.execute(
             text(
-                "UPDATE sessions SET director_agent_id = :aid "
-                "WHERE session_id = :sid"
+                "UPDATE sessions SET director_agent_id = :aid WHERE session_id = :sid"
             ),
             {"aid": director_id, "sid": session_id},
         )
@@ -209,9 +208,7 @@ def test_migration_typed_columns__upgrade_adds_text_column(db_at_0008):
         columns = {r[1] for r in rows}
     finally:
         engine.dispose()
-    assert (
-        "text" in columns
-    ), f"text column missing post-upgrade; got {sorted(columns)}"
+    assert "text" in columns, f"text column missing post-upgrade; got {sorted(columns)}"
 
 
 def test_migration_typed_columns__upgrade_drops_task_json_column(db_at_0008):
@@ -225,9 +222,9 @@ def test_migration_typed_columns__upgrade_drops_task_json_column(db_at_0008):
         columns = {r[1] for r in rows}
     finally:
         engine.dispose()
-    assert (
-        "task_json" not in columns
-    ), f"task_json should be dropped; got {sorted(columns)}"
+    assert "task_json" not in columns, (
+        f"task_json should be dropped; got {sorted(columns)}"
+    )
 
 
 def test_migration_typed_columns__pre_existing_typed_columns_survive(db_at_0008):
@@ -359,9 +356,7 @@ def test_migration_typed_columns__backfills_broadcast_summary_text(db_at_0008):
     try:
         with engine.connect() as conn:
             row = conn.execute(
-                text(
-                    "SELECT text, to_agent_id FROM tasks WHERE task_id = :tid"
-                ),
+                text("SELECT text, to_agent_id FROM tasks WHERE task_id = :tid"),
                 {"tid": summary_id},
             ).fetchone()
     finally:
@@ -418,10 +413,7 @@ def test_migration_typed_columns__backfills_multiple_rows(db_at_0008):
     try:
         with engine.connect() as conn:
             rows = conn.execute(
-                text(
-                    "SELECT task_id, text FROM tasks "
-                    "WHERE task_id IN (:a, :b, :c)"
-                ),
+                text("SELECT task_id, text FROM tasks WHERE task_id IN (:a, :b, :c)"),
                 {"a": task_ids[0], "b": task_ids[1], "c": task_ids[2]},
             ).fetchall()
     finally:
@@ -475,7 +467,7 @@ def test_migration_typed_columns__preflight_raises_on_null_body(db_at_0008):
         engine.dispose()
 
     cfg = _make_alembic_cfg(db_at_0008)
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError, match="Pre-flight check failed"):
         command.upgrade(cfg, "head")
 
 
@@ -527,7 +519,7 @@ def test_migration_typed_columns__preflight_raises_when_artifacts_missing(
         engine.dispose()
 
     cfg = _make_alembic_cfg(db_at_0008)
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError, match="Pre-flight check failed"):
         command.upgrade(cfg, "head")
 
 

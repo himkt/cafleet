@@ -36,14 +36,16 @@ def test_format_indexed_list__non_empty_calls_formatter_per_item_with_indexed_pr
 
 def test_format_indexed_list__byte_identical_output_for_task_list_shape():
     task = {
-        "id": "tid-1",
-        "status": {"state": "input_required"},
-        "metadata": {
-            "fromAgentId": "a1",
-            "toAgentId": "a2",
-            "type": "unicast",
-        },
-        "artifacts": [{"parts": [{"text": "hello world"}]}],
+        "task_id": "tid-1",
+        "context_id": "a2",
+        "from_agent_id": "a1",
+        "to_agent_id": "a2",
+        "type": "unicast",
+        "created_at": "2026-05-05T12:00:00.000000+00:00",
+        "status_state": "input_required",
+        "status_timestamp": "2026-05-05T12:00:00.000000+00:00",
+        "origin_task_id": None,
+        "text": "hello world",
     }
     result = format_indexed_list([task], format_task, "No messages found.")
     expected = "\n".join(

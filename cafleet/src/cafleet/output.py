@@ -21,10 +21,8 @@ def truncate_task_text(result: Any, *, full: bool, limit: int = 10) -> Any:
         task = item.get("task", item) if isinstance(item, dict) else None
         if not isinstance(task, dict):
             continue
-        for artifact in task.get("artifacts", []) or []:
-            for part in artifact.get("parts", []) or []:
-                if "text" in part:
-                    part["text"] = truncate_text(part["text"], full=full, limit=limit)
+        if "text" in task:
+            task["text"] = truncate_text(task["text"], full=full, limit=limit)
     return result
 
 
@@ -40,28 +38,18 @@ def format_register(data: dict) -> str:
 def format_task(task: dict) -> str:
     if "task" in task:
         task = task["task"]
-    metadata = task["metadata"]
-    text = next(
-        (
-            part["text"]
-            for artifact in task["artifacts"]
-            for part in artifact["parts"]
-            if part.get("text")
-        ),
-        "",
-    )
     lines = [
-        f"  id:    {task['id']}",
-        f"  state: {task['status']['state']}",
-        f"  from:  {metadata['fromAgentId']}",
+        f"  id:    {task['task_id']}",
+        f"  state: {task['status_state']}",
+        f"  from:  {task['from_agent_id']}",
     ]
-    # ``toAgentId`` is absent on broadcast_summary tasks; elide the line
-    # rather than rendering a "?" placeholder that hides the distinction.
-    if "toAgentId" in metadata:
-        lines.append(f"  to:    {metadata['toAgentId']}")
-    lines.append(f"  type:  {metadata['type']}")
-    if text:
-        lines.append(f"  text:  {text}")
+    # ``broadcast_summary`` rows carry ``to_agent_id=""``; elide the line
+    # rather than rendering an empty placeholder.
+    if task.get("to_agent_id"):
+        lines.append(f"  to:    {task['to_agent_id']}")
+    lines.append(f"  type:  {task['type']}")
+    if task.get("text"):
+        lines.append(f"  text:  {task['text']}")
     return "\n".join(lines)
 
 
