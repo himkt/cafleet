@@ -1,7 +1,7 @@
 # Codex Plugin Manifest
 
 **Status**: Approved
-**Progress**: 5/7 tasks complete
+**Progress**: 6/7 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -65,7 +65,7 @@ Codex marketplace catalog so the repo root is itself a marketplace addressable v
       "name": "cafleet",
       "source": {
         "source": "local",
-        "path": "./"
+        "path": "../../"
       },
       "policy": {
         "installation": "AVAILABLE"
@@ -81,7 +81,7 @@ Field rules:
 |---|---|---|
 | `name` (top-level) | `"cafleet"` | Marketplace name. Mirrors `.claude-plugin/marketplace.json:name` for symmetry. |
 | `plugins[0].name` | `"cafleet"` | Must match `plugin.json:name`. |
-| `plugins[0].source` | object with `source: "local"` and `path: "./"` | The plugin manifest at `.codex-plugin/plugin.json` lives at the repo root. Codex's resolver looks for `<marketplace-parent>/<path>/.codex-plugin/plugin.json`; from `.agents/plugins/marketplace.json` the marketplace parent is `.agents/plugins/`, so the path that points back at the repo root is the operator-verified part of the design (see Implementation Step 4). The spec'd value is `"./"`; the documented fallback is `"../../"`. |
+| `plugins[0].source` | object with `source: "local"` and `path: "../../"` | The plugin manifest at `.codex-plugin/plugin.json` lives at the repo root. Codex's resolver looks for `<marketplace-parent>/<path>/.codex-plugin/plugin.json`; from `.agents/plugins/marketplace.json` the marketplace parent is `.agents/plugins/`, so `path: "../../"` resolves to the repo root and points the resolver at `.codex-plugin/plugin.json`. The original spec'd value was `"./"`; the path-math fallback `"../../"` was applied preemptively in Executor round 2 (see Changelog) per Implementation Step 4 task 3. |
 | `plugins[0].policy.installation` | `"AVAILABLE"` | Plugin appears in the in-UI install list. No `authentication` field; the plugin needs no credentials. |
 
 Out of scope for v1 (intentionally omitted): `interface` (display metadata), `category`, `authentication: ON_INSTALL` (no creds). The minimal three fields above are enough for `codex plugin marketplace add himkt/cafleet` to succeed.
@@ -151,7 +151,7 @@ Manual operator verification is the only acceptance check. There is no JSON-sche
 
 - [x] Push the implementation branch to GitHub so `codex plugin marketplace add himkt/cafleet` can fetch it. The simplest path is to merge to `main`; alternatively, push the branch and pass its ref to the marketplace-add command. Local commits alone do NOT satisfy this task. <!-- completed: 2026-05-05T13:51 -->
 - [ ] Operator runs `codex plugin marketplace add himkt/cafleet` against the now-public branch and completes the in-UI install. Confirms that all 7 skills (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) are exposed. <!-- completed: -->
-- [ ] If the install fails because Codex cannot resolve `plugins[0].source.path`, patch `.agents/plugins/marketplace.json`. The spec'd value is `"./"`; the documented fallback is `"../../"` (since the marketplace parent is `.agents/plugins/`, two levels deep from the repo root). Try the fallback, re-run the marketplace-add + UI install, and update §Specification → File 2 to match the value that works. This is the only known implementation risk; the operator's first smoke test resolves it. <!-- completed: -->
+- [x] If the install fails because Codex cannot resolve `plugins[0].source.path`, patch `.agents/plugins/marketplace.json`. The spec'd value is `"./"`; the documented fallback is `"../../"` (since the marketplace parent is `.agents/plugins/`, two levels deep from the repo root). Try the fallback, re-run the marketplace-add + UI install, and update §Specification → File 2 to match the value that works. This is the only known implementation risk; the operator's first smoke test resolves it. <!-- completed: 2026-05-05T13:59 (applied preemptively in Executor round 2 in response to Copilot review on PR #55; path-math fallback "../../" written into .agents/plugins/marketplace.json + §Specification File 2 spec block + field-rules table) -->
 
 ---
 
@@ -163,3 +163,4 @@ Manual operator verification is the only acceptance check. There is no JSON-sche
 | 2026-05-03 | Reviewer round 1: fix progress count (now 0/7), correct Step 4 fallback path math (`../../`, not `../`), make GitHub-push prerequisite explicit, fold version/description/skill invariants into a Constraints & invariants subsection, list the 7 skills in Success Criteria. |
 | 2026-05-03 | User approved. Status → Approved. |
 | 2026-05-05 | Executor round 1: spec drift fix — File 1 description string aligned with current `.claude-plugin/plugin.json:description` (dropped `"A2A-inspired "` prefix) per lock-step invariant + Claude-untouched constraint. |
+| 2026-05-05 | Executor round 2: applied path-fallback `"../../"` preemptively in response to Copilot review (PR #55), per design doc Step 4.3. The resolver formula stated in §Specification → File 2 (`<marketplace-parent>/<path>/.codex-plugin/plugin.json`) makes `"./"` mathematically unable to reach the repo-root manifest from `.agents/plugins/`; `"../../"` resolves correctly. Both `.agents/plugins/marketplace.json` and §Specification → File 2 (spec block + field-rules table) updated together. |
