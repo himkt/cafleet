@@ -57,7 +57,7 @@ _PER_SUBCOMMAND_BUDGETS: dict[tuple[str, ...], int] = {
 
 
 @pytest.mark.parametrize(
-    "subcommand_path,budget",
+    ("subcommand_path", "budget"),
     list(_PER_SUBCOMMAND_BUDGETS.items()),
     ids=lambda x: " ".join(x) if isinstance(x, tuple) else str(x),
 )

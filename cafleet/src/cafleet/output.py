@@ -116,6 +116,52 @@ def _render_item(item: Any) -> Any:
     return item
 
 
+def render_agent(agent: dict, *, full: bool = False) -> dict:
+    """Project a broker agent dict to the slim wire shape.
+
+    Slim shape (default): ``id`` (8-char prefix of ``agent_id``), ``name``,
+    ``description`` (truncated to 60 codepoints + ``…`` suffix), ``status``,
+    plus ``coding_agent`` when the source dict carries a ``placement`` with
+    that key. ``full=True`` returns ``agent`` unchanged.
+
+    Surface 18 (design 0000049): drops the per-row token cost on
+    ``cafleet agent list`` / ``agent show`` from ~300–500 tok to ≤80 tok by
+    omitting ``registered_at``, ``kind``, the nested ``placement`` blob, and
+    by prefix-rendering ``agent_id``.
+    """
+    if full:
+        return agent
+    out: dict = {
+        "id": agent["agent_id"][:8],
+        "name": agent["name"],
+        "description": truncate_text(agent["description"], full=False, limit=60),
+        "status": agent["status"],
+    }
+    placement = agent.get("placement")
+    if placement and "coding_agent" in placement:
+        out["coding_agent"] = placement["coding_agent"]
+    return out
+
+
+def render_agents_in_result(result: Any, *, full: bool) -> Any:
+    """Apply ``render_agent`` to every agent dict in a broker result structure.
+
+    ``full=True`` returns ``result`` unchanged. Otherwise walks lists and
+    bare flat agent dicts; returns a new structure (does not mutate ``result``).
+    """
+    if full:
+        return result
+    if isinstance(result, list):
+        return [_render_agent_item(item) for item in result]
+    return _render_agent_item(result)
+
+
+def _render_agent_item(item: Any) -> Any:
+    if isinstance(item, dict) and "agent_id" in item:
+        return render_agent(item, full=False)
+    return item
+
+
 def format_register(data: dict) -> str:
     lines = [
         "Agent registered successfully!",

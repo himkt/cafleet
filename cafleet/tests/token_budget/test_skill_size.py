@@ -8,7 +8,6 @@ re-merge / accidental re-import of reference content into the core.
 
 from pathlib import Path
 
-
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SKILL_FILE = _REPO_ROOT / "skills" / "cafleet" / "SKILL.md"
 

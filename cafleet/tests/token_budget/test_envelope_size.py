@@ -152,8 +152,7 @@ def test_compact_envelope_per_task_below_150_bytes():
     task is enough to fail the test."""
     fixture = _five_unicast_fixture()
     sizes = [
-        len(output.format_json(output.render_task(t), pretty=False))
-        for t in fixture
+        len(output.format_json(output.render_task(t), pretty=False)) for t in fixture
     ]
     assert max(sizes) <= 150, (
         f"per-task compact render largest = {max(sizes)} bytes (budget 150); "

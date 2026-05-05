@@ -61,6 +61,4 @@ def test_spawn_prompt_at_most_4_lines():
     addition without the test going stale."""
     materialized = _materialize()
     line_count = materialized.count("\n") + 1
-    assert line_count <= 4, (
-        f"spawn prompt grew to {line_count} lines (budget 4)"
-    )
+    assert line_count <= 4, f"spawn prompt grew to {line_count} lines (budget 4)"
