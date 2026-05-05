@@ -177,7 +177,13 @@ def send_inline_preview(
     """
     if shutil.which("tmux") is None:
         return False
-    payload = f"[cafleet msg {task_id_8} from {sender_8} {ts}]\n{text}"
+    # Sanitize embedded newlines / carriage returns: under tmux ``-l`` (literal)
+    # they would type as actual Enter keystrokes, breaking the 2-line preview
+    # contract and prematurely submitting the body as multiple user-turn
+    # inputs. Replace with U+23CE (RETURN SYMBOL) so the visual hint survives
+    # in 1 codepoint without any keystroke side effect.
+    sanitized_text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
+    payload = f"[cafleet msg {task_id_8} from {sender_8} {ts}]\n{sanitized_text}"
     try:
         _run(
             ["tmux", "send-keys", "-t", target_pane_id, "-l", payload],

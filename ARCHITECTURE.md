@@ -97,9 +97,9 @@ The default database path is `~/.local/share/cafleet/registry.db` (XDG state dir
 
 **Concurrency**: `PRAGMA busy_timeout=5000` is set on every connection. SQLite retries internally for up to 5 seconds before returning `SQLITE_BUSY`. Expected contention is low — CLI operations are short transactions (single INSERT or UPDATE), and multiple agents polling concurrently is read-only.
 
-### Relational + document hybrid model
+### Predominantly relational model
 
-Indexed fields are columns; structured payloads (`AgentCard`-shaped, `Task`-shaped) are stored verbatim as JSON `TEXT` blobs and never queried by content. This keeps hot lookups index-served while preserving the canonical internal shape for these payloads.
+Indexed and routing fields are typed columns. The only remaining JSON `TEXT` blob is `agents.agent_card_json` (an `AgentCard`-shaped document, not queried by content). Tasks were document-blob-shaped pre-Surface-14; the `task_json` blob was dropped and every Task field now lives in a typed column (see the table below).
 
 | Table | Indexed columns | JSON blob |
 |---|---|---|

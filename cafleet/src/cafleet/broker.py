@@ -8,6 +8,7 @@ import click
 from sqlalchemy import and_, delete, exists, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from cafleet.config import settings
 from cafleet.db.engine import get_sync_sessionmaker
 from cafleet.db.models import Agent, AgentPlacement, Session, Task
 from cafleet.tmux import DirectorContext
@@ -96,12 +97,20 @@ def _try_notify_recipient(
     # get picked up on every call rather than bound once at broker import.
     from cafleet.tmux import send_inline_preview
 
+    # Truncate before keystroking so a multi-KB body cannot dump itself into
+    # the recipient's pane. Mirrors output.truncate_text's contract: same
+    # limit (``settings.max_text_len`` / ``CAFLEET_MAX_TEXT_LEN``, default
+    # 200) and same single-codepoint U+2026 suffix on overflow.
+    preview_text = task_dict["text"]
+    if len(preview_text) > settings.max_text_len:
+        preview_text = preview_text[: settings.max_text_len] + "…"
+
     return send_inline_preview(
         target_pane_id=pane_id,
         task_id_8=task_dict["task_id"][:8],
         sender_8=sender_id[:8],
         ts=task_dict["status_timestamp"],
-        text=task_dict["text"],
+        text=preview_text,
     )
 
 

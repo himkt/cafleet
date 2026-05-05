@@ -16,7 +16,7 @@ After [design 0000049 Surface 14](../../design-docs/0000049-token-reduction/desi
 | `to_agent_id` | `TEXT` (agent_id) | Recipient. Empty string `""` for `broadcast_summary` rows. |
 | `type` | `TEXT` | `"unicast"` or `"broadcast_summary"`. Drives render-time decisions (e.g. summary tasks always emit in full; unicast tasks honor `CAFLEET_MAX_TEXT_LEN` truncation). |
 | `created_at` | `TEXT` (ISO-8601, microsecond precision) | First-write timestamp; preserved across UPSERT. |
-| `status_state` | `TEXT` | TaskState enum value: `TASK_STATE_INPUT_REQUIRED` (queued), `TASK_STATE_COMPLETED` (acked), `TASK_STATE_CANCELED` (retracted), `TASK_STATE_FAILED` (routing error). |
+| `status_state` | `TEXT` | TaskState enum value: `input_required` (queued), `completed` (acked), `canceled` (retracted), `failed` (routing error). |
 | `status_timestamp` | `TEXT` (ISO-8601, microsecond precision) | Updated on every state change. Used for `ORDER BY DESC` and the `since` filter on `cafleet message poll`. |
 | `origin_task_id` | `TEXT` (UUID v4, nullable) | Broadcast grouping link. `NULL` on unicast deliveries; on broadcast delivery rows holds the summary task's `task_id`; on the broadcast summary row itself self-references its own `task_id`. |
 | `text` | `TEXT` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` (computed in `broker.broadcast_message` at insert time). Added by Alembic revision `0009_drop_task_json_add_text`. |
@@ -60,7 +60,7 @@ Field decisions:
 | `text` | included, truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix | included, untruncated |
 | `type` | omitted when `"unicast"` (the default); rendered as `kind` when `"broadcast_summary"` | rendered as `type` |
 | `created_at` | omitted | included |
-| `status_state` | omitted when `"TASK_STATE_INPUT_REQUIRED"` (the default for fresh deliveries) | included |
+| `status_state` | omitted when `"input_required"` (the default for fresh deliveries) | included |
 | `origin_task_id` | rendered as `origin` (8-char prefix) when non-NULL; omitted on unicast deliveries | included |
 
 ### JSON output
@@ -107,7 +107,7 @@ A poll result with one unicast delivery (id `abc12345…`, from `xy23ef67…`, b
     "to_agent_id": "<recipient-uuid>",
     "type": "unicast",
     "created_at": "2026-05-05T05:42:11.123456+00:00",
-    "status_state": "TASK_STATE_INPUT_REQUIRED",
+    "status_state": "input_required",
     "status_timestamp": "2026-05-05T05:42:11.123456+00:00",
     "origin_task_id": null,
     "text": "build OK"
