@@ -35,6 +35,7 @@ def test_format_indexed_list__non_empty_calls_formatter_per_item_with_indexed_pr
 
 
 def test_format_indexed_list__byte_identical_output_for_task_list_shape():
+    """Default format_task is the post-Surface-1 2-line compact render."""
     task = {
         "task_id": "tid-1",
         "context_id": "a2",
@@ -51,12 +52,8 @@ def test_format_indexed_list__byte_identical_output_for_task_list_shape():
     expected = "\n".join(
         [
             "[1]",
-            "  id:    tid-1",
-            "  state: input_required",
-            "  from:  a1",
-            "  to:    a2",
-            "  type:  unicast",
-            "  text:  hello world",
+            "[tid-1 | from:a1 | 2026-05-05T12:00:00.000000+00:00]",
+            "hello world",
         ]
     )
     assert result == expected

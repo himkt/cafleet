@@ -130,7 +130,8 @@ def test_message_show_auth_check__accepts_valid_agent(
     )
     assert result.exit_code == 0, result.output
     assert verify_calls == [(agent_id, session_id)]
-    assert task_id in (result.output or "")
+    # Compact rendered envelope carries the 8-char task_id prefix as ``id``.
+    assert task_id[:8] in (result.output or "")
 
 
 # --- message_poll_auth_check: round-9 consistency follow-up. ``message poll``

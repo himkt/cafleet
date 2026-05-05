@@ -317,7 +317,9 @@ def test_format_task__full_true_emits_legacy_verbose_layout():
     # Legacy verbose layout used dedicated "id:", "state:", "from:", "to:",
     # "type:", and "text:" prefixed lines.
     for needle in ("id:", "state:", "from:", "to:", "type:", "text:"):
-        assert needle in rendered, f"legacy field label {needle!r} missing from full output"
+        assert needle in rendered, (
+            f"legacy field label {needle!r} missing from full output"
+        )
 
 
 def test_format_task__full_true_has_more_lines_than_compact():

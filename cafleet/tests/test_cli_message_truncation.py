@@ -294,11 +294,11 @@ def test_message_poll_truncation__non_text_fields_byte_identical_between_default
 
     default_task = json.loads(default_res.output)[0]
     full_task = json.loads(full_res.output)[0]
-    assert default_task["task_id"] == full_task["task_id"]
-    assert default_task["status_state"] == full_task["status_state"]
-    assert default_task["from_agent_id"] == full_task["from_agent_id"]
-    assert default_task["to_agent_id"] == full_task["to_agent_id"]
-    assert default_task["type"] == full_task["type"]
+    # Default emits the compact rendered shape; full emits the typed-column
+    # shape. Compact keys map to typed-column counterparts:
+    assert default_task["id"] == full_task["task_id"][:8]
+    assert default_task["from"] == full_task["from_agent_id"][:8]
+    assert default_task["ts"] == full_task["status_timestamp"]
 
 
 def test_message_show_truncation__default_truncates_text_in_text_output(
@@ -469,11 +469,10 @@ def test_message_show_truncation__non_text_fields_byte_identical_between_default
 
     default_task = json.loads(default_res.output)["task"]
     full_task = json.loads(full_res.output)["task"]
-    assert default_task["task_id"] == full_task["task_id"]
-    assert default_task["status_state"] == full_task["status_state"]
-    assert default_task["from_agent_id"] == full_task["from_agent_id"]
-    assert default_task["to_agent_id"] == full_task["to_agent_id"]
-    assert default_task["type"] == full_task["type"]
+    # Default emits the compact rendered shape; full emits the typed-column shape.
+    assert default_task["id"] == full_task["task_id"][:8]
+    assert default_task["from"] == full_task["from_agent_id"][:8]
+    assert default_task["ts"] == full_task["status_timestamp"]
 
 
 def test_message_send_truncation__default_truncates_echo_in_text_output(
@@ -637,11 +636,10 @@ def test_message_send_truncation__non_text_fields_byte_identical_between_default
 
     default_task = json.loads(default_res.output)["task"]
     full_task = json.loads(full_res.output)["task"]
-    assert default_task["task_id"] == full_task["task_id"]
-    assert default_task["status_state"] == full_task["status_state"]
-    assert default_task["from_agent_id"] == full_task["from_agent_id"]
-    assert default_task["to_agent_id"] == full_task["to_agent_id"]
-    assert default_task["type"] == full_task["type"]
+    # Default emits the compact rendered shape; full emits the typed-column shape.
+    assert default_task["id"] == full_task["task_id"][:8]
+    assert default_task["from"] == full_task["from_agent_id"][:8]
+    assert default_task["ts"] == full_task["status_timestamp"]
 
 
 SUMMARY_TEXT = "Broadcast sent to 3 recipients"

@@ -1,7 +1,7 @@
 # Reduce Token Consumption Across CAFleet Output Surfaces
 
 **Status**: Approved
-**Progress**: 25/118 tasks complete
+**Progress**: 32/118 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -447,13 +447,13 @@ Each surface ships independently. If any one regresses, revert just that step.
 
 ### Step 3: Compact rendered envelope (Surface 1) + bridge adapter
 
-- [ ] Add `output.render_task(task, *, full)`. If shipped before Surface 14, include a small adapter that handles both the legacy nested dict and the typed-column flat dict. <!-- completed: -->
-- [ ] Add `output.format_json(data, *, pretty)`. <!-- completed: -->
-- [ ] Update `output.format_task` to consume the rendered envelope (2 lines/task). <!-- completed: -->
-- [ ] Wire `--pretty` as a global click flag at `cli.py` root. <!-- completed: -->
-- [ ] Make compact JSON the default; `--pretty` switches to indented. <!-- completed: -->
-- [ ] Wire `_client_command(truncates_task_text=True)` to share `full=` toggle. <!-- completed: -->
-- [ ] Unit tests on real fixture (not arithmetic). <!-- completed: -->
+- [x] Add `output.render_task(task, *, full)`. If shipped before Surface 14, include a small adapter that handles both the legacy nested dict and the typed-column flat dict. <!-- completed: 2026-05-05T07:30 -->
+- [x] Add `output.format_json(data, *, pretty)`. <!-- completed: 2026-05-05T07:30 -->
+- [x] Update `output.format_task` to consume the rendered envelope (2 lines/task). <!-- completed: 2026-05-05T07:30 -->
+- [x] Wire `--pretty` as a global click flag at `cli.py` root. <!-- completed: 2026-05-05T07:30 -->
+- [x] Make compact JSON the default; `--pretty` switches to indented. <!-- completed: 2026-05-05T07:30 -->
+- [x] Wire `_client_command(truncates_task_text=True)` to share `full=` toggle. <!-- completed: 2026-05-05T07:30 -->
+- [x] Unit tests on real fixture (not arithmetic). <!-- completed: 2026-05-05T07:30 -->
 
 ### Step 4: Inline message preview (Surface 15)
 

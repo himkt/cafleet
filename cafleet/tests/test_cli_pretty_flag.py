@@ -184,7 +184,8 @@ def test_compact_json__poll_output_has_only_compact_keys(
     )
     assert result.exit_code == 0, result.output
     parsed = json.loads(result.output)
-    assert isinstance(parsed, list) and parsed
+    assert isinstance(parsed, list)
+    assert parsed
     rendered = parsed[0]
     assert set(rendered.keys()).issubset({"id", "from", "ts", "text", "kind", "origin"})
     # Compact must NOT carry the long-form typed-column keys.
@@ -453,6 +454,6 @@ def test_compact_json__message_send_default_returns_compact_envelope(
     assert result.exit_code == 0, result.output
     parsed = json.loads(result.output)
     assert isinstance(parsed, dict)
-    inner = parsed["task"] if "task" in parsed else parsed
+    inner = parsed.get("task", parsed)
     assert "id" in inner
     assert "task_id" not in inner

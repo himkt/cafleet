@@ -74,7 +74,7 @@ def _require_session_id(ctx: click.Context) -> None:
 def _client_command(
     *,
     requires_agent_session: bool = False,
-    text_formatter: Callable[[Any], str] | None = None,
+    text_formatter: Callable[..., str] | None = None,
     truncates_task_text: bool = False,
 ):
     """Subsume the four boilerplate blocks shared by client subcommands.
@@ -115,14 +115,22 @@ def _client_command(
                             f"agent {agent_id} is not a member of session {session_id}."
                         )
                 result = func(ctx, *args, **kwargs)
+                full = kwargs.get("full", False)
+                pretty = ctx.obj["pretty"]
                 if truncates_task_text:
-                    output.truncate_task_text(result, full=kwargs.get("full", False))
-                if ctx.obj["json_output"]:
-                    click.echo(output.format_json(result))
-                elif text_formatter is not None:
-                    click.echo(text_formatter(result))
+                    output.truncate_task_text(result, full=full)
+                    rendered = output.render_tasks_in_result(result, full=full)
                 else:
-                    click.echo(output.format_json(result))
+                    rendered = result
+                if ctx.obj["json_output"]:
+                    click.echo(output.format_json(rendered, pretty=pretty))
+                elif text_formatter is not None:
+                    if truncates_task_text:
+                        click.echo(text_formatter(result, full=full))
+                    else:
+                        click.echo(text_formatter(result))
+                else:
+                    click.echo(output.format_json(rendered, pretty=pretty))
             except click.ClickException:
                 raise
             except Exception as exc:
@@ -144,17 +152,25 @@ def _sync_db_url() -> str:
     "--json", "json_output", is_flag=True, default=False, help="Output in JSON format"
 )
 @click.option(
+    "--pretty",
+    "pretty",
+    is_flag=True,
+    default=False,
+    help="Switch JSON output from compact (default) to indent=2.",
+)
+@click.option(
     "--session-id",
     "session_id",
     default=None,
     help="Session ID (UUID); required for client subcommands.",
 )
 @click.pass_context
-def cli(ctx, json_output, session_id):
+def cli(ctx, json_output, pretty, session_id):
     """CAFleet — CLI for the message broker and agent registry."""
     ctx.ensure_object(dict)
     ctx.obj["session_id"] = session_id
     ctx.obj["json_output"] = json_output
+    ctx.obj["pretty"] = pretty
 
 
 @cli.group()
@@ -267,7 +283,7 @@ def session_create(
     )
 
     if as_json or ctx.obj.get("json_output"):
-        click.echo(output.format_json(result))
+        click.echo(output.format_json(result, pretty=True))
     else:
         click.echo(output.format_session_create(result))
 
@@ -280,7 +296,7 @@ def session_list(ctx: click.Context, as_json: bool) -> None:
     rows = broker.list_sessions()
 
     if as_json or ctx.obj.get("json_output"):
-        click.echo(output.format_json(rows))
+        click.echo(output.format_json(rows, pretty=True))
     else:
         if not rows:
             click.echo("No sessions found.")
@@ -304,7 +320,7 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
         raise click.ClickException(f"session '{session_id}' not found.")
 
     if as_json or ctx.obj.get("json_output"):
-        click.echo(output.format_json(result))
+        click.echo(output.format_json(result, pretty=True))
     else:
         lines = [
             f"session_id: {result['session_id']}",
@@ -376,7 +392,8 @@ def doctor(ctx) -> None:
                         "pane_id": director_ctx.pane_id,
                         "tmux_pane_env": tmux_pane_env,
                     }
-                }
+                },
+                pretty=True,
             )
         )
     else:
@@ -432,7 +449,9 @@ def agent_register(ctx, name, description, skills):
 )
 @click.pass_context
 @_client_command(
-    text_formatter=lambda r: "Message sent.\n" + output.format_task(r),
+    text_formatter=lambda r, *, full: (
+        "Message sent.\n" + output.format_task(r, full=full)
+    ),
     truncates_task_text=True,
 )
 def message_send(ctx, agent_id, to, text, full):
@@ -486,8 +505,8 @@ def message_broadcast(ctx, agent_id, text, full):
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=lambda r: output.format_indexed_list(
-        r, output.format_task, "No messages found."
+    text_formatter=lambda r, *, full: output.format_indexed_list(
+        r, lambda t: output.format_task(t, full=full), "No messages found."
     ),
     truncates_task_text=True,
 )
@@ -513,7 +532,9 @@ def message_poll(ctx, agent_id, since, page_size, full):
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=lambda r: "Message acknowledged.\n" + output.format_task(r),
+    text_formatter=lambda r, *, full: (
+        "Message acknowledged.\n" + output.format_task(r, full=full)
+    ),
     truncates_task_text=True,
 )
 def message_ack(ctx, agent_id, task_id, full):
@@ -534,7 +555,9 @@ def message_ack(ctx, agent_id, task_id, full):
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=lambda r: "Task canceled.\n" + output.format_task(r),
+    text_formatter=lambda r, *, full: (
+        "Task canceled.\n" + output.format_task(r, full=full)
+    ),
     truncates_task_text=True,
 )
 def message_cancel(ctx, agent_id, task_id, full):
@@ -555,7 +578,7 @@ def message_cancel(ctx, agent_id, task_id, full):
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=output.format_task,
+    text_formatter=lambda r, *, full: output.format_task(r, full=full),
     truncates_task_text=True,
 )
 def message_show(ctx, agent_id, task_id, full):
@@ -799,7 +822,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
 
     result["placement"] = placement_view
     if ctx.obj["json_output"]:
-        click.echo(output.format_json(result))
+        click.echo(output.format_json(result, pretty=True))
     else:
         click.echo(output.format_member(result))
 
@@ -930,7 +953,9 @@ def member_delete(ctx, agent_id, member_id, force):
     pane_status = f"{pane_id} (timeout)"
     if ctx.obj["json_output"]:
         click.echo(
-            output.format_json({"agent_id": member_id, "pane_status": pane_status})
+            output.format_json(
+                {"agent_id": member_id, "pane_status": pane_status}, pretty=True
+            )
         )
     ctx.exit(2)
 
@@ -944,7 +969,9 @@ def _emit_member_delete_output(
 ) -> None:
     if ctx.obj["json_output"]:
         click.echo(
-            output.format_json({"agent_id": member_id, "pane_status": pane_status})
+            output.format_json(
+                {"agent_id": member_id, "pane_status": pane_status}, pretty=True
+            )
         )
     else:
         click.echo(header)
@@ -1011,7 +1038,8 @@ def member_capture(ctx, agent_id, member_id, lines):
                     "pane_id": pane_id,
                     "lines": lines,
                     "content": content,
-                }
+                },
+                pretty=True,
             )
         )
     else:
@@ -1092,7 +1120,8 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
                     "pane_id": pane_id,
                     "action": action,
                     "value": value,
-                }
+                },
+                pretty=True,
             )
         )
     else:
@@ -1148,7 +1177,8 @@ def member_exec(ctx, agent_id, member_id, command):
                     "member_agent_id": member_id,
                     "pane_id": pane_id,
                     "command": command,
-                }
+                },
+                pretty=True,
             )
         )
     else:
@@ -1206,7 +1236,8 @@ def member_ping(ctx, agent_id, member_id):
                 {
                     "member_agent_id": member_id,
                     "pane_id": pane_id,
-                }
+                },
+                pretty=True,
             )
         )
     else:
