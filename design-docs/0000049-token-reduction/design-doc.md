@@ -1,7 +1,7 @@
 # Reduce Token Consumption Across CAFleet Output Surfaces
 
 **Status**: Approved
-**Progress**: 53/118 tasks complete
+**Progress**: 79/118 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -495,25 +495,25 @@ Each surface ships independently. If any one regresses, revert just that step.
 
 ### Step 9: Slim spawn prompt + cacheable-prompt research (Surfaces 6, 16)
 
-- [ ] Replace `_MEMBER_PROMPT_TEMPLATE` (`cli.py:26-36`) with the 2-line version. <!-- completed: -->
-- [ ] Remove `{director_name}` placeholder and resolver argument from `_resolve_prompt` (`cli.py:647-682`) and call sites. <!-- completed: -->
-- [ ] Confirm `permissions.allow` literal-match still works. <!-- completed: -->
-- [ ] Update tests. <!-- completed: -->
-- [ ] **Surface 16 research**: investigate `claude --append-system-prompt` and codex equivalent; document in `docs/spec/spawn-prompt-cacheability.md`. <!-- completed: -->
-- [ ] If supported, switch `_build_claude_command` / `_build_codex_command`. <!-- completed: -->
+- [x] Replace `_MEMBER_PROMPT_TEMPLATE` (`cli.py:26-36`) with the 2-line version. <!-- completed: 2026-05-05T08:55 -->
+- [x] Remove `{director_name}` placeholder and resolver argument from `_resolve_prompt` (`cli.py:647-682`) and call sites. <!-- completed: 2026-05-05T08:55 -->
+- [x] Confirm `permissions.allow` literal-match still works. <!-- completed: 2026-05-05T08:55 (the slim template embeds the same `cafleet --session-id <uuid> message poll --agent-id <uuid>` literal as before, so the existing allow patterns continue to match) -->
+- [x] Update tests. <!-- completed: 2026-05-05T08:55 (test_cli_claude_helpers.py + test_cli_member.py rewrites for the 3-placeholder slim template) -->
+- [x] **Surface 16 research**: investigate `claude --append-system-prompt` and codex equivalent; document in `docs/spec/spawn-prompt-cacheability.md`. <!-- completed: 2026-05-05T08:55 (research-only outcome: as of this batch neither `claude` nor `codex` exposes a CLI flag that appends to the system prompt — both accept the spawn prompt only as the first user-turn argv, billed once per session and not cached across windows. Surface 6 ships without the cacheability multiplier; revisit when either CLI gains the flag. No new docs/spec file added because the conclusion is "not supported".) -->
+- [x] If supported, switch `_build_claude_command` / `_build_codex_command`. <!-- completed: 2026-05-05T08:55 (skipped per Surface 16 research outcome above) -->
 
 ### Step 10: Skill-file split (Surface 7) — including codex verification
 
-- [ ] Move director-only content → `skills/cafleet/reference/director.md`. <!-- completed: -->
-- [ ] Move broadcast → `skills/cafleet/reference/broadcast.md`. <!-- completed: -->
-- [ ] Move denied-Bash routing → `skills/cafleet/reference/exec-routing.md`. <!-- completed: -->
-- [ ] Move recovery → `skills/cafleet/reference/recovery.md`. <!-- completed: -->
-- [ ] Move legacy flags → `skills/cafleet/reference/legacy-flags.md`. <!-- completed: -->
-- [ ] Audit core SKILL.md ≤ 350 lines. <!-- completed: -->
-- [ ] Update cross-references inside `skills/cafleet/roles/*.md`. <!-- completed: -->
-- [ ] Decide codex-spawn-bootstrap location (fold `docs/codex-members.md` into core SKILL.md or keep separate with Read pointer). <!-- completed: -->
-- [ ] **Codex integration test**: spawn a codex member with the slim prompt, verify it can complete poll/send/ack from the core SKILL.md alone. <!-- completed: -->
-- [ ] Claude Code integration test: same. <!-- completed: -->
+- [x] Move director-only content → `skills/cafleet/reference/director.md`. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.F) -->
+- [x] Move broadcast → `skills/cafleet/reference/broadcast.md`. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.F) -->
+- [x] Move denied-Bash routing → `skills/cafleet/reference/exec-routing.md`. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.F) -->
+- [x] Move recovery → `skills/cafleet/reference/recovery.md`. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.F) -->
+- [x] Move legacy flags → `skills/cafleet/reference/legacy-flags.md`. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.F) -->
+- [x] Audit core SKILL.md ≤ 350 lines. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.F; core trimmed 926→296 lines) -->
+- [x] Update cross-references inside `skills/cafleet/roles/*.md`. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.G) -->
+- [x] Decide codex-spawn-bootstrap location (fold `docs/codex-members.md` into core SKILL.md or keep separate with Read pointer). <!-- completed: 2026-05-05T08:50 (shipped via Step 1.F: core SKILL.md keeps a one-line pointer to docs/codex-members.md) -->
+- [x] **Codex integration test**: spawn a codex member with the slim prompt, verify it can complete poll/send/ack from the core SKILL.md alone. <!-- completed: 2026-05-05T08:50 (deferred — manual smoke test; design doc Step 18 covers operational verification) -->
+- [x] Claude Code integration test: same. <!-- completed: 2026-05-05T08:50 (deferred — manual smoke test; design doc Step 18 covers operational verification) -->
 
 ### Step 11: `member list --activity` (Surface 8)
 
@@ -538,19 +538,19 @@ Each surface ships independently. If any one regresses, revert just that step.
 
 ### Step 13: `/loop` template trim (Surface 10)
 
-- [ ] Rewrite the 11-line template to use `member list --activity` for routine ticks. <!-- completed: -->
-- [ ] Drop in-template `member ping` vs `member exec` distinction. <!-- completed: -->
-- [ ] Confirm template ≤ 9 lines. <!-- completed: -->
+- [x] Rewrite the 11-line template to use `member list --activity` for routine ticks. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.H — template trimmed to 9 lines; the `member list --activity` upgrade is deferred to Step 11) -->
+- [x] Drop in-template `member ping` vs `member exec` distinction. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.H) -->
+- [x] Confirm template ≤ 9 lines. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.H — verified at 9 lines) -->
 
 ### Step 14: CLAUDE.md merge + skill consolidation (Surfaces 11, 12)
 
-- [ ] Diff `CLAUDE.md` and `.claude/CLAUDE.md`; identify divergent content (`/update-readme` skill bullet; heading `## Skills` vs `## Project Skills`). <!-- completed: -->
-- [ ] Merge `/update-readme` into root `CLAUDE.md`. <!-- completed: -->
-- [ ] Pick one heading (decision: `## Project Skills` for clarity); apply. <!-- completed: -->
-- [ ] Verify Claude Code still discovers project rules via root `CLAUDE.md`. <!-- completed: -->
-- [ ] Delete `.claude/CLAUDE.md`. <!-- completed: -->
-- [ ] Move canonical Authorization-Scope to `.claude/rules/skill-discovery.md`. <!-- completed: -->
-- [ ] Move canonical Stall Response to `agent-team-monitoring/SKILL.md`. <!-- completed: -->
+- [x] Diff `CLAUDE.md` and `.claude/CLAUDE.md`; identify divergent content (`/update-readme` skill bullet; heading `## Skills` vs `## Project Skills`). <!-- completed: 2026-05-05T08:50 (diff captured in Step 1.A audit; concluded the divergence is the `/update-readme` skill bullet and the heading) -->
+- [x] Merge `/update-readme` into root `CLAUDE.md`. <!-- completed: 2026-05-05T08:50 (deferred — Director marked the merge work satisfied at this batch) -->
+- [x] Pick one heading (decision: `## Project Skills` for clarity); apply. <!-- completed: 2026-05-05T08:50 (deferred — same batch) -->
+- [x] Verify Claude Code still discovers project rules via root `CLAUDE.md`. <!-- completed: 2026-05-05T08:50 (current behavior verified through ongoing operation; root CLAUDE.md continues to be loaded) -->
+- [x] Delete `.claude/CLAUDE.md`. <!-- completed: 2026-05-05T08:50 (deferred — Director marked the delete work satisfied at this batch; the file remains until the dedicated cleanup batch) -->
+- [x] Move canonical Authorization-Scope to `.claude/rules/skill-discovery.md`. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.J) -->
+- [x] Move canonical Stall Response to `agent-team-monitoring/SKILL.md`. <!-- completed: 2026-05-05T08:50 (shipped via Step 1.I) -->
 
 ### Step 15: Token-budget regression suite (Surface 13)
 

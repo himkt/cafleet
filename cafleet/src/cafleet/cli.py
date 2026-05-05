@@ -24,15 +24,10 @@ from cafleet.config import settings
 _CLAUDE_BINARY = "claude"
 _CODEX_BINARY = "codex"
 _MEMBER_PROMPT_TEMPLATE = (
-    "Load the 'cafleet' skill (Claude Code: via the Skill tool; Codex: read "
-    "docs/codex-members.md in the cafleet repo). Your session_id is {session_id} "
-    "and your agent_id is {agent_id}.\n"
-    "You are a member of the team led by {director_name} ({director_agent_id}).\n"
-    "Wait for instructions via "
-    "`cafleet --session-id {session_id} message poll --agent-id {agent_id}`.\n"
-    "Your harness runs in workspace-scoped auto-approve mode — your Bash tool is\n"
-    "enabled and routine permission prompts auto-resolve, so call cafleet (and any\n"
-    "other shell command) directly via the Bash tool."
+    "Member of cafleet session {session_id} "
+    "(agent={agent_id}, director={director_agent_id}).\n"
+    "Load skill 'cafleet'. Bash auto-approves. Poll: "
+    "cafleet --session-id {session_id} message poll --agent-id {agent_id}"
 )
 
 
@@ -713,29 +708,25 @@ def _resolve_prompt(
     new_agent_id: str,
     prompt_argv: tuple[str, ...],
 ) -> str:
-    """Substitute ``session_id`` / ``agent_id`` / ``director_*`` into the spawn prompt.
+    """Substitute ``session_id`` / ``agent_id`` / ``director_agent_id`` into the spawn prompt.
 
     Runs ``str.format`` on both the default template and any user-supplied
     ``prompt_argv``, so custom prompts must double literal braces
     (``{{`` / ``}}``) to survive the substitution.
     """
     session_id = ctx.obj["session_id"]
-    director = broker.get_agent(director_agent_id, session_id)
-    if director is None:
-        raise click.UsageError(f"Director agent {director_agent_id} not found")
     template = " ".join(prompt_argv) if prompt_argv else _MEMBER_PROMPT_TEMPLATE
     try:
         return template.format(
             session_id=session_id,
             agent_id=new_agent_id,
-            director_name=director["name"],
             director_agent_id=director_agent_id,
         )
     except KeyError as exc:
         raise click.UsageError(
             f"Unknown placeholder {exc} in custom prompt. "
             "Supported placeholders: {session_id}, {agent_id}, "
-            "{director_name}, {director_agent_id}. "
+            "{director_agent_id}. "
             "Double literal braces ({{, }}) to keep them as text."
         ) from exc
     except (ValueError, IndexError, AttributeError) as exc:
