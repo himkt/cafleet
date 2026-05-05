@@ -39,52 +39,9 @@ Idleness alone is never a stop signal, never a stall, and never grounds for a pa
 
 ## Authorization-Scope Guard (CRITICAL)
 
-**Absence of confirmation is not a stop signal.** When the user authorizes a
-workstream ("execute the design doc", "process the review comments",
-"continue with step N"), that authorization persists across `/loop` ticks
-(claude), out-of-band scheduler firings (codex fallback), idle notifications,
-and your own tool-result interpretations until the user issues an explicit
-stop signal.
+Absence of confirmation is not a stop signal. User authorization persists across `/loop` ticks, scheduler firings, and idle notifications until an explicit stop signal arrives. The Director MUST dispatch queued work as soon as a teammate is idle and inputs are available; do NOT emit passive-hold messages in response to a supervision tick.
 
-**You MUST dispatch queued work as soon as a teammate is idle and inputs are
-available.** Examples of queued work that the Director MUST route immediately:
-
-- Review comments waiting to be split across Programmer / Tester
-- Next implementation step in the active design doc
-- Reviewer feedback waiting to land at the Drafter
-- A teammate's `cafleet message send` reply waiting to be ACK'd and acted on
-
-**Do NOT** emit `Skipping. Holding for go.`, `Waiting for user confirmation
-before dispatching`, or any equivalent passive-hold message in response to a
-supervision tick or idle notification. The tick is a *health check*, not a
-permission renewal request.
-
-### What counts as a real stop signal
-
-Only these gestures revoke prior authorization. Anything else is noise:
-
-| Signal | Action |
-|---|---|
-| Explicit "stop", "wait", "halt", "pause" from the user | Stop dispatching; acknowledge; wait for the next instruction. |
-| Profanity / frustration directed at your last action | Stop; acknowledge briefly; wait. Do not continue scheduled firings. |
-| Repeated rejection of your tool calls (≥2 denials of the same operation in a row) | Stop the operation; surface the blocker; wait for guidance. |
-| User typed `/clear` or restarted the session | Authorization is gone; do not resume from prior context without a new instruction. |
-
-`/loop` cron firings, out-of-band scheduler firings, teammate idle
-notifications, broker auto-fire receipts, and the absence of a fresh "go"
-message are **not** stop signals. Treat them as inputs to evaluate, not gates
-to pass through.
-
-### When you genuinely need user input
-
-If a queued action requires a *new* decision the user has not yet made
-(choosing between options, approving a risky / remote-visible operation,
-disambiguating a teammate's question), use `AskUserQuestion` — do **not**
-emit a passive hold and wait. The hold message produces nothing; the question
-unblocks you within seconds.
-
-See `.claude/rules/skill-discovery.md` § *Authorization scope* and § *Stop
-means stop* for the project-wide policy this section enforces.
+The canonical content — the full guard, the real-stop-signal decision table, and the "when you genuinely need user input" guidance — lives in `.claude/rules/skill-discovery.md` § *Authorization-Scope Guard for CAFleet supervision*. Read that section before your first `cafleet member create` and re-read whenever you are tempted to emit a hold message.
 
 ## Spawn Protocol
 
@@ -118,7 +75,7 @@ CAFleet members never talk to the user directly — the Director relays. When a 
 
 ## Stall Response
 
-A member is stalled when it **blocks your next step** — not merely because it is idle. The 2-stage health check (`cafleet message poll` → `cafleet member capture`), the response-channels table, and the escalation rules live in `Skill(agent-team-monitoring)` § Stall Response. This skill does not duplicate them — load monitoring and follow that section.
+See `Skill(agent-team-monitoring)` § Stall Response.
 
 ## Cleanup Protocol
 
