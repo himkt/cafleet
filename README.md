@@ -15,6 +15,14 @@ A message broker and agent registry for coding agents — a Claude Code plugin p
 
 This adds 7 skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet:agent-team-monitoring`, `/cafleet:agent-team-supervision`, `/cafleet:design-doc`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`. Run `/help` in Claude Code to see them.
 
+### Install the plugin in Codex
+
+```
+codex plugin marketplace add himkt/cafleet
+```
+
+Then complete the in-UI install when prompted by `codex`. The same 7 skills (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) land in Codex from the shared `skills/` tree.
+
 ### Install the broker CLI (required for the plugin to function)
 
 ```bash

@@ -1,8 +1,8 @@
 # Codex Plugin Manifest
 
 **Status**: Approved
-**Progress**: 0/7 tasks complete
-**Last Updated**: 2026-05-03
+**Progress**: 2/7 tasks complete
+**Last Updated**: 2026-05-05
 
 ## Overview
 
@@ -134,8 +134,8 @@ Manual operator verification is the only acceptance check. There is no JSON-sche
 
 ### Step 1: Documentation first
 
-- [ ] Update `README.md`: add a "Install the plugin in Codex" subsection alongside the existing "Install the plugin in Claude Code" block (§Install). Document the `codex plugin marketplace add himkt/cafleet` command and the in-UI install step. Note that the same 7 skills land in Codex. <!-- completed: -->
-- [ ] Update `ARCHITECTURE.md`: add a sentence (in an appropriate "Distribution" / "Plugin packaging" section, or near the top if no such section exists) noting that CAFleet ships dual plugin manifests (Claude Code at `.claude-plugin/`, Codex at `.codex-plugin/` + `.agents/plugins/marketplace.json`) over a shared `skills/` tree. <!-- completed: -->
+- [x] Update `README.md`: add a "Install the plugin in Codex" subsection alongside the existing "Install the plugin in Claude Code" block (§Install). Document the `codex plugin marketplace add himkt/cafleet` command and the in-UI install step. Note that the same 7 skills land in Codex. <!-- completed: 2026-05-05T13:42 -->
+- [x] Update `ARCHITECTURE.md`: add a sentence (in an appropriate "Distribution" / "Plugin packaging" section, or near the top if no such section exists) noting that CAFleet ships dual plugin manifests (Claude Code at `.claude-plugin/`, Codex at `.codex-plugin/` + `.agents/plugins/marketplace.json`) over a shared `skills/` tree. <!-- completed: 2026-05-05T13:42 -->
 
 ### Step 2: Add the Codex plugin manifest
 

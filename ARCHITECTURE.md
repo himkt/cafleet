@@ -316,3 +316,7 @@ A single Python package and a frontend app:
 - **`admin/`** — WebUI SPA: Vite + React + TypeScript + Tailwind CSS
 
 A single `pip install cafleet` gives users both the broker server and the agent CLI.
+
+## Plugin Packaging
+
+CAFleet ships dual plugin manifests (Claude Code at `.claude-plugin/`, Codex at `.codex-plugin/` + `.agents/plugins/marketplace.json`) over a shared `skills/` tree. Both manifests anchor at the same `skills/` directory — Claude's `.claude-plugin/plugin.json` enumerates each skill explicitly, while Codex's `.codex-plugin/plugin.json` declares `"skills": "./skills/"` and auto-bundles every `SKILL.md` under it. The two manifests' `name`, `version`, and `description` fields are kept byte-identical so a single edit on a release cuts both plugins simultaneously.
