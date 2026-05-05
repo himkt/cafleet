@@ -64,12 +64,15 @@ Codex marketplace catalog so the repo root is itself a marketplace addressable v
     {
       "name": "cafleet",
       "source": {
-        "source": "local",
-        "path": "../../"
+        "source": "url",
+        "url": "https://github.com/himkt/cafleet.git",
+        "ref": "main"
       },
       "policy": {
-        "installation": "AVAILABLE"
-      }
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
     }
   ]
 }
@@ -81,10 +84,14 @@ Field rules:
 |---|---|---|
 | `name` (top-level) | `"cafleet"` | Marketplace name. Mirrors `.claude-plugin/marketplace.json:name` for symmetry. |
 | `plugins[0].name` | `"cafleet"` | Must match `plugin.json:name`. |
-| `plugins[0].source` | object with `source: "local"` and `path: "../../"` | The plugin manifest at `.codex-plugin/plugin.json` lives at the repo root. Codex's resolver looks for `<marketplace-parent>/<path>/.codex-plugin/plugin.json`; from `.agents/plugins/marketplace.json` the marketplace parent is `.agents/plugins/`, so `path: "../../"` resolves to the repo root and points the resolver at `.codex-plugin/plugin.json`. The original spec'd value was `"./"`; the path-math fallback `"../../"` was applied preemptively in Executor round 2 (see Changelog) per Implementation Step 4 task 3. |
-| `plugins[0].policy.installation` | `"AVAILABLE"` | Plugin appears in the in-UI install list. No `authentication` field; the plugin needs no credentials. |
+| `plugins[0].source.source` | `"url"` | Literal string. The Codex docs at <https://developers.openai.com/codex/plugins/build> prescribe `"source": "url"` for plugins that live at the repository root and `"source": "git-subdir"` for plugins in a subdirectory. The earlier `"local"` value (round 2) was wrong because local-source paths must stay inside the marketplace root (`.agents/plugins/`), and our plugin lives at the repo root. |
+| `plugins[0].source.url` | `"https://github.com/himkt/cafleet.git"` | The HTTPS git URL of this repository. Codex clones from this URL when resolving the plugin. |
+| `plugins[0].source.ref` | `"main"` | The git ref Codex checks out. Refreshable — bump alongside any future `version` change so installs pull the matching tagged or branch tip. |
+| `plugins[0].policy.installation` | `"AVAILABLE"` | Plugin appears in the in-UI install list. |
+| `plugins[0].policy.authentication` | `"ON_INSTALL"` | Required by the spec on every plugin entry. CAFleet needs no credentials, so this is a no-op for the install flow; `"ON_INSTALL"` is the only documented value, included for spec compliance. |
+| `plugins[0].category` | `"Productivity"` | Top-level on the plugin entry (NOT under `policy`). Required by the spec on every plugin entry; `"Productivity"` is the only documented value. |
 
-Out of scope for v1 (intentionally omitted): `interface` (display metadata), `category`, `authentication: ON_INSTALL` (no creds). The minimal three fields above are enough for `codex plugin marketplace add himkt/cafleet` to succeed.
+Out of scope for v1 (intentionally omitted): `interface` (display metadata). The fields above are enough for `codex plugin marketplace add himkt/cafleet` to succeed.
 
 ### Coexistence with the Claude Code plugin
 
@@ -151,7 +158,7 @@ Manual operator verification is the only acceptance check. There is no JSON-sche
 
 - [x] Push the implementation branch to GitHub so `codex plugin marketplace add himkt/cafleet` can fetch it. The simplest path is to merge to `main`; alternatively, push the branch and pass its ref to the marketplace-add command. Local commits alone do NOT satisfy this task. <!-- completed: 2026-05-05T13:51 -->
 - [ ] Operator runs `codex plugin marketplace add himkt/cafleet` against the now-public branch and completes the in-UI install. Confirms that all 7 skills (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) are exposed. <!-- completed: -->
-- [x] If the install fails because Codex cannot resolve `plugins[0].source.path`, patch `.agents/plugins/marketplace.json`. The spec'd value is `"./"`; the documented fallback is `"../../"` (since the marketplace parent is `.agents/plugins/`, two levels deep from the repo root). Try the fallback, re-run the marketplace-add + UI install, and update §Specification → File 2 to match the value that works. This is the only known implementation risk; the operator's first smoke test resolves it. <!-- completed: 2026-05-05T13:59 (applied preemptively in Executor round 2 in response to Copilot review on PR #55; path-math fallback "../../" written into .agents/plugins/marketplace.json + §Specification File 2 spec block + field-rules table) -->
+- [x] If the install fails because Codex cannot resolve the plugin manifest, patch `.agents/plugins/marketplace.json` so the `source` shape matches what the Codex docs at <https://developers.openai.com/codex/plugins/build> prescribe for repo-root plugins. The doc's verbatim guidance is to use `"source": "url"` when the plugin lives at the repository root and `"source": "git-subdir"` when it lives in a subdirectory. The catalog also requires `policy.authentication` and a top-level `category` on every plugin entry. Update `.agents/plugins/marketplace.json` and §Specification → File 2 (spec block + field-rules table + out-of-scope subsection) together. <!-- completed: 2026-05-05T13:59 (applied in Executor round 3 in response to user-driven docs verification: source-type pivot from local to url since plugin lives at repo root, plus added policy.authentication and category required by the spec) -->
 
 ---
 
@@ -164,3 +171,4 @@ Manual operator verification is the only acceptance check. There is no JSON-sche
 | 2026-05-03 | User approved. Status → Approved. |
 | 2026-05-05 | Executor round 1: spec drift fix — File 1 description string aligned with current `.claude-plugin/plugin.json:description` (dropped `"A2A-inspired "` prefix) per lock-step invariant + Claude-untouched constraint. |
 | 2026-05-05 | Executor round 2: applied path-fallback `"../../"` preemptively in response to Copilot review (PR #55), per design doc Step 4.3. The resolver formula stated in §Specification → File 2 (`<marketplace-parent>/<path>/.codex-plugin/plugin.json`) makes `"./"` mathematically unable to reach the repo-root manifest from `.agents/plugins/`; `"../../"` resolves correctly. Both `.agents/plugins/marketplace.json` and §Specification → File 2 (spec block + field-rules table) updated together. |
+| 2026-05-05 | Executor round 3: source-type pivot. Direct read of <https://developers.openai.com/codex/plugins/build> showed that the round-2 path-math fallback (`"../../"`) was unfixable: local-source paths must stay inside the marketplace root, but our plugin lives at the repo root. Switched to `source.source = "url"` with `url = https://github.com/himkt/cafleet.git`, `ref = "main"` — the doc-prescribed source type for repo-root plugins. Also added `policy.authentication = "ON_INSTALL"` and `category = "Productivity"` (both required per the doc's "Always include" rule). §Specification → File 2 spec block + field-rules table + out-of-scope subsection updated together; `.agents/plugins/marketplace.json` rewritten to match. |
