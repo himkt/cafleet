@@ -1,8 +1,8 @@
 # SQLite Data Model Specification
 
-All core data structures — `Task`, `Message`, `Part`, `Artifact`, `AgentCard`, `TaskStatus`, `TaskState` — follow an internal CAFleet-defined shape, and CAFleet does not maintain Pydantic models for them. SQLite stores the `Task` and `AgentCard` payloads as JSON `TEXT` blobs that the broker layer serializes via `json.dumps` and reads back as plain Python dicts via `json.loads` (see `cafleet/src/cafleet/broker.py`). Broker-specific information (routing metadata, etc.) lives in indexed columns alongside the JSON blob.
+After [design 0000049 Surface 14](../../design-docs/0000049-token-reduction/design-doc.md), the `Task` payload is fully relational — the `tasks.task_json` blob was dropped and every routing field plus the message body lives in its own typed column (see `cafleet/src/cafleet/broker.py`). The only remaining JSON `TEXT` blob is `agents.agent_card_json`, which still stores an `AgentCard`-shaped document; CAFleet does not maintain Pydantic models for either shape.
 
-The model is a **relational + document hybrid**: indexed fields are columns, while the structured payloads are stored as opaque JSON `TEXT`. The columns are queried; the JSON blobs are not.
+The model is now **predominantly relational**: every queried field on `tasks` is a typed column, and the only opaque payload is the `agent_card_json` document on `agents`. The previous "relational + document hybrid" framing applied to the pre-Surface-14 schema and no longer reflects the on-disk layout.
 
 Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver (see `cafleet/src/cafleet/db/engine.py`'s `get_sync_engine` / `get_sync_sessionmaker`). Operators apply migrations once via `cafleet db init` before starting the server.
 

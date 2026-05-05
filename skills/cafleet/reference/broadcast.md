@@ -14,7 +14,7 @@ cafleet --session-id <session-id> message broadcast --agent-id <my-agent-id> \
 
 ## What the broker does
 
-`broker.broadcast_message` writes one row per recipient as an individual delivery task (each visible to its recipient via `cafleet message poll`) PLUS one `broadcast_summary` row addressed to the broadcaster. The summary's `text` is an empty string; the human-facing summary string (`Broadcast sent to N recipients`) is computed client-side from `recipient_count`. Truncating that summary would hide the recipient count, so the CLI emits the broadcast summary in full regardless of `--full` (the `--full` flag controls only whether per-recipient envelopes and `recipient_ids` are included).
+`broker.broadcast_message` writes one row per recipient as an individual delivery task (each visible to its recipient via `cafleet message poll`) PLUS one `broadcast_summary` row addressed to the broadcaster. The summary's `text` is the human-readable string `"Broadcast sent to N recipients"`, written by the broker at insert time. Truncating that summary would hide the recipient count, so the CLI emits the broadcast summary in full regardless of `--full` (the `--full` flag controls only whether per-recipient envelopes and `recipient_ids` are included).
 
 The response carries `notifications_sent_count` indicating how many recipient panes were successfully triggered by the inline-preview keystroke (see `reference/recovery.md` for the failure-mode chain when an inline preview misses).
 
@@ -54,4 +54,4 @@ The summary row is NOT acked by recipients — it is a sender-side artifact, add
 
 ## Flag-surface consistency
 
-`--full` is preserved on `message broadcast` for surface consistency with `message {send,poll,ack,cancel,show}`. On those five subcommands `--full` disables body truncation; on `message broadcast` body truncation does not apply (the summary's `text` is empty and the per-recipient envelopes carry the original body untruncated by the time they appear in `--full` output). The flag's only on-the-wire effect for broadcast is "include `recipient_ids` and per-recipient envelopes". See `reference/legacy-flags.md` for the cross-subcommand `--full` semantics table.
+`--full` is preserved on `message broadcast` for surface consistency with `message {send,poll,ack,cancel,show}`. On those five subcommands `--full` disables body truncation; on `message broadcast` body truncation does not apply (the summary's `text` is the broker-computed summary string and is emitted untruncated regardless, while the per-recipient envelopes carry the original body untruncated by the time they appear in `--full` output). The flag's only on-the-wire effect for broadcast is "include `recipient_ids` and per-recipient envelopes". See `reference/legacy-flags.md` for the cross-subcommand `--full` semantics table.

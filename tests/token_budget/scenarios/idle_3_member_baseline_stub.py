@@ -1,21 +1,33 @@
-"""Per-tick baseline measurement for design doc 0000049 (token reduction).
+"""Per-tick baseline measurement STUB for design doc 0000049 (token reduction).
 
-Spawns an isolated 3-member CAFleet session, lets the panes settle, then
-captures + byte-counts the outputs that a Director's /loop tick currently
-runs against its team:
+This file is a **deferred stub** of the originally-scoped Step 0 baseline
+script. The original target was a 10-minute idle window with periodic
+``/loop``-tick captures; the operator deferred that measurement when
+Surface 13 was authorized to ship with character-anchored regression
+tests as the canonical contract.
 
-    1. ``cafleet member list --agent-id <director>``
-    2. ``cafleet message poll --agent-id <director>``
-    3. ``cafleet member capture --agent-id <director> --member-id <m> --lines 200``
-       (per member)
+What this script ACTUALLY does today (single-shot stub):
 
-The total byte count is the per-tick cost the design doc's surface stack
-must beat. Run this script BEFORE landing any surface; the result anchors
-the regression budget in tests/token_budget/measurement_results.md.
+    1. Spawns an isolated 3-member CAFleet session.
+    2. Sleeps ``SETTLE_SECONDS`` (= 30, NOT 10 minutes) so the panes settle.
+    3. Captures the outputs of one Director ``/loop`` tick:
+       - ``cafleet member list --agent-id <director>``
+       - ``cafleet message poll --agent-id <director>``
+       - ``cafleet member capture --agent-id <director> --member-id <m> --lines 200``
+         (per member)
+    4. Writes the per-command byte breakdown to
+       ``tests/token_budget/measurement_results.md``.
+    5. Tears the session down.
+
+There is NO 10-minute window and NO sampling loop. Treat this as a
+one-shot baseline grabber, not a periodic sampler. If the full
+10-minute scenario is implemented later, it should land as a sibling
+file (e.g. ``idle_3_member_10_minute.py``) and update the design doc's
+Step 0 reference accordingly.
 
 Usage::
 
-    uv run python tests/token_budget/scenarios/idle_3_member_10_minute.py
+    uv run python tests/token_budget/scenarios/idle_3_member_baseline_stub.py
 
 Must run inside a tmux session — ``cafleet member create`` requires it.
 The script splits the calling pane's window with three temporary
@@ -145,12 +157,12 @@ def _write_results(
         "\n"
         "Per-tick byte counts of the Director monitoring commands run against an\n"
         "isolated 3-member idle CAFleet session. Updated by\n"
-        "`tests/token_budget/scenarios/idle_3_member_10_minute.py`.\n"
+        "`tests/token_budget/scenarios/idle_3_member_baseline_stub.py`.\n"
         "\n"
         "## Pre-design-0049 baseline\n"
         "\n"
         f"- captured_at: {timestamp}\n"
-        "- scenario: idle_3_member_10_minute\n"
+        "- scenario: idle_3_member_baseline_stub\n"
         f"- session_id: {session_id}\n"
         f"- director_agent_id: {director_id}\n"
         f"- member_count: {len(member_ids)}\n"

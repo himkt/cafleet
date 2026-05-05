@@ -247,7 +247,7 @@ def test_compact_envelope_bytes_under_budget():
 
 **Pre-baseline gating** (the v3 self-confirmation hole, fixed):
 
-1. **Step 0** (lands first, in its own PR before any surface): capture pre-baseline using `tests/token_budget/scenarios/idle_3_member_10_minute.py` (deterministic scripted scenario where members no-op for 10 minutes while the Director runs current `/loop`). Persist byte count to `tests/token_budget/measurement_results.md` with an explicit `baseline_pre_design_0049: <N>` key.
+1. **Step 0** (lands first, in its own PR before any surface): capture pre-baseline using `tests/token_budget/scenarios/idle_3_member_baseline_stub.py` (deterministic scripted scenario where members no-op while the Director runs current `/loop`; originally targeted a 10-minute window — deferred per operator at execute time, see Step 0 checkbox below). Persist byte count to `tests/token_budget/measurement_results.md` with an explicit `baseline_pre_design_0049: <N>` key.
 2. Each subsequent surface PR records its post-change byte count under a `post_surface_<N>: <M>` key.
 3. The pass criterion `total ≤ 0.20 × baseline_pre_design_0049` is asserted by a CI test that reads `measurement_results.md` and the live measurement.
 
@@ -365,7 +365,7 @@ For a representative session — 3 members, 30 messages over 1 hour, Director on
 
 4. **Tokenizer choice for budget tests.** Char counts are deterministic but approximate. Surface 13 records a real-tokenizer count (Anthropic / `tiktoken` proxy) alongside the char count. If chars-vs-tokens drifts after a surface, swap to real tokenizer for assertions.
 
-5. **Measurement determinism.** Use canned scripted scenario (`idle_3_member_10_minute.py`) for the pre/post comparison. Document ±5 % variability across runs.
+5. **Measurement determinism.** Use canned scripted scenario (`idle_3_member_baseline_stub.py`) for the pre/post comparison. Document ±5 % variability across runs.
 
 6. **`member capture --lines` calibration.** 30 may truncate stalled prompts. Resolved at Step 12 by capture-trace measurement. Bump to 50 if needed.
 
@@ -412,7 +412,7 @@ Each surface ships independently. If any one regresses, revert just that step.
 
 ### Step 0: Pre-baseline capture
 
-- [x] Implement `tests/token_budget/scenarios/idle_3_member_10_minute.py` deterministic scenario. <!-- completed: 2026-05-05T05:42 -->
+- [x] Implement `tests/token_budget/scenarios/idle_3_member_baseline_stub.py` deterministic single-shot scenario (originally scoped as `idle_3_member_10_minute.py` with a 10-minute sampling window — deferred at execute time per operator; renamed to honest stub name 2026-05-05T11:25 after PR #53 Copilot review). <!-- completed: 2026-05-05T05:42 -->
 - [-] Run scenario / persist baseline / standalone PR — skipped per operator on 2026-05-05; Surface 13 char-count tests cover the regression budget.
 
 ### Step 1: Documentation first (with inherited-convention scrub)

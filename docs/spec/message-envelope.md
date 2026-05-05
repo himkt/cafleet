@@ -19,7 +19,7 @@ After [design 0000049 Surface 14](../../design-docs/0000049-token-reduction/desi
 | `status_state` | `TEXT` | TaskState enum value: `TASK_STATE_INPUT_REQUIRED` (queued), `TASK_STATE_COMPLETED` (acked), `TASK_STATE_CANCELED` (retracted), `TASK_STATE_FAILED` (routing error). |
 | `status_timestamp` | `TEXT` (ISO-8601, microsecond precision) | Updated on every state change. Used for `ORDER BY DESC` and the `since` filter on `cafleet message poll`. |
 | `origin_task_id` | `TEXT` (UUID v4, nullable) | Broadcast grouping link. `NULL` on unicast deliveries; on broadcast delivery rows holds the summary task's `task_id`; on the broadcast summary row itself self-references its own `task_id`. |
-| `text` | `TEXT` | Message body. Empty string `""` for `broadcast_summary` rows (the human-facing summary string lives client-side only — the WebUI builds it from `recipient_count`). Added by Alembic revision `0009_drop_task_json_add_text`. |
+| `text` | `TEXT` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` (computed in `broker.broadcast_message` at insert time). Added by Alembic revision `0009_drop_task_json_add_text`. |
 
 The persisted shape is the canonical source of truth. Every render the broker produces is a projection of these columns.
 
@@ -115,7 +115,7 @@ A poll result with one unicast delivery (id `abc12345…`, from `xy23ef67…`, b
 ]
 ```
 
-A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id8>` (self-referencing); the `text` body is the empty string and the CLI suppresses the per-recipient envelope list unless `--full` is passed (see [`--full` semantics](cli-options.md#full-semantics-cross-subcommand-escape-hatch) for the cross-subcommand summary).
+A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id8>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"` and the CLI suppresses the per-recipient envelope list unless `--full` is passed (see [`--full` semantics](cli-options.md#full-semantics-cross-subcommand-escape-hatch) for the cross-subcommand summary).
 
 ### Text mode
 

@@ -1,18 +1,21 @@
 """Surface 4 — broadcast summary already omits ``recipient_ids`` (design 0000049 Step 7).
 
 Post-Surface-14 the persisted broadcast-summary row dropped the
-``recipient_ids`` field entirely; only ``notifications_sent_count`` (at
-the wrapper level) and the human-readable ``text`` ("Broadcast sent to N
-recipients") remain. So Surface 4's "render-time omission" is, in
-practice, a no-op — there is nothing to strip. These tests are a
-forward-looking contract guard: if a future change re-introduces
-``recipient_ids`` into the broadcast summary, the regression must trip
-here.
+``recipient_ids`` field entirely. Two count signals remain:
 
-The Director scoped Surface 4 to: assert that the broadcast-summary task
-as returned today has no ``recipient_ids`` field, only the
-wrapper-level count. The ``--full`` recipient_ids restoration is
-explicitly out of scope (the Director's clarification).
+* ``result["notifications_sent_count"]`` — wrapper-level integer returned
+  by ``broker.broadcast_message`` for the "did it go out?" check.
+* ``result["task"]["text"]`` — the broker persists
+  ``"Broadcast sent to N recipients"`` directly into ``Task.text`` (see
+  ``broker.broadcast_message`` ≈ line 723), so the human-readable count
+  is on the typed-column row itself, not computed client-side.
+
+Surface 4's "render-time omission" of ``recipient_ids`` is therefore a
+no-op in practice — there is nothing to strip. These tests are a
+forward-looking contract guard: if a future change re-introduces
+``recipient_ids`` (or its legacy camelCase form) into the broadcast
+summary, the regression must trip here. The ``--full`` recipient_ids
+restoration is explicitly out of scope (the Director's clarification).
 """
 
 import pytest
