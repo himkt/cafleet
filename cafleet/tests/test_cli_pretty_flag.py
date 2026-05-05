@@ -349,9 +349,9 @@ def test_text_mode_default__poll_output_is_two_lines_per_task(
         ],
     )
     assert result.exit_code == 0, result.output
-    # The poll output may have a leading "[1]" indexed-list prefix in text
-    # mode. We assert that the body line "hello" appears on a line of its
-    # own, and that the per-task envelope line starts with "[" + 8-char id.
+    # Surface 17 dropped the legacy "[N]" indexed-list prefix; items are
+    # now blank-line separated. Assert the body line "hello" and the
+    # per-task envelope line ("[<id8> | from:<id8> | <ts>]") both appear.
     assert "hello" in result.output
     assert re.search(r"\[abcdef01 \| from:[a-zA-Z0-9]{8} \| 2026-", result.output), (
         f"compact envelope line missing; output was:\n{result.output}"

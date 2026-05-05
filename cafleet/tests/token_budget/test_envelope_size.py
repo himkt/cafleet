@@ -2,15 +2,18 @@
 
 The compact rendered envelope (default ``output.format_json(..., pretty=False)``
 + ``output.render_task``) MUST stay materially smaller than the legacy
-indented envelope. The pass criterion below is a fixture-anchored character
-budget rather than a derived percentage so the test detects ALL classes of
-regression — extra fields, longer keys, removed truncation, etc.
+indented envelope. The pass criterion below is a fixture-anchored
+**UTF-8 byte** budget rather than a derived percentage so the test detects
+ALL classes of regression — extra fields, longer keys, removed truncation,
+multi-byte content sneaking in, etc.
 
-Tokenizer choice: tests assert character counts (cheap, deterministic).
+Tokenizer choice: tests assert UTF-8 byte counts (cheap, deterministic).
+The on-wire cost is bytes, not Python codepoints — the Unicode ellipsis
+``…`` is 1 codepoint but 3 UTF-8 bytes, so ``len(s)`` would under-count.
 A real-tokenizer cross-check belongs in a separate helper (Step 15
-implementation note). 1 token ≈ 4 characters for English text in the
-GPT-style tokenizers cafleet's downstream coding agents use, so the
-character budgets below convert at roughly the same ratio.
+implementation note). 1 token ≈ 4 bytes for English text in the GPT-style
+tokenizers cafleet's downstream coding agents use, so the byte budgets
+below convert at roughly the same ratio.
 """
 
 from cafleet import output
@@ -84,27 +87,31 @@ def _five_unicast_fixture() -> list[dict]:
 
 
 def test_compact_envelope_fits_within_byte_budget():
-    """Compact JSON of a 5-task render MUST fit in 750 bytes. The exact
-    number was sized for the typed-column shape (id8 + from8 + ts + text +
-    optional kind/origin); a regression that re-introduces full UUIDs or
-    re-adds dropped keys will overshoot it immediately."""
+    """Compact JSON of a 5-task render MUST fit in 750 UTF-8 bytes. The
+    exact number was sized for the typed-column shape (id8 + from8 + ts +
+    text + optional kind/origin); a regression that re-introduces full
+    UUIDs, re-adds dropped keys, or smuggles in multi-byte characters
+    (e.g. the ``…`` truncation suffix is 3 UTF-8 bytes) will overshoot it
+    immediately."""
     fixture = _five_unicast_fixture()
     rendered = output.format_json(
         [output.render_task(t) for t in fixture],
         pretty=False,
     )
-    assert len(rendered) <= 750, (
-        f"compact envelope grew to {len(rendered)} bytes (budget 750); "
+    rendered_bytes = len(rendered.encode("utf-8"))
+    assert rendered_bytes <= 750, (
+        f"compact envelope grew to {rendered_bytes} UTF-8 bytes (budget 750); "
         f"check render_task or format_json for added fields"
     )
 
 
 def test_compact_slim_envelope_at_most_30pct_of_pretty_full():
     """Compact rendered (slim ``render_task``) ≤ 30 % of pretty rendered
-    (full / un-projected ``render_task(full=True)``) for the SAME fixture.
-    This is the cumulative-savings story from the design doc: the default
-    wire format (compact + projected) is what an agent actually pays for,
-    and the pretty + full form is what the legacy envelope cost."""
+    (full / un-projected ``render_task(full=True)``) for the SAME fixture,
+    measured in UTF-8 bytes (the on-wire cost). This is the cumulative-
+    savings story from the design doc: the default wire format
+    (compact + projected) is what an agent actually pays for, and the
+    pretty + full form is what the legacy envelope cost."""
     fixture = _five_unicast_fixture()
     compact_slim = output.format_json(
         [output.render_task(t, full=False) for t in fixture],
@@ -114,10 +121,13 @@ def test_compact_slim_envelope_at_most_30pct_of_pretty_full():
         [output.render_task(t, full=True) for t in fixture],
         pretty=True,
     )
-    ratio = len(compact_slim) / len(pretty_full)
+    compact_slim_bytes = len(compact_slim.encode("utf-8"))
+    pretty_full_bytes = len(pretty_full.encode("utf-8"))
+    ratio = compact_slim_bytes / pretty_full_bytes
     assert ratio <= 0.30, (
-        f"compact-slim / pretty-full ratio rose to {ratio:.3f} (budget ≤ 0.30); "
-        f"compact_slim={len(compact_slim)} pretty_full={len(pretty_full)}"
+        f"compact-slim / pretty-full UTF-8 byte ratio rose to {ratio:.3f} "
+        f"(budget ≤ 0.30); "
+        f"compact_slim={compact_slim_bytes}B pretty_full={pretty_full_bytes}B"
     )
 
 
@@ -146,15 +156,18 @@ def test_full_envelope_keeps_legacy_keys():
 
 
 def test_compact_envelope_per_task_below_150_bytes():
-    """Per-task compact render stays below 150 bytes (typed-column rendering
-    keeps id+from+ts+text only — even with origin/kind it should not blow
-    this budget). Assertion runs on the LARGEST item so a single bloated
-    task is enough to fail the test."""
+    """Per-task compact render stays below 150 UTF-8 bytes (typed-column
+    rendering keeps id+from+ts+text only — even with origin/kind it should
+    not blow this budget). Measured in UTF-8 bytes so multi-byte characters
+    in ``text`` (e.g. the ``…`` truncation suffix) cost what they actually
+    cost on the wire. Assertion runs on the LARGEST item so a single
+    bloated task is enough to fail the test."""
     fixture = _five_unicast_fixture()
     sizes = [
-        len(output.format_json(output.render_task(t), pretty=False)) for t in fixture
+        len(output.format_json(output.render_task(t), pretty=False).encode("utf-8"))
+        for t in fixture
     ]
     assert max(sizes) <= 150, (
-        f"per-task compact render largest = {max(sizes)} bytes (budget 150); "
-        f"sizes={sizes}"
+        f"per-task compact render largest = {max(sizes)} UTF-8 bytes "
+        f"(budget 150); sizes={sizes}"
     )
