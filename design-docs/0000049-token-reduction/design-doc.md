@@ -1,7 +1,7 @@
 # Reduce Token Consumption Across CAFleet Output Surfaces
 
 **Status**: Approved
-**Progress**: 0/118 tasks complete
+**Progress**: 1/118 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -412,9 +412,8 @@ Each surface ships independently. If any one regresses, revert just that step.
 
 ### Step 0: Pre-baseline capture
 
-- [ ] Implement `tests/token_budget/scenarios/idle_3_member_10_minute.py` deterministic scenario. <!-- completed: -->
-- [ ] Run scenario against current `main`; capture Director pane bytes; persist to `tests/token_budget/measurement_results.md` under key `baseline_pre_design_0049: <N>`. <!-- completed: -->
-- [ ] Land Step 0 as a standalone PR; merge before any subsequent step. <!-- completed: -->
+- [x] Implement `tests/token_budget/scenarios/idle_3_member_10_minute.py` deterministic scenario. <!-- completed: 2026-05-05T05:42 -->
+- [-] Run scenario / persist baseline / standalone PR — skipped per operator on 2026-05-05; Surface 13 char-count tests cover the regression budget.
 
 ### Step 1: Documentation first (with inherited-convention scrub)
 
