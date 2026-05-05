@@ -703,9 +703,11 @@ def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_in_text_
         ],
     )
     assert result.exit_code == 0, result.output
-    assert "Broadcast sent." in result.output
-    assert SUMMARY_TEXT in result.output
-    assert TRUNCATED_BODY not in result.output
+    # Post-Step 6: default emits a compact 1-line summary with the recipient
+    # count; the verbose summary text is reserved for ``--full``.
+    assert "broadcast id=" in result.output
+    assert "recipients=" in result.output
+    assert SUMMARY_TEXT not in result.output
 
 
 def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_with_full_in_text_output(
@@ -759,7 +761,10 @@ def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_in_json_
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert len(payload) == 1
-    assert payload[0]["task"]["text"] == SUMMARY_TEXT
+    # Post-Step 6: default JSON emits the compact rendered envelope; the
+    # summary text is truncated to ``CAFLEET_MAX_TEXT_LEN`` codepoints.
+    assert payload[0]["task"]["text"].startswith("Broadcast")
+    assert payload[0]["task"]["text"] != SUMMARY_TEXT
 
 
 def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_with_full_in_json_output(
@@ -817,9 +822,12 @@ def test_message_broadcast_no_truncation__notifications_sent_count_preserved_in_
     assert payload[0]["notifications_sent_count"] == 7
 
 
-def test_message_broadcast_no_truncation__default_and_full_json_output_byte_identical(
+def test_message_broadcast_no_truncation__default_and_full_json_output_diverge(
     runner, session_id, agent_id, task_id, monkeypatch
 ):
+    """Post-Step 6: default JSON is the compact rendered envelope, ``--full``
+    restores the typed-column shape with the un-truncated summary text."""
+
     def fresh_payload():
         return _broadcast_summary_payload(task_id, sender=agent_id, count=5)
 
@@ -837,4 +845,13 @@ def test_message_broadcast_no_truncation__default_and_full_json_output_byte_iden
     full_res = runner.invoke(cli, ["--session-id", session_id, *common, "--full"])
     assert default_res.exit_code == 0, default_res.output
     assert full_res.exit_code == 0, full_res.output
-    assert default_res.output == full_res.output
+
+    default_task = json.loads(default_res.output)[0]["task"]
+    full_task = json.loads(full_res.output)[0]["task"]
+    # Compact rendered envelope keys vs typed-column keys.
+    assert "id" in default_task
+    assert "task_id" not in default_task
+    assert "task_id" in full_task
+    # Full mode preserves the un-truncated summary text; default truncates.
+    assert full_task["text"] == SUMMARY_TEXT
+    assert default_task["text"] != SUMMARY_TEXT

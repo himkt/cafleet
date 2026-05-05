@@ -1,7 +1,7 @@
 # Reduce Token Consumption Across CAFleet Output Surfaces
 
 **Status**: Approved
-**Progress**: 37/118 tasks complete
+**Progress**: 46/118 tasks complete
 **Last Updated**: 2026-05-05
 
 ## Overview
@@ -465,18 +465,18 @@ Each surface ships independently. If any one regresses, revert just that step.
 
 ### Step 5: `--since` as filter (Surface 2 — fallback path)
 
-- [ ] No new column. The existing `since` parameter on `broker.poll_tasks` (`broker.py:746-773`) and the existing `--since` flag on `cafleet message poll` cover the path. <!-- completed: -->
-- [ ] Document `--since` usage for `member ping` (note: `member ping` re-keystrokes the same poll command — passing `--since` requires Director to track the timestamp). <!-- completed: -->
+- [x] No new column. The existing `since` parameter on `broker.poll_tasks` (`broker.py:746-773`) and the existing `--since` flag on `cafleet message poll` cover the path. <!-- completed: 2026-05-05T08:15 -->
+- [x] Document `--since` usage for `member ping` (note: `member ping` re-keystrokes the same poll command — passing `--since` requires Director to track the timestamp). <!-- completed: 2026-05-05T08:15 -->
 
 ### Step 6: Compact lists + `--quiet` + spawn echoes + broadcast echo + drop `[N]` (Surfaces 3, 17)
 
-- [ ] Collapse `output.format_agent` to one-line render; gate 4-line behind `--full`. <!-- completed: -->
-- [ ] Collapse `output.format_session_create` to one line. <!-- completed: -->
-- [ ] Collapse `output.format_member` to one line. <!-- completed: -->
-- [ ] Default `message broadcast` echo to one-line summary. <!-- completed: -->
-- [ ] Add `--quiet` to `message send`, `message ack`, `member ping`. <!-- completed: -->
-- [ ] Drop `[N]` index labels in `output.format_indexed_list`. <!-- completed: -->
-- [ ] Update tests. <!-- completed: -->
+- [x] Collapse `output.format_agent` to one-line render; gate 4-line behind `--full`. <!-- completed: 2026-05-05T08:25 -->
+- [x] Collapse `output.format_session_create` to one line. <!-- completed: 2026-05-05T08:25 -->
+- [x] Collapse `output.format_member` to one line. <!-- completed: 2026-05-05T08:25 -->
+- [x] Default `message broadcast` echo to one-line summary. <!-- completed: 2026-05-05T08:25 -->
+- [x] Add `--quiet` to `message send`, `message ack`, `member ping`. <!-- completed: 2026-05-05T08:25 -->
+- [x] Drop `[N]` index labels in `output.format_indexed_list`. <!-- completed: 2026-05-05T08:25 -->
+- [x] Update tests. <!-- completed: 2026-05-05T08:25 -->
 
 ### Step 7: Broadcast summary slim (Surface 4)
 

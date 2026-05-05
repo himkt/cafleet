@@ -39,8 +39,9 @@ def _list_entry(*, agent_id: str, name: str, coding_agent: str, pane_id: str) ->
     }
 
 
-def test_format_member__includes_backend_line():
-    assert "backend:" in format_member(_member())
+def test_format_member__includes_backend_field():
+    """Compact 1-line render uses ``backend=<name>`` (post-Surface-3)."""
+    assert "backend=" in format_member(_member())
 
 
 def test_format_member__backend_shows_claude():

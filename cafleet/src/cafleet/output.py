@@ -136,16 +136,26 @@ def format_indexed_list(
     formatter: Callable[[Any], str],
     empty_msg: str,
 ) -> str:
+    """Join formatted items with a single blank line between them.
+
+    Surface 17 dropped the legacy ``[1]`` / ``[2]`` index markers — agents
+    reference tasks by ``task_id`` (8-char prefix), not list index, so the
+    markers cost tokens without surfacing useful information.
+    """
     if not items:
         return empty_msg
-    parts = []
-    for i, item in enumerate(items, start=1):
-        parts.append(f"[{i}]")
-        parts.append(formatter(item))
-    return "\n".join(parts)
+    return "\n\n".join(formatter(item) for item in items)
 
 
-def format_agent(agent: dict) -> str:
+def format_agent(agent: dict, *, full: bool = False) -> str:
+    """Render an agent as text.
+
+    ``full=False`` (default): 1-line compact ``<id8> <name> <status>``.
+    ``full=True``: 4-line legacy block exposing the full ``agent_id``,
+    ``name``, ``description``, and ``status``.
+    """
+    if not full:
+        return f"{agent['agent_id'][:8]} {agent['name']} {agent['status']}"
     lines = [
         f"  agent_id:    {agent['agent_id']}",
         f"  name:        {agent['name']}",
@@ -155,8 +165,22 @@ def format_agent(agent: dict) -> str:
     return "\n".join(lines)
 
 
-def format_session_create(data: dict) -> str:
+def format_session_create(data: dict, *, full: bool = False) -> str:
+    """Render the session-create result as text.
+
+    ``full=False`` (default): 1-line compact form
+    ``<session_id> director=<id8> admin=<id8>``.
+    ``full=True``: 7-line legacy block (session_id + director_agent_id on
+    their own lines, plus ``label``, ``created_at``, ``director_name``,
+    ``pane``, ``administrator``).
+    """
     director = data["director"]
+    if not full:
+        return (
+            f"{data['session_id']} "
+            f"director={director['agent_id'][:8]} "
+            f"admin={data['administrator_agent_id'][:8]}"
+        )
     placement = director["placement"]
     lines = [
         data["session_id"],
@@ -170,8 +194,20 @@ def format_session_create(data: dict) -> str:
     return "\n".join(lines)
 
 
-def format_member(data: dict) -> str:
+def format_member(data: dict, *, full: bool = False) -> str:
+    """Render a member-create result as text.
+
+    ``full=False`` (default): 1-line compact form
+    ``<id8> <name> backend=<coding_agent> pane=<pane_id>``.
+    ``full=True``: 6-line legacy block.
+    """
     placement = data["placement"]
+    if not full:
+        pane = placement["tmux_pane_id"] or "(pending)"
+        return (
+            f"{data['agent_id'][:8]} {data['name']} "
+            f"backend={placement['coding_agent']} pane={pane}"
+        )
     lines = [
         "Member registered and spawned.",
         f"  agent_id:  {data['agent_id']}",

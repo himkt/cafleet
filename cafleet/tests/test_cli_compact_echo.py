@@ -26,7 +26,6 @@ from click.testing import CliRunner
 from cafleet import broker, tmux
 from cafleet.cli import cli
 
-
 LONG_BODY = "abcdefghijklmnopqrstuvwxyz"
 TRUNCATED_BODY = "abcdefghij..."
 
@@ -402,9 +401,7 @@ def test_message_ack_default__multi_line_echo_present(
 # ---------------------------------------------------------------------------
 
 
-def test_member_ping_quiet__emits_single_short_line(
-    runner, session_id, monkeypatch
-):
+def test_member_ping_quiet__emits_single_short_line(runner, session_id, monkeypatch):
     """``--quiet`` collapses the multi-line ``Pinged member …`` echo to a
     single short line. We don't pin the exact content (no task id is created
     by ping) but we do require a single line with much less text than the
@@ -461,9 +458,7 @@ def test_member_ping_quiet__emits_single_short_line(
     assert "Pinged" not in out
 
 
-def test_member_ping_default__multi_word_echo_present(
-    runner, session_id, monkeypatch
-):
+def test_member_ping_default__multi_word_echo_present(runner, session_id, monkeypatch):
     def _placement(**overrides):
         return {
             "director_agent_id": DIRECTOR_ID,

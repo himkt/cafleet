@@ -116,6 +116,7 @@ def _client_command(
                         )
                 result = func(ctx, *args, **kwargs)
                 full = kwargs.get("full", False)
+                quiet = kwargs.get("quiet", False)
                 pretty = ctx.obj["pretty"]
                 if truncates_task_text:
                     output.truncate_task_text(result, full=full)
@@ -126,7 +127,7 @@ def _client_command(
                     click.echo(output.format_json(rendered, pretty=pretty))
                 elif text_formatter is not None:
                     if truncates_task_text:
-                        click.echo(text_formatter(result, full=full))
+                        click.echo(text_formatter(result, full=full, quiet=quiet))
                     else:
                         click.echo(text_formatter(result))
                 else:
@@ -263,9 +264,20 @@ def session() -> None:
     help="Coding-agent binary to spawn / declare for the placement.",
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    default=False,
+    help="Restore the legacy 7-line text output (default 1-line summary).",
+)
 @click.pass_context
 def session_create(
-    ctx: click.Context, label: str | None, coding_agent: str, as_json: bool
+    ctx: click.Context,
+    label: str | None,
+    coding_agent: str,
+    as_json: bool,
+    full: bool,
 ) -> None:
     """Create a new session (must be run inside a tmux session)."""
     try:
@@ -285,7 +297,7 @@ def session_create(
     if as_json or ctx.obj.get("json_output"):
         click.echo(output.format_json(result, pretty=True))
     else:
-        click.echo(output.format_session_create(result))
+        click.echo(output.format_session_create(result, full=full))
 
 
 @session.command("list")
@@ -447,14 +459,23 @@ def agent_register(ctx, name, description, skills):
     default=False,
     help="Disable text truncation; emit full message body.",
 )
+@click.option(
+    "--quiet",
+    "quiet",
+    is_flag=True,
+    default=False,
+    help="Emit only the new task id (8-char prefix) on stdout.",
+)
 @click.pass_context
 @_client_command(
-    text_formatter=lambda r, *, full: (
-        "Message sent.\n" + output.format_task(r, full=full)
+    text_formatter=lambda r, *, full, quiet: (
+        r["task"]["task_id"][:8]
+        if quiet
+        else "Message sent.\n" + output.format_task(r, full=full)
     ),
     truncates_task_text=True,
 )
-def message_send(ctx, agent_id, to, text, full):
+def message_send(ctx, agent_id, to, text, full, quiet):
     """Send a unicast message to another agent."""
     return broker.send_message(
         ctx.obj["session_id"],
@@ -472,15 +493,17 @@ def message_send(ctx, agent_id, to, text, full):
     "full",
     is_flag=True,
     default=False,
-    help="No-op for broadcast output; included for consistency with other message commands.",
+    help="Restore the per-recipient envelope view (default emits a one-line summary).",
 )
 @click.pass_context
 @_client_command(
-    text_formatter=lambda r: (
-        "Broadcast sent.\n"
-        + output.format_indexed_list(r, output.format_task, "No messages found.")
+    text_formatter=lambda r, *, full, quiet: (
+        output.format_task(r[0]["task"], full=True)
+        if full
+        else f"broadcast id={r[0]['task']['task_id'][:8]} "
+        f"recipients={r[0]['notifications_sent_count']}"
     ),
-    truncates_task_text=False,
+    truncates_task_text=True,
 )
 def message_broadcast(ctx, agent_id, text, full):
     """Broadcast a message to all agents."""
@@ -505,7 +528,7 @@ def message_broadcast(ctx, agent_id, text, full):
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=lambda r, *, full: output.format_indexed_list(
+    text_formatter=lambda r, *, full, quiet: output.format_indexed_list(
         r, lambda t: output.format_task(t, full=full), "No messages found."
     ),
     truncates_task_text=True,
@@ -529,15 +552,24 @@ def message_poll(ctx, agent_id, since, page_size, full):
     default=False,
     help="Disable text truncation; emit full message body.",
 )
+@click.option(
+    "--quiet",
+    "quiet",
+    is_flag=True,
+    default=False,
+    help="Emit only the acked task id (8-char prefix) on stdout.",
+)
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=lambda r, *, full: (
-        "Message acknowledged.\n" + output.format_task(r, full=full)
+    text_formatter=lambda r, *, full, quiet: (
+        r["task"]["task_id"][:8]
+        if quiet
+        else "Message acknowledged.\n" + output.format_task(r, full=full)
     ),
     truncates_task_text=True,
 )
-def message_ack(ctx, agent_id, task_id, full):
+def message_ack(ctx, agent_id, task_id, full, quiet):
     """Acknowledge receipt of a message."""
     return broker.ack_task(agent_id, task_id)
 
@@ -555,7 +587,7 @@ def message_ack(ctx, agent_id, task_id, full):
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=lambda r, *, full: (
+    text_formatter=lambda r, *, full, quiet: (
         "Task canceled.\n" + output.format_task(r, full=full)
     ),
     truncates_task_text=True,
@@ -578,7 +610,7 @@ def message_cancel(ctx, agent_id, task_id, full):
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=lambda r, *, full: output.format_task(r, full=full),
+    text_formatter=lambda r, *, full, quiet: output.format_task(r, full=full),
     truncates_task_text=True,
 )
 def message_show(ctx, agent_id, task_id, full):
@@ -588,14 +620,22 @@ def message_show(ctx, agent_id, task_id, full):
 
 @agent.command("list")
 @click.option("--agent-id", required=True, help="Agent ID")
+@click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    default=False,
+    help="Restore the legacy 4-line per-agent view (default 1-line per agent).",
+)
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=lambda agents: output.format_indexed_list(
-        agents, output.format_agent, "No agents found."
+    text_formatter=lambda agents, *, full, quiet: output.format_indexed_list(
+        agents, lambda a: output.format_agent(a, full=full), "No agents found."
     ),
+    truncates_task_text=True,
 )
-def agent_list(ctx, agent_id):
+def agent_list(ctx, agent_id, full):
     """List registered agents in the session."""
     return broker.list_agents(ctx.obj["session_id"])
 
@@ -732,9 +772,16 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
     show_default=True,
     help="Coding-agent binary to spawn / declare for the placement.",
 )
+@click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    default=False,
+    help="Restore the legacy 6-line text output (default 1-line summary).",
+)
 @click.argument("prompt_argv", nargs=-1)
 @click.pass_context
-def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
+def member_create(ctx, agent_id, name, description, coding_agent, full, prompt_argv):
     """Register a new member and spawn its coding-agent pane in the Director's window."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
@@ -824,7 +871,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, prompt_argv):
     if ctx.obj["json_output"]:
         click.echo(output.format_json(result, pretty=True))
     else:
-        click.echo(output.format_member(result))
+        click.echo(output.format_member(result, full=full))
 
 
 @member.command("delete")
@@ -1190,8 +1237,15 @@ def member_exec(ctx, agent_id, member_id, command):
 @member.command("ping")
 @click.option("--agent-id", required=True, help="Director's agent ID")
 @click.option("--member-id", required=True, help="Target member's agent ID")
+@click.option(
+    "--quiet",
+    "quiet",
+    is_flag=True,
+    default=False,
+    help="Suppress the multi-line confirmation; emit only the member's 8-char id.",
+)
 @click.pass_context
-def member_ping(ctx, agent_id, member_id):
+def member_ping(ctx, agent_id, member_id, quiet):
     """Inject an inbox-poll keystroke into a member's pane (Director-only)."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
@@ -1240,6 +1294,8 @@ def member_ping(ctx, agent_id, member_id):
                 pretty=True,
             )
         )
+    elif quiet:
+        click.echo(member_id[:8])
     else:
         click.echo(
             f"Pinged member {target['name']} ({pane_id}) — poll keystroke dispatched."

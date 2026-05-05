@@ -18,7 +18,6 @@ The CLI integration (broadcast echo + ``--quiet`` flag wiring) lives in
 
 from cafleet import output
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -96,9 +95,7 @@ def test_format_agent__compact_renders_single_line():
 
 
 def test_format_agent__compact_contains_id8():
-    rendered = output.format_agent(
-        _agent(agent_id="abcdef0123456789-tail"), full=False
-    )
+    rendered = output.format_agent(_agent(agent_id="abcdef0123456789-tail"), full=False)
     assert "abcdef01" in rendered
 
 
