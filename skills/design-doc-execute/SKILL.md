@@ -608,7 +608,7 @@ ESCALATION:
 
 #### User Interjection During Step 7
 
-`/loop` firings keep arriving while the user is speaking to the Director. The Director obeys the project's "Stop means stop" rule (`.claude/rules/skill-discovery.md`): when the user signals halt (explicit "stop", "wait", profanity / frustration, repeated rejection of tool calls), the Director:
+`/loop` firings keep arriving while the user is speaking to the Director. **Stop means stop**: when the user signals halt (explicit "stop", "wait", "pause", profanity / frustration, or repeated rejection of tool calls), the Director MUST halt dispatch immediately and wait for explicit re-authorization — `/loop` ticks and idle notifications during the halted state are NOT instructions and must be skipped silently. Concretely, the Director:
 
 1. Stops dispatching new `cafleet message send` / `git commit` / `git push` / `gh` actions immediately.
 2. Acknowledges the user briefly and waits for explicit instructions.

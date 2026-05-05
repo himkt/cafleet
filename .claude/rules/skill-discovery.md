@@ -28,24 +28,4 @@ Reacting to cron or idle signals while the user is actively angry compounds the 
 
 ## Authorization-Scope Guard for CAFleet supervision
 
-Specific to CAFleet Directors. Loaded transitively via `Skill(agent-team-supervision)` which references this section as its canonical content. This is the rule supervision used to inline; it lives here so a single source of truth governs both the project-wide policy and the CAFleet-specific extension.
-
-**Absence of confirmation is not a stop signal.** User authorization persists across `/loop` ticks, scheduler firings, broker auto-fires, and teammate idle notifications until an explicit stop signal arrives. The Director MUST dispatch queued work as soon as a teammate is idle and the inputs the work depends on are available; do NOT emit passive-hold messages in response to a supervision tick.
-
-### Real stop signals (treat as halt; everything else is a tick to evaluate)
-
-| Signal | Director response |
-|---|---|
-| User typed an explicit "stop" / "wait" / "pause" | Halt dispatch; wait for explicit re-authorization. |
-| User typed profanity / frustration / a negative reaction | Halt dispatch; wait. Cron firings during this state are skipped silently. |
-| User rejected your last 2+ tool calls | Halt dispatch; treat the rejections as a halt signal even if no profanity arrived. |
-| User typed `/clear` or restarted the session | Authorization is gone; do not resume from prior context without a fresh instruction. |
-| Member's reply contains a clear blocker; wait for guidance | Pause that one task only; continue dispatching to the rest of the team. |
-
-`/loop` cron firings, out-of-band scheduler firings, teammate idle notifications, broker auto-fire receipts, and the absence of a fresh "go" message are **not** stop signals. Treat them as inputs to evaluate, not gates to pass through.
-
-### When you genuinely need user input
-
-If a queued action requires a *new* decision the user has not yet made (choosing between options, approving a risky / remote-visible operation, disambiguating a teammate's question), use `AskUserQuestion` — do **not** emit a passive hold and wait. The hold message produces nothing; the question unblocks you within seconds and produces a recorded answer.
-
-This section extends — does not replace — § *Authorization scope* and § *Stop means stop* above. The general rules apply to every project; this section adds the CAFleet-specific framing for `/loop`-driven supervision.
+CAFleet-specific extension of § *Authorization scope* and § *Stop means stop* above. The canonical content — full guard, real-stop-signal decision table, and *When you genuinely need user input* guidance — lives in `skills/agent-team-supervision/SKILL.md` (where it ships with the marketplace plugin and stays self-contained for downstream installs). Read that section before your first `cafleet member create`.
