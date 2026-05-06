@@ -1,6 +1,6 @@
 ---
 name: agent-team-monitoring
-description: Active monitoring mechanism for CAFleet Directors. Documents the cron-like loop primitive per backend (Claude Code: CronCreate + /loop; codex: no in-session scheduling, fallback options listed) and the team-facilitation instructions (poll, ACK, dispatch queued work, health-check, escalate). Foundation layer — load before agent-team-supervision.
+description: "Active monitoring mechanism for CAFleet Directors. Documents the cron-like loop primitive per backend (Claude Code: CronCreate + /loop; codex: no in-session scheduling, fallback options listed) and the team-facilitation instructions (poll, ACK, dispatch queued work, health-check, escalate). Foundation layer — load before agent-team-supervision."
 ---
 
 # CAFleet Agent Team Monitoring

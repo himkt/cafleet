@@ -1,6 +1,6 @@
 ---
 name: update-readme
-description: Update README.md based on ARCHITECTURE.md and docs/ directory. Use when documentation sources change and README needs to reflect the latest state.
+description: "Update README.md based on ARCHITECTURE.md and docs/ directory. Use when documentation sources change and README needs to reflect the latest state."
 allowed-tools: Agent
 ---
 

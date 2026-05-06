@@ -1,6 +1,6 @@
 ---
 name: agent-team-supervision
-description: Governance layer for CAFleet Directors. Loads agent-team-monitoring as a hard prerequisite. Defines Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, User Delegation, Stall Response (cross-reference), and Cleanup. Load both skills before any 'cafleet member create' call.
+description: "Governance layer for CAFleet Directors. Loads agent-team-monitoring as a hard prerequisite. Defines Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, User Delegation, Stall Response (cross-reference), and Cleanup. Load both skills before any 'cafleet member create' call."
 ---
 
 # CAFleet Agent Team Supervision
