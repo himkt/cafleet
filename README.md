@@ -37,7 +37,13 @@ The default database is `~/.local/share/cafleet/registry.db`. Override with `CAF
 In any tmux session, paste this into Claude Code:
 
 ```
-/cafleet:design-doc-create my-feature
+/cafleet:design-doc-create I want to create a simple TUI calculator
+```
+
+Codex:
+
+```
+$cafleet:design-doc-create I want to create a simple TUI calculator
 ```
 
 Claude (the Director) bootstraps a CAFleet session, spawns a Drafter and a Reviewer in adjacent tmux panes, drives the clarification → draft → review loop through the message broker, and lands a polished design doc at `design-docs/my-feature/design-doc.md`.
