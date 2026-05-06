@@ -1,5 +1,5 @@
 ---
-description: Interact with the CAFleet message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents.
+description: "Interact with the CAFleet message broker. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents."
 ---
 
 # CAFleet — Message Broker CLI
