@@ -12,3 +12,4 @@ This skill provides a standardized format for creating design documents, specifi
 
 - For the document template, see [template.md](template.md)
 - For section guidelines, quality standards, formatting rules, and best practices, see [guidelines.md](guidelines.md)
+- For the inter-agent coordination protocol used by `/design-doc-create`, `/design-doc-execute`, and `/design-doc-interview`, see [coordination.md](coordination.md)
