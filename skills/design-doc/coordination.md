@@ -35,6 +35,14 @@ Exactly 3 canonical forms. Use the tightest one that locates the target.
 | `<file>:<line>` or `<file>:<line-start>-<line-end>` | `cafleet/src/cafleet/cli/main.py:142` | The target is a specific line (or range) in a source file, test file, or the design doc itself. Used for source-anchored Copilot inline review and for source-file `COMMENT` markers added during code review. |
 | `doc` | `doc` | The target is the design document as a whole (e.g., Reviewer signalling overall approval, Drafter signalling the full draft is ready). |
 
+**Pointer-marker pairing rule.** When a verb's spec requires a paired `COMMENT(role)` marker (`blocked` / `escalating`, also Director arbitration replies and `COMMENT(copilot)` placements), the marker MUST live at the SAME pointer as the cafleet body:
+
+| Pointer | Canonical marker placement |
+|:--|:--|
+| `paragraph-<HeadingPath>` | Inline within that heading's section. |
+| `<file>:<line>` | At that exact line in the file (immediately above or on `<line>` per the file's native comment syntax). |
+| `doc` | Doc-top — directly under the metadata block (`Status:` / `Progress:` / `Last Updated:`), before the first heading. |
+
 The ` > ` separator avoids the collision that would arise if `/` were used as a nesting separator (heading text in real-world design docs frequently contains `/`, e.g. `Step 2: Update /design-doc-create`). ` > ` is unambiguous, ASCII-safe, and shell-safe inside double-quoted `--text` arguments.
 
 ## Message Format
