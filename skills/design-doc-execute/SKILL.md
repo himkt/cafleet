@@ -451,7 +451,7 @@ Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>
 
 **Verifier spawn prompt (if needed):**
 
-> **Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in `/design-doc-interview`). Phase 2 verification reports follow the verb + pointer + `COMMENT(verifier)` schema documented in [../design-doc/coordination.md](../design-doc/coordination.md).
+> **Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in `/design-doc-interview`). Phase 2 verification reports follow the verb + pointer + `COMMENT(verifier)` schema documented in [the Coordination Protocol section above](#coordination-protocol).
 
 ```
 You are the Verifier in a design document execution team (CAFleet-native).
@@ -737,7 +737,7 @@ TEAM HEALTH:
 1. Run `cafleet --session-id <session-id> --json member list --agent-id <director-agent-id>`.
 2. Run `cafleet --session-id <session-id> --json message poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check>"`. ACK progress reports.
 3. For each member that has not sent a message since last check, run `cafleet --session-id <session-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id> --lines 200`.
-4. Nudge stalled members via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<original-pointer>)"` — re-send the same `ready (paragraph-Implementation > Step N)` or `ready (<file>:<line>)` body that was used for the original assignment. The recipient interprets a re-sent `ready (...)` contextually as a stall-nudge per [../design-doc/coordination.md](../design-doc/coordination.md) (same target, same expected action).
+4. Nudge stalled members via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<original-pointer>)"` — re-send the same `ready (paragraph-Implementation > Step N)` or `ready (<file>:<line>)` body that was used for the original assignment. The recipient interprets a re-sent `ready (...)` contextually as a stall-nudge per [the Coordination Protocol section above](#coordination-protocol) (same target, same expected action).
 
 PR REVIEW:
 5. Run `gh pr view <pr-number> --json reviews` (GraphQL shape: `author.login`, `state`, `submittedAt`, `body`).
