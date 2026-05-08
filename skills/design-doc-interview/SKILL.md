@@ -17,8 +17,35 @@ Validate an existing design document through structured, fine-grained Q&A across
 
 - For the document template, see: [../design-doc/template.md](../design-doc/template.md)
 - For section guidelines and quality standards, see: [../design-doc/guidelines.md](../design-doc/guidelines.md)
-- For the verb + pointer + COMMENT(role) protocol shared with `/design-doc-create` and `/design-doc-execute`, see [../design-doc/coordination.md](../design-doc/coordination.md). **Director-Analyzer cafleet messages in this skill are exempt from the verb + pointer schema.** The Analyzer's question list is a one-time payload deliverable; the Director's user-facing relay goes through `AskUserQuestion`, not cafleet.
 - Output of `/design-doc-create` is the input to this skill; this skill's `COMMENT(claude)` markers are consumed by `/design-doc-create` resume mode.
+
+## Coordination Protocol
+
+This skill writes only `COMMENT(claude)` markers in the design document, and the Director-Analyzer cafleet messages are exempt from the verb + pointer + `COMMENT(role)` schema used by `/design-doc-create` and `/design-doc-execute`. The Analyzer's question list is a one-time payload deliverable (a numbered list, not iterative coordination), and the Director's user-facing relay goes through `AskUserQuestion`, not cafleet. Only the inline `COMMENT(claude)` annotation rules below are in scope.
+
+### COMMENT(claude) Marker
+
+Inline marker placed in the design document.
+
+```
+COMMENT(claude): <description of discrepancy and what needs to change>
+```
+
+Roles relevant in this skill:
+
+| Role | Who writes it | When |
+|:--|:--|:--|
+| `claude` | The Director acting as user-mediator | Carries user-derived clarifications produced by the interview. The marker is placed inline immediately before the relevant content; one marker per discrepancy. |
+
+Rules:
+
+- One marker per logical discrepancy. Do not bundle unrelated issues.
+- Body must be actionable — state what is wrong AND what the correct behavior should be.
+- Markers persist in the document until resolved by `/design-doc-create` resume mode, which reads each `COMMENT(claude)` marker, applies the fix, and removes the marker as part of the fix.
+
+### Director-Analyzer Exemption
+
+Director-Analyzer cafleet messages in this skill are explicitly exempt from the verb + pointer schema. The Analyzer's question list is a one-time payload deliverable; the Director's user-facing relay goes through `AskUserQuestion`, not cafleet. Both sides ride as free-form cafleet bodies.
 
 ## Architecture
 

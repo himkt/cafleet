@@ -1,8 +1,8 @@
 # Design Doc as Communication Medium
 
 **Status**: Approved
-**Progress**: 23/23 tasks complete
-**Last Updated**: 2026-05-08
+**Progress**: 28/28 tasks complete
+**Last Updated**: 2026-05-09
 
 ## Overview
 
@@ -297,6 +297,14 @@ Today's commit messages sometimes need per-file or per-test detail (e.g. "feat: 
 - [x] Update `skills/design-doc-execute/roles/tester.md`: replace duplicated COMMENT-routing / gap-marker prose with a one-line link to `../../design-doc/coordination.md` § *COMMENT(role) Marker*. Keep Phase 1 framework-selection ambiguity → `COMMENT(tester)` + `blocked (doc)` (skill-specific) and Phase 3 defect-resolution flow. <!-- completed: 2026-05-08T14:05 -->
 - [x] Update `skills/design-doc-execute/roles/verifier.md`: replace the duplicated `COMMENT(verifier): <category> <body>` rules with a one-line link to `../../design-doc/coordination.md` § *COMMENT(role) Marker*. Keep the Phase 1 tool-discovery exemption (skill-specific) and the success-vs-failure reporting policy (`complete (doc)` overall vs per-step `escalating`). <!-- completed: 2026-05-08T14:05 -->
 - [x] Update `skills/design-doc-execute/roles/director.md`: replace the COMMENT-Classification / role-taxonomy / marker-location paragraphs with a one-line link to `../../design-doc/coordination.md` § *COMMENT(role) Marker* + § *Copilot Routing* + § *Director Per-File Detail Recovery*. Keep the milestones table (skill-specific) and the Per-File Detail Recovery cite to git plumbing. <!-- completed: 2026-05-08T14:05 -->
+
+### Step 7: Inline Coordination Protocol per Skill (Plugin-Install Self-Containment)
+
+- [x] Add a `## Coordination Protocol` section to `skills/design-doc-create/SKILL.md` that inlines the canonical content from `coordination.md` (Core Principle, Verb Vocabulary, Pointer Forms with pointer-marker pairing rule, Message Format, COMMENT(role) Marker rules, Issue vs Status split, Copilot Routing, Anchorless Status, Finalize-Time Cleanup, Director Per-File Detail Recovery). The `Clarification Exemption` note is added at the end as a skill-specific override. <!-- completed: 2026-05-09T07:00 -->
+- [x] Add the same `## Coordination Protocol` section to `skills/design-doc-execute/SKILL.md`, with skill-specific overrides at the end (Verifier Phase 1 tool-discovery exemption). <!-- completed: 2026-05-09T07:00 -->
+- [x] Add a shorter `## Coordination Protocol` section to `skills/design-doc-interview/SKILL.md` that inlines just the COMMENT(role) Marker rules (the interview only writes `COMMENT(claude)` markers and the cafleet messages are exempt from the verb + pointer schema), plus the explicit Director-Analyzer exemption note already present. <!-- completed: 2026-05-09T07:00 -->
+- [x] Update all 7 role files (`drafter.md`, `reviewer.md`, `director.md` in design-doc-create; `programmer.md`, `tester.md`, `verifier.md`, `director.md` in design-doc-execute) to replace every reference to `../../design-doc/coordination.md` with `../SKILL.md § Coordination Protocol`. Keep the skill-specific overrides (5-tag taxonomy, Phase 1 framework selection, Phase 1.5 FIXME sweep, Phase 1 tool-discovery exemption, milestones tables) untouched. <!-- completed: 2026-05-09T07:00 -->
+- [x] Run a verification grep: `git grep -n '\.\./\.\./design-doc/coordination\.md' -- skills/` MUST return 0 hits. Any hit indicates a stale cross-skill reference. <!-- completed: 2026-05-09T07:00 -->
 
 ---
 

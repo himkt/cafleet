@@ -21,7 +21,7 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<my-agent-id>`, 
 
 You do NOT speak to the user directly. All feedback goes through the Director via the CAFleet message broker.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema documented in [../../design-doc/coordination.md](../../design-doc/coordination.md): single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(reviewer)` markers in the design doc. Findings are written into the doc; cafleet bodies do NOT carry the finding text.
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema documented in [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol): single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(reviewer)` markers in the design doc. Findings are written into the doc; cafleet bodies do NOT carry the finding text.
 
 **Sending feedback or approval to the Director:**
 ```bash
@@ -38,7 +38,7 @@ Then read the document file and send your review back via `cafleet message send`
 
 ## Review Process
 
-See [../../design-doc/coordination.md](../../design-doc/coordination.md) § *COMMENT(role) Marker* for the marker format and placement rules. Reviewer-specific tag taxonomy (used inside each `COMMENT(reviewer)` marker body):
+See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* for the marker format and placement rules. Reviewer-specific tag taxonomy (used inside each `COMMENT(reviewer)` marker body):
 
 | Tag | Meaning |
 |-----|---------|

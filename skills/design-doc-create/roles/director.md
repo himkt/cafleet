@@ -44,7 +44,7 @@ A member is stalled when they **block your next step** — not merely because th
 
 All Director-to-member messages use the CAFleet message broker. The Director stores each member's `agent_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-agent-id>` as the `--to` target.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema shared with `/design-doc-execute` and `/design-doc-interview` — every body is a single-line `<verb> (<pointer>)` poke; substantive content (Reviewer findings, Drafter spec questions, Director arbitration) lives in inline `COMMENT(role)` markers in the design document. Canonical mechanics: [../../design-doc/coordination.md](../../design-doc/coordination.md). **Step 2 clarification messages are exempt** — the design doc does not yet exist when the Drafter asks clarifying questions, so the Director's "User answers: ..." relay rides as a free-form multi-line body.
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema shared with `/design-doc-execute` and `/design-doc-interview` — every body is a single-line `<verb> (<pointer>)` poke; substantive content (Reviewer findings, Drafter spec questions, Director arbitration) lives in inline `COMMENT(role)` markers in the design document. Canonical mechanics: [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol). **Step 2 clarification messages are exempt** — the design doc does not yet exist when the Drafter asks clarifying questions, so the Director's "User answers: ..." relay rides as a free-form multi-line body.
 
 **Sending a task to a member:**
 ```bash
@@ -73,7 +73,7 @@ cafleet --session-id <session-id> member capture --agent-id <director-agent-id> 
 
 ### COMMENT Marker Handling
 
-See [../../design-doc/coordination.md](../../design-doc/coordination.md) § *COMMENT(role) Marker* for the role taxonomy and marker rules. Skill-specific user-feedback workflow when the user selects "Scan for COMMENT markers":
+See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* for the role taxonomy and marker rules. Skill-specific user-feedback workflow when the user selects "Scan for COMMENT markers":
 
 1. **Immediately** scan for `COMMENT(` markers in the design document using Grep — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
 2. **If markers are found**: Route the Drafter to address them in-doc with `ready (doc)`. After the Drafter replies `addressed (doc)`, verify with Grep that no `COMMENT(` markers remain.
@@ -109,7 +109,7 @@ Drafter and Reviewer members are spawned with `--permission-mode dontAsk` (Bash 
 |:--|:--|:--|:--|
 | Clarification | Drafter sends clarifying questions via `cafleet message send` | Drafter goes idle without sending questions or a draft | Free-form nudge (Clarification Exemption — design doc does not yet exist): `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "Please send your clarifying questions so I can relay them to the user."` |
 | Drafting | Drafter writes the design document | Drafter goes idle after receiving user answers without producing a draft | Free-form nudge (still pre-doc, Clarification Exemption window): `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "You have received the user's answers. Please proceed with writing the design document."` |
-| Review | Reviewer sends review feedback via `cafleet message send` | Reviewer goes idle without sending feedback | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <reviewer-agent-id> --text "ready (doc)"` (re-sent `ready (doc)` is interpreted contextually as a stall-nudge per [../../design-doc/coordination.md](../../design-doc/coordination.md) — same target, same expected action) |
+| Review | Reviewer sends review feedback via `cafleet message send` | Reviewer goes idle without sending feedback | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <reviewer-agent-id> --text "ready (doc)"` (re-sent `ready (doc)` is interpreted contextually as a stall-nudge per [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) — same target, same expected action) |
 | Revision | Drafter revises based on feedback | Drafter goes idle without sending revised draft | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "ready (doc)"` (re-sent stall-nudge — Drafter resolves the standing `COMMENT(reviewer)` markers in the doc) |
 
 ## Shutdown Protocol
