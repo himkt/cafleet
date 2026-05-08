@@ -17,6 +17,7 @@ Validate an existing design document through structured, fine-grained Q&A across
 
 - For the document template, see: [../design-doc/template.md](../design-doc/template.md)
 - For section guidelines and quality standards, see: [../design-doc/guidelines.md](../design-doc/guidelines.md)
+- For the verb + pointer + COMMENT(role) protocol shared with `/design-doc-create` and `/design-doc-execute`, see [../design-doc/coordination.md](../design-doc/coordination.md). **Director-Analyzer cafleet messages in this skill are exempt from the verb + pointer schema.** The Analyzer's question list is a one-time payload deliverable; the Director's user-facing relay goes through `AskUserQuestion`, not cafleet.
 - Output of `/design-doc-create` is the input to this skill; this skill's `COMMENT(claude)` markers are consumed by `/design-doc-create` resume mode.
 
 ## Architecture

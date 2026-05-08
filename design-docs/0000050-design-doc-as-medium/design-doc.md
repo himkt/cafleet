@@ -1,7 +1,7 @@
 # Design Doc as Communication Medium
 
 **Status**: Approved
-**Progress**: 11/16 tasks complete
+**Progress**: 13/16 tasks complete
 **Last Updated**: 2026-05-08
 
 ## Overview
@@ -265,8 +265,8 @@ Today's commit messages sometimes need per-file or per-test detail (e.g. "feat: 
 
 ### Step 4: Cosmetic alignment for /design-doc-interview
 
-- [ ] Update `skills/design-doc-interview/SKILL.md` `## Additional resources` block to add a bullet linking to `../design-doc/coordination.md` ("For the verb + pointer + COMMENT(role) protocol shared with `/design-doc-create` and `/design-doc-execute`, see [../design-doc/coordination.md](../design-doc/coordination.md)") AND state explicitly: "Director-Analyzer cafleet messages in this skill are exempt from the verb + pointer schema. The Analyzer's question list is a one-time payload deliverable; the Director's user-facing relay goes through `AskUserQuestion`, not cafleet." No other changes. <!-- completed: -->
-- [ ] Verify `skills/design-doc-interview/roles/analyzer.md` requires no edits (the Analyzer's deliverable is the question list itself, which is a payload by design and outside the verb + pointer schema, per the explicit exemption above). Document the verification in the commit message; do not edit the file. <!-- completed: -->
+- [x] Update `skills/design-doc-interview/SKILL.md` `## Additional resources` block to add a bullet linking to `../design-doc/coordination.md` ("For the verb + pointer + COMMENT(role) protocol shared with `/design-doc-create` and `/design-doc-execute`, see [../design-doc/coordination.md](../design-doc/coordination.md)") AND state explicitly: "Director-Analyzer cafleet messages in this skill are exempt from the verb + pointer schema. The Analyzer's question list is a one-time payload deliverable; the Director's user-facing relay goes through `AskUserQuestion`, not cafleet." No other changes. <!-- completed: 2026-05-08T13:58 -->
+- [x] Verify `skills/design-doc-interview/roles/analyzer.md` requires no edits (the Analyzer's deliverable is the question list itself, which is a payload by design and outside the verb + pointer schema, per the explicit exemption above). Document the verification in the commit message; do not edit the file. <!-- completed: 2026-05-08T13:58 -->
 
 ### Step 5: Verification
 
