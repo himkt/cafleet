@@ -19,6 +19,10 @@ Create high-quality design documents using a three-role team orchestrated via th
 - For the document template, see: [../design-doc/template.md](../design-doc/template.md)
 - For section guidelines and quality standards, see: [../design-doc/guidelines.md](../design-doc/guidelines.md)
 
+## Coordination Protocol
+
+Inter-agent cafleet messages in this skill follow the **verb + pointer + `COMMENT(role)`** protocol shared with `/design-doc-execute` and `/design-doc-interview`: every `cafleet message send --text` body is a single-line `<verb> (<pointer>)` poke, and substantive content (Reviewer findings, Drafter spec questions, Director arbitration) lives in inline `COMMENT(role)` markers in the design document. The canonical mechanics — verb table, pointer table, marker format — are defined in [../design-doc/coordination.md](../design-doc/coordination.md). Director-to-Drafter messages during the **Step 2 clarification phase** are exempt (the design doc does not yet exist when the Drafter is asking clarifying questions).
+
 ## Architecture
 
 The Director is the root agent of a CAFleet session — bootstrapped automatically by `cafleet session create` (no separate `cafleet agent register` call) — and spawns both the Drafter and Reviewer via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
@@ -66,10 +70,10 @@ Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt.
 **Resume detection** (using resolved `${DOC_PATH}`):
 
 1. **File does not exist** → Fresh creation (proceed to Step 1 as normal).
-2. **File exists** → Check for COMMENT markers:
-   - Use Grep to search for `COMMENT(` in the file.
-   - **COMMENT markers found** → This is **resume mode**. Proceed to Step 1 with the resume-specific Drafter spawn prompt. Set an internal flag `SKIP_CLARIFICATION=true` so Step 2 (clarification) is skipped.
-   - **No COMMENT markers found** → Inform the user: "No COMMENT markers found in the existing document." Use `AskUserQuestion` with two options:
+2. **File exists** → Check for `COMMENT(claude)` markers:
+   - Use Grep to search for `COMMENT(claude)` in the file. The grep is intentionally tightened to the `claude` role — only `/design-doc-interview` produces `COMMENT(claude)` markers, so they are the only reliable signal that resume-mode is appropriate. Stale `COMMENT(reviewer)` / `COMMENT(director)` / `COMMENT(programmer)` markers from other workflows MUST NOT be misclassified as interview-resume.
+   - **`COMMENT(claude)` markers found** → This is **resume mode**. Proceed to Step 1 with the resume-specific Drafter spawn prompt. Set an internal flag `SKIP_CLARIFICATION=true` so Step 2 (clarification) is skipped.
+   - **No `COMMENT(claude)` markers found** → Inform the user: "No `COMMENT(claude)` markers found in the existing document." Use `AskUserQuestion` with two options:
      - **"Run quality review"**: Set internal flags `SKIP_CLARIFICATION=true` and `QUALITY_REVIEW_ONLY=true`. Skip Step 2 entirely and enter Step 3 by immediately routing the existing `${DOC_PATH}` to the Reviewer via `cafleet message send` (no new draft is produced; the Drafter is only involved later if the Reviewer requests revisions).
      - **"Start fresh"**: Treat as new creation, ignoring the existing file. Ensure `SKIP_CLARIFICATION` and `QUALITY_REVIEW_ONLY` are unset, then proceed to Step 1 as normal.
 
@@ -239,15 +243,17 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 **Skip this step entirely when `SKIP_CLARIFICATION=true`** (set by Step 0 in resume mode or quality-review-only mode). Resume mode: the COMMENT markers serve as the clarification and the Drafter already has all the information needed. Quality-review-only mode: the Drafter is not producing a new draft at all — proceed directly to Step 3 by routing the existing `${DOC_PATH}` to the Reviewer.
 
+> **Clarification Exemption**: Director-to-Drafter messages during this step are exempt from the verb + pointer schema documented in [../design-doc/coordination.md](../design-doc/coordination.md). At clarification time the design doc does not yet exist (the Drafter is forbidden from creating any file before clarifying), so there is no in-doc target for `COMMENT(claude)` markers — the user-answer relay rides as a free-form multi-line cafleet body. From Step 3 onward (once the initial draft exists) every message falls back under the schema.
+
 1. Wait for the Drafter's clarifying questions. The monitoring `/loop` and periodic `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>` will surface the Drafter's message once it arrives.
 2. `cafleet --session-id <session-id> message ack --agent-id <director-agent-id> --task-id <task-id>` each received message after reading it.
 3. Relay the questions to the user via `AskUserQuestion`. If the number of questions exceeds the per-call limit of `AskUserQuestion`, split them into multiple sequential calls to relay all questions without omission.
-4. Relay the user's answers back to the Drafter:
+4. Relay the user's answers back to the Drafter (free-form, per the Clarification Exemption above):
    ```bash
    cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
      --to <drafter-agent-id> --text "User answers: ..."
    ```
-5. **Gate check**: If the Drafter produces a draft without prior questions, reject it and instruct them to ask first:
+5. **Gate check**: If the Drafter produces a draft without prior questions, reject it and instruct them to ask first (also free-form, per the Clarification Exemption):
    ```bash
    cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
      --to <drafter-agent-id> --text "Stop — you must send clarifying questions before drafting. Discard the draft and send questions first."
@@ -256,22 +262,22 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 ### Step 3: Internal Quality Loop (Director)
 
-Enter this step after the Drafter reports a completed draft, **or immediately** when `QUALITY_REVIEW_ONLY=true` (the existing `${DOC_PATH}` is treated as the "completed draft" — no waiting for a Drafter report):
+Enter this step after the Drafter reports `complete (doc)`, **or immediately** when `QUALITY_REVIEW_ONLY=true` (the existing `${DOC_PATH}` is treated as the "completed draft" — no waiting for a Drafter report):
 
-1. **Route to Reviewer** with the document path:
+1. **Route to Reviewer**. The Reviewer reads `${DOC_PATH}` directly; no path needs to be embedded in the cafleet body.
    ```bash
    cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
-     --to <reviewer-agent-id> --text "Please review the draft at ${DOC_PATH}. Provide feedback or signal APPROVED."
+     --to <reviewer-agent-id> --text "ready (doc)"
    ```
-2. **Wait** for the Reviewer's feedback via `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>`.
-3. **On feedback**: Route to Drafter for revision:
+2. **Wait** for the Reviewer's response via `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>`. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
+3. **On feedback**: Route the Drafter to address the markers in-doc:
    ```bash
    cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
-     --to <drafter-agent-id> --text "Reviewer feedback: ... Please address and reply when done."
+     --to <drafter-agent-id> --text "ready (doc)"
    ```
-4. Wait for the Drafter's revision report, then loop back to step 1 (re-route to Reviewer).
-5. Repeat until the Reviewer explicitly signals `APPROVED - Ready for user review.`
-6. **Iteration limit**: Aim for 2–3 rounds. If not converging, escalate to the user: summarize the remaining issues at a high level and use `AskUserQuestion` to ask whether to continue iterating or abort. Do not proceed to Step 4 until the Reviewer has approved.
+4. Wait for the Drafter's `addressed (doc)` reply (revisions resolve the `COMMENT(reviewer)` markers), then loop back to step 1 (re-route to Reviewer with `ready (doc)`).
+5. Repeat until the Reviewer explicitly signals `approved (doc)`.
+6. **Iteration limit**: Aim for 2–3 rounds. If not converging, escalate to the user: summarize the remaining issues at a high level (read directly from the surviving `COMMENT(reviewer)` markers in the doc) and use `AskUserQuestion` to ask whether to continue iterating or abort. Do not proceed to Step 4 until the Reviewer has approved.
 
 ### Step 4: Present to User (Director)
 
@@ -291,7 +297,12 @@ Process the user's selection:
 
 - **"Scan for COMMENT markers"**:
   1. **Immediately** scan the document with Grep for `COMMENT(` markers — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
-  2. **If markers are found**: Route COMMENT content and fix instructions to the Drafter via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."`. After the Drafter revises and removes markers, verify with Grep that no `COMMENT(` markers remain. Then re-enter the quality loop (Step 3) and re-present (Step 4).
+  2. **If markers are found**: Route the Drafter to read and resolve the markers in-doc with `ready (doc)` — no marker content is quoted in the cafleet body:
+     ```bash
+     cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
+       --to <drafter-agent-id> --text "ready (doc)"
+     ```
+     After the Drafter replies `addressed (doc)` and removes the markers, verify with Grep that no `COMMENT(` markers remain. Then re-enter the quality loop (Step 3) and re-present (Step 4).
   3. **If no markers are found**: Explain the COMMENT marker convention to the user — markers follow the pattern `# COMMENT(username): feedback` placed directly in the design document file. Show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / Other).
 
 - **"Other" (free text)**: Use LLM reasoning — not keyword matching — to distinguish between:
@@ -302,12 +313,12 @@ No round limit — loop continues until approved or aborted.
 
 ### Step 6: Finalize & Clean Up (Director)
 
-1. Instruct the Drafter to finalize:
+1. Instruct the Drafter to finalize. The Drafter's role definition spells out the finalize checklist (set Status to Approved, refresh Last Updated, bump the Progress header field if present, verify implementation steps are actionable); the cafleet body is just the verb + pointer poke:
    ```bash
    cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
-     --to <drafter-agent-id> --text "User approved. Please finalize: set Status to Approved, refresh Last Updated, bump the Progress header field if present in the template, verify implementation steps are actionable, then report done."
+     --to <drafter-agent-id> --text "ready (doc)"
    ```
-   Wait for the Drafter's confirmation.
+   Wait for the Drafter's `addressed (doc)` confirmation.
 
 2. Run the canonical teardown per `Skill(cafleet)` § *Shutdown Protocol*:
    1. `CronDelete` the `/loop` monitor (cron ID recorded at Step 1b).

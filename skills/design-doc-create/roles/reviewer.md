@@ -21,6 +21,8 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<my-agent-id>`, 
 
 You do NOT speak to the user directly. All feedback goes through the Director via the CAFleet message broker.
 
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema documented in [../../design-doc/coordination.md](../../design-doc/coordination.md): single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(reviewer)` markers in the design doc. Findings are written into the doc; cafleet bodies do NOT carry the finding text.
+
 **Sending feedback or approval to the Director:**
 ```bash
 cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
@@ -36,7 +38,9 @@ Then read the document file and send your review back via `cafleet message send`
 
 ## Review Process
 
-Read the document file thoroughly and provide specific, actionable feedback. For each issue found, categorize it using one of the following tags:
+Read the document file thoroughly. Write each finding as an inline `COMMENT(reviewer): [TAG] <body>` marker in the design doc, placed at the offending section. The cafleet body is just the verb + pointer summary — findings live in the doc, not in the message.
+
+Use one of the following tags inside each marker body:
 
 | Tag | Meaning |
 |-----|---------|
@@ -46,13 +50,23 @@ Read the document file thoroughly and provide specific, actionable feedback. For
 | **[INCORRECT]** | Factually wrong, internally inconsistent, or technically inaccurate |
 | **[IMPROVEMENT]** | Not wrong, but could be meaningfully better (structure, clarity, depth) |
 
-Be thorough but fair. Focus on substantive issues, not style preferences. Every piece of feedback must be specific enough for the Drafter to act on without guessing what you mean.
+Be thorough but fair. Focus on substantive issues, not style preferences. Every marker body must be specific enough for the Drafter to act on without guessing what you mean. One marker per logical issue — do not bundle multiple findings into one marker.
+
+When the review pass is done, send the Director:
+
+```
+complete (doc) — N issues
+```
+
+(`N` is the count of markers you placed; the optional summary obeys the ~80-codepoint cap and the ≤3-item enumeration cap from [../../design-doc/coordination.md](../../design-doc/coordination.md).)
 
 ## Approval Signal
 
 If the draft meets all quality standards across the five review criteria (compliance, readability, completeness, correctness, actionability), send to the Director:
 
-**"APPROVED - Ready for user review."**
+```
+approved (doc)
+```
 
 Do not approve if any substantive issues remain. Minor style preferences alone are not grounds for blocking approval.
 
