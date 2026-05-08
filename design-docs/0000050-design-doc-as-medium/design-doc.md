@@ -10,11 +10,11 @@ Switch CAFleet design-doc skills (`/design-doc-create`, `/design-doc-execute`, w
 
 ## Success Criteria
 
-- [ ] A new `skills/design-doc/coordination.md` reference defines the pointer + verb + COMMENT(role) protocol and is linked from `skills/design-doc/SKILL.md`, `skills/design-doc-create/SKILL.md`, `skills/design-doc-execute/SKILL.md`, and `skills/design-doc-interview/SKILL.md`.
-- [ ] Every `cafleet message send --text` example in the touched SKILL.md / role files conforms to the verb + pointer schema (verb chosen from the canonical 6, pointer drawn from the canonical 3 forms), is single-line, and respects the ~80-codepoint summary cap.
-- [ ] Reviewer feedback, test reports, implementation reports, escalation reasons, code-review notes, and Copilot review routing in the role files are expressed as `COMMENT(role)` markers in the design doc (or, for source-anchored Copilot, in the source file) instead of long cafleet message bodies.
-- [ ] No file under `cafleet/` source, no Alembic migration, and no schema/wire-format change is touched by this design doc.
-- [ ] `rg "Reviewer feedback: " skills/`, `rg "Tests at: " skills/`, `rg "Test results \(all passing\)" skills/`, and `rg "What tests you wrote" skills/` each return 0 hits after the changes land.
+- [x] A new `skills/design-doc/coordination.md` reference defines the pointer + verb + COMMENT(role) protocol and is linked from `skills/design-doc/SKILL.md`, `skills/design-doc-create/SKILL.md`, `skills/design-doc-execute/SKILL.md`, and `skills/design-doc-interview/SKILL.md`.
+- [x] Every `cafleet message send --text` example in the touched SKILL.md / role files conforms to the verb + pointer schema (verb chosen from the canonical 6, pointer drawn from the canonical 3 forms), is single-line, and respects the ~80-codepoint summary cap.
+- [x] Reviewer feedback, test reports, implementation reports, escalation reasons, code-review notes, and Copilot review routing in the role files are expressed as `COMMENT(role)` markers in the design doc (or, for source-anchored Copilot, in the source file) instead of long cafleet message bodies.
+- [x] No file under `cafleet/` source, no Alembic migration, and no schema/wire-format change is touched by this design doc.
+- [x] `rg "Reviewer feedback: " skills/`, `rg "Tests at: " skills/`, `rg "Test results \(all passing\)" skills/`, and `rg "What tests you wrote" skills/` each return 0 hits after the changes land.
 
 ---
 
