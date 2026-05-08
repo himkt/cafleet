@@ -20,6 +20,10 @@ Implement features based on a design document using up to four roles orchestrate
 - For the document template, see: [../design-doc/template.md](../design-doc/template.md)
 - For section guidelines and quality standards, see: [../design-doc/guidelines.md](../design-doc/guidelines.md)
 
+## Coordination Protocol
+
+Inter-agent cafleet messages in this skill follow the **verb + pointer + `COMMENT(role)`** protocol shared with `/design-doc-create` and `/design-doc-interview`: every `cafleet message send --text` body is a single-line `<verb> (<pointer>)` poke, and substantive content (Tester gaps, Programmer escalation rationales, Verifier evidence, Director Phase C code-review feedback, design-doc-anchored Copilot review) lives in inline `COMMENT(role)` markers in the design document — except for source-anchored Copilot inline review, which is annotated as `COMMENT(copilot)` in the source file at `<file>:<line>`. The canonical mechanics — verb table, pointer table, marker format — are defined in [../design-doc/coordination.md](../design-doc/coordination.md). The Verifier's **Phase 1 tool-discovery** message is exempt from the schema (one-time discovery payload, same precedent as the Analyzer's question list in `/design-doc-interview`); subsequent Verifier reports follow the schema.
+
 ## Architecture
 
 The Director is the root agent of a CAFleet session — bootstrapped automatically by `cafleet session create` (no separate `cafleet agent register` call) — and spawns each needed member via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
@@ -299,6 +303,8 @@ Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>
 
 **Verifier spawn prompt (if needed):**
 
+> **Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in `/design-doc-interview`). Phase 2 verification reports follow the verb + pointer + `COMMENT(verifier)` schema documented in [../design-doc/coordination.md](../design-doc/coordination.md).
+
 ```
 You are the Verifier in a design document execution team (CAFleet-native).
 
@@ -356,38 +362,38 @@ For each step in the design document:
 
 **Skip this phase entirely when the Tester was not spawned** (Programmer-only team composition for config/documentation-only steps). Proceed directly to Phase B and assign the step to the Programmer without a separate test-writing commit.
 
-1. **Assign**: Send the Tester the step number, description, and specification:
+1. **Assign**: Send the Tester a verb + pointer poke. The Tester reads the step description and specification directly from the design document at the pointer.
    ```bash
    cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
-     --to <tester-agent-id> --text "Step N: <description>. Spec: <…>. Write unit tests and report file paths when done."
+     --to <tester-agent-id> --text "ready (paragraph-Implementation > Step N)"
    ```
-2. **Wait for Tester report via `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>`**. If the test framework is ambiguous, ask the user via `AskUserQuestion` and relay the answer via `cafleet message send`.
-3. **Review tests** against the design doc. Send feedback via `cafleet message send` if issues found. Repeat until satisfied.
-4. **Commit tests** (separate commands, do NOT chain with `&&`):
+2. **Wait for the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)** via `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>`. On `blocked`, read the Tester's `COMMENT(tester)` marker at the pointer; if the test framework is ambiguous (per the Tester's `Phase 1` selection step), ask the user via `AskUserQuestion`, write the answer back as `COMMENT(claude): <choice>` at the same paragraph, and reply with `ready (doc)` so the Tester resumes.
+3. **Review tests** against the design doc. If issues are found, write `COMMENT(director): <issue>` markers at the offending paragraph in the design doc and reply `ready (paragraph-Implementation > Step N)`; the Tester resolves the markers and replies `addressed (paragraph-Implementation > Step N)`. Repeat until satisfied.
+4. **Commit tests** (separate commands, do NOT chain with `&&`). Recover the per-test file list directly via git (`git status` / `git diff --stat` / `git log --name-only`) — the Tester does not embed file lists in cafleet bodies under the verb + pointer schema.
    - `git add <test-files>`
    - `git commit -m "test: add tests for [feature description]"`
 
 #### Phase B: Implementation
 
-1. **Assign**: Send the Programmer the step number, description, and test file paths:
+1. **Assign**: Send the Programmer a verb + pointer poke. The Programmer reads the step spec at the pointer and locates the Tester's freshly-committed test files via git (`git log <base>..HEAD --name-only -- '**/test_*' '**/tests/**'`); the prior Tester `complete (...) — N tests` summary went Tester → Director, not Tester → Programmer.
    ```bash
    cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
-     --to <programmer-agent-id> --text "Step N: <description>. Tests at: <paths>. Implement to pass all tests, update design doc checkboxes and Progress counter, then report."
+     --to <programmer-agent-id> --text "ready (paragraph-Implementation > Step N)"
    ```
-2. **Wait for Programmer report via `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>`**. On suspected test defect, see [roles/director.md](roles/director.md) for the escalation protocol.
+2. **Wait for the Programmer's `complete (paragraph-Implementation > Step N)`** via `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>`. On `escalating (paragraph-Implementation > Step N)` (suspected test defect), see [roles/director.md](roles/director.md) for the escalation protocol; the rationale lives in a `COMMENT(programmer)` marker at the pointer, not in the cafleet body.
 3. **Programmer updates design doc**: Checkboxes, timestamps, and Progress counter.
 
 #### Phase C: Code Review (Director)
 
 1. **Review**: Verify code matches design doc, quality is acceptable, no unnecessary changes.
-2. **Feedback loop**: Send feedback via `cafleet message send` if issues found. Programmer fixes, re-runs tests, re-reports via `cafleet message send`. Repeat until satisfied.
-3. **Commit implementation** (separate commands, do NOT chain with `&&`):
+2. **Feedback loop**: If issues are found, write a `COMMENT(director): <issue>` marker at the offending paragraph in the design doc (or in the source file at `<file>:<line>` for code-anchored issues) and send `ready (paragraph-Implementation > Step N)` (or `ready (<file>:<line>)` for source anchors). The Programmer resolves the markers, re-runs tests, and replies `addressed (paragraph-Implementation > Step N)` (or `addressed (<file>:<line>)`). Repeat until satisfied.
+3. **Commit implementation** (separate commands, do NOT chain with `&&`). Recover the per-file list via git (`git status` / `git diff --stat <base>..HEAD`):
    - `git add <files> <design-doc>`
    - `git commit -m "feat: [description of what was implemented]"`
 
 Repeat from Phase A for the next step. Always include the design document in the implementation commit.
 
-**Escalation Protocol (Test Defect):** If the Programmer reports a suspected test defect (implementation matches design doc but tests expect something different), the Director reads the design doc and test, then directs either the Tester to fix the test or the Programmer to adjust the implementation via `cafleet message send`. 3-round limit before escalating to the user.
+**Escalation Protocol (Test Defect):** When the Programmer sends `escalating (paragraph-Implementation > Step N)`, the Director reads the design doc paragraph, the Programmer's `COMMENT(programmer)` rationale at that pointer, and the failing test. The Director then writes a `COMMENT(director): <decision> — <rationale, ≤2 sentences>` marker at the same paragraph stating the arbitration outcome, and sends `ready (paragraph-Implementation > Step N)` to whichever member needs to act (Tester to fix the test, or Programmer to adjust the implementation). The recipient acts on the standing markers and replies `addressed (paragraph-Implementation > Step N)`. 3-round limit before escalating to the user.
 
 **On-Demand Verification**: Any member can request verification mid-task via `cafleet message send` to the Director. The Director decides whether to route immediately or defer:
 
@@ -403,9 +409,13 @@ Repeat from Phase A for the next step. Always include the design document in the
 
 If the Verifier was spawned, assign verification:
 
-1. Send the Verifier the design document, completed steps, and relevant files via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <verifier-agent-id> --text "..."`.
-2. Verifier discovers tools, executes E2E verification, captures evidence, reports results via `cafleet message send`.
-3. **Route failures**: Implementation bugs → Programmer via `cafleet message send`, test gaps → Tester via `cafleet message send`, spec issues → user.
+1. Send the Verifier a verb + pointer poke — the Verifier reads the design document and the completed Implementation paragraphs directly at the pointer:
+   ```bash
+   cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
+     --to <verifier-agent-id> --text "ready (doc)"
+   ```
+2. The Verifier discovers tools, executes E2E verification, captures evidence, and writes each fail / suggested-fix as a `COMMENT(verifier): <category> <body>` marker (category = impl bug / test gap / spec issue) at the relevant paragraph. On overall success the Verifier sends a single `complete (doc)`; on failures the Verifier sends one `escalating (paragraph-Implementation > Step N)` per affected step.
+3. **Route failures** by reading the standing `COMMENT(verifier)` markers and dispatching with `ready (paragraph-Implementation > Step N)`: impl-bug markers → Programmer, test-gap markers → Tester, spec-issue markers → Director resolves directly via `COMMENT(director)` arbitration (or escalates to the user via `AskUserQuestion` if a product decision is needed).
 4. Re-verify after fixes. Proceed to User Approval when all verifiable criteria pass.
 
 ### Step 5: User Approval (Director)
@@ -442,12 +452,12 @@ See [roles/director.md](roles/director.md) for user interaction rules (COMMENT h
 
 #### Revision Loop (COMMENT Marker-Based Feedback)
 
-When the user selects "Scan for COMMENT markers": scan changed files for `COMMENT(` markers. Classify by file location (see [roles/director.md](roles/director.md)) and route via `cafleet message send`:
-- Design-doc COMMENTs → Director resolves directly (no routing).
-- Source-file COMMENTs → `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."`.
-- Test-file COMMENTs → `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "..."`.
+When the user selects "Scan for COMMENT markers": scan changed files for `COMMENT(` markers. Classify by file location (see [roles/director.md](roles/director.md)) and route via the verb + pointer schema:
+- Design-doc `COMMENT(...)` markers → Director resolves directly (apply spec change, remove marker; no cafleet route).
+- Source-file `COMMENT(...)` markers → `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (<file>:<line>)"`. The Programmer reads the marker at the source pointer, fixes the source, removes the marker, and replies `addressed (<file>:<line>)`.
+- Test-file `COMMENT(...)` markers → `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (<file>:<line>)"`. The Tester reads, fixes, removes the marker, and replies `addressed (<file>:<line>)`.
 
-After all COMMENTs are resolved and verified, re-present to user.
+After all `COMMENT(...)` markers are resolved and verified, re-present to user.
 
 When the user selects "Other": interpret intent per [roles/director.md](roles/director.md) rules.
 
@@ -455,7 +465,7 @@ No round limit — the loop continues until the user approves or aborts.
 
 #### Abort Flow
 
-1. Update design document Status to "Aborted", add Changelog entry.
+1. Update design document Status to "Aborted", add Changelog entry. Place a `COMMENT(director): aborting — finalize and stand by` marker near the top of the doc body (above the Overview section — `Status:` is bold metadata, not a heading, so it is not a valid `paragraph-` target). Notify any still-live members with a single `cafleet --session-id <session-id> message send ... --text "ready (doc)"` per member so they read the marker and stand by.
 2. Commit (separate commands): `git add <design-doc>` then `git commit -m "docs: mark design doc as aborted"`
 3. Follow Shutdown Protocol (Step 8: cancel whichever `/loop` is active — team-health if Step 6 was skipped, augmented if Step 7 started — then delete members and run `cafleet session delete <session-id>` to tear down the session and sweep the root Director + Administrator).
 
@@ -531,15 +541,17 @@ The APPROVED check MUST be qualified by the post-push filter (`submittedAt > las
 
 #### 7c. Classify and route
 
-For each new inline comment, pick the owner by file-path pattern:
+For each new inline comment, pick the owner by file-path pattern. **Source-anchored** Copilot lines route via the verb + pointer schema; the Director writes a `COMMENT(copilot): <body>` marker at the source pointer (because that is where the comment lives) and pokes the routed member with `ready (<file>:<line>)`. **Design-doc-anchored** Copilot lines do NOT route to a member — the Director writes a `COMMENT(director): <body>` marker at the affected paragraph, applies the spec change, and removes the marker as part of the fix; no cafleet message is sent (the git commit + marker removal is sufficient audit trail).
 
-| Path pattern | Owner | Route |
-|:--|:--|:--|
-| Design doc (`design-docs/**/design-doc.md`) | Director | Director applies directly — no `cafleet message send` route |
-| Test file (e.g. `**/test_*.py`, `**/*_test.py`, `**/tests/**`) | Tester | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "Copilot review: <file>:<line> — <comment body>. Please address."` |
-| Any other source file | Programmer | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "Copilot review: <file>:<line> — <comment body>. Please address."` |
+| Path pattern | Owner | Marker location | Route |
+|:--|:--|:--|:--|
+| Design doc (`design-docs/**/design-doc.md`) | Director | `COMMENT(director): <body>` at the affected paragraph in the design doc | (no cafleet route — Director resolves silently) |
+| Test file (e.g. `**/test_*.py`, `**/*_test.py`, `**/tests/**`) | Tester | `COMMENT(copilot): <body>` in the test file at `<file>:<line>` | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (<file>:<line>)"` |
+| Any other source file | Programmer | `COMMENT(copilot): <body>` in the source file at `<file>:<line>` | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (<file>:<line>)"` |
 
-For review-level comments (body text not attached to a specific line), route by Director judgment: spec-level → Director resolves directly; implementation-level → Programmer; test-level → Tester.
+The routed member fixes the source, removes the `COMMENT(copilot)` marker as part of the fix, and replies `addressed (<file>:<line>)`.
+
+For review-level comments (body text not attached to a specific line), route by Director judgment: spec-level → `COMMENT(director)` in design doc, Director resolves directly; implementation-level → `COMMENT(copilot)` at a representative source `<file>:<line>` + `ready (<file>:<line>)` to the Programmer; test-level → `COMMENT(copilot)` at a representative test `<file>:<line>` + `ready (<file>:<line>)` to the Tester.
 
 #### 7d. Fix, commit, push, re-request
 
@@ -577,7 +589,7 @@ TEAM HEALTH:
 1. Run `cafleet --session-id <session-id> --json member list --agent-id <director-agent-id>`.
 2. Run `cafleet --session-id <session-id> --json message poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check>"`. ACK progress reports.
 3. For each member that has not sent a message since last check, run `cafleet --session-id <session-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id> --lines 200`.
-4. Nudge stalled members via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Report your progress now. If blocked, state what is blocking you."`.
+4. Nudge stalled members via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<original-pointer>)"` — re-send the same `ready (paragraph-Implementation > Step N)` or `ready (<file>:<line>)` body that was used for the original assignment. The recipient interprets a re-sent `ready (...)` contextually as a stall-nudge per [../design-doc/coordination.md](../design-doc/coordination.md) (same target, same expected action).
 
 PR REVIEW:
 5. Run `gh pr view <pr-number> --json reviews` (GraphQL shape: `author.login`, `state`, `submittedAt`, `body`).
@@ -586,7 +598,7 @@ PR REVIEW:
 8. If the most recent Copilot-authored entry **in the filtered (post-push) set from step 7** has `state == "APPROVED"`: signal Step 7 exit (success). An older approval (i.e., one with `submittedAt <= last_push_ts`) must NOT trigger this exit.
 9. If filter returned 0 entries AND `silence_ticks < 30`: increment `silence_ticks`, continue waiting (do nothing this tick). The loop never auto-exits on Copilot silence.
 10. If filter returned 0 entries AND `silence_ticks >= 30`: silence-escalation per 7e — AskUserQuestion (Keep waiting / Re-request review / Finalize now / Other). Reset `silence_ticks = 0` if the user picks Keep waiting or Re-request review; otherwise honor the user's choice.
-11. If filter returned ≥ 1 entries: reset `silence_ticks = 0`, classify by file path, and dispatch via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`.
+11. If filter returned ≥ 1 entries: reset `silence_ticks = 0`, classify by file path per Step 7c, write `COMMENT(copilot): <body>` at the source `<file>:<line>` for source/test routes (or `COMMENT(director): <body>` at the affected paragraph for design-doc-anchored items), and dispatch via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<file>:<line>)"`. Design-doc-anchored Copilot items are NOT routed — the Director resolves them directly and skips the `cafleet message send`.
 
 ESCALATION:
 12. If any member has been nudged 2 times with no progress, escalate to the user.

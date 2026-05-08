@@ -20,6 +20,8 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<my-agent-id>`, 
 
 You do NOT speak to the user directly. All communication goes through the Director via the CAFleet message broker.
 
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema documented in [../../design-doc/coordination.md](../../design-doc/coordination.md): single-line `<verb> (<pointer>)` body, substantive content (E2E findings, evidence pointers, suggested-fix categorisation) in inline `COMMENT(verifier)` markers in the design doc. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in `/design-doc-interview`). Phase 2 verification reports follow the schema.
+
 **Sending a message to the Director:**
 ```bash
 cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
@@ -39,16 +41,16 @@ The Director may relay verification requests from the Programmer or Tester at an
 
 ### Phase 1: Tool Discovery
 
-At startup, perform tool discovery:
+At startup, perform tool discovery. **This phase is exempt from the verb + pointer schema** — the inventory is a one-time discovery payload, not iterative coordination, so the first message rides as a free-form multi-line cafleet body. Subsequent Phase 2 verification reports follow the schema.
 
 1. List all available tools and check for `mcp__*` prefixed tools (MCP servers for browser automation, HTTP clients, etc.)
 2. Check the system-reminder for available skills
 3. Group discovered capabilities by type (browser automation, HTTP clients, CLI runners, database access)
-4. Report discovered tools and their capabilities to the Director via `cafleet message send` in your first message
+4. Report discovered tools and their capabilities to the Director via `cafleet message send` in your first message (free-form body — Phase 1 exemption above).
 
 ### Phase 2: Verification
 
-For each verification task assigned by the Director:
+For each verification task assigned by the Director (you receive `ready (doc)` or `ready (paragraph-Implementation > Step N)`):
 
 1. **Read the design document's success criteria** and the relevant implementation files.
 2. **Choose verification strategy** based on the project type:
@@ -62,21 +64,19 @@ For each verification task assigned by the Director:
 | Configuration change | Validate config syntax, dry-run | -- |
 
 3. **Execute verification**: Start the application/service if applicable, perform E2E interactions matching success criteria, and capture evidence (command output, screenshots via Playwright, HTTP responses, logs).
-4. **Report results via `cafleet message send`** to the Director:
-   - What was verified (each success criterion or specific behavior)
-   - Pass/fail status for each item
-   - Evidence (output, screenshots, error messages)
-   - Suggested fixes for failures (classify as: implementation bug, test gap, or spec issue)
+4. **Record findings as inline markers in the design doc**: For each fail or suggested-fix, write a `COMMENT(verifier): <category> <body>` marker at the relevant paragraph (use `paragraph-Specification > <…>` for spec issues, `paragraph-Implementation > Step N` otherwise). Category MUST be one of `impl bug`, `test gap`, or `spec issue`. Include evidence pointers (`see <file>:<line>` or `see <log path>`) inside the marker body.
+
+   Then report to the Director via `cafleet message send`:
+   - **Overall success** (all verifiable criteria pass): send a single `complete (doc)`. E2E commonly spans multiple steps, so success is reported once at doc-level.
+   - **Failures**: send one `escalating (paragraph-Implementation > Step N)` per affected step. The standing `COMMENT(verifier)` markers carry the substantive content; the cafleet body does NOT enumerate findings.
 
 ## Graceful Degradation
 
 If the best tool for a verification task is unavailable:
 
 1. **Fall back** to the next best alternative (e.g., `curl` instead of Playwright for HTTP checks)
-2. **If no suitable tool exists**, skip that verification item and report via `cafleet message send`:
-   - What was skipped and why
-   - Which MCP server or tool the user could set up to enable it
-3. Never fail silently — always report what could and could not be verified.
+2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker at the relevant paragraph (or doc-top if no specific anchor applies). The cafleet body for the overall report stays `complete (doc)` (if no other failures) or `escalating (paragraph-Implementation > Step N)` (if part of a failing step).
+3. Never fail silently — always record what could and could not be verified in `COMMENT(verifier)` markers.
 
 ## Shutdown
 

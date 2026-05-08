@@ -20,6 +20,8 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<my-agent-id>`, 
 
 You do NOT speak to the user directly. All communication goes through the Director via the CAFleet message broker.
 
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema documented in [../../design-doc/coordination.md](../../design-doc/coordination.md): single-line `<verb> (<pointer>)` body, substantive content (test-spec gaps, test-defect counter-arguments) in inline `COMMENT(tester)` markers in the design doc, or in test files at `<file>:<line>` for code-anchored issues.
+
 **Sending a message to the Director:**
 ```bash
 cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
@@ -44,37 +46,33 @@ Before writing any tests, determine the test framework to use:
 1. **Check existing tests** in the project (e.g., `tests/` directory, `*_test.*` files, `__tests__/` directory)
 2. **Check configuration files** (e.g., `pytest.ini`, `pyproject.toml`, `jest.config.*`, `vitest.config.*`, `Cargo.toml` for `[dev-dependencies]`, `go.mod`)
 3. **Check project's `CLAUDE.md`** for testing conventions or preferences
-4. **If deterministic** → use the detected framework. Proceed to Phase 2.
-5. **If ambiguous** → Report to the Director via `cafleet message send` with what you found. The Director will ask the user and relay the answer back to you via `cafleet message send`. Wait for the Director's response before proceeding.
+4. **If deterministic** → use the detected framework. Proceed silently to Phase 2 — no cafleet message is sent for a deterministic detection.
+5. **If ambiguous** → Write a `COMMENT(tester): framework selection ambiguous — found <evidence>; need user arbitration` marker at `paragraph-Implementation` (or at the doc top if no Implementation heading exists at this stage), then send `blocked (doc)` via `cafleet message send`. The Director relays via `AskUserQuestion`, writes the answer back as `COMMENT(claude): <choice>` at the same paragraph, and sends `ready (doc)`. Resume Phase 2 once the Director's `ready (doc)` lands.
 
 This detection only needs to happen once per project. After the framework is determined, use it for all subsequent steps.
 
 ### Phase 2: Test Writing (per step)
 
-For each step assigned by the Director:
+For each step assigned by the Director (you receive `ready (paragraph-Implementation > Step N)`):
 
-1. **Read the step specification**: Read the step description and checkbox items in the design document. Understand the requirements, expected behavior, interfaces, and edge cases.
+1. **Read the step specification**: Read the step description and checkbox items in the design document at the pointer. Understand the requirements, expected behavior, interfaces, and edge cases.
 2. **Write comprehensive unit tests** that verify the step's requirements:
    - Cover the main functionality specified in the step
    - Cover edge cases and error conditions mentioned in the spec
    - Use descriptive test names that reference the requirement being tested
    - Tests WILL fail at this point (no implementation yet) — that is expected
-3. **Report to the Director via `cafleet message send`** with:
-   - What tests you wrote (test names and descriptions)
-   - Which files you created or modified
-   - What requirements the tests cover
-   - Any spec areas that were unclear or untestable
-4. **Handle Director feedback**: The Director will review your tests against the design doc (feedback relayed via `cafleet message send`). If feedback is provided, revise your tests and report again. Repeat until the Director approves.
+3. **Send `complete (paragraph-Implementation > Step N) — <count> tests` via `cafleet message send`**. The optional summary respects the ≤ 80-codepoint cap and the ≤ 3-item enumeration cap. **Do NOT enumerate test names, files, or requirements in the body** — the Director recovers per-file detail directly via git. If the spec is unclear or contains untestable areas, write a `COMMENT(tester): <gap>` marker at the offending paragraph and send `blocked (paragraph-Implementation > Step N)` instead.
+4. **Handle Director feedback**: When the Director sends `ready (paragraph-Implementation > Step N)`, read the standing `COMMENT(director)` markers at the pointer, revise your tests to resolve them, remove the markers as part of the fix, and reply `addressed (paragraph-Implementation > Step N)`. Repeat until the Director approves.
 
 ### Phase 3: Test Defect Resolution
 
-If the Director relays a test defect report from the Programmer (the Programmer's implementation matches the design doc but your tests expect something different):
+When the Director sends `ready (paragraph-Implementation > Step N)` after a Programmer escalation, the design doc paragraph contains a standing `COMMENT(programmer)` rationale and a `COMMENT(director)` arbitration decision.
 
-1. **Read the feedback**: Understand the specific test failure and the Programmer's reasoning.
+1. **Read the markers**: Understand the specific test failure (from the `COMMENT(programmer)` marker), the Programmer's reasoning, and the Director's arbitration decision (from the `COMMENT(director)` marker).
 2. **Evaluate the feedback**:
-   - **If valid** (your test expectation was wrong per the design doc): Fix the test to match the correct behavior. Report the fix to the Director via `cafleet message send`.
-   - **If you disagree** (your test is correct per the design doc): Explain your reasoning to the Director via `cafleet message send`, citing the relevant design doc section.
-3. **Wait for the Director's decision.** The Director will arbitrate and direct next steps via `cafleet message send`.
+   - **If valid** (the Director's decision says your test expectation was wrong per the design doc): Fix the test to match the correct behavior, remove the standing markers as part of the fix, and reply `addressed (paragraph-Implementation > Step N)` via `cafleet message send`.
+   - **If you disagree** (your test is correct per the design doc and the Director's arbitration is wrong): Write a `COMMENT(tester): <reasoning>` marker at the same paragraph citing the relevant design doc section, then reply `escalating (paragraph-Implementation > Step N)` via `cafleet message send`.
+3. **Wait for the Director's next decision.** The Director will arbitrate again — read the updated `COMMENT(director)` marker and act accordingly.
 
 ## Test Writing Guidelines
 

@@ -20,6 +20,8 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<my-agent-id>`, 
 
 You do NOT speak to the user directly. All communication goes through the Director via the CAFleet message broker.
 
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema documented in [../../design-doc/coordination.md](../../design-doc/coordination.md): single-line `<verb> (<pointer>)` body, substantive content (escalation rationales, observed spec gaps) in inline `COMMENT(programmer)` markers in the design doc, or in source files at `<file>:<line>` for code-anchored issues.
+
 **Sending a message to the Director:**
 ```bash
 cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
@@ -58,16 +60,13 @@ For each FIXME:
 
 #### Step 3: Report to Director
 
-After fixing all FIXMEs:
-1. Message the Director via `cafleet message send` with a summary of all changes made
-2. List the DONE(claude) comments and their locations
-3. Wait for the Director to confirm or provide further instructions
+After fixing all FIXMEs, send `complete (doc)` via `cafleet message send`. The DONE(claude) comments themselves are the inline trail — do NOT enumerate them in the cafleet body. Wait for the Director's `ready (doc)` confirmation.
 
 #### Step 4: Cleanup DONE Comments
 
-When the Director confirms the changes are acceptable:
+When the Director sends `ready (doc)` to confirm the FIXME fixes are acceptable:
 1. Remove all `DONE(claude)` comments from the codebase
-2. Report completion to the Director via `cafleet message send`
+2. Send `complete (doc)` via `cafleet message send`
 
 **Only proceed to the TDD cycle after all FIXMEs are resolved and confirmed.**
 
@@ -81,10 +80,14 @@ If resuming a partially-complete document:
 
 ### Phase 2: Implementation (TDD)
 
-For each step assigned by the Director:
+For each step assigned by the Director (you receive `ready (paragraph-Implementation > Step N)`):
 
-1. **Read the step spec**: Read the step description and checkbox items in the design document.
-2. **Read the tests**: The Tester has already written and committed unit tests for this step. Read the test files to understand the expected behavior and interfaces.
+1. **Read the step spec**: Read the step description and checkbox items in the design document at the pointer.
+2. **Locate the tests**: The Tester has already written and committed unit tests for this step. The Tester's `complete (...) — N tests` summary went Tester → Director, NOT Tester → Programmer, so the test file paths are NOT in any cafleet body you received. Locate them yourself via git, e.g.:
+   ```bash
+   git log <base>..HEAD --name-only -- '**/test_*' '**/tests/**'
+   ```
+   Read the test files to understand the expected behavior and interfaces.
 3. **Implement code**: Write implementation code to make ALL tests for the step pass.
 4. **Run tests**: Execute the tests yourself to verify they pass before reporting.
 5. **Handle test results**:
@@ -93,11 +96,8 @@ For each step assigned by the Director:
    - **Tests fail (suspected test defect)**: If your implementation matches the design doc but tests expect something different, escalate to the Director via `cafleet message send`. See Escalation below.
 6. **Update the design document**: Mark each completed task's checkbox `- [ ]` → `- [x]` AND set `<!-- completed: YYYY-MM-DDTHH:MM -->` in the same edit. Never leave a checked box without a timestamp. Update immediately after each task, before writing more code.
 7. **Update the Progress counter** in the document header after each task completion.
-8. **Message the Director via `cafleet message send`** when the step is complete, including:
-   - What you implemented
-   - Which files were changed
-   - Test results (all passing)
-9. **Handle Director feedback**: The Director will review your code for quality and design doc compliance. If feedback is provided (relayed via `cafleet message send`), fix the issues, re-run tests to ensure they still pass, and report again.
+8. **Send `complete (paragraph-Implementation > Step N)` via `cafleet message send`** when the step is complete. An optional summary may follow `— ` (≤ 80 codepoints, ≤ 3-item enumeration), e.g. `complete (paragraph-Implementation > Step N) — 12 tests pass`. **Do NOT enumerate per-file or per-test detail in the body** — the Director recovers it directly via `git status` / `git diff --stat`. If issues block you, write a `COMMENT(programmer): <note>` marker at the offending paragraph and send `blocked (paragraph-Implementation > Step N)` instead.
+9. **Handle Director feedback**: The Director will review your code for quality and design doc compliance. If feedback arrives as `ready (paragraph-Implementation > Step N)` (or `ready (<file>:<line>)`), read the standing `COMMENT(director)` markers at the pointer, fix the issues, re-run tests to ensure they still pass, remove the markers as part of the fix, and reply `addressed (paragraph-Implementation > Step N)` (or `addressed (<file>:<line>)`).
 
 **CRITICAL: The design document MUST always reflect current progress. Every completed task MUST have its checkbox checked and timestamp set before moving to the next task. If you forgot a checkbox or timestamp, stop and fix it before continuing.**
 
@@ -108,13 +108,9 @@ For each step assigned by the Director:
 If tests fail and you believe the test is defective (your implementation matches the design doc but tests expect something different):
 
 1. **Do NOT modify any test files.** Only the Tester can change tests.
-2. Message the Director via `cafleet message send` with:
-   - The specific test failure (test name, expected vs actual)
-   - Why your implementation is correct per the design doc (cite the relevant section)
-   - What the test appears to expect differently
-3. **STOP and wait** for the Director's decision. The Director will either:
-   - Direct the Tester to fix the test, or
-   - Send you feedback to adjust your implementation
+2. Write a `COMMENT(programmer): test <test-name> expects X but design doc says Y at paragraph-Specification > <…>; please arbitrate` marker at the relevant paragraph in the design doc. The marker carries the rationale (specific test failure, why your implementation is correct per the design doc with the cited section, what the test appears to expect differently); the cafleet body does NOT.
+3. Send `escalating (paragraph-Implementation > Step N)` via `cafleet message send`.
+4. **STOP and wait** for the Director's decision. The Director writes a `COMMENT(director): <decision> — <rationale>` arbitration marker at the same paragraph and sends `ready (paragraph-Implementation > Step N)` to either you or the Tester. If the recipient is you, act on the standing marker and reply `addressed (paragraph-Implementation > Step N)`.
 
 ## Shutdown
 
