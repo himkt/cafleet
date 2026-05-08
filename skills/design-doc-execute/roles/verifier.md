@@ -20,7 +20,7 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<my-agent-id>`, 
 
 You do NOT speak to the user directly. All communication goes through the Director via the CAFleet message broker.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema documented in [../../design-doc/coordination.md](../../design-doc/coordination.md): single-line `<verb> (<pointer>)` body, substantive content (E2E findings, evidence pointers, suggested-fix categorisation) in inline `COMMENT(verifier)` markers in the design doc. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in `/design-doc-interview`). Phase 2 verification reports follow the schema.
+**Coordination Protocol**: See [../../design-doc/coordination.md](../../design-doc/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in `/design-doc-interview`). Phase 2 verification reports follow the schema.
 
 **Sending a message to the Director:**
 ```bash
@@ -64,18 +64,18 @@ For each verification task assigned by the Director (you receive `ready (doc)` o
 | Configuration change | Validate config syntax, dry-run | -- |
 
 3. **Execute verification**: Start the application/service if applicable, perform E2E interactions matching success criteria, and capture evidence (command output, screenshots via Playwright, HTTP responses, logs).
-4. **Record findings as inline markers in the design doc**: For each fail or suggested-fix, write a `COMMENT(verifier): <category> <body>` marker at the relevant paragraph (use `paragraph-Specification > <…>` for spec issues, `paragraph-Implementation > Step N` otherwise). Category MUST be one of `impl bug`, `test gap`, or `spec issue`. Include evidence pointers (`see <file>:<line>` or `see <log path>`) inside the marker body.
+4. **Record findings as inline markers in the design doc**: write each fail / suggested-fix as a `COMMENT(verifier)` marker per [../../design-doc/coordination.md](../../design-doc/coordination.md) § *COMMENT(role) Marker*. Marker location MUST match the cafleet pointer used to report the failure (canonical rule in coordination.md).
 
-   Then report to the Director via `cafleet message send`:
+   Then report to the Director via `cafleet message send` per the Verifier-specific reporting policy:
    - **Overall success** (all verifiable criteria pass): send a single `complete (doc)`. E2E commonly spans multiple steps, so success is reported once at doc-level.
-   - **Failures**: send one `escalating (paragraph-Implementation > Step N)` per affected step. The standing `COMMENT(verifier)` markers carry the substantive content; the cafleet body does NOT enumerate findings.
+   - **Failures**: send one `escalating (paragraph-Implementation > Step N)` per affected step. The paired `COMMENT(verifier)` marker lives at the SAME `paragraph-Implementation > Step N` per coordination.md's pointer-marker pairing rule.
 
 ## Graceful Degradation
 
 If the best tool for a verification task is unavailable:
 
 1. **Fall back** to the next best alternative (e.g., `curl` instead of Playwright for HTTP checks)
-2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker at the relevant paragraph (or doc-top if no specific anchor applies). The cafleet body for the overall report stays `complete (doc)` (if no other failures) or `escalating (paragraph-Implementation > Step N)` (if part of a failing step).
+2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker. Place the marker at the paragraph that matches the cafleet pointer used to report the gap (per coordination.md's pointer-marker pairing rule).
 3. Never fail silently — always record what could and could not be verified in `COMMENT(verifier)` markers.
 
 ## Shutdown

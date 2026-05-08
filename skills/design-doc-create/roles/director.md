@@ -73,13 +73,11 @@ cafleet --session-id <session-id> member capture --agent-id <director-agent-id> 
 
 ### COMMENT Marker Handling
 
-When the user selects "Scan for COMMENT markers":
+See [../../design-doc/coordination.md](../../design-doc/coordination.md) § *COMMENT(role) Marker* for the role taxonomy and marker rules. Skill-specific user-feedback workflow when the user selects "Scan for COMMENT markers":
 
 1. **Immediately** scan for `COMMENT(` markers in the design document using Grep — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
-2. **If markers are found**: Route the Drafter to address them in-doc with `ready (doc)`. The Drafter reads the markers directly from the file and removes them as part of the fix; the cafleet body does NOT quote marker content. After the Drafter replies `addressed (doc)`, verify with Grep that no `COMMENT(` markers remain.
-3. **If no markers are found**: Explain the COMMENT marker convention to the user — markers follow the pattern `# COMMENT(username): feedback` placed directly in the design document file. Show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / Other).
-
-The role taxonomy carried by `COMMENT(role)` markers in `/design-doc-create` is `claude` (user-derived clarifications, the existing `/design-doc-interview` convention), `director` (Director judgments / spec arbitration / design-doc-anchored Copilot routing), `reviewer` (review findings, tagged `[COMPLIANCE]` / `[GAP]` / `[UNCLEAR]` / `[INCORRECT]` / `[IMPROVEMENT]`), and `drafter` (Drafter-side spec ambiguities the Drafter cannot resolve unaided). See [../../design-doc/coordination.md](../../design-doc/coordination.md) for the full marker taxonomy.
+2. **If markers are found**: Route the Drafter to address them in-doc with `ready (doc)`. After the Drafter replies `addressed (doc)`, verify with Grep that no `COMMENT(` markers remain.
+3. **If no markers are found**: Explain the marker convention to the user (`# COMMENT(username): feedback` placed directly in the design document) and show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / Other).
 
 ### LLM Intent Judgment
 

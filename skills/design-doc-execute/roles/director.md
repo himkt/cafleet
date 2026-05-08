@@ -54,7 +54,7 @@ A member is stalled when they **block your next step** — not merely because th
 
 All Director-to-member messages use the CAFleet message broker. The Director stores each member's `agent_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-agent-id>` as the `--to` target.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema shared with `/design-doc-create` and `/design-doc-interview`. Every body is a single-line `<verb> (<pointer>)` poke; substantive content (Tester gaps, Programmer escalation rationales, Verifier evidence categories, Director Phase C code-review feedback, design-doc-anchored Copilot review) lives in inline `COMMENT(role)` markers in the design document — except for source-anchored Copilot inline review, which is annotated as `COMMENT(copilot)` in the source file at `<file>:<line>`. Canonical mechanics: [../../design-doc/coordination.md](../../design-doc/coordination.md). The Verifier's **Phase 1 tool-discovery** message is exempt from the schema (one-time discovery payload).
+**Coordination Protocol**: See [../../design-doc/coordination.md](../../design-doc/coordination.md) § *COMMENT(role) Marker* + § *Copilot Routing* + § *Director Per-File Detail Recovery* for the verb + pointer schema, role taxonomy, marker rules, Copilot anchor classes, and git-plumbing recovery commands. The Verifier's **Phase 1 tool-discovery** message is exempt from the schema (one-time discovery payload).
 
 **Sending a task to a member:**
 ```bash
@@ -83,9 +83,9 @@ cafleet --session-id <session-id> member capture --agent-id <director-agent-id> 
 
 When the Programmer sends `escalating (paragraph-Implementation > Step N)` (suspected test defect):
 
-1. **Programmer → Director**: Sends `escalating (paragraph-Implementation > Step N)` and writes a `COMMENT(programmer): test <test-name> expects X but design doc says Y at paragraph-Specification > <…>; please arbitrate` marker at the relevant paragraph. The cafleet body carries no rationale — the rationale lives in the marker.
-2. **Director**: Reads the design doc paragraph, the standing `COMMENT(programmer)` marker, and the failing test. Writes a `COMMENT(director): <decision> — <rationale, ≤2 sentences>` marker at the same paragraph stating the arbitration outcome, then sends `ready (paragraph-Implementation > Step N)` to whichever member needs to act (Tester to fix the test, Programmer to adjust the implementation).
-3. **Recipient (Tester or Programmer)**: Acts on the Director's standing marker. If the Tester disagrees, the Tester writes their own `COMMENT(tester): <reasoning>` marker citing the relevant design-doc section and replies `escalating (paragraph-Implementation > Step N)`; otherwise the recipient applies the fix, removes the marker, and replies `addressed (paragraph-Implementation > Step N)`.
+1. **Programmer → Director**: Sends `escalating (paragraph-Implementation > Step N)` and writes a `COMMENT(programmer): test <test-name> expects X but design doc says Y; please arbitrate` marker at `paragraph-Implementation > Step N` (per coordination.md's pointer-marker pairing rule — marker location matches the cafleet pointer). The cafleet body carries no rationale — the rationale lives in the marker. The marker body MAY cite the relevant `paragraph-Specification > <…>` heading.
+2. **Director**: Reads the design doc paragraph, the standing `COMMENT(programmer)` marker, and the failing test. Writes a `COMMENT(director): <decision> — <rationale, ≤2 sentences>` marker at the same `paragraph-Implementation > Step N` stating the arbitration outcome, then sends `ready (paragraph-Implementation > Step N)` to whichever member needs to act (Tester to fix the test, Programmer to adjust the implementation).
+3. **Recipient (Tester or Programmer)**: Acts on the Director's standing marker. If the Tester disagrees, the Tester replies `escalating (paragraph-Implementation > Step N)` with a `COMMENT(tester): <reasoning>` marker at the SAME `paragraph-Implementation > Step N`; otherwise the recipient applies the fix, removes the marker, and replies `addressed (paragraph-Implementation > Step N)`.
 4. If escalation exceeds 3 rounds, consult user via `AskUserQuestion` to break deadlock.
 
 Commit test fixes separately: `git add <test-file>` then `git commit -m "fix: correct tests for [description]"` as separate Bash calls.
@@ -120,26 +120,11 @@ When the user selects "Scan for COMMENT markers":
 
 ### COMMENT Classification by File Location and Role
 
-The role taxonomy carried by `COMMENT(role)` markers in `/design-doc-execute` is `claude` (user-derived clarifications, e.g. test-framework arbitration), `director` (Director judgments / spec arbitration / Phase C code-review feedback / design-doc-anchored Copilot review), `programmer` (implementation-side notes, escalation rationales), `tester` (test-spec gaps, test-defect counter-arguments), `verifier` (E2E findings tagged impl bug / test gap / spec issue), and `copilot` (the Director copies Copilot's body into a `COMMENT(copilot)` marker in the source file at `<file>:<line>`). The `drafter` role is N/A in this skill. See [../../design-doc/coordination.md](../../design-doc/coordination.md) for the full marker taxonomy.
-
-Marker-location rules:
-
-- **Design document** (`design-docs/` directory): Spec-level change — Director resolves the `COMMENT(...)` markers directly (apply changes, remove markers, no cafleet route — the git commit + marker removal is sufficient audit trail), then reassess if the spec change impacts implementation and route to the appropriate member with `ready (paragraph-Implementation > Step N)` if needed.
-- **Source file**: Implementation-level fix — route to Programmer via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (<file>:<line>)"`. The Programmer reads the marker at the source pointer, fixes the source, removes the marker, and replies `addressed (<file>:<line>)`.
-- **Test file**: Test-level fix — route to Tester via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (<file>:<line>)"`. The Tester reads, fixes, removes the marker, and replies `addressed (<file>:<line>)`.
+See [../../design-doc/coordination.md](../../design-doc/coordination.md) § *COMMENT(role) Marker* and § *Copilot Routing* for the role taxonomy, marker-location rules (design-doc → Director resolves directly, source → Programmer, test → Tester), and routing verb + pointer schema. The `drafter` role is N/A in this skill.
 
 ### Director's Per-File Detail Recovery
 
-Members do NOT ship file lists in cafleet bodies under the verb + pointer schema. When a commit message needs per-file or per-test detail (e.g. `feat: add CLI flag --foo to bar.py and bar_test.py`), the Director recovers it directly via git:
-
-| Need | Command |
-|:--|:--|
-| Unstaged / staged file lists right now | `git status` |
-| Cumulative scope of the feature branch | `git diff --stat <base>..HEAD` |
-| File-touch history across commits | `git log <base>..HEAD --name-only` |
-| Content diff for a file or pattern | `git diff <base>..HEAD -- <pattern>` |
-
-This applies in Phase A (test commits), Phase B/C (impl commits), Phase 7d (Copilot fix commits), and Step 8 (finalize commit).
+See [../../design-doc/coordination.md](../../design-doc/coordination.md) § *Director Per-File Detail Recovery* for the git plumbing (`git status` / `git diff --stat` / `git log --name-only` / `git diff -- <pattern>`). This applies in Phase A (test commits), Phase B/C (impl commits), Phase 7d (Copilot fix commits), and Step 8 (finalize commit).
 
 ### LLM Intent Judgment
 

@@ -38,9 +38,7 @@ Then read the document file and send your review back via `cafleet message send`
 
 ## Review Process
 
-Read the document file thoroughly. Write each finding as an inline `COMMENT(reviewer): [TAG] <body>` marker in the design doc, placed at the offending section. The cafleet body is just the verb + pointer summary — findings live in the doc, not in the message.
-
-Use one of the following tags inside each marker body:
+See [../../design-doc/coordination.md](../../design-doc/coordination.md) § *COMMENT(role) Marker* for the marker format and placement rules. Reviewer-specific tag taxonomy (used inside each `COMMENT(reviewer)` marker body):
 
 | Tag | Meaning |
 |-----|---------|
@@ -50,15 +48,7 @@ Use one of the following tags inside each marker body:
 | **[INCORRECT]** | Factually wrong, internally inconsistent, or technically inaccurate |
 | **[IMPROVEMENT]** | Not wrong, but could be meaningfully better (structure, clarity, depth) |
 
-Be thorough but fair. Focus on substantive issues, not style preferences. Every marker body must be specific enough for the Drafter to act on without guessing what you mean. One marker per logical issue — do not bundle multiple findings into one marker.
-
-When the review pass is done, send the Director:
-
-```
-complete (doc) — N issues
-```
-
-(`N` is the count of markers you placed; the optional summary obeys the ~80-codepoint cap and the ≤3-item enumeration cap from [../../design-doc/coordination.md](../../design-doc/coordination.md).)
+When the review pass is done, send the Director `complete (doc) — N issues` (`N` is the count of markers you placed).
 
 ## Approval Signal
 

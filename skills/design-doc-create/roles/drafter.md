@@ -68,18 +68,13 @@ You MUST present questions from at least 3 categories from the framework below. 
 
 1. **Clarify**: Read the target codebase for context. Send clarifying questions to the Director via `cafleet message send` (free-form body — Step 2 is exempt from the verb + pointer schema). Do NOT create any file until this step is complete.
 2. **Draft**: Create the document at the OUTPUT PATH you were given. Use the `design-doc` skill template. Omit optional sections unless needed. Send `complete (doc)` for fresh drafts.
-3. **Internal Quality Loop**: The Director will route the Reviewer's feedback via `ready (doc)`. Read the inline `COMMENT(reviewer)` markers in the design doc, apply revisions to the affected sections, and remove each marker as part of the fix. Send `addressed (doc)` for revision rounds (resolving `COMMENT(reviewer)` markers). If you encounter a spec ambiguity you cannot resolve unaided, write a `COMMENT(drafter): <issue>` marker at the affected paragraph and send `blocked (doc)` instead. Repeat until the Reviewer approves.
+3. **Internal Quality Loop**: The Director will route the Reviewer's feedback via `ready (doc)`. Read the inline `COMMENT(reviewer)` markers in the design doc, apply revisions to the affected sections, and remove each marker as part of the fix. Send `addressed (doc)` for revision rounds (resolving `COMMENT(reviewer)` markers). If you encounter a spec ambiguity you cannot resolve unaided, write a `COMMENT(drafter): <issue>` marker AND send `blocked (<same-pointer>)` — the marker MUST live at the SAME pointer as the cafleet body (per coordination.md's pointer-marker pairing rule). For paragraph-local ambiguities, use `blocked (paragraph-<HeadingPath>)` with the marker at that paragraph; for doc-wide ambiguities, use `blocked (doc)` with the marker placed near the top of the doc body. Repeat until the Reviewer approves.
 4. **User Approval**: The Director presents the polished draft to the user. If the user returns COMMENT markers or verbal feedback, the Director routes you with `ready (doc)`; resolve the markers and reply `addressed (doc)`. Repeat until approved.
 5. **Finalize**: When the Director signals user approval with `ready (doc)`, update Status, verify implementation steps are actionable, and reply `addressed (doc)` via `cafleet message send`.
 
 ## COMMENT Processing
 
-When resolving `COMMENT(...)` markers, expect the role taxonomy `claude` (user-derived clarifications, the existing `/design-doc-interview` convention), `reviewer` (Reviewer findings tagged `[COMPLIANCE]` / `[GAP]` / `[UNCLEAR]` / `[INCORRECT]` / `[IMPROVEMENT]`), `director` (Director judgments / spec arbitration), and `drafter` (your own outstanding ambiguities — should normally be resolved by the next round). Procedure:
-
-- Read all markers first, then apply all changes at once
-- Propagate changes consistently throughout the document
-- Remove all markers after resolution
-- Reply with `addressed (doc)` (no summary needed — the per-section diff is recoverable from `git diff`)
+See [../../design-doc/coordination.md](../../design-doc/coordination.md) § *COMMENT(role) Marker* for the role taxonomy, marker rules, and the issue-vs-status split.
 
 ## Resume Mode
 
