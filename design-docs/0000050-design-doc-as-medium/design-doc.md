@@ -10,7 +10,7 @@ Switch CAFleet design-doc skills (`/design-doc-create`, `/design-doc-execute`, w
 
 ## Success Criteria
 
-- [x] A new `skills/design-doc/coordination.md` reference defines the pointer + verb + COMMENT(role) protocol and is linked from `skills/design-doc/SKILL.md`, `skills/design-doc-create/SKILL.md`, `skills/design-doc-execute/SKILL.md`, and `skills/design-doc-interview/SKILL.md`.
+- [x] A new `skills/design-doc/coordination.md` reference defines the pointer + verb + COMMENT(role) protocol. It is linked from the intra-skill `skills/design-doc/SKILL.md`, and its content is inlined verbatim into the per-skill `## Coordination Protocol` section of `skills/design-doc-create/SKILL.md`, `skills/design-doc-execute/SKILL.md`, and `skills/design-doc-interview/SKILL.md` per Step 7's plugin-install self-containment design (no cross-skill markdown links).
 - [x] Every `cafleet message send --text` example in the touched SKILL.md / role files conforms to the verb + pointer schema (verb chosen from the canonical 6, pointer drawn from the canonical 3 forms), is single-line, and respects the ~80-codepoint summary cap.
 - [x] Reviewer feedback, test reports, implementation reports, escalation reasons, code-review notes, and Copilot review routing in the role files are expressed as `COMMENT(role)` markers in the design doc (or, for source-anchored Copilot, in the source file) instead of long cafleet message bodies.
 - [x] No file under `cafleet/` source, no Alembic migration, and no schema/wire-format change is touched by this design doc.
