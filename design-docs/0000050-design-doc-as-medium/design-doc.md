@@ -196,7 +196,7 @@ The interview skill already uses inline `COMMENT(claude)` markers as the medium 
 
 #### Copilot Routing
 
-Copilot reviews split into two anchor classes:
+Copilot reviews split into two line-anchored classes plus a PR-level fallback:
 
 | Anchor | Where the marker lives | cafleet message | Resolver |
 |:--|:--|:--|:--|

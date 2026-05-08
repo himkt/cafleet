@@ -110,7 +110,7 @@ This keeps the design doc clean: at any moment, the markers in the doc reflect *
 
 ## Copilot Routing
 
-Copilot reviews split into two anchor classes:
+Copilot reviews split into two line-anchored classes (source file, design doc) plus a PR-level catch-all:
 
 | Anchor | Where the marker lives | cafleet message | Resolver |
 |:--|:--|:--|:--|
