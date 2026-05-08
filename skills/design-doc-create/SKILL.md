@@ -360,14 +360,13 @@ Load these skills at startup:
 SESSION ID: <session-id>
 DIRECTOR AGENT ID: <director-agent-id>
 YOUR AGENT ID: <my-agent-id>
+DESIGN DOCUMENT: [INSERT ${DOC_PATH}]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
-Wait for the Director to assign a document for review. Read the document file and
-provide specific, actionable feedback. If the draft meets all quality standards,
-signal: "APPROVED - Ready for user review."
+Wait for the Director to assign a document for review (cafleet body: `ready (doc)`). When you receive that message, the `doc` pointer refers to the DESIGN DOCUMENT path above — read that file and provide specific, actionable feedback per the role definition.
 ```
 
 Spawn with:
