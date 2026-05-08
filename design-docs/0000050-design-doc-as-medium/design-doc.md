@@ -1,7 +1,7 @@
 # Design Doc as Communication Medium
 
 **Status**: Approved
-**Progress**: 13/16 tasks complete
+**Progress**: 16/16 tasks complete
 **Last Updated**: 2026-05-08
 
 ## Overview
@@ -270,7 +270,7 @@ Today's commit messages sometimes need per-file or per-test detail (e.g. "feat: 
 
 ### Step 5: Verification
 
-- [ ] Run the negative-grep verification table below. Each row's command MUST return 0 hits. Any non-zero hit indicates a stale long-form payload still in the role files; resolve by editing the offending file before continuing.
+- [x] Run the negative-grep verification table below. Each row's command MUST return 0 hits. Any non-zero hit indicates a stale long-form payload still in the role files; resolve by editing the offending file before continuing.
 
   | Check | Command | On-fail action |
   |:--|:--|:--|
@@ -278,15 +278,15 @@ Today's commit messages sometimes need per-file or per-test detail (e.g. "feat: 
   | Tester `Tests at:` payload gone | `rg "Tests at: " skills/` | Edit Phase B assignment to use `ready (paragraph-Implementation > Step N)` and direct Programmer to git log. |
   | Programmer "all passing" payload gone | `rg "Test results \(all passing\)" skills/` | Edit Phase 2 step 8 to use `complete (paragraph-Implementation > Step N)`. |
   | Tester multi-bullet summary gone | `rg "What tests you wrote" skills/` | Edit Phase 2 step 3 to use `complete (paragraph-Implementation > Step N) — <count> tests`. |
-  <!-- completed: -->
-- [ ] Run the top-level docs scope check. Both commands MUST return 0 hits; if either has hits, scope is extended to update those files within Step 5. The `docs/` glob is constrained to top-level only — do **NOT** descend into `**/skills/*/docs/` because skill-internal docs are part of the skill change surface and are already covered by Steps 1–4.
+  <!-- completed: 2026-05-08T14:00 -->
+- [x] Run the top-level docs scope check. Both commands MUST return 0 hits; if either has hits, scope is extended to update those files within Step 5. The `docs/` glob is constrained to top-level only — do **NOT** descend into `**/skills/*/docs/` because skill-internal docs are part of the skill change surface and are already covered by Steps 1–4.
 
   | Check | Command | On-fail action |
   |:--|:--|:--|
   | Skills don't reference top-level docs surfaces | `rg -n "ARCHITECTURE\.md|README\.md|^docs/" skills/design-doc skills/design-doc-create skills/design-doc-execute skills/design-doc-interview` | Update the offending top-level surface. |
   | Top-level docs don't carry cafleet body conventions | `rg -n "cafleet message send" ARCHITECTURE.md README.md docs/` (constrained to direct top-level `docs/` only — do NOT include `**/skills/**/docs/`) | Update the offending top-level surface. |
-  <!-- completed: -->
-- [ ] Stage every changed file under `skills/design-doc*/` plus `design-docs/0000050-design-doc-as-medium/design-doc.md`, and commit per the project's `.claude/rules/git-workflow.md` (single-line message, `docs:` prefix, no HEREDOC, no `git -C`). The commit message body is not used; the design doc is the historical record. <!-- completed: -->
+  <!-- completed: 2026-05-08T14:00 -->
+- [x] Stage every changed file under `skills/design-doc*/` plus `design-docs/0000050-design-doc-as-medium/design-doc.md`, and commit per the project's `.claude/rules/git-workflow.md` (single-line message, `docs:` prefix, no HEREDOC, no `git -C`). The commit message body is not used; the design doc is the historical record. <!-- completed: 2026-05-08T14:00 -->
 
 ---
 
