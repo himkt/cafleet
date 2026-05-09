@@ -1,6 +1,6 @@
 # mise.toml Consolidation under uv Workspace
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 25/25 tasks complete
 **Last Updated**: 2026-05-10
 
@@ -263,3 +263,4 @@ Per the Success Criteria matrix, each task is verified at the strongest level it
 | 2026-05-09 | Reviewer revision: Success Criteria reframed as a per-task verification-mode matrix; `README.md:110` (`mise uv-sync`) brought into scope and added to Step 1; first Step 1 task split into two factual tasks; Step 5 split into run-to-completion vs resolution-only checks with `//cafleet:format` added and rationale for every skip recorded |
 | 2026-05-10 | User revision: `[tasks.build]` body changed from `uv build --wheel --package cafleet` to `uv build --wheel --package cafleet --out-dir ./dist` so the wheel lands in `cafleet/dist/` instead of the uv-workspace root; migration map and Step 5 wheel-location check updated to match |
 | 2026-05-10 | Approved |
+| 2026-05-10 | Implemented across PR #62 (commits f05e05c → 40b8159). Copilot review surfaced two gaps the original audit missed: `.github/workflows/publish.yml` still invoked the about-to-be-deleted root `mise publish` (rewritten to `mise //cafleet:publish`) and `.claude/rules/commands.md:14` still named the old `uv run uvicorn ...` body in the dev parenthetical (rewritten to `uv run --package cafleet uvicorn ...`); both fixed in commit e8063f4 and the audit checklist expanded. Complete. |
