@@ -7,7 +7,7 @@
 - Lint (admin): `mise //admin:lint`
 - Format: `mise //cafleet:format`
 - Type check: `mise //cafleet:typecheck`
-- Sync dependencies: `mise //:sync`
+- Sync dependencies: `mise //:uv-sync`
 - Install the `cafleet` CLI (editable uv tool): `mise //cafleet:install` — run this after pulling any change under `cafleet/src/cafleet/` if the global `cafleet` binary was previously installed non-editably; the editable reinstall makes future source edits take effect without another install.
 - Build cafleet wheel: `mise //cafleet:build` — emits the wheel into `cafleet/dist/`.
 - Publish cafleet: `mise //cafleet:publish` — chained task that builds admin assets, builds the wheel, then runs `uv publish`.
