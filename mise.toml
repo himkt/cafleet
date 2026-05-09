@@ -23,3 +23,5 @@ run = [
 ]
 description = "Publish cafleet"
 
+[tasks.uv-sync]
+run = "uv sync --all-groups --all-packages --frozen"

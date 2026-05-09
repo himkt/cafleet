@@ -107,7 +107,7 @@ Clone the repo and use mise for all common tasks:
 git clone https://github.com/himkt/cafleet.git
 cd cafleet
 
-mise //cafleet:sync       # install dependencies
+mise sync
 mise //cafleet:install    # editable uv tool install of the cafleet CLI
 cafleet db init           # apply schema migrations (idempotent; rerun after upgrades)
 
