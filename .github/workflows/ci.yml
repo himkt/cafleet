@@ -9,29 +9,19 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: cafleet
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
-          enable-cache: true
-      - run: uv python install 3.13
-      - run: uv sync
-      - run: uv run ruff check .
-      - run: uv run ty check
+          experimental: true
+      - run: mise //cafleet:lint
+      - run: mise //cafleet:typecheck
 
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: cafleet
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
-          enable-cache: true
-      - run: uv python install 3.13
-      - run: uv sync
-      - run: uv run pytest tests/ -v
+          experimental: true
+      - run: mise //cafleet:test

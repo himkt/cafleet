@@ -6,14 +6,22 @@ config_roots = [
   "admin",
 ]
 
+[tools]
+"aqua:astral-sh/uv" = "latest"
+"core:bun" = "latest"
+
+[tasks.build]
+run = "uv build --wheel --package cafleet"
+description = "Build the cafleet wheel"
+
 [tasks.publish]
 run = [
   { "task" = "//admin:install" },
   { "task" = "//admin:build" },
-  { "task" = "//cafleet:build" },
-  { "task" = "//cafleet:publish" },
+  { "task" = "build" },
+  "uv publish",
 ]
+description = "Publish cafleet"
 
-[tools]
-"aqua:astral-sh/uv" = "latest"
-"core:bun" = "latest"
+[tasks.uv-sync]
+run = "uv sync --all-groups --all-packages --frozen"
