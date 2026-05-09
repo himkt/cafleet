@@ -84,7 +84,7 @@ wheels = [
 
 [[package]]
 name = "cafleet"
-version = "0.6.0"
+version = "0.6.1"
 source = { editable = "cafleet" }
 dependencies = [
     { name = "alembic" },
