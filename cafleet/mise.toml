@@ -21,26 +21,6 @@ description = "Format code with ruff"
 run = "uv run ty check"
 description = "Run ty type checker"
 
-[tasks.sync]
-run = "uv sync"
-description = "Sync cafleet project dependencies"
-
 [tasks.install]
 run = "uv tool install --reinstall --editable ."
 description = "Install the cafleet CLI as an editable uv tool (source edits take effect without a second reinstall)"
-
-[tasks.build]
-run = "uv build --wheel"
-description = "Build the cafleet wheel"
-
-[tasks.publish]
-run = "uv publish"
-description = "Publish cafleet"
-
-[tasks.bump]
-usage = '''
-arg "<target>" {
-  choices "major" "minor" "patch"
-}
-'''
-run   = "uv version --bump ${usage_target}"
