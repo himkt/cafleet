@@ -1,7 +1,7 @@
 # mise.toml Consolidation under uv Workspace
 
 **Status**: Approved
-**Progress**: 9/23 tasks complete
+**Progress**: 11/23 tasks complete
 **Last Updated**: 2026-05-10
 
 ## Overview
@@ -226,8 +226,8 @@ Per project rule (`.claude/rules/design-doc-numbering.md` § Implementation Orde
 
 ### Step 4: Strip tasks from root `mise.toml`
 
-- [ ] Delete `[tasks.build]`, `[tasks.publish]`, `[tasks.uv-sync]` from root `mise.toml` <!-- completed: -->
-- [ ] Confirm root `mise.toml` retains exactly: `experimental_monorepo_root = true`, `[monorepo]` block, `[tools]` block <!-- completed: -->
+- [x] Delete `[tasks.build]`, `[tasks.publish]`, `[tasks.uv-sync]` from root `mise.toml` <!-- completed: 2026-05-10T22:06 -->
+- [x] Confirm root `mise.toml` retains exactly: `experimental_monorepo_root = true`, `[monorepo]` block, `[tools]` block <!-- completed: 2026-05-10T22:06 -->
 
 ### Step 5: Verification
 
