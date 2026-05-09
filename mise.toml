@@ -19,7 +19,7 @@ run = [
   { "task" = "//admin:install" },
   { "task" = "//admin:build" },
   { "task" = "build" },
-  "uv publish --dry-run",
+  "uv publish",
 ]
 description = "Publish cafleet"
 
