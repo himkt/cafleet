@@ -28,7 +28,7 @@ search   = "version = \"{current_version}\""
 replace  = "version = \"{new_version}\""
 
 [[tool.bumpversion.files]]
-filename = "cafleet/uv.lock"
+filename = "uv.lock"
 search   = """
 name = \"cafleet\"
 version = \"{current_version}\""""
