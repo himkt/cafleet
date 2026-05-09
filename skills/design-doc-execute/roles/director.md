@@ -54,6 +54,8 @@ A member is stalled when they **block your next step** — not merely because th
 
 All Director-to-member messages use the CAFleet message broker. The Director stores each member's `agent_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-agent-id>` as the `--to` target.
 
+**Coordination Protocol**: See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* + § *Copilot Routing* + § *Director Per-File Detail Recovery* for the verb + pointer schema, role taxonomy, marker rules, Copilot anchor classes, and git-plumbing recovery commands. The Verifier's **Phase 1 tool-discovery** message is exempt from the schema (one-time discovery payload).
+
 **Sending a task to a member:**
 ```bash
 cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
@@ -79,11 +81,11 @@ cafleet --session-id <session-id> member capture --agent-id <director-agent-id> 
 
 ## Escalation Protocol
 
-When the Programmer reports a suspected test defect via `cafleet message send`:
+When the Programmer sends `escalating (paragraph-Implementation > Step N)` (suspected test defect):
 
-1. **Programmer → Director**: Reports test failure and why implementation is correct per design doc.
-2. **Director**: Reads design doc section and failing test. Directs Tester (if test defect) or Programmer (if implementation issue) via `cafleet message send`.
-3. **Tester** (if fix needed): Evaluates feedback, fixes if valid, explains reasoning if disagreed.
+1. **Programmer → Director**: Sends `escalating (paragraph-Implementation > Step N)` and writes a `COMMENT(programmer): test <test-name> expects X but design doc says Y; please arbitrate` marker at `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in `../SKILL.md § Coordination Protocol` — marker location matches the cafleet pointer). The cafleet body carries no rationale — the rationale lives in the marker. The marker body MAY cite the relevant `paragraph-Specification > <…>` heading.
+2. **Director**: Reads the design doc paragraph, the standing `COMMENT(programmer)` marker, and the failing test. Writes a `COMMENT(director): <decision> — <rationale, ≤2 sentences>` marker at the same `paragraph-Implementation > Step N` stating the arbitration outcome, then sends `ready (paragraph-Implementation > Step N)` to whichever member needs to act (Tester to fix the test, Programmer to adjust the implementation).
+3. **Recipient (Tester or Programmer)**: Acts on the Director's standing marker. If the Tester disagrees, the Tester replies `escalating (paragraph-Implementation > Step N)` with a `COMMENT(tester): <reasoning>` marker at the SAME `paragraph-Implementation > Step N`; otherwise the recipient applies the fix, removes the marker, and replies `addressed (paragraph-Implementation > Step N)`.
 4. If escalation exceeds 3 rounds, consult user via `AskUserQuestion` to break deadlock.
 
 Commit test fixes separately: `git add <test-file>` then `git commit -m "fix: correct tests for [description]"` as separate Bash calls.
@@ -116,11 +118,13 @@ When the user selects "Scan for COMMENT markers":
 2. **If no markers are found**: Explain the COMMENT marker convention — add `COMMENT(username): feedback` to the relevant source or test files, using the file's native comment syntax as prefix (e.g., `# COMMENT(...)` for Python/Ruby/YAML, `// COMMENT(...)` for JS/TS/Go). Re-display the `git diff` command so the user can review the changes. Then re-prompt with the same three-option pattern.
 3. **If markers are found**: Classify each COMMENT by file location and route accordingly.
 
-### COMMENT Classification by File Location
+### COMMENT Classification by File Location and Role
 
-- **Design document** (`design-docs/` directory): Spec-level change — Director resolves the COMMENT markers directly (apply changes, remove markers), then reassess if the spec change impacts implementation and route to the appropriate member via `cafleet message send` if needed.
-- **Source file**: Implementation-level fix — route to Programmer via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."`.
-- **Test file**: Test-level fix — route to Tester via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "..."`.
+See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* and § *Copilot Routing* for the role taxonomy, marker-location rules (design-doc → Director resolves directly, source → Programmer, test → Tester), and routing verb + pointer schema. The `drafter` role is N/A in this skill.
+
+### Director's Per-File Detail Recovery
+
+See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *Director Per-File Detail Recovery* for the git plumbing (`git status` / `git diff --stat` / `git log --name-only` / `git diff -- <pattern>`). This applies in Phase A (test commits), Phase B/C (impl commits), Phase 7d (Copilot fix commits), and Step 8 (finalize commit).
 
 ### LLM Intent Judgment
 
@@ -150,11 +154,11 @@ Programmer / Tester / Verifier members are spawned with `--permission-mode dontA
 
 | Phase | Expected event | Stall indicator | Director action |
 |:--|:--|:--|:--|
-| Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "Please complete the tests for the current step and report back."` |
-| Implementation (Phase B) | Programmer implements code and runs tests | Programmer goes idle without reporting implementation result | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "Please complete the implementation for the current step and run the tests."` |
-| Verification (Phase D) | Verifier performs E2E testing | Verifier goes idle without reporting verification result | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <verifier-agent-id> --text "Please complete the E2E verification and report your findings."` |
-| PR Review (Step 7) | Copilot posts a review or inline comment on `<pr-number>` | No new Copilot-authored entry (login matching `^copilot`, timestamp > `last_push_ts`) on this tick | Increment `silence_ticks`. Evaluate the SKILL Step 7b branch table: exit on most-recent Copilot review `state == "APPROVED"`; trigger 7f silence-escalation when `silence_ticks >= 30` (AskUserQuestion: Keep waiting / Re-request review / Finalize / Other). On ≥ 1 new entry reset `silence_ticks = 0` and classify each new inline comment by file path, routing via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Copilot review: <file>:<line> — <body>. Please address."`. The loop never auto-exits on silence. |
-| Escalation | Member responds to escalation | Escalation recipient goes idle without responding | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Please respond to the escalation regarding [specific issue]."` |
+| Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge — recipient interprets contextually per [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol): same target, same expected action) |
+| Implementation (Phase B) | Programmer implements code and runs tests | Programmer goes idle without reporting implementation result | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge) |
+| Verification (Phase D) | Verifier performs E2E testing | Verifier goes idle without reporting verification result | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <verifier-agent-id> --text "ready (doc)"` (re-sent stall-nudge — Verifier reads the design doc and the standing `COMMENT(verifier)` markers) |
+| PR Review (Step 7) | Copilot posts a review or inline comment on `<pr-number>` | No new Copilot-authored entry (login matching `^copilot`, timestamp > `last_push_ts`) on this tick | Increment `silence_ticks`. Evaluate the SKILL Step 7b branch table: exit on most-recent Copilot review `state == "APPROVED"`; trigger 7f silence-escalation when `silence_ticks >= 30` (AskUserQuestion: Keep waiting / Re-request review / Finalize / Other). On ≥ 1 new entry reset `silence_ticks = 0`, classify each new inline comment by file path per Step 7c, write `COMMENT(copilot): <body>` at the source `<file>:<line>` for source/test routes (or `COMMENT(director): <body>` at the affected paragraph for design-doc-anchored items, no cafleet route), and dispatch via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<file>:<line>)"`. The loop never auto-exits on silence. |
+| Escalation | Member responds to escalation | Escalation recipient goes idle without responding | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent — the standing `COMMENT(director)` arbitration marker carries the issue) |
 
 ## Shutdown Protocol
 

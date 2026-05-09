@@ -21,11 +21,19 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<my-agent-id>`, 
 
 You do NOT speak to the user directly. All feedback goes through the Director via the CAFleet message broker.
 
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema documented in [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol): single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(reviewer)` markers in the design doc. Findings are written into the doc; cafleet bodies do NOT carry the finding text.
+
 **Sending feedback or approval to the Director:**
 ```bash
 cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
-  --to <director-agent-id> --text "<review feedback or APPROVED signal>"
+  --to <director-agent-id> --text "complete (doc) — N issues"
 ```
+or, when the draft meets all quality criteria:
+```bash
+cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+  --to <director-agent-id> --text "approved (doc)"
+```
+Findings are NOT in the cafleet body — each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design document at the affected section (see the parent SKILL.md's *Coordination Protocol* section for the full schema).
 The literal `<session-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
 **Receiving review assignments from the Director:** When the Director sends a message, the broker injects `cafleet --session-id <session-id> message poll --agent-id <my-agent-id>` into your tmux pane via push notification. You will see the `cafleet message poll` output with the Director's assignment (typically the path to a draft). Read the message, then acknowledge it:
@@ -36,7 +44,7 @@ Then read the document file and send your review back via `cafleet message send`
 
 ## Review Process
 
-Read the document file thoroughly and provide specific, actionable feedback. For each issue found, categorize it using one of the following tags:
+See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* for the marker format and placement rules. Reviewer-specific tag taxonomy (used inside each `COMMENT(reviewer)` marker body):
 
 | Tag | Meaning |
 |-----|---------|
@@ -46,13 +54,15 @@ Read the document file thoroughly and provide specific, actionable feedback. For
 | **[INCORRECT]** | Factually wrong, internally inconsistent, or technically inaccurate |
 | **[IMPROVEMENT]** | Not wrong, but could be meaningfully better (structure, clarity, depth) |
 
-Be thorough but fair. Focus on substantive issues, not style preferences. Every piece of feedback must be specific enough for the Drafter to act on without guessing what you mean.
+When the review pass is done, send the Director `complete (doc) — N issues` (`N` is the count of markers you placed).
 
 ## Approval Signal
 
 If the draft meets all quality standards across the five review criteria (compliance, readability, completeness, correctness, actionability), send to the Director:
 
-**"APPROVED - Ready for user review."**
+```
+approved (doc)
+```
 
 Do not approve if any substantive issues remain. Minor style preferences alone are not grounds for blocking approval.
 

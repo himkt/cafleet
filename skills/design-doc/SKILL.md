@@ -12,3 +12,5 @@ This skill provides a standardized format for creating design documents, specifi
 
 - For the document template, see [template.md](template.md)
 - For section guidelines, quality standards, formatting rules, and best practices, see [guidelines.md](guidelines.md)
+- For the inter-agent coordination protocol — verb + pointer schema for `/design-doc-create` and `/design-doc-execute`, plus the inline `COMMENT(role)` marker convention shared by `/design-doc-interview` (whose Director-Analyzer cafleet messages are exempt from the verb + pointer schema) — see [coordination.md](coordination.md)
+
