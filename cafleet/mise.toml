@@ -29,10 +29,6 @@ description = "Install the cafleet CLI as an editable uv tool (source edits take
 run = "uv build --wheel --package cafleet --out-dir ./dist"
 description = "Build the cafleet wheel into cafleet/dist/ (the explicit --out-dir prevents uv from writing to the uv-workspace root by default)"
 
-[tasks.sync]
-run = "uv sync --all-groups --all-packages --frozen"
-description = "Sync uv workspace dependencies (all groups, all packages, frozen lockfile)"
-
 [tasks.publish]
 run = [
   { task = "//admin:install" },

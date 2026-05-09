@@ -9,3 +9,7 @@ config_roots = [
 [tools]
 "aqua:astral-sh/uv" = "latest"
 "core:bun" = "latest"
+
+[tasks.uv-sync]
+run = "uv sync --all-groups --all-packages --frozen"
+description = "Sync uv workspace dependencies (all groups, all packages, frozen lockfile)"
