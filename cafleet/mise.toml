@@ -1,26 +1,43 @@
 [tasks.dev]
-run = "uv run uvicorn cafleet.server:app --host 127.0.0.1 --port 8000"
+run = "uv run --package cafleet uvicorn cafleet.server:app --host 127.0.0.1 --port 8000"
 description = "Start the admin WebUI server on 127.0.0.1:8000 (no hot-reload; restart manually between edits)"
 
 [tasks.test]
-run = "uv run python -m pytest"
+run = "uv run --package cafleet python -m pytest"
 description = "Run all tests"
 
 [tasks.lint]
 run = [
-  "uv run ruff check .",
-  "uv run ruff format --check .",
+  "uv run --package cafleet ruff check .",
+  "uv run --package cafleet ruff format --check .",
 ]
 description = "Run ruff linter and format check"
 
 [tasks.format]
-run = "uv run ruff format ."
+run = "uv run --package cafleet ruff format ."
 description = "Format code with ruff"
 
 [tasks.typecheck]
-run = "uv run ty check"
+run = "uv run --package cafleet ty check"
 description = "Run ty type checker"
 
 [tasks.install]
 run = "uv tool install --reinstall --editable ."
 description = "Install the cafleet CLI as an editable uv tool (source edits take effect without a second reinstall)"
+
+[tasks.build]
+run = "uv build --wheel --package cafleet --out-dir ./dist"
+description = "Build the cafleet wheel into cafleet/dist/ (the explicit --out-dir prevents uv from writing to the uv-workspace root by default)"
+
+[tasks.sync]
+run = "uv sync --all-groups --all-packages --frozen"
+description = "Sync uv workspace dependencies (all groups, all packages, frozen lockfile)"
+
+[tasks.publish]
+run = [
+  { task = "//admin:install" },
+  { task = "//admin:build" },
+  { task = "//cafleet:build" },
+  "uv publish",
+]
+description = "Publish cafleet to PyPI (builds admin assets, builds the wheel, then uv publish)"

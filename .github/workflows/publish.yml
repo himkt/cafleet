@@ -18,4 +18,4 @@ jobs:
         with:
           experimental: true
       - run: |
-          mise publish
+          mise //cafleet:publish
