@@ -1,7 +1,7 @@
 # mise.toml Consolidation under uv Workspace
 
 **Status**: Approved
-**Progress**: 23/23 tasks complete
+**Progress**: 25/25 tasks complete
 **Last Updated**: 2026-05-10
 
 ## Overview
@@ -213,6 +213,8 @@ Per project rule (`.claude/rules/design-doc-numbering.md` § Implementation Orde
 - [x] Update `README.md:110` from `mise uv-sync` to `mise //cafleet:sync` (the short-form root task is deleted in Step 4; this is also the only `README.md` reference that goes stale) <!-- completed: 2026-05-10T22:01 -->
 - [x] Audit both `CLAUDE.md` files (root + `.claude/CLAUDE.md`) for any direct mention of `mise build`, `mise publish`, or `mise uv-sync` short-forms — none expected, but confirm and fix if found <!-- completed: 2026-05-10T22:01 -->
 - [x] Audit `skills/*/SKILL.md` for any mise task examples that would need updating (expected: none — skills target the `cafleet` CLI surface, not dev tasks) <!-- completed: 2026-05-10T22:01 -->
+- [x] Audit `.github/workflows/*.yml` for any short-form mise references — `.github/workflows/publish.yml` invokes the about-to-be-deleted `mise publish`; rewrite to `mise //cafleet:publish` so the release workflow keeps working after Step 4 lands <!-- completed: 2026-05-10T22:18 -->
+- [x] Audit `.claude/rules/commands.md` line 14 (the `mise //cafleet:dev` parenthetical) — the inline body string still names the old `uv run uvicorn ...` form; rewrite to `uv run --package cafleet uvicorn ...` to match the new task body from Step 3 <!-- completed: 2026-05-10T22:18 -->
 
 ### Step 2: Move root tasks into `cafleet/mise.toml`
 
