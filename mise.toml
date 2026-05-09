@@ -19,8 +19,7 @@ run = [
   { "task" = "//admin:install" },
   { "task" = "//admin:build" },
   { "task" = "build" },
-  "ls",
-  #"uv publish",
+  "uv publish",
 ]
 description = "Publish cafleet"
 
