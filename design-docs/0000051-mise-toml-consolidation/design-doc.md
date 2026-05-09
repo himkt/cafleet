@@ -1,7 +1,7 @@
 # mise.toml Consolidation under uv Workspace
 
 **Status**: Approved
-**Progress**: 7/23 tasks complete
+**Progress**: 9/23 tasks complete
 **Last Updated**: 2026-05-10
 
 ## Overview
@@ -221,8 +221,8 @@ Per project rule (`.claude/rules/design-doc-numbering.md` § Implementation Orde
 
 ### Step 3: Rewrite cafleet task bodies to use `uv run --package cafleet`
 
-- [ ] Update `[tasks.dev]`, `[tasks.test]`, `[tasks.lint]` (both run-list entries), `[tasks.format]`, `[tasks.typecheck]` in `cafleet/mise.toml` to prepend `--package cafleet` to every `uv run` invocation <!-- completed: -->
-- [ ] Leave `[tasks.install]` body unchanged — `uv tool install` is not workspace-aware <!-- completed: -->
+- [x] Update `[tasks.dev]`, `[tasks.test]`, `[tasks.lint]` (both run-list entries), `[tasks.format]`, `[tasks.typecheck]` in `cafleet/mise.toml` to prepend `--package cafleet` to every `uv run` invocation <!-- completed: 2026-05-10T22:05 -->
+- [x] Leave `[tasks.install]` body unchanged — `uv tool install` is not workspace-aware <!-- completed: 2026-05-10T22:05 -->
 
 ### Step 4: Strip tasks from root `mise.toml`
 

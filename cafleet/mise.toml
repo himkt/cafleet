@@ -1,24 +1,24 @@
 [tasks.dev]
-run = "uv run uvicorn cafleet.server:app --host 127.0.0.1 --port 8000"
+run = "uv run --package cafleet uvicorn cafleet.server:app --host 127.0.0.1 --port 8000"
 description = "Start the admin WebUI server on 127.0.0.1:8000 (no hot-reload; restart manually between edits)"
 
 [tasks.test]
-run = "uv run python -m pytest"
+run = "uv run --package cafleet python -m pytest"
 description = "Run all tests"
 
 [tasks.lint]
 run = [
-  "uv run ruff check .",
-  "uv run ruff format --check .",
+  "uv run --package cafleet ruff check .",
+  "uv run --package cafleet ruff format --check .",
 ]
 description = "Run ruff linter and format check"
 
 [tasks.format]
-run = "uv run ruff format ."
+run = "uv run --package cafleet ruff format ."
 description = "Format code with ruff"
 
 [tasks.typecheck]
-run = "uv run ty check"
+run = "uv run --package cafleet ty check"
 description = "Run ty type checker"
 
 [tasks.install]
