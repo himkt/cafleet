@@ -1,7 +1,7 @@
 # mise.toml Consolidation under uv Workspace
 
 **Status**: Approved
-**Progress**: 11/23 tasks complete
+**Progress**: 23/23 tasks complete
 **Last Updated**: 2026-05-10
 
 ## Overview
@@ -19,14 +19,14 @@ Each `//cafleet:*` and `//admin:*` task is verified at the strongest level its s
 | `//cafleet:install`, `//admin:install` | **Resolve** (`mise tasks --all` lists them with the expected body). Skipped from execution to avoid mutating the developer's global uv tool registry / `node_modules`. |
 | `//cafleet:publish` | **Chain resolves** (`mise tasks --all` lists it; every `{ task = "..." }` subtask reference points at a defined task). Skipped from execution because `uv publish` would push a real wheel to PyPI. |
 
-- [ ] Every task in the matrix above passes its declared verification mode
-- [ ] Root `mise.toml` defines no `[tasks.*]` sections — only `[monorepo]` and `[tools]`
-- [ ] `cafleet/mise.toml` is the single source for every `//cafleet:*` task
-- [ ] `mise //cafleet:sync` is a real, executable task (closing the existing documentation drift in `.claude/rules/commands.md`)
-- [ ] No `dir = ...` overrides on cafleet tasks — they rely on mise's monorepo cwd auto-set
-- [ ] `cafleet/mise.toml` task bodies use the workspace-aware `uv run --package cafleet ...` form
-- [ ] `.claude/rules/commands.md` reflects the final task surface; no references to nonexistent tasks remain
-- [ ] `README.md:110` no longer uses the about-to-be-deleted `mise uv-sync` short-form (replaced by `mise //cafleet:sync`)
+- [x] Every task in the matrix above passes its declared verification mode
+- [x] Root `mise.toml` defines no `[tasks.*]` sections — only `[monorepo]` and `[tools]`
+- [x] `cafleet/mise.toml` is the single source for every `//cafleet:*` task
+- [x] `mise //cafleet:sync` is a real, executable task (closing the existing documentation drift in `.claude/rules/commands.md`)
+- [x] No `dir = ...` overrides on cafleet tasks — they rely on mise's monorepo cwd auto-set
+- [x] `cafleet/mise.toml` task bodies use the workspace-aware `uv run --package cafleet ...` form
+- [x] `.claude/rules/commands.md` reflects the final task surface; no references to nonexistent tasks remain
+- [x] `README.md:110` no longer uses the about-to-be-deleted `mise uv-sync` short-form (replaced by `mise //cafleet:sync`)
 
 ---
 
@@ -235,21 +235,21 @@ Per the Success Criteria matrix, each task is verified at the strongest level it
 
 **Run-to-completion checks** (exit code 0 expected):
 
-- [ ] Run `mise tasks --all` and confirm output lists exactly: `//admin:build`, `//admin:dev`, `//admin:install`, `//admin:lint`, `//cafleet:build`, `//cafleet:dev`, `//cafleet:format`, `//cafleet:install`, `//cafleet:lint`, `//cafleet:publish`, `//cafleet:sync`, `//cafleet:test`, `//cafleet:typecheck` (13 tasks total; no root-level tasks) <!-- completed: -->
-- [ ] Run `mise //cafleet:test` from the repository root — passes <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` from the repository root — passes <!-- completed: -->
-- [ ] Run `mise //cafleet:format` from the repository root on a clean tree — leaves the tree clean (catches regressions in the `uv run --package cafleet ruff format .` rewrite from Step 3) <!-- completed: -->
-- [ ] Run `mise //cafleet:typecheck` from the repository root — passes <!-- completed: -->
-- [ ] Run `mise //cafleet:sync` from the repository root — succeeds (real task, not the previously-undefined doc reference) <!-- completed: -->
-- [ ] Run `mise //cafleet:build` from the repository root — produces a wheel under `cafleet/dist/` (the `--out-dir ./dist` flag combined with mise's auto-cwd `cafleet/` keeps the artifact out of the uv-workspace root) <!-- completed: -->
-- [ ] Run `mise //admin:lint` and `mise //admin:build` to confirm admin tasks remain unaffected <!-- completed: -->
+- [x] Run `mise tasks --all` and confirm output lists exactly: `//admin:build`, `//admin:dev`, `//admin:install`, `//admin:lint`, `//cafleet:build`, `//cafleet:dev`, `//cafleet:format`, `//cafleet:install`, `//cafleet:lint`, `//cafleet:publish`, `//cafleet:sync`, `//cafleet:test`, `//cafleet:typecheck` (13 tasks total; no root-level tasks) <!-- completed: 2026-05-10T22:07 -->
+- [x] Run `mise //cafleet:test` from the repository root — passes <!-- completed: 2026-05-10T22:08 -->
+- [x] Run `mise //cafleet:lint` from the repository root — passes <!-- completed: 2026-05-10T22:09 -->
+- [x] Run `mise //cafleet:format` from the repository root on a clean tree — leaves the tree clean (catches regressions in the `uv run --package cafleet ruff format .` rewrite from Step 3) <!-- completed: 2026-05-10T22:11 -->
+- [x] Run `mise //cafleet:typecheck` from the repository root — passes <!-- completed: 2026-05-10T22:09 -->
+- [x] Run `mise //cafleet:sync` from the repository root — succeeds (real task, not the previously-undefined doc reference) <!-- completed: 2026-05-10T22:11 -->
+- [x] Run `mise //cafleet:build` from the repository root — produces a wheel under `cafleet/dist/` (the `--out-dir ./dist` flag combined with mise's auto-cwd `cafleet/` keeps the artifact out of the uv-workspace root) <!-- completed: 2026-05-10T22:12 -->
+- [x] Run `mise //admin:lint` and `mise //admin:build` to confirm admin tasks remain unaffected <!-- completed: 2026-05-10T22:12 -->
 
 **Resolution-only checks** (intentionally not executed; rationale for skipping execution given inline):
 
-- [ ] Confirm `mise //cafleet:dev` resolves and starts (binds `127.0.0.1:8000`); kill with Ctrl+C. *Execution skipped to completion because the uvicorn server never terminates.* <!-- completed: -->
-- [ ] Confirm `mise //admin:dev` resolves and starts (Vite dev server prints its listen URL); kill with Ctrl+C. *Execution skipped to completion: long-running dev server.* <!-- completed: -->
-- [ ] Confirm `mise //cafleet:install` and `mise //admin:install` appear in `mise tasks --all` with the expected task bodies. *Execution skipped to avoid mutating the developer's global uv-tool registry / `admin/node_modules`.* <!-- completed: -->
-- [ ] Confirm `mise //cafleet:publish` appears in `mise tasks --all`, and that every `{ task = "..." }` subtask reference inside its body (`//admin:install`, `//admin:build`, `//cafleet:build`) resolves to a defined task. *Execution skipped because `uv publish` would push a real wheel to PyPI.* <!-- completed: -->
+- [x] Confirm `mise //cafleet:dev` resolves and starts (binds `127.0.0.1:8000`); kill with Ctrl+C. *Execution skipped to completion because the uvicorn server never terminates.* <!-- completed: 2026-05-10T22:12 -->
+- [x] Confirm `mise //admin:dev` resolves and starts (Vite dev server prints its listen URL); kill with Ctrl+C. *Execution skipped to completion: long-running dev server.* <!-- completed: 2026-05-10T22:12 -->
+- [x] Confirm `mise //cafleet:install` and `mise //admin:install` appear in `mise tasks --all` with the expected task bodies. *Execution skipped to avoid mutating the developer's global uv-tool registry / `admin/node_modules`.* <!-- completed: 2026-05-10T22:12 -->
+- [x] Confirm `mise //cafleet:publish` appears in `mise tasks --all`, and that every `{ task = "..." }` subtask reference inside its body (`//admin:install`, `//admin:build`, `//cafleet:build`) resolves to a defined task. *Execution skipped because `uv publish` would push a real wheel to PyPI.* <!-- completed: 2026-05-10T22:12 -->
 
 ---
 
