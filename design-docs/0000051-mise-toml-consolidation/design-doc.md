@@ -1,7 +1,7 @@
 # mise.toml Consolidation under uv Workspace
 
 **Status**: Approved
-**Progress**: 5/23 tasks complete
+**Progress**: 7/23 tasks complete
 **Last Updated**: 2026-05-10
 
 ## Overview
@@ -216,8 +216,8 @@ Per project rule (`.claude/rules/design-doc-numbering.md` § Implementation Orde
 
 ### Step 2: Move root tasks into `cafleet/mise.toml`
 
-- [ ] Add `[tasks.build]`, `[tasks.publish]`, `[tasks.sync]` to `cafleet/mise.toml` per the Specification §Final cafleet/mise.toml block <!-- completed: -->
-- [ ] In the new `[tasks.publish]`, replace the `{ task = "build" }` step with `{ task = "//cafleet:build" }` (the `build` task is no longer at root) <!-- completed: -->
+- [x] Add `[tasks.build]`, `[tasks.publish]`, `[tasks.sync]` to `cafleet/mise.toml` per the Specification §Final cafleet/mise.toml block <!-- completed: 2026-05-10T22:04 -->
+- [x] In the new `[tasks.publish]`, replace the `{ task = "build" }` step with `{ task = "//cafleet:build" }` (the `build` task is no longer at root) <!-- completed: 2026-05-10T22:04 -->
 
 ### Step 3: Rewrite cafleet task bodies to use `uv run --package cafleet`
 

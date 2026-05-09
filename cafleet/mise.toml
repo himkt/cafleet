@@ -24,3 +24,20 @@ description = "Run ty type checker"
 [tasks.install]
 run = "uv tool install --reinstall --editable ."
 description = "Install the cafleet CLI as an editable uv tool (source edits take effect without a second reinstall)"
+
+[tasks.build]
+run = "uv build --wheel --package cafleet --out-dir ./dist"
+description = "Build the cafleet wheel into cafleet/dist/ (the explicit --out-dir prevents uv from writing to the uv-workspace root by default)"
+
+[tasks.sync]
+run = "uv sync --all-groups --all-packages --frozen"
+description = "Sync uv workspace dependencies (all groups, all packages, frozen lockfile)"
+
+[tasks.publish]
+run = [
+  { task = "//admin:install" },
+  { task = "//admin:build" },
+  { task = "//cafleet:build" },
+  "uv publish",
+]
+description = "Publish cafleet to PyPI (builds admin assets, builds the wheel, then uv publish)"
