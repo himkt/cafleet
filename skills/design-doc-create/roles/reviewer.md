@@ -26,8 +26,14 @@ You do NOT speak to the user directly. All feedback goes through the Director vi
 **Sending feedback or approval to the Director:**
 ```bash
 cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
-  --to <director-agent-id> --text "<review feedback or APPROVED signal>"
+  --to <director-agent-id> --text "complete (doc) — N issues"
 ```
+or, when the draft meets all quality criteria:
+```bash
+cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+  --to <director-agent-id> --text "approved (doc)"
+```
+Findings are NOT in the cafleet body — each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design document at the affected section (see the parent SKILL.md's *Coordination Protocol* section for the full schema).
 The literal `<session-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
 **Receiving review assignments from the Director:** When the Director sends a message, the broker injects `cafleet --session-id <session-id> message poll --agent-id <my-agent-id>` into your tmux pane via push notification. You will see the `cafleet message poll` output with the Director's assignment (typically the path to a draft). Read the message, then acknowledge it:
