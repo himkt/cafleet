@@ -213,10 +213,10 @@ CAFleet also ships ported copies of four general-purpose authoring skills. The f
 
 | Skill | Location | Purpose |
 |---|---|---|
-| `research-report` | `skills/research-report/` | Create a comprehensive research report with folder-based output via CAFleet-orchestrated Director / Manager / Researcher members. Output lands under `researches/<topic-slug>/`. |
-| `research-presentation` | `skills/research-presentation/` | Build a Slidev presentation and reading transcript from an existing research report folder via CAFleet-orchestrated Director / Presentation / Transcript / Visual-Reviewer members. Invokes `cafleet:my-slidev` and `cafleet:create-figure` as leaf skills. |
-| `my-slidev` | `skills/my-slidev/` | Author Slidev decks against a custom theme bundled at `skills/my-slidev/theme/` (cover, bullets, two-cols, blank, stats-grid, section-divider, end layouts). |
-| `create-figure` | `skills/create-figure/` | Render matplotlib charts via `mise //:figure <script>` (equivalently `uv run --frozen --group research <script>`) — matplotlib lives in the repo-root `pyproject.toml` `[dependency-groups.research]` group. |
+| `research-report` | `.claude/skills/research-report/` | Create a comprehensive research report with folder-based output via CAFleet-orchestrated Director / Manager / Researcher members. Output lands under `researches/<topic-slug>/`. |
+| `research-presentation` | `.claude/skills/research-presentation/` | Build a Slidev presentation and reading transcript from an existing research report folder via CAFleet-orchestrated Director / Presentation / Transcript / Visual-Reviewer members. Invokes `my-slidev` and `create-figure` as leaf skills. |
+| `my-slidev` | `.claude/skills/my-slidev/` | Author Slidev decks against a custom theme bundled at `.claude/skills/my-slidev/theme/` (cover, bullets, two-cols, blank, stats-grid, section-divider, end layouts). |
+| `create-figure` | `.claude/skills/create-figure/` | Render matplotlib charts via `mise //:figure <script>` (equivalently `uv run --frozen --group research <script>`) — matplotlib lives in the repo-root `pyproject.toml` `[dependency-groups.research]` group. |
 
 ## Repo-root toolchain
 

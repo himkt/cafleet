@@ -39,7 +39,7 @@ Substitute the literal `[session-id]`, `[my-agent-id]`, and `[director-agent-id]
 
 ## Task-Based Coordination
 
-The team shares a task list at `~/.claude/tasks/research-[topic-slug]/` (where `[topic-slug]` resolves to the slug the Director selected at session bootstrap). With multiple Researchers running in parallel, the task list is the backbone of coordination — not just spawn prompts.
+The team shares a task list managed by the `TaskCreate` / `TaskUpdate` / `TaskList` tools. With multiple Researchers running in parallel, the task list is the backbone of coordination — not just spawn prompts.
 
 **Your discipline:**
 

@@ -3,7 +3,7 @@ name: create-figure
 description: >
   Create data visualizations and charts using matplotlib. Triggered when user
   asks to create a chart, plot, graph, or visualize data. Also invokable via
-  /cafleet:create-figure. Do NOT use plt.show() — always save to PNG files.
+  /create-figure. Do NOT use plt.show() — always save to PNG files.
 ---
 
 # Create Figure

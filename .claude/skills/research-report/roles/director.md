@@ -32,7 +32,7 @@ cafleet --session-id [session-id] message send --agent-id [director-agent-id] \
 
 ## Task List Coordination
 
-The team shares a task list at `~/.claude/tasks/research-[topic-slug]/`. The Manager creates one task per sub-topic before requesting Researcher spawns. Each Researcher claims their assigned task (`owner: "researcher-NN"`, `status: "in_progress"`) on start and marks it `completed` when their output file is written.
+The team shares a task list managed by the `TaskCreate` / `TaskUpdate` / `TaskList` tools. The Manager creates one task per sub-topic before requesting Researcher spawns. Each Researcher claims their assigned task (`owner: "researcher-NN"`, `status: "in_progress"`) on start and marks it `completed` when their output file is written.
 
 - Use `TaskList` during review to see which sub-topics are complete vs. outstanding.
 - If you see a spawn request whose scope doesn't match any existing task, ask the Manager to create the task first (the Manager owns sub-topic scoping).
