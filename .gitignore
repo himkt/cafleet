@@ -6,6 +6,10 @@ cafleet/src/cafleet/webui/
 admin/node_modules/
 .vite
 
+# cafleet-playground derived artifacts
+cafleet-playground/node_modules/
+cafleet-playground/.venv/
+
 !.claude
 !.claude/agents
 !.claude/rules

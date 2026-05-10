@@ -1,7 +1,7 @@
 # Port Research and Slidev Skills into cafleet, with `cafleet-playground/` Toolchain Consolidation
 
 **Status**: Approved
-**Progress**: 4/28 tasks complete
+**Progress**: 10/28 tasks complete
 **Last Updated**: 2026-05-10
 
 ## Overview
@@ -248,12 +248,12 @@ Documentation lands before any file move or skill copy.
 
 ### Step 2: Create `cafleet-playground/` and migrate manifests
 
-- [ ] Create the `cafleet-playground/` directory at the cafleet repo root. <!-- completed: -->
-- [ ] Move `~/.claude/package.json` → `cafleet-playground/package.json`. <!-- completed: -->
-- [ ] Move `~/.claude/bun.lock` → `cafleet-playground/bun.lock`. <!-- completed: -->
-- [ ] Move `~/.claude/pyproject.toml` → `cafleet-playground/pyproject.toml`. <!-- completed: -->
-- [ ] Move `~/.claude/uv.lock` → `cafleet-playground/uv.lock`. <!-- completed: -->
-- [ ] Add `cafleet-playground/node_modules/` and `cafleet-playground/.venv/` to `.gitignore` if they are not already covered by an existing pattern. <!-- completed: -->
+- [x] Create the `cafleet-playground/` directory at the cafleet repo root. <!-- completed: 2026-05-10T07:04 -->
+- [x] Move `~/.claude/package.json` → `cafleet-playground/package.json`. <!-- completed: 2026-05-10T07:25 -->
+- [x] Move `~/.claude/bun.lock` → `cafleet-playground/bun.lock`. <!-- completed: 2026-05-10T07:25 -->
+- [x] Move `~/.claude/pyproject.toml` → `cafleet-playground/pyproject.toml`. <!-- completed: 2026-05-10T07:25 -->
+- [x] Move `~/.claude/uv.lock` → `cafleet-playground/uv.lock`. <!-- completed: 2026-05-10T07:25 -->
+- [x] Add `cafleet-playground/node_modules/` and `cafleet-playground/.venv/` to `.gitignore` if they are not already covered by an existing pattern. <!-- completed: 2026-05-10T07:05 -->
 
 ### Step 3: Port skill directories
 
