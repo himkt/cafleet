@@ -1,7 +1,7 @@
 # Port Research and Slidev Skills into cafleet, with `cafleet-playground/` Toolchain Consolidation
 
 **Status**: Approved
-**Progress**: 0/28 tasks complete
+**Progress**: 4/28 tasks complete
 **Last Updated**: 2026-05-10
 
 ## Overview
@@ -240,10 +240,11 @@ Smoke-testing `/cafleet:research-report` and `/cafleet:research-presentation` en
 
 Documentation lands before any file move or skill copy.
 
-- [ ] Update `README.md` Project Skills section with one bullet per ported skill (`/cafleet:research-report`, `/cafleet:research-presentation`, `/cafleet:my-slidev`, `/cafleet:create-figure`) plus a `cafleet-playground/` entry under the project-structure section. <!-- completed: -->
-- [ ] Update `ARCHITECTURE.md` (which exists at the repo root) to add the four ported skills to the skill catalog and to describe `cafleet-playground/` as the Bun + uv toolchain home for the ported skills. <!-- completed: -->
-- [ ] Update root `CLAUDE.md` Project Skills section with one entry per ported skill, matching the format of the existing `cafleet:design-doc-*` entries. <!-- completed: -->
-- [ ] Mirror the `CLAUDE.md` additions in `.claude/CLAUDE.md`. <!-- completed: -->
+- [x] Update `README.md` Project Skills section with one bullet per ported skill (`/cafleet:research-report`, `/cafleet:research-presentation`, `/cafleet:my-slidev`, `/cafleet:create-figure`) plus a `cafleet-playground/` entry under the project-structure section. <!-- completed: 2026-05-10T06:50 -->
+- [x] Update `ARCHITECTURE.md` (which exists at the repo root) to add the four ported skills to the skill catalog and to describe `cafleet-playground/` as the Bun + uv toolchain home for the ported skills. <!-- completed: 2026-05-10T06:51 -->
+- [x] Update root `CLAUDE.md` Project Skills section with one entry per ported skill, matching the format of the existing `cafleet:design-doc-*` entries. <!-- completed: 2026-05-10T06:52 -->
+- [x] Mirror the `CLAUDE.md` additions in `.claude/CLAUDE.md`. <!-- completed: 2026-05-10T07:00 -->
+
 
 ### Step 2: Create `cafleet-playground/` and migrate manifests
 

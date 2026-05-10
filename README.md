@@ -13,7 +13,7 @@ A message broker and agent registry for coding agents — a Claude Code plugin p
 /plugin install cafleet@himkt-cafleet
 ```
 
-This adds 7 skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet:agent-team-monitoring`, `/cafleet:agent-team-supervision`, `/cafleet:design-doc`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`. Run `/help` in Claude Code to see them.
+This adds 11 skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet:agent-team-monitoring`, `/cafleet:agent-team-supervision`, `/cafleet:design-doc`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`, `/cafleet:research-report`, `/cafleet:research-presentation`, `/cafleet:my-slidev`, `/cafleet:create-figure`. Run `/help` in Claude Code to see them.
 
 ### Install the plugin in Codex
 
@@ -21,7 +21,7 @@ This adds 7 skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet:
 codex plugin marketplace add himkt/cafleet
 ```
 
-Then complete the in-UI install when prompted by `codex`. The same 7 skills (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) land in Codex from the shared `skills/` tree.
+Then complete the in-UI install when prompted by `codex`. The same 11 skills (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`, `research-report`, `research-presentation`, `my-slidev`, `create-figure`) land in Codex from the shared `skills/` tree.
 
 ### Install the broker CLI (required for the plugin to function)
 
@@ -98,6 +98,17 @@ cafleet supports two coding-agent binaries for member panes: `claude` (Claude Co
 ## Architecture
 
 CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Sessions partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
+
+## Project structure
+
+| Top-level directory | Purpose |
+|---|---|
+| `cafleet/` | The `cafleet` Python package (FastAPI + SQLAlchemy + Alembic + click). |
+| `admin/` | Admin WebUI SPA (Vite + React + TypeScript + Tailwind CSS). |
+| `skills/` | Plugin skills shared by the Claude Code and Codex manifests. |
+| `cafleet-playground/` | Bun + uv toolchain home for the ported `/cafleet:my-slidev`, `/cafleet:research-presentation`, and `/cafleet:create-figure` skills. Contains `package.json`, `bun.lock`, `pyproject.toml`, and `uv.lock`; `node_modules/` and `.venv/` are derived artifacts and are gitignored. |
+| `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
+| `docs/` | CLI reference, message envelope, and other operator-facing docs. |
 
 ## Development
 

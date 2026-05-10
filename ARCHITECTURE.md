@@ -207,6 +207,25 @@ CAFleet ships CAFleet-native replicas of the global Agent Teams design document 
 | `design-doc-create` | `skills/design-doc-create/` | Create a design document through CAFleet-orchestrated Director / Drafter / Reviewer roles. Mirrors the process of `/design-doc-create`. |
 | `design-doc-execute` | `skills/design-doc-execute/` | Execute a design document through CAFleet-orchestrated Director / Programmer / Tester / (optional) Verifier roles with per-step TDD cycle. Mirrors the process of `/design-doc-execute`. |
 
+## Research and Slidev Skills
+
+CAFleet also ships ported copies of four general-purpose authoring skills. The first two orchestrate cafleet members directly; the second two are leaf skills the first two invoke. All four resolve their toolchain through `cafleet-playground/` (see § Cafleet Playground below).
+
+| Skill | Location | Purpose |
+|---|---|---|
+| `research-report` | `skills/research-report/` | Create a comprehensive research report with folder-based output via CAFleet-orchestrated Director / Manager / Researcher members. Output lands under `researches/<topic-slug>/`. |
+| `research-presentation` | `skills/research-presentation/` | Build a Slidev presentation and reading transcript from an existing research report folder via CAFleet-orchestrated Director / Presentation / Transcript / Visual-Reviewer members. Invokes `cafleet:my-slidev` and `cafleet:create-figure` as leaf skills. |
+| `my-slidev` | `skills/my-slidev/` | Author Slidev decks against a custom theme bundled at `skills/my-slidev/theme/` (cover, bullets, two-cols, blank, stats-grid, section-divider, end layouts). |
+| `create-figure` | `skills/create-figure/` | Render matplotlib charts via `uv run --frozen --project ${CAFLEET_REPO_ROOT}/cafleet-playground <script>`; the playground absolute path is resolved through `Skill(base-dir)`. |
+
+## Cafleet Playground
+
+`cafleet-playground/` is a top-level repository directory that serves as the Bun + uv toolchain home for the four ported skills above. It contains exactly four manifests: `package.json` and `bun.lock` (Bun: Slidev, agent-browser, …), and `pyproject.toml` and `uv.lock` (uv: matplotlib, Pillow, …). The directory replaces the previous `CLAUDE_HOME = ~/.claude` assumption that the global versions of these skills relied on.
+
+Skills resolve the playground as an absolute path at invocation time. `Skill(base-dir)` (already used by `create-figure` to resolve `${BASE}`) supplies the cafleet repo root so the skill can compute `${CAFLEET_REPO_ROOT}/cafleet-playground/` regardless of the calling pane's CWD. `research-presentation` invokes Bun via `bun --cwd ${CAFLEET_REPO_ROOT}/cafleet-playground ...` (no new `mise.toml` task is added); `create-figure` invokes uv via `uv run --frozen --project ${CAFLEET_REPO_ROOT}/cafleet-playground <script>`.
+
+`cafleet-playground/node_modules/` and `cafleet-playground/.venv/` are derived artifacts and are excluded from version control via `.gitignore`. Only the four manifests are tracked.
+
 **Role files**: Each `*-create` and `*-execute` skill ships a `roles/` directory with one Markdown file per role. The Director reads the relevant role file and embeds its content verbatim in the `cafleet member create` spawn prompt.
 
 **Communication pattern**: Director → member messages are delivered via `cafleet message send`, which triggers a tmux push notification that injects `cafleet message poll` into the member's pane. Member → Director replies use the same `cafleet message send` path. The Director runs the `Skill(agent-team-monitoring)` `/loop` to watch for incoming messages and stalled panes; supervision obligations come from the paired `Skill(agent-team-supervision)`.
