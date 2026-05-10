@@ -13,7 +13,7 @@ Create a Slidev presentation and reading transcript from an existing research re
 | **Director** | Main Claude | Bootstrap CAFleet session, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
 | **Presentation** | claude pane (loads Skill(my-slidev) + Skill(create-figure)) | Create Slidev presentation from report using `/cafleet:my-slidev` | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
 | **Transcript** | claude pane | Create reading transcript with 1:1 slide correspondence | Invent data, modify report, conduct research | [roles/transcript.md](roles/transcript.md) |
-| **Visual Reviewer** | claude pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`mise //:agent-browser ...` from the cafleet repo root, equivalent to `bun run agent-browser ...`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
+| **Visual Reviewer** | claude pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`bun run agent-browser ...` from the cafleet repo root, equivalent to `bun run agent-browser ...`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
 
 ## Prerequisites
 
@@ -214,10 +214,10 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 **Calling-pane working directory: cafleet repo root.** Bun resolves `node_modules/` and `package.json` from the repo root directly — no `--cwd` plumbing or sidecar directory. The `mise` task wrappers below capture the canonical invariants (`--frozen-lockfile`, `run`, etc.) so callers do not have to remember them.
 
 1. From the cafleet repo root, run `mise //:bun-install` to ensure dependencies (equivalent to `bun install --frozen-lockfile`).
-2. Start the Slidev dev server (`run_in_background: true`): `mise //:slidev-dev <folder>/slide.md` (equivalent to `bun run slidev <folder>/slide.md`).
+2. Start the Slidev dev server (`run_in_background: true`): `mise //:slidev <folder>/slide.md` (equivalent to `bun run slidev <folder>/slide.md`).
 3. Set `<server_url>` to the Slidev dev server URL (default: `http://localhost:3030`). Use this value when spawning Visual Reviewers.
 4. Create the persistent screenshots directory: write `<folder>/screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per `/cafleet:research-presentation` invocation; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
-5. The Director MUST NOT run `mise //:agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` (or the equivalent `bun run agent-browser ...`) directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.
+5. The Director MUST NOT run `bun run agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` (or the equivalent `bun run agent-browser ...`) directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.
 
 **Batched Review Loop** (batch_size=10, fresh Visual Reviewer per batch to avoid context overflow):
 
@@ -252,7 +252,7 @@ while start <= total_slides:
 
     # Explicit close handshake before delete: the VR cannot reliably run extra commands after /exit.
     cafleet --session-id [session-id] message send --agent-id [director-agent-id] \
-        --to [vr-batch-agent-id] --text "CLOSE: run `mise //:agent-browser --session vr-batch-<start> close`, then reply 'closed'."
+        --to [vr-batch-agent-id] --text "CLOSE: run `bun run agent-browser --session vr-batch-<start> close`, then reply 'closed'."
     wait for the VR's "closed" confirmation via cafleet message poll
     cafleet --session-id [session-id] member delete --agent-id [director-agent-id] --member-id [vr-batch-agent-id]
     start = end + 1
@@ -321,7 +321,7 @@ No round limit — loop until approved.
 Follow the Shutdown Protocol in `Skill(cafleet)` § *Shutdown Protocol*. Order matters — every step before `cafleet session delete` must complete first.
 
 1. **Cancel the `/loop` monitor** with `CronDelete <job-id>`. The cron must stop firing BEFORE any member is deleted; a cron that keeps polling a tearing-down session spams `Error: session is deleted`.
-2. **Delete every member** — Presentation, Transcript, and any active VR batch. For any active VR batch, run the explicit close handshake first (Director sends `CLOSE:` via `cafleet message send`, VR runs `mise //:agent-browser --session vr-batch-<start> close` and replies `closed`), THEN run `cafleet member delete`. Once all VR browser sessions are closed:
+2. **Delete every member** — Presentation, Transcript, and any active VR batch. For any active VR batch, run the explicit close handshake first (Director sends `CLOSE:` via `cafleet message send`, VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`), THEN run `cafleet member delete`. Once all VR browser sessions are closed:
    ```bash
    cafleet --session-id [session-id] member delete --agent-id [director-agent-id] --member-id [presentation-agent-id]
    cafleet --session-id [session-id] member delete --agent-id [director-agent-id] --member-id [transcript-agent-id]
@@ -331,7 +331,7 @@ Follow the Shutdown Protocol in `Skill(cafleet)` § *Shutdown Protocol*. Order m
 3. **Verify the roster is empty**: `cafleet --session-id [session-id] member list --agent-id [director-agent-id]` must return zero members.
 4. **Run the agent-browser safety net** to close any orphan browser sessions left behind:
    ```bash
-   mise //:agent-browser close --all
+   bun run agent-browser close --all
    ```
 5. **Kill the Slidev dev server** if still running (stop the background Bash task started at Step 3).
 6. **Delete the session**: `cafleet session delete [session-id]` (positional, no `--session-id` flag). Soft-deletes the session and deregisters the root Director and Administrator atomically.

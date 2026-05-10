@@ -106,7 +106,7 @@ CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file
 | `cafleet/` | The `cafleet` Python package (FastAPI + SQLAlchemy + Alembic + click). |
 | `admin/` | Admin WebUI SPA (Vite + React + TypeScript + Tailwind CSS). |
 | `skills/` | Plugin skills shared by the Claude Code and Codex manifests. |
-| `package.json` + `bun.lock` (repo root) | Bun toolchain manifests for the ported `/cafleet:my-slidev` and `/cafleet:research-presentation` skills (Slidev + agent-browser). Driven via `mise //:bun-install` / `mise //:slidev-build` / `mise //:slidev-dev` / `mise //:agent-browser`; `node_modules/` is gitignored. |
+| `package.json` + `bun.lock` (repo root) | Bun toolchain manifests for the ported `/cafleet:my-slidev` and `/cafleet:research-presentation` skills (Slidev + agent-browser). Driven via `mise //:bun-install` / `mise //:slidev <deck>`; `node_modules/` is gitignored. |
 | `pyproject.toml` (`[dependency-groups.research]`) | matplotlib lives in the `research` uv dependency group at the repo-root `pyproject.toml`. `/cafleet:create-figure` invokes it via `mise //:figure <script>` (equivalent to `uv run --frozen --group research <script>`); `.venv/` is gitignored. |
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
 | `docs/` | CLI reference, message envelope, and other operator-facing docs. |

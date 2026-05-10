@@ -18,12 +18,12 @@ description = "Sync uv workspace dependencies (all groups, all packages, frozen 
 run = "bun install --frozen-lockfile"
 description = "Install bun dependencies (slidev, agent-browser, vue) into ./node_modules"
 
-[tasks.slidev-dev]
+[tasks.slidev]
 usage = '''
-arg "<deck>" help="Path to the Slidev deck markdown file"
+arg "<slide>" help="path to slide.md file"
 '''
-run = "bun run slidev {{ arg(name='deck') }}"
-description = "Start the Slidev dev server for a deck (long-running; stop with Ctrl-C)"
+run = "script -qfc 'bun run slidev --open false ${usage_slide}'"
+description = "Start the Slidev dev server inside a PTY (script -qfc) so Slidev does not detect a non-TTY stdout and exit early"
 
 [tasks.figure]
 usage = '''

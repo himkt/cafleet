@@ -4,7 +4,7 @@
       "Bash(mise //admin*)",
       "Bash(mise //cafleet*)",
       "Bash(mise //:bun-install)",
-      "Bash(mise //:slidev-dev *)",
+      "Bash(mise //:slidev *)",
       "Bash(mise //:figure *)",
       "Bash(mise tasks)",
       "Bash(mise tasks --all)",
