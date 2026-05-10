@@ -57,16 +57,16 @@ This design doc supersedes that verdict, scoped strictly:
 
 ### Post-migration skill resolution
 
-After this design lands, only the `cafleet:`-namespaced versions resolve:
+After this design lands, the four skills resolve as project-local (unprefixed) Claude Code skills under the cafleet repo's `.claude/skills/` directory:
 
-| User-typed slash command | Resolves to |
-|---|---|
-| `/research-report` | `.claude/skills/research-report/SKILL.md` |
-| `/research-presentation` | `.claude/skills/research-presentation/SKILL.md` |
-| `/my-slidev` | `.claude/skills/my-slidev/SKILL.md` |
-| `/create-figure` | `.claude/skills/create-figure/SKILL.md` |
+| User-typed slash command | Resolves to | Available |
+|---|---|---|
+| `/research-report` | `.claude/skills/research-report/SKILL.md` | Inside the cafleet repo only |
+| `/research-presentation` | `.claude/skills/research-presentation/SKILL.md` | Inside the cafleet repo only |
+| `/my-slidev` | `.claude/skills/my-slidev/SKILL.md` | Inside the cafleet repo only |
+| `/create-figure` | `.claude/skills/create-figure/SKILL.md` | Inside the cafleet repo only |
 
-The unprefixed names (`/research-report`, `/research-presentation`, `/my-slidev`, `/create-figure`) no longer resolve because the `~/.claude/skills/<name>/` directories are removed. This is intentional: the ported `cafleet:`-namespaced skills are the single canonical entry points.
+The `~/.claude/skills/<name>/` global snapshots are removed, and the four skills are NOT part of the cafleet plugin's `./skills/` tree (which holds only the seven plugin-packaged `cafleet:*`-namespaced skills). This matches the user directive that these skills be project-local rather than globally namespaced.
 
 ---
 
@@ -74,7 +74,7 @@ The unprefixed names (`/research-report`, `/research-presentation`, `/my-slidev`
 
 ### Scope
 
-Four skills are ported. For each, the port copies the entire skill directory tree (`SKILL.md` + any `roles/` / `theme/` / `template.md` subtree) verbatim from `~/.claude/skills/<skill>/` into `skills/<skill>/`, then applies the textual edits described under *Internal reference rewrites* below.
+Four skills are ported. For each, the port copies the entire skill directory tree (`SKILL.md` + any `roles/` / `theme/` / `template.md` subtree) verbatim from `~/.claude/skills/<skill>/` into `.claude/skills/<skill>/`, then applies the textual edits described under *Internal reference rewrites* below.
 
 | Source | Target | Notes |
 |---|---|---|
@@ -89,18 +89,18 @@ The user's answers limit rewrites to slash-command cross-references plus the two
 
 #### Slash-command rewrites
 
-Inside each ported `SKILL.md` body text, rewrite cross-references between the ported skills to use the cafleet namespace:
+The cross-references between the four ported skills stay unprefixed because the skills are project-local (`.claude/skills/<name>/`) rather than plugin-packaged. The port preserves the original unprefixed slash commands; no namespacing rewrite is applied for cross-skill references:
 
-| Original token | Rewritten token | Affected files |
+| Original token | Final token | Affected files |
 |---|---|---|
-| `/research-report` | `/research-report` | `research-presentation/SKILL.md` (description, Step 0 error message) |
-| `/research-presentation` | `/research-presentation` | `research-report/SKILL.md` (description, Step 7) |
-| `/my-slidev` (in body prose) | `/my-slidev` | `research-presentation/SKILL.md` (Presentation role section) |
-| `/create-figure` (in body prose) | `/create-figure` | `research-presentation/SKILL.md` (Presentation role section) |
+| `/research-report` | `/research-report` (unchanged) | `research-presentation/SKILL.md` (description, Step 0 error message) |
+| `/research-presentation` | `/research-presentation` (unchanged) | `research-report/SKILL.md` (description, Step 7) |
+| `/my-slidev` (in body prose) | `/my-slidev` (unchanged) | `research-presentation/SKILL.md` (Presentation role section) |
+| `/create-figure` (in body prose) | `/create-figure` (unchanged) | `research-presentation/SKILL.md` (Presentation role section) |
 
-`Skill(...)` calls (e.g., `Skill(cafleet)`, `Skill(cafleet:agent-team-monitoring)`, `Skill(base-dir)`, `Skill(my-slidev)`, `Skill(create-figure)`) are **not** rewritten. They resolve via the existing skill loader and the user has explicitly chosen to keep them unchanged.
+`Skill(...)` calls (e.g., `Skill(cafleet)`, `Skill(cafleet:agent-team-monitoring)`, `Skill(base-dir)`, `Skill(my-slidev)`, `Skill(create-figure)`) likewise stay unprefixed for the four ported skills and namespaced for the cafleet plugin skills they call into. They resolve via the existing skill loader.
 
-References to other plugins' slash commands — for example `/slidev` and `/slidev:slidev` in `my-slidev/SKILL.md` — are also left as-is. Only cross-references between the four ported skills are namespaced.
+References to other plugins' slash commands — for example `/slidev` and `/slidev:slidev` in `my-slidev/SKILL.md` — are also left as-is.
 
 #### Hard-coded role paths in `research-presentation/SKILL.md`
 
