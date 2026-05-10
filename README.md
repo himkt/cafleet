@@ -13,7 +13,7 @@ A message broker and agent registry for coding agents — a Claude Code plugin p
 /plugin install cafleet@himkt-cafleet
 ```
 
-This adds 7 skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet:agent-team-monitoring`, `/cafleet:agent-team-supervision`, `/cafleet:design-doc`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`. Run `/help` in Claude Code to see them.
+This adds 7 plugin-packaged skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet:agent-team-monitoring`, `/cafleet:agent-team-supervision`, `/cafleet:design-doc`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`. Run `/help` in Claude Code to see them. The four research / Slidev skills (`/research-report`, `/research-presentation`, `/my-slidev`, `/create-figure`) live under `.claude/skills/` in this repo as project-local skills — they resolve only when Claude Code is opened inside the cafleet checkout, not via `/plugin install`.
 
 ### Install the plugin in Codex
 
@@ -21,7 +21,7 @@ This adds 7 skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet:
 codex plugin marketplace add himkt/cafleet
 ```
 
-Then complete the in-UI install when prompted by `codex`. The same 7 skills (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) land in Codex from the shared `skills/` tree.
+Then complete the in-UI install when prompted by `codex`. The same 7 plugin-packaged skills (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) land in Codex from the shared `skills/` tree. The four project-local research / Slidev skills (`research-report`, `research-presentation`, `my-slidev`, `create-figure`) under `.claude/skills/` are not part of the plugin install — they resolve only when working inside the cafleet repo.
 
 ### Install the broker CLI (required for the plugin to function)
 
@@ -98,6 +98,18 @@ cafleet supports two coding-agent binaries for member panes: `claude` (Claude Co
 ## Architecture
 
 CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Sessions partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
+
+## Project structure
+
+| Top-level entry | Purpose |
+|---|---|
+| `cafleet/` | The `cafleet` Python package (FastAPI + SQLAlchemy + Alembic + click). |
+| `admin/` | Admin WebUI SPA (Vite + React + TypeScript + Tailwind CSS). |
+| `skills/` | Plugin skills shared by the Claude Code and Codex manifests. |
+| `package.json` + `bun.lock` (repo root) | Bun toolchain manifests for the ported `/my-slidev` and `/research-presentation` skills (Slidev + agent-browser). Driven via `mise //:bun-install` / `mise //:slidev <deck>`; `node_modules/` is gitignored. |
+| `pyproject.toml` (`[dependency-groups.research]`) | matplotlib lives in the `research` uv dependency group at the repo-root `pyproject.toml`. `/create-figure` invokes it via `mise //:figure <script>` (equivalent to `uv run --frozen --group research <script>`); `.venv/` is gitignored. |
+| `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
+| `docs/` | CLI reference, message envelope, and other operator-facing docs. |
 
 ## Development
 

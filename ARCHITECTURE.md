@@ -207,6 +207,28 @@ CAFleet ships CAFleet-native replicas of the global Agent Teams design document 
 | `design-doc-create` | `skills/design-doc-create/` | Create a design document through CAFleet-orchestrated Director / Drafter / Reviewer roles. Mirrors the process of `/design-doc-create`. |
 | `design-doc-execute` | `skills/design-doc-execute/` | Execute a design document through CAFleet-orchestrated Director / Programmer / Tester / (optional) Verifier roles with per-step TDD cycle. Mirrors the process of `/design-doc-execute`. |
 
+## Research and Slidev Skills
+
+The cafleet repo also vendors four project-local Claude Code skills under `.claude/skills/`. These are NOT part of the plugin install (`/plugin install cafleet@himkt-cafleet` only installs the seven plugin-packaged skills under `./skills/`); they resolve only when Claude Code is opened inside the cafleet checkout. The first two orchestrate cafleet members directly; the second two are leaf skills the first two invoke. All four resolve their toolchain at the cafleet repo root (see § Repo-root toolchain below).
+
+| Skill | Location | Purpose |
+|---|---|---|
+| `research-report` | `.claude/skills/research-report/` | Create a comprehensive research report with folder-based output via CAFleet-orchestrated Director / Manager / Researcher members. Output lands under `researches/<topic-slug>/`. |
+| `research-presentation` | `.claude/skills/research-presentation/` | Build a Slidev presentation and reading transcript from an existing research report folder via CAFleet-orchestrated Director / Presentation / Transcript / Visual-Reviewer members. Invokes `my-slidev` and `create-figure` as leaf skills. |
+| `my-slidev` | `.claude/skills/my-slidev/` | Author Slidev decks against a custom theme bundled at `.claude/skills/my-slidev/theme/` (cover, bullets, two-cols, blank, stats-grid, section-divider, end layouts). |
+| `create-figure` | `.claude/skills/create-figure/` | Render matplotlib charts via `mise //:figure <script>` (equivalently `uv run --frozen --group research <script>`) — matplotlib lives in the repo-root `pyproject.toml` `[dependency-groups.research]` group. |
+
+## Repo-root toolchain
+
+The four ported skills share two repo-root toolchains:
+
+- **Bun** (`package.json` + `bun.lock`) — pulls in `@slidev/cli`, `@slidev/theme-default`, `@slidev/theme-seriph`, `agent-browser`, and `vue`. Bun resolves `node_modules/` at the repo root with no `--cwd` plumbing.
+- **uv** (`pyproject.toml` `[dependency-groups.research]` + the existing `uv.lock`) — adds matplotlib alongside the existing cafleet uv workspace. The cafleet python package itself does not depend on matplotlib; matplotlib lands only when the `research` group is activated. The repo's standard `mise //:uv-sync` task runs `uv sync --all-groups --all-packages --frozen`, which DOES install the research group too — direct `uv run --frozen --group research <script>` invocations (and `mise //:figure`) target the same group explicitly.
+
+The supported entry points are mise tasks at the repo root: `mise //:bun-install`, `mise //:slidev <slide>` (starts the Slidev dev server inside `script -qfc` so Slidev does not detect a non-TTY stdout and exit early), and `mise //:figure <script>`. Each task wraps the canonical `bun ...` / `uv run ...` invocation with the right invariants (`--frozen-lockfile`, `--frozen --group research`, etc.) so callers do not have to remember them. `node_modules/` and `.venv/` are gitignored at the repo root.
+
+This layout replaces the previous `CLAUDE_HOME = ~/.claude` assumption that the global versions of these skills relied on. The four manifests previously held under `~/.claude/{package.json,bun.lock,pyproject.toml,uv.lock}` are migrated into `package.json` + `bun.lock` at the repo root and folded into the existing `pyproject.toml` + `uv.lock`.
+
 **Role files**: Each `*-create` and `*-execute` skill ships a `roles/` directory with one Markdown file per role. The Director reads the relevant role file and embeds its content verbatim in the `cafleet member create` spawn prompt.
 
 **Communication pattern**: Director → member messages are delivered via `cafleet message send`, which triggers a tmux push notification that injects `cafleet message poll` into the member's pane. Member → Director replies use the same `cafleet message send` path. The Director runs the `Skill(agent-team-monitoring)` `/loop` to watch for incoming messages and stalled panes; supervision obligations come from the paired `Skill(agent-team-supervision)`.

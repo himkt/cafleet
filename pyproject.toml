@@ -10,3 +10,6 @@ members = ["./cafleet"]
 dev = [
     "bump-my-version>=1.3.0",
 ]
+research = [
+    "matplotlib>=3.10.8",
+]
