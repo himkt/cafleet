@@ -193,7 +193,7 @@ Per the project's `Implementation Order` rule, documentation precedes code. The 
 
 | File | Update |
 |---|---|
-| `README.md` | Add a Project Skills bullet for each new `/cafleet:*` skill. Add the repo-root toolchain entries (Bun manifests at root + `[dependency-groups.research]`) to the project-structure section. |
+| `README.md` | Add a Project Skills bullet for each new project-local skill (`/research-report`, `/research-presentation`, `/my-slidev`, `/create-figure`) and clarify that they live under `.claude/skills/` (NOT in the plugin install). Add the repo-root toolchain entries (Bun manifests at root + `[dependency-groups.research]`) to the project-structure section. |
 | `ARCHITECTURE.md` | (`ARCHITECTURE.md` exists at the repo root — confirmed during drafting.) Append the four skills to the skill catalog and describe the repo-root toolchain (Bun + uv `research` group) home for the ported skills. |
 | `CLAUDE.md` | Add a Project Skills entry per ported skill in the same shape as the existing `cafleet:design-doc-*` entries. |
 | `.claude/CLAUDE.md` | Mirror the `CLAUDE.md` additions. |
@@ -269,12 +269,12 @@ Documentation lands before any file move or skill copy.
 
 ### Step 4: Apply internal-reference rewrites
 
-- [x] In `.claude/skills/research-report/SKILL.md`, rewrite `/research-presentation` references in body prose to `/research-presentation`. Leave `Skill(...)` invocations untouched. <!-- completed: 2026-05-10T07:46 -->
-- [x] In `.claude/skills/research-presentation/SKILL.md`, rewrite `/research-report`, `/my-slidev`, and `/create-figure` references in body prose to their `/cafleet:*` forms. <!-- completed: 2026-05-10T07:47 -->
+- [x] In `.claude/skills/research-report/SKILL.md`, confirm that `/research-presentation` references in body prose stay unprefixed (project-local). Leave `Skill(...)` invocations untouched. <!-- completed: 2026-05-10T07:46 -->
+- [x] In `.claude/skills/research-presentation/SKILL.md`, confirm that `/research-report`, `/my-slidev`, and `/create-figure` references in body prose stay unprefixed (project-local) — no namespace rewrite is applied because the four ported skills are NOT in the plugin's `./skills/` tree. <!-- completed: 2026-05-10T07:47 -->
 - [x] In `.claude/skills/research-presentation/SKILL.md`, rewrite the two hard-coded role-file paths from `~/.claude/skills/research-presentation/roles/<file>.md` to `.claude/skills/research-presentation/roles/<file>.md` (resolved from project root). <!-- completed: 2026-05-10T07:48 -->
 - [x] In `.claude/skills/research-presentation/SKILL.md`, rewrite every Bun invocation (`bun install --frozen-lockfile`, `mise run slidev`, `bun run agent-browser ...`, `bun run agent-browser close --all`) to the `mise <task>` wrapper form per the rebinding table in *Bun invocation rebinding* (mise tasks live in the repo-root `mise.toml`). <!-- completed: 2026-05-10T07:50 -->
 - [x] In `.claude/skills/research-presentation/SKILL.md` Step 3, rewrite the working-directory invariant prose paragraph ("Working directory: project root (the directory containing `node_modules/` and `skills/`)…") so it reflects the post-rebinding layout: calling-pane working directory is the cafleet repo root, and Bun resolves `node_modules/` + `package.json` from the same root with no `--cwd` flag. <!-- completed: 2026-05-10T07:50 -->
-- [x] Rewrite YAML front-matter `description:` strings in `.claude/skills/research-presentation/SKILL.md` and `.claude/skills/create-figure/SKILL.md` so any cross-references to the four ported skills use the `/cafleet:*` form (e.g., `Do NOT use for research — use /research-report for that.`). The token list is the same as the body-prose rewrite. <!-- completed: 2026-05-10T07:51 -->
+- [x] Confirm YAML front-matter `description:` strings in `.claude/skills/research-presentation/SKILL.md` and `.claude/skills/create-figure/SKILL.md` use the unprefixed cross-references (e.g., `Do NOT use for research — use /research-report for that.`). The token list is the same as the body-prose check. <!-- completed: 2026-05-10T07:51 -->
 - [x] In `.claude/skills/my-slidev/SKILL.md`, update the headmatter `theme:` guidance to point at `.claude/skills/my-slidev/theme/` resolved from the cafleet repo root. <!-- completed: 2026-05-10T07:52 -->
 - [x] In `.claude/skills/create-figure/SKILL.md`, rewrite every `CLAUDE_HOME` reference and the surrounding "substitute with the absolute path of the user's Claude config directory" guidance to point at the repo-root uv `research` dependency group. The uv command becomes `mise //:figure <script>` (equivalently `uv run --frozen --group research <script>`). <!-- completed: 2026-05-10T07:54 -->
 

@@ -29,7 +29,7 @@
       "Bash(bun run slidev *)",
       "Bash(sleep)",
       "Bash(sleep *)",
-      "Bash(uv run --frozen --group research *.py)",
+      "Bash(uv run --frozen --group research *)",
       "Skill(update-readme)",
       "Skill(design-doc-create)",
       "Skill(design-doc-execute)",
