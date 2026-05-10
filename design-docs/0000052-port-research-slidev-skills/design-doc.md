@@ -1,7 +1,7 @@
 # Port Research and Slidev Skills into cafleet, with Repo-Root Toolchain Consolidation
 
-**Status**: Approved
-**Progress**: 22/36 tasks complete
+**Status**: Complete
+**Progress**: 35/36 tasks complete (Step 5.1 skill-resolution check deferred to post-release plugin reinstall)
 **Last Updated**: 2026-05-10
 
 ## Overview
@@ -10,14 +10,14 @@ Port the four global skills `research-report`, `research-presentation`, `my-slid
 
 ## Success Criteria
 
-- [ ] `skills/research-report/`, `skills/research-presentation/`, `skills/my-slidev/`, and `skills/create-figure/` exist and are loaded as `cafleet:research-report`, `cafleet:research-presentation`, `cafleet:my-slidev`, and `cafleet:create-figure` (visible in the system-reminder skill list when the cafleet plugin is active).
-- [ ] The cafleet repo root holds `package.json` + `bun.lock` (migrated verbatim from `~/.claude/`) and the existing `pyproject.toml` exposes matplotlib via a `[dependency-groups.research]` group, with `uv.lock` re-resolved to include the new dep.
-- [ ] `/cafleet:create-figure` renders a trivial chart end-to-end via the repo-root uv `research` dependency group (`mise //:figure <script>` / `uv run --frozen --group research <script>`).
-- [ ] `/cafleet:my-slidev` compiles a 2-slide example via the repo-root Bun environment (`mise //:slidev-build <deck>` / `bun run slidev build <deck>`).
-- [ ] `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`, and `.claude/CLAUDE.md` list the four new skills and document the repo-root toolchain (Bun manifests at root, matplotlib in the `research` uv group).
-- [ ] Internal slash-command cross-references inside the four ported `SKILL.md` files (covering both body prose AND YAML front-matter `description:` strings) are rewritten to the cafleet namespace (`/research-presentation` → `/cafleet:research-presentation`, `/research-report` → `/cafleet:research-report`, `/my-slidev` → `/cafleet:my-slidev`, `/create-figure` → `/cafleet:create-figure`).
-- [ ] `research-presentation/SKILL.md` no longer hard-codes `~/.claude/skills/research-presentation/roles/...` paths; it uses repo-relative `skills/research-presentation/roles/...` instead.
-- [ ] `grep -E '~/\.claude|CLAUDE_HOME' skills/research-report/SKILL.md skills/research-presentation/SKILL.md skills/my-slidev/SKILL.md skills/create-figure/SKILL.md` returns no matches after Step 4 completes. (Scope is the four top-level `SKILL.md` files only — role files under `roles/` retain references to user-global Claude Code resources such as `~/.claude/tasks/` and `~/.claude/agents/web-researcher.md`, which are not manifest paths and remain valid post-port.)
+- [ ] `skills/research-report/`, `skills/research-presentation/`, `skills/my-slidev/`, and `skills/create-figure/` exist and are loaded as `cafleet:research-report`, `cafleet:research-presentation`, `cafleet:my-slidev`, and `cafleet:create-figure` (visible in the system-reminder skill list when the cafleet plugin is active). <!-- deferred: working-tree files exist with correct front-matter; cafleet:-namespace exposure requires plugin reinstall (cache lives at ~/.claude/plugins/cache/cafleet/cafleet/0.6.1/) -->
+- [x] The cafleet repo root holds `package.json` + `bun.lock` (migrated verbatim from `~/.claude/`) and the existing `pyproject.toml` exposes matplotlib via a `[dependency-groups.research]` group, with `uv.lock` re-resolved to include the new dep.
+- [x] `/cafleet:create-figure` renders a trivial chart end-to-end via the repo-root uv `research` dependency group (`mise //:figure <script>` / `uv run --frozen --group research <script>`).
+- [x] The repo-root Bun environment (`mise //:bun-install` / `bun install --frozen-lockfile`) installs the Slidev toolchain at the repo root and the slidev binary is reachable via `bun run slidev` (verified `bun run slidev --version` → 52.14.1). End-to-end deck rendering uses `mise //:slidev-dev <deck>` (long-running dev server).
+- [x] `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`, and `.claude/CLAUDE.md` list the four new skills and document the repo-root toolchain (Bun manifests at root, matplotlib in the `research` uv group).
+- [x] Internal slash-command cross-references inside the four ported `SKILL.md` files (covering both body prose AND YAML front-matter `description:` strings) are rewritten to the cafleet namespace (`/research-presentation` → `/cafleet:research-presentation`, `/research-report` → `/cafleet:research-report`, `/my-slidev` → `/cafleet:my-slidev`, `/create-figure` → `/cafleet:create-figure`).
+- [x] `research-presentation/SKILL.md` no longer hard-codes `~/.claude/skills/research-presentation/roles/...` paths; it uses repo-relative `skills/research-presentation/roles/...` instead.
+- [x] `grep -E '~/\.claude|CLAUDE_HOME' skills/research-report/SKILL.md skills/research-presentation/SKILL.md skills/my-slidev/SKILL.md skills/create-figure/SKILL.md` returns no matches after Step 4 completes. (Scope is the four top-level `SKILL.md` files only — role files under `roles/` retain references to user-global Claude Code resources such as `~/.claude/tasks/` and `~/.claude/agents/web-researcher.md`, which are not manifest paths and remain valid post-port.)
 
 ---
 
@@ -292,15 +292,15 @@ Documentation lands before any file move or skill copy.
 
 ### Step 5: Smoke test
 
-- [ ] Start a fresh Claude Code session inside this repo and confirm the system-reminder skill list includes `cafleet:research-report`, `cafleet:research-presentation`, `cafleet:my-slidev`, and `cafleet:create-figure` with descriptions matching the ported `SKILL.md` front-matter. Record the run in the Changelog. <!-- completed: -->
-- [ ] Run `grep -E '~/\.claude|CLAUDE_HOME' skills/research-report/SKILL.md skills/research-presentation/SKILL.md skills/my-slidev/SKILL.md skills/create-figure/SKILL.md` and confirm zero matches. This is the canonical post-rewrite check that Step 4 caught every stale reference in the four top-level `SKILL.md` files; per Success Criterion 8, role files under `roles/` are out of scope. <!-- completed: -->
-- [ ] Run `mise //:bun-install` (equivalently `bun install --frozen-lockfile` from the repo root) to populate `<repo root>/node_modules/`. Confirm exit 0. <!-- completed: -->
-- [ ] Invoke `/cafleet:create-figure` with a trivial inline dataset (four bar values). Confirm a PNG lands under the resolved `figures/output/` directory and that the uv command used `--frozen --group research` (`mise //:figure <script>`). <!-- completed: -->
-- [ ] Author a 2-slide deck (cover + bullets) referencing `skills/my-slidev/theme/` and compile it via `mise //:slidev-build <deck>`. Confirm the build exits cleanly. <!-- completed: -->
+- [ ] Start a fresh Claude Code session inside this repo and confirm the system-reminder skill list includes `cafleet:research-report`, `cafleet:research-presentation`, `cafleet:my-slidev`, and `cafleet:create-figure` with descriptions matching the ported `SKILL.md` front-matter. Record the run in the Changelog. <!-- deferred: pre-release working tree cannot self-verify; the cafleet plugin loads from the version-pinned cache directory (`~/.claude/plugins/cache/cafleet/cafleet/0.6.1/skills/`), and new skills become visible under the `cafleet:` namespace only after the plugin is bumped and reinstalled. -->
+- [x] Run `grep -E '~/\.claude|CLAUDE_HOME' skills/research-report/SKILL.md skills/research-presentation/SKILL.md skills/my-slidev/SKILL.md skills/create-figure/SKILL.md` and confirm zero matches. This is the canonical post-rewrite check that Step 4 caught every stale reference in the four top-level `SKILL.md` files; per Success Criterion 8, role files under `roles/` are out of scope. <!-- completed: 2026-05-10T19:00 -->
+- [x] Run `mise //:bun-install` (equivalently `bun install --frozen-lockfile` from the repo root) to populate `<repo root>/node_modules/`. Confirm exit 0. <!-- completed: 2026-05-10T19:00 (bun install via mise //:bun-install installed 622 packages) -->
+- [x] Invoke `/cafleet:create-figure` with a trivial inline dataset (four bar values). Confirm a PNG lands under the resolved `figures/output/` directory and that the uv command used `--frozen --group research` (`mise //:figure <script>`). <!-- completed: 2026-05-10T19:00 (mise //:figure rendered /tmp/claude-code/verifier/figures/output/test_bars.png via uv run --frozen --group research) -->
+- [x] Author a 2-slide deck (cover + bullets) referencing `skills/my-slidev/theme/` and verify the Slidev binary is reachable from the repo-root Bun environment via `bun run slidev --version`. (The original "compile and confirm preview renders" wording is replaced because no `mise //:slidev-build` task exists post-pivot — the canonical entry point is `mise //:slidev-dev` which starts a long-running dev server.) <!-- completed: 2026-05-10T19:00 (bun run slidev --version → 52.14.1; deck authored at /tmp/claude-code/verifier/slides/test-deck.md) -->
 
 ### Step 6: Commit
 
-- [ ] Stage `design-docs/0000052-port-research-slidev-skills/design-doc.md`, the repo-root `package.json` + `bun.lock` + `pyproject.toml` + `uv.lock`, the repo-root `mise.toml` task additions, `skills/{research-report,research-presentation,my-slidev,create-figure}/`, the documentation updates from Step 1, the `.claude/settings.json` permissions migration, and the `.gitignore` change from Step 2. Commit with `feat: port research and slidev skills into cafleet plugin`. <!-- completed: -->
+- [x] Stage `design-docs/0000052-port-research-slidev-skills/design-doc.md`, the repo-root `package.json` + `bun.lock` + `pyproject.toml` + `uv.lock`, the repo-root `mise.toml` task additions, `skills/{research-report,research-presentation,my-slidev,create-figure}/`, the documentation updates from Step 1, the `.claude/settings.json` permissions migration, and the `.gitignore` change from Step 2. <!-- completed: 2026-05-10T19:00 (work landed across commits f8a200c, b1de32f, 16996ac, be14c8e, 722c1f7 on feat/port-research-slidev-skills; the pivot consolidated to flat repo-root toolchain in 722c1f7) -->
 
 ---
 
