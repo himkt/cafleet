@@ -209,7 +209,7 @@ CAFleet ships CAFleet-native replicas of the global Agent Teams design document 
 
 ## Research and Slidev Skills
 
-CAFleet also ships ported copies of four general-purpose authoring skills. The first two orchestrate cafleet members directly; the second two are leaf skills the first two invoke. All four resolve their toolchain at the cafleet repo root (see § Repo-root toolchain below).
+The cafleet repo also vendors four project-local Claude Code skills under `.claude/skills/`. These are NOT part of the plugin install (`/plugin install cafleet@himkt-cafleet` only installs the seven plugin-packaged skills under `./skills/`); they resolve only when Claude Code is opened inside the cafleet checkout. The first two orchestrate cafleet members directly; the second two are leaf skills the first two invoke. All four resolve their toolchain at the cafleet repo root (see § Repo-root toolchain below).
 
 | Skill | Location | Purpose |
 |---|---|---|
@@ -223,7 +223,7 @@ CAFleet also ships ported copies of four general-purpose authoring skills. The f
 The four ported skills share two repo-root toolchains:
 
 - **Bun** (`package.json` + `bun.lock`) — pulls in `@slidev/cli`, `@slidev/theme-default`, `@slidev/theme-seriph`, `agent-browser`, and `vue`. Bun resolves `node_modules/` at the repo root with no `--cwd` plumbing.
-- **uv** (`pyproject.toml` `[dependency-groups.research]` + the existing `uv.lock`) — adds matplotlib alongside the existing cafleet uv workspace. The `research` group is opt-in (`uv sync --group research`, `uv run --frozen --group research <script>`); the cafleet python package itself does not depend on matplotlib.
+- **uv** (`pyproject.toml` `[dependency-groups.research]` + the existing `uv.lock`) — adds matplotlib alongside the existing cafleet uv workspace. The cafleet python package itself does not depend on matplotlib; matplotlib lands only when the `research` group is activated. The repo's standard `mise //:uv-sync` task runs `uv sync --all-groups --all-packages --frozen`, which DOES install the research group too — direct `uv run --frozen --group research <script>` invocations (and `mise //:figure`) target the same group explicitly.
 
 The supported entry points are mise tasks at the repo root: `mise //:bun-install`, `mise //:slidev <slide>` (starts the Slidev dev server inside `script -qfc` so Slidev does not detect a non-TTY stdout and exit early), and `mise //:figure <script>`. Each task wraps the canonical `bun ...` / `uv run ...` invocation with the right invariants (`--frozen-lockfile`, `--frozen --group research`, etc.) so callers do not have to remember them. `node_modules/` and `.venv/` are gitignored at the repo root.
 

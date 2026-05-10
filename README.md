@@ -13,7 +13,7 @@ A message broker and agent registry for coding agents — a Claude Code plugin p
 /plugin install cafleet@himkt-cafleet
 ```
 
-This adds 11 skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet:agent-team-monitoring`, `/cafleet:agent-team-supervision`, `/cafleet:design-doc`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`, `/research-report`, `/research-presentation`, `/my-slidev`, `/create-figure`. Run `/help` in Claude Code to see them.
+This adds 7 plugin-packaged skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet:agent-team-monitoring`, `/cafleet:agent-team-supervision`, `/cafleet:design-doc`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`. Run `/help` in Claude Code to see them. The four research / Slidev skills (`/research-report`, `/research-presentation`, `/my-slidev`, `/create-figure`) live under `.claude/skills/` in this repo as project-local skills — they resolve only when Claude Code is opened inside the cafleet checkout, not via `/plugin install`.
 
 ### Install the plugin in Codex
 
@@ -21,7 +21,7 @@ This adds 11 skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet
 codex plugin marketplace add himkt/cafleet
 ```
 
-Then complete the in-UI install when prompted by `codex`. The same 11 skills (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`, `research-report`, `research-presentation`, `my-slidev`, `create-figure`) land in Codex from the shared `skills/` tree.
+Then complete the in-UI install when prompted by `codex`. The same 7 plugin-packaged skills (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) land in Codex from the shared `skills/` tree. The four project-local research / Slidev skills (`research-report`, `research-presentation`, `my-slidev`, `create-figure`) under `.claude/skills/` are not part of the plugin install — they resolve only when working inside the cafleet repo.
 
 ### Install the broker CLI (required for the plugin to function)
 
