@@ -6,9 +6,9 @@ cafleet/src/cafleet/webui/
 admin/node_modules/
 .vite
 
-# cafleet-playground derived artifacts
-cafleet-playground/node_modules/
-cafleet-playground/.venv/
+# Repo-root toolchain derived artifacts (Bun + uv)
+/node_modules/
+/.venv/
 
 !.claude
 !.claude/agents

@@ -13,3 +13,21 @@ config_roots = [
 [tasks.uv-sync]
 run = "uv sync --all-groups --all-packages --frozen"
 description = "Sync uv workspace dependencies (all groups, all packages, frozen lockfile)"
+
+[tasks.bun-install]
+run = "bun install --frozen-lockfile"
+description = "Install bun dependencies (slidev, agent-browser, vue) into ./node_modules"
+
+[tasks.slidev-dev]
+usage = '''
+arg "<deck>" help="Path to the Slidev deck markdown file"
+'''
+run = "bun run slidev {{ arg(name='deck') }}"
+description = "Start the Slidev dev server for a deck (long-running; stop with Ctrl-C)"
+
+[tasks.figure]
+usage = '''
+arg "<script>" help="Absolute path to a matplotlib python script"
+'''
+run = "uv run --frozen --group research {{ arg(name='script') }}"
+description = "Run a matplotlib script against the research uv dependency group"

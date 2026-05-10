@@ -9,7 +9,7 @@ description: >
 # Create Figure
 
 Generate matplotlib charts. Scripts, outputs, and data go in separate subdirectories under `figures/`.
-Only the execution borrows a uv environment that has matplotlib installed: `${CAFLEET_REPO_ROOT}/cafleet-playground/` (resolve `${CAFLEET_REPO_ROOT}` via `Skill(base-dir)`).
+Only the execution borrows a uv environment that has matplotlib installed: the cafleet repo-root `pyproject.toml` exposes matplotlib via the `[dependency-groups.research]` group, run with `mise //:figure <script>` (equivalently `uv run --frozen --group research <script>`). Resolve the cafleet repo root via `Skill(base-dir)` when invocation needs an absolute path.
 
 **Before writing any script, read the Chart Type Selection and Color Rules sections.** All charts in a deck share the same `C_BAR` / `C_BAR_SEC` palette regardless of data topic.
 
@@ -24,7 +24,7 @@ Only the execution borrows a uv environment that has matplotlib installed: `${CA
 **Resolve `${BASE}` in this order:**
 
 1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., `/research-presentation` passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
-2. **Otherwise**: Load `Skill(base-dir)` and follow its procedure (no path argument; CWD-based inference applies). If the resolved `${BASE}` is `${CAFLEET_REPO_ROOT}/cafleet-playground` (i.e., not a real project root — the playground is the toolchain home, not an output target), override to `${BASE} = /tmp/claude-code`.
+2. **Otherwise**: Load `Skill(base-dir)` and follow its procedure (no path argument; CWD-based inference applies). If the resolved `${BASE}` is the cafleet repo root itself (i.e., `Skill(base-dir)` returned `${CAFLEET_REPO_ROOT}` because the calling pane is at the repo root), override to `${BASE} = /tmp/claude-code` so generated figures do not pollute the repo tree.
 
 **Derive the subdirectories** (each is a literal path string you will embed in the script):
 
@@ -36,7 +36,7 @@ Example resolution: if the calling skill said "use `/tmp/claude-code/researches/
 
 If the directories do not exist yet, the Write tool auto-creates parent directories when you write the script file — do NOT call `mkdir`.
 
-All subsequent steps use `${SRC_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` as literal resolved paths. Never create scripts or outputs inside `${CAFLEET_REPO_ROOT}/cafleet-playground/` — the playground is a toolchain home for the uv environment, not an output target.
+All subsequent steps use `${SRC_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` as literal resolved paths. Never create scripts or outputs directly in the cafleet repo root — the root holds the toolchain manifests (`pyproject.toml`, `package.json`), not figure artifacts.
 
 **Font:** No setup needed. The theme font `Noto Sans` is available as a system font. Scripts set `plt.rcParams['font.family'] = 'Noto Sans'` (see template below).
 
@@ -84,14 +84,19 @@ Key points:
 
 ### 2. Execute the script
 
-`${CAFLEET_REPO_ROOT}/cafleet-playground/` (resolve `${CAFLEET_REPO_ROOT}` via `Skill(base-dir)`) has a `pyproject.toml` that manages matplotlib via uv.
-Run a single Bash call with `--frozen` and `--project` to use this environment without changing CWD:
+The cafleet repo-root `pyproject.toml` exposes matplotlib via the `[dependency-groups.research]` group; the matching `uv.lock` pins a frozen resolution. Run via the `mise //:figure` task (preferred — it wraps the `--frozen --group research` invariants) or directly via `uv run`:
 
 ```
-uv run --frozen --project ${CAFLEET_REPO_ROOT}/cafleet-playground ${SRC_DIR}/script_name.py
+mise //:figure ${SRC_DIR}/script_name.py
 ```
 
-`--frozen` prevents lockfile updates. `--project ${CAFLEET_REPO_ROOT}/cafleet-playground` uses the venv there without changing CWD.
+Equivalent direct invocation (when `mise` is unavailable):
+
+```
+uv run --frozen --group research ${SRC_DIR}/script_name.py
+```
+
+`--frozen` prevents lockfile updates. `--group research` activates the matplotlib dependency group at the repo-root uv workspace without sidecar manifests.
 
 ### 3. Verify the result
 

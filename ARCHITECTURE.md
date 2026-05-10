@@ -209,22 +209,25 @@ CAFleet ships CAFleet-native replicas of the global Agent Teams design document 
 
 ## Research and Slidev Skills
 
-CAFleet also ships ported copies of four general-purpose authoring skills. The first two orchestrate cafleet members directly; the second two are leaf skills the first two invoke. All four resolve their toolchain through `cafleet-playground/` (see § Cafleet Playground below).
+CAFleet also ships ported copies of four general-purpose authoring skills. The first two orchestrate cafleet members directly; the second two are leaf skills the first two invoke. All four resolve their toolchain at the cafleet repo root (see § Repo-root toolchain below).
 
 | Skill | Location | Purpose |
 |---|---|---|
 | `research-report` | `skills/research-report/` | Create a comprehensive research report with folder-based output via CAFleet-orchestrated Director / Manager / Researcher members. Output lands under `researches/<topic-slug>/`. |
 | `research-presentation` | `skills/research-presentation/` | Build a Slidev presentation and reading transcript from an existing research report folder via CAFleet-orchestrated Director / Presentation / Transcript / Visual-Reviewer members. Invokes `cafleet:my-slidev` and `cafleet:create-figure` as leaf skills. |
 | `my-slidev` | `skills/my-slidev/` | Author Slidev decks against a custom theme bundled at `skills/my-slidev/theme/` (cover, bullets, two-cols, blank, stats-grid, section-divider, end layouts). |
-| `create-figure` | `skills/create-figure/` | Render matplotlib charts via `uv run --frozen --project ${CAFLEET_REPO_ROOT}/cafleet-playground <script>`; the playground absolute path is resolved through `Skill(base-dir)`. |
+| `create-figure` | `skills/create-figure/` | Render matplotlib charts via `mise //:figure <script>` (equivalently `uv run --frozen --group research <script>`) — matplotlib lives in the repo-root `pyproject.toml` `[dependency-groups.research]` group. |
 
-## Cafleet Playground
+## Repo-root toolchain
 
-`cafleet-playground/` is a top-level repository directory that serves as the Bun + uv toolchain home for the four ported skills above. It contains exactly four manifests: `package.json` and `bun.lock` (Bun: Slidev, agent-browser, …), and `pyproject.toml` and `uv.lock` (uv: matplotlib, Pillow, …). The directory replaces the previous `CLAUDE_HOME = ~/.claude` assumption that the global versions of these skills relied on.
+The four ported skills share two repo-root toolchains:
 
-Skills resolve the playground as an absolute path at invocation time. `Skill(base-dir)` (already used by `create-figure` to resolve `${BASE}`) supplies the cafleet repo root so the skill can compute `${CAFLEET_REPO_ROOT}/cafleet-playground/` regardless of the calling pane's CWD. `research-presentation` invokes Bun via `bun --cwd ${CAFLEET_REPO_ROOT}/cafleet-playground ...` (no new `mise.toml` task is added); `create-figure` invokes uv via `uv run --frozen --project ${CAFLEET_REPO_ROOT}/cafleet-playground <script>`.
+- **Bun** (`package.json` + `bun.lock`) — pulls in `@slidev/cli`, `@slidev/theme-default`, `@slidev/theme-seriph`, `agent-browser`, and `vue`. Bun resolves `node_modules/` at the repo root with no `--cwd` plumbing.
+- **uv** (`pyproject.toml` `[dependency-groups.research]` + the existing `uv.lock`) — adds matplotlib alongside the existing cafleet uv workspace. The `research` group is opt-in (`uv sync --group research`, `uv run --frozen --group research <script>`); the cafleet python package itself does not depend on matplotlib.
 
-`cafleet-playground/node_modules/` and `cafleet-playground/.venv/` are derived artifacts and are excluded from version control via `.gitignore`. Only the four manifests are tracked.
+The supported entry points are mise tasks at the repo root: `mise //:bun-install`, `mise //:slidev-build <deck>`, `mise //:slidev-dev <deck>`, `mise //:figure <script>`, and `mise //:agent-browser <args>`. Each task wraps the canonical `bun ...` / `uv run ...` invocation with the right invariants (`--frozen-lockfile`, `--frozen --group research`, etc.) so callers do not have to remember them. `node_modules/` and `.venv/` are gitignored at the repo root.
+
+This layout replaces the previous `CLAUDE_HOME = ~/.claude` assumption that the global versions of these skills relied on. The four manifests previously held under `~/.claude/{package.json,bun.lock,pyproject.toml,uv.lock}` are migrated into `package.json` + `bun.lock` at the repo root and folded into the existing `pyproject.toml` + `uv.lock`.
 
 **Role files**: Each `*-create` and `*-execute` skill ships a `roles/` directory with one Markdown file per role. The Director reads the relevant role file and embeds its content verbatim in the `cafleet member create` spawn prompt.
 

@@ -16,7 +16,7 @@ When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE 
 - `/cafleet:research-report` — Create a comprehensive research report with folder-based output via CAFleet-orchestrated Director / Manager / Researcher members. Output lands under `researches/<topic-slug>/`. Use when the user wants a thorough, multi-source research artifact rather than a quick web search summary.
 - `/cafleet:research-presentation` — Build a Slidev presentation and reading transcript from an existing research report folder via CAFleet-orchestrated Director / Presentation / Transcript / Visual-Reviewer members. Reads `report.md` and per-researcher files; invokes `cafleet:my-slidev` and `cafleet:create-figure` as leaf skills. Do NOT use for research itself — use `/cafleet:research-report`.
 - `/cafleet:my-slidev` — Author Slidev decks using the bundled theme at `skills/my-slidev/theme/` (cover, bullets, two-cols, blank, stats-grid, section-divider, end layouts). Use when generating presentations from research reports, outlines, or other content.
-- `/cafleet:create-figure` — Render matplotlib charts via the cafleet-playground uv environment (`uv run --frozen --project ${CAFLEET_REPO_ROOT}/cafleet-playground <script>`). Use when the user asks to create a chart, plot, or visualize data. Do NOT use `plt.show()` — always save to PNG files.
+- `/cafleet:create-figure` — Render matplotlib charts via the repo-root uv `research` dependency group (`mise //:figure <script>`, equivalent to `uv run --frozen --group research <script>`). Use when the user asks to create a chart, plot, or visualize data. Do NOT use `plt.show()` — always save to PNG files.
 
 ## Project: CAFleet
 
