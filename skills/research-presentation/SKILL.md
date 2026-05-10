@@ -1,6 +1,6 @@
 ---
 name: research-presentation
-description: Create a Slidev presentation and reading transcript from an existing research report folder. Reads report.md and researcher files for context, creates slides using /my-slidev skill and a reading transcript. Takes folder path as argument (e.g., topic-name). Do NOT use for research — use /research-report for that.
+description: Create a Slidev presentation and reading transcript from an existing research report folder. Reads report.md and researcher files for context, creates slides using /cafleet:my-slidev skill and a reading transcript. Takes folder path as argument (e.g., topic-name). Do NOT use for research — use /cafleet:research-report for that.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, TaskGet
 ---
 
@@ -11,9 +11,9 @@ Create a Slidev presentation and reading transcript from an existing research re
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director** | Main Claude | Bootstrap CAFleet session, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
-| **Presentation** | claude pane (loads Skill(my-slidev) + Skill(create-figure)) | Create Slidev presentation from report using `/my-slidev` | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
+| **Presentation** | claude pane (loads Skill(my-slidev) + Skill(create-figure)) | Create Slidev presentation from report using `/cafleet:my-slidev` | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
 | **Transcript** | claude pane | Create reading transcript with 1:1 slide correspondence | Invent data, modify report, conduct research | [roles/transcript.md](roles/transcript.md) |
-| **Visual Reviewer** | claude pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`bun run agent-browser`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
+| **Visual Reviewer** | claude pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`bun --cwd ${CAFLEET_REPO_ROOT}/cafleet-playground run agent-browser`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
 
 ## Prerequisites
 
@@ -69,7 +69,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
 2. Load `Skill(base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
    - If skipped (absolute path): set `${FOLDER} = $ARGUMENTS`.
    - If base resolved: set `${FOLDER} = ${BASE}/researches/$ARGUMENTS`. Resolve to absolute path.
-3. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run `/research-report` first to generate a report."
+3. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run `/cafleet:research-report` first to generate a report."
 4. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts.
 
 ### Step 1: Bootstrap CAFleet Session, Start Monitor & Spawn Presentation + Transcript (Director)
@@ -155,7 +155,7 @@ Capture the printed `agent_id` and substitute it for `[presentation-agent-id]` i
 You are the Transcript Specialist in a research presentation team (CAFleet-native).
 
 [ROLE DEFINITION]
-[Content of ~/.claude/skills/research-presentation/roles/transcript.md injected verbatim. Cafleet substitutes only the four format kwargs `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
+[Content of skills/research-presentation/roles/transcript.md (resolved from project root) injected verbatim. Cafleet substitutes only the four format kwargs `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
 [/ROLE DEFINITION]
 
 Load these skills at startup:
@@ -211,13 +211,13 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 
 **Server Startup (once):**
 
-**Working directory: project root** (the directory containing `node_modules/` and `skills/`). Do NOT cd to dependency source directories — they are source repos, not runnable installations.
+**Calling-pane working directory: cafleet repo root.** **Bun working directory** (where `node_modules/` and `package.json` resolve): `${CAFLEET_REPO_ROOT}/cafleet-playground/` — supplied via Bun's `--cwd` flag in every invocation below. Resolve `${CAFLEET_REPO_ROOT}` via `Skill(base-dir)`. Do NOT `cd` into the playground or any dependency source directory.
 
-1. From the project root, run `bun install --frozen-lockfile` to ensure dependencies.
-2. Start the Slidev dev server (`run_in_background: true`): `mise run slidev <folder>/slide.md`
+1. From the cafleet repo root, run `bun --cwd ${CAFLEET_REPO_ROOT}/cafleet-playground install --frozen-lockfile` to ensure dependencies.
+2. Start the Slidev dev server (`run_in_background: true`): `bun --cwd ${CAFLEET_REPO_ROOT}/cafleet-playground run slidev <folder>/slide.md`
 3. Set `<server_url>` to the Slidev dev server URL (default: `http://localhost:3030`). Use this value when spawning Visual Reviewers.
-4. Create the persistent screenshots directory: write `<folder>/screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per `/research-presentation` invocation; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
-5. The Director MUST NOT run `bun run agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.
+4. Create the persistent screenshots directory: write `<folder>/screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per `/cafleet:research-presentation` invocation; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
+5. The Director MUST NOT run `bun --cwd ${CAFLEET_REPO_ROOT}/cafleet-playground run agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.
 
 **Batched Review Loop** (batch_size=10, fresh Visual Reviewer per batch to avoid context overflow):
 
@@ -252,7 +252,7 @@ while start <= total_slides:
 
     # Explicit close handshake before delete: the VR cannot reliably run extra commands after /exit.
     cafleet --session-id [session-id] message send --agent-id [director-agent-id] \
-        --to [vr-batch-agent-id] --text "CLOSE: run `bun run agent-browser --session vr-batch-<start> close`, then reply 'closed'."
+        --to [vr-batch-agent-id] --text "CLOSE: run `bun --cwd ${CAFLEET_REPO_ROOT}/cafleet-playground run agent-browser --session vr-batch-<start> close`, then reply 'closed'."
     wait for the VR's "closed" confirmation via cafleet message poll
     cafleet --session-id [session-id] member delete --agent-id [director-agent-id] --member-id [vr-batch-agent-id]
     start = end + 1
@@ -264,7 +264,7 @@ while start <= total_slides:
 You are the Visual Reviewer in a research presentation team (CAFleet-native).
 
 [ROLE DEFINITION]
-[Content of ~/.claude/skills/research-presentation/roles/visual-reviewer.md injected verbatim. Cafleet substitutes only the four format kwargs `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
+[Content of skills/research-presentation/roles/visual-reviewer.md (resolved from project root) injected verbatim. Cafleet substitutes only the four format kwargs `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
 [/ROLE DEFINITION]
 
 Load these skills at startup:
@@ -321,7 +321,7 @@ No round limit — loop until approved.
 Follow the Shutdown Protocol in `Skill(cafleet)` § *Shutdown Protocol*. Order matters — every step before `cafleet session delete` must complete first.
 
 1. **Cancel the `/loop` monitor** with `CronDelete <job-id>`. The cron must stop firing BEFORE any member is deleted; a cron that keeps polling a tearing-down session spams `Error: session is deleted`.
-2. **Delete every member** — Presentation, Transcript, and any active VR batch. For any active VR batch, run the explicit close handshake first (Director sends `CLOSE:` via `cafleet message send`, VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`), THEN run `cafleet member delete`. Once all VR browser sessions are closed:
+2. **Delete every member** — Presentation, Transcript, and any active VR batch. For any active VR batch, run the explicit close handshake first (Director sends `CLOSE:` via `cafleet message send`, VR runs `bun --cwd ${CAFLEET_REPO_ROOT}/cafleet-playground run agent-browser --session vr-batch-<start> close` and replies `closed`), THEN run `cafleet member delete`. Once all VR browser sessions are closed:
    ```bash
    cafleet --session-id [session-id] member delete --agent-id [director-agent-id] --member-id [presentation-agent-id]
    cafleet --session-id [session-id] member delete --agent-id [director-agent-id] --member-id [transcript-agent-id]
@@ -331,7 +331,7 @@ Follow the Shutdown Protocol in `Skill(cafleet)` § *Shutdown Protocol*. Order m
 3. **Verify the roster is empty**: `cafleet --session-id [session-id] member list --agent-id [director-agent-id]` must return zero members.
 4. **Run the agent-browser safety net** to close any orphan browser sessions left behind:
    ```bash
-   bun run agent-browser close --all
+   bun --cwd ${CAFLEET_REPO_ROOT}/cafleet-playground run agent-browser close --all
    ```
 5. **Kill the Slidev dev server** if still running (stop the background Bash task started at Step 3).
 6. **Delete the session**: `cafleet session delete [session-id]` (positional, no `--session-id` flag). Soft-deletes the session and deregisters the root Director and Administrator atomically.

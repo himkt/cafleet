@@ -1,7 +1,7 @@
 # Port Research and Slidev Skills into cafleet, with `cafleet-playground/` Toolchain Consolidation
 
 **Status**: Approved
-**Progress**: 14/28 tasks complete
+**Progress**: 22/28 tasks complete
 **Last Updated**: 2026-05-10
 
 ## Overview
@@ -264,14 +264,14 @@ Documentation lands before any file move or skill copy.
 
 ### Step 4: Apply internal-reference rewrites
 
-- [ ] In `skills/research-report/SKILL.md`, rewrite `/research-presentation` references in body prose to `/cafleet:research-presentation`. Leave `Skill(...)` invocations untouched. <!-- completed: -->
-- [ ] In `skills/research-presentation/SKILL.md`, rewrite `/research-report`, `/my-slidev`, and `/create-figure` references in body prose to their `/cafleet:*` forms. <!-- completed: -->
-- [ ] In `skills/research-presentation/SKILL.md`, rewrite the two hard-coded role-file paths from `~/.claude/skills/research-presentation/roles/<file>.md` to `skills/research-presentation/roles/<file>.md` (resolved from project root). <!-- completed: -->
-- [ ] In `skills/research-presentation/SKILL.md`, rewrite every Bun invocation (`bun install --frozen-lockfile`, `mise run slidev`, `bun run agent-browser ...`, `bun run agent-browser close --all`) to the `bun --cwd ${CAFLEET_REPO_ROOT}/cafleet-playground ...` form per the rebinding table in *Bun invocation rebinding*. No new `mise.toml` task is added. <!-- completed: -->
-- [ ] In `skills/research-presentation/SKILL.md` Step 3, rewrite the working-directory invariant prose paragraph ("Working directory: project root (the directory containing `node_modules/` and `skills/`)…") so it reflects the post-rebinding layout: calling-pane working directory is the cafleet repo root, Bun working directory (where `node_modules/` resolves) is `${CAFLEET_REPO_ROOT}/cafleet-playground/`. <!-- completed: -->
-- [ ] Rewrite YAML front-matter `description:` strings in `skills/research-presentation/SKILL.md` and `skills/create-figure/SKILL.md` so any cross-references to the four ported skills use the `/cafleet:*` form (e.g., `Do NOT use for research — use /cafleet:research-report for that.`). The token list is the same as the body-prose rewrite. <!-- completed: -->
-- [ ] In `skills/my-slidev/SKILL.md`, update the headmatter `theme:` guidance to point at `skills/my-slidev/theme/` resolved from the cafleet repo root. <!-- completed: -->
-- [ ] In `skills/create-figure/SKILL.md`, rewrite every `CLAUDE_HOME` reference and the surrounding "substitute with the absolute path of the user's Claude config directory" guidance to resolve the playground via `Skill(base-dir)` as `${CAFLEET_REPO_ROOT}/cafleet-playground/`. The uv command becomes `uv run --frozen --project ${CAFLEET_REPO_ROOT}/cafleet-playground <script>`. <!-- completed: -->
+- [x] In `skills/research-report/SKILL.md`, rewrite `/research-presentation` references in body prose to `/cafleet:research-presentation`. Leave `Skill(...)` invocations untouched. <!-- completed: 2026-05-10T07:46 -->
+- [x] In `skills/research-presentation/SKILL.md`, rewrite `/research-report`, `/my-slidev`, and `/create-figure` references in body prose to their `/cafleet:*` forms. <!-- completed: 2026-05-10T07:47 -->
+- [x] In `skills/research-presentation/SKILL.md`, rewrite the two hard-coded role-file paths from `~/.claude/skills/research-presentation/roles/<file>.md` to `skills/research-presentation/roles/<file>.md` (resolved from project root). <!-- completed: 2026-05-10T07:48 -->
+- [x] In `skills/research-presentation/SKILL.md`, rewrite every Bun invocation (`bun install --frozen-lockfile`, `mise run slidev`, `bun run agent-browser ...`, `bun run agent-browser close --all`) to the `bun --cwd ${CAFLEET_REPO_ROOT}/cafleet-playground ...` form per the rebinding table in *Bun invocation rebinding*. No new `mise.toml` task is added. <!-- completed: 2026-05-10T07:50 -->
+- [x] In `skills/research-presentation/SKILL.md` Step 3, rewrite the working-directory invariant prose paragraph ("Working directory: project root (the directory containing `node_modules/` and `skills/`)…") so it reflects the post-rebinding layout: calling-pane working directory is the cafleet repo root, Bun working directory (where `node_modules/` resolves) is `${CAFLEET_REPO_ROOT}/cafleet-playground/`. <!-- completed: 2026-05-10T07:50 -->
+- [x] Rewrite YAML front-matter `description:` strings in `skills/research-presentation/SKILL.md` and `skills/create-figure/SKILL.md` so any cross-references to the four ported skills use the `/cafleet:*` form (e.g., `Do NOT use for research — use /cafleet:research-report for that.`). The token list is the same as the body-prose rewrite. <!-- completed: 2026-05-10T07:51 -->
+- [x] In `skills/my-slidev/SKILL.md`, update the headmatter `theme:` guidance to point at `skills/my-slidev/theme/` resolved from the cafleet repo root. <!-- completed: 2026-05-10T07:52 -->
+- [x] In `skills/create-figure/SKILL.md`, rewrite every `CLAUDE_HOME` reference and the surrounding "substitute with the absolute path of the user's Claude config directory" guidance to resolve the playground via `Skill(base-dir)` as `${CAFLEET_REPO_ROOT}/cafleet-playground/`. The uv command becomes `uv run --frozen --project ${CAFLEET_REPO_ROOT}/cafleet-playground <script>`. <!-- completed: 2026-05-10T07:54 -->
 
 ### Step 5: Smoke test
 

@@ -5,13 +5,13 @@ description: Create Slidev presentations using the custom theme with cover, bull
 
 # Custom Slidev Theme Presentation Guide
 
-Theme location: `theme/` inside this skill's directory. For Slidev syntax, refer to /slidev or /slidev:slidev. **NEVER READ FILES DIRECTLY**.
+Theme location: `theme/` inside this skill's directory — `${CAFLEET_REPO_ROOT}/skills/my-slidev/theme/` (resolve `${CAFLEET_REPO_ROOT}` via `Skill(base-dir)`). For Slidev syntax, refer to /slidev or /slidev:slidev. **NEVER READ FILES DIRECTLY**.
 
 ## Headmatter
 
 ```yaml
 ---
-theme: <absolute-path-to-this-skill's-theme-directory>
+theme: ${CAFLEET_REPO_ROOT}/skills/my-slidev/theme  # absolute path; resolve ${CAFLEET_REPO_ROOT} via Skill(base-dir)
 title: <Presentation Title>
 author: <Author Name>
 fonts:
@@ -85,7 +85,7 @@ After generating all slides, check every slide:
 
 1. **No duplicate titles** — slide heading IS the chart title
 2. **Caption**: `<div class="figure-caption">Source: [N]</div>` — never raw `<div class="text-sm">`
-3. **Colors**: must match `/create-figure` palette
+3. **Colors**: must match `/cafleet:create-figure` palette
 4. **Figure-only slide**: `blank` layout with `## Title` + image + caption
 5. **Figure + insight**: `two-cols` with `columns: "3:2"`, chart in `::left::`, text in `::right::`
 
