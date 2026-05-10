@@ -22,8 +22,8 @@ description = "Install bun dependencies (slidev, agent-browser, vue) into ./node
 usage = '''
 arg "<slide>" help="path to slide.md file"
 '''
-run = "script -qfc \"bun run slidev --open false {{ arg(name='slide') }}\""
-description = "Start the Slidev dev server inside a PTY (script -qfc) so Slidev does not detect a non-TTY stdout and exit early"
+run = "script -qfc \"bun run slidev --open false {{ arg(name='slide') }}\" /dev/null"
+description = "Start the Slidev dev server inside a PTY (script -qfc) so Slidev does not detect a non-TTY stdout and exit early. The trailing /dev/null is the script(1) typescript output file — discarding it keeps the working tree clean"
 
 [tasks.figure]
 usage = '''
