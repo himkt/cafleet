@@ -27,7 +27,7 @@ Use lazy loading for images below the fold.
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `type` | String | `'note'` | One of: `note`, `important`, `tip`, `warning`, `caution` |
+| `type` | String | `'note'` | One of: `note`, `important`, `tip`, `warning`, `caution`, `formula` |
 | `title` | String | Auto from type | Box title text. Defaults to capitalized type name |
 
 **Note**: Always leave a blank line after the opening tag and before the closing tag for markdown content to render correctly.
@@ -188,5 +188,5 @@ $$\text{SwiGLU}(x) = \text{Swish}(xW_1) \odot (xW_2)$$
 |-----------|----------|
 | `<Admonition>` | Multi-line callouts with a title and distinct visual emphasis |
 | `<Admonition type="formula">` | Mathematical formulas and definitions that need visual prominence |
-| `.c-positive` / `.c-negative` spans | Inline colored text within a sentence |
+| `<Highlight type="positive">` / `<Highlight type="negative">` | Inline semantic emphasis within a sentence (see `techniques/highlight.md`) |
 | `.bg-primary-light` | Light background highlight for a paragraph without a title |

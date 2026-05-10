@@ -120,10 +120,10 @@ The Director owns the Slidev dev server lifecycle. The Visual Reviewer does not 
 
 | Aspect | Detail |
 |--------|--------|
-| Start command | `mise run slidev <folder>/slide.md` |
+| Start command | `mise //:slidev <folder>/slide.md` (PTY-wrapped via `script -qfc 'bun run slidev --open false ${usage_slide}'`) |
 | Execution | Bash tool with `run_in_background: true` |
 | Default URL | `http://localhost:3030` |
-| Readiness check | Visual Reviewer confirms via `bun run agent-browser --session vr-batch-<start> open <server_url>/1` followed by `wait --load networkidle` (retry up to 3 times with `wait 3000` between attempts) |
+| Readiness check | Visual Reviewer confirms via `bun run agent-browser --session vr-batch-<start> open <server_url>/1` followed by a `bun run agent-browser --session vr-batch-<start> snapshot` retry loop (sleep 3 seconds between retries via `sleep 3`, up to 3 attempts) — `agent-browser wait --load networkidle` is denied by repo permissions and is not used. |
 | Shutdown | Kill the background Bash task after all visual review rounds complete |
 
 **Fallback chain:**
