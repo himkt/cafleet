@@ -1,7 +1,7 @@
 # Port Research and Slidev Skills into cafleet, with `cafleet-playground/` Toolchain Consolidation
 
 **Status**: Approved
-**Progress**: 10/28 tasks complete
+**Progress**: 14/28 tasks complete
 **Last Updated**: 2026-05-10
 
 ## Overview
@@ -257,10 +257,10 @@ Documentation lands before any file move or skill copy.
 
 ### Step 3: Port skill directories
 
-- [ ] Copy `~/.claude/skills/research-report/` → `skills/research-report/` verbatim (`SKILL.md`, `roles/`, `template.md`). <!-- completed: -->
-- [ ] Copy `~/.claude/skills/research-presentation/` → `skills/research-presentation/` verbatim (`SKILL.md`, `roles/`). <!-- completed: -->
-- [ ] Copy `~/.claude/skills/my-slidev/` → `skills/my-slidev/` verbatim, including the entire `theme/` subtree (CSS, layouts, Vue components). <!-- completed: -->
-- [ ] Copy `~/.claude/skills/create-figure/` → `skills/create-figure/` verbatim (`SKILL.md` only). <!-- completed: -->
+- [x] Copy `~/.claude/skills/research-report/` → `skills/research-report/` verbatim (`SKILL.md`, `roles/`, `template.md`). <!-- completed: 2026-05-10T07:42 -->
+- [x] Copy `~/.claude/skills/research-presentation/` → `skills/research-presentation/` verbatim (`SKILL.md`, `roles/`). <!-- completed: 2026-05-10T07:42 -->
+- [x] Copy `~/.claude/skills/my-slidev/` → `skills/my-slidev/` verbatim, including the entire `theme/` subtree (CSS, layouts, Vue components). <!-- completed: 2026-05-10T07:42 -->
+- [x] Copy `~/.claude/skills/create-figure/` → `skills/create-figure/` verbatim (`SKILL.md` only). <!-- completed: 2026-05-10T07:42 -->
 
 ### Step 4: Apply internal-reference rewrites
 
