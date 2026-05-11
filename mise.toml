@@ -25,9 +25,3 @@ arg "<slide>" help="path to slide.md file"
 run = "script -qfc \"bun run slidev --open false {{ arg(name='slide') }}\" /dev/null"
 description = "Start the Slidev dev server inside a PTY (script -qfc) so Slidev does not detect a non-TTY stdout and exit early. The trailing /dev/null is the script(1) typescript output file — discarding it keeps the working tree clean"
 
-[tasks.figure]
-usage = '''
-arg "<script>" help="Absolute path to a matplotlib python script"
-'''
-run = "uv run --frozen --group research {{ arg(name='script') }}"
-description = "Run a matplotlib script against the research uv dependency group"
