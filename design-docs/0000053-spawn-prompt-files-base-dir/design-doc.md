@@ -1,6 +1,6 @@
 # On-Demand Spawn-Prompt Audit + base-dir Migration
 
-**Status**: Draft
+**Status**: Approved
 **Progress**: 12/13 tasks complete (Step 5 smoke deferred to operator)
 **Last Updated**: 2026-05-11
 
@@ -219,3 +219,4 @@ After step 4 (parse `agent_id` from the `member create` JSON response), append:
 | 2026-05-11 | Doc reconstructed from conversation transcript after an in-session `git checkout` clobbered uncommitted revision changes. Content matched the user-approved Round-2 state. |
 | 2026-05-11 | Step 1 (no-op audit) and Step 2 (base-dir migration to skills/base-dir/, version bump 0.7.0→0.8.0, mise sync-skills extension) and Step 3 (brace audit clean) executed and committed. |
 | 2026-05-11 | Mid-implementation pivot: user determined that the `prompts/<role>.md` externalization approach was not the intent. Design revised to drop the `prompts/` directory entirely. `roles/<role>.md` stays unchanged (role definitions only, as today). Spawn-prompt template stays inline in `SKILL.md` (as today). The audit-file feature is restored (reverses interview Q11) with a simpler shape: rendered prompt written to `<base-dir>/<role>.md` per role-type, overwritten on subsequent spawns. Status reverted to Draft pending revision review. Title renamed from "Spawn-Prompt Files and base-dir Migration" to "On-Demand Spawn-Prompt Audit + base-dir Migration". Task count revised to 13 (Steps 1+2+3 already done = 7/13). Step 4 was previously the prompts/ flatten across 5 skills; it is now the SKILL.md Director-instruction update to add the audit-file write step. Step 5 is the smoke test (was Step 6). Step 6 is removed. Programmer's mid-Step-4 work-in-progress (13 prompts/<role>.md files) was deleted and the 12 deleted role files restored from git HEAD before this revision was written. |
+| 2026-05-11 | Post-pivot Status promoted: Draft → Approved upon user re-approval (the user typed "commit and go" after reviewing the revised design; the implementation team then completed the revised Step 4 and pushed PR #66). Copilot review of PR #66 is in progress. Status will be promoted to Complete at Step 8 finalize. |
