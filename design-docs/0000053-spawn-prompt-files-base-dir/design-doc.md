@@ -1,7 +1,7 @@
 # On-Demand Spawn-Prompt Audit + base-dir Migration
 
 **Status**: Draft
-**Progress**: 7/13 tasks complete
+**Progress**: 12/13 tasks complete
 **Last Updated**: 2026-05-11
 
 ## Overview
@@ -190,11 +190,11 @@ After step 4 (parse `agent_id` from the `member create` JSON response), append:
 6. **Write the audit file** to `<base-dir>/<role>.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0; `<role>` is the role-type slug, e.g. `manager`, `programmer`). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 ````
 
-- [ ] Update `skills/research-report/SKILL.md`: add the audit-file write step (5+6) to each of the three per-role spawn sections (Manager, Scout, Researcher). Update `Skill(base-dir)` invocations to `Skill(cafleet:base-dir)`. <!-- completed: -->
-- [ ] Update `skills/research-presentation/SKILL.md`: same for Presentation, Transcript, Visual Reviewer. Update `Skill(base-dir)` invocations to `Skill(cafleet:base-dir)`. <!-- completed: -->
-- [ ] Update `skills/design-doc-create/SKILL.md`: same for Drafter (both normal and resume modes share the same Director procedure location) and Reviewer. Update `Skill(base-dir)` invocations to `Skill(cafleet:base-dir)`. <!-- completed: -->
-- [ ] Update `skills/design-doc-execute/SKILL.md`: same for Programmer, Tester, Verifier. Update `Skill(base-dir)` invocations to `Skill(cafleet:base-dir)`. <!-- completed: -->
-- [ ] Update `skills/design-doc-interview/SKILL.md`: same for the single Analyzer spawn section. Update `Skill(base-dir)` invocations to `Skill(cafleet:base-dir)`. <!-- completed: -->
+- [x] Update `skills/research-report/SKILL.md`: add the audit-file write step (5+6) to each of the three per-role spawn sections (Manager, Scout, Researcher). Update `Skill(base-dir)` invocations to `Skill(cafleet:base-dir)`. <!-- completed: 2026-05-11T13:51 -->
+- [x] Update `skills/research-presentation/SKILL.md`: same for Presentation, Transcript, Visual Reviewer. Update `Skill(base-dir)` invocations to `Skill(cafleet:base-dir)`. <!-- completed: 2026-05-11T13:51 -->
+- [x] Update `skills/design-doc-create/SKILL.md`: same for Drafter (both normal and resume modes share the same Director procedure location) and Reviewer. Update `Skill(base-dir)` invocations to `Skill(cafleet:base-dir)`. <!-- completed: 2026-05-11T13:51; drafter step covers both normal and resume modes; audit filename branches drafter.md / drafter-resume.md -->
+- [x] Update `skills/design-doc-execute/SKILL.md`: same for Programmer, Tester, Verifier. Update `Skill(base-dir)` invocations to `Skill(cafleet:base-dir)`. <!-- completed: 2026-05-11T13:51 -->
+- [x] Update `skills/design-doc-interview/SKILL.md`: same for the single Analyzer spawn section. Update `Skill(base-dir)` invocations to `Skill(cafleet:base-dir)`. <!-- completed: 2026-05-11T13:51 -->
 
 ### Step 5: Smoke-Test the Migration
 

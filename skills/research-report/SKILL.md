@@ -54,7 +54,7 @@ Members cannot talk to the user directly — the Director always relays. Members
 
 Before creating the team, determine where output files will be saved.
 
-1. Load `Skill(base-dir)` and follow its procedure. (The topic argument is not a path, so the absolute-path skip rule does not apply.)
+1. Load `Skill(cafleet:base-dir)` and follow its procedure. (The topic argument is not a path, so the absolute-path skip rule does not apply.)
 2. Compute: `${OUTPUT_DIR} = ${BASE}/researches/[topic-slug]/`
 3. Create the output directory.
 4. Pass `${OUTPUT_DIR}` as the resolved absolute path to the Manager and all Researchers/Scouts in their spawn prompts.
@@ -154,6 +154,11 @@ cafleet --session-id [session-id] --json member create --agent-id [director-agen
 
 Capture the printed `agent_id` and substitute it for `[manager-agent-id]` in every subsequent `cafleet` call that targets the Manager.
 
+After parsing `agent_id`:
+
+5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<manager-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+6. **Write the audit file** to `<base-dir>/manager.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+
 ### Step 3: Knowledge Bootstrapping — Scout Phase (Director, on Manager's request)
 
 After assessing the topic, the Manager may send the Director one or more Scout spawn requests via `cafleet message send`. For each request, the Director spawns a Scout.
@@ -196,6 +201,11 @@ cafleet --session-id [session-id] --json member create --agent-id [director-agen
 ```
 
 (Use `scout` if only one; `scout-1`, `scout-2`, ... for multiple.) Capture the printed `agent_id` for each Scout and substitute it into subsequent `cafleet message send` calls targeting that Scout.
+
+After parsing `agent_id`:
+
+5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<scout-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+6. **Write the audit file** to `<base-dir>/scout.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Scout-Manager loop (relayed through Director):**
 
@@ -266,6 +276,11 @@ cafleet --session-id [session-id] --json member create --agent-id [director-agen
 ```
 
 The Director repeats this step whenever the Manager requests additional Researchers (for coverage gaps, failed investigations, or revision-driven re-research). Any new Researcher must first have a task created by the Manager; the Director includes the `taskId` in the spawn prompt.
+
+After parsing `agent_id`:
+
+5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<researcher-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+6. **Write the audit file** to `<base-dir>/researcher.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 ### Step 5: Review & Revision Loop (Director ↔ Manager, via `cafleet message send`)
 

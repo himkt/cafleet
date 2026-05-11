@@ -210,7 +210,7 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 
 **Path resolution** (before resume detection):
 
-Load `Skill(base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
+Load `Skill(cafleet:base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
 - If skipped (absolute path): set `${DOC_PATH} = $ARGUMENTS`.
 - If base resolved: set `${DOC_PATH} = ${BASE}/design-docs/$ARGUMENTS`. Resolve to absolute path.
 
@@ -342,6 +342,11 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 
 Parse `agent_id` from the JSON response and substitute it for `<drafter-agent-id>` in every subsequent command.
 
+After parsing `agent_id`:
+
+5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<drafter-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+6. **Write the audit file** to `<base-dir>/drafter.md` (normal mode) or `<base-dir>/drafter-resume.md` (resume mode), where `<base-dir>` is resolved by `Skill(cafleet:base-dir)` in Step 0. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+
 #### 1e. Spawn the Reviewer
 
 **Reviewer spawn prompt:**
@@ -379,6 +384,11 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<reviewer-agent-id>` in every subsequent command.
+
+After parsing `agent_id`:
+
+5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<reviewer-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+6. **Write the audit file** to `<base-dir>/reviewer.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 #### 1f. Verify members are live
 

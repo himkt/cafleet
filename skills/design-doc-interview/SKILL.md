@@ -105,7 +105,7 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 
 ### Step 0: Path Resolution & Doc Validation (Director)
 
-1. Load `Skill(base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
+1. Load `Skill(cafleet:base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
    - If skipped (absolute path): set `doc_path = $ARGUMENTS`.
    - If base resolved: set `doc_path = ${BASE}/design-docs/$ARGUMENTS`. Resolve to absolute path.
    - If `doc_path` does not end with `design-doc.md`, append `/design-doc.md`.
@@ -181,6 +181,11 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-id>` in every subsequent command.
+
+After parsing `agent_id`:
+
+5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<analyzer-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+6. **Write the audit file** to `<base-dir>/analyzer.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 #### 2e. Wait for the Analyzer's question list
 

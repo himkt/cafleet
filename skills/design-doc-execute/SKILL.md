@@ -215,7 +215,7 @@ Before validation, resolve `$ARGUMENTS` into a concrete `design-doc.md` path.
 
 #### Phase 1: Base Directory Resolution
 
-Load `Skill(base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
+Load `Skill(cafleet:base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
 - If skipped (absolute path): set `${RESOLVED_ARGS} = $ARGUMENTS`.
 - If base resolved: set `${RESOLVED_ARGS} = ${BASE}/design-docs/$ARGUMENTS`. Resolve to absolute path.
 
@@ -408,6 +408,11 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 
 Parse `agent_id` from the JSON response and substitute it for `<programmer-agent-id>` in every subsequent command.
 
+After parsing `agent_id`:
+
+5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<programmer-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+6. **Write the audit file** to `<base-dir>/programmer.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+
 **Tester spawn prompt (if needed):**
 
 ```
@@ -448,6 +453,11 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>` in every subsequent command.
+
+After parsing `agent_id`:
+
+5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<tester-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+6. **Write the audit file** to `<base-dir>/tester.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Verifier spawn prompt (if needed):**
 
@@ -491,6 +501,11 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-id>` in every subsequent command.
+
+After parsing `agent_id`:
+
+5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<verifier-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+6. **Write the audit file** to `<base-dir>/verifier.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 #### 3f. Verify members are live
 
