@@ -1,7 +1,7 @@
 # Promote Project-Local Skills and Agents to Global
 
 **Status**: Approved
-**Progress**: 30/49 tasks complete
+**Progress**: 38/49 tasks complete
 **Last Updated**: 2026-05-11
 
 ## Overview
@@ -341,14 +341,14 @@ The rollback does NOT need to revert the `mise //:figure` deletion, the `[depend
 
 ### Step 4: Plugin Source Sync and Manifest Updates
 
-- [ ] `cp -r ~/.claude/skills/create-figure skills/create-figure` (plugin source at repo root). <!-- completed: -->
-- [ ] `cp -r ~/.claude/skills/my-slidev skills/my-slidev`. <!-- completed: -->
-- [ ] `cp -r ~/.claude/skills/research-presentation skills/research-presentation`. <!-- completed: -->
-- [ ] `cp -r ~/.claude/skills/research-report skills/research-report`. <!-- completed: -->
-- [ ] Add a steady-state sync task to the repo-root `mise.toml`: `[tasks.sync-skills]` (single-segment name per the repo-root convention shared with `figure`, `uv-sync`, `bun-install`) that runs the four `cp -r skills/<name> ~/.claude/skills/<name>` mirrors in one shot. Invoked as `mise //:sync-skills`. This is the canonical mechanism for keeping the home-dir working copy aligned with the plugin source after this design lands; it is the divergence-guard mentioned in the *Distribution Topology* section. <!-- completed: -->
-- [ ] Edit `.claude-plugin/plugin.json`: append the four new `./skills/...` entries to the `skills` array (full target shape shown in Specification § *Plugin Manifest Updates*). Bump `version` from `0.6.1` to `0.7.0` (MINOR bump per the *Version-bump policy*: four new shipped skills extend the public surface). <!-- completed: -->
-- [ ] Edit `.codex-plugin/plugin.json`: bump `version` from `0.6.1` to `0.7.0`. The `"skills": "./skills/"` auto-discovery field is unchanged. <!-- completed: -->
-- [ ] Edit `cafleet/pyproject.toml`: bump `version` from `0.6.1` to `0.7.0` (verified to mirror the plugin manifest version on line 3). <!-- completed: -->
+- [x] `cp -r ~/.claude/skills/create-figure skills/create-figure` (plugin source at repo root). <!-- completed: 2026-05-11T10:35; Director applied (Programmer Bash to ~/.claude/skills/ source was harness-denied). -->
+- [x] `cp -r ~/.claude/skills/my-slidev skills/my-slidev`. <!-- completed: 2026-05-11T10:35; Director applied. -->
+- [x] `cp -r ~/.claude/skills/research-presentation skills/research-presentation`. <!-- completed: 2026-05-11T10:35; Director applied. -->
+- [x] `cp -r ~/.claude/skills/research-report skills/research-report`. <!-- completed: 2026-05-11T10:35; Director applied. -->
+- [x] Add a steady-state sync task to the repo-root `mise.toml`: `[tasks.sync-skills]` (single-segment name per the repo-root convention shared with `figure`, `uv-sync`, `bun-install`) that runs the four `cp -r skills/<name> ~/.claude/skills/<name>` mirrors in one shot. Invoked as `mise //:sync-skills`. This is the canonical mechanism for keeping the home-dir working copy aligned with the plugin source after this design lands; it is the divergence-guard mentioned in the *Distribution Topology* section. <!-- completed: 2026-05-11T10:36; user pre-applied. Each line idempotently removes the home-dir copy with `rm -rf` first so re-runs don't nest dirs. -->
+- [x] Edit `.claude-plugin/plugin.json`: append the four new `./skills/...` entries to the `skills` array (full target shape shown in Specification § *Plugin Manifest Updates*). Bump `version` from `0.6.1` to `0.7.0` (MINOR bump per the *Version-bump policy*: four new shipped skills extend the public surface). <!-- completed: 2026-05-11T10:36; user pre-applied. -->
+- [x] Edit `.codex-plugin/plugin.json`: bump `version` from `0.6.1` to `0.7.0`. The `"skills": "./skills/"` auto-discovery field is unchanged. <!-- completed: 2026-05-11T10:36; user pre-applied. -->
+- [x] Edit `cafleet/pyproject.toml`: bump `version` from `0.6.1` to `0.7.0` (verified to mirror the plugin manifest version on line 3). <!-- completed: 2026-05-11T10:36; user pre-applied. -->
 
 ### Step 5: Verification
 

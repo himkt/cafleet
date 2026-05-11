@@ -1,6 +1,6 @@
 {
   "name": "cafleet",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Message broker CLI and design document orchestration skills for coding agents.",
   "author": {
     "name": "himkt"
@@ -15,6 +15,10 @@
     "./skills/design-doc",
     "./skills/design-doc-create",
     "./skills/design-doc-execute",
-    "./skills/design-doc-interview"
+    "./skills/design-doc-interview",
+    "./skills/create-figure",
+    "./skills/my-slidev",
+    "./skills/research-presentation",
+    "./skills/research-report"
   ]
 }
