@@ -11,7 +11,10 @@ Theme location: `theme/` inside this skill's directory. For Slidev syntax, refer
 
 ```yaml
 ---
-theme: ~/.claude/skills/my-slidev/theme  # absolute path to this skill's theme/ directory
+theme: ~/.claude/skills/my-slidev/theme  # working-copy install (skill present under ~/.claude/skills/)
+# For plugin-only installs (no working copy in ~/.claude/skills/), use the plugin's installed path instead:
+# theme: ~/.claude/plugins/cache/cafleet/cafleet/<version>/skills/my-slidev/theme
+# Replace <version> with the installed cafleet plugin version, or run `claude plugin list` to find it.
 title: <Presentation Title>
 author: <Author Name>
 fonts:
@@ -175,7 +178,7 @@ This skill ships an embedded agent spec for generating a complete Slidev present
 
     Before generating any presentation, load these two skills:
 
-    1. **`my-slidev`** — Custom theme with cover, bullets, and blank layouts. Provides layout selection guide, content structuring rules, formatting conventions, and headmatter template.
+    1. **`my-slidev`** (or **`cafleet:my-slidev`** when only the plugin is installed) — Custom theme with cover, bullets, and blank layouts. Provides layout selection guide, content structuring rules, formatting conventions, and headmatter template.
     2. **`slidev`** — Slidev syntax reference for markdown features, components, animations, and other capabilities.
 
     ## Input
@@ -201,7 +204,7 @@ This skill ships an embedded agent spec for generating a complete Slidev present
        - Use `**bold**` for key terms, max 1-2 per bullet
     6. **Generate the initial slide content**:
        - Start with the headmatter template from the `my-slidev` skill
-       - Resolve the theme path to the absolute filesystem path of the embedding skill's `theme/` directory (use `Skill(base-dir)` to resolve the skill's own directory — typically `~/.claude/skills/my-slidev/theme/` on the maintainer machine, or the plugin-installed path otherwise).
+       - Use the literal `theme:` path documented in the embedding skill's headmatter template — `~/.claude/skills/my-slidev/theme` when this skill is installed under `~/.claude/skills/`, or `~/.claude/plugins/cache/cafleet/cafleet/<version>/skills/my-slidev/theme` when it is installed only via the cafleet plugin. The path is a fixed, documented location; do NOT try to derive it dynamically (Skill(base-dir) resolves a CWD-based working directory, not the install location of the calling skill).
        - First slide is always `cover` layout
        - Content slides follow with appropriate layouts
        - Add presenter notes (`<!-- notes -->`) with expanded talking points from the source content
@@ -219,7 +222,7 @@ This skill ships an embedded agent spec for generating a complete Slidev present
     - Always start with a `cover` slide
     - Use `bullets` layout by default for content slides
     - Add presenter notes with expanded talking points from the source content
-    - Resolve the theme path to the absolute filesystem path of the embedding skill's `theme/` directory (use `Skill(base-dir)` to resolve the skill's own directory — typically `~/.claude/skills/my-slidev/theme/` on the maintainer machine, or the plugin-installed path otherwise).
+    - Use the literal `theme:` path documented in the embedding skill's headmatter template — `~/.claude/skills/my-slidev/theme` when this skill is installed under `~/.claude/skills/`, or `~/.claude/plugins/cache/cafleet/cafleet/<version>/skills/my-slidev/theme` when it is installed only via the cafleet plugin. The path is a fixed, documented location; do NOT try to derive it dynamically (Skill(base-dir) resolves a CWD-based working directory, not the install location of the calling skill).
     - All slides must pass content overflow review — no slide may have content that exceeds its viewport
     - Citations must be numbered sequentially by order of first appearance
     - Every citation in body must have a reference; every reference must be cited in body
