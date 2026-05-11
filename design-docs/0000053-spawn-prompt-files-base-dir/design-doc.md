@@ -53,7 +53,9 @@ In scope: the five base-dir-consuming skills that spawn members.
 | `design-doc-execute` | `skills/design-doc-execute/` | Programmer, Tester, Verifier | `roles/programmer.md`, `roles/tester.md`, `roles/verifier.md` |
 | `design-doc-interview` | `skills/design-doc-interview/` | Analyzer | `roles/analyzer.md` |
 
-Out of scope: `agent-team-monitoring`, `agent-team-supervision`, `my-slidev`, `create-figure`, `cafleet`. These skills are out of scope because they do not spawn CAFleet members and therefore do not participate in the audit-file write described here. (Some of them — e.g. `create-figure` — do load `Skill(base-dir)` for their own output-directory resolution; that is unrelated to the audit-file feature.)
+Out of scope for the audit-file write: `agent-team-monitoring`, `agent-team-supervision`, `my-slidev`, `create-figure`, `cafleet`. These skills do not spawn CAFleet members and therefore do not participate in the audit-file write described here.
+
+**`create-figure` exception (in-scope for the namespace rename):** `create-figure` does load `Skill(base-dir)` for its own output-directory resolution. To keep `/create-figure` working after the operator removes `~/.claude/skills/base-dir/`, the `Skill(base-dir)` invocation in `skills/create-figure/SKILL.md` MUST be updated to `Skill(cafleet:base-dir)` as part of Step 4 (treated as the sixth consuming skill for that step's namespace-rename portion; create-figure does NOT get an audit-file write step because it spawns no members).
 
 Non-spawned `roles/director.md` files document the main-Claude Director's behavior. They remain in `roles/` as reference documentation.
 
