@@ -14,11 +14,12 @@ No new `prompts/<role>.md` directory is introduced. The `roles/` directory remai
 
 ## Success Criteria
 
-- [ ] Every successful `cafleet member create` in the five consuming skills (`research-report`, `research-presentation`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) writes the rendered spawn prompt to `<base-dir>/<role>.md` (one file per role-type, overwritten on subsequent spawns of the same role-type within an invocation).
-- [ ] The `base-dir` skill exists at `skills/base-dir/SKILL.md` and ships as `cafleet:base-dir` via both plugin manifests.
-- [ ] `skills/<skill>/roles/<role>.md` files are unchanged in content from before this design (no flattening, no prologue/identity-block inlining).
-- [ ] Each consuming skill's `SKILL.md` Director instructions explicitly call out the audit-file write step after `cafleet member create` returns success.
-- [ ] A `/research-report` smoke run end-to-end succeeds with the new audit-file write and produces one rendered file under `<base-dir>/` per spawned member-role.
+- [ ] Every successful `cafleet member create` in the five consuming skills (`research-report`, `research-presentation`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) writes the rendered spawn prompt to `<base-dir>/<role>.md` (one file per role-type, overwritten on subsequent spawns of the same role-type within an invocation). <!-- deferred to operator smoke; in-repo instructions are in place (see SC #4) -->
+- [x] The `base-dir` skill exists at `skills/base-dir/SKILL.md` and ships as `cafleet:base-dir` via both plugin manifests. <!-- verified: skills/base-dir/SKILL.md tracked; .claude-plugin/plugin.json + .codex-plugin/plugin.json both at v0.8.0 with ./skills/base-dir entry -->
+- [x] `skills/<skill>/roles/<role>.md` files are unchanged in content from before this design (no flattening, no prologue/identity-block inlining). <!-- verified: `git diff main -- skills/*/roles/*.md` returns empty for the 12 spawned-role files -->
+- [x] Each consuming skill's `SKILL.md` Director instructions explicitly call out the audit-file write step after `cafleet member create` returns success. <!-- verified: 12 "Write the audit file" occurrences across 5 SKILL.md files (3+3+2+3+1) -->
+- [ ] A `/research-report` smoke run end-to-end succeeds with the new audit-file write and produces one rendered file under `<base-dir>/` per spawned member-role. <!-- deferred to operator post-merge smoke -->
+
 
 ---
 
