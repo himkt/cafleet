@@ -1,7 +1,7 @@
 # Promote Project-Local Skills and Agents to Global
 
-**Status**: Approved
-**Progress**: 47/49 tasks complete
+**Status**: Complete
+**Progress**: 49/49 tasks complete
 **Last Updated**: 2026-05-11
 
 ## Overview
@@ -375,3 +375,4 @@ The rollback does NOT need to revert the `mise //:figure` deletion, the `[depend
 | 2026-05-11 | Revision round 2 (reviewer feedback): documented codex-side dispatch explicitly (verified codex has no in-session subagent-dispatch primitive — added two patterns "inline-follow" and "member-spawn" with concrete recipes); renamed mise task `skills:sync` → `sync-skills` per the repo-root single-segment convention; quoted verified heading positions for `research-report/SKILL.md` and `research-presentation/SKILL.md` so the gitignore-note insertion and discovery-pointer insertion target actual line numbers (no `## Output` heading exists in either file, so the task now creates the section explicitly between `## Prerequisites` and `## Architecture`); added Step 5 codex check (c) member-spawn verification (tasks recounted 0/46 → 0/47); corrected round-1 changelog parenthetical from "(0/44)" to "(0/46)". |
 | 2026-05-11 | Revision round 3 (reviewer feedback): corrected the `cafleet member create` recipe in *Agent Embedding Strategy* § *Codex-side dispatch* pattern 2 — the non-existent `--spawn-prompt-from-text` flag is replaced with the verified signature `cafleet --session-id <s> member create --agent-id <d> --name <n> --description <d> --coding-agent codex "<positional spawn prompt>"`; same fix in Step 5 codex check (c). Added two new Step 3 tasks to append the "codex inline-follow" and "codex member-spawn" subsections to each embedded spec — these two subsections, together with the existing Claude Code recipe subsection, satisfy the three-sibling-sub-heading contract in the Specification. Task count 0/47 → 0/49. |
 | 2026-05-11 | Status promoted from `Draft` to `Approved` upon user approval relayed by the Director. Implementation steps verified actionable (no `[TBD]`, no standing `COMMENT(role): <body>` issue markers, every task carries the `<!-- completed: -->` timestamp slot). |
+| 2026-05-11 | Implementation landed across 5 commits (b8e5f6c Step 1, 7e597c2 Step 2, 872dd6d Step 3, 79cd9f2 Step 4, 96bb4e9 Step 5) on branch `feat/promote-skills-agents-to-global`. PR #65 opened against `main`. Copilot review loop: 3 rounds — round 1 caught 3 issues (theme path documentation, embedded skill-name aliases for plugin installs, `Skill(base-dir)` misuse) fixed in 2db4fc7; round 2 caught 1 issue (`slide.md` vs `slides.md` naming inconsistency) fixed in d240fb9; round 3 returned "generated no new comments" — user treated as approval. Step 5 runtime smoke tests (out-of-repo Skill load, /create-figure render, codex compat (a)/(b)/(c)) are deferred to user-side post-merge sanity check; static-content verification recorded in Step 5 annotations. Status promoted to `Complete`. |
