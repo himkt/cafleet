@@ -1,7 +1,7 @@
 # Promote Project-Local Skills and Agents to Global
 
 **Status**: Approved
-**Progress**: 11/49 tasks complete
+**Progress**: 20/49 tasks complete
 **Last Updated**: 2026-05-11
 
 ## Overview
@@ -313,15 +313,16 @@ The rollback does NOT need to revert the `mise //:figure` deletion, the `[depend
 
 ### Step 2: Move Skills to `~/.claude/skills/` (one-time bootstrap)
 
-- [ ] Pre-move enumeration check: for each of `.claude/skills/create-figure/`, `.claude/skills/my-slidev/`, `.claude/skills/research-presentation/`, `.claude/skills/research-report/`, list every file and subdirectory and verify the contents match what the Inventory table contemplates (SKILL.md + standard subdirs like `theme/`, `techniques/`, etc.). Also run `git status -s -- .claude/skills/<name>/` for each — must be clean. If any unenumerated file is found, escalate via `COMMENT(programmer)` before deleting in the final task of this step. <!-- completed: -->
-- [ ] `cp -r .claude/skills/create-figure ~/.claude/skills/create-figure`. <!-- completed: -->
-- [ ] `cp -r .claude/skills/my-slidev ~/.claude/skills/my-slidev`. <!-- completed: -->
-- [ ] `cp -r .claude/skills/research-presentation ~/.claude/skills/research-presentation`. <!-- completed: -->
-- [ ] `cp -r .claude/skills/research-report ~/.claude/skills/research-report`. <!-- completed: -->
-- [ ] Rewrite `~/.claude/skills/create-figure/SKILL.md`: replace every occurrence of `mise //:figure <script>` with `uv run --with matplotlib python <script>`. Remove any sentence that says the skill requires the cafleet repo's `research` uv group. <!-- completed: -->
-- [ ] Edit `~/.claude/skills/my-slidev/SKILL.md` line 8: delete exactly the segment ` — \`${CAFLEET_REPO_ROOT}/.claude/skills/my-slidev/theme/\` (resolve \`${CAFLEET_REPO_ROOT}\` via \`Skill(base-dir)\`)`. Resulting line 8 must read: `Theme location: \`theme/\` inside this skill's directory. For Slidev syntax, refer to /slidev or /slidev:slidev. **NEVER READ FILES DIRECTLY**.` <!-- completed: -->
-- [ ] Update `~/.claude/skills/research-report/SKILL.md`: verified headings are `## Additional resources` (line 18), `## Prerequisites` (line 22), `## Architecture` (line 26), `## Process` (line 47) — there is no existing `## Output` section. Insert a new `## Output` section between `## Prerequisites` (line 22) and `## Architecture` (line 26) containing the per-project gitignore note: callers MUST gitignore `researches/` per project; the skill does not create or modify `.gitignore` itself. <!-- completed: -->
-- [ ] Delete `.claude/skills/create-figure/`, `.claude/skills/my-slidev/`, `.claude/skills/research-presentation/`, `.claude/skills/research-report/` from the repo. Confirm `.claude/skills/` listing returns exactly `update-readme/`. <!-- completed: -->
+- [x] Pre-move enumeration check: for each of `.claude/skills/create-figure/`, `.claude/skills/my-slidev/`, `.claude/skills/research-presentation/`, `.claude/skills/research-report/`, list every file and subdirectory and verify the contents match what the Inventory table contemplates (SKILL.md + standard subdirs like `theme/`, `techniques/`, etc.). Also run `git status -s -- .claude/skills/<name>/` for each — must be clean. If any unenumerated file is found, escalate via `COMMENT(programmer)` before deleting in the final task of this step. <!-- completed: 2026-05-11T10:07; Programmer git ls-files + git status returned clean. -->
+- [x] `cp -r .claude/skills/create-figure ~/.claude/skills/create-figure`. <!-- completed: 2026-05-11T10:08; Director applied (Programmer Bash to ~/.claude/skills/ was harness-denied). -->
+- [x] `cp -r .claude/skills/my-slidev ~/.claude/skills/my-slidev`. <!-- completed: 2026-05-11T10:08; Director applied. -->
+- [x] `cp -r .claude/skills/research-presentation ~/.claude/skills/research-presentation`. <!-- completed: 2026-05-11T10:09; Director applied. -->
+- [x] `cp -r .claude/skills/research-report ~/.claude/skills/research-report`. <!-- completed: 2026-05-11T10:09; Director applied. -->
+- [x] Rewrite `~/.claude/skills/create-figure/SKILL.md`: replace every occurrence of `mise //:figure <script>` with `uv run --with matplotlib python <script>`. Remove any sentence that says the skill requires the cafleet repo's `research` uv group. <!-- completed: 2026-05-11T10:10; Director applied. Also generalized two cafleet-specific path lines (the base-dir override rule and the "never create scripts in the cafleet repo root" warning) so the skill reads project-agnostically. -->
+- [x] Edit `~/.claude/skills/my-slidev/SKILL.md` line 8: delete exactly the segment ` — \`${CAFLEET_REPO_ROOT}/.claude/skills/my-slidev/theme/\` (resolve \`${CAFLEET_REPO_ROOT}\` via \`Skill(base-dir)\`)`. Resulting line 8 must read: `Theme location: \`theme/\` inside this skill's directory. For Slidev syntax, refer to /slidev or /slidev:slidev. **NEVER READ FILES DIRECTLY**.` <!-- completed: 2026-05-11T10:11; Director applied. Also rewrote the Headmatter `theme:` example on line 14 to `~/.claude/skills/my-slidev/theme` (was the same `${CAFLEET_REPO_ROOT}`-based path). -->
+- [x] Update `~/.claude/skills/research-report/SKILL.md`: verified headings are `## Additional resources` (line 18), `## Prerequisites` (line 22), `## Architecture` (line 26), `## Process` (line 47) — there is no existing `## Output` section. Insert a new `## Output` section between `## Prerequisites` (line 22) and `## Architecture` (line 26) containing the per-project gitignore note: callers MUST gitignore `researches/` per project; the skill does not create or modify `.gitignore` itself. <!-- completed: 2026-05-11T10:11; Director applied. -->
+- [x] Delete `.claude/skills/create-figure/`, `.claude/skills/my-slidev/`, `.claude/skills/research-presentation/`, `.claude/skills/research-report/` from the repo. Confirm `.claude/skills/` listing returns exactly `update-readme/`. <!-- completed: 2026-05-11T10:13; Director applied via `git rm -r`. git status -s confirms 4 dirs staged for deletion; only `.claude/skills/update-readme/` remains. -->
+
 
 ### Step 3: Embed Agent Specs and Delete Standalone Agent Files
 
