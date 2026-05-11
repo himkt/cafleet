@@ -271,7 +271,7 @@ Read the role files that will be embedded verbatim in spawn prompts:
 
 **Drafter spawn prompt (normal mode):**
 
-When constructing the prompt, substitute the literal `<session-id>` and `<director-agent-id>` UUIDs for the placeholders below. The new member's own `<my-agent-id>` will be allocated by `member create` and baked into the spawn prompt automatically — `_resolve_prompt` runs `str.format()` on BOTH the default template AND any user-supplied custom prompt, so `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` placeholders are substituted either way. See the Template safety note under `Member Create` in `skills/cafleet/SKILL.md` — any literal `{` / `}` in a custom prompt must be doubled (`{{` / `}}`), because the prompt is passed through `.format()` even when it contains no placeholders. Pre-substituting the dynamic placeholder values in shell is separate and does NOT remove the need to escape literal braces.
+When constructing the prompt, substitute the literal `<session-id>` and `<director-agent-id>` UUIDs for the placeholders below. The new member's own `<my-agent-id>` will be allocated by `member create` and baked into the spawn prompt automatically — `_resolve_prompt` runs `str.format()` on BOTH the default template AND any user-supplied custom prompt, so `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders are substituted either way. See the Template safety note under `Member Create` in `skills/cafleet/SKILL.md` — any literal `{` / `}` in a custom prompt must be doubled (`{{` / `}}`), because the prompt is passed through `.format()` even when it contains no placeholders. Pre-substituting the dynamic placeholder values in shell is separate and does NOT remove the need to escape literal braces.
 
 ```
 You are the Drafter in a design document creation team (CAFleet-native).
@@ -344,7 +344,7 @@ Parse `agent_id` from the JSON response and substitute it for `<drafter-agent-id
 
 After parsing `agent_id`:
 
-1. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<drafter-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<drafter-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
 2. **Write the audit file** to `${BASE}/drafter.md` (normal mode) or `${BASE}/drafter-resume.md` (resume mode), where `${BASE}` is resolved by `Skill(cafleet:base-dir)` in Step 0. If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 #### 1e. Spawn the Reviewer
@@ -387,7 +387,7 @@ Parse `agent_id` from the JSON response and substitute it for `<reviewer-agent-i
 
 After parsing `agent_id`:
 
-1. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<reviewer-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<reviewer-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
 2. **Write the audit file** to `${BASE}/reviewer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 #### 1f. Verify members are live

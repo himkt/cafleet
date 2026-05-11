@@ -27,7 +27,7 @@ No new `prompts/<role>.md` directory is introduced. The `roles/` directory remai
 
 CAFleet member spawn prompts are assembled by the Director from two sources:
 
-1. **`SKILL.md`** carries the spawn-prompt template inline (prologue + `[ROLE DEFINITION]` placeholder + identity block + protocol + trailing instructions) and the four cafleet kwargs `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}`.
+1. **`SKILL.md`** carries the spawn-prompt template inline (prologue + `[ROLE DEFINITION]` placeholder + identity block + protocol + trailing instructions) and the three cafleet kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}`.
 2. **`roles/<role>.md`** carries the role definition; the Director substitutes this verbatim into the `[ROLE DEFINITION]` placeholder at render time.
 
 Two pain points:
@@ -80,7 +80,7 @@ The existing three-tier model is preserved. Every spawn-prompt template (inline 
 |:--|:--|:--|:--|:--|
 | 1. Skill-side fill-in | `[INSERT <description>]` | The Director, **before** the `member create` call | Per-spawn (skill-specific values) | `[INSERT today's date]`, `[INSERT output directory]`, `[INSERT USER'S ORIGINAL REQUEST]` |
 | 2. Verbatim role inlining | `[ROLE DEFINITION]` placeholder, replaced with the verbatim content of `roles/<role>.md` | The Director, **before** the `member create` call | Per-spawn | n/a after substitution |
-| 3. cafleet kwargs | `{session_id}`, `{agent_id}`, `{director_name}`, `{director_agent_id}` | `cafleet member create` via Python `str.format()` on the entire prompt string | At spawn time | Single-braced; never doubled |
+| 3. cafleet kwargs | `{session_id}`, `{agent_id}`, `{director_agent_id}` | `cafleet member create` via Python `str.format()` on the entire prompt string | At spawn time | Single-braced; never doubled |
 
 The tier-1 marker syntax is a **notational convention** — `[INSERT <description>]` means "substitute the value the consuming skill computed earlier in its procedure." The Director performs the substitution in-memory before passing the rendered prompt to `cafleet member create`; no shell variable expansion is involved.
 
@@ -96,7 +96,7 @@ For each `cafleet member create`, the Director's flow becomes:
 4. **Substitute every `[INSERT ...]` tier-1 marker** with the corresponding skill-side value (string replace, in memory). The Director MUST resolve every `[INSERT ...]` marker; any unresolved marker is a bug, not a fallthrough.
 5. **Pass the result** as the positional spawn-prompt argument to `cafleet --json member create --agent-id <director-agent-id> -- "<rendered prompt>"`. cafleet's own `_resolve_prompt` performs tier-3 `str.format()` on this string with the four kwargs.
 6. **Parse `agent_id`** from the `member create` JSON response. Treat it as the new member's literal UUID for all subsequent `cafleet` calls.
-7. **Re-render the final prompt locally** with Python `str.format()` semantics over the rendered string and the four kwargs — i.e., conceptually `prompt.format(session_id=<session-id>, agent_id=<new-member-id>, director_name=<director-name>, director_agent_id=<director-agent-id>)`. This mirrors cafleet's broker-side substitution and yields the **exact** text the new member sees in its pane.
+7. **Re-render the final prompt locally** with Python `str.format()` semantics over the rendered string and the three kwargs — i.e., conceptually `prompt.format(session_id=<session-id>, agent_id=<new-member-id>, director_agent_id=<director-agent-id>)`. This mirrors cafleet's broker-side substitution and yields the **exact** text the new member sees in its pane.
 8. **Write the audit file** to `${BASE}/<role>.md` (see § *Audit File Layout* below).
 
 Steps 1–6 are today's procedure unchanged. Steps 7–8 are new.
@@ -178,18 +178,18 @@ The design doc does NOT introduce new verbs, new pointer forms, or new `COMMENT(
 
 ### Step 3: Brace Audit
 
-- [x] For each of the five consuming skills, grep `SKILL.md` and every `roles/*.md` file under that skill for literal `{` and `}` characters. Every occurrence outside the four cafleet kwargs (`{session_id}`, `{agent_id}`, `{director_name}`, `{director_agent_id}`) MUST already be doubled (`{{` / `}}`). Fix any unescaped occurrence in-place before Step 4 proceeds. <!-- completed: 2026-05-11T13:20; audit clean — role files have zero braces; SKILL.md spawn-prompt blocks contain only the four kwargs; `${VAR}` references in narrative + `[INSERT ${VAR}]` markers are out-of-scope (tier-1 substituted by Director before str.format) -->
+- [x] For each of the five consuming skills, grep `SKILL.md` and every `roles/*.md` file under that skill for literal `{` and `}` characters. Every occurrence outside the three cafleet kwargs (`{session_id}`, `{agent_id}`, `{director_agent_id}`) MUST already be doubled (`{{` / `}}`). Fix any unescaped occurrence in-place before Step 4 proceeds. <!-- completed: 2026-05-11T13:20; audit clean — role files have zero braces; SKILL.md spawn-prompt blocks contain only the four kwargs; `${VAR}` references in narrative + `[INSERT ${VAR}]` markers are out-of-scope (tier-1 substituted by Director before str.format) -->
 
 ### Step 4: Update SKILL.md Director Instructions (Audit-File Write)
 
-For each consuming skill, edit `SKILL.md`'s per-role spawn section to add two new steps after `cafleet member create` parsing: (a) re-render the prompt locally with `prompt.format(session_id=..., agent_id=<new-member-id>, director_name=..., director_agent_id=...)` (in memory; the Director can shell out via `python -c` or do the substitution textually — implementation choice per skill), and (b) Write the result to `${BASE}/<role>.md`. Also update every `Skill(base-dir)` invocation in the affected SKILL.md to the prefixed `Skill(cafleet:base-dir)` form — bare-name resolution does not work post-migration once the global `~/.claude/skills/base-dir/` copy is removed.
+For each consuming skill, edit `SKILL.md`'s per-role spawn section to add two new steps after `cafleet member create` parsing: (a) re-render the prompt locally with `prompt.format(session_id=..., agent_id=<new-member-id>, director_agent_id=...)` (in memory; the Director can shell out via `python -c` or do the substitution textually — implementation choice per skill), and (b) Write the result to `${BASE}/<role>.md`. Also update every `Skill(base-dir)` invocation in the affected SKILL.md to the prefixed `Skill(cafleet:base-dir)` form — bare-name resolution does not work post-migration once the global `~/.claude/skills/base-dir/` copy is removed.
 
 Reference template for the added steps (adapt per skill — outer fence is four backticks so the inner ```bash fence renders correctly):
 
 ````
 After parsing `agent_id` from the `member create` JSON response, append:
 
-1. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<new-member-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<new-member-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
 2. **Write the audit file** to `${BASE}/<role>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<role>` is the role-type slug, e.g. `manager`, `programmer`). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 ````
 

@@ -101,7 +101,7 @@ Read the role files that will be embedded verbatim in spawn prompts (paths are r
 - `roles/transcript.md`
 - `roles/visual-reviewer.md`
 
-> **Template safety**: cafleet `member create` runs `str.format()` on the entire spawn prompt with `session_id` / `agent_id` / `director_name` / `director_agent_id` as kwargs. The role docs in this skill use `<...>` / `[...]` notation everywhere placeholders appear, so the embedded role content contains no literal `{` or `}` and no escaping is needed. The only single-brace tokens in the spawn prompt are the four kwargs cafleet itself substitutes: `{session_id}`, `{agent_id}`, `{director_name}`, `{director_agent_id}`. If you ever add a `{` or `}` to a role doc (a JSON example, a format-string example), double it to `{{` / `}}` before embedding — `str.format()` raises `KeyError` at spawn time otherwise. Do NOT shell out to `sed` / `awk` — those are blocked by the harness Bash validator.
+> **Template safety**: cafleet `member create` runs `str.format()` on the entire spawn prompt with `session_id` / `agent_id` / `director_agent_id` as kwargs. The role docs in this skill use `<...>` / `[...]` notation everywhere placeholders appear, so the embedded role content contains no literal `{` or `}` and no escaping is needed. The only single-brace tokens in the spawn prompt are the three kwargs cafleet itself substitutes: `{session_id}`, `{agent_id}`, `{director_agent_id}`. If you ever add a `{` or `}` to a role doc (a JSON example, a format-string example), double it to `{{` / `}}` before embedding — `str.format()` raises `KeyError` at spawn time otherwise. Do NOT shell out to `sed` / `awk` — those are blocked by the harness Bash validator.
 
 #### 1d. Spawn Presentation + Transcript in parallel
 
@@ -113,7 +113,7 @@ Both work from `report.md` independently. After the slide deck is finalized (Ste
 You are the Presentation Specialist in a research presentation team (CAFleet-native).
 
 [ROLE DEFINITION]
-[Content of roles/presentation.md injected verbatim. Cafleet substitutes only the four format kwargs `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
+[Content of roles/presentation.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
 [/ROLE DEFINITION]
 
 Load these skills at startup:
@@ -123,7 +123,6 @@ Load these skills at startup:
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
-DIRECTOR NAME: {director_name}
 YOUR AGENT ID: {agent_id}
 
 TASK: Create a Slidev presentation from the approved research report.
@@ -153,7 +152,7 @@ Capture the printed `agent_id` and substitute it for `[presentation-agent-id]` i
 
 After parsing `agent_id`:
 
-1. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<presentation-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<presentation-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
 2. **Write the audit file** to `${BASE}/presentation.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Transcript spawn prompt:**
@@ -162,7 +161,7 @@ After parsing `agent_id`:
 You are the Transcript Specialist in a research presentation team (CAFleet-native).
 
 [ROLE DEFINITION]
-[Content of .claude/skills/research-presentation/roles/transcript.md (resolved from project root) injected verbatim. Cafleet substitutes only the four format kwargs `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
+[Content of skills/research-presentation/roles/transcript.md (resolved from project root) injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
 [/ROLE DEFINITION]
 
 Load these skills at startup:
@@ -170,7 +169,6 @@ Load these skills at startup:
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
-DIRECTOR NAME: {director_name}
 YOUR AGENT ID: {agent_id}
 
 TASK: Create a reading transcript from the approved research report.
@@ -198,7 +196,7 @@ Capture the printed `agent_id` and substitute it for `[transcript-agent-id]` in 
 
 After parsing `agent_id`:
 
-1. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<transcript-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<transcript-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
 2. **Write the audit file** to `${BASE}/transcript.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 ### Step 2: Content Review & Revision Loop (Director)
@@ -278,7 +276,7 @@ while start <= total_slides:
 You are the Visual Reviewer in a research presentation team (CAFleet-native).
 
 [ROLE DEFINITION]
-[Content of .claude/skills/research-presentation/roles/visual-reviewer.md (resolved from project root) injected verbatim. Cafleet substitutes only the four format kwargs `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
+[Content of skills/research-presentation/roles/visual-reviewer.md (resolved from project root) injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
 [/ROLE DEFINITION]
 
 Load these skills at startup:
@@ -286,7 +284,6 @@ Load these skills at startup:
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
-DIRECTOR NAME: {director_name}
 YOUR AGENT ID: {agent_id}
 
 TASK: Visually verify the rendered Slidev presentation.
@@ -317,7 +314,7 @@ Capture the printed `agent_id` as `[vr-batch-agent-id]` for subsequent `cafleet 
 
 After parsing `agent_id`:
 
-1. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<vr-batch-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<vr-batch-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
 2. **Write the audit file** to `${BASE}/visual-reviewer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. The audit filename uses the role-type slug `visual-reviewer`, not the member `--name` (`vr-batch-<start>`); subsequent VR batches in the same invocation overwrite the same audit file — that is intentional.
 
 ### Step 4: User Approval & Revision Loop (Director)
