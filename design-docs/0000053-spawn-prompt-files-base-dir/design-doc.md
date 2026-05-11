@@ -1,7 +1,7 @@
 # Spawn-Prompt Files and base-dir Migration
 
 **Status**: Approved
-**Progress**: 0/27 tasks complete
+**Progress**: 2/27 tasks complete
 **Last Updated**: 2026-05-11
 
 ## Overview
@@ -138,8 +138,8 @@ The design doc does NOT introduce new verbs, new pointer forms, or new `COMMENT(
 
 `base-dir` is an internal skill — it is loaded by consuming skills via `Skill(cafleet:base-dir)` (prefixed) and is explicitly NOT user-invocable. It therefore does NOT belong in the "Project Skills" lists in `CLAUDE.md` or `.claude/CLAUDE.md`, which enumerate user-invocable slash commands only. Claude Code's system-reminder surfaces `cafleet:base-dir` to teammates that need it without any project-manifest entry.
 
-- [ ] Grep `README.md` (and `ARCHITECTURE.md` and `docs/` if present) for the strings `base-dir`, `~/.claude/skills/base-dir`, and `Skill(base-dir)`. Update any path reference to point at the new repo-root plugin source `skills/base-dir/`. Update any `Skill(base-dir)` invocation to the prefixed `Skill(cafleet:base-dir)` form. If nothing is found, the task is no-op and gets checked off as such. <!-- completed: -->
-- [ ] Verify `CLAUDE.md` and `.claude/CLAUDE.md` do NOT add a `/base-dir` entry to their Project Skills sections. (The skill is non-user-invocable; the system-reminder is its sole discovery path.) <!-- completed: -->
+- [x] Grep `README.md` (and `ARCHITECTURE.md` and `docs/` if present) for the strings `base-dir`, `~/.claude/skills/base-dir`, and `Skill(base-dir)`. Update any path reference to point at the new repo-root plugin source `skills/base-dir/`. Update any `Skill(base-dir)` invocation to the prefixed `Skill(cafleet:base-dir)` form. If nothing is found, the task is no-op and gets checked off as such. <!-- completed: 2026-05-11T12:45 -->
+- [x] Verify `CLAUDE.md` and `.claude/CLAUDE.md` do NOT add a `/base-dir` entry to their Project Skills sections. (The skill is non-user-invocable; the system-reminder is its sole discovery path.) <!-- completed: 2026-05-11T12:45 -->
 
 ### Step 2: Migrate `base-dir` Skill
 
