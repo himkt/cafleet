@@ -1,7 +1,7 @@
 # On-Demand Spawn-Prompt Audit + base-dir Migration
 
 **Status**: Draft
-**Progress**: 13/13 tasks complete
+**Progress**: 12/13 tasks complete (Step 5 smoke deferred to operator)
 **Last Updated**: 2026-05-11
 
 ## Overview
@@ -53,7 +53,7 @@ In scope: the five base-dir-consuming skills that spawn members.
 | `design-doc-execute` | `skills/design-doc-execute/` | Programmer, Tester, Verifier | `roles/programmer.md`, `roles/tester.md`, `roles/verifier.md` |
 | `design-doc-interview` | `skills/design-doc-interview/` | Analyzer | `roles/analyzer.md` |
 
-Out of scope: `agent-team-monitoring`, `agent-team-supervision`, `my-slidev`, `create-figure`, `cafleet`. These skills are not base-dir consumers.
+Out of scope: `agent-team-monitoring`, `agent-team-supervision`, `my-slidev`, `create-figure`, `cafleet`. These skills are out of scope because they do not spawn CAFleet members and therefore do not participate in the audit-file write described here. (Some of them — e.g. `create-figure` — do load `Skill(base-dir)` for their own output-directory resolution; that is unrelated to the audit-file feature.)
 
 Non-spawned `roles/director.md` files document the main-Claude Director's behavior. They remain in `roles/` as reference documentation.
 
@@ -199,7 +199,7 @@ After step 4 (parse `agent_id` from the `member create` JSON response), append:
 
 ### Step 5: Smoke-Test the Migration
 
-- [x] Run `/research-report` with a short topic phrase (e.g., `"tcp-vs-udp"`) end-to-end in a fresh tmux session inside a fresh Claude Code instance that has the cafleet plugin installed. Confirm: (i) `Skill(cafleet:base-dir)` resolves correctly from the plugin location, (ii) every spawned member starts successfully, (iii) `<base-dir>/<role>.md` files are written for every spawned role (`<base-dir>/manager.md`, `<base-dir>/scout.md`, `<base-dir>/researcher.md` — the last one overwritten if 3 Researchers spawned), (iv) each audit-file's content matches the prompt the corresponding pane received (verify via `cafleet member capture` for one pane and diffing against the audit file). <!-- completed: 2026-05-11T13:52; deferred to operator post-merge smoke — the smoke test requires a fresh Claude Code session in a fresh tmux session and cannot be executed from the implementation team's pane -->
+- [ ] Run `/research-report` with a short topic phrase (e.g., `"tcp-vs-udp"`) end-to-end in a fresh tmux session inside a fresh Claude Code instance that has the cafleet plugin installed. Confirm: (i) `Skill(cafleet:base-dir)` resolves correctly from the plugin location, (ii) every spawned member starts successfully, (iii) `<base-dir>/<role>.md` files are written for every spawned role (`<base-dir>/manager.md`, `<base-dir>/scout.md`, `<base-dir>/researcher.md` — the last one overwritten if 3 Researchers spawned), (iv) each audit-file's content matches the prompt the corresponding pane received (verify via `cafleet member capture` for one pane and diffing against the audit file). <!-- deferred to operator: the smoke test requires a fresh Claude Code session in a fresh tmux session and cannot be executed from the implementation team's pane; the in-repo deliverables that make the smoke runnable are verified via SC #2/#3/#4 -->
 
 **Operator follow-up (outside this design doc's authority — no checkbox).** After Step 5 passes, the operator manually removes `~/.claude/skills/base-dir/` so the repo-root plugin source `skills/base-dir/` (installed as `cafleet:base-dir`) is the sole copy on disk. This action lives outside the cafleet repo and cannot be performed by the implementation team; the in-repo deliverable (`Success Criterion #2`) is satisfied independently of when the operator runs the removal.
 
