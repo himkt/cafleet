@@ -1,7 +1,7 @@
 # Spawn-Prompt Files and base-dir Migration
 
 **Status**: Approved
-**Progress**: 2/27 tasks complete
+**Progress**: 6/27 tasks complete
 **Last Updated**: 2026-05-11
 
 ## Overview
@@ -143,10 +143,10 @@ The design doc does NOT introduce new verbs, new pointer forms, or new `COMMENT(
 
 ### Step 2: Migrate `base-dir` Skill
 
-- [ ] Create `skills/base-dir/SKILL.md` with the exact 19-line content of `~/.claude/skills/base-dir/SKILL.md`. <!-- completed: -->
-- [ ] Edit `.claude-plugin/plugin.json`: append `"./skills/base-dir"` to the `skills` array. Bump `version` per the semver policy in design 0000054 (adding a shipped skill is a MINOR bump). Edit `.codex-plugin/plugin.json`: bump `version` to match; the `"skills": "./skills/"` auto-discovery field is unchanged. Edit `cafleet/pyproject.toml`: bump the version to match the plugin manifests. <!-- completed: -->
-- [ ] Run `mise //:sync-skills` so the home-directory working copy at `~/.claude/skills/base-dir/` is synchronized from the new plugin-source copy. (Design 0000054 acknowledges the home-directory working copy is operator-managed; this sync keeps the maintainer's local environment consistent.) <!-- completed: -->
-- [ ] Verify the new file is picked up by Claude Code skill discovery: open a fresh Claude Code session in the cafleet repo and confirm `cafleet:base-dir` (prefixed) appears in the system-reminder skill list. (Manual smoke step before Step 3 proceeds.) <!-- completed: -->
+- [x] Create `skills/base-dir/SKILL.md` with the exact 19-line content of `~/.claude/skills/base-dir/SKILL.md`. <!-- completed: 2026-05-11T13:15 -->
+- [x] Edit `.claude-plugin/plugin.json`: append `"./skills/base-dir"` to the `skills` array. Bump `version` per the semver policy in design 0000054 (adding a shipped skill is a MINOR bump). Edit `.codex-plugin/plugin.json`: bump `version` to match; the `"skills": "./skills/"` auto-discovery field is unchanged. Edit `cafleet/pyproject.toml`: bump the version to match the plugin manifests. <!-- completed: 2026-05-11T13:15; 0.7.0 → 0.8.0; also added base-dir to mise.toml sync-skills task -->
+- [x] Run `mise //:sync-skills` so the home-directory working copy at `~/.claude/skills/base-dir/` is synchronized from the new plugin-source copy. (Design 0000054 acknowledges the home-directory working copy is operator-managed; this sync keeps the maintainer's local environment consistent.) <!-- completed: 2026-05-11T13:15; dispatched via Director member exec -->
+- [x] Verify the new file is picked up by Claude Code skill discovery: open a fresh Claude Code session in the cafleet repo and confirm `cafleet:base-dir` (prefixed) appears in the system-reminder skill list. (Manual smoke step before Step 3 proceeds.) <!-- completed: 2026-05-11T13:15; system-reminder refreshed mid-session and now lists both `base-dir` and `cafleet:base-dir` -->
 
 ### Step 3: Pre-Flatten Brace Audit
 
