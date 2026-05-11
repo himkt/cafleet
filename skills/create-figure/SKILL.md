@@ -9,7 +9,7 @@ description: >
 # Create Figure
 
 Generate matplotlib charts. Scripts, outputs, and data go in separate subdirectories under `figures/`.
-Only the execution borrows a uv environment that has matplotlib installed: the cafleet repo-root `pyproject.toml` exposes matplotlib via the `[dependency-groups.research]` group, run with `mise //:figure <script>` (equivalently `uv run --frozen --group research <script>`). Resolve the cafleet repo root via `Skill(base-dir)` when invocation needs an absolute path.
+Execution self-bootstraps matplotlib via `uv run --with matplotlib python <script>` — `uv` resolves and caches the dependency on first run, so the skill works in any project without a project-rooted `research` uv group or `mise` task.
 
 **Before writing any script, read the Chart Type Selection and Color Rules sections.** All charts in a deck share the same `C_BAR` / `C_BAR_SEC` palette regardless of data topic.
 
@@ -24,7 +24,7 @@ Only the execution borrows a uv environment that has matplotlib installed: the c
 **Resolve `${BASE}` in this order:**
 
 1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., `/research-presentation` passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
-2. **Otherwise**: Load `Skill(base-dir)` and follow its procedure (no path argument; CWD-based inference applies). If the resolved `${BASE}` is the cafleet repo root itself (i.e., `Skill(base-dir)` returned `${CAFLEET_REPO_ROOT}` because the calling pane is at the repo root), override to `${BASE} = /tmp/claude-code` so generated figures do not pollute the repo tree.
+2. **Otherwise**: Load `Skill(base-dir)` and follow its procedure (no path argument; CWD-based inference applies). If the resolved `${BASE}` is a git repository root, override to `${BASE} = /tmp/claude-code` so generated figures do not pollute the repo tree.
 
 **Derive the subdirectories** (each is a literal path string you will embed in the script):
 
@@ -36,7 +36,7 @@ Example resolution: if the calling skill said "use `/tmp/claude-code/researches/
 
 If the directories do not exist yet, the Write tool auto-creates parent directories when you write the script file — do NOT call `mkdir`.
 
-All subsequent steps use `${SRC_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` as literal resolved paths. Never create scripts or outputs directly in the cafleet repo root — the root holds the toolchain manifests (`pyproject.toml`, `package.json`), not figure artifacts.
+All subsequent steps use `${SRC_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` as literal resolved paths. Never create scripts or outputs directly in a project repo root — figure artifacts belong under the resolved `${BASE}/figures/` subdirectories.
 
 **Font:** No setup needed. The theme font `Noto Sans` is available as a system font. Scripts set `plt.rcParams['font.family'] = 'Noto Sans'` (see template below).
 
@@ -84,19 +84,13 @@ Key points:
 
 ### 2. Execute the script
 
-The cafleet repo-root `pyproject.toml` exposes matplotlib via the `[dependency-groups.research]` group; the matching `uv.lock` pins a frozen resolution. Run via the `mise //:figure` task (preferred — it wraps the `--frozen --group research` invariants) or directly via `uv run`:
+Run via `uv run --with matplotlib python <script>`. `uv` resolves matplotlib and its transitive deps into an ephemeral environment, cached after the first invocation:
 
 ```
-mise //:figure ${SRC_DIR}/script_name.py
+uv run --with matplotlib python ${SRC_DIR}/script_name.py
 ```
 
-Equivalent direct invocation (when `mise` is unavailable):
-
-```
-uv run --frozen --group research ${SRC_DIR}/script_name.py
-```
-
-`--frozen` prevents lockfile updates. `--group research` activates the matplotlib dependency group at the repo-root uv workspace without sidecar manifests.
+`--with matplotlib` brings matplotlib in without requiring a `pyproject.toml` dependency-group entry at the caller's repo, so the skill self-bootstraps in any project. No `--group`, no project-rooted lockfile, no `mise` task required.
 
 ### 3. Verify the result
 

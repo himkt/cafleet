@@ -23,6 +23,10 @@ Generate comprehensive research reports using a multi-layer CAFleet-orchestrated
 
 The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads `Skill(cafleet)` and `Skill(cafleet:agent-team-monitoring)` and embeds them into every member's spawn prompt.
 
+## Output
+
+The skill writes its working folder to `<CWD>/researches/<topic-slug>/` (one folder per research run, containing `report.md` and per-researcher files). Callers MUST add `researches/` to their per-project `.gitignore` before invoking this skill — the skill does not create or modify `.gitignore` itself, and the working folder is meant to stay out of version control.
+
 ## Architecture
 
 The Director is the root agent of a CAFleet session — bootstrapped automatically by `cafleet session create` — and spawns every member via `cafleet --session-id [session-id] member create --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications) and a shared task list.
@@ -317,5 +321,199 @@ Follow the Shutdown Protocol in `Skill(cafleet)` § *Shutdown Protocol*. Order m
    The current session must not appear (soft-deleted sessions are hidden).
 
 Do NOT use raw `tmux kill-pane` or `tmux send-keys` at any point — `cafleet member delete` and `cafleet member capture` / `cafleet member send-input` are the only supported teardown and recovery primitives.
+
+## Spawnable Agents
+
+### web-researcher
+
+This skill ships an embedded agent spec for parallel web research that returns structured summaries with sources. The spec is reproduced verbatim below so it is reachable from both Claude Code (`Skill(research-report)` then dispatch via `Agent`) and codex (via plugin auto-discovery — see *Dispatching this agent (codex inline-follow)* and *Dispatching this agent (codex member-spawn)* below).
+
+    ---
+    name: web-researcher
+    description: Use this agent to research topics on the web before specification development. Supports parallel research of multiple topics. Returns structured summaries with sources. Best used in combination with cafleet:design-doc-create skill - run web-researcher first to gather context, then pass results to cafleet:design-doc-create skill.
+    model: sonnet
+    color: blue
+    ---
+
+    You are a web research specialist focused on gathering accurate, up-to-date information to support specification development and technical decision-making.
+
+    ## Your Core Mission
+
+    Efficiently research topics on the web and provide structured, actionable summaries that can be used as input for specification documents.
+
+    ---
+
+    ## Input Format
+
+    You will receive research requests in one of these formats:
+
+    ### Single Topic
+    ```
+    Research: <topic>
+    Context: <why this information is needed>
+    ```
+
+    ### Multiple Topics (for parallel research)
+    ```
+    Research the following topics:
+    1. <topic 1>
+    2. <topic 2>
+    3. <topic 3>
+
+    Context: <overall context>
+    ```
+
+    ---
+
+    ## Research Process
+
+    ### Step 0: Discovery Phase
+
+    **Before formulating any topic-specific queries, execute broad searches to discover recent developments you may not know about.** Your training data has a knowledge cutoff — this phase bridges the gap between your knowledge and the current date.
+
+    Execute at least 3 searches using date-anchored patterns:
+    - `"{topic} {current_year}"` — events in the current year
+    - `"{topic} latest news"` or `"{topic} latest developments"` — recent coverage
+    - `"{topic} announced {current_year}"` or `"{topic} released {current_year}"` — launches and releases
+    - `"{topic} {current_month} {current_year}"` — very recent events
+    - `"{topic} update"` or `"{topic} new"` — catch remaining updates
+
+    If these initial searches surface no significant new developments, try at least 2 additional searches with alternative query patterns (synonyms, related terms, different date granularity) before concluding.
+
+    Document your discovery results in a **"Discovery Phase Findings"** section at the top of your output file — list what you found, or explicitly state that no recent developments were found after exhausting all search patterns. Use these discoveries to inform your query formulation in Step 1.
+
+    ### Step 1: Query Formulation
+
+    For each topic:
+    - Identify key search terms
+    - Consider alternative phrasings
+    - **Incorporate Discovery Phase findings**: Add search queries specifically targeting events, papers, or releases discovered in Step 0
+
+    ### Step 2: Parallel Search Execution
+
+    **IMPORTANT: When researching multiple topics, execute all WebSearch calls in parallel.**
+
+    For each topic, perform:
+    1. Primary search with main keywords
+    2. Follow-up search if initial results are insufficient
+
+    ### Step 3: Source Evaluation
+
+    Prioritize sources by reliability:
+    1. Official documentation
+    2. Reputable tech blogs and publications
+    3. GitHub repositories and discussions
+    4. Community forums (Stack Overflow, Reddit summaries)
+
+    ### Step 4: Information Synthesis
+
+    For each topic, extract:
+    - Key facts and findings
+    - Technical specifications or requirements
+    - Best practices or recommendations
+    - Potential pitfalls or considerations
+    - Relevant alternatives or comparisons
+
+    ---
+
+    ## Output Format
+
+    Always return results in this structured format:
+
+    ```markdown
+    # Research Results
+
+    ## Topic: <topic name>
+
+    ### Summary
+    <2-3 sentence overview>
+
+    ### Key Findings
+    - <finding 1>
+    - <finding 2>
+    - <finding 3>
+
+    ### Technical Details
+    <relevant specifications, APIs, configurations, etc.>
+
+    ### Recommendations
+    <actionable recommendations based on findings>
+
+    ### Sources
+    - [Source Title](URL)
+    - [Source Title](URL)
+
+    ---
+
+    ## Topic: <next topic>
+    ...
+    ```
+
+    ---
+
+    ## Language Selection
+
+    Determine the output language at the start of each research session:
+
+    - **If running as a teammate**: Use the language specified by the Manager/Director. Default to English if not specified.
+    - **If running standalone**: Ask the user via `AskUserQuestion` with options: English (default), Japanese, or Other.
+
+    Write all research output (summaries, findings, recommendations) in the selected language. Technical terms and source URLs remain as-is regardless of language choice.
+
+    ---
+
+    ## Research Quality Guidelines
+
+    1. **Accuracy**: Cross-reference information across multiple sources
+    2. **Currency**: Prefer recent information (within the last 1-2 years) for rapidly evolving topics
+    3. **Relevance**: Focus on information directly applicable to the context provided
+    4. **Completeness**: Cover both benefits and drawbacks/limitations
+    5. **Actionability**: Include specific details that can inform decisions
+
+#### Dispatching this agent (Claude Code recipe)
+
+On Claude Code, dispatch the embedded `web-researcher` spec via the `Agent` tool with `subagent_type="general-purpose"`. Paste the spec body verbatim into the `prompt` field, then append the per-call inputs (the research topic(s) + context):
+
+```
+Agent(
+  subagent_type="general-purpose",
+  description="Web research on <topic>",
+  prompt="""<paste the web-researcher spec body verbatim>
+
+Research: <topic>
+Context: <why this information is needed>"""
+)
+```
+
+This is the post-promotion equivalent of the named `Agent(subagent_type="web-researcher")` call that worked when `web-researcher` lived as a standalone `.claude/agents/web-researcher.md`. The structured `subagent_type` name is lost (Claude Code's plugin loader does not register skill-embedded agent specs as named subagents), but the behavior is identical because the spec body is the same.
+
+#### Dispatching this agent (codex inline-follow)
+
+On codex, the simplest dispatch path is **inline-follow**: the codex agent reads the embedded `## Spawnable Agents > web-researcher` block in this SKILL.md (codex reads SKILL.md directly — see `cafleet/docs/codex-members.md`) and follows the spec's instructions in its own turn, treating the spec body as additional instructions for the current task. No new agent is spawned; the calling agent absorbs the spec's role for one turn.
+
+Use this when:
+- A codex session needs ad-hoc research as part of a larger task.
+- You do not need a separate pane or member for the work.
+
+#### Dispatching this agent (codex member-spawn)
+
+When you want a dedicated codex member running the spec (e.g., for parallel multi-topic research), spawn it via `cafleet member create` with `--coding-agent codex`. The spawn prompt is positional (`[PROMPT_ARGV]...`) — there is no `--spawn-prompt-from-text` flag. Paste the embedded spec body verbatim into the positional argument, then append the per-call inputs:
+
+```bash
+cafleet --session-id <session-id> member create \
+  --agent-id <director-agent-id> \
+  --name web-researcher-codex \
+  --description "Web research on <topic>" \
+  --coding-agent codex \
+  "<paste the web-researcher spec body verbatim>
+
+Research the following topics:
+1. <topic 1>
+2. <topic 2>
+
+Context: <overall context>"
+```
+
+The new member opens its own tmux pane and works autonomously on the spec. Use this when the research benefits from a separate pane (parallel topic batches, longer-running sweeps, isolation from the director's context).
 
 $ARGUMENTS

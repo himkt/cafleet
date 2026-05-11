@@ -1,6 +1,6 @@
 {
   "name": "cafleet",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Message broker CLI and design document orchestration skills for coding agents.",
   "skills": "./skills/"
 }

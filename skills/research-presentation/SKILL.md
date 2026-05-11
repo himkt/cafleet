@@ -19,6 +19,8 @@ Create a Slidev presentation and reading transcript from an existing research re
 
 The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads `Skill(cafleet)` and `Skill(cafleet:agent-team-monitoring)` and embeds them into every member's spawn prompt.
 
+For autonomous Slidev generation, see `my-slidev/SKILL.md` § Spawnable Agents → slide-creator.
+
 ## Architecture
 
 The Director is the root agent of a CAFleet session — bootstrapped automatically by `cafleet session create` — and spawns every member via `cafleet --session-id [session-id] member create --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications).

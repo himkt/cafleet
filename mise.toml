@@ -25,9 +25,12 @@ arg "<slide>" help="path to slide.md file"
 run = "script -qfc \"bun run slidev --open false {{ arg(name='slide') }}\" /dev/null"
 description = "Start the Slidev dev server inside a PTY (script -qfc) so Slidev does not detect a non-TTY stdout and exit early. The trailing /dev/null is the script(1) typescript output file — discarding it keeps the working tree clean"
 
-[tasks.figure]
-usage = '''
-arg "<script>" help="Absolute path to a matplotlib python script"
-'''
-run = "uv run --frozen --group research {{ arg(name='script') }}"
-description = "Run a matplotlib script against the research uv dependency group"
+[tasks.sync-skills]
+run = [
+  "rm -rf ~/.claude/skills/create-figure && cp -r skills/create-figure ~/.claude/skills/create-figure",
+  "rm -rf ~/.claude/skills/my-slidev && cp -r skills/my-slidev ~/.claude/skills/my-slidev",
+  "rm -rf ~/.claude/skills/research-presentation && cp -r skills/research-presentation ~/.claude/skills/research-presentation",
+  "rm -rf ~/.claude/skills/research-report && cp -r skills/research-report ~/.claude/skills/research-report",
+]
+description = "Mirror the four moved skills from the repo-root plugin source (skills/<name>/) to the maintainer's home-dir working copy (~/.claude/skills/<name>/). Each line removes the home-dir copy first so a re-run does not nest dirs. Canonical divergence-guard per design 0000054."
+

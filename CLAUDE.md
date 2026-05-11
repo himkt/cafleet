@@ -13,10 +13,6 @@ When a task matches a skill below, you MUST invoke it via the Skill tool BEFORE 
 - `/design-doc-create` — Create a new design document using CAFleet-native orchestration (Director / Drafter / Reviewer). Use when the user wants to create a specification with CAFleet message broker coordination.
 - `/design-doc-interview` — Validate an existing design document through fine-grained Q&A using CAFleet-native orchestration (Director + short-lived Analyzer). Adds `COMMENT(claude)` annotations consumed by `/design-doc-create` resume mode. Use after `/design-doc-create` and before `/design-doc-execute`.
 - `/design-doc-execute` — Implement features based on a design document using CAFleet-native orchestration with TDD cycle (Director / Programmer / Tester / optional Verifier).
-- `/research-report` — Create a comprehensive research report with folder-based output via CAFleet-orchestrated Director / Manager / Researcher members. Output lands under `researches/<topic-slug>/`. Use when the user wants a thorough, multi-source research artifact rather than a quick web search summary.
-- `/research-presentation` — Build a Slidev presentation and reading transcript from an existing research report folder via CAFleet-orchestrated Director / Presentation / Transcript / Visual-Reviewer members. Reads `report.md` and per-researcher files; invokes `my-slidev` and `create-figure` as leaf skills. Do NOT use for research itself — use `/research-report`.
-- `/my-slidev` — Author Slidev decks using the bundled theme at `.claude/skills/my-slidev/theme/` (cover, bullets, two-cols, blank, stats-grid, section-divider, end layouts). Use when generating presentations from research reports, outlines, or other content.
-- `/create-figure` — Render matplotlib charts via the repo-root uv `research` dependency group (`mise //:figure <script>`, equivalent to `uv run --frozen --group research <script>`). Use when the user asks to create a chart, plot, or visualize data. Do NOT use `plt.show()` — always save to PNG files.
 
 ## Project: CAFleet
 
