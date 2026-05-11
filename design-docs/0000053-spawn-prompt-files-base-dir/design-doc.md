@@ -1,7 +1,7 @@
 # Spawn-Prompt Files and base-dir Migration
 
 **Status**: Approved
-**Progress**: 6/27 tasks complete
+**Progress**: 7/27 tasks complete
 **Last Updated**: 2026-05-11
 
 ## Overview
@@ -150,7 +150,7 @@ The design doc does NOT introduce new verbs, new pointer forms, or new `COMMENT(
 
 ### Step 3: Pre-Flatten Brace Audit
 
-- [ ] For each of the five consuming skills, grep `SKILL.md` and every `roles/*.md` file under that skill for literal `{` and `}` characters. Every occurrence outside the four cafleet kwargs (`{session_id}`, `{agent_id}`, `{director_name}`, `{director_agent_id}`) MUST already be doubled (`{{` / `}}`). Fix any unescaped occurrence in-place before Step 4 proceeds. This is a one-shot audit; once Step 4 flattens the role docs, the audit is permanently consumed. <!-- completed: -->
+- [x] For each of the five consuming skills, grep `SKILL.md` and every `roles/*.md` file under that skill for literal `{` and `}` characters. Every occurrence outside the four cafleet kwargs (`{session_id}`, `{agent_id}`, `{director_name}`, `{director_agent_id}`) MUST already be doubled (`{{` / `}}`). Fix any unescaped occurrence in-place before Step 4 proceeds. This is a one-shot audit; once Step 4 flattens the role docs, the audit is permanently consumed. <!-- completed: 2026-05-11T13:20; audit clean — to-be-flattened role files (manager/scout/researcher/presentation/transcript/visual-reviewer/drafter/reviewer/programmer/tester/verifier/analyzer.md) have zero braces; SKILL.md spawn-prompt blocks contain only the four kwargs; `${VAR}` references in narrative + `[INSERT ${VAR}]` markers are out-of-scope (tier-1 substituted by Director before str.format) -->
 
 ### Step 4: Introduce `prompts/<role>.md` Files (Flatten roles/)
 
