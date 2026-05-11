@@ -168,7 +168,7 @@ This skill ships an embedded agent spec for generating a complete Slidev present
 
     ---
     name: slide-creator
-    description: Generate a complete Slidev presentation from input content (research reports, outlines, notes). Fully autonomous — produces slides.md without asking clarifying questions. Takes a file path or inline content as input.
+    description: Generate a complete Slidev presentation from input content (research reports, outlines, notes). Fully autonomous — produces slide.md without asking clarifying questions. Takes a file path or inline content as input.
     color: green
     ---
 
@@ -215,7 +215,7 @@ This skill ships an embedded agent spec for generating a complete Slidev present
          2. Citation ordering check: Scan all slides from first to last, recording the order of first appearance of each citation. If citations are not in sequential order, renumber them throughout the entire presentation (both body text and References section).
          3. Citation correctness check: Verify body→references and references→body consistency. Fix any mismatches (remove orphan references, add missing references, remove uncited `[N]` markers).
        - **Pass 2 — Verification**: Re-scan the entire presentation to verify all fixes are correct and no new issues were introduced. Confirm: no overflowing slides, sequential citation numbers starting from `[1]`, body↔references consistency, and no broken formatting (slide separators, layout frontmatter).
-       - Only after Pass 2 confirms zero issues, write the file to the current working directory as `slides.md`.
+       - Only after Pass 2 confirms zero issues, write the file to the current working directory as `slide.md`.
 
     ## Output Constraints
 
