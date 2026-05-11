@@ -8,17 +8,17 @@
 
 Add an on-demand spawn-prompt audit to every CAFleet member spawn, and relocate the `base-dir` skill from the user's global `~/.claude/skills/base-dir/` into the repo-root `skills/base-dir/` so the cafleet plugin becomes self-contained (the migrated copy ships as `cafleet:base-dir` via both `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`).
 
-The audit feature: after every successful `cafleet member create`, the Director writes the rendered spawn prompt — exactly the text delivered to the member — to a single file under `<base-dir>/`. The role definition itself stays in `skills/<skill>/roles/<role>.md`, unchanged from today (role-definition content only, no prologue, no identity block, no spawn-prompt template). The spawn-prompt template (prologue + `<ROLE DEFINITION>...</ROLE DEFINITION>` block + identity block + protocol) stays inline in each consuming skill's `SKILL.md`, also unchanged from today. The Director's *render procedure* gains one extra step at the end: write the assembled, kwarg-substituted prompt to `<base-dir>/<role>.md` for operator inspection.
+The audit feature: after every successful `cafleet member create`, the Director writes the rendered spawn prompt — exactly the text delivered to the member — to a single file under `${BASE}/`. The role definition itself stays in `skills/<skill>/roles/<role>.md`, unchanged from today (role-definition content only, no prologue, no identity block, no spawn-prompt template). The spawn-prompt template (prologue + `<ROLE DEFINITION>...</ROLE DEFINITION>` block + identity block + protocol) stays inline in each consuming skill's `SKILL.md`, also unchanged from today. The Director's *render procedure* gains one extra step at the end: write the assembled, kwarg-substituted prompt to `${BASE}/<role>.md` for operator inspection.
 
 No new `prompts/<role>.md` directory is introduced. The `roles/` directory remains the single on-disk source-of-truth for role-definition content.
 
 ## Success Criteria
 
-- [ ] Every successful `cafleet member create` in the five consuming skills (`research-report`, `research-presentation`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) writes the rendered spawn prompt to `<base-dir>/<role>.md` (one file per role-type, overwritten on subsequent spawns of the same role-type within an invocation). <!-- deferred to operator smoke; in-repo instructions are in place (see SC #4) -->
+- [ ] Every successful `cafleet member create` in the five consuming skills (`research-report`, `research-presentation`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`) writes the rendered spawn prompt to `${BASE}/<role>.md` (one file per role-type, overwritten on subsequent spawns of the same role-type within an invocation). <!-- deferred to operator smoke; in-repo instructions are in place (see SC #4) -->
 - [x] The `base-dir` skill exists at `skills/base-dir/SKILL.md` and ships as `cafleet:base-dir` via both plugin manifests. <!-- verified: skills/base-dir/SKILL.md tracked; .claude-plugin/plugin.json carries the explicit `./skills/base-dir` entry; .codex-plugin/plugin.json picks it up via the auto-discovery form `"skills": "./skills/"`; both manifests bumped to v0.8.0 -->
 - [x] `skills/<skill>/roles/<role>.md` files are unchanged in content from before this design (no flattening, no prologue/identity-block inlining). <!-- verified: `git diff main -- skills/*/roles/*.md` returns empty for the 12 spawned-role files -->
 - [x] Each consuming skill's `SKILL.md` Director instructions explicitly call out the audit-file write step after `cafleet member create` returns success. <!-- verified: 12 "Write the audit file" occurrences across 5 SKILL.md files (3+3+2+3+1) -->
-- [ ] A `/research-report` smoke run end-to-end succeeds with the new audit-file write and produces one rendered file under `<base-dir>/` per spawned member-role. <!-- deferred to operator post-merge smoke -->
+- [ ] A `/research-report` smoke run end-to-end succeeds with the new audit-file write and produces one rendered file under `${BASE}/` per spawned member-role. <!-- deferred to operator post-merge smoke -->
 
 
 ---
@@ -70,7 +70,7 @@ skills/<skill>/
     └── director.md   # reference documentation, not a spawn-prompt
 ```
 
-This is the current layout. The design does NOT introduce a new `prompts/` directory and does NOT flatten the role files. The only on-disk change is the new file at `<base-dir>/<role>.md` that the Director writes per spawn.
+This is the current layout. The design does NOT introduce a new `prompts/` directory and does NOT flatten the role files. The only on-disk change is the new file at `${BASE}/<role>.md` that the Director writes per spawn.
 
 ### Three-Tier Variable Substitution Model
 
@@ -97,7 +97,7 @@ For each `cafleet member create`, the Director's flow becomes:
 5. **Pass the result** as the positional spawn-prompt argument to `cafleet --json member create --agent-id <director-agent-id> -- "<rendered prompt>"`. cafleet's own `_resolve_prompt` performs tier-3 `str.format()` on this string with the four kwargs.
 6. **Parse `agent_id`** from the `member create` JSON response. Treat it as the new member's literal UUID for all subsequent `cafleet` calls.
 7. **Re-render the final prompt locally** with Python `str.format()` semantics over the rendered string and the four kwargs — i.e., conceptually `prompt.format(session_id=<session-id>, agent_id=<new-member-id>, director_name=<director-name>, director_agent_id=<director-agent-id>)`. This mirrors cafleet's broker-side substitution and yields the **exact** text the new member sees in its pane.
-8. **Write the audit file** to `<base-dir>/<role>.md` (see § *Audit File Layout* below).
+8. **Write the audit file** to `${BASE}/<role>.md` (see § *Audit File Layout* below).
 
 Steps 1–6 are today's procedure unchanged. Steps 7–8 are new.
 
@@ -106,19 +106,19 @@ Steps 1–6 are today's procedure unchanged. Steps 7–8 are new.
 After every successful `cafleet member create`, the Director writes:
 
 ```
-<base-dir>/<role>.md
+${BASE}/<role>.md
 ```
 
 | Component | Source | Notes |
 |:--|:--|:--|
-| `<base-dir>` | The `BASE` value resolved by `Skill(cafleet:base-dir)` in the consuming skill's Step 0 | The audit feature is **gated on Step 0 having completed**; nothing is written if `BASE` is not yet resolved. |
+| `${BASE}` | The `BASE` value resolved by `Skill(cafleet:base-dir)` in the consuming skill's Step 0 | The audit feature is **gated on Step 0 having completed**; nothing is written if `BASE` is not yet resolved. |
 | `<role>` | The role-type slug (kebab-case) — `manager`, `scout`, `researcher`, `presentation`, `transcript`, `visual-reviewer`, `drafter`, `drafter-resume`, `reviewer`, `programmer`, `tester`, `verifier`, `analyzer` | Independent of the cafleet member `--name` (which may carry an additional ordinal like `vr-batch-7`). The audit filename uses the **role type**, not the member name. |
 
 File contents: the **fully rendered prompt only** — exactly the text the member sees in its pane after tier-1, tier-2, and tier-3 substitutions. No YAML frontmatter, no sidecar JSON, no metadata header. Operators recover metadata (session id, member agent id, timestamp, originating command) from the broker timeline / admin WebUI.
 
 #### Overwrite Semantics
 
-`<base-dir>/<role>.md` is overwritten in place on subsequent spawns of the **same role-type** within the same skill invocation. There is no slot ordinal (`-1`, `-2`, etc.) — the latest spawn wins. Rationale: keeps the audit folder a flat, predictable workspace; per-spawn forensics live in the broker timeline (canonical) and in the immediate-prior file content (if the operator captures it before the overwrite). Operators who need per-spawn isolation can run each invocation against a distinct `BASE` (`Skill(cafleet:base-dir)` supports this).
+`${BASE}/<role>.md` is overwritten in place on subsequent spawns of the **same role-type** within the same skill invocation. There is no slot ordinal (`-1`, `-2`, etc.) — the latest spawn wins. Rationale: keeps the audit folder a flat, predictable workspace; per-spawn forensics live in the broker timeline (canonical) and in the immediate-prior file content (if the operator captures it before the overwrite). Operators who need per-spawn isolation can run each invocation against a distinct `BASE` (`Skill(cafleet:base-dir)` supports this).
 
 A re-spawn after a crash within the same invocation also overwrites the audit file with the new rendered prompt. Pre-existing audit files from a prior invocation are likewise overwritten in place without warning.
 
@@ -148,7 +148,7 @@ Consuming skills MUST invoke `Skill(cafleet:base-dir)` (prefixed) post-migration
 | Scenario | Behavior |
 |:--|:--|
 | `Skill(cafleet:base-dir)` fails to load post-migration (e.g., the user has neither the global nor the repo copy installed). | Step 0 of every consuming skill aborts immediately — same failure mode as today, with the global copy missing. The audit-file write is unreachable because `BASE` was never resolved. |
-| `<base-dir>/<role>.md` write fails (e.g., disk full, permission denied). | The Director logs a one-line warning and proceeds without rolling back the spawn — the member is already live in its pane. Degraded mode: subsequent spawns may also fail to write. The Director does NOT escalate via `AskUserQuestion` for an isolated write failure; only if multiple consecutive writes fail does the Director surface the issue. |
+| `${BASE}/<role>.md` write fails (e.g., disk full, permission denied). | The Director logs a one-line warning and proceeds without rolling back the spawn — the member is already live in its pane. Degraded mode: subsequent spawns may also fail to write. The Director does NOT escalate via `AskUserQuestion` for an isolated write failure; only if multiple consecutive writes fail does the Director surface the issue. |
 | A `roles/<role>.md` file is missing at render time. | Hard error — the Director aborts the spawn for that role with a clear message ("`roles/<role>.md` not found in skills/<skill>/"). This is a regression bug in the skill, not a runtime fallback. |
 
 ### Coordination Protocol Compatibility
@@ -182,15 +182,15 @@ The design doc does NOT introduce new verbs, new pointer forms, or new `COMMENT(
 
 ### Step 4: Update SKILL.md Director Instructions (Audit-File Write)
 
-For each consuming skill, edit `SKILL.md`'s per-role spawn section to add two new steps after `cafleet member create` parsing: (a) re-render the prompt locally with `prompt.format(session_id=..., agent_id=<new-member-id>, director_name=..., director_agent_id=...)` (in memory; the Director can shell out via `python -c` or do the substitution textually — implementation choice per skill), and (b) Write the result to `<base-dir>/<role>.md`. Also update every `Skill(base-dir)` invocation in the affected SKILL.md to the prefixed `Skill(cafleet:base-dir)` form — bare-name resolution does not work post-migration once the global `~/.claude/skills/base-dir/` copy is removed.
+For each consuming skill, edit `SKILL.md`'s per-role spawn section to add two new steps after `cafleet member create` parsing: (a) re-render the prompt locally with `prompt.format(session_id=..., agent_id=<new-member-id>, director_name=..., director_agent_id=...)` (in memory; the Director can shell out via `python -c` or do the substitution textually — implementation choice per skill), and (b) Write the result to `${BASE}/<role>.md`. Also update every `Skill(base-dir)` invocation in the affected SKILL.md to the prefixed `Skill(cafleet:base-dir)` form — bare-name resolution does not work post-migration once the global `~/.claude/skills/base-dir/` copy is removed.
 
 Reference template for the added steps (adapt per skill — outer fence is four backticks so the inner ```bash fence renders correctly):
 
 ````
-After step 4 (parse `agent_id` from the `member create` JSON response), append:
+After parsing `agent_id` from the `member create` JSON response, append:
 
-5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<new-member-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-6. **Write the audit file** to `<base-dir>/<role>.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0; `<role>` is the role-type slug, e.g. `manager`, `programmer`). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+1. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<new-member-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+2. **Write the audit file** to `${BASE}/<role>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<role>` is the role-type slug, e.g. `manager`, `programmer`). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 ````
 
 - [x] Update `skills/research-report/SKILL.md`: add the audit-file write step (5+6) to each of the three per-role spawn sections (Manager, Scout, Researcher). Update `Skill(base-dir)` invocations to `Skill(cafleet:base-dir)`. <!-- completed: 2026-05-11T13:51 -->
@@ -201,7 +201,7 @@ After step 4 (parse `agent_id` from the `member create` JSON response), append:
 
 ### Step 5: Smoke-Test the Migration
 
-- [ ] Run `/research-report` with a short topic phrase (e.g., `"tcp-vs-udp"`) end-to-end in a fresh tmux session inside a fresh Claude Code instance that has the cafleet plugin installed. Confirm: (i) `Skill(cafleet:base-dir)` resolves correctly from the plugin location, (ii) every spawned member starts successfully, (iii) `<base-dir>/<role>.md` files are written for every spawned role (`<base-dir>/manager.md`, `<base-dir>/scout.md`, `<base-dir>/researcher.md` — the last one overwritten if 3 Researchers spawned), (iv) each audit-file's content matches the prompt the corresponding pane received (verify via `cafleet member capture` for one pane and diffing against the audit file). <!-- deferred to operator: the smoke test requires a fresh Claude Code session in a fresh tmux session and cannot be executed from the implementation team's pane; the in-repo deliverables that make the smoke runnable are verified via SC #2/#3/#4 -->
+- [ ] Run `/research-report` with a short topic phrase (e.g., `"tcp-vs-udp"`) end-to-end in a fresh tmux session inside a fresh Claude Code instance that has the cafleet plugin installed. Confirm: (i) `Skill(cafleet:base-dir)` resolves correctly from the plugin location, (ii) every spawned member starts successfully, (iii) `${BASE}/<role>.md` files are written for every spawned role (`${BASE}/manager.md`, `${BASE}/scout.md`, `${BASE}/researcher.md` — the last one overwritten if 3 Researchers spawned), (iv) each audit-file's content matches the prompt the corresponding pane received (verify via `cafleet member capture` for one pane and diffing against the audit file). <!-- deferred to operator: the smoke test requires a fresh Claude Code session in a fresh tmux session and cannot be executed from the implementation team's pane; the in-repo deliverables that make the smoke runnable are verified via SC #2/#3/#4 -->
 
 **Operator follow-up (outside this design doc's authority — no checkbox).** After Step 5 passes, the operator manually removes `~/.claude/skills/base-dir/` so the repo-root plugin source `skills/base-dir/` (installed as `cafleet:base-dir`) is the sole copy on disk. This action lives outside the cafleet repo and cannot be performed by the implementation team; the in-repo deliverable (`Success Criterion #2`) is satisfied independently of when the operator runs the removal.
 
@@ -218,5 +218,5 @@ After step 4 (parse `agent_id` from the `member create` JSON response), append:
 | 2026-05-11 | User approval — Status promoted from Draft to Approved; ready for `/design-doc-execute`. |
 | 2026-05-11 | Doc reconstructed from conversation transcript after an in-session `git checkout` clobbered uncommitted revision changes. Content matched the user-approved Round-2 state. |
 | 2026-05-11 | Step 1 (no-op audit) and Step 2 (base-dir migration to skills/base-dir/, version bump 0.7.0→0.8.0, mise sync-skills extension) and Step 3 (brace audit clean) executed and committed. |
-| 2026-05-11 | Mid-implementation pivot: user determined that the `prompts/<role>.md` externalization approach was not the intent. Design revised to drop the `prompts/` directory entirely. `roles/<role>.md` stays unchanged (role definitions only, as today). Spawn-prompt template stays inline in `SKILL.md` (as today). The audit-file feature is restored (reverses interview Q11) with a simpler shape: rendered prompt written to `<base-dir>/<role>.md` per role-type, overwritten on subsequent spawns. Status reverted to Draft pending revision review. Title renamed from "Spawn-Prompt Files and base-dir Migration" to "On-Demand Spawn-Prompt Audit + base-dir Migration". Task count revised to 13 (Steps 1+2+3 already done = 7/13). Step 4 was previously the prompts/ flatten across 5 skills; it is now the SKILL.md Director-instruction update to add the audit-file write step. Step 5 is the smoke test (was Step 6). Step 6 is removed. Programmer's mid-Step-4 work-in-progress (13 prompts/<role>.md files) was deleted and the 12 deleted role files restored from git HEAD before this revision was written. |
+| 2026-05-11 | Mid-implementation pivot: user determined that the `prompts/<role>.md` externalization approach was not the intent. Design revised to drop the `prompts/` directory entirely. `roles/<role>.md` stays unchanged (role definitions only, as today). Spawn-prompt template stays inline in `SKILL.md` (as today). The audit-file feature is restored (reverses interview Q11) with a simpler shape: rendered prompt written to `${BASE}/<role>.md` per role-type, overwritten on subsequent spawns. Status reverted to Draft pending revision review. Title renamed from "Spawn-Prompt Files and base-dir Migration" to "On-Demand Spawn-Prompt Audit + base-dir Migration". Task count revised to 13 (Steps 1+2+3 already done = 7/13). Step 4 was previously the prompts/ flatten across 5 skills; it is now the SKILL.md Director-instruction update to add the audit-file write step. Step 5 is the smoke test (was Step 6). Step 6 is removed. Programmer's mid-Step-4 work-in-progress (13 prompts/<role>.md files) was deleted and the 12 deleted role files restored from git HEAD before this revision was written. |
 | 2026-05-11 | Post-pivot Status promoted: Draft → Approved upon user re-approval (the user typed "commit and go" after reviewing the revised design; the implementation team then completed the revised Step 4 and pushed PR #66). Copilot review of PR #66 is in progress. Status will be promoted to Complete by the orchestrating `/design-doc-execute` skill's finalize phase after the Copilot review loop exits — that phase is external to this design's own Implementation steps (which end at Step 5). |

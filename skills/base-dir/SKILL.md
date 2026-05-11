@@ -9,7 +9,7 @@ description: >
 
 ## Procedure
 
-1. **Precondition (caller-side, before loading this skill)**: the consuming skill should only load this skill when its argument is not an absolute path. For an absolute-path argument, the consuming skill sets `${BASE}` directly from that path and does NOT load this skill.
+1. **Precondition (caller-side, before loading this skill)**: the consuming skill MUST only load this skill when its argument is not an absolute path. For an absolute-path argument, the consuming skill sets `${BASE}` directly from that path and does NOT load this skill.
 2. If `${CWD} == $HOME` or `${CWD}` is under `$HOME/.claude` (for example, `${CWD}` starts with `$HOME/.claude/`) → go to step 3.
    Otherwise → `${BASE} = ${CWD}`. Done.
 3. Ask via `AskUserQuestion` ("Select the base directory for output files:"):
