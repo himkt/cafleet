@@ -153,8 +153,8 @@ Capture the printed `agent_id` and substitute it for `[presentation-agent-id]` i
 
 After parsing `agent_id`:
 
-5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<presentation-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-6. **Write the audit file** to `<base-dir>/presentation.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+1. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<presentation-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+2. **Write the audit file** to `<base-dir>/presentation.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Transcript spawn prompt:**
 
@@ -198,8 +198,8 @@ Capture the printed `agent_id` and substitute it for `[transcript-agent-id]` in 
 
 After parsing `agent_id`:
 
-5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<transcript-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-6. **Write the audit file** to `<base-dir>/transcript.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+1. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<transcript-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+2. **Write the audit file** to `<base-dir>/transcript.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 ### Step 2: Content Review & Revision Loop (Director)
 
@@ -317,8 +317,8 @@ Capture the printed `agent_id` as `[vr-batch-agent-id]` for subsequent `cafleet 
 
 After parsing `agent_id`:
 
-5. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<vr-batch-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-6. **Write the audit file** to `<base-dir>/visual-reviewer.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). The audit filename uses the role-type slug `visual-reviewer`, not the member `--name` (`vr-batch-<start>`); subsequent VR batches in the same invocation overwrite the same audit file — that is intentional.
+1. **Re-render the prompt locally** with the four kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<vr-batch-agent-id>`, `director_name` = the root Director's name, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+2. **Write the audit file** to `<base-dir>/visual-reviewer.md` (`<base-dir>` resolved by `Skill(cafleet:base-dir)` in Step 0). The audit filename uses the role-type slug `visual-reviewer`, not the member `--name` (`vr-batch-<start>`); subsequent VR batches in the same invocation overwrite the same audit file — that is intentional.
 
 ### Step 4: User Approval & Revision Loop (Director)
 

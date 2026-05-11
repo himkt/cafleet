@@ -2,7 +2,7 @@
 name: base-dir
 description: >
   Resolve the base directory for output files. Loaded by consuming skills
-  via Skill(base-dir). Do NOT invoke directly.
+  via Skill(cafleet:base-dir). Do NOT invoke directly.
 ---
 
 # Base Directory Resolution
