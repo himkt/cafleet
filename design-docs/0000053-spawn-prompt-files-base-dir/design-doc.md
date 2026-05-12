@@ -178,7 +178,7 @@ The design doc does NOT introduce new verbs, new pointer forms, or new `COMMENT(
 
 ### Step 3: Brace Audit
 
-- [x] For each of the five consuming skills, grep `SKILL.md` and every `roles/*.md` file under that skill for literal `{` and `}` characters. Every occurrence outside the three cafleet kwargs (`{session_id}`, `{agent_id}`, `{director_agent_id}`) MUST already be doubled (`{{` / `}}`). Fix any unescaped occurrence in-place before Step 4 proceeds. <!-- completed: 2026-05-11T13:20; audit clean — role files have zero braces; SKILL.md spawn-prompt blocks contain only the four kwargs; `${VAR}` references in narrative + `[INSERT ${VAR}]` markers are out-of-scope (tier-1 substituted by Director before str.format) -->
+- [x] For each of the five consuming skills, grep `SKILL.md` and every `roles/*.md` file under that skill for literal `{` and `}` characters. Every occurrence outside the three cafleet kwargs (`{session_id}`, `{agent_id}`, `{director_agent_id}`) MUST already be doubled (`{{` / `}}`). Fix any unescaped occurrence in-place before Step 4 proceeds. <!-- completed: 2026-05-11T13:20; audit clean — role files have zero braces; SKILL.md spawn-prompt blocks contain only the three kwargs; `${VAR}` references in narrative + `[INSERT ${VAR}]` markers are out-of-scope (tier-1 substituted by Director before str.format) -->
 
 ### Step 4: Update SKILL.md Director Instructions (Audit-File Write)
 
