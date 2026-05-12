@@ -368,6 +368,8 @@ Read the role files that will be embedded verbatim in spawn prompts:
 
 #### 3e. Spawn each member via `cafleet member create`
 
+The spawn prompts below use `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders — cafleet `member create` runs `str.format()` over the entire prompt and substitutes these from the new member's allocated `agent_id`, the session ID, and the spawning Director's `agent_id`. The `[INSERT …]` markers (e.g. `[INSERT DESIGN DOC PATH]`) are NOT format placeholders — the Director substitutes them in shell before calling `member create`. See the Template safety note under `Member Create` in `skills/cafleet/SKILL.md` — any literal `{` / `}` you embed in a custom prompt (e.g., a JSON example, a `${VAR}` reference) must be doubled (`{{` / `}}`), because the prompt is passed through `.format()` even when it contains no placeholders.
+
 **Programmer spawn prompt:**
 
 ```
@@ -381,13 +383,13 @@ Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
 - Skill(design-doc) — for template and guidelines
 
-SESSION ID: <session-id>
-DIRECTOR AGENT ID: <director-agent-id>
-YOUR AGENT ID: <my-agent-id>     (will be filled in literally by member create)
+SESSION ID: {session_id}
+DIRECTOR AGENT ID: {director_agent_id}
+YOUR AGENT ID: {agent_id}
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
@@ -426,13 +428,13 @@ Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
 - Skill(design-doc) — for template and guidelines
 
-SESSION ID: <session-id>
-DIRECTOR AGENT ID: <director-agent-id>
-YOUR AGENT ID: <my-agent-id>     (will be filled in literally by member create)
+SESSION ID: {session_id}
+DIRECTOR AGENT ID: {director_agent_id}
+YOUR AGENT ID: {agent_id}
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
@@ -474,13 +476,13 @@ Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
 - Skill(design-doc) — for template and guidelines
 
-SESSION ID: <session-id>
-DIRECTOR AGENT ID: <director-agent-id>
-YOUR AGENT ID: <my-agent-id>     (will be filled in literally by member create)
+SESSION ID: {session_id}
+DIRECTOR AGENT ID: {director_agent_id}
+YOUR AGENT ID: {agent_id}
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code or modify implementation/test files.

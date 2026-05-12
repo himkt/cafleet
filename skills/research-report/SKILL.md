@@ -128,7 +128,7 @@ YOUR AGENT ID: {agent_id}
 
 CURRENT DATE: [INSERT today's date]
 USER REQUEST: [INSERT user's original request in full]
-OUTPUT DIRECTORY: [INSERT ${OUTPUT_DIR}]
+OUTPUT DIRECTORY: [INSERT OUTPUT DIRECTORY]
 LANGUAGE: [INSERT user's language preference if specified]
 
 COMMUNICATION PROTOCOL:
