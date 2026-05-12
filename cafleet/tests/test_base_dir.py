@@ -10,7 +10,6 @@ from click.testing import CliRunner
 from cafleet import base_dir as base_dir_module
 from cafleet.base_dir import (
     ANCHOR_FILENAME,
-    UNSET_SENTINEL,
     AnchorError,
     record,
     resolve,
@@ -23,14 +22,24 @@ def runner():
     return CliRunner()
 
 
-def _write_anchor(path: Path, *, base: str, source: str = "askuserquestion",
-                  version: int = 1, resolved_at: str = "2026-05-12T13:00:00.000000+00:00") -> None:
-    path.write_text(json.dumps({
-        "version": version,
-        "base": base,
-        "source": source,
-        "resolved_at": resolved_at,
-    }))
+def _write_anchor(
+    path: Path,
+    *,
+    base: str,
+    source: str = "askuserquestion",
+    version: int = 1,
+    resolved_at: str = "2026-05-12T13:00:00.000000+00:00",
+) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "version": version,
+                "base": base,
+                "source": source,
+                "resolved_at": resolved_at,
+            }
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +122,9 @@ def test_resolve_anchor_mismatch_raises(tmp_path):
         resolve(cwd=proj, home=home)
 
 
-def test_resolve_cwd_under_home_dot_claude_returns_needs_user_input(tmp_path, monkeypatch):
+def test_resolve_cwd_under_home_dot_claude_returns_needs_user_input(
+    tmp_path, monkeypatch
+):
     """CWD under $HOME/.claude triggers the AskUserQuestion branch."""
     home = tmp_path / "home"
     home.mkdir()
@@ -245,7 +256,9 @@ def test_cli_resolve_emits_documented_json_shape(tmp_path, runner, monkeypatch):
     monkeypatch.setattr(base_dir_module, "_TMP_CANDIDATE", fake_tmp_candidate)
 
     # Branch 1: absolute-path-arg → status="unset"
-    result = runner.invoke(cli, ["base-dir", "resolve", "--json", "--path", "/abs/path"])
+    result = runner.invoke(
+        cli, ["base-dir", "resolve", "--json", "--path", "/abs/path"]
+    )
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data == {
@@ -298,11 +311,17 @@ def test_cli_record_writes_anchor_or_errors_on_mismatch(tmp_path, runner):
     proj.mkdir()
 
     # First call: anchor lands with the expected JSON shape
-    result = runner.invoke(cli, [
-        "base-dir", "record",
-        "--base", str(proj),
-        "--source", "askuserquestion",
-    ])
+    result = runner.invoke(
+        cli,
+        [
+            "base-dir",
+            "record",
+            "--base",
+            str(proj),
+            "--source",
+            "askuserquestion",
+        ],
+    )
     assert result.exit_code == 0, result.output
     anchor = proj / ANCHOR_FILENAME
     assert anchor.exists()
@@ -312,23 +331,37 @@ def test_cli_record_writes_anchor_or_errors_on_mismatch(tmp_path, runner):
     assert data["source"] == "askuserquestion"
 
     # Idempotent: re-invoking with the same args is a successful no-op
-    result = runner.invoke(cli, [
-        "base-dir", "record",
-        "--base", str(proj),
-        "--source", "askuserquestion",
-    ])
+    result = runner.invoke(
+        cli,
+        [
+            "base-dir",
+            "record",
+            "--base",
+            str(proj),
+            "--source",
+            "askuserquestion",
+        ],
+    )
     assert result.exit_code == 0, result.output
 
     # Mismatched base: pre-existing anchor records a different `base` field
     other = tmp_path / "other"
     other.mkdir()
-    _write_anchor(other / ANCHOR_FILENAME, base=str(proj))  # mismatch: anchor body != location
+    _write_anchor(
+        other / ANCHOR_FILENAME, base=str(proj)
+    )  # mismatch: anchor body != location
 
-    result = runner.invoke(cli, [
-        "base-dir", "record",
-        "--base", str(other),
-        "--source", "askuserquestion",
-    ])
+    result = runner.invoke(
+        cli,
+        [
+            "base-dir",
+            "record",
+            "--base",
+            str(other),
+            "--source",
+            "askuserquestion",
+        ],
+    )
     assert result.exit_code != 0
     combined = (result.output or "") + (result.stderr or "")
     assert "records base=" in combined
@@ -349,7 +382,8 @@ def test_resolve_rejects_unknown_anchor_version(tmp_path, runner, monkeypatch):
     result = runner.invoke(cli, ["base-dir", "resolve", "--json"])
     assert result.exit_code != 0
     combined = (result.output or "") + (result.stderr or "")
-    assert "version" in combined and ("=2" in combined or " 2" in combined)
+    assert "version" in combined
+    assert "=2" in combined or " 2" in combined
     assert "supports version 1" in combined or "version 1" in combined
 
     # version=0 → also rejected (non-positive)

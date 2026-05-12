@@ -14,20 +14,17 @@ End-to-end member spawning (`cafleet member create` + real Claude API) is
 explicitly out of scope per the design doc.
 """
 
-from __future__ import annotations
-
-import re
 from pathlib import Path
 
 import pytest
 
 from cafleet.base_dir import (
     UNSET_SENTINEL,
+    extract_spawn_templates,
     record,
     substitute_base_in_prompt,
     write_audit_file,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = REPO_ROOT / "skills"
@@ -40,9 +37,7 @@ CONSUMER_SKILLS = [
     SKILLS_DIR / "design-doc-interview" / "SKILL.md",
 ]
 
-BASE_MARKER = (
-    "[INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"
-)
+BASE_MARKER = "[INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"
 
 # Total number of spawn templates that gain a BASE line (design doc §Spec 2):
 #   research-report:        Manager, Scout, Researcher                 (3)
@@ -54,29 +49,23 @@ EXPECTED_SPAWN_TEMPLATE_COUNT = 13
 
 
 def _extract_spawn_templates(skill_md: Path) -> list[str]:
-    """Return every fenced code block in ``skill_md`` whose body is a spawn prompt.
+    """Return every fenced spawn-prompt body in ``skill_md``.
 
-    A "spawn-prompt" code block is identified by the simultaneous presence of:
-    - the literal token ``YOUR AGENT ID: {agent_id}`` (curly placeholder injected
-      by ``cafleet member create``'s ``str.format()`` pass), and
-    - the ``[INSERT BASE]`` marker on a ``BASE:`` line.
+    Thin wrapper that delegates to :func:`cafleet.base_dir.extract_spawn_templates`
+    — the line-by-line fence-parity parser that handles both bare ` ``` ` opens
+    and language-tagged opens (` ```bash`, ` ```text`, etc.). A regex-only
+    parser silently mis-pairs fences and returns the wrong bodies.
     """
-    content = skill_md.read_text(encoding="utf-8")
-    templates: list[str] = []
-    for match in re.finditer(r"```\n(.*?)\n```", content, flags=re.DOTALL):
-        body = match.group(1)
-        if "YOUR AGENT ID: {agent_id}" in body and BASE_MARKER in body:
-            templates.append(body)
-    return templates
+    return extract_spawn_templates(skill_md.read_text(encoding="utf-8"))
 
 
 def _all_spawn_templates() -> list[tuple[Path, str]]:
     """Collect every spawn template across the 5 consumer SKILL.md files."""
-    out: list[tuple[Path, str]] = []
-    for skill_md in CONSUMER_SKILLS:
-        for tpl in _extract_spawn_templates(skill_md):
-            out.append((skill_md, tpl))
-    return out
+    return [
+        (skill_md, tpl)
+        for skill_md in CONSUMER_SKILLS
+        for tpl in _extract_spawn_templates(skill_md)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -103,8 +92,7 @@ def test_spawn_prompt_substitution_carries_base_to_member():
         lines = rendered.splitlines()
         try:
             agent_idx = next(
-                i for i, line in enumerate(lines)
-                if line.startswith("YOUR AGENT ID:")
+                i for i, line in enumerate(lines) if line.startswith("YOUR AGENT ID:")
             )
         except StopIteration:
             pytest.fail(

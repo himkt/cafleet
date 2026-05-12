@@ -1,7 +1,7 @@
 # Base-dir Authoritative Resolution
 
 **Status**: Approved
-**Progress**: 14/23 tasks complete
+**Progress**: 16/23 tasks complete
 **Last Updated**: 2026-05-12
 
 ## Overview
@@ -243,8 +243,8 @@ For each of the 5 consumer skills below, two sub-tasks: (a) add the `[INSERT BAS
 
 ### Step 2: Python helper + CLI
 
-- [ ] Add `cafleet/src/cafleet/base_dir.py`: anchor read / write / validate, `resolve()` returning the four status branches, sentinel constant <!-- completed: -->
-- [ ] Wire `cafleet base-dir resolve` and `cafleet base-dir record` into the click CLI (`cafleet/src/cafleet/cli/`); register the `base-dir` subgroup so `cafleet base-dir --help` works <!-- completed: -->
+- [x] Add `cafleet/src/cafleet/base_dir.py`: anchor read / write / validate, `resolve()` returning the four status branches, sentinel constant <!-- completed: 2026-05-13T00:35 -->
+- [x] Wire `cafleet base-dir resolve` and `cafleet base-dir record` into the click CLI (`cafleet/src/cafleet/cli/`); register the `base-dir` subgroup so `cafleet base-dir --help` works <!-- completed: 2026-05-13T00:40 -->
 - [ ] `mise //cafleet:lint` + `mise //cafleet:typecheck` + `mise //cafleet:format` clean for the new code <!-- completed: -->
 
 ### Step 3: Tests
