@@ -54,7 +54,7 @@ Members cannot talk to the user directly — the Director always relays. Members
 
 Before creating the team, determine where output files will be saved.
 
-1. Load `Skill(base-dir)` and follow its procedure. (The topic argument is not a path, so the absolute-path skip rule does not apply.)
+1. Load `Skill(cafleet:base-dir)` and follow its procedure. (The topic argument is not a path, so the absolute-path skip rule does not apply.)
 2. Compute: `${OUTPUT_DIR} = ${BASE}/researches/[topic-slug]/`
 3. Create the output directory.
 4. Pass `${OUTPUT_DIR}` as the resolved absolute path to the Manager and all Researchers/Scouts in their spawn prompts.
@@ -106,7 +106,7 @@ Read the role files that will be embedded verbatim in spawn prompts (paths are r
 - `roles/scout.md`
 - `roles/researcher.md`
 
-> **Template safety**: cafleet `member create` runs `str.format()` on the entire spawn prompt with `session_id` / `agent_id` / `director_name` / `director_agent_id` as kwargs. The role docs in this skill use `<...>` / `[...]` notation everywhere placeholders appear, so the embedded role content contains no literal `{` or `}` and no escaping is needed. The only single-brace tokens in the spawn prompt are the four kwargs cafleet itself substitutes: `{session_id}`, `{agent_id}`, `{director_name}`, `{director_agent_id}`. If you ever add a `{` or `}` to a role doc (a JSON example, a format-string example), double it to `{{` / `}}` before embedding — `str.format()` raises `KeyError` at spawn time otherwise. Do NOT shell out to `sed` / `awk` — those are blocked by the harness Bash validator.
+> **Template safety**: cafleet `member create` runs `str.format()` on the entire spawn prompt with `session_id` / `agent_id` / `director_agent_id` as kwargs. The role docs in this skill use `<...>` / `[...]` notation everywhere placeholders appear, so the embedded role content contains no literal `{` or `}` and no escaping is needed. The only single-brace tokens in the spawn prompt are the three kwargs cafleet itself substitutes: `{session_id}`, `{agent_id}`, `{director_agent_id}`. If you ever add a `{` or `}` to a role doc (a JSON example, a format-string example), double it to `{{` / `}}` before embedding — `str.format()` raises `KeyError` at spawn time otherwise. Do NOT shell out to `sed` / `awk` — those are blocked by the harness Bash validator.
 
 #### 2c. Spawn the Manager
 
@@ -116,7 +116,7 @@ Read the role files that will be embedded verbatim in spawn prompts (paths are r
 You are the Manager in a research report team (CAFleet-native).
 
 [ROLE DEFINITION]
-[Content of roles/manager.md injected verbatim. Cafleet substitutes only the four format kwargs `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
+[Content of roles/manager.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
 [/ROLE DEFINITION]
 
 Load these skills at startup:
@@ -124,12 +124,11 @@ Load these skills at startup:
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
-DIRECTOR NAME: {director_name}
 YOUR AGENT ID: {agent_id}
 
 CURRENT DATE: [INSERT today's date]
 USER REQUEST: [INSERT user's original request in full]
-OUTPUT DIRECTORY: [INSERT ${OUTPUT_DIR}]
+OUTPUT DIRECTORY: [INSERT OUTPUT DIRECTORY]
 LANGUAGE: [INSERT user's language preference if specified]
 
 COMMUNICATION PROTOCOL:
@@ -154,6 +153,11 @@ cafleet --session-id [session-id] --json member create --agent-id [director-agen
 
 Capture the printed `agent_id` and substitute it for `[manager-agent-id]` in every subsequent `cafleet` call that targets the Manager.
 
+After parsing `agent_id`:
+
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<manager-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+2. **Write the audit file** to `${BASE}/manager.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+
 ### Step 3: Knowledge Bootstrapping — Scout Phase (Director, on Manager's request)
 
 After assessing the topic, the Manager may send the Director one or more Scout spawn requests via `cafleet message send`. For each request, the Director spawns a Scout.
@@ -164,7 +168,7 @@ After assessing the topic, the Manager may send the Director one or more Scout s
 You are a Scout Researcher in a research team (CAFleet-native).
 
 [ROLE DEFINITION]
-[Content of roles/scout.md injected verbatim. Cafleet substitutes only the four format kwargs `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
+[Content of roles/scout.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
 [/ROLE DEFINITION]
 
 Load these skills at startup:
@@ -172,7 +176,6 @@ Load these skills at startup:
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
-DIRECTOR NAME: {director_name}
 YOUR AGENT ID: {agent_id}
 
 CURRENT DATE: [INSERT today's date]
@@ -196,6 +199,11 @@ cafleet --session-id [session-id] --json member create --agent-id [director-agen
 ```
 
 (Use `scout` if only one; `scout-1`, `scout-2`, ... for multiple.) Capture the printed `agent_id` for each Scout and substitute it into subsequent `cafleet message send` calls targeting that Scout.
+
+After parsing `agent_id`:
+
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<scout-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+2. **Write the audit file** to `${BASE}/scout.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Scout-Manager loop (relayed through Director):**
 
@@ -230,7 +238,7 @@ The Manager's `TaskCreate` calls also serve as the authoritative list of sub-top
 You are a Research Specialist in a research team (CAFleet-native).
 
 [ROLE DEFINITION]
-[Content of roles/researcher.md injected verbatim. Cafleet substitutes only the four format kwargs `{session_id}` / `{agent_id}` / `{director_name}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
+[Content of roles/researcher.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
 [/ROLE DEFINITION]
 
 Load these skills at startup:
@@ -238,7 +246,6 @@ Load these skills at startup:
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
-DIRECTOR NAME: {director_name}
 YOUR AGENT ID: {agent_id}
 
 CURRENT DATE: [INSERT today's date]
@@ -266,6 +273,11 @@ cafleet --session-id [session-id] --json member create --agent-id [director-agen
 ```
 
 The Director repeats this step whenever the Manager requests additional Researchers (for coverage gaps, failed investigations, or revision-driven re-research). Any new Researcher must first have a task created by the Manager; the Director includes the `taskId` in the spawn prompt.
+
+After parsing `agent_id`:
+
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<researcher-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+2. **Write the audit file** to `${BASE}/researcher.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 ### Step 5: Review & Revision Loop (Director ↔ Manager, via `cafleet message send`)
 

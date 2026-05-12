@@ -24,7 +24,7 @@ Execution self-bootstraps matplotlib via `uv run --with matplotlib python <scrip
 **Resolve `${BASE}` in this order:**
 
 1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., `/research-presentation` passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
-2. **Otherwise**: Load `Skill(base-dir)` and follow its procedure (no path argument; CWD-based inference applies). If the resolved `${BASE}` is a git repository root, override to `${BASE} = /tmp/claude-code` so generated figures do not pollute the repo tree.
+2. **Otherwise**: Load `Skill(cafleet:base-dir)` and follow its procedure (no path argument; CWD-based inference applies). If the resolved `${BASE}` is a git repository root, override to `${BASE} = /tmp/claude-code` so generated figures do not pollute the repo tree.
 
 **Derive the subdirectories** (each is a literal path string you will embed in the script):
 

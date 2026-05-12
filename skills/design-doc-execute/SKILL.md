@@ -215,7 +215,7 @@ Before validation, resolve `$ARGUMENTS` into a concrete `design-doc.md` path.
 
 #### Phase 1: Base Directory Resolution
 
-Load `Skill(base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
+Load `Skill(cafleet:base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
 - If skipped (absolute path): set `${RESOLVED_ARGS} = $ARGUMENTS`.
 - If base resolved: set `${RESOLVED_ARGS} = ${BASE}/design-docs/$ARGUMENTS`. Resolve to absolute path.
 
@@ -368,6 +368,8 @@ Read the role files that will be embedded verbatim in spawn prompts:
 
 #### 3e. Spawn each member via `cafleet member create`
 
+The spawn prompts below use `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders — cafleet `member create` runs `str.format()` over the entire prompt and substitutes these from the new member's allocated `agent_id`, the session ID, and the spawning Director's `agent_id`. The `[INSERT …]` markers (e.g. `[INSERT DESIGN DOC PATH]`) are NOT format placeholders — the Director substitutes them in shell before calling `member create`. See the Template safety note under `Member Create` in `skills/cafleet/reference/director.md` — any literal `{` / `}` you embed in a custom prompt (e.g., a JSON example, a `${VAR}` reference) must be doubled (`{{` / `}}`), because the prompt is passed through `.format()` even when it contains no placeholders.
+
 **Programmer spawn prompt:**
 
 ```
@@ -381,13 +383,13 @@ Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
 - Skill(design-doc) — for template and guidelines
 
-SESSION ID: <session-id>
-DIRECTOR AGENT ID: <director-agent-id>
-YOUR AGENT ID: <my-agent-id>     (will be filled in literally by member create)
+SESSION ID: {session_id}
+DIRECTOR AGENT ID: {director_agent_id}
+YOUR AGENT ID: {agent_id}
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
@@ -408,6 +410,11 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 
 Parse `agent_id` from the JSON response and substitute it for `<programmer-agent-id>` in every subsequent command.
 
+After parsing `agent_id`:
+
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<programmer-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+2. **Write the audit file** to `${BASE}/programmer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+
 **Tester spawn prompt (if needed):**
 
 ```
@@ -421,13 +428,13 @@ Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
 - Skill(design-doc) — for template and guidelines
 
-SESSION ID: <session-id>
-DIRECTOR AGENT ID: <director-agent-id>
-YOUR AGENT ID: <my-agent-id>     (will be filled in literally by member create)
+SESSION ID: {session_id}
+DIRECTOR AGENT ID: {director_agent_id}
+YOUR AGENT ID: {agent_id}
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
@@ -449,6 +456,11 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 
 Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>` in every subsequent command.
 
+After parsing `agent_id`:
+
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<tester-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+2. **Write the audit file** to `${BASE}/tester.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+
 **Verifier spawn prompt (if needed):**
 
 > **Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in `/design-doc-interview`). Phase 2 verification reports follow the verb + pointer + `COMMENT(verifier)` schema documented in [the Coordination Protocol section above](#coordination-protocol).
@@ -464,13 +476,13 @@ Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
 - Skill(design-doc) — for template and guidelines
 
-SESSION ID: <session-id>
-DIRECTOR AGENT ID: <director-agent-id>
-YOUR AGENT ID: <my-agent-id>     (will be filled in literally by member create)
+SESSION ID: {session_id}
+DIRECTOR AGENT ID: {director_agent_id}
+YOUR AGENT ID: {agent_id}
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "your report"
+- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code or modify implementation/test files.
@@ -491,6 +503,11 @@ cafleet --session-id <session-id> --json member create --agent-id <director-agen
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-id>` in every subsequent command.
+
+After parsing `agent_id`:
+
+1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<verifier-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
+2. **Write the audit file** to `${BASE}/verifier.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 #### 3f. Verify members are live
 

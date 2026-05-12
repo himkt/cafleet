@@ -31,6 +31,7 @@ run = [
   "rm -rf ~/.claude/skills/my-slidev && cp -r skills/my-slidev ~/.claude/skills/my-slidev",
   "rm -rf ~/.claude/skills/research-presentation && cp -r skills/research-presentation ~/.claude/skills/research-presentation",
   "rm -rf ~/.claude/skills/research-report && cp -r skills/research-report ~/.claude/skills/research-report",
+  "rm -rf ~/.claude/skills/base-dir && cp -r skills/base-dir ~/.claude/skills/base-dir",
 ]
-description = "Mirror the four moved skills from the repo-root plugin source (skills/<name>/) to the maintainer's home-dir working copy (~/.claude/skills/<name>/). Each line removes the home-dir copy first so a re-run does not nest dirs. Canonical divergence-guard per design 0000054."
+description = "Mirror the five home-dir-mirrored skills (create-figure, my-slidev, research-presentation, research-report, base-dir) from the repo-root plugin source (skills/<name>/) to the maintainer's home-dir working copy (~/.claude/skills/<name>/). The cafleet plugin ships additional skills (cafleet, design-doc, design-doc-*, agent-team-*) that are NOT mirrored here — those are consumed via the plugin loader only. Each line removes the home-dir copy first so a re-run does not nest dirs. Canonical divergence-guard per design 0000054 (base-dir added in design 0000053). Note: this task re-creates ~/.claude/skills/base-dir/; per the design 0000053 operator-follow-up, the smoke-test that validates the post-removal state must be run in a fresh Claude Code session that has not run sync-skills since the operator removed the global copy."
 
