@@ -98,15 +98,21 @@ Load `Skill(cafleet)` and follow its spawn protocol.
 
 The harness task tools (`TaskCreate / TaskUpdate / TaskList / TaskGet`) are the work-coordination substrate. The on-disk task store is created on the first `TaskCreate` call (typically by the Manager when decomposing the topic). No explicit team-bootstrap step is required.
 
-#### 2b. Read role definitions
+#### 2b. Locate role definitions (path-by-reference)
 
-Read the role files that will be embedded verbatim in spawn prompts (paths are relative to this skill's directory):
+The Director references each role definition by its **absolute path** in the spawn prompt — the spawned member opens its role doc with `Read` at startup. Do NOT inline the role content into the prompt. Resolve the absolute path for each role file once (the role files live in this skill's `roles/` directory):
 
-- `roles/manager.md`
-- `roles/scout.md`
-- `roles/researcher.md`
+- `<abs path to this skill>/roles/manager.md`
+- `<abs path to this skill>/roles/scout.md`
+- `<abs path to this skill>/roles/researcher.md`
 
-> **Template safety**: cafleet `member create` runs `str.format()` on the entire spawn prompt with `session_id` / `agent_id` / `director_agent_id` as kwargs. The role docs in this skill use `<...>` / `[...]` notation everywhere placeholders appear, so the embedded role content contains no literal `{` or `}` and no escaping is needed. The only single-brace tokens in the spawn prompt are the three kwargs cafleet itself substitutes: `{session_id}`, `{agent_id}`, `{director_agent_id}`. If you ever add a `{` or `}` to a role doc (a JSON example, a format-string example), double it to `{{` / `}}` before embedding — `str.format()` raises `KeyError` at spawn time otherwise. Do NOT shell out to `sed` / `awk` — those are blocked by the harness Bash validator.
+Substitute these absolute paths into the spawn prompts below.
+
+> **Why path-by-reference (and not inline-verbatim)**: cafleet `member create` passes the prompt to `tmux split-window` as a single positional argument. tmux fails with `command too long` once the shell-quoted prompt grows past a few KB, and cafleet rolls back the agent registration. A role file is typically large enough (5–15 KB) that inlining it exceeds the limit. The member loads the role file via `Read` on its first turn; the file lives in the skill directory and is stable, so this is safe. See `Skill(cafleet)` reference `director.md` § *Spawn prompt size limit* for the canonical write-up.
+>
+> **Template safety (str.format placeholders)**: cafleet `member create` runs `str.format()` over the entire spawn prompt with `session_id` / `agent_id` / `director_agent_id` as kwargs. Leave those three single-braced. Double any other literal `{` or `}` in the prompt body (a JSON example, a `${{VAR}}` reference) to `{{` / `}}`. With role content no longer inlined, the prompt body rarely needs `{` or `}` at all.
+>
+> **Scratch and audit files**: See `Skill(cafleet:base-dir)` § *No-bypass write protocol*.
 
 #### 2c. Spawn the Manager
 
@@ -115,9 +121,7 @@ Read the role files that will be embedded verbatim in spawn prompts (paths are r
 ```
 You are the Manager in a research report team (CAFleet-native).
 
-[ROLE DEFINITION]
-[Content of roles/manager.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
-[/ROLE DEFINITION]
+ROLE DEFINITION: Open [INSERT abs path to roles/manager.md] with the Read tool BEFORE any other action. That file is your authoritative role definition — accountability, communication protocol, task discipline, file-aggregation rules, pre-compilation verification, revision loop, and shutdown. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
 - Skill(cafleet) — for the broker primitives, literal-UUID flag convention, and bash-via-Director routing
@@ -125,6 +129,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 CURRENT DATE: [INSERT today's date]
 USER REQUEST: [INSERT user's original request in full]
@@ -156,7 +161,7 @@ Capture the printed `agent_id` and substitute it for `[manager-agent-id]` in eve
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<manager-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/manager.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/manager.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 ### Step 3: Knowledge Bootstrapping — Scout Phase (Director, on Manager's request)
 
@@ -167,9 +172,7 @@ After assessing the topic, the Manager may send the Director one or more Scout s
 ```
 You are a Scout Researcher in a research team (CAFleet-native).
 
-[ROLE DEFINITION]
-[Content of roles/scout.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
-[/ROLE DEFINITION]
+ROLE DEFINITION: Open [INSERT abs path to roles/scout.md] with the Read tool BEFORE any other action. That file is your authoritative role definition — landscape-mapping focus, communication protocol, output format, and shutdown. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
 - Skill(cafleet) — for the broker primitives and bash-via-Director routing
@@ -177,6 +180,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 CURRENT DATE: [INSERT today's date]
 YOUR ASSIGNMENT: [landscape scope and what areas to map]
@@ -203,7 +207,7 @@ cafleet --session-id [session-id] --json member create --agent-id [director-agen
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<scout-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/scout.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/scout.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Scout-Manager loop (relayed through Director):**
 
@@ -237,9 +241,7 @@ The Manager's `TaskCreate` calls also serve as the authoritative list of sub-top
 ```
 You are a Research Specialist in a research team (CAFleet-native).
 
-[ROLE DEFINITION]
-[Content of roles/researcher.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
-[/ROLE DEFINITION]
+ROLE DEFINITION: Open [INSERT abs path to roles/researcher.md] with the Read tool BEFORE any other action. That file is your authoritative role definition — accountability, Discovery Phase, fact verification protocol, output format, and shutdown. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
 - Skill(cafleet) — for the broker primitives and bash-via-Director routing
@@ -247,6 +249,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 CURRENT DATE: [INSERT today's date]
 YOUR NAME: researcher-NN
@@ -277,7 +280,7 @@ The Director repeats this step whenever the Manager requests additional Research
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<researcher-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/researcher.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/researcher.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 ### Step 5: Review & Revision Loop (Director ↔ Manager, via `cafleet message send`)
 

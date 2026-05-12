@@ -24,7 +24,7 @@ Execution self-bootstraps matplotlib via `uv run --with matplotlib python <scrip
 **Resolve `${BASE}` in this order:**
 
 1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., `/research-presentation` passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
-2. **Otherwise**: Load `Skill(cafleet:base-dir)` and follow its procedure (no path argument; CWD-based inference applies). If the resolved `${BASE}` is a git repository root, override to `${BASE} = /tmp/claude-code` so generated figures do not pollute the repo tree.
+2. **Otherwise**: Load `Skill(cafleet:base-dir)` and follow its procedure (no path argument; CWD-based inference applies). Use the resolved `${BASE}` verbatim. Figures, scripts, and data land under `${BASE}/figures/{src,output,data}` regardless of whether `${BASE}` is a git-repo root, `/tmp/claude-code`, or any other path. If you want figures kept out of a repo tree, pick `/tmp/claude-code` (or any non-repo path) at base-dir resolution time — `create-figure` does NOT second-guess base-dir's answer.
 
 **Derive the subdirectories** (each is a literal path string you will embed in the script):
 
@@ -32,11 +32,11 @@ Execution self-bootstraps matplotlib via `uv run --with matplotlib python <scrip
 - `${OUTPUT_DIR} = ${BASE}/figures/output`
 - `${DATA_DIR} = ${BASE}/figures/data`
 
-Example resolution: if the calling skill said "use `/tmp/claude-code/researches/foo` as the figure base", then `${SRC_DIR}` in your head is `/tmp/claude-code/researches/foo/figures/src` — that literal string is what you write into the Python script.
+Example resolution: if base-dir resolved `${BASE} = /home/user/proj` (a git-repo root), then `${SRC_DIR}` in your head is `/home/user/proj/figures/src` and figures land under the repo tree — that is the intended behavior. If base-dir resolved `${BASE} = /tmp/claude-code` instead, `${SRC_DIR}` is `/tmp/claude-code/figures/src`. Either way, the literal string you write into the Python script is the concrete resolved path.
 
 If the directories do not exist yet, the Write tool auto-creates parent directories when you write the script file — do NOT call `mkdir`.
 
-All subsequent steps use `${SRC_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` as literal resolved paths. Never create scripts or outputs directly in a project repo root — figure artifacts belong under the resolved `${BASE}/figures/` subdirectories.
+All subsequent steps use `${SRC_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` as literal resolved paths. Figure artifacts always live under `${BASE}/figures/`; never directly at `${BASE}` and never at `/tmp` unless `${BASE}` itself is `/tmp/claude-code`.
 
 **Font:** No setup needed. The theme font `Noto Sans` is available as a system font. Scripts set `plt.rcParams['font.family'] = 'Noto Sans'` (see template below).
 

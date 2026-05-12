@@ -368,16 +368,18 @@ Read the role files that will be embedded verbatim in spawn prompts:
 
 #### 3e. Spawn each member via `cafleet member create`
 
-The spawn prompts below use `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders — cafleet `member create` runs `str.format()` over the entire prompt and substitutes these from the new member's allocated `agent_id`, the session ID, and the spawning Director's `agent_id`. The `[INSERT …]` markers (e.g. `[INSERT DESIGN DOC PATH]`) are NOT format placeholders — the Director substitutes them in shell before calling `member create`. See the Template safety note under `Member Create` in `skills/cafleet/reference/director.md` — any literal `{` / `}` you embed in a custom prompt (e.g., a JSON example, a `${VAR}` reference) must be doubled (`{{` / `}}`), because the prompt is passed through `.format()` even when it contains no placeholders.
+The spawn prompts below use `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders — cafleet `member create` runs `str.format()` over the entire prompt and substitutes these from the new member's allocated `agent_id`, the session ID, and the spawning Director's `agent_id`. The `[INSERT …]` markers (e.g. `[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/programmer.md]`) are NOT format placeholders — the Director substitutes them in shell before calling `member create`. See the Template safety note under `Member Create` in `skills/cafleet/reference/director.md`.
+
+> **Path-by-reference for role docs**: Each spawn prompt below references its role file by **absolute path**. The spawned member opens its role doc with `Read` on its first turn. Do NOT inline the role content — cafleet `member create` hits a `tmux command failed: command too long` error once the shell-quoted prompt grows past a few KB, and rolls back the registration. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up. Resolve the absolute path for each of `roles/programmer.md`, `roles/tester.md`, and `roles/verifier.md` (from this skill's `roles/` directory) and substitute into the `[INSERT abs path to …]` markers below.
+>
+> **Scratch and audit files**: See `Skill(cafleet:base-dir)` § *No-bypass write protocol*.
 
 **Programmer spawn prompt:**
 
 ```
 You are the Programmer in a design document execution team (CAFleet-native).
 
-<ROLE DEFINITION>
-[Content of roles/programmer.md injected here verbatim]
-</ROLE DEFINITION>
+ROLE DEFINITION: Open [INSERT abs path to roles/programmer.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
@@ -386,6 +388,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
@@ -413,16 +416,14 @@ Parse `agent_id` from the JSON response and substitute it for `<programmer-agent
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<programmer-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/programmer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/programmer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Tester spawn prompt (if needed):**
 
 ```
 You are the Tester in a design document execution team (CAFleet-native).
 
-<ROLE DEFINITION>
-[Content of roles/tester.md injected here verbatim]
-</ROLE DEFINITION>
+ROLE DEFINITION: Open [INSERT abs path to roles/tester.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
@@ -431,6 +432,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
@@ -459,7 +461,7 @@ Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<tester-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/tester.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/tester.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Verifier spawn prompt (if needed):**
 
@@ -468,9 +470,7 @@ After parsing `agent_id`:
 ```
 You are the Verifier in a design document execution team (CAFleet-native).
 
-<ROLE DEFINITION>
-[Content of roles/verifier.md injected here verbatim]
-</ROLE DEFINITION>
+ROLE DEFINITION: Open [INSERT abs path to roles/verifier.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
@@ -479,6 +479,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
@@ -507,7 +508,7 @@ Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-i
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<verifier-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/verifier.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/verifier.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 #### 3f. Verify members are live
 
