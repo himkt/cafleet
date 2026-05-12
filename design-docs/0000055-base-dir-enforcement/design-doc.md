@@ -1,7 +1,7 @@
 # Base-dir Authoritative Resolution
 
 **Status**: Approved
-**Progress**: 16/23 tasks complete
+**Progress**: 21/23 tasks complete
 **Last Updated**: 2026-05-12
 
 ## Overview
@@ -245,19 +245,19 @@ For each of the 5 consumer skills below, two sub-tasks: (a) add the `[INSERT BAS
 
 - [x] Add `cafleet/src/cafleet/base_dir.py`: anchor read / write / validate, `resolve()` returning the four status branches, sentinel constant <!-- completed: 2026-05-13T00:35 -->
 - [x] Wire `cafleet base-dir resolve` and `cafleet base-dir record` into the click CLI (`cafleet/src/cafleet/cli/`); register the `base-dir` subgroup so `cafleet base-dir --help` works <!-- completed: 2026-05-13T00:40 -->
-- [ ] `mise //cafleet:lint` + `mise //cafleet:typecheck` + `mise //cafleet:format` clean for the new code <!-- completed: -->
+- [x] `mise //cafleet:lint` + `mise //cafleet:typecheck` + `mise //cafleet:format` clean for the new code <!-- completed: 2026-05-13T00:50 -->
 
 ### Step 3: Tests
 
-- [ ] Add `cafleet/tests/test_base_dir.py` with all 12 helper unit tests + the 3 CLI tests (incl. `test_resolve_rejects_unknown_anchor_version`) listed in §Specification 7 <!-- completed: -->
-- [ ] Add `cafleet/tests/test_base_dir_spawn_flow.py` with the 3 integration tests (spawn-prompt substitution carry, omit-on-unset, Director-side audit-write lands under BASE not /tmp) <!-- completed: -->
-- [ ] `mise //cafleet:test` green <!-- completed: -->
+- [x] Add `cafleet/tests/test_base_dir.py` with all 12 helper unit tests + the 3 CLI tests (incl. `test_resolve_rejects_unknown_anchor_version`) listed in §Specification 7 <!-- completed: 2026-05-13T00:25 -->
+- [x] Add `cafleet/tests/test_base_dir_spawn_flow.py` with the 3 integration tests (spawn-prompt substitution carry, omit-on-unset, Director-side audit-write lands under BASE not /tmp) <!-- completed: 2026-05-13T00:25 -->
+- [x] `mise //cafleet:test` green <!-- completed: 2026-05-13T00:50; 886 tests pass post-Tester rewire to canonical extract_spawn_templates -->
 
 ### Step 4: Validation
 
 - [ ] Manual smoke: run `/design-doc-create` in a non-`/tmp` BASE; verify every spawned role file has `BASE:` in its spawn prompt; verify no files appear under `/tmp/claude-code/` from the member panes <!-- completed: -->
 - [ ] Manual smoke: run `/create-figure` from a git-repo CWD; verify figures land at `${CWD}/figures/` and not `/tmp/claude-code/figures/` <!-- completed: -->
-- [ ] Final removal sweep: grep the repo for any remaining "/tmp/claude-code" reference outside `skills/base-dir/SKILL.md` and `design-docs/0000055-*/`; either justify or delete (per `~/.claude/rules/removal.md` — no historical deprecation notices) <!-- completed: -->
+- [x] Final removal sweep: grep the repo for any remaining "/tmp/claude-code" reference outside `skills/base-dir/SKILL.md` and `design-docs/0000055-*/`; either justify or delete (per `~/.claude/rules/removal.md` — no historical deprecation notices) <!-- completed: 2026-05-13T01:00; grep sweep clean: remaining refs are intentional (base-dir SKILL.md, create-figure SKILL.md /tmp/claude-code as legitimate BASE choice, base_dir.py _TMP_CANDIDATE, test docstrings, design-doc-0000055 itself); the workflow scratch files at repo root (director-answers.md, drafter*.md) are now gitignored per design 0000055 + the .gitignore reorganization commit -->
 
 ---
 
