@@ -161,7 +161,7 @@ After parsing `agent_id`:
 You are the Transcript Specialist in a research presentation team (CAFleet-native).
 
 [ROLE DEFINITION]
-[Content of skills/research-presentation/roles/transcript.md (resolved from project root) injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
+[Content of roles/transcript.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
 [/ROLE DEFINITION]
 
 Load these skills at startup:
@@ -276,7 +276,7 @@ while start <= total_slides:
 You are the Visual Reviewer in a research presentation team (CAFleet-native).
 
 [ROLE DEFINITION]
-[Content of skills/research-presentation/roles/visual-reviewer.md (resolved from project root) injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
+[Content of roles/visual-reviewer.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
 [/ROLE DEFINITION]
 
 Load these skills at startup:

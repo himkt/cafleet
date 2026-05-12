@@ -368,7 +368,7 @@ Read the role files that will be embedded verbatim in spawn prompts:
 
 #### 3e. Spawn each member via `cafleet member create`
 
-The spawn prompts below use `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders — cafleet `member create` runs `str.format()` over the entire prompt and substitutes these from the new member's allocated `agent_id`, the session ID, and the spawning Director's `agent_id`. The `[INSERT …]` markers (e.g. `[INSERT DESIGN DOC PATH]`) are NOT format placeholders — the Director substitutes them in shell before calling `member create`. See the Template safety note under `Member Create` in `skills/cafleet/SKILL.md` — any literal `{` / `}` you embed in a custom prompt (e.g., a JSON example, a `${VAR}` reference) must be doubled (`{{` / `}}`), because the prompt is passed through `.format()` even when it contains no placeholders.
+The spawn prompts below use `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders — cafleet `member create` runs `str.format()` over the entire prompt and substitutes these from the new member's allocated `agent_id`, the session ID, and the spawning Director's `agent_id`. The `[INSERT …]` markers (e.g. `[INSERT DESIGN DOC PATH]`) are NOT format placeholders — the Director substitutes them in shell before calling `member create`. See the Template safety note under `Member Create` in `skills/cafleet/reference/director.md` — any literal `{` / `}` you embed in a custom prompt (e.g., a JSON example, a `${VAR}` reference) must be doubled (`{{` / `}}`), because the prompt is passed through `.format()` even when it contains no placeholders.
 
 **Programmer spawn prompt:**
 

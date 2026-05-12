@@ -38,6 +38,7 @@
       "Skill(cafleet:cafleet)",
       "Skill(cafleet:agent-team-monitoring)",
       "Skill(cafleet:agent-team-supervision)",
+      "Skill(cafleet:base-dir)",
       "Skill(cafleet:design-doc)",
       "Skill(cafleet:design-doc-create)",
       "Skill(cafleet:design-doc-execute)",
