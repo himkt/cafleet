@@ -1,8 +1,8 @@
 # Base-dir Authoritative Resolution
 
-**Status**: Approved
-**Progress**: 21/23 tasks complete
-**Last Updated**: 2026-05-12
+**Status**: Implementation Complete (operator end-to-end smoke deferred — see SC #1 manual checkboxes 22 + 23)
+**Progress**: 21/23 implementation tasks complete; Steps 4.1 + 4.2 (manual /design-doc-create + /create-figure smoke runs) are operator-deferred and tracked separately as post-merge actions
+**Last Updated**: 2026-05-13
 
 ## Overview
 
@@ -275,3 +275,4 @@ For each of the 5 consumer skills below, two sub-tasks: (a) add the `[INSERT BAS
 | Date | Changes |
 |:--|:--|
 | 2026-05-12 | Initial draft |
+| 2026-05-13 | Implementation merged on PR #67; Copilot review loop addressed 20+ inline comments across base_dir.py / cli.py / 5 consumer SKILL.md / 1 test file; Status moved to Implementation Complete with manual smoke deferred to operator. |
