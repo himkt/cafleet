@@ -59,6 +59,12 @@ def _validate_anchor(anchor_path: Path, data: Any) -> None:
     base_field = data.get("base")
     if not isinstance(base_field, str) or not base_field:
         raise AnchorError(f"anchor at {anchor_path} is missing the 'base' field")
+    if not Path(base_field).is_absolute():
+        raise AnchorError(
+            f"anchor at {anchor_path} has non-absolute base={base_field!r}; "
+            "the anchor contract requires an absolute path. "
+            "Delete the anchor and re-resolve."
+        )
 
 
 def _load_anchor(anchor_path: Path) -> dict[str, Any]:
