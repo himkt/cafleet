@@ -360,7 +360,7 @@ Based on the design document steps (see [roles/director.md](roles/director.md) f
 
 #### 3d. Read role files
 
-Read the role files that will be embedded verbatim in spawn prompts:
+Resolve the absolute path of each role file you will reference by path-by-reference in spawn prompts (the member opens the file via `Read` on its first turn — do NOT inline the content):
 
 - `skills/design-doc-execute/roles/programmer.md`
 - `skills/design-doc-execute/roles/tester.md` (if Tester needed)
@@ -408,7 +408,7 @@ Spawn with:
 cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
   --name "Programmer" \
   --description "Implements code to pass tests per step" \
-  -- "<Programmer spawn prompt (embedded role content)>"
+  -- "<Programmer spawn prompt — role file referenced by absolute path>"
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<programmer-agent-id>` in every subsequent command.
@@ -453,7 +453,7 @@ Spawn with:
 cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
   --name "Tester" \
   --description "Writes unit tests per step" \
-  -- "<Tester spawn prompt (embedded role content)>"
+  -- "<Tester spawn prompt — role file referenced by absolute path>"
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>` in every subsequent command.
@@ -500,7 +500,7 @@ Spawn with:
 cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
   --name "Verifier" \
   --description "E2E/integration testing and evidence collection" \
-  -- "<Verifier spawn prompt (embedded role content)>"
+  -- "<Verifier spawn prompt — role file referenced by absolute path>"
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-id>` in every subsequent command.

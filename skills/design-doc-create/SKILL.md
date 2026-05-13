@@ -341,7 +341,7 @@ Spawn with:
 cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
   --name "Drafter" \
   --description "Writes and revises the design document" \
-  -- "<Drafter spawn prompt (embedded role content)>"
+  -- "<Drafter spawn prompt — role file referenced by absolute path>"
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<drafter-agent-id>` in every subsequent command.
@@ -383,7 +383,7 @@ Spawn with:
 cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
   --name "Reviewer" \
   --description "Critically reviews drafts for rule compliance and quality" \
-  -- "<Reviewer spawn prompt (embedded role content)>"
+  -- "<Reviewer spawn prompt — role file referenced by absolute path>"
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<reviewer-agent-id>` in every subsequent command.

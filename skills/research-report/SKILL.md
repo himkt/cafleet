@@ -153,7 +153,7 @@ Spawn with:
 cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
   --name "manager" \
   --description "Compiles the research report" \
-  -- "[Manager spawn prompt with embedded role content (literal braces doubled)]"
+  -- "[Manager spawn prompt — role file referenced by absolute path, literal braces doubled]"
 ```
 
 Capture the printed `agent_id` and substitute it for `[manager-agent-id]` in every subsequent `cafleet` call that targets the Manager.

@@ -95,7 +95,7 @@ Per `Skill(cafleet:agent-team-monitoring)`, start a 1-minute interval monitor be
 
 #### 1c. Read role definitions
 
-Read the role files that will be embedded verbatim in spawn prompts (paths are relative to this skill's directory):
+Resolve the absolute path of each role file you will reference by path-by-reference in spawn prompts (the member opens the file via `Read` on its first turn — do NOT inline the content; paths below are relative to this skill's directory):
 
 - `roles/presentation.md`
 - `roles/transcript.md`

@@ -178,7 +178,7 @@ Spawn with:
 cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
   --name "Analyzer" \
   --description "Reads the design doc and generates a numbered question list" \
-  -- "<Analyzer spawn prompt (embedded role content)>"
+  -- "<Analyzer spawn prompt — role file referenced by absolute path>"
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-id>` in every subsequent command.
