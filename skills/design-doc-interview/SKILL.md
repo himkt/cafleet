@@ -61,7 +61,7 @@ User
 
 - **Director ↔ User**: `AskUserQuestion` (4 questions per call, batching the Analyzer's numbered list)
 - **Director ↔ Analyzer**: `cafleet message send` (assignment with doc path + already-reviewed sections; reply with numbered question list)
-- Members receive messages via push notification: the broker injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into the member's pane via `tmux send-keys`. The literal `<session-id>` and `<recipient-agent-id>` UUIDs are baked into the injected command string. `--session-id` is a global flag (placed **before** the subcommand); `--agent-id` is a per-subcommand option (placed **after** the subcommand name).
+- Members receive messages via push notification: the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview`. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves. `--session-id` is a global flag (placed **before** the subcommand); `--agent-id` is a per-subcommand option (placed **after** the subcommand name).
 
 ## Prerequisites
 
@@ -99,7 +99,7 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 | `SendMessage(to="Director")` (from Analyzer) | `cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
 | `agent-team-supervision` `/loop` | Load `Skill(agent-team-monitoring)` (mechanism + `/loop`) and `Skill(agent-team-supervision)` (governance), then run `/loop` from agent-team-monitoring |
 | `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <analyzer-agent-id>`, then `cafleet session delete <session-id>` |
-| Auto message delivery | Push notification injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into member's tmux pane |
+| Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
 ## Process
 
@@ -190,7 +190,7 @@ After parsing `agent_id`:
 
 #### 2e. Wait for the Analyzer's question list
 
-Poll `cafleet --session-id <session-id> message poll --agent-id <director-agent-id> --full` until the Analyzer's reply arrives. **The `--full` flag is required**: `cafleet message poll` truncates each message body to 10 codepoints + `...` by default, which would silently mangle the Analyzer's numbered question list. Acknowledge with `cafleet --session-id <session-id> message ack --agent-id <director-agent-id> --task-id <task-id>`.
+Poll `cafleet --session-id <session-id> message poll --agent-id <director-agent-id> --full` until the Analyzer's reply arrives. **The `--full` flag is required**: `cafleet message poll` truncates each message body to 200 codepoints + `…` by default, which would silently mangle the Analyzer's numbered question list. Acknowledge with `cafleet --session-id <session-id> message ack --agent-id <director-agent-id> --task-id <task-id>`.
 
 The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll --full`. After 2 corrective rounds, escalate to the user.
 

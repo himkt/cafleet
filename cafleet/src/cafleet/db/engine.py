@@ -29,7 +29,7 @@ def _enable_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
     cursor.close()
 
 
-def get_sync_engine() -> Engine:
+def _get_sync_engine() -> Engine:
     global _sync_engine
     if _sync_engine is None:
         sync_url = str(make_url(settings.database_url).set(drivername="sqlite"))
@@ -42,5 +42,5 @@ def get_sync_engine() -> Engine:
 def get_sync_sessionmaker() -> sessionmaker[Session]:
     global _sync_sessionmaker
     if _sync_sessionmaker is None:
-        _sync_sessionmaker = sessionmaker(get_sync_engine(), expire_on_commit=False)
+        _sync_sessionmaker = sessionmaker(_get_sync_engine(), expire_on_commit=False)
     return _sync_sessionmaker

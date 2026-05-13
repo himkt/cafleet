@@ -302,6 +302,12 @@ def format_member(data: dict, *, full: bool = False) -> str:
 _AGENT_ID_COLUMN_WIDTH = 14
 
 
+def _agent_id_for_column(agent_id: str) -> str:
+    if len(agent_id) > _AGENT_ID_COLUMN_WIDTH:
+        return agent_id[: _AGENT_ID_COLUMN_WIDTH - 2] + "…"
+    return agent_id
+
+
 def format_member_list_activity(members: list) -> str:
     """Render the activity-augmented member roster as text.
 
@@ -319,9 +325,7 @@ def format_member_list_activity(members: list) -> str:
     lines.append(header)
     lines.append(sep)
     for m in members:
-        agent_id = m["agent_id"]
-        if len(agent_id) > _AGENT_ID_COLUMN_WIDTH:
-            agent_id = agent_id[: _AGENT_ID_COLUMN_WIDTH - 2] + "…"
+        agent_id = _agent_id_for_column(m["agent_id"])
         lines.append(
             f"  {agent_id:<{_AGENT_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
             f"{m['status']:<6}  "
@@ -367,9 +371,7 @@ def format_member_list(members: list) -> str:
     for m in members:
         placement = m["placement"]
         pane_display = placement["tmux_pane_id"] or "(pending)"
-        agent_id = m["agent_id"]
-        if len(agent_id) > _AGENT_ID_COLUMN_WIDTH:
-            agent_id = agent_id[: _AGENT_ID_COLUMN_WIDTH - 2] + "…"
+        agent_id = _agent_id_for_column(m["agent_id"])
         lines.append(
             f"  {agent_id:<{_AGENT_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
             f"{m['status']:<6}  "

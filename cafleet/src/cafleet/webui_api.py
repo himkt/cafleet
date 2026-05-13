@@ -1,6 +1,5 @@
 """FastAPI endpoints backing the admin WebUI."""
 
-from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -24,58 +23,29 @@ def get_webui_session(request: Request) -> str:
     return session_id
 
 
-def _build_message(
-    *,
-    task_id: str,
-    from_id: str,
-    to_id: str,
-    type_: str,
-    status: str,
-    created_at: str,
-    status_timestamp: str,
-    origin_task_id: str | None,
-    body: str,
-    agent_names: dict[str, str],
-) -> dict:
-    return {
-        "task_id": task_id,
-        "from_agent_id": from_id,
-        "from_agent_name": agent_names[from_id],
-        "to_agent_id": to_id,
-        "to_agent_name": agent_names[to_id],
-        "type": type_,
-        "status": status,
-        "created_at": created_at,
-        "status_timestamp": status_timestamp,
-        "origin_task_id": origin_task_id,
-        "body": body,
-    }
-
-
-def _flat_task_accessor(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "task_id": row["task_id"],
-        "from_id": row["from_agent_id"],
-        "to_id": row["to_agent_id"],
-        "type_": row["type"],
-        "status": row["status_state"],
-        "created_at": row["created_at"],
-        "status_timestamp": row["status_timestamp"],
-        "origin_task_id": row["origin_task_id"],
-        "body": row["text"],
-    }
-
-
-def _format_messages(
-    rows: list[dict[str, Any]],
-    accessor: Callable[[dict[str, Any]], dict[str, Any]],
-) -> list[dict[str, Any]]:
+def _format_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not rows:
         return []
-    extracted = [accessor(row) for row in rows]
-    agent_ids = {x["from_id"] for x in extracted} | {x["to_id"] for x in extracted}
+    agent_ids = {row["from_agent_id"] for row in rows} | {
+        row["to_agent_id"] for row in rows
+    }
     agent_names = broker.get_agent_names(list(agent_ids))
-    return [_build_message(**x, agent_names=agent_names) for x in extracted]
+    return [
+        {
+            "task_id": row["task_id"],
+            "from_agent_id": row["from_agent_id"],
+            "from_agent_name": agent_names[row["from_agent_id"]],
+            "to_agent_id": row["to_agent_id"],
+            "to_agent_name": agent_names[row["to_agent_id"]],
+            "type": row["type"],
+            "status": row["status_state"],
+            "created_at": row["created_at"],
+            "status_timestamp": row["status_timestamp"],
+            "origin_task_id": row["origin_task_id"],
+            "body": row["text"],
+        }
+        for row in rows
+    ]
 
 
 class SendMessageRequest(BaseModel):
@@ -104,7 +74,7 @@ def get_inbox(
         raise HTTPException(status_code=404, detail="Agent not found")
 
     rows = broker.list_inbox(agent_id)
-    return {"messages": _format_messages(rows, _flat_task_accessor)}
+    return {"messages": _format_messages(rows)}
 
 
 @webui_router.get("/agents/{agent_id}/sent")
@@ -116,15 +86,15 @@ def get_sent(
         raise HTTPException(status_code=404, detail="Agent not found")
 
     rows = broker.list_sent(agent_id)
-    return {"messages": _format_messages(rows, _flat_task_accessor)}
+    return {"messages": _format_messages(rows)}
 
 
 @webui_router.get("/timeline")
 def get_timeline(
     session_id: str = Depends(get_webui_session),
 ):
-    entries = broker.list_timeline(session_id)
-    return {"messages": _format_messages(entries, _flat_task_accessor)}
+    rows = broker.list_timeline(session_id)
+    return {"messages": _format_messages(rows)}
 
 
 @webui_router.post("/messages/send")

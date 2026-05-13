@@ -1,15 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import type { TimelineMessage, TimelineEntry, Agent } from "../types";
 import { fetchTimeline } from "../api";
+import { entrySortKey } from "../timeline";
 import TimelineMessageComponent from "./TimelineMessage";
 
 interface TimelineProps {
   agents: Agent[];
   refreshKey: number;
-}
-
-function entrySortKey(entry: TimelineEntry): string {
-  return entry.kind === "unicast" ? entry.message.created_at : entry.sortKey;
 }
 
 function entryKey(entry: TimelineEntry): string {

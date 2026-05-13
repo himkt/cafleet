@@ -104,7 +104,7 @@ The `last_ack` aggregation filters `Task.type != 'broadcast_summary'` (mirrors `
 
 ## Member Capture
 
-Capture the last N lines of a member's pane buffer. Default `--lines 30` (was 80 pre-design-0049); `--no-ansi` is the default and strips ANSI escapes.
+Capture the last N lines of a member's pane buffer. Default `--lines 30`; `--no-ansi` is the default and strips ANSI escapes.
 
 ```bash
 cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
@@ -198,7 +198,7 @@ For a series of `member exec` calls on the same member, the ping follows each ex
 
 ## Member Ping
 
-Director-only manual inbox-poll nudge. Keystrokes `cafleet --session-id <s> message poll --agent-id <m>` + `Enter` into the member's pane via `tmux.send_poll_trigger`. Auto-fire on every `cafleet message send` switched to inline-preview keystrokes in design 0000049 Surface 15; `member ping` is the manually-invokable counterpart for re-poking a member that missed an inline preview.
+Director-only manual inbox-poll nudge. The broker's auto-fire on every `cafleet message send` is an inline preview keystroked into the recipient's pane (`tmux.send_inline_preview`). `member ping` is the manually-invokable counterpart for re-poking a member that missed an inline preview.
 
 ```bash
 cafleet --session-id <session-id> member ping --agent-id <director-agent-id> \

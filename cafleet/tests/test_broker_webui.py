@@ -3,68 +3,20 @@
 import uuid
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet import broker
 from cafleet.broker import ADMINISTRATOR_KIND
-from cafleet.db.models import Base
-from cafleet.tmux import DirectorContext
-
-
-@pytest.fixture
-def sync_sessionmaker():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    return sessionmaker(engine, expire_on_commit=False)
-
-
-@pytest.fixture
-def _patch_broker(sync_sessionmaker, monkeypatch):
-    monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
+from tests._broker_helpers import (
+    _create_session,
+    _register_agent,
+    _setup_three_agents,
+    _setup_two_agents,
+)
 
 
 @pytest.fixture(autouse=True)
-def broker_session(sync_sessionmaker, _patch_broker):
-    return sync_sessionmaker
-
-
-def _create_session(label: str | None = None) -> dict:
-    return broker.create_session(
-        label=label,
-        director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
-        coding_agent="claude",
-    )
-
-
-def _register_agent(
-    session_id: str,
-    name: str = "test-agent",
-    description: str = "A test agent",
-) -> dict:
-    return broker.register_agent(
-        session_id=session_id,
-        name=name,
-        description=description,
-    )
-
-
-def _setup_two_agents() -> tuple[str, str, str]:
-    session = _create_session()
-    sid = session["session_id"]
-    a = _register_agent(sid, name="sender")
-    b = _register_agent(sid, name="recipient")
-    return sid, a["agent_id"], b["agent_id"]
-
-
-def _setup_three_agents() -> tuple[str, str, str, str]:
-    session = _create_session()
-    sid = session["session_id"]
-    a = _register_agent(sid, name="agent-a")
-    b = _register_agent(sid, name="agent-b")
-    c = _register_agent(sid, name="agent-c")
-    return sid, a["agent_id"], b["agent_id"], c["agent_id"]
+def _autouse_broker(broker_session):
+    return broker_session
 
 
 def test_list_session_agents__returns_active_agents():
@@ -464,56 +416,3 @@ def test_get_agent_names__single_agent():
     result = broker.get_agent_names([agent["agent_id"]])
     assert len(result) == 1
     assert result[agent["agent_id"]] == "solo"
-
-
-def test_get_task_created_ats__returns_created_at_mapping():
-    sid, sender, recipient = _setup_two_agents()
-    sent1 = broker.send_message(sid, sender, recipient, "first")
-    sent2 = broker.send_message(sid, sender, recipient, "second")
-    tid1 = sent1["task"]["task_id"]
-    tid2 = sent2["task"]["task_id"]
-
-    result = broker.get_task_created_ats([tid1, tid2])
-    assert isinstance(result, dict)
-    assert tid1 in result
-    assert tid2 in result
-    assert isinstance(result[tid1], str)
-    assert len(result[tid1]) > 0
-    assert isinstance(result[tid2], str)
-    assert len(result[tid2]) > 0
-
-
-def test_get_task_created_ats__empty_input_returns_empty_dict():
-    result = broker.get_task_created_ats([])
-    assert result == {}
-
-
-def test_get_task_created_ats__nonexistent_task_id_absent_from_result():
-    sid, sender, recipient = _setup_two_agents()
-    sent = broker.send_message(sid, sender, recipient, "real")
-    tid = sent["task"]["task_id"]
-    fake_id = str(uuid.uuid4())
-
-    result = broker.get_task_created_ats([tid, fake_id])
-    assert tid in result
-    assert fake_id not in result
-
-
-def test_get_task_created_ats__single_task():
-    sid, sender, recipient = _setup_two_agents()
-    sent = broker.send_message(sid, sender, recipient, "one")
-    tid = sent["task"]["task_id"]
-
-    result = broker.get_task_created_ats([tid])
-    assert len(result) == 1
-    assert tid in result
-
-
-def test_get_task_created_ats__created_at_is_iso8601():
-    sid, sender, recipient = _setup_two_agents()
-    sent = broker.send_message(sid, sender, recipient, "timestamped")
-    tid = sent["task"]["task_id"]
-
-    result = broker.get_task_created_ats([tid])
-    created_at = result[tid]
-    assert "T" in created_at

@@ -26,9 +26,10 @@ ANCHOR_VERSION = 1
 
 _TMP_CANDIDATE = Path("/tmp/claude-code")
 
-_BASE_LINE_MARKER = (
-    "BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"
+_BASE_INSERT_MARKER = (
+    "[INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"
 )
+_BASE_LINE_MARKER = f"BASE: {_BASE_INSERT_MARKER}"
 
 
 class AnchorError(Exception):
@@ -242,9 +243,6 @@ def is_git_repo_root(path: Path) -> bool:
 
 
 _FENCE_LINE_RE = re.compile(r"^```[A-Za-z0-9_+-]*$")
-_BASE_INSERT_MARKER = (
-    "[INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"
-)
 
 
 def extract_spawn_templates(content: str) -> list[str]:

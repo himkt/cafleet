@@ -32,7 +32,7 @@ Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-
 
 **Members go idle after every turn. A member's tmux pane sitting at the prompt between turns is the expected state, NOT a stall.** A member sending you a `cafleet message send` and then returning to the prompt is the normal flow — they sent their output and are waiting for the next push notification or the next assignment.
 
-- Idle members receive messages normally; the broker's push notification (`tmux send-keys` of `cafleet message poll`) wakes them.
+- Idle members receive messages normally; the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview` to wake them.
 - `/loop` notifications about idle panes are informational. Do not react unless you are ready to assign new work, OR the member's idleness is **blocking your next step** (a downstream phase cannot start, an expected deliverable file is missing past its milestone, you sent a message and received no reply after a reasonable window).
 - Do NOT comment on idleness or nudge a member just because they went idle. Only nudge per the Stall Response Ladder below.
 
@@ -61,7 +61,7 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 cafleet --session-id <session-id> message send --agent-id <director-agent-id> \
   --to <member-agent-id> --text "<instruction>"
 ```
-A push notification automatically injects `cafleet --session-id <session-id> message poll --agent-id <member-agent-id>` into the member's tmux pane — the member sees the message without polling manually.
+A push notification automatically keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's tmux pane via `tmux.send_inline_preview`. The member processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the member calls `cafleet message poll` themselves.
 
 **Checking for incoming messages from members:**
 ```bash

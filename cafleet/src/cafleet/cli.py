@@ -58,8 +58,38 @@ def _ensure_coding_agent_available(binary_name: str) -> None:
         raise RuntimeError(f"binary {binary_name} not found on PATH")
 
 
+def _ensure_tmux_or_die() -> None:
+    try:
+        tmux.ensure_tmux_available()
+    except tmux.TmuxError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+_full_flag = click.option("--full", "full", is_flag=True, default=False, hidden=True)
+_quiet_flag = click.option("--quiet", "quiet", is_flag=True, default=False, hidden=True)
+
+
+def _full_flag_with_help(help_text: str):
+    return click.option(
+        "--full", "full", is_flag=True, default=False, hidden=True, help=help_text
+    )
+
+
+def _quiet_flag_with_help(help_text: str):
+    return click.option(
+        "--quiet", "quiet", is_flag=True, default=False, hidden=True, help=help_text
+    )
+
+
+def _director_member_options(func):
+    func = click.option("--member-id", required=True, help="Target member's agent ID")(
+        func
+    )
+    return click.option("--agent-id", required=True, help="Director's agent ID")(func)
+
+
 def _require_session_id(ctx: click.Context) -> None:
-    if not ctx.obj.get("session_id"):
+    if not ctx.obj["session_id"]:
         raise click.ClickException(
             "--session-id <uuid> is required for this subcommand. "
             "Create a session with 'cafleet session create' and pass its id."
@@ -109,7 +139,6 @@ def _client_command(
                         )
                 result = func(ctx, *args, **kwargs)
                 full = kwargs.get("full", False)
-                quiet = kwargs.get("quiet", False)
                 pretty = ctx.obj["pretty"]
                 if truncates_task_text:
                     output.truncate_task_text(result, full=full)
@@ -122,7 +151,8 @@ def _client_command(
                     click.echo(output.format_json(rendered, pretty=pretty))
                 elif text_formatter is not None:
                     if truncates_task_text:
-                        click.echo(text_formatter(result, full=full, quiet=quiet))
+                        extra = {"quiet": kwargs["quiet"]} if "quiet" in kwargs else {}
+                        click.echo(text_formatter(result, full=full, **extra))
                     elif renders_agent_card:
                         click.echo(text_formatter(result, full=full))
                     else:
@@ -261,13 +291,7 @@ def session() -> None:
     help="Coding agent (claude or codex).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-@click.option(
-    "--full",
-    "full",
-    is_flag=True,
-    default=False,
-    hidden=True,
-)
+@_full_flag
 @click.pass_context
 def session_create(
     ctx: click.Context,
@@ -291,7 +315,7 @@ def session_create(
         coding_agent=coding_agent,
     )
 
-    if as_json or ctx.obj.get("json_output"):
+    if as_json or ctx.obj["json_output"]:
         click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
     else:
         click.echo(output.format_session_create(result, full=full))
@@ -304,7 +328,7 @@ def session_list(ctx: click.Context, as_json: bool) -> None:
     """List all sessions."""
     rows = broker.list_sessions()
 
-    if as_json or ctx.obj.get("json_output"):
+    if as_json or ctx.obj["json_output"]:
         click.echo(output.format_json(rows, pretty=ctx.obj["pretty"]))
     else:
         if not rows:
@@ -328,7 +352,7 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
     if result is None:
         raise click.ClickException(f"session '{session_id}' not found.")
 
-    if as_json or ctx.obj.get("json_output"):
+    if as_json or ctx.obj["json_output"]:
         click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
     else:
         lines = [
@@ -379,10 +403,7 @@ def server(host: str, port: int) -> None:
 @click.pass_context
 def doctor(ctx) -> None:
     """Print the calling pane's tmux session/window/pane identifiers."""
-    try:
-        tmux.ensure_tmux_available()
-    except tmux.TmuxError as exc:
-        raise click.ClickException(str(exc)) from exc
+    _ensure_tmux_or_die()
 
     try:
         director_ctx = tmux.director_context()
@@ -443,7 +464,7 @@ def base_dir_resolve(ctx: click.Context, path_arg: str | None, as_json: bool) ->
     except (base_dir.AnchorError, RuntimeError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
-    if as_json or ctx.obj.get("json_output"):
+    if as_json or ctx.obj["json_output"]:
         click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
         return
 
@@ -485,7 +506,7 @@ def base_dir_record(ctx: click.Context, base_arg: str, source_arg: str) -> None:
     except (ValueError, base_dir.AnchorError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
-    if ctx.obj.get("json_output"):
+    if ctx.obj["json_output"]:
         click.echo(
             output.format_json({"anchor": str(anchor)}, pretty=ctx.obj["pretty"])
         )
@@ -537,20 +558,8 @@ def agent_register(ctx, name, description, skills):
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--to", required=True, help="Recipient agent ID")
 @click.option("--text", required=True, help="Message text")
-@click.option(
-    "--full",
-    "full",
-    is_flag=True,
-    default=False,
-    hidden=True,
-)
-@click.option(
-    "--quiet",
-    "quiet",
-    is_flag=True,
-    default=False,
-    hidden=True,
-)
+@_full_flag
+@_quiet_flag
 @click.pass_context
 @_client_command(
     text_formatter=lambda r, *, full, quiet: (
@@ -573,16 +582,10 @@ def message_send(ctx, agent_id, to, text, full, quiet):
 @message.command("broadcast")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--text", required=True, help="Message text")
-@click.option(
-    "--full",
-    "full",
-    is_flag=True,
-    default=False,
-    hidden=True,
-)
+@_full_flag
 @click.pass_context
 @_client_command(
-    text_formatter=lambda r, *, full, quiet: (
+    text_formatter=lambda r, *, full: (
         output.format_task(r[0]["task"], full=True)
         if full
         else f"broadcast id={r[0]['task']['task_id'][:8]} "
@@ -603,18 +606,11 @@ def message_broadcast(ctx, agent_id, text, full):
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--since", default=None, hidden=True)
 @click.option("--page-size", default=None, type=int, hidden=True)
-@click.option(
-    "--full",
-    "full",
-    is_flag=True,
-    default=False,
-    hidden=True,
-    help="Disable body truncation.",
-)
+@_full_flag_with_help("Disable body truncation.")
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=lambda r, *, full, quiet: output.format_indexed_list(
+    text_formatter=lambda r, *, full: output.format_indexed_list(
         r, lambda t: output.format_task(t, full=full), "No messages found."
     ),
     truncates_task_text=True,
@@ -631,22 +627,8 @@ def message_poll(ctx, agent_id, since, page_size, full):
 @message.command("ack")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to acknowledge")
-@click.option(
-    "--full",
-    "full",
-    is_flag=True,
-    default=False,
-    hidden=True,
-    help="Disable body truncation.",
-)
-@click.option(
-    "--quiet",
-    "quiet",
-    is_flag=True,
-    default=False,
-    hidden=True,
-    help="Print only the task id.",
-)
+@_full_flag_with_help("Disable body truncation.")
+@_quiet_flag_with_help("Print only the task id.")
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
@@ -665,18 +647,11 @@ def message_ack(ctx, agent_id, task_id, full, quiet):
 @message.command("cancel")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to cancel")
-@click.option(
-    "--full",
-    "full",
-    is_flag=True,
-    default=False,
-    hidden=True,
-    help="Disable body truncation.",
-)
+@_full_flag_with_help("Disable body truncation.")
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=lambda r, *, full, quiet: (
+    text_formatter=lambda r, *, full: (
         "Task canceled.\n" + output.format_task(r, full=full)
     ),
     truncates_task_text=True,
@@ -689,18 +664,11 @@ def message_cancel(ctx, agent_id, task_id, full):
 @message.command("show")
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.option("--task-id", required=True, help="Task ID to retrieve")
-@click.option(
-    "--full",
-    "full",
-    is_flag=True,
-    default=False,
-    hidden=True,
-    help="Disable body truncation.",
-)
+@_full_flag_with_help("Disable body truncation.")
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
-    text_formatter=lambda r, *, full, quiet: output.format_task(r, full=full),
+    text_formatter=lambda r, *, full: output.format_task(r, full=full),
     truncates_task_text=True,
 )
 def message_show(ctx, agent_id, task_id, full):
@@ -710,13 +678,7 @@ def message_show(ctx, agent_id, task_id, full):
 
 @agent.command("list")
 @click.option("--agent-id", required=True, help="Agent ID")
-@click.option(
-    "--full",
-    "full",
-    is_flag=True,
-    default=False,
-    hidden=True,
-)
+@_full_flag
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
@@ -732,25 +694,19 @@ def agent_list(ctx, agent_id, full):
 
 @agent.command("show")
 @click.option("--agent-id", required=True, help="Agent ID")
-@click.option("--id", "detail_id", required=True, help="Target agent ID")
-@click.option(
-    "--full",
-    "full",
-    is_flag=True,
-    default=False,
-    hidden=True,
-)
+@click.option("--id", "target_agent_id", required=True, help="Target agent ID")
+@_full_flag
 @click.pass_context
 @_client_command(
     requires_agent_session=True,
     text_formatter=output.format_agent,
     renders_agent_card=True,
 )
-def agent_show(ctx, agent_id, detail_id, full):
+def agent_show(ctx, agent_id, target_agent_id, full):
     """Show detail for a specific agent."""
-    result = broker.get_agent(detail_id, ctx.obj["session_id"])
+    result = broker.get_agent(target_agent_id, ctx.obj["session_id"])
     if result is None:
-        raise ValueError(f"Agent {detail_id} not found")
+        raise click.ClickException(f"Agent {target_agent_id} not found")
     return result
 
 
@@ -774,6 +730,22 @@ def agent_deregister(ctx, agent_id):
 @cli.group()
 def member():
     """Manage tmux-backed member agents (Director only)."""
+
+
+_PLACEMENT_MISSING_DEFAULT = (
+    "agent {member_id} has no placement row; it was not "
+    "spawned via `cafleet member create`."
+)
+
+
+def _require_member_pane(placement: dict, member_id: str, action: str) -> str:
+    pane_id = placement["tmux_pane_id"]
+    if pane_id is None:
+        raise click.ClickException(
+            f"member {member_id} has no pane yet (pending placement) "
+            f"— nothing to {action}."
+        )
+    return pane_id
 
 
 def _load_authorized_member(
@@ -869,13 +841,7 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
     show_default=True,
     help="Coding agent (claude or codex).",
 )
-@click.option(
-    "--full",
-    "full",
-    is_flag=True,
-    default=False,
-    hidden=True,
-)
+@_full_flag
 @click.argument("prompt_argv", nargs=-1)
 @click.pass_context
 def member_create(ctx, agent_id, name, description, coding_agent, full, prompt_argv):
@@ -972,8 +938,7 @@ def member_create(ctx, agent_id, name, description, coding_agent, full, prompt_a
 
 
 @member.command("delete")
-@click.option("--agent-id", required=True, help="Director's agent ID")
-@click.option("--member-id", required=True, help="Target member's agent ID")
+@_director_member_options
 @click.option(
     "--force",
     "-f",
@@ -988,10 +953,7 @@ def member_delete(ctx, agent_id, member_id, force):
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
-    try:
-        tmux.ensure_tmux_available()
-    except tmux.TmuxError as exc:
-        raise click.ClickException(str(exc)) from exc
+    _ensure_tmux_or_die()
 
     _target, placement = _load_authorized_member(
         session_id,
@@ -1157,8 +1119,7 @@ def member_list(ctx, agent_id, activity):
 
 
 @member.command("capture")
-@click.option("--agent-id", required=True, help="Director's agent ID")
-@click.option("--member-id", required=True, help="Target member's agent ID")
+@_director_member_options
 @click.option(
     "--lines",
     "--tail",
@@ -1179,26 +1140,15 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
-    try:
-        tmux.ensure_tmux_available()
-    except tmux.TmuxError as exc:
-        raise click.ClickException(str(exc)) from exc
+    _ensure_tmux_or_die()
 
     _target, placement = _load_authorized_member(
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=(
-            f"agent {member_id} has no placement row; it was not "
-            f"spawned via `cafleet member create`."
-        ),
+        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
-    pane_id = placement["tmux_pane_id"]
-    if pane_id is None:
-        raise click.ClickException(
-            f"member {member_id} has no pane yet (pending placement) "
-            f"— nothing to capture."
-        )
+    pane_id = _require_member_pane(placement, member_id, "capture")
 
     try:
         content = tmux.capture_pane(target_pane_id=pane_id, lines=lines)
@@ -1228,8 +1178,7 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
 
 
 @member.command("send-input")
-@click.option("--agent-id", required=True, help="Director's agent ID")
-@click.option("--member-id", required=True, help="Target member's agent ID")
+@_director_member_options
 @click.option(
     "--choice",
     type=click.IntRange(1, 3),
@@ -1263,25 +1212,15 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
     if freetext is not None and ("\n" in freetext or "\r" in freetext):
         raise click.UsageError("free text may not contain newlines.")
 
-    try:
-        tmux.ensure_tmux_available()
-    except tmux.TmuxError as exc:
-        raise click.ClickException(str(exc)) from exc
+    _ensure_tmux_or_die()
 
     target, placement = _load_authorized_member(
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=(
-            f"agent {member_id} has no placement row; it was not "
-            f"spawned via `cafleet member create`."
-        ),
+        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
-    pane_id = placement["tmux_pane_id"]
-    if pane_id is None:
-        raise click.ClickException(
-            f"member {member_id} has no pane yet (pending placement) — nothing to send."
-        )
+    pane_id = _require_member_pane(placement, member_id, "send")
 
     try:
         if choice is not None:
@@ -1311,8 +1250,7 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
 
 
 @member.command("exec")
-@click.option("--agent-id", required=True, help="Director's agent ID")
-@click.option("--member-id", required=True, help="Target member's agent ID")
+@_director_member_options
 @click.argument("command")
 @click.pass_context
 def member_exec(ctx, agent_id, member_id, command):
@@ -1326,25 +1264,15 @@ def member_exec(ctx, agent_id, member_id, command):
         raise click.UsageError("command may not be empty.")
     command = command.strip()
 
-    try:
-        tmux.ensure_tmux_available()
-    except tmux.TmuxError as exc:
-        raise click.ClickException(str(exc)) from exc
+    _ensure_tmux_or_die()
 
     target, placement = _load_authorized_member(
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=(
-            f"agent {member_id} has no placement row; it was not "
-            f"spawned via `cafleet member create`."
-        ),
+        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
-    pane_id = placement["tmux_pane_id"]
-    if pane_id is None:
-        raise click.ClickException(
-            f"member {member_id} has no pane yet (pending placement) — nothing to send."
-        )
+    pane_id = _require_member_pane(placement, member_id, "send")
 
     try:
         tmux.send_bash_command(target_pane_id=pane_id, command=command)
@@ -1369,40 +1297,23 @@ def member_exec(ctx, agent_id, member_id, command):
 
 
 @member.command("ping")
-@click.option("--agent-id", required=True, help="Director's agent ID")
-@click.option("--member-id", required=True, help="Target member's agent ID")
-@click.option(
-    "--quiet",
-    "quiet",
-    is_flag=True,
-    default=False,
-    hidden=True,
-)
+@_director_member_options
+@_quiet_flag
 @click.pass_context
 def member_ping(ctx, agent_id, member_id, quiet):
     """Inject an inbox-poll keystroke into a member's pane (Director-only)."""
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
-    try:
-        tmux.ensure_tmux_available()
-    except tmux.TmuxError as exc:
-        raise click.ClickException(str(exc)) from exc
+    _ensure_tmux_or_die()
 
     target, placement = _load_authorized_member(
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=(
-            f"agent {member_id} has no placement row; it was not "
-            f"spawned via `cafleet member create`."
-        ),
+        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
-    pane_id = placement["tmux_pane_id"]
-    if pane_id is None:
-        raise click.ClickException(
-            f"member {member_id} has no pane yet (pending placement) — nothing to send."
-        )
+    pane_id = _require_member_pane(placement, member_id, "send")
 
     try:
         ok = tmux.send_poll_trigger(

@@ -20,23 +20,13 @@ from click.testing import CliRunner
 
 from cafleet import broker, config
 from cafleet.cli import cli
-from cafleet.db import engine as engine_mod
 from cafleet.tmux import DirectorContext
 
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 
 @pytest.fixture
-def _reset_engine():
-    engine_mod._sync_engine = None
-    engine_mod._sync_sessionmaker = None
-    yield
-    engine_mod._sync_engine = None
-    engine_mod._sync_sessionmaker = None
-
-
-@pytest.fixture
-def bootstrapped_team(tmp_path, monkeypatch, _reset_engine):
+def bootstrapped_team(tmp_path, monkeypatch, _reset_engine_singletons):
     """Fresh DB + session + 3 registered members. Returns ``(sid, director,
     [member_ids], runner)``.
 

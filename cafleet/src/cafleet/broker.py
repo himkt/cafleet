@@ -18,22 +18,9 @@ _DIRECTOR_DESCRIPTION = "Root Director for this session"
 
 ADMINISTRATOR_KIND = "builtin-administrator"
 
-_TASK_COLUMNS = (
-    "task_id",
-    "context_id",
-    "from_agent_id",
-    "to_agent_id",
-    "type",
-    "created_at",
-    "status_state",
-    "status_timestamp",
-    "origin_task_id",
-    "text",
-)
+_TASK_COLUMNS = tuple(Task.__table__.columns.keys())
 
-
-class AdministratorProtectedError(Exception):
-    """Raised when an operation targets a built-in Administrator agent."""
+_NOT_BROADCAST_SUMMARY = Task.type != "broadcast_summary"
 
 
 def _is_administrator(agent_card_json: str | None) -> bool:
@@ -41,7 +28,7 @@ def _is_administrator(agent_card_json: str | None) -> bool:
         return False
     try:
         kind = json.loads(agent_card_json).get("cafleet", {}).get("kind")
-    except (ValueError, TypeError, AttributeError):
+    except ValueError:
         return False
     return kind == ADMINISTRATOR_KIND
 
@@ -366,7 +353,7 @@ def register_agent(
                     f"in session '{session_id}'."
                 )
             if _is_administrator(director_card):
-                raise AdministratorProtectedError("Administrator cannot be a director")
+                raise click.ClickException("Administrator cannot be a director")
 
         session.add(
             Agent(
@@ -464,10 +451,9 @@ def deregister_agent(agent_id: str) -> bool:
     """Soft-delete the agent and drop its placement.
 
     Returns True if a row was flipped from ``active`` to ``deregistered``.
-    Raises ``AdministratorProtectedError`` for the built-in Administrator
-    (design 0000025 §D) and ``click.UsageError`` for the root Director of
-    any session (design 0000026), which must be torn down via
-    ``cafleet session delete``.
+    Raises ``click.ClickException`` for the built-in Administrator and
+    ``click.UsageError`` for the root Director of any session, which must
+    be torn down via ``cafleet session delete``.
     """
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
@@ -484,7 +470,7 @@ def deregister_agent(agent_id: str) -> bool:
             select(Agent.agent_card_json).where(Agent.agent_id == agent_id)
         ).scalar_one_or_none()
         if card_json is not None and _is_administrator(card_json):
-            raise AdministratorProtectedError("Administrator cannot be deregistered")
+            raise click.ClickException("Administrator cannot be deregistered")
         deregistered = session.execute(
             update(Agent)
             .where(
@@ -521,9 +507,8 @@ def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
     return _placement_dict(row)
 
 
-def list_members(session_id: str, director_agent_id: str) -> list[dict]:
-    """Return active members belonging to the given director, with placements."""
-    stmt = (
+def _base_members_select(session_id: str, director_agent_id: str):
+    return (
         select(
             Agent.agent_id,
             Agent.name,
@@ -544,6 +529,11 @@ def list_members(session_id: str, director_agent_id: str) -> list[dict]:
             AgentPlacement.director_agent_id == director_agent_id,
         )
     )
+
+
+def list_members(session_id: str, director_agent_id: str) -> list[dict]:
+    """Return active members belonging to the given director, with placements."""
+    stmt = _base_members_select(session_id, director_agent_id)
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(stmt).all()
@@ -576,7 +566,7 @@ def list_members_with_activity(session_id: str, director_agent_id: str) -> list[
         select(func.max(Task.status_timestamp))
         .where(
             Task.from_agent_id == Agent.agent_id,
-            Task.type != "broadcast_summary",
+            _NOT_BROADCAST_SUMMARY,
         )
         .correlate(Agent)
         .scalar_subquery()
@@ -585,7 +575,7 @@ def list_members_with_activity(session_id: str, director_agent_id: str) -> list[
         select(func.max(Task.status_timestamp))
         .where(
             Task.context_id == Agent.agent_id,
-            Task.type != "broadcast_summary",
+            _NOT_BROADCAST_SUMMARY,
         )
         .correlate(Agent)
         .scalar_subquery()
@@ -595,34 +585,15 @@ def list_members_with_activity(session_id: str, director_agent_id: str) -> list[
         .where(
             Task.context_id == Agent.agent_id,
             Task.status_state == "completed",
-            Task.type != "broadcast_summary",
+            _NOT_BROADCAST_SUMMARY,
         )
         .correlate(Agent)
         .scalar_subquery()
     )
-    stmt = (
-        select(
-            Agent.agent_id,
-            Agent.name,
-            Agent.description,
-            Agent.status,
-            Agent.registered_at,
-            AgentPlacement.director_agent_id,
-            AgentPlacement.tmux_session,
-            AgentPlacement.tmux_window_id,
-            AgentPlacement.tmux_pane_id,
-            AgentPlacement.coding_agent,
-            AgentPlacement.created_at,
-            last_sent_sq.label("last_sent"),
-            last_recv_sq.label("last_recv"),
-            last_ack_sq.label("last_ack"),
-        )
-        .join(AgentPlacement, Agent.agent_id == AgentPlacement.agent_id)
-        .where(
-            Agent.session_id == session_id,
-            Agent.status == "active",
-            AgentPlacement.director_agent_id == director_agent_id,
-        )
+    stmt = _base_members_select(session_id, director_agent_id).add_columns(
+        last_sent_sq.label("last_sent"),
+        last_recv_sq.label("last_recv"),
+        last_ack_sq.label("last_ack"),
     )
     sm = get_sync_sessionmaker()
     with sm() as session:
@@ -856,71 +827,67 @@ def poll_tasks(
     status: str | None = None,
 ) -> list[dict]:
     """Return tasks addressed to ``agent_id`` in DESC timestamp order."""
-    stmt = (
-        select(*(getattr(Task, col) for col in _TASK_COLUMNS))
-        .where(
-            Task.context_id == agent_id,
-            Task.type != "broadcast_summary",
-        )
-        .order_by(Task.status_timestamp.desc())
+    return _list_tasks_where(
+        Task.context_id == agent_id,
+        since=since,
+        page_size=page_size,
+        status=status,
     )
 
-    if since is not None:
-        stmt = stmt.where(Task.status_timestamp > since)
-    if status is not None:
-        stmt = stmt.where(Task.status_state == status)
-    if page_size is not None:
-        stmt = stmt.limit(page_size)
 
+def _transition_task_state(
+    agent_id: str,
+    task_id: str,
+    *,
+    expected_agent_field: str,
+    new_state: str,
+    action_verb: str,
+    permission_error_msg: str,
+) -> dict:
     sm = get_sync_sessionmaker()
-    with sm() as session:
-        rows = session.execute(stmt).all()
+    with sm() as session, session.begin():
+        task_dict = _read_task(session, task_id)
+        if task_dict is None:
+            raise ValueError(f"Task {task_id} not found")
 
-    return [_row_to_task_dict(row) for row in rows]
+        if task_dict[expected_agent_field] != agent_id:
+            raise PermissionError(permission_error_msg)
+
+        if task_dict["status_state"] != "input_required":
+            raise ValueError(
+                f"Cannot {action_verb} task in state {task_dict['status_state']}"
+            )
+
+        task_dict["status_state"] = new_state
+        task_dict["status_timestamp"] = _now_iso()
+
+        _save_task(session, task_dict)
+
+    return {"task": task_dict}
 
 
 def ack_task(agent_id: str, task_id: str) -> dict:
     """Transition a task from ``input_required`` to ``completed`` for the recipient."""
-    sm = get_sync_sessionmaker()
-    with sm() as session, session.begin():
-        task_dict = _read_task(session, task_id)
-        if task_dict is None:
-            raise ValueError(f"Task {task_id} not found")
-
-        if task_dict["context_id"] != agent_id:
-            raise PermissionError("Only the recipient can ACK a task")
-
-        if task_dict["status_state"] != "input_required":
-            raise ValueError(f"Cannot ACK task in state {task_dict['status_state']}")
-
-        task_dict["status_state"] = "completed"
-        task_dict["status_timestamp"] = _now_iso()
-
-        _save_task(session, task_dict)
-
-    return {"task": task_dict}
+    return _transition_task_state(
+        agent_id,
+        task_id,
+        expected_agent_field="context_id",
+        new_state="completed",
+        action_verb="ACK",
+        permission_error_msg="Only the recipient can ACK a task",
+    )
 
 
 def cancel_task(agent_id: str, task_id: str) -> dict:
     """Transition a task from ``input_required`` to ``canceled`` for the sender."""
-    sm = get_sync_sessionmaker()
-    with sm() as session, session.begin():
-        task_dict = _read_task(session, task_id)
-        if task_dict is None:
-            raise ValueError(f"Task {task_id} not found")
-
-        if task_dict["from_agent_id"] != agent_id:
-            raise PermissionError("Only the sender can cancel a task")
-
-        if task_dict["status_state"] != "input_required":
-            raise ValueError(f"Cannot cancel task in state {task_dict['status_state']}")
-
-        task_dict["status_state"] = "canceled"
-        task_dict["status_timestamp"] = _now_iso()
-
-        _save_task(session, task_dict)
-
-    return {"task": task_dict}
+    return _transition_task_state(
+        agent_id,
+        task_id,
+        expected_agent_field="from_agent_id",
+        new_state="canceled",
+        action_verb="cancel",
+        permission_error_msg="Only the sender can cancel a task",
+    )
 
 
 def list_session_agents(session_id: str) -> list[dict]:
@@ -972,12 +939,23 @@ def list_session_agents(session_id: str) -> list[dict]:
     ]
 
 
-def _list_tasks_where(*filters) -> list[dict]:
+def _list_tasks_where(
+    *filters,
+    since: str | None = None,
+    page_size: int | None = None,
+    status: str | None = None,
+) -> list[dict]:
     stmt = (
         select(*(getattr(Task, col) for col in _TASK_COLUMNS))
-        .where(*filters, Task.type != "broadcast_summary")
+        .where(*filters, _NOT_BROADCAST_SUMMARY)
         .order_by(Task.status_timestamp.desc())
     )
+    if since is not None:
+        stmt = stmt.where(Task.status_timestamp > since)
+    if status is not None:
+        stmt = stmt.where(Task.status_state == status)
+    if page_size is not None:
+        stmt = stmt.limit(page_size)
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(stmt).all()
@@ -1001,7 +979,7 @@ def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
         .join(Agent, Task.from_agent_id == Agent.agent_id)
         .where(
             Agent.session_id == session_id,
-            Task.type != "broadcast_summary",
+            _NOT_BROADCAST_SUMMARY,
         )
         .order_by(Task.status_timestamp.desc())
         .limit(limit)
@@ -1022,18 +1000,6 @@ def get_agent_names(agent_ids: list[str]) -> dict[str, str]:
             select(Agent.agent_id, Agent.name).where(Agent.agent_id.in_(agent_ids))
         ).all()
     return {row.agent_id: row.name for row in rows}
-
-
-def get_task_created_ats(task_ids: list[str]) -> dict[str, str]:
-    """Batch ``task_id → created_at`` lookup."""
-    if not task_ids:
-        return {}
-    sm = get_sync_sessionmaker()
-    with sm() as session:
-        rows = session.execute(
-            select(Task.task_id, Task.created_at).where(Task.task_id.in_(task_ids))
-        ).all()
-    return {row.task_id: row.created_at for row in rows}
 
 
 def get_task(session_id: str, task_id: str) -> dict:

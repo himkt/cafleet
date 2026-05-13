@@ -7,7 +7,7 @@ export interface Agent {
   kind: "builtin-administrator" | "user";
 }
 
-export interface Message {
+export interface TimelineMessage {
   task_id: string;
   from_agent_id: string;
   from_agent_name: string;
@@ -16,12 +16,9 @@ export interface Message {
   type: string;
   status: "input_required" | "completed" | "canceled";
   created_at: string;
-  body: string;
-}
-
-export interface TimelineMessage extends Message {
   origin_task_id: string | null;
   status_timestamp: string;
+  body: string;
 }
 
 export type TimelineEntry =
@@ -34,11 +31,6 @@ export interface AgentsResponse {
 
 export interface TimelineResponse {
   messages: TimelineMessage[];
-}
-
-export interface SendMessageResponse {
-  task_id: string;
-  status: string;
 }
 
 export interface SessionListItem {

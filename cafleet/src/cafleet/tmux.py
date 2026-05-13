@@ -69,76 +69,52 @@ def select_layout(*, target_window_id: str, layout: str = "main-vertical") -> No
 
 _PANE_GONE_MARKERS = ("can't find pane", "no such pane")
 
-# Sleep between a literal-text ``send-keys -l`` call and the immediately
-# following ``send-keys Enter`` call. Required for the codex TUI: when the
-# two ``send-keys`` calls fire back-to-back (sub-millisecond apart), codex
-# treats the Enter as part of the bracketed-paste payload instead of a
-# submit. ~120ms is enough for codex to finalise the paste. Claude Code is
-# unaffected by the same pause; the delay is applied unconditionally to
-# keep the helpers backend-agnostic and the call sites simple.
-_SUBMIT_DELAY = 0.12
 
-
-def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
-    """Send ``/exit`` + Enter, swallowing pane-gone errors when requested."""
+def _run_tolerating_pane_gone(args: list[str], *, ignore_missing: bool) -> None:
     try:
-        _run(["tmux", "send-keys", "-t", target_pane_id, "/exit", "Enter"])
+        _run(args)
     except TmuxError as exc:
         if ignore_missing and any(m in str(exc).lower() for m in _PANE_GONE_MARKERS):
             return
         raise
 
 
+# Sleep between literal-text ``send-keys -l`` and following ``send-keys Enter``
+# so the codex TUI's bracketed-paste finalises before submit (applied
+# unconditionally to keep the helpers backend-agnostic).
+_SUBMIT_DELAY = 0.12
+
+
+def _send_literal_then_enter(
+    *, target_pane_id: str, payload: str, timeout: float | None = None
+) -> None:
+    _run(
+        ["tmux", "send-keys", "-t", target_pane_id, "-l", payload],
+        timeout=timeout,
+    )
+    time.sleep(_SUBMIT_DELAY)
+    _run(
+        ["tmux", "send-keys", "-t", target_pane_id, "Enter"],
+        timeout=timeout,
+    )
+
+
+def send_exit(*, target_pane_id: str, ignore_missing: bool = False) -> None:
+    """Send ``/exit`` + Enter, swallowing pane-gone errors when requested."""
+    _run_tolerating_pane_gone(
+        ["tmux", "send-keys", "-t", target_pane_id, "/exit", "Enter"],
+        ignore_missing=ignore_missing,
+    )
+
+
 def send_poll_trigger(*, target_pane_id: str, session_id: str, agent_id: str) -> bool:
-    """Best-effort ``cafleet ... message poll`` trigger for the recipient's pane.
-
-    Injects the poll command string literally into the recipient's tmux
-    pane and then submits it with Enter. Members spawn under workspace-scoped
-    auto-approval (``claude --permission-mode dontAsk`` or
-    ``codex --ask-for-approval never --sandbox workspace-write``), so if
-    running the injected command eventually invokes the Bash tool, routine
-    permission prompts auto-resolve. Returns False on any tmux failure or
-    when the binary is missing, never raising.
-
-    Split into two ``send-keys`` calls for the same reason as
-    ``send_freetext_and_submit``: ``-l`` is per-invocation, so mixing
-    literal text with the ``Enter`` key name in one call means tmux
-    does not interpret ``Enter`` as the Enter key. It is sent literally
-    instead of producing the submit keypress that the coding agent's
-    input box expects.
-
-    A small sleep between the literal-text send and the Enter send is
-    required for the codex TUI: codex uses bracketed-paste, and back-to-back
-    literal+Enter sends let the Enter get absorbed into the paste payload
-    instead of submitting. ~120ms lets codex finalise the paste. Claude Code
-    is unaffected; the delay is applied unconditionally to keep the helper
-    backend-agnostic.
-
-    Two callers share this helper: ``broker._try_notify_recipient``
-    auto-fires after every ``cafleet message send`` and swallows
-    ``False`` silently (the message queue remains the source of truth);
-    ``cafleet member ping`` is the manual Director-only entry-point and
-    converts ``False`` to a ``ClickException`` (exit 1) so an operator
-    or monitoring loop sees the failure.
-    """
+    """Best-effort ``cafleet ... message poll`` keystroke for the recipient's pane."""
     if shutil.which("tmux") is None:
         return False
+    payload = f"cafleet --session-id {session_id} message poll --agent-id {agent_id}"
     try:
-        _run(
-            [
-                "tmux",
-                "send-keys",
-                "-t",
-                target_pane_id,
-                "-l",
-                f"cafleet --session-id {session_id} message poll --agent-id {agent_id}",
-            ],
-            timeout=5,
-        )
-        time.sleep(_SUBMIT_DELAY)
-        _run(
-            ["tmux", "send-keys", "-t", target_pane_id, "Enter"],
-            timeout=5,
+        _send_literal_then_enter(
+            target_pane_id=target_pane_id, payload=payload, timeout=5
         )
     except TmuxError:
         return False
@@ -153,50 +129,18 @@ def send_inline_preview(
     ts: str,
     text: str,
 ) -> bool:
-    """Best-effort inline-preview keystroke for the recipient's pane.
-
-    Replaces the auto-fire ``send_poll_trigger`` invocation made by
-    ``broker._try_notify_recipient``. Sends a 2-line preview as a single
-    bracketed-paste literal — the envelope ``[cafleet msg <id8> from
-    <sender8> <ts>]`` on line 1, the raw body on line 2 — followed by
-    Enter to submit.
-
-    NOT a reuse of ``send_freetext_and_submit``: that helper prepends a
-    literal ``"4"`` to route the AskUserQuestion option-4 freetext slot,
-    which would corrupt the recipient's input box when no AskUserQuestion
-    frame is active.
-
-    Returns ``False`` on any tmux failure or when the binary is missing,
-    never raising. ``send_poll_trigger`` is preserved for the manual
-    ``cafleet member ping`` re-poke primitive.
-
-    The ``_SUBMIT_DELAY`` between the literal-text send and the Enter send
-    is required for the codex TUI's bracketed-paste finalisation; see
-    ``send_poll_trigger`` for the rationale (applied unconditionally to
-    keep the helper backend-agnostic).
-    """
+    """Best-effort 2-line inline preview keystroke for the recipient's pane."""
     if shutil.which("tmux") is None:
         return False
-    # Sanitize newlines / carriage returns IN THE USER-SUPPLIED BODY only.
-    # The single ``\n`` in the f-string below (between the envelope line and
-    # the body line) is the contract — it is what makes the preview 2 lines
-    # — and is intentionally NOT sanitized. By contrast, any newline that
-    # arrives inside ``text`` would type as an Enter keystroke under tmux
-    # ``-l`` (literal mode), submitting the body as multiple separate user-
-    # turn inputs and corrupting the 2-line shape. Replacing each with U+23CE
-    # (RETURN SYMBOL) keeps the visual hint in 1 codepoint with no keystroke
-    # side effect.
+    # Sanitize newlines in the user-supplied body — under tmux ``-l`` a raw
+    # newline submits as Enter, corrupting the 2-line shape. The single ``\n``
+    # in the f-string below is the contract between envelope and body and is
+    # intentionally not sanitized.
     sanitized_text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
     payload = f"[cafleet msg {task_id_8} from {sender_8} {ts}]\n{sanitized_text}"
     try:
-        _run(
-            ["tmux", "send-keys", "-t", target_pane_id, "-l", payload],
-            timeout=5,
-        )
-        time.sleep(_SUBMIT_DELAY)
-        _run(
-            ["tmux", "send-keys", "-t", target_pane_id, "Enter"],
-            timeout=5,
+        _send_literal_then_enter(
+            target_pane_id=target_pane_id, payload=payload, timeout=5
         )
     except TmuxError:
         return False
@@ -211,42 +155,23 @@ def send_choice_key(*, target_pane_id: str, digit: int) -> None:
 
 
 def send_freetext_and_submit(*, target_pane_id: str, text: str) -> None:
-    """Send ``4`` + literal ``text`` + Enter as three separate send-keys calls.
-
-    tmux's ``-l`` (literal) flag is per-invocation, so a single call cannot
-    mix literal characters with the ``Enter`` key name. Splitting also means
-    embedded ``Enter`` / ``C-c`` / ``Esc`` in ``text`` land as plain chars.
-
-    See ``send_poll_trigger`` for why the pre-Enter sleep is required (codex
-    TUI absorbs Enter into the bracketed-paste payload otherwise; the delay
-    is applied unconditionally to keep the helper backend-agnostic).
-    """
+    """Send ``4`` + literal ``text`` + Enter as three separate send-keys calls."""
     if "\n" in text or "\r" in text:
         raise TmuxError("send_freetext_and_submit: text may not contain newlines")
     _run(["tmux", "send-keys", "-t", target_pane_id, "4"])
-    _run(["tmux", "send-keys", "-t", target_pane_id, "-l", text])
-    time.sleep(_SUBMIT_DELAY)
-    _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
+    _send_literal_then_enter(target_pane_id=target_pane_id, payload=text)
 
 
 def send_bash_command(*, target_pane_id: str, command: str) -> None:
-    """Send ``! <command>`` + Enter as two separate send-keys calls.
-
-    Used by ``cafleet member exec`` to route shell commands via the coding
-    agent's ``!`` shortcut (honored by both ``claude`` and ``codex``). Unlike
-    ``send_freetext_and_submit``, there is NO leading ``4`` keystroke (no
-    AskUserQuestion gate).
-
-    See ``send_poll_trigger`` for why the pre-Enter sleep is required.
-    """
+    """Send ``! <command>`` + Enter, routing shell via the coding agent's ``!`` shortcut."""
     normalized_command = command.strip()
     if not normalized_command:
         raise TmuxError("send_bash_command: command may not be empty")
     if "\n" in command or "\r" in command:
         raise TmuxError("send_bash_command: command may not contain newlines")
-    _run(["tmux", "send-keys", "-t", target_pane_id, "-l", f"! {normalized_command}"])
-    time.sleep(_SUBMIT_DELAY)
-    _run(["tmux", "send-keys", "-t", target_pane_id, "Enter"])
+    _send_literal_then_enter(
+        target_pane_id=target_pane_id, payload=f"! {normalized_command}"
+    )
 
 
 def capture_pane(*, target_pane_id: str, lines: int = 30) -> str:
@@ -273,12 +198,10 @@ def pane_exists(*, target_pane_id: str) -> bool:
 
 def kill_pane(*, target_pane_id: str, ignore_missing: bool = False) -> None:
     """Unconditionally kill the target pane. Swallows pane-gone errors when ignore_missing=True."""
-    try:
-        _run(["tmux", "kill-pane", "-t", target_pane_id])
-    except TmuxError as exc:
-        if ignore_missing and any(m in str(exc).lower() for m in _PANE_GONE_MARKERS):
-            return
-        raise
+    _run_tolerating_pane_gone(
+        ["tmux", "kill-pane", "-t", target_pane_id],
+        ignore_missing=ignore_missing,
+    )
 
 
 def wait_for_pane_gone(

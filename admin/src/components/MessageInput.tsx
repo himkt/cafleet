@@ -6,7 +6,6 @@ interface MessageInputProps {
   senderId: string | null;
   agents: Agent[];
   onSent: () => void;
-  disabled?: boolean;
 }
 
 function slugify(name: string): string {
@@ -96,7 +95,6 @@ export default function MessageInput({
   senderId,
   agents,
   onSent,
-  disabled: disabledProp = false,
 }: MessageInputProps) {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -125,7 +123,7 @@ export default function MessageInput({
     (a) => a.kind !== "builtin-administrator",
   );
 
-  const disabled = disabledProp || !senderId || activeAgents.length === 0;
+  const disabled = !senderId || activeAgents.length === 0;
 
   const candidates: MentionCandidate[] = useMemo(() => {
     if (mention === null) return [];
@@ -141,7 +139,7 @@ export default function MessageInput({
     return list.slice(0, 6);
   }, [mention, userAgents]);
 
-  const popoverOpen = mention !== null && candidates.length > 0;
+  const popoverOpen = candidates.length > 0;
 
   useEffect(() => {
     if (!popoverOpen) {

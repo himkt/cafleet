@@ -96,7 +96,6 @@ export default function Dashboard({
             senderId={senderId}
             agents={agents}
             onSent={refreshAll}
-            disabled={senderId === null}
           />
         </div>
       </div>

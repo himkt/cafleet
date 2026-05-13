@@ -1,6 +1,6 @@
 # Legacy flags — `--full` / `--pretty` / `--json` opt-back-ins
 
-Design 0000049 made every cafleet output as compact as possible by default. The flags below are the opt-back-ins for the pre-design-0049 verbosity.
+`--full` / `--pretty` / `--json` are the opt-back-ins for cafleet's compact default output. Each flag is documented below.
 
 ## `--full` (cross-subcommand escape hatch)
 
@@ -44,6 +44,6 @@ cafleet --session-id <s> message send --agent-id <m> --to <r> --text "..." --qui
 
 ## `CAFLEET_MAX_TEXT_LEN`
 
-Environment variable controlling body truncation in the rendered envelope. Default `200` codepoints. Wired via `Field(validation_alias="CAFLEET_MAX_TEXT_LEN")` on `Settings`, matching the `CAFLEET_`-prefixed convention used by `CAFLEET_DATABASE_URL`, `CAFLEET_BROKER_HOST`, and `CAFLEET_BROKER_PORT`. The suffix is the single Unicode codepoint `…` (U+2026 HORIZONTAL ELLIPSIS) — replaced the three-ASCII-character `...` suffix in design 0000049 Surface 5.
+Environment variable controlling body truncation in the rendered envelope. Default `200` codepoints. Wired via `Field(validation_alias="CAFLEET_MAX_TEXT_LEN")` on `Settings`, matching the `CAFLEET_`-prefixed convention used by `CAFLEET_DATABASE_URL`, `CAFLEET_BROKER_HOST`, and `CAFLEET_BROKER_PORT`. The suffix is the single Unicode codepoint `…` (U+2026 HORIZONTAL ELLIPSIS).
 
 `CAFLEET_MAX_TEXT_LEN` also caps `agent.description` (limit `60`, hard-coded) and metadata-string truncation (limit `80`, hard-coded). Bypass all three via `--full`.

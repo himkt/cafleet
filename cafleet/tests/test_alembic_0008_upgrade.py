@@ -1,22 +1,13 @@
 """Tests for Alembic migration ``0008_capitalize_root_director_name``."""
 
-import importlib.resources
 import json
 import uuid
 
 import pytest
 from alembic import command
-from alembic.config import Config
 from sqlalchemy import create_engine, text
 
-
-def _make_alembic_cfg(db_path) -> Config:
-    with importlib.resources.as_file(
-        importlib.resources.files("cafleet") / "alembic.ini"
-    ) as ini_path:
-        cfg = Config(str(ini_path))
-        cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-        return cfg
+from tests._helpers import _make_alembic_cfg
 
 
 def _insert_session_with_director(

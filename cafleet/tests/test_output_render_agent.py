@@ -24,7 +24,6 @@ from click.testing import CliRunner
 
 from cafleet import config, output
 from cafleet.cli import cli
-from cafleet.db import engine as engine_mod
 from cafleet.tmux import DirectorContext
 
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
@@ -171,16 +170,7 @@ def test_render_agent_slim__no_description_handled_gracefully():
 
 
 @pytest.fixture
-def _reset_engine():
-    engine_mod._sync_engine = None
-    engine_mod._sync_sessionmaker = None
-    yield
-    engine_mod._sync_engine = None
-    engine_mod._sync_sessionmaker = None
-
-
-@pytest.fixture
-def bootstrapped_session(tmp_path, monkeypatch, _reset_engine):
+def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,

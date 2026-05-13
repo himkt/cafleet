@@ -3,67 +3,19 @@
 import uuid
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet import broker
-from cafleet.db.models import Base
-from cafleet.tmux import DirectorContext
-
-
-@pytest.fixture
-def sync_sessionmaker():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    return sessionmaker(engine, expire_on_commit=False)
-
-
-@pytest.fixture
-def _patch_broker(sync_sessionmaker, monkeypatch):
-    monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
+from tests._broker_helpers import (
+    _create_session,
+    _register_agent,
+    _setup_three_agents,
+    _setup_two_agents,
+)
 
 
 @pytest.fixture(autouse=True)
-def broker_session(sync_sessionmaker, _patch_broker):
-    return sync_sessionmaker
-
-
-def _create_session(label: str | None = None) -> dict:
-    return broker.create_session(
-        label=label,
-        director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
-        coding_agent="claude",
-    )
-
-
-def _register_agent(
-    session_id: str,
-    name: str = "test-agent",
-    description: str = "A test agent",
-) -> dict:
-    return broker.register_agent(
-        session_id=session_id,
-        name=name,
-        description=description,
-    )
-
-
-def _setup_two_agents() -> tuple[str, str, str]:
-    session = _create_session()
-    sid = session["session_id"]
-    agent_a = _register_agent(sid, name="sender")
-    agent_b = _register_agent(sid, name="recipient")
-    return sid, agent_a["agent_id"], agent_b["agent_id"]
-
-
-def _setup_three_agents() -> tuple[str, str, str, str]:
-    session = _create_session()
-    sid = session["session_id"]
-    a = _register_agent(sid, name="agent-a")
-    b = _register_agent(sid, name="agent-b")
-    c = _register_agent(sid, name="agent-c")
-    return sid, a["agent_id"], b["agent_id"], c["agent_id"]
+def _autouse_broker(broker_session):
+    return broker_session
 
 
 # --- send_message: broker.send_message(session_id, agent_id, to, text) → {"task": <dict>} ---

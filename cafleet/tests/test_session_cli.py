@@ -7,17 +7,12 @@ from click.testing import CliRunner
 
 from cafleet import config
 from cafleet.cli import cli
-from cafleet.db import engine as engine_mod
 from cafleet.tmux import DirectorContext
 
 
 @pytest.fixture(autouse=True)
-def _reset_engine_singletons():
-    engine_mod._sync_engine = None
-    engine_mod._sync_sessionmaker = None
-    yield
-    engine_mod._sync_engine = None
-    engine_mod._sync_sessionmaker = None
+def _autouse_reset_engine(_reset_engine_singletons):
+    pass
 
 
 @pytest.fixture(autouse=True)
