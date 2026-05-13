@@ -134,15 +134,9 @@ This keeps the design doc clean: at any moment, the markers in the doc reflect *
 
 ### Copilot Routing
 
-Copilot reviews split into two line-anchored classes (source file, design doc) plus a PR-level catch-all:
-
 | Anchor | Where the marker lives | cafleet message | Resolver |
 |:--|:--|:--|:--|
-| Source file (e.g. `cafleet/.../foo.py:42`) | `COMMENT(copilot): <body>` in the source file at `<file>:<line>` | `ready (<file>:<line>)` to the Drafter | Drafter fixes source, removes marker, replies `addressed (<file>:<line>)` |
 | Design doc (e.g. `design-docs/foo/design-doc.md:42`) | `COMMENT(director): <body>` inline at the affected paragraph in the design doc | (no cafleet route — Director resolves directly per the existing rule) | Director applies the spec change and removes the marker. **No self-note cafleet message is sent** — the git commit and marker removal are sufficient audit trail. |
-| PR-level (non-line-anchored) | Director judgment per existing classification (spec → `COMMENT(director)` in design doc; doc-shape → `COMMENT(copilot)` at a representative file:line) | `ready (...)` per anchor | per anchor |
-
-The Director's commit message follows the existing convention (`fix: address Copilot review - <short summary>`); the message text contains the summary, not the `COMMENT(copilot)` body (which would be gone from source by then).
 
 ### Anchorless Status
 
@@ -186,7 +180,7 @@ User
 - **Director ↔ User**: `AskUserQuestion` (clarification relay, draft presentation, feedback collection)
 - **Director ↔ Drafter**: `cafleet message send` (questions relay, user answers, reviewer feedback, drafting instructions)
 - **Director ↔ Reviewer**: `cafleet message send` (draft review requests, review feedback)
-- Members receive messages via a push notification: the broker injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into the member's pane via `tmux send-keys` whenever a `cafleet message send` is persisted. The literal `<session-id>` and `<recipient-agent-id>` UUIDs are the session and target member UUIDs the broker has in scope, baked into the injected command string. `--session-id` is global (before the subcommand); `--agent-id` is per-subcommand (after the subcommand name).
+- Members receive messages via a push notification: the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview` whenever a `cafleet message send` is persisted. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves. `--session-id` is global (before the subcommand); `--agent-id` is per-subcommand (after the subcommand name).
 
 ## Prerequisites
 
@@ -202,7 +196,7 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 | `SendMessage(to="Director")` (from member) | `cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
 | `agent-team-supervision` `/loop` | Load `Skill(agent-team-monitoring)` (mechanism + `/loop`) and `Skill(agent-team-supervision)` (governance), then run `/loop` from agent-team-monitoring |
 | `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` for each member, then `cafleet session delete <session-id>` (soft-deletes the session, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `session delete` is the only supported teardown. |
-| Auto message delivery | Push notification injects `cafleet --session-id <session-id> message poll --agent-id <recipient-agent-id>` into member's tmux pane |
+| Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
 ## Process
 

@@ -1,15 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cafleet *)",
-      "Bash(mise //admin*)",
-      "Bash(mise //cafleet*)",
-      "Bash(mise //:bun-install)",
-      "Bash(mise //:uv-sync)",
-      "Bash(mise //:slidev *)",
-      "Bash(mise //:figure *)",
-      "Bash(mise tasks)",
-      "Bash(mise tasks --all)",
       "Bash(bun install --frozen-lockfile)",
       "Bash(bun run agent-browser * --help)",
       "Bash(bun run agent-browser * --version)",
@@ -28,14 +19,17 @@
       "Bash(bun run agent-browser --session vr-batch-* reload)",
       "Bash(bun run agent-browser close --all)",
       "Bash(bun run slidev *)",
-      "Bash(sleep)",
+      "Bash(cafleet *)",
+      "Bash(mise //admin*)",
+      "Bash(mise //cafleet*)",
+      "Bash(mise //:bun-install)",
+      "Bash(mise //:uv-sync)",
+      "Bash(mise //:slidev *)",
+      "Bash(mise tasks)",
+      "Bash(mise tasks --all)",
       "Bash(sleep *)",
       "Bash(uv run --frozen --group research *)",
       "Skill(update-readme)",
-      "Skill(design-doc-create)",
-      "Skill(design-doc-execute)",
-      "Skill(design-doc-interview)",
-      "Skill(design-doc)",
       "Skill(cafleet:agent-team-monitoring)",
       "Skill(cafleet:agent-team-supervision)",
       "Skill(cafleet:base-dir)",
@@ -50,10 +44,6 @@
       "Skill(cafleet:research-report)"
     ],
     "deny": [
-      "Bash(uv run pytest *)",
-      "Bash(uv run python -m *)",
-      "Bash(uv run --package *)",
-      "Bash(mise run *)",
       "Bash(bun install)",
       "Bash(bun run agent-browser open *)",
       "Bash(bun run agent-browser --session vr-batch-* set *)",
@@ -67,7 +57,12 @@
       "Bash(bun run agent-browser eval *)",
       "Bash(bun run agent-browser --session vr-batch-* wait)",
       "Bash(bun run agent-browser wait)",
-      "Bash(bun run agent-browser wait *)"
+      "Bash(bun run agent-browser wait *)",
+      "Bash(mise run *)",
+      "Bash(sqlite3 *)",
+      "Bash(uv run pytest *)",
+      "Bash(uv run python -m *)",
+      "Bash(uv run --package *)"
     ],
     "ask": [
       "Bash(cafleet * member exec *)"

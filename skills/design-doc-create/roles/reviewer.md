@@ -43,7 +43,7 @@ cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
 Findings are NOT in the cafleet body — each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design document at the affected section (see the parent SKILL.md's *Coordination Protocol* section for the full schema).
 The literal `<session-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
-**Receiving review assignments from the Director:** When the Director sends a message, the broker injects `cafleet --session-id <session-id> message poll --agent-id <my-agent-id>` into your tmux pane via push notification. You will see the `cafleet message poll` output with the Director's assignment (typically the path to a draft). Read the message, then acknowledge it:
+**Receiving review assignments from the Director:** When the Director sends a message, the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into your tmux pane via `tmux.send_inline_preview`. You process the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body (e.g., the path to a draft), run `cafleet message poll` yourself. Read the message, then acknowledge it:
 ```bash
 cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```

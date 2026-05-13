@@ -18,7 +18,7 @@ CAFleet members spawned via `cafleet member create` do not act autonomously. The
 Supervision happens over the CAFleet message broker. The flow:
 
 1. The Director sends a message: `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "..."`.
-2. The broker persists the task and immediately keystrokes `cafleet --session-id <session-id> message poll --agent-id <member-agent-id>` into the recipient's tmux pane via `tmux send-keys` (the broker auto-fire).
+2. The broker persists the task and immediately keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the recipient's pane via `tmux.send_inline_preview`. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves.
 3. The member's next turn picks up the polled task, processes it, and (when a reply is expected) sends a `cafleet message send` back to the Director.
 4. The Director receives the reply on the next supervision tick (`/loop` for Claude Code, fallback driver for codex — see `Skill(agent-team-monitoring)` § Mechanism by backend) and ACKs it via `cafleet message ack`.
 
@@ -30,7 +30,7 @@ The Director's plain output is **not visible to members** — the only Director�
 
 **Members go idle after every turn. Idle is normal, not a stall.** A member that finished its turn and is awaiting the next instruction is doing exactly what it should.
 
-- Idle members receive messages normally; the broker auto-fires a poll keystroke into the pane to wake them.
+- Idle members receive messages normally; the broker keystrokes a 2-line inline preview into the pane via `tmux.send_inline_preview` to wake them.
 - Idle notifications are informational. Do not react to them unless you are ready to assign new work or to dispatch already-queued work (see Authorization-Scope Guard below).
 - Do **not** nudge a member just because it went idle. Only nudge when idleness is **blocking your next step** AND health-check evidence (no recent message, no terminal forward progress) confirms a real stall.
 - A member that has sent you a question and is awaiting your reply is idle by design — do not nudge it. Reply via `cafleet message send`.
@@ -103,7 +103,7 @@ The single rule supervision restates here: **stop the `/loop` cron (Claude Code)
 |---|---|---|
 | Start the supervision tick | `/loop` (Claude Code) or fallback driver (codex) — see `Skill(agent-team-monitoring)` | First step — before any `cafleet member create` call |
 | Spawn member | `cafleet --session-id <s> member create --agent-id <director> --name <n> --description <d> -- "<prompt>"` | Verify with `cafleet member list` |
-| Message member | `cafleet --session-id <s> message send --agent-id <director> --to <member> --text "..."` | Broker auto-fires a `message poll` keystroke into the member's pane |
+| Message member | `cafleet --session-id <s> message send --agent-id <director> --to <member> --text "..."` | Broker keystrokes a 2-line inline preview into the member's pane via `tmux.send_inline_preview` |
 | ACK reply | `cafleet --session-id <s> message ack --agent-id <director> --task-id <task>` | Unacknowledged tasks accumulate; ACK every reply you act on |
 | Inspect stalled member | `cafleet --session-id <s> member capture --agent-id <director> --member-id <member>` | Replaces raw `tmux capture-pane` |
 | Manual inbox-poll nudge | `cafleet --session-id <s> member ping --agent-id <director> --member-id <member>` | Pre-approved; for missed auto-fires and post-`exec` chains |

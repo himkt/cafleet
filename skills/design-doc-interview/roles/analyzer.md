@@ -35,7 +35,7 @@ cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "<numbered question list ending in 'Total: N questions'>"
 ```
 
-**Receiving messages from the Director:** When the Director sends a message (e.g., a corrective request to reformat the list), the broker injects `cafleet --session-id <session-id> message poll --agent-id <my-agent-id>` into your tmux pane via push notification. Acknowledge:
+**Receiving messages from the Director:** When the Director sends a message (e.g., a corrective request to reformat the list), the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into your tmux pane via `tmux.send_inline_preview`. You process the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, run `cafleet message poll` yourself. Acknowledge:
 
 ```bash
 cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>

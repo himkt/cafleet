@@ -7,7 +7,7 @@ Director reference for crash / disconnect / idle / wedged-pane recovery. Member-
 Before assuming a member is stalled, run the cheap check first:
 
 1. **Check the Director's inbox via `cafleet message poll`** — the member may have replied and you missed the inline-preview keystroke. The poll output shows pending messages without touching the member's pane.
-2. **Capture the member's pane via `cafleet member capture`** — see what the member is actually doing. Default `--lines 30` (post-design-0049). If the capture is too short to show the prompt frame, re-run with `--lines 120` or `--lines 200`.
+2. **Capture the member's pane via `cafleet member capture`** — see what the member is actually doing. Default `--lines 30`. If the capture is too short to show the prompt frame, re-run with `--lines 120` or `--lines 200`.
 
 ```bash
 cafleet --session-id <session-id> message poll --agent-id <director-agent-id>

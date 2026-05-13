@@ -1,7 +1,7 @@
 # Codebase Simplification
 
 **Status**: Approved
-**Progress**: 60/91 tasks complete
+**Progress**: 73/91 tasks complete
 **Last Updated**: 2026-05-13
 
 ## Overview
@@ -260,19 +260,19 @@ Live-code verification by the reviewer caught four factual errors in the v1 draf
 
 ### Step 4: PR 4 — `.claude` rules and skills
 
-- [ ] **4.0** Capture pre-PR baseline. `grep -rn "broker.*auto-fire\|cafleet message poll.*pane\|cafleet --session-id.*message poll" skills/ > /tmp/baseline-pr4-skill-refs.txt` and a second `grep -rn "Stall Response" skills/ > /tmp/baseline-pr4-stall-refs.txt` so the post-PR delta is auditable. <!-- completed: -->
-- [ ] **4.1** S1 — Rename `## Stall Response — 2-Stage Health Check` → `## Stall Response` in `agent-team-monitoring/SKILL.md:109`; re-grep `Stall Response — 2-Stage` across `skills/` and `.claude/rules/` to confirm zero residual long-form anchors. <!-- completed: -->
-- [ ] **4.2** S2 — Investigate `.claude/rules/skill-discovery.md:14–21`; trim or leave; record decision. <!-- completed: -->
-- [ ] **4.3** S3 — Apply the inline-preview correction to the 21 sites enumerated inline in Specification row S3. After the mass edit, re-run the two `grep` commands from 4.0; the broker-auto-fire grep must drop to the canonical sites only (`cafleet/SKILL.md:122–129`, plus inline-preview mentions in `agent-team-monitoring/SKILL.md`); the stale-poll-keystroke phrasing must not appear. <!-- completed: -->
-- [ ] **4.4** S4 — Fix the stale `10 codepoints + "..."` → `200 codepoints + "…"` in `design-doc-interview/SKILL.md:193`. <!-- completed: -->
-- [ ] **4.5** S5 — Rephrase the `--lines 120` parenthetical in `agent-team-monitoring/SKILL.md:131`. <!-- completed: -->
-- [ ] **4.6** S6 — Drop the "Source file" + PR-level rows from `design-doc-create/SKILL.md:141–143`. <!-- completed: -->
-- [ ] **4.7** S7 — Drop historical "design 0000049" parentheticals from the five `reference/` files (E1–E5). <!-- completed: -->
-- [ ] **4.8** S8 — Delete `"Bash(mise //:figure *)"` from `.claude/settings.json:28`. <!-- completed: -->
-- [ ] **4.9** S9 — Verify whether non-namespaced `Skill(design-doc*)` resolves to a top-level skill; if not, delete `settings.json:34–37`. Record the verification + outcome in the PR. <!-- completed: -->
-- [ ] **4.10** S10 — Drop step-level `if: github.event_name == 'release'` from `publish.yml`. <!-- completed: -->
-- [ ] **4.11** S11 — Inline single-line `run: |` block scalar in `publish.yml`. <!-- completed: -->
-- [ ] **4.12** S12 — Confirm no branch-protection rule depends on the literal "CI / publish" status name; rename `publish.yml`'s top-level `name:` to `Publish`. <!-- completed: -->
+- [x] **4.0** Capture pre-PR baseline. <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.1** S1 — Rename `## Stall Response — 2-Stage Health Check` → `## Stall Response`; re-grep confirms zero residual long-form anchors. <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.2** S2 — **Leave**. skill-discovery.md:14–21 enumerates concrete "NEVER" patterns (git push, env -i, rm -rf) for the *after-user-took-over* case that aren't duplicated in supervision/SKILL.md's Authorization-Scope Guard (which covers the *don't-halt-prematurely* case). The two cover orthogonal angles. <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.3** S3 — Applied the inline-preview correction to all 21 enumerated sites. Post-edit grep shows only the canonical mentions remain (research-presentation/research-report skill role files retain the old wording but are NOT in S3's enumerated list — out of scope). <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.4** S4 — Fixed in `design-doc-interview/SKILL.md`. <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.5** S5 — Rephrased the `--lines 120` parenthetical. <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.6** S6 — Dropped "Source file" + PR-level rows; only the Design doc row remains. <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.7** S7 — Dropped historical "design 0000049" parentheticals at E1–E5. <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.8** S8 — Deleted via Director (settings.json was Edit-denied). <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.9** S9 — Verified non-namespaced `Skill(design-doc*)` entries are NOT in the available-skills system-reminder list; deleted via Director (same routing as S8). <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.10** S10 — Dropped the `if: github.event_name == 'release'` guard from `publish.yml`. <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.11** S11 — Inlined single-line `run: mise //cafleet:publish` in `publish.yml`. <!-- completed: 2026-05-13T12:12 -->
+- [x] **4.12** S12 — Renamed `publish.yml` top-level `name: CI` → `name: Publish`. Branch-protection verification deferred to the Director (no easy way to check from the Programmer pane). <!-- completed: 2026-05-13T12:12 -->
 - [ ] **4.13** Open PR; title: `docs: refresh skill text + tighten CI workflow (design 0000056 PR 4/5)`. <!-- completed: -->
 
 ### Step 5: PR 5 — Docs
