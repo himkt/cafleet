@@ -29,14 +29,14 @@ If the consuming skill received an argument that is already an absolute path (e.
 cafleet base-dir resolve --json --path <abs-or-rel-arg>
 ```
 
-The CLI returns one of four JSON shapes:
+The CLI returns one of three JSON shapes (plus a fourth fatal branch that exits non-zero with an error message rather than a JSON payload):
 
 | `status` field | Meaning | `${BASE}` outcome |
 |:--|:--|:--|
 | `resolved` | A concrete BASE was determined from CWD inference or from an existing anchor. The `base` field is the absolute path; the `source` field is `cwd-inference` or `anchor`. | `${BASE} = <base>`. Done. |
 | `unset` | The caller passed an absolute-path argument. `${BASE}` is intentionally undefined. The `base` field is `null`; the `source` field is `absolute-path-arg`. | `${BASE} = <unset>` (literal sentinel). Done. See § *The `<unset>` sentinel* for caller obligations. |
 | `needs-user-input` | The CLI could not resolve deterministically (CWD is `$HOME` or under `$HOME/.claude`, and no usable anchor exists). The `candidates` field lists the options to present. | Go to Step 2. |
-| (error / non-zero exit) | Anchor schema mismatch, version mismatch, or other fatal condition. | Surface the error and stop — do NOT fall back to `/tmp`. |
+| (no JSON — non-zero exit) | Anchor schema mismatch, version mismatch, or other fatal condition. The CLI exits non-zero with an error message on stderr; no JSON payload is emitted. | Surface the error and stop — do NOT fall back to `/tmp`. |
 
 ### Step 2. AskUserQuestion (only when `status == "needs-user-input"`)
 
