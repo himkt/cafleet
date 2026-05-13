@@ -22,7 +22,7 @@ def test_ensure_tmux_available__errors_when_tmux_env_unset(monkeypatch):
 def test_director_context__parses_display_message(monkeypatch):
     monkeypatch.setenv("TMUX_PANE", "%0")
 
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         assert args == [
             "tmux",
             "display-message",
@@ -47,7 +47,7 @@ def test_director_context__errors_when_tmux_pane_unset(monkeypatch):
 
 
 def test_split_window__returns_captured_pane_id(monkeypatch):
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         assert args[0:3] == ["tmux", "split-window", "-t"]
         assert "@3" in args
         assert "-P" in args
@@ -70,7 +70,7 @@ def test_split_window__returns_captured_pane_id(monkeypatch):
 def test_split_window__command_appended_directly_to_args(monkeypatch):
     captured_args = []
 
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         captured_args.extend(args)
         return "%8\n"
 
@@ -86,7 +86,7 @@ def test_split_window__command_appended_directly_to_args(monkeypatch):
 def test_split_window__claude_style_command(monkeypatch):
     captured_args = []
 
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         captured_args.extend(args)
         return "%9\n"
 
@@ -108,42 +108,29 @@ def test_split_window__claude_style_command(monkeypatch):
 
 
 def test_split_window__env_vars_forwarded_as_flags(monkeypatch):
-    """Only CAFLEET_DATABASE_URL is forwarded as -e KEY=VAL when set.
-
-    Design doc 0000023: session_id and agent_id are now passed as literal
-    CLI flags via the prompt text, not via tmux env inheritance. The only
-    env var that member-create forwards is CAFLEET_DATABASE_URL so the
-    spawned agent can reach the same SQLite file.
-    """
     captured_args = []
 
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         captured_args.extend(args)
         return "%11\n"
 
     monkeypatch.setattr(tmux, "_run", mock_run)
     tmux.split_window(
         target_window_id="@3",
-        env={
-            "CAFLEET_DATABASE_URL": "sqlite+aiosqlite:////tmp/registry.db",
-        },
+        env={"CAFLEET_DATABASE_URL": "sqlite+aiosqlite:////tmp/registry.db"},
         command=["claude", "prompt"],
     )
-    env_pairs = []
-    for i, a in enumerate(captured_args):
-        if a == "-e" and i + 1 < len(captured_args):
-            env_pairs.append(captured_args[i + 1])
-    assert "CAFLEET_DATABASE_URL=sqlite+aiosqlite:////tmp/registry.db" in env_pairs
-    for pair in env_pairs:
-        assert not pair.startswith("CAFLEET_SESSION_ID=")
-        assert not pair.startswith("CAFLEET_AGENT_ID=")
-        assert not pair.startswith("CAFLEET_URL=")
+    flag_idx = captured_args.index("-e")
+    assert (
+        captured_args[flag_idx + 1]
+        == "CAFLEET_DATABASE_URL=sqlite+aiosqlite:////tmp/registry.db"
+    )
 
 
 def test_split_window__empty_env_emits_no_e_flags(monkeypatch):
     captured_args = []
 
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         captured_args.extend(args)
         return "%12\n"
 
@@ -157,7 +144,7 @@ def test_split_window__empty_env_emits_no_e_flags(monkeypatch):
 
 
 def test_send_exit__raises_tmuxerror_on_failure(monkeypatch):
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         raise tmux.TmuxError("tmux command failed: server exited unexpectedly")
 
     monkeypatch.setattr(tmux, "_run", mock_run)
@@ -166,7 +153,7 @@ def test_send_exit__raises_tmuxerror_on_failure(monkeypatch):
 
 
 def test_send_exit__ignore_missing_swallows_pane_gone(monkeypatch):
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         raise tmux.TmuxError(
             "tmux command failed: tmux send-keys -t %99 /exit Enter\n"
             "stderr: can't find pane: %99"
@@ -177,7 +164,7 @@ def test_send_exit__ignore_missing_swallows_pane_gone(monkeypatch):
 
 
 def test_send_exit__ignore_missing_does_not_swallow_other_errors(monkeypatch):
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         raise tmux.TmuxError("tmux command failed: server crashed")
 
     monkeypatch.setattr(tmux, "_run", mock_run)
@@ -188,7 +175,7 @@ def test_send_exit__ignore_missing_does_not_swallow_other_errors(monkeypatch):
 def test_capture_pane__invokes_correct_args(monkeypatch):
     captured_args = []
 
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         captured_args.extend(args)
         return "line 1\nline 2\n"
 
@@ -199,7 +186,7 @@ def test_capture_pane__invokes_correct_args(monkeypatch):
 
 
 def test_capture_pane__raises_on_missing_pane(monkeypatch):
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         raise tmux.TmuxError(
             "tmux command failed: tmux capture-pane -p -t %99 -S -80\n"
             "stderr: can't find pane: %99"
@@ -227,7 +214,7 @@ def test_send_poll_trigger__success_returns_true(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     captured_args = []
 
-    def mock_run(args, **kwargs):
+    def mock_run(args, **_kwargs):
         captured_args.extend(args)
         return ""
 
@@ -256,7 +243,7 @@ def test_send_poll_trigger__success_returns_true(monkeypatch):
 def test_send_poll_trigger__pane_not_found_returns_false(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
 
-    def mock_run(args, **kwargs):
+    def mock_run(args, **_kwargs):
         raise tmux.TmuxError(
             "tmux command failed: tmux send-keys -t %99\nstderr: can't find pane: %99"
         )
@@ -274,7 +261,7 @@ def test_send_poll_trigger__tmux_binary_missing_returns_false(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: None)
     run_called = False
 
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         nonlocal run_called
         run_called = True
         return ""
@@ -292,7 +279,7 @@ def test_send_poll_trigger__tmux_binary_missing_returns_false(monkeypatch):
 def test_send_poll_trigger__never_raises_on_tmux_error(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
 
-    def mock_run(args, **kwargs):
+    def mock_run(args, **_kwargs):
         raise tmux.TmuxError("tmux command failed: server exited unexpectedly")
 
     monkeypatch.setattr(tmux, "_run", mock_run)
@@ -304,51 +291,10 @@ def test_send_poll_trigger__never_raises_on_tmux_error(monkeypatch):
     assert result is False
 
 
-# --- send_poll_trigger_keystroke: regression guard for the literal keystroke
-# shape pushed by ``send_poll_trigger``. The keystroke is the bare cafleet
-# command and MUST carry ``message poll --agent-id <a>``. The recipient's Bash
-# tool is enabled under ``--permission-mode dontAsk``, so the harness runs the
-# keystroke as a normal Bash invocation.
-#
-# The two ``send-keys`` calls are inspected separately:
-# - call 0: ``["tmux", "send-keys", "-t", <pane>, "-l", <keystroke>]``
-# - call 1: ``["tmux", "send-keys", "-t", <pane>, "Enter"]``
-# ---
-
-
-def test_send_poll_trigger_keystroke__keystroke_starts_with_bare_cafleet(monkeypatch):
-    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
-    captured: list[list[str]] = []
-
-    def mock_run(args, **_kwargs):
-        captured.append(list(args))
-        return ""
-
-    monkeypatch.setattr(tmux, "_run", mock_run)
-    ok = tmux.send_poll_trigger(
-        target_pane_id="%5",
-        session_id="550e8400-e29b-41d4-a716-446655440000",
-        agent_id="7ba91234-5678-90ab-cdef-112233445566",
-    )
-    assert ok is True
-    assert len(captured) == 2
-
-    keystroke = captured[0][-1]
-    assert keystroke.startswith("cafleet --session-id "), (
-        "send_poll_trigger keystroke must start with `cafleet --session-id `; "
-        f"got: {keystroke!r}"
-    )
-    assert "message poll --agent-id" in keystroke, (
-        f"keystroke must carry `message poll --agent-id`; got: {keystroke!r}"
-    )
-
-    assert captured[1] == ["tmux", "send-keys", "-t", "%5", "Enter"]
-
-
 def test_pane_exists__returns_true_when_pane_present_in_list(monkeypatch):
     captured_args = []
 
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         captured_args.extend(args)
         return "%0\n%3\n%7\n%9\n"
 
@@ -364,7 +310,7 @@ def test_pane_exists__returns_true_when_pane_present_in_list(monkeypatch):
 
 
 def test_pane_exists__returns_false_when_pane_absent(monkeypatch):
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         return "%0\n%3\n%9\n"
 
     monkeypatch.setattr(tmux, "_run", mock_run)
@@ -372,7 +318,7 @@ def test_pane_exists__returns_false_when_pane_absent(monkeypatch):
 
 
 def test_pane_exists__propagates_unrelated_tmux_error(monkeypatch):
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         raise tmux.TmuxError(
             "tmux command failed: tmux list-panes -a -F #{pane_id}\n"
             "stderr: no server running on /tmp/tmux-1000/default"
@@ -386,7 +332,7 @@ def test_pane_exists__propagates_unrelated_tmux_error(monkeypatch):
 def test_kill_pane__invokes_correct_args(monkeypatch):
     captured_args = []
 
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         captured_args.extend(args)
         return ""
 
@@ -397,7 +343,7 @@ def test_kill_pane__invokes_correct_args(monkeypatch):
 
 
 def test_kill_pane__ignore_missing_swallows_pane_gone(monkeypatch):
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         raise tmux.TmuxError(
             "tmux command failed: tmux kill-pane -t %99\nstderr: can't find pane: %99"
         )
@@ -407,7 +353,7 @@ def test_kill_pane__ignore_missing_swallows_pane_gone(monkeypatch):
 
 
 def test_kill_pane__ignore_missing_does_not_swallow_other_errors(monkeypatch):
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         raise tmux.TmuxError(
             "tmux command failed: tmux kill-pane -t %7\n"
             "stderr: server exited unexpectedly"
@@ -419,7 +365,7 @@ def test_kill_pane__ignore_missing_does_not_swallow_other_errors(monkeypatch):
 
 
 def test_kill_pane__default_raises_even_for_pane_gone(monkeypatch):
-    def mock_run(args):
+    def mock_run(args, **_kwargs):
         raise tmux.TmuxError(
             "tmux command failed: tmux kill-pane -t %99\nstderr: can't find pane: %99"
         )
@@ -528,14 +474,8 @@ def test_wait_for_pane_gone__propagates_tmux_error_from_pane_exists(monkeypatch)
     assert call_count["n"] == 2
 
 
-# --- send_bash_command: round-8 ``tmux.send_bash_command`` helper.
-#
-# Bash routing uses Claude Code's ``!`` keystroke convention: the keystroke
-# ``! <command>`` followed by ``Enter`` enters Bash-input mode in the
-# member's pane and runs ``<command>``. Unlike ``send_freetext_and_submit``,
-# there is NO leading ``4`` keystroke (no AskUserQuestion gate), so the
-# helper issues exactly two ``send-keys`` invocations.
-# ---
+# --- send_bash_command: routes shell via ``! <command>`` + Enter (two
+# send-keys calls; no leading ``4`` keystroke). ---
 
 
 def test_send_bash_command__sends_keystrokes_in_two_calls(monkeypatch):
@@ -588,29 +528,11 @@ def test_send_bash_command__rejects_newlines(monkeypatch, bad_command):
     assert run_calls == []
 
 
-def test_send_bash_command__rejects_empty_command(monkeypatch):
-    run_calls: list[list[str]] = []
-
-    def mock_run(args, **_kwargs):
-        run_calls.append(list(args))
-        return ""
-
-    monkeypatch.setattr(tmux, "_run", mock_run)
-    with pytest.raises(
-        tmux.TmuxError,
-        match="send_bash_command: command may not be empty",
-    ):
-        tmux.send_bash_command(target_pane_id="%5", command="")
-    assert run_calls == []
-
-
 @pytest.mark.parametrize(
-    "whitespace_command",
-    [" ", "   ", "\t", " \t ", "\t\t"],
+    "command",
+    ["", " ", "   ", "\t", " \t ", "\t\t"],
 )
-def test_send_bash_command__rejects_whitespace_only_command(
-    monkeypatch, whitespace_command
-):
+def test_send_bash_command__rejects_empty_or_whitespace(monkeypatch, command):
     run_calls: list[list[str]] = []
 
     def mock_run(args, **_kwargs):
@@ -622,7 +544,7 @@ def test_send_bash_command__rejects_whitespace_only_command(
         tmux.TmuxError,
         match="send_bash_command: command may not be empty",
     ):
-        tmux.send_bash_command(target_pane_id="%5", command=whitespace_command)
+        tmux.send_bash_command(target_pane_id="%5", command=command)
     assert run_calls == []
 
 

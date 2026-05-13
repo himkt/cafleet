@@ -9,7 +9,6 @@ from click.testing import CliRunner
 
 from cafleet import broker, config
 from cafleet.cli import _resolve_prompt, cli
-from cafleet.db import engine as engine_mod
 from cafleet.tmux import DirectorContext
 
 
@@ -202,16 +201,7 @@ _CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id
 
 
 @pytest.fixture
-def _reset_engine():
-    engine_mod._sync_engine = None
-    engine_mod._sync_sessionmaker = None
-    yield
-    engine_mod._sync_engine = None
-    engine_mod._sync_sessionmaker = None
-
-
-@pytest.fixture
-def bootstrapped_session(tmp_path, monkeypatch, _reset_engine):
+def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
     """Create a real session and return ``(session_id, director_agent_id, runner)``.
 
     Spins up a fresh SQLite DB, runs ``cafleet db init`` + ``cafleet session

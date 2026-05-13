@@ -4,16 +4,13 @@ import json
 
 import click
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet import broker
 from cafleet.broker import (
     ADMINISTRATOR_KIND,
     _is_administrator,
 )
-from cafleet.db.models import Agent, Base
+from cafleet.db.models import Agent
 from cafleet.tmux import DirectorContext
 
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
@@ -104,20 +101,9 @@ def test_is_administrator__returns_false_for_none():
 
 
 @pytest.fixture
-def sync_sessionmaker():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    return sessionmaker(engine, expire_on_commit=False)
-
-
-@pytest.fixture
-def _patch_broker(sync_sessionmaker, monkeypatch):
-    monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
-
-
-@pytest.fixture
-def broker_db(sync_sessionmaker, _patch_broker):
-    return sync_sessionmaker
+def broker_db(broker_session):
+    """Alias of conftest.broker_session for legacy tests in this file."""
+    return broker_session
 
 
 def test_deregister_administrator_guard__raises_administrator_protected_error(

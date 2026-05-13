@@ -12,23 +12,14 @@ Tests build a DB at the prior head (revision ``0008``), seed legacy rows,
 then run ``alembic upgrade head`` and assert the resulting schema and data.
 """
 
-import importlib.resources
 import json
 import uuid
 
 import pytest
 from alembic import command
-from alembic.config import Config
 from sqlalchemy import create_engine, text
 
-
-def _make_alembic_cfg(db_path) -> Config:
-    with importlib.resources.as_file(
-        importlib.resources.files("cafleet") / "alembic.ini"
-    ) as ini_path:
-        cfg = Config(str(ini_path))
-        cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-        return cfg
+from tests._helpers import _make_alembic_cfg
 
 
 def _seed_session_and_two_agents(

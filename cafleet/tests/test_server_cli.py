@@ -10,21 +10,11 @@ from cafleet.cli import cli
 from cafleet.config import Settings, settings
 
 
-def test_server_command_help__server_help_exits_zero():
+def test_server_help__exits_zero_and_mentions_host_and_port():
     runner = CliRunner()
     result = runner.invoke(cli, ["server", "--help"])
     assert result.exit_code == 0, result.output
-
-
-def test_server_command_help__server_help_mentions_host_flag():
-    runner = CliRunner()
-    result = runner.invoke(cli, ["server", "--help"])
     assert "--host" in result.output
-
-
-def test_server_command_help__server_help_mentions_port_flag():
-    runner = CliRunner()
-    result = runner.invoke(cli, ["server", "--help"])
     assert "--port" in result.output
 
 

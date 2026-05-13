@@ -1,7 +1,7 @@
 # Codebase Simplification
 
 **Status**: Approved
-**Progress**: 42/91 tasks complete
+**Progress**: 60/91 tasks complete
 **Last Updated**: 2026-05-13
 
 ## Overview
@@ -237,24 +237,24 @@ Live-code verification by the reviewer caught four factual errors in the v1 draf
 
 ### Step 3: PR 3 — Tests and tooling
 
-- [ ] **3.0** Capture pre-PR baseline. Run `mise //cafleet:test -- --tb=no -q` on the parent commit; capture the pass/fail count + the full test-id list to `/tmp/baseline-pr3.txt`. <!-- completed: -->
-- [ ] **3.1** T1 — Create `cafleet/tests/_helpers.py`; move `_make_alembic_cfg`; add explicit `from cafleet.tests._helpers import _make_alembic_cfg` to the four test files. <!-- completed: -->
-- [ ] **3.2** T2 — Move `_now_iso` to the same helpers module. <!-- completed: -->
-- [ ] **3.3** T3 — Merge the three `test_server_command_help__*` tests into one. <!-- completed: -->
-- [ ] **3.4** T4 — Delete empty `[tool.pytest.ini_options]` section in `cafleet/pyproject.toml`. <!-- completed: -->
-- [ ] **3.5** T5 — Delete empty `[tool.ty]` section in `cafleet/pyproject.toml` (sub-sections `[tool.ty.environment]` etc. stay). <!-- completed: -->
-- [ ] **3.6** T6 — Drop `pytest-asyncio>=1.3.0` from `[dependency-groups.dev]`; run `mise //:uv-sync`. <!-- completed: -->
-- [ ] **3.7** T7 — Refactor the 6 recorder fixtures in `test_cli_member_delete.py` into a factory. <!-- completed: -->
-- [ ] **3.8** T8 — Audit `cafleet/tests/` for files that would break if broker autouse fired everywhere; lift the broker triplet to `conftest.py` (or a scoped subdirectory `conftest.py` if the audit finds unsafe consumers). Record the audit result in the PR description. <!-- completed: -->
-- [ ] **3.9** T9 — Define `_reset_engine_singletons` in conftest; rename 4 `_reset_engine` references to the canonical name. <!-- completed: -->
-- [ ] **3.10** T10 — Create `cafleet/tests/_broker_helpers.py`; move `_create_session` / `_register_agent` / `_setup_two_agents` / `_setup_three_agents`; add explicit imports. <!-- completed: -->
-- [ ] **3.11** T11 — Create `cafleet/tests/_member_cli_helpers.py`; move constants + `_placement` + `_agent`; add explicit imports. <!-- completed: -->
-- [ ] **3.12** T12 — Delete `test_send_poll_trigger_keystroke__keystroke_starts_with_bare_cafleet` (test_tmux.py:307–345). <!-- completed: -->
-- [ ] **3.13** T13 — Merge the two `test_send_bash_command__rejects_*` tests via `@pytest.mark.parametrize`. <!-- completed: -->
-- [ ] **3.14** T14 — Rewrite `test_split_window__env_vars_forwarded_as_flags` to assert only the positive case; drop the historical docstring. <!-- completed: -->
-- [ ] **3.15** T15 — Trim the "round-8" historical comment in `test_tmux.py:531–538`. <!-- completed: -->
-- [ ] **3.16** T16 — Normalize `mock_run` signatures in `test_tmux.py` to `(args, **_kwargs)`. <!-- completed: -->
-- [ ] **3.17** Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`. <!-- completed: -->
+- [x] **3.0** Capture pre-PR baseline. Run `mise //cafleet:test -- --tb=no -q` on the parent commit; capture the pass/fail count + the full test-id list to `/tmp/baseline-pr3.txt`. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.1** T1 — Create `cafleet/tests/_helpers.py`; move `_make_alembic_cfg`; explicit imports use `from tests._helpers` (not `cafleet.tests._helpers`, since `tests/` lives outside the installed package). <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.2** T2 — Move `_now_iso` to the same helpers module. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.3** T3 — Merge the three `test_server_command_help__*` tests into one. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.4** T4 — Delete empty `[tool.pytest.ini_options]` section in `cafleet/pyproject.toml`. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.5** T5 — Delete empty `[tool.ty]` section in `cafleet/pyproject.toml` (sub-sections `[tool.ty.environment]` etc. stay). <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.6** T6 — Drop `pytest-asyncio>=1.3.0` from `[dependency-groups.dev]`; uv.lock regenerated via Director (mise //:uv-sync uses --frozen). <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.7** T7 — Refactored 6 recorder fixtures in `test_cli_member_delete.py` via shared `_make_kwargs_recorder` factory (stateful flag toggles `.calls`/`.state` wrapper vs raw list). <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.8** T8 — Audit failed for autouse-in-conftest (test_session_cli.py uses real DB file). Lifted triplet definitions to conftest as non-autouse; each broker-touching file adds a 3-line `@pytest.fixture(autouse=True) def _autouse_broker(broker_session): return broker_session` wrapper. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.9** T9 — Defined `_reset_engine_singletons` in conftest (non-autouse); 4 `_reset_engine` fixtures deleted, references updated to `_reset_engine_singletons`; the 3 files that previously had autouse now declare an autouse wrapper. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.10** T10 — Create `cafleet/tests/_broker_helpers.py`; move `_create_session` / `_register_agent` (with optional `skills`/`placement` kwargs) / `_setup_two_agents` / `_setup_three_agents`; explicit imports. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.11** T11 — Create `cafleet/tests/_member_cli_helpers.py`; move constants + `_placement` + `_agent`; explicit imports. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.12** T12 — Delete `test_send_poll_trigger_keystroke__keystroke_starts_with_bare_cafleet`. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.13** T13 — Merge the two `test_send_bash_command__rejects_*` tests via `@pytest.mark.parametrize`. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.14** T14 — Rewrite `test_split_window__env_vars_forwarded_as_flags` to assert only the positive case via index lookup; drop the historical docstring. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.15** T15 — Trim the "round-8" historical comment in `test_tmux.py`. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.16** T16 — Normalize 24 `mock_run` signatures in `test_tmux.py` to `(args, **_kwargs)`. <!-- completed: 2026-05-13T11:53 -->
+- [x] **3.17** Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`. <!-- completed: 2026-05-13T11:53 -->
 - [ ] **3.18** Post-PR smoke: rerun `mise //cafleet:test -- --tb=no -q`; capture to `/tmp/post-pr3.txt`; `diff` against baseline. Required invariant: total test count differs by exactly the expected merge/delete deltas (T3: −2, T12: −1, T13: −1; all others unchanged); zero new failures. <!-- completed: -->
 - [ ] **3.19** Open PR; title: `refactor: dedupe test helpers + drop dead config (design 0000056 PR 3/5)`. <!-- completed: -->
 

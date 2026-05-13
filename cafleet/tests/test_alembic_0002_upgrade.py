@@ -1,25 +1,10 @@
 """Tests for Alembic migration ``0002_local_simplification`` (design 0000015)."""
 
-import importlib.resources
-from datetime import UTC, datetime
-
 import pytest
 from alembic import command
-from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
-
-def _make_alembic_cfg(db_path) -> Config:
-    with importlib.resources.as_file(
-        importlib.resources.files("cafleet") / "alembic.ini"
-    ) as ini_path:
-        cfg = Config(str(ini_path))
-        cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-        return cfg
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+from tests._helpers import _make_alembic_cfg, _now_iso
 
 
 @pytest.fixture

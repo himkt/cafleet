@@ -9,50 +9,16 @@ from click.testing import CliRunner
 from cafleet import broker, tmux
 from cafleet.cli import cli
 from cafleet.tmux import DirectorContext, TmuxError
-
-DIRECTOR_ID = "11111111-1111-1111-1111-111111111111"
-MEMBER_ID = "22222222-2222-2222-2222-222222222222"
-OTHER_DIRECTOR_ID = "33333333-3333-3333-3333-333333333333"
-PANE_ID = "%7"
-MEMBER_NAME = "Claude-B"
+from tests._member_cli_helpers import (
+    DIRECTOR_ID,
+    MEMBER_ID,
+    OTHER_DIRECTOR_ID,
+    PANE_ID,
+    _agent,
+    _placement,
+)
 
 _DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
-
-_UNSET: object = object()
-
-
-def _placement(
-    *,
-    director_agent_id: str = DIRECTOR_ID,
-    tmux_pane_id: str | None = PANE_ID,
-    coding_agent: str = "claude",
-) -> dict:
-    return {
-        "director_agent_id": director_agent_id,
-        "tmux_session": "main",
-        "tmux_window_id": "@3",
-        "tmux_pane_id": tmux_pane_id,
-        "coding_agent": coding_agent,
-        "created_at": "2026-04-16T08:00:00+00:00",
-    }
-
-
-def _agent(
-    *,
-    agent_id: str = MEMBER_ID,
-    name: str = MEMBER_NAME,
-    placement: dict | None | object = _UNSET,
-) -> dict:
-    resolved_placement = _placement() if placement is _UNSET else placement
-    return {
-        "agent_id": agent_id,
-        "name": name,
-        "description": "Test member",
-        "status": "active",
-        "registered_at": "2026-04-16T08:00:00+00:00",
-        "kind": "user",
-        "placement": resolved_placement,
-    }
 
 
 @pytest.fixture
@@ -82,6 +48,34 @@ def _stub_tmux_entrypoints(monkeypatch):
     monkeypatch.setattr(tmux, "capture_pane", lambda **_: "", raising=False)
 
 
+def _make_kwargs_recorder(
+    monkeypatch,
+    call_log,
+    module,
+    func_name,
+    *,
+    stateful: bool = False,
+    default_return=None,
+):
+    """Record kwargs-only calls; with ``stateful=True`` expose ``.calls`` + ``.state``."""
+    calls: list[dict] = []
+    state: dict = {"return_value": default_return, "side_effect": None}
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        call_log.append((func_name, kwargs))
+        if stateful and state["side_effect"] is not None:
+            raise state["side_effect"]
+        return state["return_value"] if stateful else None
+
+    monkeypatch.setattr(module, func_name, fake, raising=False)
+    if stateful:
+        fake.calls = calls
+        fake.state = state
+        return fake
+    return calls
+
+
 @pytest.fixture
 def deregister_recorder(monkeypatch, call_log):
     calls: list[str] = []
@@ -97,75 +91,41 @@ def deregister_recorder(monkeypatch, call_log):
 
 @pytest.fixture
 def send_exit_recorder(monkeypatch, call_log):
-    calls: list[dict] = []
-
-    def fake(**kwargs):
-        calls.append(kwargs)
-        call_log.append(("send_exit", kwargs))
-
-    monkeypatch.setattr(tmux, "send_exit", fake)
-    return calls
+    return _make_kwargs_recorder(monkeypatch, call_log, tmux, "send_exit")
 
 
 @pytest.fixture
 def select_layout_recorder(monkeypatch, call_log):
-    calls: list[dict] = []
-
-    def fake(**kwargs):
-        calls.append(kwargs)
-        call_log.append(("select_layout", kwargs))
-
-    monkeypatch.setattr(tmux, "select_layout", fake)
-    return calls
+    return _make_kwargs_recorder(monkeypatch, call_log, tmux, "select_layout")
 
 
 @pytest.fixture
 def wait_for_pane_gone_recorder(monkeypatch, call_log):
-    """Recording stub with mutable return / side-effect via .state."""
-    state: dict = {"return_value": True, "side_effect": None}
-    calls: list[dict] = []
-
-    def fake(**kwargs):
-        calls.append(kwargs)
-        call_log.append(("wait_for_pane_gone", kwargs))
-        if state["side_effect"] is not None:
-            raise state["side_effect"]
-        return state["return_value"]
-
-    monkeypatch.setattr(tmux, "wait_for_pane_gone", fake, raising=False)
-    fake.calls = calls
-    fake.state = state
-    return fake
+    return _make_kwargs_recorder(
+        monkeypatch,
+        call_log,
+        tmux,
+        "wait_for_pane_gone",
+        stateful=True,
+        default_return=True,
+    )
 
 
 @pytest.fixture
 def capture_pane_recorder(monkeypatch, call_log):
-    state: dict = {"return_value": "", "side_effect": None}
-    calls: list[dict] = []
-
-    def fake(**kwargs):
-        calls.append(kwargs)
-        call_log.append(("capture_pane", kwargs))
-        if state["side_effect"] is not None:
-            raise state["side_effect"]
-        return state["return_value"]
-
-    monkeypatch.setattr(tmux, "capture_pane", fake, raising=False)
-    fake.calls = calls
-    fake.state = state
-    return fake
+    return _make_kwargs_recorder(
+        monkeypatch,
+        call_log,
+        tmux,
+        "capture_pane",
+        stateful=True,
+        default_return="",
+    )
 
 
 @pytest.fixture
 def kill_pane_recorder(monkeypatch, call_log):
-    calls: list[dict] = []
-
-    def fake(**kwargs):
-        calls.append(kwargs)
-        call_log.append(("kill_pane", kwargs))
-
-    monkeypatch.setattr(tmux, "kill_pane", fake, raising=False)
-    return calls
+    return _make_kwargs_recorder(monkeypatch, call_log, tmux, "kill_pane")
 
 
 def _invoke(runner, session_id, *extra_args):

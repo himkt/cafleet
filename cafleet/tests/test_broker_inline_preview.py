@@ -14,34 +14,14 @@ in ``test_tmux_send_inline_preview.py``.
 """
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-import cafleet.db.engine  # noqa: F401 — registers the PRAGMA listener globally
 from cafleet import broker, tmux
-from cafleet.db.models import Base
 from cafleet.tmux import DirectorContext
-
-# ---------------------------------------------------------------------------
-# Fixtures (mirror ``test_broker_messaging.py``)
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def sync_sessionmaker():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    return sessionmaker(engine, expire_on_commit=False)
-
-
-@pytest.fixture
-def _patch_broker(sync_sessionmaker, monkeypatch):
-    monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
 
 
 @pytest.fixture(autouse=True)
-def broker_session(sync_sessionmaker, _patch_broker):
-    return sync_sessionmaker
+def _autouse_broker(broker_session):
+    return broker_session
 
 
 @pytest.fixture
