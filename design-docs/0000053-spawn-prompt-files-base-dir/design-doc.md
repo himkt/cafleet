@@ -1,8 +1,8 @@
 # On-Demand Spawn-Prompt Audit + base-dir Migration
 
-**Status**: Complete
-**Progress**: 12/13 tasks complete (Step 5 smoke deferred to operator)
-**Last Updated**: 2026-05-12
+**Status**: Implementation Complete (operator end-to-end smoke deferred — see SC #1 + #5)
+**Progress**: 12/13 implementation tasks complete; Step 5 (end-to-end smoke) is operator-deferred and tracked separately as a post-merge action
+**Last Updated**: 2026-05-13
 
 ## Overview
 
