@@ -75,11 +75,17 @@ def _read_consistent_anchor(anchor_path: Path) -> str | None:
         return None
     data = _load_anchor(anchor_path)
     base_field = data["base"]
-    parent = str(anchor_path.parent)
-    if base_field != parent:
+    # Compare via Path.resolve() so equivalent paths with different lexical
+    # forms (symlinks, `..` segments, trailing slash) do not false-positive
+    # a fatal mismatch. strict=False keeps non-existent components tolerated
+    # (e.g., the fixture-based tests that write `base` pointing at a sibling
+    # tmp dir which may not exist on every platform).
+    base_resolved = Path(base_field).resolve(strict=False)
+    parent_resolved = anchor_path.parent.resolve(strict=False)
+    if base_resolved != parent_resolved:
         raise AnchorError(
             f"anchor file {anchor_path} records base={base_field} "
-            f"but lives at {parent}; refusing to use."
+            f"but lives at {anchor_path.parent}; refusing to use."
         )
     return base_field
 
@@ -128,7 +134,16 @@ def resolve(
         }
 
     cwd_path = Path(cwd) if cwd is not None else Path.cwd()
-    home_path = Path(home) if home is not None else Path(os.environ.get("HOME", ""))
+    if home is not None:
+        home_path = Path(home)
+    else:
+        home_env = os.environ.get("HOME")
+        if not home_env:
+            raise RuntimeError(
+                "Cannot resolve BASE: HOME environment variable is not set or is empty. "
+                "Pass home= explicitly or set HOME."
+            )
+        home_path = Path(home_env)
     tmp_path = Path(tmp_candidate) if tmp_candidate is not None else _TMP_CANDIDATE
 
     claude_subdir = home_path / ".claude"
