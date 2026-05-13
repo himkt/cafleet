@@ -204,6 +204,10 @@ def resolve(
 
 def record(base: str, *, source: str) -> Path:
     """Persist an anchor at ``<base>/.cafleet-base-dir.json`` (idempotent on match)."""
+    if source not in ("cwd-inference", "askuserquestion"):
+        raise ValueError(
+            f"source must be 'cwd-inference' or 'askuserquestion'; got {source!r}"
+        )
     base_dir = Path(base)
     if not base_dir.is_absolute():
         raise ValueError(f"base must be an absolute path; got {base!r}")
