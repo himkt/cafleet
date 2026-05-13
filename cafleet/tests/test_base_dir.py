@@ -47,7 +47,7 @@ def _write_anchor(
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_absolute_path_argument_returns_unset(tmp_path):
+def test_resolve_absolute_path_argument_returns_unset():
     """Absolute-path argument bypasses BASE entirely: returns the <unset> sentinel."""
     result = resolve(path="/abs/path/to/foo")
     assert result == {
