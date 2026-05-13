@@ -65,6 +65,13 @@ def _validate_anchor(anchor_path: Path, data: Any) -> None:
             "the anchor contract requires an absolute path. "
             "Delete the anchor and re-resolve."
         )
+    source_field = data.get("source")
+    if source_field not in ("cwd-inference", "askuserquestion"):
+        raise AnchorError(
+            f"anchor at {anchor_path} has invalid source={source_field!r}; "
+            "must be 'cwd-inference' or 'askuserquestion'. "
+            "Delete the anchor and re-resolve."
+        )
 
 
 def _load_anchor(anchor_path: Path) -> dict[str, Any]:
