@@ -1,9 +1,10 @@
 """Base directory resolver for CAFleet (design 0000055).
 
 Owns the deterministic side of `${BASE}` resolution: anchor file
-read / write / validate, the four-status state machine
-(`resolved` / `unset` / `needs-user-input`), and the `<unset>` sentinel
-returned on the absolute-path branch.
+read / write / validate, the three returned-status branches
+(`resolved` / `unset` / `needs-user-input`) plus a fatal `AnchorError`
+raise on schema / version mismatch, and the `<unset>` sentinel returned
+on the absolute-path branch.
 
 The `AskUserQuestion` branch lives in Claude's tool context — this module
 only reports `status="needs-user-input"` with the candidates Claude should
@@ -103,7 +104,9 @@ def resolve(
 ) -> dict[str, Any]:
     """Resolve the `${BASE}` output-root.
 
-    Returns one of four shapes (matches the contract in `skills/base-dir/SKILL.md`):
+    Returns one of three shapes (matches the contract in
+    `skills/base-dir/SKILL.md` — three returned statuses plus a fatal-error
+    branch that is signalled via exception, not a return value):
 
     - ``{"status": "resolved", "base": "<abs>", "source": "cwd-inference" | "anchor",
         "anchor": "<abs>/.cafleet-base-dir.json"}``
@@ -112,7 +115,9 @@ def resolve(
     - ``{"status": "needs-user-input", "base": None, "source": None,
         "candidates": ["<tmp-candidate>", "<cwd>"]}``
 
-    Raises ``AnchorError`` on schema/version mismatch or anchor inconsistency.
+    Raises ``AnchorError`` on schema / version mismatch or anchor
+    inconsistency (the fourth, fatal branch — the CLI surfaces this as a
+    non-zero exit instead of one of the JSON shapes above).
     """
     if path is not None and Path(path).is_absolute():
         return {
