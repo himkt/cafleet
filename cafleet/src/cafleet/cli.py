@@ -440,7 +440,7 @@ def base_dir_resolve(ctx: click.Context, path_arg: str | None, as_json: bool) ->
     """
     try:
         result = base_dir.resolve(path=path_arg)
-    except base_dir.AnchorError as exc:
+    except (base_dir.AnchorError, RuntimeError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     if as_json or ctx.obj.get("json_output"):
@@ -482,7 +482,7 @@ def base_dir_record(ctx: click.Context, base_arg: str, source_arg: str) -> None:
 
     try:
         anchor = base_dir.record(base_arg, source=source_arg)
-    except (ValueError, base_dir.AnchorError) as exc:
+    except (ValueError, base_dir.AnchorError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     if ctx.obj.get("json_output"):
