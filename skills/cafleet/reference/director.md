@@ -39,6 +39,20 @@ In both modes the member's Bash tool is enabled and routine permission prompts a
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`).
 
+**Spawn prompt size limit (use path-by-reference for role docs)**: cafleet hands the prompt to `tmux split-window` as a single positional argument. tmux fails with `tmux command failed: command too long` and cafleet rolls back the agent registration once the shell-quoted prompt grows past a few KB — well below `ARG_MAX`. Empirically a prompt that inlines a full role definition (~10 KB) already exceeds this threshold.
+
+Do NOT embed long role definitions, full skill specs, or any other multi-page block of text inline. Instead:
+
+1. Resolve the absolute path of the role file in the Director's filesystem (e.g. `/home/.../skills/research-report/roles/manager.md`).
+2. In the spawn prompt, write a short instruction like `ROLE DEFINITION: Open <abs path> with the Read tool BEFORE any other action.`
+3. Keep the spawn prompt under ~2 KB total. Reserve it for: role-file path, skill-load list, session/agent/director IDs, the operational context (output dir, current date, user request), and "start now" cue.
+
+This applies to every CAFleet-native team skill (`/research-report`, `/research-presentation`, `/design-doc-create`, `/design-doc-execute`, `/design-doc-interview`, and any future skill). The member loads the role file via `Read` on its first turn; the role files live in the skill directory and are stable, so path-by-reference is safe.
+
+**Scratch and audit files**: Spawn-related scratch (audit re-renders, working notes) MUST be written under `${BASE}` (resolved by `Skill(cafleet:base-dir)`) or under the skill's resolved output directory — never `/tmp`. The audit-file convention (`${BASE}/<role>.md`) is canonical; per-spawn temporary files have no place in `/tmp` because `${BASE}` is the project-local scratch root and keeps everything inspectable from one place.
+
+**Backtick caveat (harness-dependent)**: Some operator environments (including this project) ship a Bash-validator hook that rejects any backtick in a `Bash` invocation — even inside single-quoted positional arguments — because the validator treats backticks as command-substitution syntax. When such a harness is in play, strip backticks from spawn-prompt bodies (use plain text where you would otherwise use markdown code spans). Path-by-reference for role docs sidesteps this entirely: the prompt body becomes short enough that backticks are easy to avoid.
+
 **Pane title (claude backend only)**: `claude --name <member-name>` forwards the name to the spawned process so `#{pane_title}` shows the member name. The `codex` backend has no `--name` analog. Operators discover panes via `cafleet member list` (`pane_id` column is ground truth for both backends).
 
 If the tmux `split-window` fails, the registered agent is rolled back. If the placement PATCH fails, the pane is `/exit`'d and the agent rolled back.

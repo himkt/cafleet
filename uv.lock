@@ -84,7 +84,7 @@ wheels = [
 
 [[package]]
 name = "cafleet"
-version = "0.6.1"
+version = "0.8.0"
 source = { editable = "cafleet" }
 dependencies = [
     { name = "alembic" },
@@ -140,7 +140,7 @@ research = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "bump-my-version", specifier = ">=1.3.0" }]
-research = [{ name = "matplotlib", specifier = ">=3.10.8" }]
+research = [{ name = "matplotlib" }]
 
 [[package]]
 name = "certifi"
