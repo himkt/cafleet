@@ -18,7 +18,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.url import make_url
 
-from cafleet import broker, output, tmux
+from cafleet import base_dir, broker, output, tmux
 from cafleet.config import settings
 
 _CLAUDE_BINARY = "claude"
@@ -411,6 +411,94 @@ def doctor(ctx) -> None:
         click.echo(f"  window_id:     {director_ctx.window_id}")
         click.echo(f"  pane_id:       {director_ctx.pane_id}")
         click.echo(f"  TMUX_PANE:     {tmux_pane_env}")
+
+
+@cli.group("base-dir")
+def base_dir_group() -> None:
+    """Resolve or persist the BASE output-root anchor."""
+
+
+@base_dir_group.command("resolve")
+@click.option(
+    "--path",
+    "path_arg",
+    default=None,
+    help="Absolute-path argument from the consuming skill (triggers the <unset> branch).",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    default=False,
+    help="Emit machine-parseable JSON instead of human-readable text.",
+)
+@click.pass_context
+def base_dir_resolve(ctx: click.Context, path_arg: str | None, as_json: bool) -> None:
+    """Resolve `${BASE}` non-interactively. Never prompts; on the CWD-inference
+    branch it auto-writes the anchor at `${CWD}/.cafleet-base-dir.json` so the
+    next run is idempotent. Reports the four documented status branches.
+    """
+    try:
+        result = base_dir.resolve(path=path_arg)
+    except (base_dir.AnchorError, RuntimeError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if as_json or ctx.obj.get("json_output"):
+        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
+        return
+
+    click.echo(f"status: {result['status']}")
+    if result.get("base"):
+        click.echo(f"base:   {result['base']}")
+    if result.get("source"):
+        click.echo(f"source: {result['source']}")
+    if result.get("anchor"):
+        click.echo(f"anchor: {result['anchor']}")
+    if result.get("candidates"):
+        click.echo("candidates:")
+        for c in result["candidates"]:
+            click.echo(f"  - {c}")
+
+
+@base_dir_group.command("record")
+@click.option(
+    "--base",
+    "base_arg",
+    required=True,
+    help="Absolute path to record as the BASE output-root.",
+)
+@click.option(
+    "--source",
+    "source_arg",
+    type=click.Choice(["askuserquestion", "cwd-inference"]),
+    required=True,
+    help="How the BASE was determined.",
+)
+@click.pass_context
+def base_dir_record(ctx: click.Context, base_arg: str, source_arg: str) -> None:
+    """Persist a `${BASE}/.cafleet-base-dir.json` anchor (idempotent on match)."""
+    base_path = Path(base_arg)
+    anchor_existed = (base_path / base_dir.ANCHOR_FILENAME).is_file()
+
+    try:
+        anchor = base_dir.record(base_arg, source=source_arg)
+    except (ValueError, base_dir.AnchorError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if ctx.obj.get("json_output"):
+        click.echo(
+            output.format_json({"anchor": str(anchor)}, pretty=ctx.obj["pretty"])
+        )
+    else:
+        click.echo(f"anchor: {anchor}")
+
+    if not anchor_existed and base_dir.is_git_repo_root(base_path):
+        click.echo(
+            "tip: this BASE is a git-repo root. Add "
+            f"'{base_dir.ANCHOR_FILENAME}' to your global git excludes "
+            "(~/.config/git/ignore) so the anchor never shows up in git status.",
+            err=True,
+        )
 
 
 @cli.group()

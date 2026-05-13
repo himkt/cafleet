@@ -141,18 +141,18 @@ Capture `session_id` and `director.agent_id` from the JSON response. Substitute 
 
 BEFORE spawning the Analyzer, load both `Skill(agent-team-monitoring)` and `Skill(agent-team-supervision)` (in that order) and use agent-team-monitoring's `/loop` Prompt Template to start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. **Record the cron job ID returned by `/loop` (and by any `CronCreate` it issues underneath) — Step 2f references this exact ID when tearing the loop down via `CronDelete`.** The loop stays active until the Analyzer is torn down at the end of this step.
 
-#### 2c. Read the Analyzer role file
+#### 2c. Locate the Analyzer role file (path-by-reference)
 
-Read `skills/design-doc-interview/roles/analyzer.md` — its content will be embedded verbatim in the spawn prompt.
+Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content — cafleet `member create` fails with `tmux command failed: command too long` once the shell-quoted prompt grows past a few KB. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up.
+
+> **Scratch and audit files**: See `Skill(cafleet:base-dir)` § *No-bypass write protocol*.
 
 #### 2d. Spawn the Analyzer
 
 ```
 You are the Analyzer in a design document interview team (CAFleet-native).
 
-<ROLE DEFINITION>
-[Content of roles/analyzer.md injected here verbatim]
-</ROLE DEFINITION>
+ROLE DEFINITION: Open [INSERT abs path to roles/analyzer.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
 - Skill(cafleet) — for communication with the Director
@@ -160,6 +160,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 DESIGN DOCUMENT: [INSERT doc_path]
 ALREADY-REVIEWED SECTIONS: [INSERT JSON array from interview-progress, or "none" on fresh start]
 
@@ -177,7 +178,7 @@ Spawn with:
 cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
   --name "Analyzer" \
   --description "Reads the design doc and generates a numbered question list" \
-  -- "<Analyzer spawn prompt (embedded role content)>"
+  -- "<Analyzer spawn prompt — role file referenced by absolute path>"
 ```
 
 Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-id>` in every subsequent command.
@@ -185,7 +186,7 @@ Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-i
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<analyzer-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/analyzer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/analyzer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 #### 2e. Wait for the Analyzer's question list
 

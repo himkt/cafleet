@@ -95,13 +95,17 @@ Per `Skill(cafleet:agent-team-monitoring)`, start a 1-minute interval monitor be
 
 #### 1c. Read role definitions
 
-Read the role files that will be embedded verbatim in spawn prompts (paths are relative to this skill's directory):
+Resolve the absolute path of each role file you will reference by path-by-reference in spawn prompts (the member opens the file via `Read` on its first turn — do NOT inline the content; paths below are relative to this skill's directory):
 
 - `roles/presentation.md`
 - `roles/transcript.md`
 - `roles/visual-reviewer.md`
 
-> **Template safety**: cafleet `member create` runs `str.format()` on the entire spawn prompt with `session_id` / `agent_id` / `director_agent_id` as kwargs. The role docs in this skill use `<...>` / `[...]` notation everywhere placeholders appear, so the embedded role content contains no literal `{` or `}` and no escaping is needed. The only single-brace tokens in the spawn prompt are the three kwargs cafleet itself substitutes: `{session_id}`, `{agent_id}`, `{director_agent_id}`. If you ever add a `{` or `}` to a role doc (a JSON example, a format-string example), double it to `{{` / `}}` before embedding — `str.format()` raises `KeyError` at spawn time otherwise. Do NOT shell out to `sed` / `awk` — those are blocked by the harness Bash validator.
+> **Path-by-reference for role docs**: Each spawn prompt below references its role file by **absolute path**; the spawned member opens its role doc with `Read` on its first turn. Do NOT inline the role content — cafleet `member create` fails with `tmux command failed: command too long` once the shell-quoted prompt grows past a few KB, and rolls back the registration. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up. Resolve the absolute paths for each of `roles/presentation.md`, `roles/transcript.md`, and `roles/visual-reviewer.md` from this skill's `roles/` directory.
+>
+> **Template safety (str.format placeholders)**: cafleet runs `str.format()` over the entire spawn prompt with `session_id` / `agent_id` / `director_agent_id` as kwargs — leave those three single-braced. Double any other literal `{` or `}` in the prompt body. With role content no longer inlined, this rarely comes up.
+>
+> **Scratch and audit files**: See `Skill(cafleet:base-dir)` § *No-bypass write protocol*.
 
 #### 1d. Spawn Presentation + Transcript in parallel
 
@@ -112,9 +116,7 @@ Both work from `report.md` independently. After the slide deck is finalized (Ste
 ```
 You are the Presentation Specialist in a research presentation team (CAFleet-native).
 
-[ROLE DEFINITION]
-[Content of roles/presentation.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
-[/ROLE DEFINITION]
+ROLE DEFINITION: Open [INSERT abs path to roles/presentation.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
 - Skill(cafleet) — for the broker primitives and bash-via-Director routing
@@ -124,6 +126,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 TASK: Create a Slidev presentation from the approved research report.
 REPORT:           [INSERT <folder>/report.md]
@@ -153,16 +156,14 @@ Capture the printed `agent_id` and substitute it for `[presentation-agent-id]` i
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<presentation-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/presentation.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/presentation.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Transcript spawn prompt:**
 
 ```
 You are the Transcript Specialist in a research presentation team (CAFleet-native).
 
-[ROLE DEFINITION]
-[Content of roles/transcript.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
-[/ROLE DEFINITION]
+ROLE DEFINITION: Open [INSERT abs path to roles/transcript.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
 - Skill(cafleet) — for the broker primitives and bash-via-Director routing
@@ -170,6 +171,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 TASK: Create a reading transcript from the approved research report.
 REPORT:   [INSERT <folder>/report.md]
@@ -197,7 +199,7 @@ Capture the printed `agent_id` and substitute it for `[transcript-agent-id]` in 
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<transcript-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/transcript.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/transcript.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 ### Step 2: Content Review & Revision Loop (Director)
 
@@ -275,9 +277,7 @@ while start <= total_slides:
 ```
 You are the Visual Reviewer in a research presentation team (CAFleet-native).
 
-[ROLE DEFINITION]
-[Content of roles/visual-reviewer.md injected verbatim. Cafleet substitutes only the three format kwargs `{session_id}` / `{agent_id}` / `{director_agent_id}` — leave those single-braced. Any other literal `{` or `}` characters that appear inside the role doc itself must be doubled to `{{` / `}}` before embedding (per Template safety)]
-[/ROLE DEFINITION]
+ROLE DEFINITION: Open [INSERT abs path to roles/visual-reviewer.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
 - Skill(cafleet) — for the broker primitives and bash-via-Director routing
@@ -285,6 +285,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 TASK: Visually verify the rendered Slidev presentation.
 SLIDE FILE:      [INSERT <folder>/slide.md]
@@ -315,7 +316,7 @@ Capture the printed `agent_id` as `[vr-batch-agent-id]` for subsequent `cafleet 
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<vr-batch-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/visual-reviewer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `Skill(cafleet:base-dir)` was skipped (absolute-path argument), `${BASE}` is undefined and the audit-file write is skipped per the design doc *Audit File Layout* gating rule. The audit filename uses the role-type slug `visual-reviewer`, not the member `--name` (`vr-batch-<start>`); subsequent VR batches in the same invocation overwrite the same audit file — that is intentional.
+2. **Write the audit file** to `${BASE}/visual-reviewer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. The audit filename uses the role-type slug `visual-reviewer`, not the member `--name` (`vr-batch-<start>`); subsequent VR batches in the same invocation overwrite the same audit file — that is intentional.
 
 ### Step 4: User Approval & Revision Loop (Director)
 
