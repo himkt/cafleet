@@ -490,20 +490,19 @@ def test_authorization_boundary__missing_agent_exits_one(
     assert deregister_recorder == []
 
 
-def test_authorization_boundary__fetch_db_error_surfaces_failed_to_fetch_wording(
+def test_authorization_boundary__fetch_db_error_aborts_without_deregister(
     runner, session_id, monkeypatch, deregister_recorder
 ):
-    """Symmetric guard: real ``get_agent`` failures keep the wrapper wording."""
+    """A real ``get_agent`` failure aborts the command without deregistering."""
 
     def boom(*_a, **_kw):
         raise RuntimeError("db connection lost")
 
     monkeypatch.setattr(broker, "get_agent", boom)
     result = _invoke(runner, session_id)
-    assert result.exit_code == 1
-    out = result.output or ""
-    assert "failed to fetch member" in out
-    assert "db connection lost" in out
+    assert result.exit_code != 0
+    assert isinstance(result.exception, RuntimeError)
+    assert "db connection lost" in str(result.exception)
     assert deregister_recorder == []
 
 

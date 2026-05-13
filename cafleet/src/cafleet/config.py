@@ -27,7 +27,5 @@ class Settings(BaseSettings):
         validation_alias="CAFLEET_MAX_TEXT_LEN",
     )
 
-    model_config = {"env_prefix": ""}
-
 
 settings = Settings()

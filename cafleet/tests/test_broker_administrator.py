@@ -2,6 +2,7 @@
 
 import json
 
+import click
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -10,7 +11,6 @@ import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet import broker
 from cafleet.broker import (
     ADMINISTRATOR_KIND,
-    AdministratorProtectedError,
     _is_administrator,
 )
 from cafleet.db.models import Agent, Base
@@ -103,26 +103,6 @@ def test_is_administrator__returns_false_for_none():
     assert _is_administrator(None) is False
 
 
-def test_administrator_protected_error__class_is_importable():
-    assert AdministratorProtectedError is not None
-
-
-def test_administrator_protected_error__is_subclass_of_exception():
-    assert issubclass(AdministratorProtectedError, Exception)
-
-
-def test_administrator_protected_error__can_be_raised_and_caught():
-    with pytest.raises(AdministratorProtectedError):
-        raise AdministratorProtectedError("Administrator cannot be deregistered")
-
-
-def test_administrator_protected_error__preserves_message():
-    msg = "Administrator cannot be a director"
-    with pytest.raises(AdministratorProtectedError) as exc_info:
-        raise AdministratorProtectedError(msg)
-    assert msg in str(exc_info.value)
-
-
 @pytest.fixture
 def sync_sessionmaker():
     engine = create_engine("sqlite:///:memory:")
@@ -146,7 +126,7 @@ def test_deregister_administrator_guard__raises_administrator_protected_error(
     session = _create_session_with_ctx()
     admin_id = session["administrator_agent_id"]
 
-    with pytest.raises(AdministratorProtectedError) as exc_info:
+    with pytest.raises(click.ClickException) as exc_info:
         broker.deregister_agent(admin_id)
 
     assert "Administrator cannot be deregistered" in str(exc_info.value)
@@ -158,7 +138,7 @@ def test_deregister_administrator_guard__admin_row_still_active_after_failed_der
     session = _create_session_with_ctx()
     admin_id = session["administrator_agent_id"]
 
-    with pytest.raises(AdministratorProtectedError):
+    with pytest.raises(click.ClickException):
         broker.deregister_agent(admin_id)
 
     with broker_db() as s:
@@ -195,7 +175,7 @@ def test_register_agent_placement_administrator_guard__raises_when_director_is_a
         "tmux_pane_id": None,
         "coding_agent": "claude",
     }
-    with pytest.raises(AdministratorProtectedError) as exc_info:
+    with pytest.raises(click.ClickException) as exc_info:
         broker.register_agent(
             session_id=sid,
             name="member",
@@ -220,7 +200,7 @@ def test_register_agent_placement_administrator_guard__admin_director_rejection_
         "tmux_pane_id": None,
         "coding_agent": "claude",
     }
-    with pytest.raises(AdministratorProtectedError):
+    with pytest.raises(click.ClickException):
         broker.register_agent(
             session_id=sid,
             name="rejected-member",
