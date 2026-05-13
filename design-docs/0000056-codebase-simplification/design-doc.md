@@ -1,7 +1,7 @@
 # Codebase Simplification
 
 **Status**: Approved
-**Progress**: 73/91 tasks complete
+**Progress**: 80/91 tasks complete
 **Last Updated**: 2026-05-13
 
 ## Overview
@@ -277,13 +277,13 @@ Live-code verification by the reviewer caught four factual errors in the v1 draf
 
 ### Step 5: PR 5 — Docs
 
-- [ ] **5.0** Capture pre-PR baseline. `git diff --stat origin/main -- README.md ARCHITECTURE.md docs/` on the parent commit gives the doc-tree snapshot for the post-PR diff to compare against (deltas should match the planned edits exactly). <!-- completed: -->
-- [ ] **5.1** D1 — Add `docs/spec/message-envelope.md` cross-reference at the end of `ARCHITECTURE.md` "Task Lifecycle Mapping" section. <!-- completed: -->
-- [ ] **5.2** D2 — Fix the stale `10 cp + "..."` → `200 cp + "…"` in `ARCHITECTURE.md:273`. <!-- completed: -->
-- [ ] **5.3** D3 — Fix the stale `10 cp + "..."` → `200 cp + "…"` in `docs/spec/cli-options.md:115`. <!-- completed: -->
-- [ ] **5.4** D4 — Drop / rewrite the HTTP-409 speculation in `ARCHITECTURE.md:48` to describe the `click.ClickException` flow (exit 1, single-line `Error: <msg>`, no `Usage:` banner) — consistent with the plain-`ClickException` implementation P22 lands in PR 1. <!-- completed: -->
-- [ ] **5.5** D5 — Bump `.bumpversion.toml:2` `current_version` from `0.6.1` → `0.8.0`; update `.claude-plugin/marketplace.json:8,15` from `0.6.1` → `0.8.0`. <!-- completed: -->
-- [ ] **5.6** Run `mise //cafleet:lint` (catches markdown link-check failures if configured). <!-- completed: -->
+- [x] **5.0** Capture pre-PR baseline. <!-- completed: 2026-05-13T12:15 -->
+- [x] **5.1** D1 — Added cross-reference sentence at end of "Task Lifecycle Mapping" section. <!-- completed: 2026-05-13T12:15 -->
+- [x] **5.2** D2 — Replaced both `10` on the line with `CAFLEET_MAX_TEXT_LEN (default 200)`; `...` → `…`. <!-- completed: 2026-05-13T12:15 -->
+- [x] **5.3** D3 — `10 cp + "..."` → `200 cp + "…"` in `docs/spec/cli-options.md:115`. <!-- completed: 2026-05-13T12:15 -->
+- [x] **5.4** D4 — Rewrote `ARCHITECTURE.md:48` to describe the `click.ClickException` flow (exit 1, single-line `Error: Administrator cannot be deregistered`, no `Usage:` banner); dropped HTTP-409 speculation and removed `AdministratorProtectedError` references (class deleted in PR 1 P22). <!-- completed: 2026-05-13T12:15 -->
+- [x] **5.5** D5 — Bumped `.bumpversion.toml` `current_version` from `0.6.1` → `0.8.0` and the two `marketplace.json` `0.6.1` occurrences. `uv.lock` already had `version = "0.8.0"` adjacent to `name = "cafleet"`, so left untouched per design-doc instruction. <!-- completed: 2026-05-13T12:15 -->
+- [x] **5.6** Run `mise //cafleet:lint` — all checks pass; 873 tests still pass. <!-- completed: 2026-05-13T12:15 -->
 - [ ] **5.7** Open PR; title: `docs: cross-refs + stale truncation default + version sync (design 0000056 PR 5/5)`. <!-- completed: -->
 
 ### Step 6: Close out

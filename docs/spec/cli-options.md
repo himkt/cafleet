@@ -112,7 +112,7 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split.
 
 ```bash
-cafleet --session-id <session-id> message poll --agent-id <my-agent-id>          # default: text truncated to 10 cp + "..."
+cafleet --session-id <session-id> message poll --agent-id <my-agent-id>          # default: text truncated to 200 cp + "…"
 cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --full   # full body
 ```
 
