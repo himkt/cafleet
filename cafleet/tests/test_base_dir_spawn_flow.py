@@ -145,19 +145,14 @@ def test_spawn_prompt_omits_base_line_when_unset():
 def test_director_side_audit_writes_land_under_base_not_tmp(tmp_path):
     """The Director-side audit-file write helper lands files under BASE only.
 
-    Scenario: an anchor exists at a non-`/tmp/claude-code` BASE (the pytest
-    tmp_path fixture). The helper writes the audit file there, and nothing
-    appears under `/tmp/claude-code/`. The `<unset>` case also returns None
-    without writing.
+    Asserted structurally: the helper writes precisely one file at
+    ``base/filename`` (no second write site, no /tmp fallback). The
+    ``<unset>`` case is a guarded skip that returns None without writing.
     """
     base = tmp_path / "myproj"
     base.mkdir()
     record(str(base), source="askuserquestion")
-
-    # Snapshot the recommended-default location so we can prove the helper
-    # never accidentally polluted it.
-    tmp_claude = Path("/tmp/claude-code")
-    before = set(tmp_claude.rglob("*")) if tmp_claude.exists() else set()
+    anchor_path = base / ".cafleet-base-dir.json"
 
     audit_path = write_audit_file(
         base=str(base),
@@ -165,24 +160,27 @@ def test_director_side_audit_writes_land_under_base_not_tmp(tmp_path):
         content="rendered spawn prompt audit\n",
     )
 
+    # The audit file lands at the documented BASE-relative path.
     assert audit_path == base / "drafter.md"
     assert audit_path.is_file()
     assert audit_path.read_text() == "rendered spawn prompt audit\n"
 
-    after = set(tmp_claude.rglob("*")) if tmp_claude.exists() else set()
-    new_paths = after - before
-    assert not new_paths, (
-        f"audit-write helper leaked files into /tmp/claude-code: {sorted(new_paths)}"
+    # No other files appear under BASE — only the audit file and the anchor.
+    files_under_base = {p for p in base.rglob("*") if p.is_file()}
+    expected = {audit_path, anchor_path}
+    assert files_under_base == expected, (
+        f"unexpected files under BASE: extras={sorted(files_under_base - expected)}, "
+        f"missing={sorted(expected - files_under_base)}"
     )
 
-    # The <unset> branch: helper must return None and write nothing.
+    # The <unset> branch: helper must return None and write nothing extra.
     skipped = write_audit_file(
         base=UNSET_SENTINEL,
         filename="drafter.md",
         content="should not appear anywhere",
     )
     assert skipped is None
-    after_unset = set(tmp_claude.rglob("*")) if tmp_claude.exists() else set()
-    assert after_unset - after == set(), (
-        "audit-write helper wrote under /tmp/claude-code despite BASE=<unset>"
+    files_after_unset = {p for p in base.rglob("*") if p.is_file()}
+    assert files_after_unset == expected, (
+        "audit-write helper wrote a file despite BASE=<unset>"
     )
