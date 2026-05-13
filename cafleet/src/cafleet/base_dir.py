@@ -174,6 +174,10 @@ def record(base: str, *, source: str) -> Path:
     base_dir = Path(base)
     if not base_dir.is_absolute():
         raise ValueError(f"base must be an absolute path; got {base!r}")
+    # Normalize the string form so a caller-supplied trailing slash does not
+    # desynchronize the JSON `base` field from the anchor's parent directory
+    # (which `_read_consistent_anchor` later compares against).
+    base = str(base_dir)
     anchor_path = base_dir / ANCHOR_FILENAME
 
     if anchor_path.is_file():
@@ -204,12 +208,15 @@ _BASE_INSERT_MARKER = (
 def extract_spawn_templates(content: str) -> list[str]:
     """Extract fenced spawn-prompt bodies from SKILL.md content.
 
-    Uses a line-by-line state machine that pairs fence opens and closes
-    correctly across both bare ``` and language-tagged ``` fences
-    (``` bash, ``` text, ``` html, ``` markdown, etc.). A naive regex like
+    Uses a line-by-line state machine that pairs fenced-code opens and closes
+    correctly across both bare and language-tagged fences. Accepted fence
+    syntax is ``^```([A-Za-z0-9_+-]*)$`` — the three backticks may be
+    immediately followed by a no-whitespace language tag (``bash``, ``text``,
+    ``html``, ``markdown``, etc.) or by nothing. Fences with intervening
+    whitespace or trailing characters are not recognized. A naive regex like
     ``` ``` \\n(.*?)\\n ``` ``` mismatches when bare close-fences of
-    language-tagged blocks get treated as new openings; this parser
-    tracks parity instead.
+    language-tagged blocks get treated as new openings; this parser tracks
+    parity instead.
 
     A "spawn-prompt" body is identified by the simultaneous presence of:
 
