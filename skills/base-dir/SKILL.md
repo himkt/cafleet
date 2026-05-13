@@ -117,7 +117,7 @@ Every CAFleet member, every consumer skill, and every Director MUST follow this 
 
 2. **`${BASE} == <unset>` is a hard stop, not a fallback.** If `${BASE}` is the literal sentinel `<unset>` (absolute-path argument branch), any code that tries to compute a path from `${BASE}` MUST abort with `Error: BASE is <unset>; refusing to fall back to /tmp`. The loud failure is the safety net for sites that forgot to guard explicitly.
 
-3. **Members never re-resolve BASE.** The Director's spawn-prompt substitution delivers `${BASE}` to each spawned member as a literal absolute path baked into the spawn prompt. Members MUST use that literal path. Members MUST NOT load `Skill(cafleet:base-dir)` to compute their own `${BASE}` — that would invite drift if the Director's anchor changed mid-session.
+3. **Members never re-resolve BASE.** The Director's spawn-prompt substitution delivers `${BASE}` to each spawned member as a literal absolute path baked into the spawn prompt. Members MUST use that literal path verbatim. Members DO load this skill at startup (per their role file's *Load at Startup* block) to pick up the no-bypass write protocol and the `<unset>` sentinel contract — but they MUST NOT run `cafleet base-dir resolve` / `cafleet base-dir record` or otherwise derive a new `${BASE}` of their own. Re-resolving would invite drift if the Director's anchor changed mid-session.
 
 4. **Missing-BASE-line anchorless status.** If a member's spawn prompt is missing the `BASE:` line entirely (an expected outcome when the Director resolved `${BASE} = <unset>`), the member treats the audit-file feature as disabled and emits a single CAFleet message back to the Director as a parens-free anchorless status (per `skills/design-doc/coordination.md` § *Anchorless Status*):
 

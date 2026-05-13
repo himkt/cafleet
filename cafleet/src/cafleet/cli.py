@@ -432,7 +432,8 @@ def base_dir_group() -> None:
     default=False,
     help="Emit machine-parseable JSON instead of human-readable text.",
 )
-def base_dir_resolve(path_arg: str | None, as_json: bool) -> None:
+@click.pass_context
+def base_dir_resolve(ctx: click.Context, path_arg: str | None, as_json: bool) -> None:
     """Resolve `${BASE}` non-interactively. Never prompts; on the CWD-inference
     branch it auto-writes the anchor at `${CWD}/.cafleet-base-dir.json` so the
     next run is idempotent. Reports the four documented status branches.
@@ -442,8 +443,8 @@ def base_dir_resolve(path_arg: str | None, as_json: bool) -> None:
     except base_dir.AnchorError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    if as_json:
-        click.echo(json.dumps(result))
+    if as_json or ctx.obj.get("json_output"):
+        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
         return
 
     click.echo(f"status: {result['status']}")
