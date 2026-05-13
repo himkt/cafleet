@@ -1,7 +1,7 @@
 # Codebase Simplification
 
-**Status**: Approved
-**Progress**: 80/91 tasks complete
+**Status**: Complete
+**Progress**: 80/91 tasks complete (11 per-PR "Open PR" / "Post-PR smoke" subtasks subsumed by the single PR #69 in execute mode)
 **Last Updated**: 2026-05-13
 
 ## Overview
