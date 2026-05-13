@@ -763,7 +763,10 @@ def _load_authorized_member(
     capture / send-input). Pane-id presence is NOT checked here — delete
     tolerates a pending placement while the others reject it.
     """
-    target = broker.get_agent(member_id, session_id)
+    try:
+        target = broker.get_agent(member_id, session_id)
+    except Exception as exc:
+        raise click.ClickException(f"failed to fetch member: {exc}") from exc
     if target is None:
         raise click.ClickException(f"Agent {member_id} not found")
     placement = target["placement"]
