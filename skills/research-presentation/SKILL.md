@@ -156,7 +156,7 @@ Capture the printed `agent_id` and substitute it for `[presentation-agent-id]` i
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<presentation-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/presentation.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/presentation.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Transcript spawn prompt:**
 
@@ -199,7 +199,7 @@ Capture the printed `agent_id` and substitute it for `[transcript-agent-id]` in 
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<transcript-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/transcript.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/transcript.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 ### Step 2: Content Review & Revision Loop (Director)
 
@@ -316,7 +316,7 @@ Capture the printed `agent_id` as `[vr-batch-agent-id]` for subsequent `cafleet 
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<vr-batch-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/visual-reviewer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. The audit filename uses the role-type slug `visual-reviewer`, not the member `--name` (`vr-batch-<start>`); subsequent VR batches in the same invocation overwrite the same audit file — that is intentional.
+2. **Write the audit file** to `${BASE}/visual-reviewer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. The audit filename uses the role-type slug `visual-reviewer`, not the member `--name` (`vr-batch-<start>`); subsequent VR batches in the same invocation overwrite the same audit file — that is intentional.
 
 ### Step 4: User Approval & Revision Loop (Director)
 

@@ -186,7 +186,7 @@ Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-i
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<analyzer-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/analyzer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/analyzer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 #### 2e. Wait for the Analyzer's question list
 

@@ -90,7 +90,9 @@ When `${BASE}` is a git-repo CWD (the normal case in this project), the anchor f
 The two subcommands live under the `cafleet` CLI as the `base-dir` subgroup. Like `cafleet doctor`, they operate on the local filesystem only and do NOT require `--session-id`.
 
 ```bash
-# Probe-only resolution. Does NOT prompt the user. Reports what should happen.
+# Non-interactive resolution. Never prompts the user. On the CWD-inference
+# branch it auto-writes the anchor at ${CWD}/.cafleet-base-dir.json so the
+# next call returns from "anchor" instead.
 cafleet base-dir resolve [--path <abs-or-rel-arg>] [--json]
 
 # Possible JSON outputs:

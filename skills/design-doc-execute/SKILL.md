@@ -416,7 +416,7 @@ Parse `agent_id` from the JSON response and substitute it for `<programmer-agent
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<programmer-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/programmer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/programmer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Tester spawn prompt (if needed):**
 
@@ -461,7 +461,7 @@ Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<tester-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/tester.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/tester.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 **Verifier spawn prompt (if needed):**
 
@@ -508,7 +508,7 @@ Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-i
 After parsing `agent_id`:
 
 1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<verifier-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/verifier.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *No-bypass write protocol* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+2. **Write the audit file** to `${BASE}/verifier.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
 
 #### 3f. Verify members are live
 
