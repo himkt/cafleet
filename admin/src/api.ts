@@ -1,7 +1,6 @@
 import type {
   AgentsResponse,
   TimelineResponse,
-  SendMessageResponse,
   SessionListItem,
 } from "./types";
 
@@ -57,8 +56,8 @@ export async function sendMessage(
   fromAgentId: string,
   toAgentId: string,
   text: string,
-): Promise<SendMessageResponse> {
-  return request<SendMessageResponse>("/messages/send", {
+): Promise<void> {
+  await request<unknown>("/messages/send", {
     method: "POST",
     body: JSON.stringify({
       from_agent_id: fromAgentId,

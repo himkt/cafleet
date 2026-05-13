@@ -1,4 +1,5 @@
 import type { TimelineEntry, Agent } from "../types";
+import { entrySortKey } from "../timeline";
 import ReactionBar from "./ReactionBar";
 
 interface TimelineMessageProps {
@@ -38,11 +39,6 @@ function recipientNames(entry: TimelineEntry): string[] {
   return entry.rows.map((r) => r.to_agent_name);
 }
 
-function createdAt(entry: TimelineEntry): string {
-  if (entry.kind === "unicast") return entry.message.created_at;
-  return entry.sortKey;
-}
-
 function formatTime(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -59,7 +55,7 @@ export default function TimelineMessageComponent({
     <div className="px-4 py-2 hover:bg-gray-50">
       <div className="flex items-baseline gap-1.5">
         <span className="text-xs text-gray-400 shrink-0">
-          {formatTime(createdAt(entry))}
+          {formatTime(entrySortKey(entry))}
         </span>
         <span className="font-medium text-sm text-gray-900">
           {senderName(entry)}

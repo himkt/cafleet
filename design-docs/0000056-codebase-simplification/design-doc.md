@@ -1,7 +1,7 @@
 # Codebase Simplification
 
 **Status**: Approved
-**Progress**: 32/91 tasks complete
+**Progress**: 42/91 tasks complete
 **Last Updated**: 2026-05-13
 
 ## Overview
@@ -222,16 +222,16 @@ Live-code verification by the reviewer caught four factual errors in the v1 draf
 
 ### Step 2: PR 2 — Admin frontend (`admin/`)
 
-- [ ] **2.0** Capture pre-PR baseline. Build the admin (`mise //admin:build`) on the parent commit; record the bundled-asset listing and SHA256 of the produced `cafleet/src/cafleet/webui/index.html` + `assets/` to `/tmp/baseline-pr2.txt` (the build must reproduce these byte-equally except for hash-named asset filenames). <!-- completed: -->
-- [ ] **2.1** F1 — Inline `Message` interface fields into `TimelineMessage`; delete `Message`. <!-- completed: -->
-- [ ] **2.2** F2 — Drop `SendMessageResponse` type; change `sendMessage` return to `Promise<void>`. <!-- completed: -->
-- [ ] **2.3** F3 — Remove `disabled?: boolean` prop from `MessageInputProps`; let MessageInput compute it internally. Drop `disabled={senderId === null}` from `Dashboard.tsx`. <!-- completed: -->
-- [ ] **2.4** F4 — Move `entrySortKey` to `admin/src/timeline.ts` (or `types.ts`); import from both consumers. <!-- completed: -->
-- [ ] **2.5** F5 — Simplify `popoverOpen` to drop the redundant `mention !== null` conjunct. <!-- completed: -->
-- [ ] **2.6** F6 — Delete `admin/README.md` (Vite-scaffold leftover). <!-- completed: -->
-- [ ] **2.7** F7 — Drop `"preview": "vite preview"` from `admin/package.json`. <!-- completed: -->
-- [ ] **2.8** F8 — Drop `dist` from `admin/.gitignore` and `admin/eslint.config.js` (and the `globalIgnores` import if no other ignores remain). <!-- completed: -->
-- [ ] **2.9** Run `mise //admin:lint`, `mise //admin:build`; resolve any failures. <!-- completed: -->
+- [x] **2.0** Capture pre-PR baseline. Build the admin (`mise //admin:build`) on the parent commit; record the bundled-asset listing and SHA256 of the produced `cafleet/src/cafleet/webui/index.html` + `assets/` to `/tmp/baseline-pr2.txt` (the build must reproduce these byte-equally except for hash-named asset filenames). <!-- completed: 2026-05-13T11:35 -->
+- [x] **2.1** F1 — Inline `Message` interface fields into `TimelineMessage`; delete `Message`. <!-- completed: 2026-05-13T11:35 -->
+- [x] **2.2** F2 — Drop `SendMessageResponse` type; change `sendMessage` return to `Promise<void>`. <!-- completed: 2026-05-13T11:35 -->
+- [x] **2.3** F3 — Remove `disabled?: boolean` prop from `MessageInputProps`; let MessageInput compute it internally. Drop `disabled={senderId === null}` from `Dashboard.tsx`. <!-- completed: 2026-05-13T11:35 -->
+- [x] **2.4** F4 — Move `entrySortKey` to `admin/src/timeline.ts` (or `types.ts`); import from both consumers. <!-- completed: 2026-05-13T11:35 -->
+- [x] **2.5** F5 — Simplify `popoverOpen` to drop the redundant `mention !== null` conjunct. <!-- completed: 2026-05-13T11:35 -->
+- [x] **2.6** F6 — Delete `admin/README.md` (Vite-scaffold leftover). <!-- completed: 2026-05-13T11:35 -->
+- [x] **2.7** F7 — Drop `"preview": "vite preview"` from `admin/package.json`. <!-- completed: 2026-05-13T11:35 -->
+- [x] **2.8** F8 — Drop `dist` from `admin/.gitignore` and `admin/eslint.config.js` (and the `globalIgnores` import if no other ignores remain). <!-- completed: 2026-05-13T11:35 -->
+- [x] **2.9** Run `mise //admin:lint`, `mise //admin:build`; resolve any failures. <!-- completed: 2026-05-13T11:35 -->
 - [ ] **2.10** Post-PR smoke: rebuild; compare bundled-asset listing + index.html SHA256 against `/tmp/baseline-pr2.txt`. Accept only hash-named asset-file rename drift (different content hash from the type-erasure tweaks). <!-- completed: -->
 - [ ] **2.11** Open PR; title: `refactor: admin frontend — dead types + redundant prop drilling (design 0000056 PR 2/5)`. <!-- completed: -->
 
