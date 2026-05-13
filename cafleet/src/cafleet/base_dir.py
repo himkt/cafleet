@@ -209,7 +209,12 @@ def record(base: str, *, source: str) -> Path:
     if anchor_path.is_file():
         data = _load_anchor(anchor_path)
         existing_base = data["base"]
-        if existing_base != base:
+        # Normalize via Path.resolve() so equivalent paths with different
+        # lexical forms (symlinks, `..` segments, trailing slash) do not
+        # break record() idempotency — matches _read_consistent_anchor.
+        if Path(existing_base).resolve(strict=False) != Path(base).resolve(
+            strict=False
+        ):
             raise AnchorError(
                 f"anchor file {anchor_path} records base={existing_base} "
                 f"but lives at {base}; refusing to overwrite."

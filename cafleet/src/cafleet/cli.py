@@ -474,7 +474,8 @@ def base_dir_resolve(ctx: click.Context, path_arg: str | None, as_json: bool) ->
     required=True,
     help="How the BASE was determined.",
 )
-def base_dir_record(base_arg: str, source_arg: str) -> None:
+@click.pass_context
+def base_dir_record(ctx: click.Context, base_arg: str, source_arg: str) -> None:
     """Persist a `${BASE}/.cafleet-base-dir.json` anchor (idempotent on match)."""
     base_path = Path(base_arg)
     anchor_existed = (base_path / base_dir.ANCHOR_FILENAME).is_file()
@@ -484,7 +485,12 @@ def base_dir_record(base_arg: str, source_arg: str) -> None:
     except (ValueError, base_dir.AnchorError) as exc:
         raise click.ClickException(str(exc)) from exc
 
-    click.echo(f"anchor: {anchor}")
+    if ctx.obj.get("json_output"):
+        click.echo(
+            output.format_json({"anchor": str(anchor)}, pretty=ctx.obj["pretty"])
+        )
+    else:
+        click.echo(f"anchor: {anchor}")
 
     if not anchor_existed and base_dir.is_git_repo_root(base_path):
         click.echo(
