@@ -13,8 +13,8 @@ Second-pass configuration cleanup picking up where design 0000057 left off. Remo
 - [x] `mise.toml` no longer contains a `[tasks.sync-skills]` block.
 - [x] The five home-dir mirrors at `~/.claude/skills/{create-figure,my-slidev,research-presentation,research-report,base-dir}/` no longer exist on the maintainer machine (operator-side action).
 - [x] Every unprefixed `Skill(<name>)` reference in `skills/` body text — where `<name>` is one of `create-figure`, `my-slidev`, `research-presentation`, `research-report`, `base-dir` — has been rewritten to `Skill(cafleet:<name>)`.
-- [x] `skills/create-figure/SKILL.md` no longer contains the string `--with matplotlib`; every execution example uses `uv run --frozen --group research python <script>`.
-- [x] `skills/my-slidev/SKILL.md` headmatter template (lines ~14-17) and theme-path notes (lines ~207, ~225) reference the plugin install path (`~/.claude/plugins/cache/cafleet/cafleet/<version>/skills/my-slidev/theme`) as the single authoritative location; the `~/.claude/skills/my-slidev/theme` (home-dir working-copy) branch is removed. Verified by `git grep -n "~/.claude/skills/my-slidev/theme" -- skills/my-slidev/SKILL.md` returning zero matches (Step 4 verification task).
+- [x] `skills/create-figure/SKILL.md` no longer contains the string `--with matplotlib` and no longer hardcodes any specific Python runner. The execution section uses a `<project-python-runner>` placeholder and delegates the canonical command to the host project's `.claude/rules/`; the cafleet repo's `.claude/rules/commands.md` documents `uv run --frozen --group research python <script>` as its runner.
+- [x] `skills/my-slidev/SKILL.md` headmatter template and the embedded `slide-creator` theme-path constraints use the install-location-agnostic placeholder `<cafleet-plugin-install-dir>/skills/my-slidev/theme` with discovery hints for both Claude Code and Codex; the original Claude-only path is no longer presented as the single authoritative location. Verified by `git grep -n "~/.claude/skills/my-slidev/theme" -- skills/my-slidev/SKILL.md` returning zero matches (Step 4 verification task).
 - [x] `.gitignore` no longer contains the `!.claude/agents` override line.
 - [x] `git grep` for `uv run --with matplotlib` across tracked files outside `design-docs/` returns zero matches.
 - [x] `git grep` for `sync-skills` across tracked files outside `design-docs/` returns zero matches.
@@ -72,7 +72,7 @@ run = [
 description = "Mirror the five home-dir-mirrored skills … (see file for the full description, deleted by this step)"
 ```
 
-**Rationale.** The `cafleet` plugin (`.claude-plugin/plugin.json` v0.8.0) ships all twelve skills directly under the `cafleet:` namespace, including the five skills this task mirrors. The home-dir copies served only to support unprefixed `Skill(<name>)` invocation. Per A1, callers will use `Skill(cafleet:<name>)` (prefixed) going forward, eliminating the need for the home-dir branch. Removing the task is one of three coordinated edits — the others are §3 (rewrite unprefixed cross-refs to prefixed form) and §6 (operator-side mirror deletion).
+**Rationale.** The `cafleet` plugin (`.claude-plugin/plugin.json` — bumped to v0.8.1 by this design's Step 6b) ships all twelve skills directly under the `cafleet:` namespace, including the five skills this task mirrors. The home-dir copies served only to support unprefixed `Skill(<name>)` invocation. Per A1, callers will use `Skill(cafleet:<name>)` (prefixed) going forward, eliminating the need for the home-dir branch. Removing the task is one of three coordinated edits — the others are §3 (rewrite unprefixed cross-refs to prefixed form) and §6 (operator-side mirror deletion).
 
 **Reference removal (downstream).** No `README.md`, `ARCHITECTURE.md`, or `docs/` references to the `sync-skills` task exist (`git grep -n "sync-skills\|sync_skills" -- README.md ARCHITECTURE.md docs/ CLAUDE.md` returns zero hits). The task name does appear inside earlier design docs (`design-docs/0000022`, `design-docs/0000053`, `design-docs/0000054`); per `~/.claude/rules/removal.md`, design-doc historical record is preserved.
 
@@ -218,7 +218,7 @@ Per B2, each configuration surface enumerated in the brief plus the four B1-expa
 
 ### 9. Adjacent finding — out of scope
 
-`README.md` lines 16 and 24 say "**11** plugin-packaged skills" but `.claude-plugin/plugin.json` v0.8.0 ships **12** (the addition of `base-dir` in design 0000053 was not reflected). This is documentation drift, not a config-cleanup finding, and the user's brief did not enumerate `README.md` as an audit surface. Recorded here for visibility; a separate small design doc can correct it without coupling to this cleanup. No edit in this design.
+`README.md` lines 16 and 24 say "**11** plugin-packaged skills" but `.claude-plugin/plugin.json` v0.8.1 ships **12** (the addition of `base-dir` in design 0000053 was not reflected). This is documentation drift, not a config-cleanup finding, and the user's brief did not enumerate `README.md` as an audit surface. Recorded here for visibility; a separate small design doc can correct it without coupling to this cleanup. No edit in this design.
 
 ---
 
