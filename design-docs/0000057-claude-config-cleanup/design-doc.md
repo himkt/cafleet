@@ -1,7 +1,7 @@
 # 0000057 — Claude Configuration Cleanup
 
 **Status**: Approved
-**Progress**: 3/6 tasks complete
+**Progress**: 4/6 tasks complete
 **Last Updated**: 2026-05-13
 
 ## Overview
@@ -166,7 +166,7 @@ All three sites carry the **identical** `old_string` and receive the **identical
 
 ### Step 2: Delete `.claude/CLAUDE.md`
 
-- [ ] Delete the file `/home/himkt/work/himkt/cafleet/.claude/CLAUDE.md`. No surrounding file (root `CLAUDE.md`, any `SKILL.md`, any `docs/*.md`, any `README.md`) needs an accompanying edit — the §Specification pre-flight scan confirmed zero live references outside `design-docs/`. <!-- completed: -->
+- [x] Delete the file `/home/himkt/work/himkt/cafleet/.claude/CLAUDE.md`. No surrounding file (root `CLAUDE.md`, any `SKILL.md`, any `docs/*.md`, any `README.md`) needs an accompanying edit — the §Specification pre-flight scan confirmed zero live references outside `design-docs/`. <!-- completed: 2026-05-14T10:27 -->
 
 ### Step 3: Post-implementation verification
 
