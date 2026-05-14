@@ -1,7 +1,7 @@
 # 0000058 — Stale Config Audit
 
 **Status**: Approved
-**Progress**: 5/18 tasks complete
+**Progress**: 7/18 tasks complete
 **Last Updated**: 2026-05-14
 
 ## Overview
@@ -210,8 +210,8 @@ Per `.claude/rules/design-doc-numbering.md`, documentation updates come first. T
 
 ### Step 2: Config file edits
 
-- [ ] Edit `mise.toml`: delete lines 27-37 inclusive (blank separator on 27, `[tasks.sync-skills]` block on 28-36, trailing blank on 37) per §1. After this edit, `mise.toml` ends at the `[tasks.slidev]` `description = "..."` line followed by a single trailing newline; `git grep "sync-skills" -- mise.toml` MUST return zero matches. <!-- completed: -->
-- [ ] Edit `.gitignore`: delete line 7 (`!.claude/agents`). `git grep "\.claude/agents" -- .gitignore` post-edit MUST return zero matches. <!-- completed: -->
+- [x] Edit `mise.toml`: delete lines 27-37 inclusive (blank separator on 27, `[tasks.sync-skills]` block on 28-36, trailing blank on 37) per §1. After this edit, `mise.toml` ends at the `[tasks.slidev]` `description = "..."` line followed by a single trailing newline; `git grep "sync-skills" -- mise.toml` MUST return zero matches. <!-- completed: 2026-05-14T11:32 -->
+- [x] Edit `.gitignore`: delete line 7 (`!.claude/agents`). `git grep "\.claude/agents" -- .gitignore` post-edit MUST return zero matches. <!-- completed: 2026-05-14T11:32 -->
 
 ### Step 3: Operator-side — delete the five home-dir mirrors
 
