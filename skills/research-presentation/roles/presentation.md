@@ -35,7 +35,7 @@ Substitute the literal `[session-id]`, `[my-agent-id]`, and `[director-agent-id]
 
 ## Layout Selection
 
-Choose the best layout for each slide's content. The `/my-slidev` skill defines all available layouts. Key decisions:
+Choose the best layout for each slide's content. The `/cafleet:my-slidev` skill defines all available layouts. Key decisions:
 
 | Content | Layout |
 |---------|--------|
@@ -74,7 +74,7 @@ Pick the right format — don't default to bullets or bar charts.
 
 Follow the **Color Discipline** and **Usage Rules** sections in `techniques/highlight.md`. Key rules:
 
-- **Always use the `Highlight` component** for colored numbers and keywords. The actual slide.md syntax is the Vue tag form documented in `.claude/skills/my-slidev/techniques/highlight.md`. Never use `span class="c-..."` markup directly.
+- **Always use the `Highlight` component** for colored numbers and keywords. The actual slide.md syntax is the Vue tag form documented in the my-slidev skill's `techniques/highlight.md` file. Never use `span class="c-..."` markup directly.
 - **Max 3 per slide.** More than 3 → move data to a table or chart.
 - **Semantic color**: positive (green), negative (red), neutral (blue), caution (orange). Ask "is this good or bad for the audience?"
 

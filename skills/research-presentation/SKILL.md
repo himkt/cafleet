@@ -1,6 +1,6 @@
 ---
 name: research-presentation
-description: Create a Slidev presentation and reading transcript from an existing research report folder. Reads report.md and researcher files for context, creates slides using /my-slidev skill and a reading transcript. Takes folder path as argument (e.g., topic-name). Do NOT use for research — use /research-report for that.
+description: Create a Slidev presentation and reading transcript from an existing research report folder. Reads report.md and researcher files for context, creates slides using /cafleet:my-slidev skill and a reading transcript. Takes folder path as argument (e.g., topic-name). Do NOT use for research — use /cafleet:research-report for that.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, TaskGet
 ---
 
@@ -11,7 +11,7 @@ Create a Slidev presentation and reading transcript from an existing research re
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director** | Main Claude | Bootstrap CAFleet session, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
-| **Presentation** | claude pane (loads Skill(cafleet:my-slidev) + Skill(cafleet:create-figure)) | Create Slidev presentation from report using `/my-slidev` | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
+| **Presentation** | claude pane (loads Skill(cafleet:my-slidev) + Skill(cafleet:create-figure)) | Create Slidev presentation from report using `/cafleet:my-slidev` | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
 | **Transcript** | claude pane | Create reading transcript with 1:1 slide correspondence | Invent data, modify report, conduct research | [roles/transcript.md](roles/transcript.md) |
 | **Visual Reviewer** | claude pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`bun run agent-browser ...`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
 
@@ -67,11 +67,11 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
 ### Step 0: Validate Input (Director)
 
-1. If `$ARGUMENTS` is absent → error: "Usage: `/research-presentation <folder-name>`. Specify the folder containing report.md."
+1. If `$ARGUMENTS` is absent → error: "Usage: `/cafleet:research-presentation <folder-name>`. Specify the folder containing report.md."
 2. Load `Skill(cafleet:base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
    - If skipped (absolute path): set `${FOLDER} = $ARGUMENTS`.
    - If base resolved: set `${FOLDER} = ${BASE}/researches/$ARGUMENTS`. Resolve to absolute path.
-3. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run `/research-report` first to generate a report."
+3. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run `/cafleet:research-report` first to generate a report."
 4. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts.
 
 ### Step 1: Bootstrap CAFleet Session, Start Monitor & Spawn Presentation + Transcript (Director)
@@ -228,9 +228,9 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 **Calling-pane working directory: a directory that contains the Slidev `package.json` (typically the host project root).** Bun resolves `node_modules/` and `package.json` from the calling directory directly — no `--cwd` plumbing or sidecar directory. Project-specific task wrappers (e.g., `mise` tasks) that capture invariants like `--frozen-lockfile` belong in the host project's `.claude/rules/`, not in this skill body.
 
 1. Install bun dependencies — refer to your host project's `.claude/rules/` for the canonical command (it typically wraps `bun install --frozen-lockfile`).
-2. Start the Slidev dev server (`run_in_background: true`) — refer to your host project's `.claude/rules/` for the canonical launcher. The underlying invocation is `bun run slidev <folder>/slide.md` and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY.
+2. Start the Slidev dev server (`run_in_background: true`) — refer to your host project's `.claude/rules/` for the canonical launcher. The underlying invocation is `bun run slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY.
 3. Set `<server_url>` to the Slidev dev server URL (default: `http://localhost:3030`). Use this value when spawning Visual Reviewers.
-4. Create the persistent screenshots directory: write `<folder>/screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per `/research-presentation` invocation; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
+4. Create the persistent screenshots directory: write `<folder>/screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per `/cafleet:research-presentation` invocation; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
 5. The Director MUST NOT run `bun run agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` (or the equivalent `bun run agent-browser ...`) directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.
 
 **Batched Review Loop** (batch_size=10, fresh Visual Reviewer per batch to avoid context overflow):

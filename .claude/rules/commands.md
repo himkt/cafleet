@@ -37,7 +37,7 @@ This rule applies **even when a teammate is blocked on permissions** and you are
 
 ## Skill artifact runners (project-specific glue)
 
-Skills under `skills/` are deliberately invocation-agnostic — they describe the artifact they produce (a matplotlib script, a Slidev deck) but not the host-project run command. This section is the cafleet repo's catalog of those commands, paired one-to-one with the skill artifact they run. Skills MUST NOT embed the cafleet-specific runner in their own body; they reference this rule file instead.
+Skills under `skills/` are deliberately invocation-agnostic — they describe the artifact they produce (a matplotlib script, a Slidev deck) but not the host-project run command. This section is the cafleet repo's catalog of those commands, paired one-to-one with the skill artifact they run. Skills MUST NOT embed the cafleet-specific runner in their own body; they direct users to the host project's `.claude/rules/`, which in this repo is this very file.
 
 | Skill artifact | Cafleet runner |
 |---|---|
