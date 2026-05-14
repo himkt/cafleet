@@ -45,4 +45,4 @@ Skills under `skills/` are deliberately invocation-agnostic — they describe th
 | `/cafleet:research-presentation` bun deps install | `mise //:bun-install` (equivalent to `bun install --frozen-lockfile`). |
 | `/cafleet:research-presentation` Slidev dev server | `mise //:slidev <folder>/slide.md` — PTY-wrapped via `script -qfc 'bun run slidev --open false <slide>' /dev/null`. Default URL `http://localhost:3030`. Run with `run_in_background: true`. |
 | Calling-pane working directory for `bun` / `agent-browser` / Slidev | The cafleet repo root (where `package.json` and `node_modules/` live). |
-| `agent-browser wait` family | Denied by `.claude/settings.json` `permissions.deny` (`Bash(bun run agent-browser ... wait ...)`). Use `sleep N` + `bun run agent-browser ... open` retry loops instead. |
+| `agent-browser wait` | Discouraged — unreliable across renderers and slow CI environments. The repo's `.claude/settings.json` `permissions.deny` blocks the common `wait --load networkidle` forms and bare `wait` forms but does not cover every variant; treat the whole family as off-limits and use `sleep N` + `bun run agent-browser ... open` retry loops instead. |
