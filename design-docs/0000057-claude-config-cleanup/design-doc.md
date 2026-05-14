@@ -1,7 +1,7 @@
 # 0000057 — Claude Configuration Cleanup
 
 **Status**: Approved
-**Progress**: 4/6 tasks complete
+**Progress**: 6/6 tasks complete
 **Last Updated**: 2026-05-13
 
 ## Overview
@@ -172,8 +172,8 @@ All three sites carry the **identical** `old_string` and receive the **identical
 
 Both checks scope to **tracked files only** via `git ls-files`. This cleanly excludes `.git/` internals, the gitignored member-spawn audit copies (`programmer.md`, `tester.md`, `verifier.md`, etc. — see the §4 ambient-audit-copies note), and the untracked drafter/reviewer scratch artifacts. Hits inside `design-docs/` are acceptable — those are historical and need not change.
 
-- [ ] Run `git ls-files | xargs grep -l '\.claude/CLAUDE\.md'`. Expected result: zero matches outside `design-docs/*.md`. <!-- completed: -->
-- [ ] Run `git ls-files | xargs grep -nE '(^|[^./~])rules/bash-command\.md'` (the leading-anchor regex matches the **bare** path only — it rejects the fully-qualified `.claude/rules/bash-command.md` and `~/.claude/rules/bash-command.md` forms introduced by Step 1). Expected result: zero matches outside `design-docs/*.md`. <!-- completed: -->
+- [x] Run `git ls-files | xargs grep -l '\.claude/CLAUDE\.md'`. Expected result: zero matches outside `design-docs/*.md`. <!-- completed: 2026-05-14T10:28 -->
+- [x] Run `git ls-files | xargs grep -nE '(^|[^./~])rules/bash-command\.md'` (the leading-anchor regex matches the **bare** path only — it rejects the fully-qualified `.claude/rules/bash-command.md` and `~/.claude/rules/bash-command.md` forms introduced by Step 1). Expected result: zero matches outside `design-docs/*.md`. <!-- completed: 2026-05-14T10:28 -->
 
 
 ---
