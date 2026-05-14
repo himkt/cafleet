@@ -34,3 +34,15 @@ The commands above are the **only** way to run these operations. Do NOT invoke t
 | `uv run cafleet ...` for verification/smoke | delegate to a teammate that already has permission, or ask the user | see `.claude/rules/skill-discovery.md` (Authorization scope section) |
 
 This rule applies **even when a teammate is blocked on permissions** and you are tempted to "just run it yourself" — using `mise` keeps commands matching the project's `permissions.allow` patterns, which is the entire point of this project's session-id / agent-id CLI design.
+
+## Skill artifact runners (project-specific glue)
+
+Skills under `skills/` are deliberately invocation-agnostic — they describe the artifact they produce (a matplotlib script, a Slidev deck) but not the host-project run command. This section is the cafleet repo's catalog of those commands, paired one-to-one with the skill artifact they run. Skills MUST NOT embed the cafleet-specific runner in their own body; they reference this rule file instead.
+
+| Skill artifact | Cafleet runner |
+|---|---|
+| `/create-figure` matplotlib scripts | `uv run --frozen --group research python <script>` — the `[dependency-groups].research = ["matplotlib"]` block in root `pyproject.toml` provides matplotlib; `uv.lock` pins the version. |
+| `/research-presentation` bun deps install | `mise //:bun-install` (equivalent to `bun install --frozen-lockfile`). |
+| `/research-presentation` Slidev dev server | `mise //:slidev <folder>/slide.md` — PTY-wrapped via `script -qfc 'bun run slidev --open false <slide>' /dev/null`. Default URL `http://localhost:3030`. Run with `run_in_background: true`. |
+| Calling-pane working directory for `bun` / `agent-browser` / Slidev | The cafleet repo root (where `package.json` and `node_modules/` live). |
+| `agent-browser wait` family | Denied by `.claude/settings.json` `permissions.deny` (`Bash(bun run agent-browser ... wait ...)`). Use `sleep N` + `bun run agent-browser ... open` retry loops instead.

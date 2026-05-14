@@ -1,7 +1,7 @@
 # 0000058 — Stale Config Audit
 
 **Status**: Approved
-**Progress**: 18/18 tasks complete
+**Progress**: 32/32 tasks complete
 **Last Updated**: 2026-05-14T11:41
 
 ## Overview
@@ -19,6 +19,7 @@ Second-pass configuration cleanup picking up where design 0000057 left off. Remo
 - [x] `git grep` for `uv run --with matplotlib` across tracked files outside `design-docs/` returns zero matches.
 - [x] `git grep` for `sync-skills` across tracked files outside `design-docs/` returns zero matches.
 - [x] Zero deprecation notices, removal markers, or "see design 0000058" pointers appear in any tracked file outside `design-docs/` (per `~/.claude/rules/removal.md`).
+- [x] **Skill self-containment.** Every skill body under `skills/**` is environment-agnostic — no cafleet-specific run commands (`uv run --frozen --group research`, `mise //:bun-install`, `mise //:slidev`), no "cafleet repo root" / "cafleet repo's …" working-directory hardcoding, and no cross-references to cafleet's `permissions.deny` configuration. The cafleet-specific runner glue lives in `.claude/rules/commands.md`.
 
 
 ---
@@ -75,22 +76,50 @@ description = "Mirror the five home-dir-mirrored skills … (see file for the fu
 
 **Reference removal (downstream).** No `README.md`, `ARCHITECTURE.md`, or `docs/` references to the `sync-skills` task exist (`git grep -n "sync-skills\|sync_skills" -- README.md ARCHITECTURE.md docs/ CLAUDE.md` returns zero hits). The task name does appear inside earlier design docs (`design-docs/0000022`, `design-docs/0000053`, `design-docs/0000054`); per `~/.claude/rules/removal.md`, design-doc historical record is preserved.
 
-### 2. `skills/create-figure/SKILL.md` — switch to pyproject.toml dependency group
+### 2. Self-containment principle (post-PR-71-review revision)
 
-**Action.** Rewrite every `--with matplotlib` reference in `skills/create-figure/SKILL.md` to use the repo-rooted `--frozen --group research` invocation instead.
+**Principle.** Skills must be **self-contained and environment-agnostic**. A skill describes its own domain (the matplotlib chart-generation logic, the Slidev authoring layout, the agent-browser commands). It does NOT hardcode the host project's run-glue — the choice of `uv run --frozen --group research`, `mise //:slidev`, `mise //:bun-install`, the working-directory invariant, or the host's `permissions.deny` configuration is project-specific glue that belongs in `.claude/rules/`, not in the skill body.
 
-**Verified affected sites (`skills/create-figure/SKILL.md`):**
+**Source of the principle.** The A2 pivot in this design's clarification round originally read *"Use pyproject.toml. Remove `--with matplotlib` related instructions. I want to fix the dependencies."* The first implementation pass interpreted this as "switch the skill from `--with matplotlib` to `--frozen --group research`," which made `skills/create-figure/SKILL.md` repo-bound to the cafleet checkout. The user's intent — surfaced on PR #71 — was the opposite: **the skill should stop documenting any specific invocation**; the cafleet-specific runner (`uv run --frozen --group research python <script>`) belongs in `.claude/rules/commands.md` where every other host-glue command already lives. This revision applies that principle uniformly to every skill site that violates it.
 
-| Line | Current content | Required edit |
-|---|---|---|
-| 12 | `Execution self-bootstraps matplotlib via \`uv run --with matplotlib python <script>\` — \`uv\` resolves and caches the dependency on first run, so the skill works in any project without a project-rooted \`research\` uv group or \`mise\` task.` | Rewrite to: `Execution uses the cafleet repo's pyproject.toml-managed \`[dependency-groups].research\` invocation: \`uv run --frozen --group research python <script>\`. This skill is repo-bound — it requires the calling pane's CWD to be inside the cafleet checkout (or any project whose \`pyproject.toml\` declares an equivalent \`research\` dependency group containing matplotlib).` |
-| 87 | `Run via \`uv run --with matplotlib python <script>\`. \`uv\` resolves matplotlib and its transitive deps into an ephemeral environment, cached after the first invocation:` | Rewrite to: `Run via \`uv run --frozen --group research python <script>\`. \`uv\` resolves matplotlib from the repo's \`uv.lock\` so the version is pinned and reproducible:` |
-| 90 | `uv run --with matplotlib python ${SRC_DIR}/script_name.py` | Replace with: `uv run --frozen --group research python ${SRC_DIR}/script_name.py` |
-| 93 | `\`--with matplotlib\` brings matplotlib in without requiring a \`pyproject.toml\` dependency-group entry at the caller's repo, so the skill self-bootstraps in any project. No \`--group\`, no project-rooted lockfile, no \`mise\` task required.` | Replace entirely with: `\`--frozen\` pins to \`uv.lock\` (no resolver run); \`--group research\` pulls matplotlib via the cafleet \`pyproject.toml\` \`[dependency-groups].research\` block. The skill is no longer self-bootstrapping in arbitrary projects — it assumes the calling pane is inside the cafleet repo (or a sibling project that ships an equivalent dependency group).` |
+**Scope.** `git grep` audit (executed during PR #71 review) surfaced 12 sites across 5 files that hardcode cafleet-specific run-glue inside skill bodies. The revision rewrites all 12 to be invocation-agnostic and moves the runner detail to `.claude/rules/commands.md`.
 
-**Project-bound trade-off acknowledged.** Per A2, the skill is no longer portable to projects that lack a `[dependency-groups].research` block. This is intentional — the user explicitly chose pinned/reproducible dependencies over portable self-bootstrap. No "portability" prose remains in the SKILL.md after the rewrite.
+| # | File:Line | Current binding | Severity |
+|---|---|---|---|
+| 1 | `skills/create-figure/SKILL.md:12` | "cafleet repo's pyproject.toml-managed `[dependency-groups].research` invocation" | Hard binding |
+| 2 | `skills/create-figure/SKILL.md:87` | `Run via uv run --frozen --group research python <script>` | Hard binding |
+| 3 | `skills/create-figure/SKILL.md:90` | `uv run --frozen --group research python ${SRC_DIR}/script_name.py` | Hard binding |
+| 4 | `skills/create-figure/SKILL.md:93` | "`--frozen` pins to `uv.lock`; `--group research` pulls matplotlib via the cafleet `pyproject.toml`" | Hard binding |
+| 5 | `skills/research-presentation/SKILL.md:16` | "`bun run agent-browser ...` from the cafleet repo root" | Hard binding |
+| 6 | `skills/research-presentation/SKILL.md:228` | "Calling-pane working directory: cafleet repo root" | Hard binding |
+| 7 | `skills/research-presentation/SKILL.md:230` | `mise //:bun-install` (cafleet-specific task) | Hard binding |
+| 8 | `skills/research-presentation/SKILL.md:231` | `mise //:slidev <folder>/slide.md` (cafleet-specific task) | Hard binding |
+| 9 | `skills/research-presentation/roles/director.md:123` | `mise //:slidev <folder>/slide.md` (cafleet-specific task) | Hard binding |
+| 10 | `skills/research-presentation/roles/director.md:126` | "`agent-browser wait --load networkidle` is denied by repo permissions" | Cafleet `permissions.deny` cross-ref |
+| 11 | `skills/research-presentation/roles/visual-reviewer.md:106` | "the project's `settings.json` `permissions.deny` blocks `Bash(bun run agent-browser ... wait ...)`" | Cafleet `permissions.deny` cross-ref |
+| 12 | `skills/base-dir/SKILL.md:84` | "The cafleet repo's own `.gitignore` already excludes…" | Cafleet-installation informational cross-ref |
 
-**Cross-skill audit.** `git grep -nE "uv run --with " -- skills/ .claude/ docs/ ARCHITECTURE.md README.md cafleet/ admin/` returns matches only inside `skills/create-figure/SKILL.md` (the three lines above). No other skill uses the `--with` pattern, so the rewrite is scoped to this one file.
+**Required edits — skills (invocation-agnostic rewrites):**
+
+| Site | Replacement strategy |
+|---|---|
+| 1-4 (`create-figure`) | Strip every cafleet-specific runner detail. The skill describes generating a self-contained matplotlib script; the run command is delegated to the host project's rules (e.g., `.claude/rules/commands.md`). Example invocation block becomes pseudo-form `<project-python-runner> ${SRC_DIR}/script_name.py`. |
+| 5-6 (`research-presentation` SKILL.md L16, L228) | Replace "cafleet repo root" / "cafleet repo's …" language with a generic invariant — the calling pane needs a directory that contains the Slidev `package.json` (typically the host project root). |
+| 7-9 (`research-presentation` SKILL.md L230-L231, `roles/director.md` L123) | Replace `mise //:bun-install` and `mise //:slidev <folder>/slide.md` with a reference to the host project's `.claude/rules/` for the canonical command. The skill states the underlying invariant (`bun install --frozen-lockfile`, `bun run slidev <folder>/slide.md` PTY-wrapped). |
+| 10-11 (`director.md` L126, `visual-reviewer.md` L106) | State `agent-browser wait` as **discouraged** (unreliable across renderers + slow CI) instead of as "denied by repo permissions". Note that host projects (the canonical cafleet setup included) typically block it via `permissions.deny`, but the skill recommendation does not depend on a specific project's configuration. |
+| 12 (`base-dir/SKILL.md` L84) | Rewrite the cafleet-gitignore reference to a generic instruction: host projects that install cafleet should add `/.cafleet-base-dir.json` to their root `.gitignore` so the anchor file does not surface as untracked. The cafleet repo's own `.gitignore` is one example of such a project. |
+
+**Required edits — `.claude/rules/commands.md` (project-specific glue, receiving site):**
+
+Add the following entries so the cafleet-specific invocations the skills used to embed continue to be discoverable inside this repo. Each entry maps a skill-emitted artifact to the canonical cafleet runner:
+
+| Skill artifact | Cafleet runner |
+|---|---|
+| `/create-figure` matplotlib scripts | `uv run --frozen --group research python <script>` (pyproject.toml `[dependency-groups].research = ["matplotlib"]` provides the dependency; `uv.lock` pins the version) |
+| `/research-presentation` bun deps | `mise //:bun-install` (= `bun install --frozen-lockfile`) |
+| `/research-presentation` Slidev dev server | `mise //:slidev <folder>/slide.md` (= PTY-wrapped `bun run slidev --open false <folder>/slide.md`; default URL `http://localhost:3030`) |
+| Calling-pane working directory for bun / agent-browser / Slidev | The cafleet repo root (contains `package.json` and `node_modules/`) |
+| `agent-browser wait` family | Denied by `.claude/settings.json` `permissions.deny` (blocks `Bash(bun run agent-browser ... wait ...)`). Use `sleep N` + open-retry loops instead. |
 
 ### 3. Unprefixed `Skill(<one of the five>)` cross-references in plugin-source skills
 
@@ -234,6 +263,45 @@ All greps scope to **tracked files only** via `git ls-files` (or the equivalent 
 - [x] Run `git grep -n "!\.claude/agents" -- .gitignore`. Expected: zero matches. <!-- completed: 2026-05-14T11:41 -->
 - [x] Confirm the five home-dir mirrors are gone via five `test ! -d ~/.claude/skills/<name>` checks (or a single `ls ~/.claude/skills/` showing only `update-readme/`). <!-- completed: 2026-05-14T11:41 -->
 
+### Step 5: Self-containment revision (post-PR-71-review)
+
+Per §2's revised principle, undo the cafleet-binding parts of Step 1 task 1 and apply the same fix to seven additional pre-existing violations. The runner-glue (mise tasks, `uv run --frozen --group research`, working-directory invariant, `permissions.deny` cross-references) moves to `.claude/rules/commands.md`; the skills become invocation-agnostic. See §2's tables for the full site list and replacement strategy.
+
+**5a. Edit `.claude/rules/commands.md` — receive runner-specific glue:**
+
+- [x] Append a new section to `.claude/rules/commands.md` documenting the cafleet-specific runner for each skill artifact per §2's last table (matplotlib scripts, bun deps, Slidev dev server, calling-pane working directory, `agent-browser wait` denial). The section header should mark these as the host-project glue that the skills themselves no longer embed. <!-- completed: 2026-05-14T11:54 -->
+
+**5b. Strip cafleet bindings from `skills/create-figure/SKILL.md` (sites 1-4):**
+
+- [x] Rewrite lines 12, 87, 90, 93 of `skills/create-figure/SKILL.md` to drop every `uv run --frozen --group research` / `cafleet repo` / `[dependency-groups].research` reference. The skill describes only the self-contained Python script and points at `.claude/rules/` for the host-project run command. After this edit, `git grep -nE "(uv run --(frozen|group|with)|cafleet repo|\[dependency-groups\])" -- skills/create-figure/SKILL.md` MUST return zero matches. <!-- completed: 2026-05-14T11:54 -->
+
+**5c. Strip cafleet bindings from `skills/research-presentation/SKILL.md` (sites 5-8):**
+
+- [x] Rewrite line 16 (Visual Reviewer cell): strip `from the cafleet repo root, equivalent to \`bun run agent-browser …\`` redundancy; keep the canonical agent-browser invocation only. <!-- completed: 2026-05-14T11:54 -->
+- [x] Rewrite line 228 (working-directory paragraph): replace "Calling-pane working directory: cafleet repo root" with the generic invariant "the calling pane needs a directory that contains the Slidev `package.json`". <!-- completed: 2026-05-14T11:54 -->
+- [x] Rewrite lines 230-231 (Server Startup steps 1-2): replace `mise //:bun-install` and `mise //:slidev <folder>/slide.md` with references to the host project's `.claude/rules/`. State the underlying invariant (`bun install --frozen-lockfile`, `bun run slidev <folder>/slide.md` PTY-wrapped) but not the cafleet-specific task names. After this edit, `git grep -n "mise //" -- skills/research-presentation/SKILL.md` MUST return zero matches. <!-- completed: 2026-05-14T11:54 -->
+
+**5d. Strip cafleet bindings from `skills/research-presentation/roles/director.md` (sites 9-10):**
+
+- [x] Rewrite line 123 (Start command table row): replace `mise //:slidev <folder>/slide.md` with a reference to the host project's `.claude/rules/` for the canonical Slidev launcher. State the underlying invariant (`bun run slidev --open false <slide>` PTY-wrapped via `script -qfc`) but not the mise task name. <!-- completed: 2026-05-14T11:54 -->
+- [x] Rewrite line 126 (Readiness check table row): drop "`agent-browser wait --load networkidle` is denied by repo permissions" — state the recommendation (`agent-browser wait` is discouraged; use `sleep` + open-retry) without referencing cafleet's `permissions.deny`. <!-- completed: 2026-05-14T11:54 -->
+
+**5e. Strip cafleet bindings from `skills/research-presentation/roles/visual-reviewer.md` (site 11):**
+
+- [x] Rewrite line 106: drop "the project's `settings.json` `permissions.deny` blocks `Bash(bun run agent-browser ... wait ...)`" — state the recommendation (`agent-browser wait` is unreliable and host projects typically block it; use `sleep` + open-retry) without naming cafleet's specific configuration. <!-- completed: 2026-05-14T11:54 -->
+
+**5f. Strip cafleet bindings from `skills/base-dir/SKILL.md` (site 12):**
+
+- [x] Rewrite line 84 (Gitignore handling item 1): replace "The cafleet repo's own `.gitignore` already excludes …" with a generic instruction to host projects (add `/.cafleet-base-dir.json` to the project `.gitignore`). The cafleet repo's own configuration becomes one example, not the subject of the sentence. <!-- completed: 2026-05-14T11:54 -->
+
+**5g. Verification:**
+
+- [x] Run `git grep -nE "(uv run --frozen --group research|mise //:slidev|mise //:bun-install)" -- skills/`. Expected: zero matches. <!-- completed: 2026-05-14T11:54 -->
+- [x] Run `git grep -n "cafleet repo root\|cafleet repo's\|cafleet checkout" -- skills/`. Expected: zero matches outside `design-docs/`. <!-- completed: 2026-05-14T11:54 -->
+- [x] Run `git grep -nE "denied by repo permissions|project's \`settings.json\` \`permissions.deny\` blocks" -- skills/`. Expected: zero matches. <!-- completed: 2026-05-14T11:54 -->
+- [x] Run `git grep -n "cafleet repo's own" -- skills/base-dir/SKILL.md`. Expected: zero matches. <!-- completed: 2026-05-14T11:54 -->
+- [x] Run `git grep -n "uv run --frozen --group research" -- .claude/rules/commands.md`. Expected: exactly one match (the new commands.md entry). <!-- completed: 2026-05-14T11:54 -->
+
 ---
 
 ## Changelog
@@ -242,4 +310,5 @@ All greps scope to **tracked files only** via `git ls-files` (or the equivalent 
 |------|---------|
 | 2026-05-14 | Initial draft. |
 | 2026-05-14 | Reviewer round 1 addressed. Fixed Progress count `0/19` → `0/18` (matched the 18 Implementation tasks after Step 4 expansion); dropped two non-edit Success Criteria bullets (`pyproject.toml [dependency-groups].research = ["matplotlib"]` is unchanged; `.claude/settings.json:31` is unchanged) — "X was not edited" is implicit in not having a §1-§6 entry; added a Step 4 verification grep for `~/.claude/skills/my-slidev/theme` against `skills/my-slidev/SKILL.md` and a companion SC qualifier so the §4 theme-path collapse is auditable; replaced §1 + Step 2 task 1's ambiguous "stranded blank line" prose with the concrete "delete lines 27-37 inclusive" instruction and an explicit post-edit shape; switched Step 4 task 3's `git grep` from BRE-`\|` alternation to a single literal `git grep -n "sync-skills" -- .` (the sibling token `sync_skills` does not appear in the codebase, so alternation is unnecessary). |
-| 2026-05-14 | Status promoted from `Draft` to `Approved` upon user approval relayed by the Director. Implementation steps verified actionable (no `[TBD]`, no standing `COMMENT(role)` issue markers, every task carries the `<!-- completed: -->` timestamp slot — 18 tasks × 1 slot each = 18 slots, plus the 1 example slot in the §Implementation header). |
+| 2026-05-14 | PR #71 user review surfaced the underlying principle — skills must be self-contained and environment-agnostic; project-specific run-glue belongs in `.claude/rules/`, not in skill bodies. The first-pass implementation of A2 had violated this principle by switching `skills/create-figure/SKILL.md` from `--with matplotlib` (self-bootstrapping) to `uv run --frozen --group research` (cafleet-bound). Broader `git grep` audit found 12 sites across 5 files with the same anti-pattern (4 newly-introduced + 8 pre-existing in `skills/research-presentation/**` and `skills/base-dir/SKILL.md`). Revised §2 to articulate the principle, added §2's site table covering all 12 sites, added Step 5 (Self-containment revision) with the 14 corrective tasks + verification greps, added a new Success Criterion enforcing the principle, bumped Progress from `18/18` to `18/32`. The cafleet-specific runner glue (`uv run --frozen --group research`, `mise //:bun-install`, `mise //:slidev`, working-directory invariant, `agent-browser wait` denial) moves to `.claude/rules/commands.md`. |
+| 2026-05-14 | Status promoted from `Draft` to `Approved` upon user approval relayed by the Director. Implementation steps verified actionable (no `[TBD]`, no standing `COMMENT(role)` issue markers, every task carries the `<!-- completed: 2026-05-14T11:54 -->` timestamp slot — 18 tasks × 1 slot each = 18 slots, plus the 1 example slot in the §Implementation header). |

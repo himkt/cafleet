@@ -9,7 +9,7 @@ description: >
 # Create Figure
 
 Generate matplotlib charts. Scripts, outputs, and data go in separate subdirectories under `figures/`.
-Execution uses the cafleet repo's pyproject.toml-managed `[dependency-groups].research` invocation: `uv run --frozen --group research python <script>`. This skill is repo-bound — it requires the calling pane's CWD to be inside the cafleet checkout (or any project whose `pyproject.toml` declares an equivalent `research` dependency group containing matplotlib).
+The skill writes a self-contained Python script that imports matplotlib. The run command is host-project-specific — refer to your project's `.claude/rules/` for the canonical Python invocation. Any environment that provides matplotlib will run the script.
 
 **Before writing any script, read the Chart Type Selection and Color Rules sections.** All charts in a deck share the same `C_BAR` / `C_BAR_SEC` palette regardless of data topic.
 
@@ -84,13 +84,13 @@ Key points:
 
 ### 2. Execute the script
 
-Run via `uv run --frozen --group research python <script>`. `uv` resolves matplotlib from the repo's `uv.lock` so the version is pinned and reproducible:
+Run the script with the Python invocation documented in your host project's `.claude/rules/`. This skill is invocation-agnostic — it only requires that the chosen environment provide matplotlib:
 
 ```
-uv run --frozen --group research python ${SRC_DIR}/script_name.py
+<project-python-runner> ${SRC_DIR}/script_name.py
 ```
 
-`--frozen` pins to `uv.lock` (no resolver run); `--group research` pulls matplotlib via the cafleet `pyproject.toml` `[dependency-groups].research` block. The skill is no longer self-bootstrapping in arbitrary projects — it assumes the calling pane is inside the cafleet repo (or a sibling project that ships an equivalent dependency group).
+The host project's rules document the project-specific runner (typical patterns include `uv run`, `python`, or a `mise` task wrapper). The skill itself does not name a runner.
 
 ### 3. Verify the result
 
