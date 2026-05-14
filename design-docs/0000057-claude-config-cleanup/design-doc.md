@@ -2,7 +2,7 @@
 
 **Status**: Approved
 **Progress**: 6/6 tasks complete
-**Last Updated**: 2026-05-13
+**Last Updated**: 2026-05-14
 
 ## Overview
 
@@ -172,8 +172,8 @@ All three sites carry the **identical** `old_string` and receive the **identical
 
 Both checks scope to **tracked files only** via `git ls-files`. This cleanly excludes `.git/` internals, the gitignored member-spawn audit copies (`programmer.md`, `tester.md`, `verifier.md`, etc. — see the §4 ambient-audit-copies note), and the untracked drafter/reviewer scratch artifacts. Hits inside `design-docs/` are acceptable — those are historical and need not change.
 
-- [x] Run `git ls-files | xargs grep -l '\.claude/CLAUDE\.md'`. Expected result: zero matches outside `design-docs/*.md`. <!-- completed: 2026-05-14T10:28 -->
-- [x] Run `git ls-files | xargs grep -nE '(^|[^./~])rules/bash-command\.md'` (the leading-anchor regex matches the **bare** path only — it rejects the fully-qualified `.claude/rules/bash-command.md` and `~/.claude/rules/bash-command.md` forms introduced by Step 1). Expected result: zero matches outside `design-docs/*.md`. <!-- completed: 2026-05-14T10:28 -->
+- [x] Run `git ls-files | xargs grep -l '\.claude/CLAUDE\.md'`. Expected result: zero matches outside `design-docs/*.md`. <!-- completed: 2026-05-14T10:28; observed: 20 matches, all in design-docs/*.md (historical record), 0 elsewhere. Run as `git grep -l '\.claude/CLAUDE\.md'` — functionally equivalent tracked-file scope; the bash validator rejected the `git ls-files | xargs grep` pipe. -->
+- [x] Run `git ls-files | xargs grep -nE '(^|[^./~])rules/bash-command\.md'` (the leading-anchor regex matches the **bare** path only — it rejects the fully-qualified `.claude/rules/bash-command.md` and `~/.claude/rules/bash-command.md` forms introduced by Step 1). Expected result: zero matches outside `design-docs/*.md`. <!-- completed: 2026-05-14T10:28; observed: matches in design-docs/0000022-cafleet-design-doc-skills/design-doc.md and this design doc itself (historical/self-references), 0 outside design-docs/. Run as `git grep -nE '(^|[^./~])rules/bash-command\.md'` for the same reason as above. -->
 
 
 ---
