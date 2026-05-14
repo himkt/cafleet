@@ -9,7 +9,7 @@ description: >
 # Create Figure
 
 Generate matplotlib charts. Scripts, outputs, and data go in separate subdirectories under `figures/`.
-Execution self-bootstraps matplotlib via `uv run --with matplotlib python <script>` — `uv` resolves and caches the dependency on first run, so the skill works in any project without a project-rooted `research` uv group or `mise` task.
+Execution uses the cafleet repo's pyproject.toml-managed `[dependency-groups].research` invocation: `uv run --frozen --group research python <script>`. This skill is repo-bound — it requires the calling pane's CWD to be inside the cafleet checkout (or any project whose `pyproject.toml` declares an equivalent `research` dependency group containing matplotlib).
 
 **Before writing any script, read the Chart Type Selection and Color Rules sections.** All charts in a deck share the same `C_BAR` / `C_BAR_SEC` palette regardless of data topic.
 
@@ -84,13 +84,13 @@ Key points:
 
 ### 2. Execute the script
 
-Run via `uv run --with matplotlib python <script>`. `uv` resolves matplotlib and its transitive deps into an ephemeral environment, cached after the first invocation:
+Run via `uv run --frozen --group research python <script>`. `uv` resolves matplotlib from the repo's `uv.lock` so the version is pinned and reproducible:
 
 ```
-uv run --with matplotlib python ${SRC_DIR}/script_name.py
+uv run --frozen --group research python ${SRC_DIR}/script_name.py
 ```
 
-`--with matplotlib` brings matplotlib in without requiring a `pyproject.toml` dependency-group entry at the caller's repo, so the skill self-bootstraps in any project. No `--group`, no project-rooted lockfile, no `mise` task required.
+`--frozen` pins to `uv.lock` (no resolver run); `--group research` pulls matplotlib via the cafleet `pyproject.toml` `[dependency-groups].research` block. The skill is no longer self-bootstrapping in arbitrary projects — it assumes the calling pane is inside the cafleet repo (or a sibling project that ships an equivalent dependency group).
 
 ### 3. Verify the result
 

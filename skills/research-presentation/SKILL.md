@@ -11,7 +11,7 @@ Create a Slidev presentation and reading transcript from an existing research re
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director** | Main Claude | Bootstrap CAFleet session, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
-| **Presentation** | claude pane (loads Skill(my-slidev) + Skill(create-figure)) | Create Slidev presentation from report using `/my-slidev` | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
+| **Presentation** | claude pane (loads Skill(cafleet:my-slidev) + Skill(cafleet:create-figure)) | Create Slidev presentation from report using `/my-slidev` | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
 | **Transcript** | claude pane | Create reading transcript with 1:1 slide correspondence | Invent data, modify report, conduct research | [roles/transcript.md](roles/transcript.md) |
 | **Visual Reviewer** | claude pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`bun run agent-browser ...` from the cafleet repo root, equivalent to `bun run agent-browser ...`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
 
@@ -28,7 +28,7 @@ The Director is the root agent of a CAFleet session — bootstrapped automatical
 ```text
 User
  +-- Director (main Claude — runs cafleet session create, cafleet member create, runs Slidev background server)
-      +-- presentation (claude pane — authors slide.md; loads Skill(my-slidev), Skill(create-figure))
+      +-- presentation (claude pane — authors slide.md; loads Skill(cafleet:my-slidev), Skill(cafleet:create-figure))
       +-- transcript   (claude pane — authors transcript.md)
       +-- vr-batch-<start> (claude pane — captures + reports on one slide batch; per-batch spawn/delete)
 ```
@@ -120,8 +120,8 @@ ROLE DEFINITION: Open [INSERT abs path to roles/presentation.md] with the Read t
 
 Load these skills at startup:
 - Skill(cafleet) — for the broker primitives and bash-via-Director routing
-- Skill(my-slidev) — for Slidev authoring layouts and rules
-- Skill(create-figure) — if the report includes data that would render better as a chart
+- Skill(cafleet:my-slidev) — for Slidev authoring layouts and rules
+- Skill(cafleet:create-figure) — if the report includes data that would render better as a chart
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}

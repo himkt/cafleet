@@ -341,7 +341,7 @@ Do NOT use raw `tmux kill-pane` or `tmux send-keys` at any point — `cafleet me
 
 ### web-researcher
 
-This skill ships an embedded agent spec for parallel web research that returns structured summaries with sources. The spec is reproduced verbatim below so it is reachable from both Claude Code (`Skill(research-report)` then dispatch via `Agent`) and codex (via plugin auto-discovery — see *Dispatching this agent (codex inline-follow)* and *Dispatching this agent (codex member-spawn)* below).
+This skill ships an embedded agent spec for parallel web research that returns structured summaries with sources. The spec is reproduced verbatim below so it is reachable from both Claude Code (`Skill(cafleet:research-report)` then dispatch via `Agent`) and codex (via plugin auto-discovery — see *Dispatching this agent (codex inline-follow)* and *Dispatching this agent (codex member-spawn)* below).
 
     ---
     name: web-researcher
