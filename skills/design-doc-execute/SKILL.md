@@ -397,7 +397,7 @@ COMMUNICATION PROTOCOL:
 
 IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
 IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.
-IMPORTANT: Read and follow rules/bash-command.md for all Bash commands.
+IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.
 
 Start by reading the design document. Then wait for the Director to assign your first step.
 ```
@@ -442,7 +442,7 @@ COMMUNICATION PROTOCOL:
 IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
 IMPORTANT: Do NOT write implementation code — only test code.
 IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.
-IMPORTANT: Read and follow rules/bash-command.md for all Bash commands.
+IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.
 
 Start by reading the design document. Then wait for the Director to assign your first step.
 ```
@@ -488,7 +488,7 @@ COMMUNICATION PROTOCOL:
 
 IMPORTANT: Do NOT commit code or modify implementation/test files.
 IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.
-IMPORTANT: Read and follow rules/bash-command.md for all Bash commands.
+IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.
 
 Start by reading the design document and discovering available tools.
 Then wait for the Director to assign your first verification task.

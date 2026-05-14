@@ -1,7 +1,7 @@
 # 0000057 — Claude Configuration Cleanup
 
 **Status**: Approved
-**Progress**: 0/6 tasks complete
+**Progress**: 3/6 tasks complete
 **Last Updated**: 2026-05-13
 
 ## Overview
@@ -159,9 +159,9 @@ Per `.claude/rules/design-doc-numbering.md`, documentation surface changes come 
 
 All three sites carry the **identical** `old_string` and receive the **identical** `new_string`. Implementation hint: a single `Edit` call with `replace_all=true` resolves all three sites atomically and is line-number-shift safe. If the implementer prefers per-site review, the three tasks below are equivalent — the replacement is single-line to single-line, so line numbers remain stable across the three edits.
 
-- [ ] Edit `skills/design-doc-execute/SKILL.md:400` (Programmer spawn prompt) — replace `IMPORTANT: Read and follow rules/bash-command.md for all Bash commands.` with `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` <!-- completed: -->
-- [ ] Edit `skills/design-doc-execute/SKILL.md:445` (Tester spawn prompt) — replace the identical line with the same replacement string. <!-- completed: -->
-- [ ] Edit `skills/design-doc-execute/SKILL.md:491` (Verifier spawn prompt) — replace the identical line with the same replacement string. <!-- completed: -->
+- [x] Edit `skills/design-doc-execute/SKILL.md:400` (Programmer spawn prompt) — replace `IMPORTANT: Read and follow rules/bash-command.md for all Bash commands.` with `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` <!-- completed: 2026-05-14T10:25 -->
+- [x] Edit `skills/design-doc-execute/SKILL.md:445` (Tester spawn prompt) — replace the identical line with the same replacement string. <!-- completed: 2026-05-14T10:25 -->
+- [x] Edit `skills/design-doc-execute/SKILL.md:491` (Verifier spawn prompt) — replace the identical line with the same replacement string. <!-- completed: 2026-05-14T10:25 -->
 
 
 ### Step 2: Delete `.claude/CLAUDE.md`
