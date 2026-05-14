@@ -10,15 +10,15 @@ Second-pass configuration cleanup picking up where design 0000057 left off. Remo
 
 ## Success Criteria
 
-- [ ] `mise.toml` no longer contains a `[tasks.sync-skills]` block.
-- [ ] The five home-dir mirrors at `~/.claude/skills/{create-figure,my-slidev,research-presentation,research-report,base-dir}/` no longer exist on the maintainer machine (operator-side action).
-- [ ] Every unprefixed `Skill(<name>)` reference in `skills/` body text — where `<name>` is one of `create-figure`, `my-slidev`, `research-presentation`, `research-report`, `base-dir` — has been rewritten to `Skill(cafleet:<name>)`.
-- [ ] `skills/create-figure/SKILL.md` no longer contains the string `--with matplotlib`; every execution example uses `uv run --frozen --group research python <script>`.
-- [ ] `skills/my-slidev/SKILL.md` headmatter template (lines ~14-17) and theme-path notes (lines ~207, ~225) reference the plugin install path (`~/.claude/plugins/cache/cafleet/cafleet/<version>/skills/my-slidev/theme`) as the single authoritative location; the `~/.claude/skills/my-slidev/theme` (home-dir working-copy) branch is removed. Verified by `git grep -n "~/.claude/skills/my-slidev/theme" -- skills/my-slidev/SKILL.md` returning zero matches (Step 4 verification task).
-- [ ] `.gitignore` no longer contains the `!.claude/agents` override line.
-- [ ] `git grep` for `uv run --with matplotlib` across tracked files outside `design-docs/` returns zero matches.
-- [ ] `git grep` for `sync-skills` across tracked files outside `design-docs/` returns zero matches.
-- [ ] Zero deprecation notices, removal markers, or "see design 0000058" pointers appear in any tracked file outside `design-docs/` (per `~/.claude/rules/removal.md`).
+- [x] `mise.toml` no longer contains a `[tasks.sync-skills]` block.
+- [x] The five home-dir mirrors at `~/.claude/skills/{create-figure,my-slidev,research-presentation,research-report,base-dir}/` no longer exist on the maintainer machine (operator-side action).
+- [x] Every unprefixed `Skill(<name>)` reference in `skills/` body text — where `<name>` is one of `create-figure`, `my-slidev`, `research-presentation`, `research-report`, `base-dir` — has been rewritten to `Skill(cafleet:<name>)`.
+- [x] `skills/create-figure/SKILL.md` no longer contains the string `--with matplotlib`; every execution example uses `uv run --frozen --group research python <script>`.
+- [x] `skills/my-slidev/SKILL.md` headmatter template (lines ~14-17) and theme-path notes (lines ~207, ~225) reference the plugin install path (`~/.claude/plugins/cache/cafleet/cafleet/<version>/skills/my-slidev/theme`) as the single authoritative location; the `~/.claude/skills/my-slidev/theme` (home-dir working-copy) branch is removed. Verified by `git grep -n "~/.claude/skills/my-slidev/theme" -- skills/my-slidev/SKILL.md` returning zero matches (Step 4 verification task).
+- [x] `.gitignore` no longer contains the `!.claude/agents` override line.
+- [x] `git grep` for `uv run --with matplotlib` across tracked files outside `design-docs/` returns zero matches.
+- [x] `git grep` for `sync-skills` across tracked files outside `design-docs/` returns zero matches.
+- [x] Zero deprecation notices, removal markers, or "see design 0000058" pointers appear in any tracked file outside `design-docs/` (per `~/.claude/rules/removal.md`).
 
 
 ---
