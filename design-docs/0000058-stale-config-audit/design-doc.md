@@ -1,8 +1,8 @@
 # 0000058 — Stale Config Audit
 
 **Status**: Approved
-**Progress**: 12/18 tasks complete
-**Last Updated**: 2026-05-14
+**Progress**: 18/18 tasks complete
+**Last Updated**: 2026-05-14T11:41
 
 ## Overview
 
@@ -227,12 +227,12 @@ Expect each `rm -rf` to be routed through the Director via `cafleet member exec`
 
 All greps scope to **tracked files only** via `git ls-files` (or the equivalent `git grep` which respects tracked-file scope). Hits inside `design-docs/` are acceptable and expected — those are the historical record and are preserved per `~/.claude/rules/removal.md`.
 
-- [ ] Run `git grep -nE 'Skill\((my-slidev|create-figure|research-report|research-presentation|base-dir)\)' -- skills/`. Expected: zero matches. Any hit indicates an unprefixed `Skill(...)` cross-ref that Step 1 missed. <!-- completed: -->
-- [ ] Run `git grep -n "uv run --with matplotlib" -- skills/ .claude/ docs/ ARCHITECTURE.md README.md cafleet/ admin/`. Expected: zero matches outside `design-docs/`. <!-- completed: -->
-- [ ] Run `git grep -n "sync-skills" -- .` and verify every remaining match is inside `design-docs/*.md`. Zero matches outside `design-docs/`. (The sibling token `sync_skills` was considered and dropped — it does not appear in the codebase, so a single literal grep is enough and avoids the BRE-vs-ERE alternation question.) <!-- completed: -->
-- [ ] Run `git grep -n "~/.claude/skills/my-slidev/theme" -- skills/my-slidev/SKILL.md`. Expected: zero matches. Confirms the §4 theme-path collapse removed every reference to the home-dir working-copy install location. <!-- completed: -->
-- [ ] Run `git grep -n "!\.claude/agents" -- .gitignore`. Expected: zero matches. <!-- completed: -->
-- [ ] Confirm the five home-dir mirrors are gone via five `test ! -d ~/.claude/skills/<name>` checks (or a single `ls ~/.claude/skills/` showing only `update-readme/`). <!-- completed: -->
+- [x] Run `git grep -nE 'Skill\((my-slidev|create-figure|research-report|research-presentation|base-dir)\)' -- skills/`. Expected: zero matches. Any hit indicates an unprefixed `Skill(...)` cross-ref that Step 1 missed. <!-- completed: 2026-05-14T11:41 -->
+- [x] Run `git grep -n "uv run --with matplotlib" -- skills/ .claude/ docs/ ARCHITECTURE.md README.md cafleet/ admin/`. Expected: zero matches outside `design-docs/`. <!-- completed: 2026-05-14T11:41 -->
+- [x] Run `git grep -n "sync-skills" -- .` and verify every remaining match is inside `design-docs/*.md`. Zero matches outside `design-docs/`. (The sibling token `sync_skills` was considered and dropped — it does not appear in the codebase, so a single literal grep is enough and avoids the BRE-vs-ERE alternation question.) <!-- completed: 2026-05-14T11:41 -->
+- [x] Run `git grep -n "~/.claude/skills/my-slidev/theme" -- skills/my-slidev/SKILL.md`. Expected: zero matches. Confirms the §4 theme-path collapse removed every reference to the home-dir working-copy install location. <!-- completed: 2026-05-14T11:41 -->
+- [x] Run `git grep -n "!\.claude/agents" -- .gitignore`. Expected: zero matches. <!-- completed: 2026-05-14T11:41 -->
+- [x] Confirm the five home-dir mirrors are gone via five `test ! -d ~/.claude/skills/<name>` checks (or a single `ls ~/.claude/skills/` showing only `update-readme/`). <!-- completed: 2026-05-14T11:41 -->
 
 ---
 
