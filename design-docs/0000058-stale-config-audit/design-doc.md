@@ -1,7 +1,7 @@
 # 0000058 — Stale Config Audit
 
 **Status**: Approved
-**Progress**: 7/18 tasks complete
+**Progress**: 12/18 tasks complete
 **Last Updated**: 2026-05-14
 
 ## Overview
@@ -217,11 +217,11 @@ Per `.claude/rules/design-doc-numbering.md`, documentation updates come first. T
 
 Expect each `rm -rf` to be routed through the Director via `cafleet member exec` if the spawned Programmer's Bash allow-list does not cover `~/.claude/skills/` paths. The user's machine state, not the repo, is being mutated; the corresponding Success-Criteria bullet is verified by post-step `ls ~/.claude/skills/` listing only `update-readme/`.
 
-- [ ] Run `rm -rf ~/.claude/skills/create-figure`. Verify with `test ! -d ~/.claude/skills/create-figure`. <!-- completed: -->
-- [ ] Run `rm -rf ~/.claude/skills/my-slidev`. Verify with `test ! -d ~/.claude/skills/my-slidev`. <!-- completed: -->
-- [ ] Run `rm -rf ~/.claude/skills/research-presentation`. Verify with `test ! -d ~/.claude/skills/research-presentation`. <!-- completed: -->
-- [ ] Run `rm -rf ~/.claude/skills/research-report`. Verify with `test ! -d ~/.claude/skills/research-report`. <!-- completed: -->
-- [ ] Run `rm -rf ~/.claude/skills/base-dir`. Verify with `test ! -d ~/.claude/skills/base-dir`. <!-- completed: -->
+- [x] Run `rm -rf ~/.claude/skills/create-figure`. Verify with `test ! -d ~/.claude/skills/create-figure`. <!-- completed: 2026-05-14T11:39 -->
+- [x] Run `rm -rf ~/.claude/skills/my-slidev`. Verify with `test ! -d ~/.claude/skills/my-slidev`. <!-- completed: 2026-05-14T11:39 -->
+- [x] Run `rm -rf ~/.claude/skills/research-presentation`. Verify with `test ! -d ~/.claude/skills/research-presentation`. <!-- completed: 2026-05-14T11:39 -->
+- [x] Run `rm -rf ~/.claude/skills/research-report`. Verify with `test ! -d ~/.claude/skills/research-report`. <!-- completed: 2026-05-14T11:39 -->
+- [x] Run `rm -rf ~/.claude/skills/base-dir`. Verify with `test ! -d ~/.claude/skills/base-dir`. <!-- completed: 2026-05-14T11:39 -->
 
 ### Step 4: Verification
 
