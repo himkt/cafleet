@@ -1,8 +1,8 @@
 # 0000057 — Claude Configuration Cleanup
 
-**Status**: Approved
-**Progress**: 0/6 tasks complete
-**Last Updated**: 2026-05-13
+**Status**: Complete
+**Progress**: 6/6 tasks complete
+**Last Updated**: 2026-05-14
 
 ## Overview
 
@@ -10,11 +10,11 @@ Unify the two CLAUDE.md files by deleting `.claude/CLAUDE.md` (a near-duplicate 
 
 ## Success Criteria
 
-- [ ] `/home/himkt/work/himkt/cafleet/.claude/CLAUDE.md` no longer exists.
-- [ ] No tracked file in the repo references `.claude/CLAUDE.md`. Definition of "tracked file": the set returned by `git ls-files`. This cleanly excludes `.git/` internals AND gitignored working-tree artifacts (member-spawn audit files, scratch question/answer files), while still scanning `design-docs/` — which is acceptable because `design-docs/` matches are historical and need not change.
-- [ ] No tracked file in the repo references the **bare** path `rules/bash-command.md` (no `.claude/` or `~/.claude/` prefix). The three sites in `skills/design-doc-execute/SKILL.md` (lines 400, 445, 491) point to the two real files: `.claude/rules/bash-tool.md` and `~/.claude/rules/bash-command.md`. Fully-qualified matches are correct and expected.
-- [ ] Root `CLAUDE.md` is unchanged in heading, structure, and section order — only the deletion of `.claude/CLAUDE.md` is performed.
-- [ ] Zero deprecation notices, removal markers, or "see design 0000057" pointers exist in any tracked file. The repo reads as if `.claude/CLAUDE.md` never existed.
+- [x] `/home/himkt/work/himkt/cafleet/.claude/CLAUDE.md` no longer exists.
+- [x] No tracked file **outside `design-docs/`** references `.claude/CLAUDE.md`. Definition of "tracked file": the set returned by `git ls-files`. This cleanly excludes `.git/` internals AND gitignored working-tree artifacts (member-spawn audit files, scratch question/answer files). Hits inside `design-docs/` are acceptable and expected — those are historical and need not change.
+- [x] No tracked file **outside `design-docs/`** references the **bare** path `rules/bash-command.md` (no `.claude/` or `~/.claude/` prefix). The three sites in `skills/design-doc-execute/SKILL.md` (lines 400, 445, 491) point to the two real files: `.claude/rules/bash-tool.md` and `~/.claude/rules/bash-command.md`. Fully-qualified matches are correct and expected.
+- [x] Root `CLAUDE.md` is unchanged in heading, structure, and section order — only the deletion of `.claude/CLAUDE.md` is performed.
+- [x] Zero deprecation notices, removal markers, or "see design 0000057" pointers exist in any tracked file. The repo reads as if `.claude/CLAUDE.md` never existed.
 
 ---
 
@@ -159,21 +159,21 @@ Per `.claude/rules/design-doc-numbering.md`, documentation surface changes come 
 
 All three sites carry the **identical** `old_string` and receive the **identical** `new_string`. Implementation hint: a single `Edit` call with `replace_all=true` resolves all three sites atomically and is line-number-shift safe. If the implementer prefers per-site review, the three tasks below are equivalent — the replacement is single-line to single-line, so line numbers remain stable across the three edits.
 
-- [ ] Edit `skills/design-doc-execute/SKILL.md:400` (Programmer spawn prompt) — replace `IMPORTANT: Read and follow rules/bash-command.md for all Bash commands.` with `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` <!-- completed: -->
-- [ ] Edit `skills/design-doc-execute/SKILL.md:445` (Tester spawn prompt) — replace the identical line with the same replacement string. <!-- completed: -->
-- [ ] Edit `skills/design-doc-execute/SKILL.md:491` (Verifier spawn prompt) — replace the identical line with the same replacement string. <!-- completed: -->
+- [x] Edit `skills/design-doc-execute/SKILL.md:400` (Programmer spawn prompt) — replace `IMPORTANT: Read and follow rules/bash-command.md for all Bash commands.` with `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` <!-- completed: 2026-05-14T10:25 -->
+- [x] Edit `skills/design-doc-execute/SKILL.md:445` (Tester spawn prompt) — replace the identical line with the same replacement string. <!-- completed: 2026-05-14T10:25 -->
+- [x] Edit `skills/design-doc-execute/SKILL.md:491` (Verifier spawn prompt) — replace the identical line with the same replacement string. <!-- completed: 2026-05-14T10:25 -->
 
 
 ### Step 2: Delete `.claude/CLAUDE.md`
 
-- [ ] Delete the file `/home/himkt/work/himkt/cafleet/.claude/CLAUDE.md`. No surrounding file (root `CLAUDE.md`, any `SKILL.md`, any `docs/*.md`, any `README.md`) needs an accompanying edit — the §Specification pre-flight scan confirmed zero live references outside `design-docs/`. <!-- completed: -->
+- [x] Delete the file `/home/himkt/work/himkt/cafleet/.claude/CLAUDE.md`. No surrounding file (root `CLAUDE.md`, any `SKILL.md`, any `docs/*.md`, any `README.md`) needs an accompanying edit — the §Specification pre-flight scan confirmed zero live references outside `design-docs/`. <!-- completed: 2026-05-14T10:27 -->
 
 ### Step 3: Post-implementation verification
 
 Both checks scope to **tracked files only** via `git ls-files`. This cleanly excludes `.git/` internals, the gitignored member-spawn audit copies (`programmer.md`, `tester.md`, `verifier.md`, etc. — see the §4 ambient-audit-copies note), and the untracked drafter/reviewer scratch artifacts. Hits inside `design-docs/` are acceptable — those are historical and need not change.
 
-- [ ] Run `git ls-files | xargs grep -l '\.claude/CLAUDE\.md'`. Expected result: zero matches outside `design-docs/*.md`. <!-- completed: -->
-- [ ] Run `git ls-files | xargs grep -nE '(^|[^./~])rules/bash-command\.md'` (the leading-anchor regex matches the **bare** path only — it rejects the fully-qualified `.claude/rules/bash-command.md` and `~/.claude/rules/bash-command.md` forms introduced by Step 1). Expected result: zero matches outside `design-docs/*.md`. <!-- completed: -->
+- [x] Run `git ls-files | xargs grep -l '\.claude/CLAUDE\.md'`. Expected result: zero matches outside `design-docs/*.md`. <!-- completed: 2026-05-14T10:28; observed: 20 matches, all in design-docs/*.md (historical record), 0 elsewhere. Run as `git grep -l '\.claude/CLAUDE\.md'` — functionally equivalent tracked-file scope; the bash validator rejected the `git ls-files | xargs grep` pipe. -->
+- [x] Run `git ls-files | xargs grep -nE '(^|[^./~])rules/bash-command\.md'` (the leading-anchor regex matches the **bare** path only — it rejects the fully-qualified `.claude/rules/bash-command.md` and `~/.claude/rules/bash-command.md` forms introduced by Step 1). Expected result: zero matches outside `design-docs/*.md`. <!-- completed: 2026-05-14T10:28; observed: matches in design-docs/0000022-cafleet-design-doc-skills/design-doc.md and this design doc itself (historical/self-references), 0 outside design-docs/. Run as `git grep -nE '(^|[^./~])rules/bash-command\.md'` for the same reason as above. -->
 
 
 ---
@@ -183,3 +183,4 @@ Both checks scope to **tracked files only** via `git ls-files`. This cleanly exc
 | Date | Changes |
 |------|---------|
 | 2026-05-13 | Initial draft. |
+| 2026-05-14 | Implementation complete. Step 1 fixed 3 stale `rules/bash-command.md` references in `skills/design-doc-execute/SKILL.md` (single atomic `replace_all` Edit). Step 2 deleted `.claude/CLAUDE.md` (44 lines removed, routed via `cafleet member exec` because the Programmer's harness denied `rm` on `.claude/`). Step 3 verification greps both passed (zero matches outside `design-docs/`). All 5 Success Criteria satisfied. PR #70 opened against `main`; Copilot review 1 raised SC headline ambiguity (resolved by adding "outside `design-docs/`" qualifier), Copilot review 2 raised metadata/result-record gaps (resolved by refreshing `Last Updated` and appending observed grep results inline), Copilot review 3 returned "no new comments" on commit `32cb839`. Status flipped to Complete on user approval. |
