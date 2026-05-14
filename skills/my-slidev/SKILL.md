@@ -224,7 +224,7 @@ This skill ships an embedded agent spec for generating a complete Slidev present
     - Always start with a `cover` slide
     - Use `bullets` layout by default for content slides
     - Add presenter notes with expanded talking points from the source content
-    - Use the literal `theme:` path documented in the embedding skill's headmatter template — `~/.claude/plugins/cache/cafleet/cafleet/<version>/skills/my-slidev/theme`. The path is a fixed, documented location; do NOT try to derive it dynamically (Skill(cafleet:base-dir) resolves a CWD-based working directory, not the install location of the calling skill).
+    - Use the literal `theme:` path documented in the embedding skill's headmatter template — `<cafleet-plugin-install-dir>/skills/my-slidev/theme`. Substitute the absolute path to the installed cafleet plugin directory on this machine (Claude Code: `~/.claude/plugins/cache/cafleet/cafleet/<version>/`; Codex: as reported by `codex plugin list`). The path is a fixed, documented location; do NOT try to derive it dynamically (Skill(cafleet:base-dir) resolves a CWD-based working directory, not the install location of the calling skill).
     - All slides must pass content overflow review — no slide may have content that exceeds its viewport
     - Citations must be numbered sequentially by order of first appearance
     - Every citation in body must have a reference; every reference must be cited in body
