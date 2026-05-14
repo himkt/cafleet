@@ -47,7 +47,7 @@ Do NOT embed long role definitions, full skill specs, or any other multi-page bl
 2. In the spawn prompt, write a short instruction like `ROLE DEFINITION: Open <abs path> with the Read tool BEFORE any other action.`
 3. Keep the spawn prompt under ~2 KB total. Reserve it for: role-file path, skill-load list, session/agent/director IDs, the operational context (output dir, current date, user request), and "start now" cue.
 
-This applies to every CAFleet-native team skill (`/research-report`, `/research-presentation`, `/design-doc-create`, `/design-doc-execute`, `/design-doc-interview`, and any future skill). The member loads the role file via `Read` on its first turn; the role files live in the skill directory and are stable, so path-by-reference is safe.
+This applies to every CAFleet-native team skill (`/cafleet:research-report`, `/cafleet:research-presentation`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`, and any future skill). The member loads the role file via `Read` on its first turn; the role files live in the skill directory and are stable, so path-by-reference is safe.
 
 **Scratch and audit files**: Spawn-related scratch (audit re-renders, working notes) MUST be written under `${BASE}` (resolved by `Skill(cafleet:base-dir)`) or under the skill's resolved output directory — never `/tmp`. The audit-file convention (`${BASE}/<role>.md`) is canonical; per-spawn temporary files have no place in `/tmp` because `${BASE}` is the project-local scratch root and keeps everything inspectable from one place.
 

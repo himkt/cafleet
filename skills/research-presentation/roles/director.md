@@ -103,7 +103,7 @@ Director → User: "The presentation member suggests modifying report.md: [reaso
                   Please edit the report and re-run, or I can proceed with the current structure."
 ```
 
-The user (or a re-run of `/research-report`) owns report modifications.
+The user (or a re-run of `/cafleet:research-report`) owns report modifications.
 
 ## User Delegation
 
@@ -120,10 +120,10 @@ The Director owns the Slidev dev server lifecycle. The Visual Reviewer does not 
 
 | Aspect | Detail |
 |--------|--------|
-| Start command | `mise //:slidev <folder>/slide.md` (PTY-wrapped via `script -qfc 'bun run slidev --open false ${usage_slide}'`) |
+| Start command | Project-specific Slidev launcher from your host project's `.claude/rules/`. The underlying invocation is `bun run slidev --open false <slide>` PTY-wrapped via `script -qfc 'bun run slidev --open false <slide>' /dev/null` so Slidev does not exit on detecting a non-TTY. |
 | Execution | Bash tool with `run_in_background: true` |
 | Default URL | `http://localhost:3030` |
-| Readiness check | Visual Reviewer confirms via `bun run agent-browser --session vr-batch-<start> open <server_url>/1` followed by a `bun run agent-browser --session vr-batch-<start> snapshot` retry loop (sleep 3 seconds between retries via `sleep 3`, up to 3 attempts) — `agent-browser wait --load networkidle` is denied by repo permissions and is not used. |
+| Readiness check | Visual Reviewer confirms via `bun run agent-browser --session vr-batch-<start> open <server_url>/1` followed by a `bun run agent-browser --session vr-batch-<start> snapshot` retry loop (sleep 3 seconds between retries via `sleep 3`, up to 3 attempts). `agent-browser wait` (`wait --load networkidle`, `wait N`) is discouraged — it is unreliable across renderers and slow CI environments. Use sleep + open-retry instead. Host projects may additionally block the `wait` form via their permissions rules; refer to your host project's `.claude/rules/` for any project-specific constraint. |
 | Shutdown | Kill the background Bash task after all visual review rounds complete |
 
 **Fallback chain:**

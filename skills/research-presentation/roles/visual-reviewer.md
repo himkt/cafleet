@@ -103,7 +103,7 @@ Parse `slide.md` and count `\n---\n` separators that are **not** part of the YAM
 
 ### Prohibited Commands
 
-- `agent-browser wait` is **prohibited entirely** — the project's `settings.json` `permissions.deny` blocks `Bash(bun run agent-browser ... wait ...)`, so any `wait` form (including `wait --load networkidle` and `wait N`) will be rejected. For all readiness checks and pauses, use shell `sleep N` (literal integer seconds, e.g., `sleep 2`) plus `open` retry loops. If you genuinely need page-load detection, repeat the `screenshot` capture and retry on blank rather than relying on `wait`.
+- `agent-browser wait` is **prohibited** — `wait --load networkidle` and `wait N` are unreliable across renderers and slow CI environments, and host projects typically block them via `permissions.deny` (refer to your host project's permissions rules). Treat any `wait` form as unavailable. For all readiness checks and pauses, use shell `sleep N` (literal integer seconds, e.g., `sleep 2`) plus `open` retry loops. If you genuinely need page-load detection, repeat the `screenshot` capture and retry on blank rather than relying on `wait`.
 - `agent-browser eval *` — prohibited in the VR role. Screenshot is the source of truth.
 
 ### Per-Slide Capture

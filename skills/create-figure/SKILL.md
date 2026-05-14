@@ -3,13 +3,13 @@ name: create-figure
 description: >
   Create data visualizations and charts using matplotlib. Triggered when user
   asks to create a chart, plot, graph, or visualize data. Also invokable via
-  /create-figure. Do NOT use plt.show() — always save to PNG files.
+  /cafleet:create-figure. Do NOT use plt.show() — always save to PNG files.
 ---
 
 # Create Figure
 
 Generate matplotlib charts. Scripts, outputs, and data go in separate subdirectories under `figures/`.
-Execution self-bootstraps matplotlib via `uv run --with matplotlib python <script>` — `uv` resolves and caches the dependency on first run, so the skill works in any project without a project-rooted `research` uv group or `mise` task.
+The skill writes a self-contained Python script that imports matplotlib. The run command is host-project-specific — refer to your project's `.claude/rules/` for the canonical Python invocation. Any environment that provides matplotlib will run the script.
 
 **Before writing any script, read the Chart Type Selection and Color Rules sections.** All charts in a deck share the same `C_BAR` / `C_BAR_SEC` palette regardless of data topic.
 
@@ -23,7 +23,7 @@ Execution self-bootstraps matplotlib via `uv run --with matplotlib python <scrip
 
 **Resolve `${BASE}` in this order:**
 
-1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., `/research-presentation` passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
+1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., `/cafleet:research-presentation` passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
 2. **Otherwise**: Load `Skill(cafleet:base-dir)` and follow its procedure (no path argument; CWD-based inference applies). Use the resolved `${BASE}` verbatim. Figures, scripts, and data land under `${BASE}/figures/{src,output,data}` regardless of whether `${BASE}` is a git-repo root, `/tmp/claude-code`, or any other path. If you want figures kept out of a repo tree, pick `/tmp/claude-code` (or any non-repo path) at base-dir resolution time — `create-figure` does NOT second-guess base-dir's answer.
 
 **Derive the subdirectories** (each is a literal path string you will embed in the script):
@@ -84,13 +84,13 @@ Key points:
 
 ### 2. Execute the script
 
-Run via `uv run --with matplotlib python <script>`. `uv` resolves matplotlib and its transitive deps into an ephemeral environment, cached after the first invocation:
+Run the script with the Python invocation documented in your host project's `.claude/rules/`. This skill is invocation-agnostic — it only requires that the chosen environment provide matplotlib:
 
 ```
-uv run --with matplotlib python ${SRC_DIR}/script_name.py
+<project-python-runner> ${SRC_DIR}/script_name.py
 ```
 
-`--with matplotlib` brings matplotlib in without requiring a `pyproject.toml` dependency-group entry at the caller's repo, so the skill self-bootstraps in any project. No `--group`, no project-rooted lockfile, no `mise` task required.
+The host project's rules document the project-specific runner (typical patterns include `uv run`, `python`, or a `mise` task wrapper). The skill itself does not name a runner.
 
 ### 3. Verify the result
 

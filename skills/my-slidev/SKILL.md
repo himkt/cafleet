@@ -11,10 +11,12 @@ Theme location: `theme/` inside this skill's directory. For Slidev syntax, refer
 
 ```yaml
 ---
-theme: ~/.claude/skills/my-slidev/theme  # working-copy install (skill present under ~/.claude/skills/)
-# For plugin-only installs (no working copy in ~/.claude/skills/), use the plugin's installed path instead:
-# theme: ~/.claude/plugins/cache/cafleet/cafleet/<version>/skills/my-slidev/theme
-# Replace <version> with the installed cafleet plugin version, or run `claude plugin list` to find it.
+theme: <cafleet-plugin-install-dir>/skills/my-slidev/theme
+# Replace <cafleet-plugin-install-dir> with the absolute path to the installed cafleet plugin's directory on this machine.
+# Discovery hints:
+#   - Claude Code:  ~/.claude/plugins/cache/cafleet/cafleet/<version>/   (run `claude plugin list` to find <version>)
+#   - Codex:        the path printed by `codex plugin list` for the cafleet plugin
+# The skill is install-location-agnostic; the absolute path resolves at Slidev render time.
 title: <Presentation Title>
 author: <Author Name>
 fonts:
@@ -88,7 +90,7 @@ After generating all slides, check every slide:
 
 1. **No duplicate titles** — slide heading IS the chart title
 2. **Caption**: `<div class="figure-caption">Source: [N]</div>` — never raw `<div class="text-sm">`
-3. **Colors**: must match `/create-figure` palette
+3. **Colors**: must match `/cafleet:create-figure` palette
 4. **Figure-only slide**: `blank` layout with `## Title` + image + caption
 5. **Figure + insight**: `two-cols` with `columns: "3:2"`, chart in `::left::`, text in `::right::`
 
@@ -164,7 +166,7 @@ Key risks in AI-generated code
 
 ### slide-creator
 
-This skill ships an embedded agent spec for generating a complete Slidev presentation autonomously from input content (research reports, outlines, notes). The spec is reproduced verbatim below so it is reachable from both Claude Code (`Skill(my-slidev)` then dispatch via `Agent`) and codex (via plugin auto-discovery — see *Dispatching this agent (codex inline-follow)* and *Dispatching this agent (codex member-spawn)* below).
+This skill ships an embedded agent spec for generating a complete Slidev presentation autonomously from input content (research reports, outlines, notes). The spec is reproduced verbatim below so it is reachable from both Claude Code (`Skill(cafleet:my-slidev)` then dispatch via `Agent`) and codex (via plugin auto-discovery — see *Dispatching this agent (codex inline-follow)* and *Dispatching this agent (codex member-spawn)* below).
 
     ---
     name: slide-creator
@@ -178,7 +180,7 @@ This skill ships an embedded agent spec for generating a complete Slidev present
 
     Before generating any presentation, load these two skills:
 
-    1. **`my-slidev`** (or **`cafleet:my-slidev`** when only the plugin is installed) — Custom theme with cover, bullets, and blank layouts. Provides layout selection guide, content structuring rules, formatting conventions, and headmatter template.
+    1. **`cafleet:my-slidev`** — Custom theme with cover, bullets, and blank layouts. Provides layout selection guide, content structuring rules, formatting conventions, and headmatter template.
     2. **`slidev`** — Slidev syntax reference for markdown features, components, animations, and other capabilities.
 
     ## Input
@@ -204,7 +206,7 @@ This skill ships an embedded agent spec for generating a complete Slidev present
        - Use `**bold**` for key terms, max 1-2 per bullet
     6. **Generate the initial slide content**:
        - Start with the headmatter template from the `my-slidev` skill
-       - Use the literal `theme:` path documented in the embedding skill's headmatter template — `~/.claude/skills/my-slidev/theme` when this skill is installed under `~/.claude/skills/`, or `~/.claude/plugins/cache/cafleet/cafleet/<version>/skills/my-slidev/theme` when it is installed only via the cafleet plugin. The path is a fixed, documented location; do NOT try to derive it dynamically (Skill(base-dir) resolves a CWD-based working directory, not the install location of the calling skill).
+       - Use the literal `theme:` path documented in the embedding skill's headmatter template — `<cafleet-plugin-install-dir>/skills/my-slidev/theme`. Substitute the absolute path to the installed cafleet plugin directory on this machine (Claude Code: `~/.claude/plugins/cache/cafleet/cafleet/<version>/`; Codex: as reported by `codex plugin list`). The path is a fixed, documented location; do NOT try to derive it dynamically (Skill(cafleet:base-dir) resolves a CWD-based working directory, not the install location of the calling skill).
        - First slide is always `cover` layout
        - Content slides follow with appropriate layouts
        - Add presenter notes (`<!-- notes -->`) with expanded talking points from the source content
@@ -222,7 +224,7 @@ This skill ships an embedded agent spec for generating a complete Slidev present
     - Always start with a `cover` slide
     - Use `bullets` layout by default for content slides
     - Add presenter notes with expanded talking points from the source content
-    - Use the literal `theme:` path documented in the embedding skill's headmatter template — `~/.claude/skills/my-slidev/theme` when this skill is installed under `~/.claude/skills/`, or `~/.claude/plugins/cache/cafleet/cafleet/<version>/skills/my-slidev/theme` when it is installed only via the cafleet plugin. The path is a fixed, documented location; do NOT try to derive it dynamically (Skill(base-dir) resolves a CWD-based working directory, not the install location of the calling skill).
+    - Use the literal `theme:` path documented in the embedding skill's headmatter template — `<cafleet-plugin-install-dir>/skills/my-slidev/theme`. Substitute the absolute path to the installed cafleet plugin directory on this machine (Claude Code: `~/.claude/plugins/cache/cafleet/cafleet/<version>/`; Codex: as reported by `codex plugin list`). The path is a fixed, documented location; do NOT try to derive it dynamically (Skill(cafleet:base-dir) resolves a CWD-based working directory, not the install location of the calling skill).
     - All slides must pass content overflow review — no slide may have content that exceeds its viewport
     - Citations must be numbered sequentially by order of first appearance
     - Every citation in body must have a reference; every reference must be cited in body
