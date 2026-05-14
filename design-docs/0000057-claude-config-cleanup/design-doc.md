@@ -11,8 +11,8 @@ Unify the two CLAUDE.md files by deleting `.claude/CLAUDE.md` (a near-duplicate 
 ## Success Criteria
 
 - [x] `/home/himkt/work/himkt/cafleet/.claude/CLAUDE.md` no longer exists.
-- [x] No tracked file in the repo references `.claude/CLAUDE.md`. Definition of "tracked file": the set returned by `git ls-files`. This cleanly excludes `.git/` internals AND gitignored working-tree artifacts (member-spawn audit files, scratch question/answer files), while still scanning `design-docs/` — which is acceptable because `design-docs/` matches are historical and need not change.
-- [x] No tracked file in the repo references the **bare** path `rules/bash-command.md` (no `.claude/` or `~/.claude/` prefix). The three sites in `skills/design-doc-execute/SKILL.md` (lines 400, 445, 491) point to the two real files: `.claude/rules/bash-tool.md` and `~/.claude/rules/bash-command.md`. Fully-qualified matches are correct and expected.
+- [x] No tracked file **outside `design-docs/`** references `.claude/CLAUDE.md`. Definition of "tracked file": the set returned by `git ls-files`. This cleanly excludes `.git/` internals AND gitignored working-tree artifacts (member-spawn audit files, scratch question/answer files). Hits inside `design-docs/` are acceptable and expected — those are historical and need not change.
+- [x] No tracked file **outside `design-docs/`** references the **bare** path `rules/bash-command.md` (no `.claude/` or `~/.claude/` prefix). The three sites in `skills/design-doc-execute/SKILL.md` (lines 400, 445, 491) point to the two real files: `.claude/rules/bash-tool.md` and `~/.claude/rules/bash-command.md`. Fully-qualified matches are correct and expected.
 - [x] Root `CLAUDE.md` is unchanged in heading, structure, and section order — only the deletion of `.claude/CLAUDE.md` is performed.
 - [x] Zero deprecation notices, removal markers, or "see design 0000057" pointers exist in any tracked file. The repo reads as if `.claude/CLAUDE.md` never existed.
 
