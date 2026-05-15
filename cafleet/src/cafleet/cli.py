@@ -806,7 +806,7 @@ def _read_prompt_file(path: str) -> str:
         # promises the file body lands in the spawn argv byte-for-byte verbatim.
         content = file_path.read_bytes().decode("utf-8")
     except FileNotFoundError as exc:
-        # File disappeared between is_file() above and read_text() here. The
+        # File disappeared between is_file() above and read_bytes() here. The
         # § 6 catalog uses the same message as the pre-read existence check.
         raise click.ClickException(
             f"--prompt-file {path}: file does not exist or is not a regular file."
