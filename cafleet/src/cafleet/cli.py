@@ -802,6 +802,12 @@ def _read_prompt_file(path: str) -> str:
         )
     try:
         content = file_path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        # File disappeared between is_file() above and read_text() here. The
+        # § 6 catalog uses the same message as the pre-read existence check.
+        raise click.ClickException(
+            f"--prompt-file {path}: file does not exist or is not a regular file."
+        ) from exc
     except PermissionError as exc:
         raise click.ClickException(
             f"--prompt-file {path}: file is not readable."
@@ -811,11 +817,9 @@ def _read_prompt_file(path: str) -> str:
             f"--prompt-file {path}: file is not valid UTF-8."
         ) from exc
     except OSError as exc:
-        # Catches FileNotFoundError (file disappeared between is_file() and
-        # read), EIO, ENOSPC, and every other I/O failure that surfaces as an
-        # OSError subclass. Map them all to "file is not readable" so the
-        # output stays inside the documented § 6 catalog instead of bubbling
-        # as an unhandled traceback.
+        # Reserved for true I/O failures (EIO, ENOSPC, EBUSY, …). The earlier
+        # PermissionError / FileNotFoundError branches handle the OSError
+        # subclasses that have a more precise § 6 message.
         raise click.ClickException(
             f"--prompt-file {path}: file is not readable."
         ) from exc
