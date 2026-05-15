@@ -11,7 +11,6 @@ from cafleet import config
 from cafleet.cli import _resolve_prompt, cli
 from cafleet.tmux import DirectorContext
 
-
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 

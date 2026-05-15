@@ -1,7 +1,7 @@
 # Add `--prompt-file` option to `cafleet member create`
 
 **Status**: Approved
-**Progress**: 12/38 tasks complete
+**Progress**: 29/38 tasks complete
 **Last Updated**: 2026-05-15
 
 ## Overview
@@ -290,27 +290,32 @@ Per project rule `.claude/rules/design-doc-numbering.md`: documentation FIRST.
 
 ### Step 2: CLI implementation
 
-- [ ] Add the `_read_prompt_file(path: str) -> str` helper to `cafleet/src/cafleet/cli.py`. Responsibilities: absolute-path check, `Path.read_text(encoding="utf-8")` with `UnicodeDecodeError` handling, emptiness check (`content == ""` or `content.isspace()`). Each failure raises `click.UsageError` or `click.ClickException` per § 6. <!-- completed: -->
-- [ ] Extend `_resolve_prompt` signature with `prompt_file: str | None` and branch order: `prompt_file` → `prompt_argv` → default template (§ 5). <!-- completed: -->
-- [ ] Add the `@click.option("--prompt-file", ...)` declaration to `member_create` with `type=str` (NOT `click.Path` — see § 1 rationale) and the help text from § 1. <!-- completed: -->
-- [ ] Add the mutual-exclusion guard at the top of `member_create` (before `_require_session_id`): raise `click.UsageError` if both `prompt_file` and `prompt_argv` are non-empty. <!-- completed: -->
-- [ ] Pass `prompt_file` through to `_resolve_prompt` in the `member_create` body. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck` and resolve any failures. <!-- completed: -->
+- [x] Add the `_read_prompt_file(path: str) -> str` helper to `cafleet/src/cafleet/cli.py`. Responsibilities: absolute-path check, `Path.read_text(encoding="utf-8")` with `UnicodeDecodeError` handling, emptiness check (`content == ""` or `content.isspace()`). Each failure raises `click.UsageError` or `click.ClickException` per § 6. <!-- completed: 2026-05-15T11:54 -->
+- [x] Extend `_resolve_prompt` signature with `prompt_file: str | None` and branch order: `prompt_file` → `prompt_argv` → default template (§ 5). <!-- completed: 2026-05-15T11:54 -->
+  - Added `prompt_file: str | None = None` (default `None`) so existing helper-level tests in `tests/test_cli_member.py` continue to call `_resolve_prompt` with the 4-arg form.
+- [x] Add the `@click.option("--prompt-file", ...)` declaration to `member_create` with `type=str` (NOT `click.Path` — see § 1 rationale) and the help text from § 1. <!-- completed: 2026-05-15T11:54 -->
+  - Help text trimmed to single line (`"Read spawn prompt from FILE (abs path, UTF-8)."`) for budget compliance; the mutex info is preserved in the `UsageError` message text from § 6 row 1. Spec § 1 sketch was a multi-line help; Click wrapped it to 3 lines and breached the per-subcommand budget — single-line trim is the smallest change that fits.
+- [x] Add the mutual-exclusion guard at the top of `member_create` (before `_require_session_id`): raise `click.UsageError` if both `prompt_file` and `prompt_argv` are non-empty. <!-- completed: 2026-05-15T11:54 -->
+- [x] Pass `prompt_file` through to `_resolve_prompt` in the `member_create` body. <!-- completed: 2026-05-15T11:54 -->
+  - Also extracted `_deregister_with_warning` helper and split the post-register prompt-resolution `except` so `click.UsageError` (relative-path, unknown-placeholder) re-raises unwrapped (preserves exit code 2) while `click.ClickException` (file-not-found, empty, invalid UTF-8) still routes through `_rollback_register` (exit 1).
+- [x] Run `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck` and resolve any failures. <!-- completed: 2026-05-15T11:55 -->
+  - All three pass after Tester's arbitration fixes (budget bump 11→12 in `cafleet/tests/test_cli_help_budget.py`; ruff I001 auto-fixed in `cafleet/tests/test_cli_member_create_prompt_file.py`).
 
 ### Step 3: Tests
 
-- [ ] Add a new test module `cafleet/tests/cli/test_member_create_prompt_file.py` (or extend an existing `test_member_create.py`). <!-- completed: -->
-- [ ] Test: `--prompt-file` with absolute path containing only `{session_id}` placeholder → spawn argv ends with the substituted string. Parametrize both `claude` and `codex` backends. <!-- completed: -->
-- [ ] Test: parity with positional form — given the same template text, `--prompt-file` and positional `prompt_argv` produce byte-identical spawn argvs (after substitution). <!-- completed: -->
-- [ ] Test: mutual-exclusion error when both inputs supplied — assert exit code 2 and the message from § 6. <!-- completed: -->
-- [ ] Test: relative path error — call with `--prompt-file ./foo.md`; assert exit code 2 and the absolute-path message. <!-- completed: -->
-- [ ] Test: file-not-found error — call with `--prompt-file /tmp/does-not-exist`; assert exit code 1 and the file-not-found message from § 6. Add a companion test for a path pointing at a directory rather than a regular file (same expected message). <!-- completed: -->
-- [ ] Test: empty-file error — create a zero-byte file, call `--prompt-file <that>`, assert exit code 1 and the empty message. Repeat with a whitespace-only (`\n   \t\n`) file. <!-- completed: -->
-- [ ] Test: invalid UTF-8 error — create a file with bytes `b"\xff\xfe\xfd"`, assert exit code 1 and the UTF-8 message. <!-- completed: -->
-- [ ] Test: trailing newline preservation — file content `"hello\n"` with no placeholders → spawn argv contains the literal `"hello\n"`. <!-- completed: -->
-- [ ] Test: surrounding-whitespace preservation — file content `"   \n  hello world  \n   "` with no placeholders → spawn argv contains the identical leading/inner/trailing whitespace, byte-for-byte. Covers the second half of the no-strip Success Criterion. <!-- completed: -->
-- [ ] Test: format-error path (unknown placeholder in file) — file content `"hi {unknown}"`, assert the existing `Unknown placeholder` UsageError fires unchanged. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` and verify all new tests pass alongside the existing suite. <!-- completed: -->
+- [x] Add a new test module `cafleet/tests/cli/test_member_create_prompt_file.py` (or extend an existing `test_member_create.py`). <!-- completed: 2026-05-15T11:33 -->
+  - Placed at `cafleet/tests/test_cli_member_create_prompt_file.py` (project's existing convention: tests live one level under `tests/`, not under a `tests/cli/` subdirectory).
+- [x] Test: `--prompt-file` with absolute path containing only `{session_id}` placeholder → spawn argv ends with the substituted string. Parametrize both `claude` and `codex` backends. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: parity with positional form — given the same template text, `--prompt-file` and positional `prompt_argv` produce byte-identical spawn argvs (after substitution). <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: mutual-exclusion error when both inputs supplied — assert exit code 2 and the message from § 6. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: relative path error — call with `--prompt-file ./foo.md`; assert exit code 2 and the absolute-path message. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: file-not-found error — call with `--prompt-file /tmp/does-not-exist`; assert exit code 1 and the file-not-found message from § 6. Add a companion test for a path pointing at a directory rather than a regular file (same expected message). <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: empty-file error — create a zero-byte file, call `--prompt-file <that>`, assert exit code 1 and the empty message. Repeat with a whitespace-only (`\n   \t\n`) file. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: invalid UTF-8 error — create a file with bytes `b"\xff\xfe\xfd"`, assert exit code 1 and the UTF-8 message. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: trailing newline preservation — file content `"hello\n"` with no placeholders → spawn argv contains the literal `"hello\n"`. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: surrounding-whitespace preservation — file content `"   \n  hello world  \n   "` with no placeholders → spawn argv contains the identical leading/inner/trailing whitespace, byte-for-byte. Covers the second half of the no-strip Success Criterion. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: format-error path (unknown placeholder in file) — file content `"hi {unknown}"`, assert the existing `Unknown placeholder` UsageError fires unchanged. <!-- completed: 2026-05-15T11:33 -->
+- [x] Run `mise //cafleet:test` and verify all new tests pass alongside the existing suite. <!-- completed: 2026-05-15T11:55 -->
 
 ### Step 4: Verification
 
