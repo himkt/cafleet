@@ -783,7 +783,7 @@ def _load_authorized_member(
 def _read_prompt_file(path: str) -> str:
     """Read the spawn prompt from a file, validating absolute path / readability / UTF-8 / non-empty.
 
-    Owns the four error surfaces from design 0000059 § 6: relative path →
+    Owns the five error surfaces from design 0000059 § 6: relative path →
     ``UsageError``; missing / non-regular file → ``ClickException``;
     permission / generic-I/O failures → ``ClickException``; invalid UTF-8 →
     ``ClickException``; zero-byte or whitespace-only contents →
