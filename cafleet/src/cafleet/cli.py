@@ -801,7 +801,10 @@ def _read_prompt_file(path: str) -> str:
             f"--prompt-file {path}: file does not exist or is not a regular file."
         )
     try:
-        content = file_path.read_text(encoding="utf-8")
+        # read_bytes() + decode() instead of read_text() so universal-newline
+        # translation does NOT collapse CRLF / CR to LF — the success-criterion
+        # promises the file body lands in the spawn argv byte-for-byte verbatim.
+        content = file_path.read_bytes().decode("utf-8")
     except FileNotFoundError as exc:
         # File disappeared between is_file() above and read_text() here. The
         # § 6 catalog uses the same message as the pre-read existence check.
