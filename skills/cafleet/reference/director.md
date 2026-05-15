@@ -46,7 +46,7 @@ In both modes the member's Bash tool is enabled and routine permission prompts a
 
 **Spawn prompt size limit (use `--prompt-file` for templated identity blocks)**: cafleet hands the prompt to `tmux split-window` as a single positional argument. With the inline positional form, the rendered prompt is held simultaneously by the caller-side shell, by the cafleet `execve` argv, and by the `tmux split-window` `execve` argv — three layers stack against `ARG_MAX`. Empirically the rolled-up budget exhausts well before any single layer's ceiling and surfaces as `tmux command failed: command too long`, which rolls back the agent registration once the shell-quoted prompt grows past a few KB.
 
-`--prompt-file` removes that ceiling: only the path (tens of bytes) flows through the caller-side shell and the cafleet argv. cafleet reads the file into Python memory, runs `str.format()`, and hands the substituted text to `tmux split-window` as a single argv element — only that final `execve` carries the body, which sits comfortably above any realistic spawn-prompt size. Use `--prompt-file` for every templated identity block + role-file-by-path prompt. Inline `-- "<prompt>"` remains a first-class input for trivial one-line ad-hoc spawns (e.g. test scripts, doctor flows).
+`--prompt-file` collapses that triple-layer stack down to one: only the path (tens of bytes) flows through the caller-side shell and the cafleet argv. cafleet reads the file into Python memory, runs `str.format()`, and hands the substituted text to `tmux split-window` as a single argv element — only that final `execve` carries the body. The single remaining layer still has an `ARG_MAX` ceiling, but it sits comfortably above any realistic spawn-prompt size. Use `--prompt-file` for every templated identity block + role-file-by-path prompt. Inline `-- "<prompt>"` remains a first-class input for trivial one-line ad-hoc spawns (e.g. test scripts, doctor flows).
 
 Whichever input mode is used, keep the prompt body itself focused: role-file path, skill-load list, session/agent/director IDs, the operational context (output dir, current date, user request), and "start now" cue. The member loads the role file via `Read` on its first turn; the role files live in the skill directory and are stable, so path-by-reference is safe.
 
@@ -54,7 +54,7 @@ Whichever input mode is used, keep the prompt body itself focused: role-file pat
 
 - `<role>` is the lowercased value of `--name` (e.g., `drafter`, `reviewer`, `programmer`, `tester`, `verifier`, `manager`, `analyzer`).
 - `<UTC-compact>` is `YYYYMMDDTHHMMSSZ` (Python: `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`).
-- The skill creates the `<BASE>/prompts/` subdirectory on first write (`Path("<BASE>/prompts").mkdir(parents=True, exist_ok=True)`).
+- The skill creates the `<BASE>/prompts/` subdirectory on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`).
 - Same-second collisions: skills MUST NOT overwrite an existing file. If the target path already exists, append `_2`, `_3`, … until the name is unique.
 - The pre-spawn file IS the audit artifact — there is no second post-spawn re-render write. The file path used for `--prompt-file` is the single source of truth for what was spawned, in perpetuity.
 

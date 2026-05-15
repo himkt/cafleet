@@ -145,7 +145,7 @@ When complete, send the file path to the Director via cafleet message send.
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
 1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
-2. **Write the rendered text** to `${BASE}/prompts/presentation-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (`Path("<BASE>/prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+2. **Write the rendered text** to `${BASE}/prompts/presentation-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
