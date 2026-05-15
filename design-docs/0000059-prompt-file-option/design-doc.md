@@ -1,7 +1,7 @@
 # Add `--prompt-file` option to `cafleet member create`
 
 **Status**: Approved
-**Progress**: 0/38 tasks complete
+**Progress**: 12/38 tasks complete
 **Last Updated**: 2026-05-15
 
 ## Overview
@@ -266,18 +266,27 @@ The "After parsing `agent_id`:" post-spawn step (currently: re-render + write `<
 
 Per project rule `.claude/rules/design-doc-numbering.md`: documentation FIRST.
 
-- [ ] Update `ARCHITECTURE.md` — add a paragraph under the CLI section documenting `--prompt-file` on `member create` (alternative input mechanism, absolute-path requirement, audit role). <!-- completed: -->
-- [ ] Update `docs/` — add or extend the relevant CLI reference page (`docs/cli-reference.md` or equivalent) with the `--prompt-file` flag row, mutual-exclusion rule, and error-message catalog from § 6. <!-- completed: -->
-- [ ] Update `README.md` — if README enumerates `member create` flags or describes spawn-prompt sizing, add the `--prompt-file` mention; otherwise leave unchanged (README change must be consistent with ARCHITECTURE.md / docs/ outcome). <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/director.md` § *Member Create*: add the `--prompt-file` row to the flag table, the new spawn-with-file example, and the `<BASE>/prompts/<role>-<ts>.md` audit convention paragraph (retiring the `<BASE>/<role>.md` pointer). <!-- completed: -->
-- [ ] Update `skills/design-doc-create/SKILL.md` — convert the spawn blocks under § *1d. Spawn the Drafter* and § *1e. Spawn the Reviewer* to the two-step (render to file, then `--prompt-file`) pattern. Remove the post-spawn `<BASE>/drafter.md` and `<BASE>/reviewer.md` re-render steps; add the pre-spawn write step. <!-- completed: -->
-- [ ] Update `skills/design-doc-create/roles/director.md` and `roles/reviewer.md` if they reference the old audit-file convention. <!-- completed: -->
-- [ ] Update `skills/design-doc-execute/SKILL.md` — same conversion under § *3e. Spawn each member via `cafleet member create`* for the Programmer / Tester / Verifier sub-blocks. <!-- completed: -->
-- [ ] Update `skills/design-doc-interview/SKILL.md` — convert § *2d. Spawn the Analyzer*. <!-- completed: -->
-- [ ] Update `skills/research-report/SKILL.md` — convert § *2c. Spawn the Manager* and § *4b. Spawn each Researcher (Director)*. <!-- completed: -->
-- [ ] Update `skills/research-presentation/SKILL.md` — convert Slidev-composer spawn block. <!-- completed: -->
-- [ ] Update `skills/agent-team-monitoring/SKILL.md` and `skills/agent-team-supervision/SKILL.md` if either embeds a templated `member create` example. <!-- completed: -->
-- [ ] Remove every standing `${BASE}/<role>.md` audit-write paragraph across the skill tree per `.claude/rules/removal.md`: the convention is retired, not deprecated, so no "previously written to" pointers remain. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` — add a paragraph under the CLI section documenting `--prompt-file` on `member create` (alternative input mechanism, absolute-path requirement, audit role). <!-- completed: 2026-05-15T11:10 -->
+- [x] Update `docs/` — add or extend the relevant CLI reference page (`docs/cli-reference.md` or equivalent) with the `--prompt-file` flag row, mutual-exclusion rule, and error-message catalog from § 6. <!-- completed: 2026-05-15T11:14 -->
+- [x] Update `README.md` — if README enumerates `member create` flags or describes spawn-prompt sizing, add the `--prompt-file` mention; otherwise leave unchanged (README change must be consistent with ARCHITECTURE.md / docs/ outcome). <!-- completed: 2026-05-15T11:16 -->
+  - Verified: README cheatsheet lists `cafleet member create [--coding-agent {claude,codex}]` as one line and the "Notable flags" table does not enumerate per-flag details for `member create` — neither trigger condition fires. Left unchanged. The cheatsheet still points at `docs/spec/cli-options.md` for the per-command sections, where the new `--prompt-file` row landed in Step 1.2.
+- [x] Update `skills/cafleet/reference/director.md` § *Member Create*: add the `--prompt-file` row to the flag table, the new spawn-with-file example, and the `<BASE>/prompts/<role>-<ts>.md` audit convention paragraph (retiring the `<BASE>/<role>.md` pointer). <!-- completed: 2026-05-15T11:20 -->
+- [x] Update `skills/design-doc-create/SKILL.md` — convert the spawn blocks under § *1d. Spawn the Drafter* and § *1e. Spawn the Reviewer* to the two-step (render to file, then `--prompt-file`) pattern. Remove the post-spawn `<BASE>/drafter.md` and `<BASE>/reviewer.md` re-render steps; add the pre-spawn write step. <!-- completed: 2026-05-15T11:24 -->
+- [x] Update `skills/design-doc-create/roles/director.md` and `roles/reviewer.md` if they reference the old audit-file convention. <!-- completed: 2026-05-15T11:26 -->
+  - Verified: neither file references `${BASE}/<role>.md` or any specific audit-file basename. `roles/reviewer.md` only references `Skill(cafleet:base-dir)` generically (line 8) for the no-bypass write protocol, which remains accurate. No edits required.
+- [x] Update `skills/design-doc-execute/SKILL.md` — same conversion under § *3e. Spawn each member via `cafleet member create`* for the Programmer / Tester / Verifier sub-blocks. <!-- completed: 2026-05-15T11:32 -->
+- [x] Update `skills/design-doc-interview/SKILL.md` — convert § *2d. Spawn the Analyzer*. <!-- completed: 2026-05-15T11:34 -->
+- [x] Update `skills/research-report/SKILL.md` — convert § *2c. Spawn the Manager* and § *4b. Spawn each Researcher (Director)*. <!-- completed: 2026-05-15T11:38 -->
+  - Also converted the Step 3 Scout spawn block (same pattern, audit file at `<BASE>/prompts/<scout-name>-<ts>.md`).
+- [x] Update `skills/research-presentation/SKILL.md` — convert Slidev-composer spawn block. <!-- completed: 2026-05-15T11:42 -->
+  - Converted all three spawn blocks: Presentation, Transcript, and Visual Reviewer (per-batch). VR batches now get per-batch timestamped audit files instead of overwriting a single `<BASE>/visual-reviewer.md`.
+- [x] Update `skills/agent-team-monitoring/SKILL.md` and `skills/agent-team-supervision/SKILL.md` if either embeds a templated `member create` example. <!-- completed: 2026-05-15T11:46 -->
+  - `agent-team-supervision/SKILL.md`: updated § *Spawn Protocol* step 2 and the *Quick Reference* table row to use `--prompt-file <abs path to ${BASE}/prompts/<role>-<UTC-compact>.md>` and cite the canonical convention.
+  - `agent-team-monitoring/SKILL.md`: only narrative references to `cafleet member create` (no embedded templated invocation), so no per-flag update needed.
+- [x] Remove every standing `${BASE}/<role>.md` audit-write paragraph across the skill tree per `.claude/rules/removal.md`: the convention is retired, not deprecated, so no "previously written to" pointers remain. <!-- completed: 2026-05-15T11:50 -->
+  - Verified via `grep -rnE "BASE./(drafter|reviewer|programmer|tester|verifier|manager|analyzer|scout|researcher|presentation|transcript|visual-reviewer)\.md" skills ARCHITECTURE.md README.md docs/`: zero matches.
+  - Updated `skills/base-dir/SKILL.md` § *No-bypass write protocol* item 1 to reference the new `${BASE}/prompts/<role>-<UTC-compact>.md` path scheme instead of "audit re-renders of spawn prompts".
+  - The general-concept references to "audit-file writes" in `skills/base-dir/SKILL.md` § *The `<unset>` sentinel* and `ARCHITECTURE.md` § *Member Lifecycle* still apply unchanged — the prompt file IS the audit file under the new convention; only the specific filename scheme was retired.
 
 ### Step 2: CLI implementation
 

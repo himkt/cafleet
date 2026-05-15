@@ -18,6 +18,10 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 
 cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Codex-A --description "Reviewer for PR #42" --coding-agent codex
+
+cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+  --name Drafter --description "Writes and revises the design document" \
+  --prompt-file /abs/path/to/<BASE>/prompts/drafter-20260514T145000Z.md
 ```
 
 | Flag | Required | Notes |
@@ -26,7 +30,8 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude` (default) or `codex`. The flag both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(["claude", "codex"])`. Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
-| *(positional, after `--`)* | no | Prompt for the spawned coding-agent process. If omitted, the default prompt template is used. The default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
+| `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are the spawn prompt. Mutually exclusive with the positional prompt argument. Read verbatim (no stripping); passes through the same `str.format()` substitution as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all error non-zero with the messages catalogued in [`docs/spec/cli-options.md`](../../../docs/spec/cli-options.md) § Error Messages. The canonical input mode for every CAFleet-native team-skill spawn — see § *Member Create — Scratch and audit files* below. |
+| *(positional, after `--`)* | no | Prompt for the spawned coding-agent process. Mutually exclusive with `--prompt-file`. If both are omitted the default prompt template is used. The default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
 
 The spawn argv depends on the chosen backend:
 
@@ -39,17 +44,25 @@ In both modes the member's Bash tool is enabled and routine permission prompts a
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`).
 
-**Spawn prompt size limit (use path-by-reference for role docs)**: cafleet hands the prompt to `tmux split-window` as a single positional argument. tmux fails with `tmux command failed: command too long` and cafleet rolls back the agent registration once the shell-quoted prompt grows past a few KB — well below `ARG_MAX`. Empirically a prompt that inlines a full role definition (~10 KB) already exceeds this threshold.
+**Spawn prompt size limit (use `--prompt-file` for templated identity blocks)**: cafleet hands the prompt to `tmux split-window` as a single positional argument. With the inline positional form, the rendered prompt is held simultaneously by the caller-side shell, by the cafleet `execve` argv, and by the `tmux split-window` `execve` argv — three layers stack against `ARG_MAX`. Empirically the rolled-up budget exhausts well before any single layer's ceiling and surfaces as `tmux command failed: command too long`, which rolls back the agent registration once the shell-quoted prompt grows past a few KB.
 
-Do NOT embed long role definitions, full skill specs, or any other multi-page block of text inline. Instead:
+`--prompt-file` removes that ceiling: only the path (tens of bytes) flows through the caller-side shell and the cafleet argv. cafleet reads the file into Python memory, runs `str.format()`, and hands the substituted text to `tmux split-window` as a single argv element — only that final `execve` carries the body, which sits comfortably above any realistic spawn-prompt size. Use `--prompt-file` for every templated identity block + role-file-by-path prompt. Inline `-- "<prompt>"` remains a first-class input for trivial one-line ad-hoc spawns (e.g. test scripts, doctor flows).
 
-1. Resolve the absolute path of the role file in the Director's filesystem (e.g. `/home/.../skills/research-report/roles/manager.md`).
-2. In the spawn prompt, write a short instruction like `ROLE DEFINITION: Open <abs path> with the Read tool BEFORE any other action.`
-3. Keep the spawn prompt under ~2 KB total. Reserve it for: role-file path, skill-load list, session/agent/director IDs, the operational context (output dir, current date, user request), and "start now" cue.
+Whichever input mode is used, keep the prompt body itself focused: role-file path, skill-load list, session/agent/director IDs, the operational context (output dir, current date, user request), and "start now" cue. The member loads the role file via `Read` on its first turn; the role files live in the skill directory and are stable, so path-by-reference is safe.
 
-This applies to every CAFleet-native team skill (`/cafleet:research-report`, `/cafleet:research-presentation`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`, and any future skill). The member loads the role file via `Read` on its first turn; the role files live in the skill directory and are stable, so path-by-reference is safe.
+**Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved by `Skill(cafleet:base-dir)`) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--prompt-file` write at `<BASE>/prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
 
-**Scratch and audit files**: Spawn-related scratch (audit re-renders, working notes) MUST be written under `${BASE}` (resolved by `Skill(cafleet:base-dir)`) or under the skill's resolved output directory — never `/tmp`. The audit-file convention (`${BASE}/<role>.md`) is canonical; per-spawn temporary files have no place in `/tmp` because `${BASE}` is the project-local scratch root and keeps everything inspectable from one place.
+- `<role>` is the lowercased value of `--name` (e.g., `drafter`, `reviewer`, `programmer`, `tester`, `verifier`, `manager`, `analyzer`).
+- `<UTC-compact>` is `YYYYMMDDTHHMMSSZ` (Python: `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`).
+- The skill creates the `<BASE>/prompts/` subdirectory on first write (`Path("<BASE>/prompts").mkdir(parents=True, exist_ok=True)`).
+- Same-second collisions: skills MUST NOT overwrite an existing file. If the target path already exists, append `_2`, `_3`, … until the name is unique.
+- The pre-spawn file IS the audit artifact — there is no second post-spawn re-render write. The file path used for `--prompt-file` is the single source of truth for what was spawned, in perpetuity.
+
+**`${BASE} == <unset>` fallback**: when the Director's startup-time `${BASE}` resolution returned the `<unset>` sentinel (the absolute-path argument branch of `cafleet base-dir resolve`), the team skill MUST follow the guarded-skip protocol from `Skill(cafleet:base-dir)` § *No-bypass write protocol*:
+
+1. Skip the `<BASE>/prompts/<role>-<ts>.md` write entirely (do NOT compute the path).
+2. Fall back to the inline positional `prompt_argv` form — the size limit above still applies, so the skill MUST keep the inline-form prompt under ~2 KB (path-by-reference for role docs, short identity block).
+3. Emit the anchorless status `audit-disabled no BASE in spawn prompt` once per spawn cycle so the operator sees that the audit channel is unavailable. The spawn itself still proceeds.
 
 **Backtick caveat (harness-dependent)**: Some operator environments (including this project) ship a Bash-validator hook that rejects any backtick in a `Bash` invocation — even inside single-quoted positional arguments — because the validator treats backticks as command-substitution syntax. When such a harness is in play, strip backticks from spawn-prompt bodies (use plain text where you would otherwise use markdown code spans). Path-by-reference for role docs sidesteps this entirely: the prompt body becomes short enough that backticks are easy to avoid.
 

@@ -110,9 +110,9 @@ Substitute these absolute paths into the spawn prompts below.
 
 > **Why path-by-reference (and not inline-verbatim)**: cafleet `member create` passes the prompt to `tmux split-window` as a single positional argument. tmux fails with `command too long` once the shell-quoted prompt grows past a few KB, and cafleet rolls back the agent registration. A role file is typically large enough (5–15 KB) that inlining it exceeds the limit. The member loads the role file via `Read` on its first turn; the file lives in the skill directory and is stable, so this is safe. See `Skill(cafleet)` reference `director.md` § *Spawn prompt size limit* for the canonical write-up.
 >
-> **Template safety (str.format placeholders)**: cafleet `member create` runs `str.format()` over the entire spawn prompt with `session_id` / `agent_id` / `director_agent_id` as kwargs. Leave those three single-braced. Double any other literal `{` or `}` in the prompt body (a JSON example, a `${{VAR}}` reference) to `{{` / `}}`. With role content no longer inlined, the prompt body rarely needs `{` or `}` at all.
+> **Template safety (str.format placeholders)**: cafleet `member create` runs `str.format()` over the entire spawn prompt (whether it arrived via `--prompt-file` or inline `prompt_argv`) with `session_id` / `agent_id` / `director_agent_id` as kwargs. Leave those three single-braced. Double any other literal `{` or `}` in the prompt body (a JSON example, a `${{VAR}}` reference) to `{{` / `}}`. With role content no longer inlined, the prompt body rarely needs `{` or `}` at all.
 >
-> **Scratch and audit files**: See `Skill(cafleet:base-dir)` § *No-bypass write protocol*.
+> **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see the per-role flow below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See `Skill(cafleet:base-dir)` § *No-bypass write protocol* and `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 2c. Spawn the Manager
 
@@ -147,21 +147,20 @@ To request Scouts or Researchers, send the Director a cafleet message specifying
 Your first compiled report will be reviewed critically by the Director. Aim for highest quality on the first attempt.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-```bash
-cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
-  --name "manager" \
-  --description "Compiles the research report" \
-  -- "[Manager spawn prompt — role file referenced by absolute path, literal braces doubled]"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
+2. **Write the rendered text** to `${BASE}/prompts/manager-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (`Path("<BASE>/prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-Capture the printed `agent_id` and substitute it for `[manager-agent-id]` in every subsequent `cafleet` call that targets the Manager.
+   ```bash
+   cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
+     --name "manager" \
+     --description "Compiles the research report" \
+     --prompt-file ${BASE}/prompts/manager-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<manager-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/manager.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+   Capture the printed `agent_id` and substitute it for `[manager-agent-id]` in every subsequent `cafleet` call that targets the Manager. The pre-spawn file at `${BASE}/prompts/manager-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
 
 ### Step 3: Knowledge Bootstrapping — Scout Phase (Director, on Manager's request)
 
@@ -193,21 +192,20 @@ COMMUNICATION PROTOCOL:
 Write findings to the output file, then send the Director a completion summary. The Director will relay your findings to the Manager.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern. Use `scout` if only one Scout will be spawned this run; `scout-1`, `scout-2`, … for multiple — the `<role>` segment in the audit-file path matches the `--name` value (lowercased):
 
-```bash
-cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
-  --name "scout-<NN>" \
-  --description "Landscape scout" \
-  -- "[Scout spawn prompt]"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
+2. **Write the rendered text** to `${BASE}/prompts/<scout-name>-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; `<scout-name>` matches the lowercased `--name` value, e.g., `scout-1`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-(Use `scout` if only one; `scout-1`, `scout-2`, ... for multiple.) Capture the printed `agent_id` for each Scout and substitute it into subsequent `cafleet message send` calls targeting that Scout.
+   ```bash
+   cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
+     --name "scout-<NN>" \
+     --description "Landscape scout" \
+     --prompt-file ${BASE}/prompts/scout-<NN>-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<scout-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/scout.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+   Capture the printed `agent_id` for each Scout and substitute it into subsequent `cafleet message send` calls targeting that Scout. The pre-spawn file at `${BASE}/prompts/<scout-name>-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
 
 **Scout-Manager loop (relayed through Director):**
 
@@ -266,21 +264,20 @@ COMMUNICATION PROTOCOL:
 Write findings to the output file, then send the Director a completion summary. The Director will relay findings and any follow-up questions between you and the Manager.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern — the `<role>` segment in the audit-file path matches the `--name` value (lowercased), so each Researcher gets its own timestamped file:
 
-```bash
-cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
-  --name "researcher-NN" \
-  --description "Researcher for sub-topic <slug>" \
-  -- "[Researcher spawn prompt]"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
+2. **Write the rendered text** to `${BASE}/prompts/researcher-<NN>-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-The Director repeats this step whenever the Manager requests additional Researchers (for coverage gaps, failed investigations, or revision-driven re-research). Any new Researcher must first have a task created by the Manager; the Director includes the `taskId` in the spawn prompt.
+   ```bash
+   cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
+     --name "researcher-NN" \
+     --description "Researcher for sub-topic <slug>" \
+     --prompt-file ${BASE}/prompts/researcher-NN-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<researcher-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/researcher.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+   The Director repeats this step whenever the Manager requests additional Researchers (for coverage gaps, failed investigations, or revision-driven re-research). Any new Researcher must first have a task created by the Manager; the Director includes the `taskId` in the spawn prompt. The pre-spawn file at `${BASE}/prompts/researcher-NN-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
 
 ### Step 5: Review & Revision Loop (Director ↔ Manager, via `cafleet message send`)
 

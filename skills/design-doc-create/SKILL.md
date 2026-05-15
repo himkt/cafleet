@@ -263,9 +263,9 @@ The Director references each role definition by **absolute path** in the spawn p
 
 Substitute these absolute paths into the spawn prompts below.
 
-> **Why path-by-reference (and not inline-verbatim)**: cafleet `member create` passes the prompt to `tmux split-window` as a single positional argument. tmux fails with `command too long` once the shell-quoted prompt grows past a few KB. A role file is typically large enough that inlining it exceeds the limit. The member loads the role file via `Read` on its first turn. See `Skill(cafleet)` reference `director.md` § *Spawn prompt size limit* for the canonical write-up.
+> **Why path-by-reference (and not inline-verbatim)**: cafleet `member create` passes the prompt to `tmux split-window` as a single positional argument. The cumulative caller-shell + cafleet-argv + tmux-argv budget exhausts well below `ARG_MAX` and surfaces as `command too long` once the shell-quoted prompt grows past a few KB. The role file is typically large enough that inlining it exceeds the limit. The member loads the role file via `Read` on its first turn. See `Skill(cafleet)` reference `director.md` § *Spawn prompt size limit* for the canonical write-up.
 >
-> **Scratch and audit files**: See `Skill(cafleet:base-dir)` § *No-bypass write protocol*.
+> **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see Step 1d / 1e for the per-role flow). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See `Skill(cafleet:base-dir)` § *No-bypass write protocol* and `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 1d. Spawn the Drafter
 
@@ -329,21 +329,20 @@ Do NOT ask clarifying questions — the COMMENTs contain the needed information.
 Start by reading the design document.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-```bash
-cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
-  --name "Drafter" \
-  --description "Writes and revises the design document" \
-  -- "<Drafter spawn prompt — role file referenced by absolute path>"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
+2. **Write the rendered text** to `${BASE}/prompts/drafter-<UTC-compact>.md` (normal mode) or `${BASE}/prompts/drafter-resume-<UTC-compact>.md` (resume mode), where `${BASE}` is resolved by `Skill(cafleet:base-dir)` in Step 0 and `<UTC-compact>` is `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`. Create the `${BASE}/prompts/` subdirectory on first write (`Path("<BASE>/prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*: skip the file write, fall back to the inline positional `prompt_argv` form, and emit the `audit-disabled no BASE in spawn prompt` anchorless status once.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-Parse `agent_id` from the JSON response and substitute it for `<drafter-agent-id>` in every subsequent command.
+   ```bash
+   cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
+     --name "Drafter" \
+     --description "Writes and revises the design document" \
+     --prompt-file ${BASE}/prompts/drafter-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<drafter-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/drafter.md` (normal mode) or `${BASE}/drafter-resume.md` (resume mode), where `${BASE}` is resolved by `Skill(cafleet:base-dir)` in Step 0. If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+   Parse `agent_id` from the JSON response and substitute it for `<drafter-agent-id>` in every subsequent command. The pre-spawn file at `${BASE}/prompts/drafter-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
 
 #### 1e. Spawn the Reviewer
 
@@ -371,21 +370,20 @@ COMMUNICATION PROTOCOL:
 Wait for the Director to assign a document for review (cafleet body: `ready (doc)`). When you receive that message, the `doc` pointer refers to the DESIGN DOCUMENT path above — read that file and provide specific, actionable feedback per the role definition.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-```bash
-cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
-  --name "Reviewer" \
-  --description "Critically reviews drafts for rule compliance and quality" \
-  -- "<Reviewer spawn prompt — role file referenced by absolute path>"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
+2. **Write the rendered text** to `${BASE}/prompts/reviewer-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-Parse `agent_id` from the JSON response and substitute it for `<reviewer-agent-id>` in every subsequent command.
+   ```bash
+   cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
+     --name "Reviewer" \
+     --description "Critically reviews drafts for rule compliance and quality" \
+     --prompt-file ${BASE}/prompts/reviewer-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<reviewer-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/reviewer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+   Parse `agent_id` from the JSON response and substitute it for `<reviewer-agent-id>` in every subsequent command. The pre-spawn file at `${BASE}/prompts/reviewer-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
 
 #### 1f. Verify members are live
 
