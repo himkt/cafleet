@@ -145,7 +145,7 @@ BEFORE spawning the Analyzer, load both `Skill(agent-team-monitoring)` and `Skil
 
 Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content — cafleet `member create` fails with `tmux command failed: command too long` once the shell-quoted prompt grows past a few KB. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up.
 
-> **Scratch and audit files**: See `Skill(cafleet:base-dir)` § *No-bypass write protocol*.
+> **Spawn-prompt audit file**: the spawn below writes the rendered prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See `Skill(cafleet:base-dir)` § *No-bypass write protocol* and `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 2d. Spawn the Analyzer
 
@@ -172,21 +172,20 @@ Read the design document, generate a numbered question list per the role definit
 send it to the Director via cafleet message send, then idle pending shutdown.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-```bash
-cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
-  --name "Analyzer" \
-  --description "Reads the design doc and generates a numbered question list" \
-  -- "<Analyzer spawn prompt — role file referenced by absolute path>"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
+2. **Write the rendered text** to `${BASE}/prompts/analyzer-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-id>` in every subsequent command.
+   ```bash
+   cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
+     --name "Analyzer" \
+     --description "Reads the design doc and generates a numbered question list" \
+     --prompt-file ${BASE}/prompts/analyzer-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<analyzer-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/analyzer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+   Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-id>` in every subsequent command. The pre-spawn file at `${BASE}/prompts/analyzer-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
 
 #### 2e. Wait for the Analyzer's question list
 

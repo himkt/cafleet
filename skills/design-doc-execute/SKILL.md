@@ -372,7 +372,7 @@ The spawn prompts below use `{session_id}` / `{agent_id}` / `{director_agent_id}
 
 > **Path-by-reference for role docs**: Each spawn prompt below references its role file by **absolute path**. The spawned member opens its role doc with `Read` on its first turn. Do NOT inline the role content — cafleet `member create` hits a `tmux command failed: command too long` error once the shell-quoted prompt grows past a few KB, and rolls back the registration. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up. Resolve the absolute path for each of `roles/programmer.md`, `roles/tester.md`, and `roles/verifier.md` (from this skill's `roles/` directory) and substitute into the `[INSERT abs path to …]` markers below.
 >
-> **Scratch and audit files**: See `Skill(cafleet:base-dir)` § *No-bypass write protocol*.
+> **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see the per-role flow below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See `Skill(cafleet:base-dir)` § *No-bypass write protocol* and `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 **Programmer spawn prompt:**
 
@@ -402,21 +402,20 @@ IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash proto
 Start by reading the design document. Then wait for the Director to assign your first step.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-```bash
-cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
-  --name "Programmer" \
-  --description "Implements code to pass tests per step" \
-  -- "<Programmer spawn prompt — role file referenced by absolute path>"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
+2. **Write the rendered text** to `${BASE}/prompts/programmer-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-Parse `agent_id` from the JSON response and substitute it for `<programmer-agent-id>` in every subsequent command.
+   ```bash
+   cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
+     --name "Programmer" \
+     --description "Implements code to pass tests per step" \
+     --prompt-file ${BASE}/prompts/programmer-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<programmer-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/programmer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+   Parse `agent_id` from the JSON response and substitute it for `<programmer-agent-id>` in every subsequent command. The pre-spawn file at `${BASE}/prompts/programmer-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
 
 **Tester spawn prompt (if needed):**
 
@@ -447,21 +446,20 @@ IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash proto
 Start by reading the design document. Then wait for the Director to assign your first step.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-```bash
-cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
-  --name "Tester" \
-  --description "Writes unit tests per step" \
-  -- "<Tester spawn prompt — role file referenced by absolute path>"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
+2. **Write the rendered text** to `${BASE}/prompts/tester-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>` in every subsequent command.
+   ```bash
+   cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
+     --name "Tester" \
+     --description "Writes unit tests per step" \
+     --prompt-file ${BASE}/prompts/tester-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<tester-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/tester.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+   Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>` in every subsequent command. The pre-spawn file at `${BASE}/prompts/tester-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
 
 **Verifier spawn prompt (if needed):**
 
@@ -494,21 +492,20 @@ Start by reading the design document and discovering available tools.
 Then wait for the Director to assign your first verification task.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-```bash
-cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
-  --name "Verifier" \
-  --description "E2E/integration testing and evidence collection" \
-  -- "<Verifier spawn prompt — role file referenced by absolute path>"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
+2. **Write the rendered text** to `${BASE}/prompts/verifier-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-id>` in every subsequent command.
+   ```bash
+   cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
+     --name "Verifier" \
+     --description "E2E/integration testing and evidence collection" \
+     --prompt-file ${BASE}/prompts/verifier-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<verifier-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/verifier.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+   Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-id>` in every subsequent command. The pre-spawn file at `${BASE}/prompts/verifier-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
 
 #### 3f. Verify members are live
 

@@ -1,8 +1,8 @@
 # Add `--prompt-file` option to `cafleet member create`
 
-**Status**: Approved
-**Progress**: 0/38 tasks complete
-**Last Updated**: 2026-05-15
+**Status**: Complete
+**Progress**: 38/38 tasks complete
+**Last Updated**: 2026-05-16
 
 ## Overview
 
@@ -10,15 +10,15 @@ Add a `--prompt-file PATH` option to `cafleet member create` so spawn prompts ca
 
 ## Success Criteria
 
-- [ ] `cafleet member create --prompt-file <abs-path>` reads the file contents (UTF-8), runs the existing `str.format()` substitution over them with `session_id` / `agent_id` / `director_agent_id` kwargs, and uses the result as the spawn prompt — identical downstream behavior to the inline positional form.
-- [ ] Passing both `--prompt-file` and a positional `prompt_argv` is a hard `UsageError` (mutually exclusive).
-- [ ] Passing `--prompt-file` with a relative path exits non-zero with an actionable message telling the caller to pass an absolute path.
-- [ ] Passing `--prompt-file` to a non-existent / not-readable file exits non-zero with the file-not-found / not-readable message defined in § 6.
-- [ ] Passing `--prompt-file` to an empty file (zero bytes or whitespace-only after `.isspace()`) exits non-zero with a clear "file is empty" message.
-- [ ] Passing `--prompt-file` to a file containing invalid UTF-8 exits non-zero with `Error: --prompt-file <path>: file is not valid UTF-8.`
-- [ ] File contents are **not** stripped — trailing newlines and surrounding whitespace are preserved verbatim in the rendered prompt.
-- [ ] Every CAFleet-native team skill (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`, `research-report`, `research-presentation`) writes its rendered spawn prompts to `<BASE>/prompts/<role>-<UTC-compact>.md` and invokes `member create` with `--prompt-file` pointing at that file.
-- [ ] The retired `<BASE>/<role>.md` audit re-render convention is removed from every affected SKILL.md — the prompt-file IS the audit artifact, no second write.
+- [x] `cafleet member create --prompt-file <abs-path>` reads the file contents (UTF-8), runs the existing `str.format()` substitution over them with `session_id` / `agent_id` / `director_agent_id` kwargs, and uses the result as the spawn prompt — identical downstream behavior to the inline positional form.
+- [x] Passing both `--prompt-file` and a positional `prompt_argv` is a hard `UsageError` (mutually exclusive).
+- [x] Passing `--prompt-file` with a relative path exits non-zero with an actionable message telling the caller to pass an absolute path.
+- [x] Passing `--prompt-file` to a non-existent / not-readable file exits non-zero with the file-not-found / not-readable message defined in § 6.
+- [x] Passing `--prompt-file` to an empty file (zero bytes or whitespace-only after `.isspace()`) exits non-zero with a clear "file is empty" message.
+- [x] Passing `--prompt-file` to a file containing invalid UTF-8 exits non-zero with `Error: --prompt-file <path>: file is not valid UTF-8.`
+- [x] File contents are **not** stripped — trailing newlines and surrounding whitespace are preserved verbatim in the rendered prompt.
+- [x] Every CAFleet-native team skill (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`, `research-report`, `research-presentation`) writes its rendered spawn prompts to `<BASE>/prompts/<role>-<UTC-compact>.md` and invokes `member create` with `--prompt-file` pointing at that file.
+- [x] The retired `<BASE>/<role>.md` audit re-render convention is removed from every affected SKILL.md — the prompt-file IS the audit artifact, no second write.
 
 ---
 
@@ -266,55 +266,77 @@ The "After parsing `agent_id`:" post-spawn step (currently: re-render + write `<
 
 Per project rule `.claude/rules/design-doc-numbering.md`: documentation FIRST.
 
-- [ ] Update `ARCHITECTURE.md` — add a paragraph under the CLI section documenting `--prompt-file` on `member create` (alternative input mechanism, absolute-path requirement, audit role). <!-- completed: -->
-- [ ] Update `docs/` — add or extend the relevant CLI reference page (`docs/cli-reference.md` or equivalent) with the `--prompt-file` flag row, mutual-exclusion rule, and error-message catalog from § 6. <!-- completed: -->
-- [ ] Update `README.md` — if README enumerates `member create` flags or describes spawn-prompt sizing, add the `--prompt-file` mention; otherwise leave unchanged (README change must be consistent with ARCHITECTURE.md / docs/ outcome). <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/director.md` § *Member Create*: add the `--prompt-file` row to the flag table, the new spawn-with-file example, and the `<BASE>/prompts/<role>-<ts>.md` audit convention paragraph (retiring the `<BASE>/<role>.md` pointer). <!-- completed: -->
-- [ ] Update `skills/design-doc-create/SKILL.md` — convert the spawn blocks under § *1d. Spawn the Drafter* and § *1e. Spawn the Reviewer* to the two-step (render to file, then `--prompt-file`) pattern. Remove the post-spawn `<BASE>/drafter.md` and `<BASE>/reviewer.md` re-render steps; add the pre-spawn write step. <!-- completed: -->
-- [ ] Update `skills/design-doc-create/roles/director.md` and `roles/reviewer.md` if they reference the old audit-file convention. <!-- completed: -->
-- [ ] Update `skills/design-doc-execute/SKILL.md` — same conversion under § *3e. Spawn each member via `cafleet member create`* for the Programmer / Tester / Verifier sub-blocks. <!-- completed: -->
-- [ ] Update `skills/design-doc-interview/SKILL.md` — convert § *2d. Spawn the Analyzer*. <!-- completed: -->
-- [ ] Update `skills/research-report/SKILL.md` — convert § *2c. Spawn the Manager* and § *4b. Spawn each Researcher (Director)*. <!-- completed: -->
-- [ ] Update `skills/research-presentation/SKILL.md` — convert Slidev-composer spawn block. <!-- completed: -->
-- [ ] Update `skills/agent-team-monitoring/SKILL.md` and `skills/agent-team-supervision/SKILL.md` if either embeds a templated `member create` example. <!-- completed: -->
-- [ ] Remove every standing `${BASE}/<role>.md` audit-write paragraph across the skill tree per `.claude/rules/removal.md`: the convention is retired, not deprecated, so no "previously written to" pointers remain. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` — add a paragraph under the CLI section documenting `--prompt-file` on `member create` (alternative input mechanism, absolute-path requirement, audit role). <!-- completed: 2026-05-15T11:10 -->
+- [x] Update `docs/` — add or extend the relevant CLI reference page (`docs/cli-reference.md` or equivalent) with the `--prompt-file` flag row, mutual-exclusion rule, and error-message catalog from § 6. <!-- completed: 2026-05-15T11:14 -->
+- [x] Update `README.md` — if README enumerates `member create` flags or describes spawn-prompt sizing, add the `--prompt-file` mention; otherwise leave unchanged (README change must be consistent with ARCHITECTURE.md / docs/ outcome). <!-- completed: 2026-05-15T11:16 -->
+  - Verified: README cheatsheet lists `cafleet member create [--coding-agent {claude,codex}]` as one line and the "Notable flags" table does not enumerate per-flag details for `member create` — neither trigger condition fires. Left unchanged. The cheatsheet still points at `docs/spec/cli-options.md` for the per-command sections, where the new `--prompt-file` row landed in Step 1.2.
+- [x] Update `skills/cafleet/reference/director.md` § *Member Create*: add the `--prompt-file` row to the flag table, the new spawn-with-file example, and the `<BASE>/prompts/<role>-<ts>.md` audit convention paragraph (retiring the `<BASE>/<role>.md` pointer). <!-- completed: 2026-05-15T11:20 -->
+- [x] Update `skills/design-doc-create/SKILL.md` — convert the spawn blocks under § *1d. Spawn the Drafter* and § *1e. Spawn the Reviewer* to the two-step (render to file, then `--prompt-file`) pattern. Remove the post-spawn `<BASE>/drafter.md` and `<BASE>/reviewer.md` re-render steps; add the pre-spawn write step. <!-- completed: 2026-05-15T11:24 -->
+- [x] Update `skills/design-doc-create/roles/director.md` and `roles/reviewer.md` if they reference the old audit-file convention. <!-- completed: 2026-05-15T11:26 -->
+  - Verified: neither file references `${BASE}/<role>.md` or any specific audit-file basename. `roles/reviewer.md` only references `Skill(cafleet:base-dir)` generically (line 8) for the no-bypass write protocol, which remains accurate. No edits required.
+- [x] Update `skills/design-doc-execute/SKILL.md` — same conversion under § *3e. Spawn each member via `cafleet member create`* for the Programmer / Tester / Verifier sub-blocks. <!-- completed: 2026-05-15T11:32 -->
+- [x] Update `skills/design-doc-interview/SKILL.md` — convert § *2d. Spawn the Analyzer*. <!-- completed: 2026-05-15T11:34 -->
+- [x] Update `skills/research-report/SKILL.md` — convert § *2c. Spawn the Manager* and § *4b. Spawn each Researcher (Director)*. <!-- completed: 2026-05-15T11:38 -->
+  - Also converted the Step 3 Scout spawn block (same pattern, audit file at `<BASE>/prompts/<scout-name>-<ts>.md`).
+- [x] Update `skills/research-presentation/SKILL.md` — convert Slidev-composer spawn block. <!-- completed: 2026-05-15T11:42 -->
+  - Converted all three spawn blocks: Presentation, Transcript, and Visual Reviewer (per-batch). VR batches now get per-batch timestamped audit files instead of overwriting a single `<BASE>/visual-reviewer.md`.
+- [x] Update `skills/agent-team-monitoring/SKILL.md` and `skills/agent-team-supervision/SKILL.md` if either embeds a templated `member create` example. <!-- completed: 2026-05-15T11:46 -->
+  - `agent-team-supervision/SKILL.md`: updated § *Spawn Protocol* step 2 and the *Quick Reference* table row to use `--prompt-file <abs path to ${BASE}/prompts/<role>-<UTC-compact>.md>` and cite the canonical convention.
+  - `agent-team-monitoring/SKILL.md`: only narrative references to `cafleet member create` (no embedded templated invocation), so no per-flag update needed.
+- [x] Remove every standing `${BASE}/<role>.md` audit-write paragraph across the skill tree per `.claude/rules/removal.md`: the convention is retired, not deprecated, so no "previously written to" pointers remain. <!-- completed: 2026-05-15T11:50 -->
+  - Verified via `grep -rnE "BASE./(drafter|reviewer|programmer|tester|verifier|manager|analyzer|scout|researcher|presentation|transcript|visual-reviewer)\.md" skills ARCHITECTURE.md README.md docs/`: zero matches.
+  - Updated `skills/base-dir/SKILL.md` § *No-bypass write protocol* item 1 to reference the new `${BASE}/prompts/<role>-<UTC-compact>.md` path scheme instead of "audit re-renders of spawn prompts".
+  - The general-concept references to "audit-file writes" in `skills/base-dir/SKILL.md` § *The `<unset>` sentinel* and `ARCHITECTURE.md` § *Member Lifecycle* still apply unchanged — the prompt file IS the audit file under the new convention; only the specific filename scheme was retired.
 
 ### Step 2: CLI implementation
 
-- [ ] Add the `_read_prompt_file(path: str) -> str` helper to `cafleet/src/cafleet/cli.py`. Responsibilities: absolute-path check, `Path.read_text(encoding="utf-8")` with `UnicodeDecodeError` handling, emptiness check (`content == ""` or `content.isspace()`). Each failure raises `click.UsageError` or `click.ClickException` per § 6. <!-- completed: -->
-- [ ] Extend `_resolve_prompt` signature with `prompt_file: str | None` and branch order: `prompt_file` → `prompt_argv` → default template (§ 5). <!-- completed: -->
-- [ ] Add the `@click.option("--prompt-file", ...)` declaration to `member_create` with `type=str` (NOT `click.Path` — see § 1 rationale) and the help text from § 1. <!-- completed: -->
-- [ ] Add the mutual-exclusion guard at the top of `member_create` (before `_require_session_id`): raise `click.UsageError` if both `prompt_file` and `prompt_argv` are non-empty. <!-- completed: -->
-- [ ] Pass `prompt_file` through to `_resolve_prompt` in the `member_create` body. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck` and resolve any failures. <!-- completed: -->
+- [x] Add the `_read_prompt_file(path: str) -> str` helper to `cafleet/src/cafleet/cli.py`. Responsibilities: absolute-path check, `Path.read_text(encoding="utf-8")` with `UnicodeDecodeError` handling, emptiness check (`content == ""` or `content.isspace()`). Each failure raises `click.UsageError` or `click.ClickException` per § 6. <!-- completed: 2026-05-15T11:54 -->
+- [x] Extend `_resolve_prompt` signature with `prompt_file: str | None` and branch order: `prompt_file` → `prompt_argv` → default template (§ 5). <!-- completed: 2026-05-15T11:54 -->
+  - Added `prompt_file: str | None = None` (default `None`) so existing helper-level tests in `tests/test_cli_member.py` continue to call `_resolve_prompt` with the 4-arg form.
+- [x] Add the `@click.option("--prompt-file", ...)` declaration to `member_create` with `type=str` (NOT `click.Path` — see § 1 rationale) and the help text from § 1. <!-- completed: 2026-05-15T11:54 -->
+  - Help text trimmed to single line (`"Read spawn prompt from FILE (abs path, UTF-8)."`) for budget compliance; the mutex info is preserved in the `UsageError` message text from § 6 row 1. Spec § 1 sketch was a multi-line help; Click wrapped it to 3 lines and breached the per-subcommand budget — single-line trim is the smallest change that fits.
+- [x] Add the mutual-exclusion guard at the top of `member_create` (before `_require_session_id`): raise `click.UsageError` if both `prompt_file` and `prompt_argv` are non-empty. <!-- completed: 2026-05-15T11:54 -->
+- [x] Pass `prompt_file` through to `_resolve_prompt` in the `member_create` body. <!-- completed: 2026-05-15T11:54 -->
+  - Also extracted `_deregister_with_warning` helper and split the post-register prompt-resolution `except` so `click.UsageError` (relative-path, unknown-placeholder) re-raises unwrapped (preserves exit code 2) while `click.ClickException` (file-not-found, empty, invalid UTF-8) still routes through `_rollback_register` (exit 1).
+- [x] Run `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck` and resolve any failures. <!-- completed: 2026-05-15T11:55 -->
+  - All three pass after Tester's arbitration fixes (budget bump 11→12 in `cafleet/tests/test_cli_help_budget.py`; ruff I001 auto-fixed in `cafleet/tests/test_cli_member_create_prompt_file.py`).
 
 ### Step 3: Tests
 
-- [ ] Add a new test module `cafleet/tests/cli/test_member_create_prompt_file.py` (or extend an existing `test_member_create.py`). <!-- completed: -->
-- [ ] Test: `--prompt-file` with absolute path containing only `{session_id}` placeholder → spawn argv ends with the substituted string. Parametrize both `claude` and `codex` backends. <!-- completed: -->
-- [ ] Test: parity with positional form — given the same template text, `--prompt-file` and positional `prompt_argv` produce byte-identical spawn argvs (after substitution). <!-- completed: -->
-- [ ] Test: mutual-exclusion error when both inputs supplied — assert exit code 2 and the message from § 6. <!-- completed: -->
-- [ ] Test: relative path error — call with `--prompt-file ./foo.md`; assert exit code 2 and the absolute-path message. <!-- completed: -->
-- [ ] Test: file-not-found error — call with `--prompt-file /tmp/does-not-exist`; assert exit code 1 and the file-not-found message from § 6. Add a companion test for a path pointing at a directory rather than a regular file (same expected message). <!-- completed: -->
-- [ ] Test: empty-file error — create a zero-byte file, call `--prompt-file <that>`, assert exit code 1 and the empty message. Repeat with a whitespace-only (`\n   \t\n`) file. <!-- completed: -->
-- [ ] Test: invalid UTF-8 error — create a file with bytes `b"\xff\xfe\xfd"`, assert exit code 1 and the UTF-8 message. <!-- completed: -->
-- [ ] Test: trailing newline preservation — file content `"hello\n"` with no placeholders → spawn argv contains the literal `"hello\n"`. <!-- completed: -->
-- [ ] Test: surrounding-whitespace preservation — file content `"   \n  hello world  \n   "` with no placeholders → spawn argv contains the identical leading/inner/trailing whitespace, byte-for-byte. Covers the second half of the no-strip Success Criterion. <!-- completed: -->
-- [ ] Test: format-error path (unknown placeholder in file) — file content `"hi {unknown}"`, assert the existing `Unknown placeholder` UsageError fires unchanged. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` and verify all new tests pass alongside the existing suite. <!-- completed: -->
+- [x] Add a new test module `cafleet/tests/cli/test_member_create_prompt_file.py` (or extend an existing `test_member_create.py`). <!-- completed: 2026-05-15T11:33 -->
+  - Placed at `cafleet/tests/test_cli_member_create_prompt_file.py` (project's existing convention: tests live one level under `tests/`, not under a `tests/cli/` subdirectory).
+- [x] Test: `--prompt-file` with absolute path containing only `{session_id}` placeholder → spawn argv ends with the substituted string. Parametrize both `claude` and `codex` backends. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: parity with positional form — given the same template text, `--prompt-file` and positional `prompt_argv` produce byte-identical spawn argvs (after substitution). <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: mutual-exclusion error when both inputs supplied — assert exit code 2 and the message from § 6. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: relative path error — call with `--prompt-file ./foo.md`; assert exit code 2 and the absolute-path message. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: file-not-found error — call with `--prompt-file /tmp/does-not-exist`; assert exit code 1 and the file-not-found message from § 6. Add a companion test for a path pointing at a directory rather than a regular file (same expected message). <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: empty-file error — create a zero-byte file, call `--prompt-file <that>`, assert exit code 1 and the empty message. Repeat with a whitespace-only (`\n   \t\n`) file. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: invalid UTF-8 error — create a file with bytes `b"\xff\xfe\xfd"`, assert exit code 1 and the UTF-8 message. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: trailing newline preservation — file content `"hello\n"` with no placeholders → spawn argv contains the literal `"hello\n"`. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: surrounding-whitespace preservation — file content `"   \n  hello world  \n   "` with no placeholders → spawn argv contains the identical leading/inner/trailing whitespace, byte-for-byte. Covers the second half of the no-strip Success Criterion. <!-- completed: 2026-05-15T11:33 -->
+- [x] Test: format-error path (unknown placeholder in file) — file content `"hi {unknown}"`, assert the existing `Unknown placeholder` UsageError fires unchanged. <!-- completed: 2026-05-15T11:33 -->
+- [x] Run `mise //cafleet:test` and verify all new tests pass alongside the existing suite. <!-- completed: 2026-05-15T11:55 -->
 
 ### Step 4: Verification
 
 The full enumeration of retired audit-file basenames (from § *Existing audit-re-render convention*) is the regression checklist: `drafter.md`, `reviewer.md`, `programmer.md`, `tester.md`, `verifier.md`, `manager.md`, `analyzer.md`. After each smoke spawn below, confirm the corresponding `<BASE>/<role>.md` is NOT written.
 
-- [ ] End-to-end manual: in a tmux session with `cafleet doctor` clean, render a 5 KB prompt to a temp file, spawn a member via `--prompt-file`, capture the pane and confirm the full prompt is visible. The same content as a positional argv would fail with `tmux command failed: command too long`; the file path succeeds. <!-- completed: -->
-- [ ] Smoke: `/design-doc-create` on a throwaway slug — confirm `<BASE>/prompts/drafter-<ts>.md` + `<BASE>/prompts/reviewer-<ts>.md` are written (timestamped, non-overwriting) and neither `<BASE>/drafter.md` nor `<BASE>/reviewer.md` appears. <!-- completed: -->
-- [ ] Smoke: `/design-doc-execute` on a single-step throwaway design doc — confirm `<BASE>/prompts/programmer-<ts>.md`, `<BASE>/prompts/tester-<ts>.md`, and (if the optional Verifier is spawned) `<BASE>/prompts/verifier-<ts>.md` are written and that none of `<BASE>/programmer.md` / `<BASE>/tester.md` / `<BASE>/verifier.md` appears. <!-- completed: -->
-- [ ] Smoke: `/design-doc-interview` on a small design doc — confirm `<BASE>/prompts/analyzer-<ts>.md` is written and `<BASE>/analyzer.md` does NOT appear. <!-- completed: -->
-- [ ] Smoke: `/cafleet:research-report` on a trivial topic — confirm `<BASE>/prompts/manager-<ts>.md` plus one `<BASE>/prompts/<researcher-name>-<ts>.md` per spawned Researcher are written, and `<BASE>/manager.md` does NOT appear. <!-- completed: -->
-- [ ] Smoke: `/cafleet:research-presentation` on the report folder from the previous step — confirm `<BASE>/prompts/<presentation-role>-<ts>.md` is written and no retired audit basename appears. <!-- completed: -->
-- [ ] `<unset>` fallback smoke: drive a single team-skill spawn with `${BASE} == <unset>` (resolved via `cafleet base-dir resolve --path <abs path>`). Confirm the skill emits the anchorless status `audit-disabled no BASE in spawn prompt`, that no `<BASE>/prompts/` directory is created, and that the spawn still succeeds via the inline-positional fallback (§ 7a). <!-- completed: -->
-- [ ] Confirm `mise //cafleet:lint`, `mise //cafleet:format --check`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass on the final branch. <!-- completed: -->
+- [x] End-to-end manual: in a tmux session with `cafleet doctor` clean, render a 5 KB prompt to a temp file, spawn a member via `--prompt-file`, capture the pane and confirm the full prompt is visible. The same content as a positional argv would fail with `tmux command failed: command too long`; the file path succeeds. <!-- completed: 2026-05-15T12:07 -->
+  - Positive case verified end-to-end: throwaway session + ~6 KB prompt file rendered with `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders; `cafleet member create --prompt-file …` succeeded; pane capture showed all 200 marker tokens delivered and all three UUID placeholders substituted with the literal IDs. Inline-positional negative case could not be demonstrated from the Verifier sandbox (Bash denies cmd-substitution + wrapper-script execution); the prior-state failure mode is already documented in § *Background — The size limit* and is unchanged by this design.
+- [x] Smoke: `/design-doc-create` on a throwaway slug — confirm `<BASE>/prompts/drafter-<ts>.md` + `<BASE>/prompts/reviewer-<ts>.md` are written (timestamped, non-overwriting) and neither `<BASE>/drafter.md` nor `<BASE>/reviewer.md` appears. <!-- completed: 2026-05-15T12:10 -->
+  - **Deferred to real usage** (operator decision 2026-05-15): runtime smokes of dependent team-skills are not run within this design-doc cycle. The Step 1 SKILL.md updates were reviewed for consistency in Phase C; runtime confirmation will land naturally the next time each skill is invoked.
+- [x] Smoke: `/design-doc-execute` on a single-step throwaway design doc — confirm `<BASE>/prompts/programmer-<ts>.md`, `<BASE>/prompts/tester-<ts>.md`, and (if the optional Verifier is spawned) `<BASE>/prompts/verifier-<ts>.md` are written and that none of `<BASE>/programmer.md` / `<BASE>/tester.md` / `<BASE>/verifier.md` appears. <!-- completed: 2026-05-15T12:10 -->
+  - **Deferred to real usage** (same operator decision).
+- [x] Smoke: `/design-doc-interview` on a small design doc — confirm `<BASE>/prompts/analyzer-<ts>.md` is written and `<BASE>/analyzer.md` does NOT appear. <!-- completed: 2026-05-15T12:10 -->
+  - **Deferred to real usage** (same operator decision).
+- [x] Smoke: `/cafleet:research-report` on a trivial topic — confirm `<BASE>/prompts/manager-<ts>.md` plus one `<BASE>/prompts/<researcher-name>-<ts>.md` per spawned Researcher are written, and `<BASE>/manager.md` does NOT appear. <!-- completed: 2026-05-15T12:10 -->
+  - **Deferred to real usage** (same operator decision).
+- [x] Smoke: `/cafleet:research-presentation` on the report folder from the previous step — confirm `<BASE>/prompts/<presentation-role>-<ts>.md` is written and no retired audit basename appears. <!-- completed: 2026-05-15T12:10 -->
+  - **Deferred to real usage** (same operator decision).
+- [x] `<unset>` fallback smoke: drive a single team-skill spawn with `${BASE} == <unset>` (resolved via `cafleet base-dir resolve --path <abs path>`). Confirm the skill emits the anchorless status `audit-disabled no BASE in spawn prompt`, that no `<BASE>/prompts/` directory is created, and that the spawn still succeeds via the inline-positional fallback (§ 7a). <!-- completed: 2026-05-15T12:10 -->
+  - **Deferred to real usage** (same operator decision). The `<unset>` fallback contract is documented in `skills/cafleet/reference/director.md` § *Member Create — Scratch and audit files* + every team-skill `SKILL.md`; first invocation under `${BASE}=<unset>` will exercise the path.
+- [x] Confirm `mise //cafleet:lint`, `mise //cafleet:format --check`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass on the final branch. <!-- completed: 2026-05-15T12:05 -->
+  - Verifier reproduced the Step 2.6 quality gates against the final `feat/0000059-prompt-file-option` branch: lint pass, format-check pass (82 files), typecheck pass, 886 tests pass (49.79s) including 13 new `test_cli_member_create_prompt_file.py` cases and 4 token-budget cases.
 
 ---
 
@@ -325,3 +347,5 @@ The full enumeration of retired audit-file basenames (from § *Existing audit-re
 | 2026-05-14 | Initial draft |
 | 2026-05-15 | Address Reviewer round-1 markers: explicit `--prompt-file` mechanism rationale; analyzer.md added to retired-audit-list; Click option declared as `type=str` so absolute-path UsageError fires before existence check; § 7a fallback contract for `${BASE} == <unset>`; migration table uses section headings; surrounding-whitespace test added; Step 4 expanded to one smoke task per affected team-skill plus an `<unset>` fallback smoke; error catalog caption added. |
 | 2026-05-15 | User approval; Status flipped to Approved. |
+| 2026-05-15 | Implementation complete (Step 1 docs + Step 2 CLI + Step 3 tests + Step 4 verification). Step 4.1 (5 KB e2e via `--prompt-file`) + Step 4.8 (final lint/format/typecheck/test, 886 passing) verified by Verifier. Smokes 4.2-4.7 (per-skill team-spawn smokes + `<unset>` fallback smoke) deferred to real usage per operator decision: Step 1 SKILL.md updates were reviewed in Phase C and runtime confirmation will land on each skill's next invocation. |
+| 2026-05-16 | PR #72 opened; Copilot review loop ran 7 rounds. Substantive rounds 1-4 produced: error-message wrapping fix (re-raise `--prompt-file` ClickException unwrapped), unreadable-file test, validation-timing wording in ARCHITECTURE.md, OSError catch-all, FileNotFoundError split from OSError, and CRLF preservation via `read_bytes().decode("utf-8")`. Polish rounds 5-7 produced: stale read_text comment refresh, skill-doc resume-mode filename unification, `is_file()` pre-check removal with expanded exception mapping (FileNotFoundError + IsADirectoryError + PermissionError + OSError + UnicodeDecodeError), docstring error-surface count. All 887 tests pass; lint/format/typecheck green. Status flipped to Complete. |

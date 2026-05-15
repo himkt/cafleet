@@ -338,7 +338,8 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `--name` | yes | Display name of the new member. Forwarded to the spawned `claude` process as `claude --name <member-name> <prompt>` so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. The codex backend has no `--name` analog — codex panes display the codex default title and operators discover them via `cafleet member list` instead. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude` (default) or `codex`. The flag both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(["claude", "codex"])`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically via `show_default=True`.) Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
-| *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. Both backends receive the same prompt; the prompt template is backend-neutral. |
+| `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are used as the spawn prompt. Mutually exclusive with the positional prompt argument. The file is read verbatim (no stripping) and passes through the same `str.format()` substitution (`session_id` / `agent_id` / `director_agent_id`) as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. |
+| *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. Both backends receive the same prompt; the prompt template is backend-neutral. Mutually exclusive with `--prompt-file`. |
 
 #### Spawn command per backend
 
@@ -348,6 +349,19 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `codex`  | `codex --ask-for-approval never --sandbox workspace-write <prompt>` |
 
 The `claude` spawn carries `--permission-mode dontAsk`; the `codex` spawn carries `--ask-for-approval never --sandbox workspace-write`. In both modes the member's Bash tool is enabled and routine permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no Director routing required by default. The bash-via-Director protocol fires as a fallback when the harness deny-list rejects a Bash invocation (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director). Operational details for codex members live in [`docs/codex-members.md`](../codex-members.md).
+
+#### Spawn-prompt input modes
+
+`cafleet member create` accepts the spawn prompt in three mutually exclusive shapes:
+
+| Inputs | Resulting spawn prompt |
+|---|---|
+| Neither `--prompt-file` nor positional `prompt_argv` | The built-in `_MEMBER_PROMPT_TEMPLATE` default, with `{session_id}` / `{agent_id}` / `{director_agent_id}` substituted. |
+| Positional `prompt_argv` only | `" ".join(prompt_argv)` after the same `str.format()` substitution. |
+| `--prompt-file PATH` only | The file contents, byte-for-byte, after the same `str.format()` substitution. Surrounding whitespace and trailing newlines are preserved verbatim. |
+| Both positional `prompt_argv` and `--prompt-file` | `click.UsageError` (exit 2) — see [Error Messages](#error-messages). |
+
+The `--prompt-file` path is BOTH the spawn input AND the permanent audit artifact. CAFleet-native team skills render the prompt to `<BASE>/prompts/<role>-<UTC-compact>.md` before invoking `member create --prompt-file`, so the on-disk file is the source of truth for what was spawned. Inline `-- "<prompt>"` invocation remains supported for trivial one-line ad-hoc spawns; long, templated identity blocks must use `--prompt-file` because the rendered text otherwise exceeds the documented `tmux split-window` argv ceiling (`tmux command failed: command too long` rolls back the agent registration once the shell-quoted prompt grows past a few KB).
 
 ### `member delete`
 
@@ -687,3 +701,10 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
 | `member ping` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
 | `member ping` when `tmux send-keys` fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
+| `member create` with both `--prompt-file` and positional `prompt_argv` | `Error: --prompt-file and the positional prompt argument are mutually exclusive.` (exit 2; `click.UsageError`) |
+| `member create --prompt-file` with a relative path | `Error: --prompt-file requires an absolute path (got '<input>'). Resolve relative paths against your BASE first — see Skill(cafleet:base-dir).` (exit 2; `click.UsageError`) |
+| `member create --prompt-file` to a non-existent path or non-regular file (e.g. directory) | `Error: --prompt-file <path>: file does not exist or is not a regular file.` (exit 1; `click.ClickException`) |
+| `member create --prompt-file` to an unreadable file | `Error: --prompt-file <path>: file is not readable.` (exit 1; `click.ClickException`) |
+| `member create --prompt-file` to a file containing invalid UTF-8 | `Error: --prompt-file <path>: file is not valid UTF-8.` (exit 1; `click.ClickException`) |
+| `member create --prompt-file` to a zero-byte or whitespace-only file | `Error: --prompt-file <path>: file is empty.` (exit 1; `click.ClickException`) |
+

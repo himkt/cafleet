@@ -103,9 +103,9 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 
 > **Path-by-reference for role docs**: Each spawn prompt below references its role file by **absolute path**; the spawned member opens its role doc with `Read` on its first turn. Do NOT inline the role content — cafleet `member create` fails with `tmux command failed: command too long` once the shell-quoted prompt grows past a few KB, and rolls back the registration. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up. Resolve the absolute paths for each of `roles/presentation.md`, `roles/transcript.md`, and `roles/visual-reviewer.md` from this skill's `roles/` directory.
 >
-> **Template safety (str.format placeholders)**: cafleet runs `str.format()` over the entire spawn prompt with `session_id` / `agent_id` / `director_agent_id` as kwargs — leave those three single-braced. Double any other literal `{` or `}` in the prompt body. With role content no longer inlined, this rarely comes up.
+> **Template safety (str.format placeholders)**: cafleet runs `str.format()` over the entire spawn prompt (whether it arrived via `--prompt-file` or inline `prompt_argv`) with `session_id` / `agent_id` / `director_agent_id` as kwargs — leave those three single-braced. Double any other literal `{` or `}` in the prompt body. With role content no longer inlined, this rarely comes up.
 >
-> **Scratch and audit files**: See `Skill(cafleet:base-dir)` § *No-bypass write protocol*.
+> **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see the per-role flow below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See `Skill(cafleet:base-dir)` § *No-bypass write protocol* and `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 1d. Spawn Presentation + Transcript in parallel
 
@@ -142,21 +142,20 @@ COMMUNICATION PROTOCOL:
 When complete, send the file path to the Director via cafleet message send.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-```bash
-cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
-  --name "presentation" \
-  --description "Authors slide.md" \
-  -- "[Presentation spawn prompt]"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
+2. **Write the rendered text** to `${BASE}/prompts/presentation-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-Capture the printed `agent_id` and substitute it for `[presentation-agent-id]` in subsequent `cafleet message send` calls.
+   ```bash
+   cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
+     --name "presentation" \
+     --description "Authors slide.md" \
+     --prompt-file ${BASE}/prompts/presentation-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<presentation-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/presentation.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+   Capture the printed `agent_id` and substitute it for `[presentation-agent-id]` in subsequent `cafleet message send` calls. The pre-spawn file at `${BASE}/prompts/presentation-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
 
 **Transcript spawn prompt:**
 
@@ -185,21 +184,20 @@ COMMUNICATION PROTOCOL:
 When complete, send the file path to the Director via cafleet message send.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-```bash
-cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
-  --name "transcript" \
-  --description "Authors transcript.md" \
-  -- "[Transcript spawn prompt]"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
+2. **Write the rendered text** to `${BASE}/prompts/transcript-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-Capture the printed `agent_id` and substitute it for `[transcript-agent-id]` in subsequent `cafleet message send` calls.
+   ```bash
+   cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
+     --name "transcript" \
+     --description "Authors transcript.md" \
+     --prompt-file ${BASE}/prompts/transcript-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<transcript-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/transcript.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. Overwrites on subsequent spawns of the same role-type within this invocation; that is intentional.
+   Capture the printed `agent_id` and substitute it for `[transcript-agent-id]` in subsequent `cafleet message send` calls. The pre-spawn file at `${BASE}/prompts/transcript-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
 
 ### Step 2: Content Review & Revision Loop (Director)
 
@@ -302,21 +300,20 @@ COMMUNICATION PROTOCOL:
 When complete, persist the report to <folder>/screenshots/vr<start>-r<round>.md and send it to the Director via cafleet message send.
 ```
 
-Spawn with:
+Spawn with the two-step (render to file, then `--prompt-file`) pattern. Each VR batch gets its own timestamped pre-spawn file — no overwriting:
 
-```bash
-cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
-  --name "vr-batch-<start>" \
-  --description "Visual Reviewer for slides <start>..<end>" \
-  -- "[Visual Reviewer spawn prompt]"
-```
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
+2. **Write the rendered text** to `${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; `<start>` matches the batch's first-slide index used in `--name`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
-Capture the printed `agent_id` as `[vr-batch-agent-id]` for subsequent `cafleet message send` / `member delete` calls.
+   ```bash
+   cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
+     --name "vr-batch-<start>" \
+     --description "Visual Reviewer for slides <start>..<end>" \
+     --prompt-file ${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md
+   ```
 
-After parsing `agent_id`:
-
-1. **Re-render the prompt locally** with the three kwargs bound: `session_id` = `<session-id>`, `agent_id` = the parsed `<vr-batch-agent-id>`, `director_agent_id` = `<director-agent-id>`. The result equals the exact text the new member sees in its pane.
-2. **Write the audit file** to `${BASE}/visual-reviewer.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0). If `${BASE}` is the sentinel `<unset>`, the audit-file write is guarded-skipped per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel* item 1. The audit filename uses the role-type slug `visual-reviewer`, not the member `--name` (`vr-batch-<start>`); subsequent VR batches in the same invocation overwrite the same audit file — that is intentional.
+   Capture the printed `agent_id` as `[vr-batch-agent-id]` for subsequent `cafleet message send` / `member delete` calls. The pre-spawn file at `${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed; consecutive VR batches each get a unique timestamped file.
 
 ### Step 4: User Approval & Revision Loop (Director)
 

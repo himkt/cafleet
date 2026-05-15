@@ -780,20 +780,81 @@ def _load_authorized_member(
     return target, placement
 
 
+def _read_prompt_file(path: str) -> str:
+    """Read the spawn prompt from a file, validating absolute path / readability / UTF-8 / non-empty.
+
+    Owns the five error surfaces from design 0000059 § 6: relative path →
+    ``UsageError``; missing / non-regular file → ``ClickException``;
+    permission / generic-I/O failures → ``ClickException``; invalid UTF-8 →
+    ``ClickException``; zero-byte or whitespace-only contents →
+    ``ClickException``. Returns the file body verbatim — no stripping,
+    trailing newlines preserved.
+
+    The existence and regular-file checks ride entirely on the
+    ``read_bytes()`` exception surface (no ``is_file()`` pre-check), so a
+    path on which we lack traverse permission cannot leak through a stat
+    gate and surface as the wrong message — ``PermissionError`` from
+    ``read_bytes`` lands in the ``file is not readable`` branch directly.
+    """
+    if not Path(path).is_absolute():
+        raise click.UsageError(
+            f"--prompt-file requires an absolute path (got '{path}'). "
+            "Resolve relative paths against your BASE first — "
+            "see Skill(cafleet:base-dir)."
+        )
+    file_path = Path(path)
+    try:
+        # read_bytes() + decode() instead of read_text() so universal-newline
+        # translation does NOT collapse CRLF / CR to LF — the success-criterion
+        # promises the file body lands in the spawn argv byte-for-byte verbatim.
+        content = file_path.read_bytes().decode("utf-8")
+    except (FileNotFoundError, IsADirectoryError) as exc:
+        # FileNotFoundError → the path does not name an existing file.
+        # IsADirectoryError → the path names a directory, not a regular file.
+        # Both map to the § 6 "missing or non-regular file" surface.
+        raise click.ClickException(
+            f"--prompt-file {path}: file does not exist or is not a regular file."
+        ) from exc
+    except PermissionError as exc:
+        raise click.ClickException(
+            f"--prompt-file {path}: file is not readable."
+        ) from exc
+    except UnicodeDecodeError as exc:
+        raise click.ClickException(
+            f"--prompt-file {path}: file is not valid UTF-8."
+        ) from exc
+    except OSError as exc:
+        # Reserved for true I/O failures (EIO, ENOSPC, EBUSY, …). The earlier
+        # FileNotFoundError / IsADirectoryError / PermissionError branches
+        # handle the OSError subclasses that have a more precise § 6 message.
+        raise click.ClickException(
+            f"--prompt-file {path}: file is not readable."
+        ) from exc
+    if content == "" or content.isspace():
+        raise click.ClickException(f"--prompt-file {path}: file is empty.")
+    return content
+
+
 def _resolve_prompt(
     ctx: click.Context,
     director_agent_id: str,
     new_agent_id: str,
     prompt_argv: tuple[str, ...],
+    prompt_file: str | None = None,
 ) -> str:
     """Substitute ``session_id`` / ``agent_id`` / ``director_agent_id`` into the spawn prompt.
 
-    Runs ``str.format`` on both the default template and any user-supplied
-    ``prompt_argv``, so custom prompts must double literal braces
-    (``{{`` / ``}}``) to survive the substitution.
+    Runs ``str.format`` on the chosen template (file > positional > default)
+    so custom prompts must double literal braces (``{{`` / ``}}``) to survive
+    the substitution.
     """
     session_id = ctx.obj["session_id"]
-    template = " ".join(prompt_argv) if prompt_argv else _MEMBER_PROMPT_TEMPLATE
+    if prompt_file is not None:
+        template = _read_prompt_file(prompt_file)
+    elif prompt_argv:
+        template = " ".join(prompt_argv)
+    else:
+        template = _MEMBER_PROMPT_TEMPLATE
     try:
         return template.format(
             session_id=session_id,
@@ -814,8 +875,8 @@ def _resolve_prompt(
         ) from exc
 
 
-def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> NoReturn:
-    """Best-effort deregister of a just-created agent, then raise ClickException."""
+def _deregister_with_warning(new_agent_id: str, *, session_id: str) -> None:
+    """Best-effort deregister; emit warning to stderr if it fails."""
     try:
         broker.deregister_agent(new_agent_id)
     except Exception as drop_exc:
@@ -826,6 +887,11 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
             f"Cause: {drop_exc}",
             err=True,
         )
+
+
+def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> NoReturn:
+    """Best-effort deregister of a just-created agent, then raise ClickException."""
+    _deregister_with_warning(new_agent_id, session_id=session_id)
     raise click.ClickException(f"{reason}. Rolled back registration of {new_agent_id}.")
 
 
@@ -841,11 +907,24 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
     show_default=True,
     help="Coding agent (claude or codex).",
 )
+@click.option(
+    "--prompt-file",
+    "prompt_file",
+    type=str,
+    default=None,
+    help="Read spawn prompt from FILE (abs path, UTF-8).",
+)
 @_full_flag
 @click.argument("prompt_argv", nargs=-1)
 @click.pass_context
-def member_create(ctx, agent_id, name, description, coding_agent, full, prompt_argv):
+def member_create(
+    ctx, agent_id, name, description, coding_agent, prompt_file, full, prompt_argv
+):
     """Register a new member and spawn its pane."""
+    if prompt_file is not None and prompt_argv:
+        raise click.UsageError(
+            "--prompt-file and the positional prompt argument are mutually exclusive."
+        )
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
@@ -876,13 +955,16 @@ def member_create(ctx, agent_id, name, description, coding_agent, full, prompt_a
     new_agent_id = result["agent_id"]
 
     try:
-        prompt = _resolve_prompt(ctx, agent_id, new_agent_id, prompt_argv)
-    except click.UsageError as exc:
-        _rollback_register(
-            new_agent_id,
-            session_id=session_id,
-            reason=f"prompt resolution failed: {exc}",
-        )
+        prompt = _resolve_prompt(ctx, agent_id, new_agent_id, prompt_argv, prompt_file)
+    except (click.UsageError, click.ClickException):
+        # Re-raise unwrapped so the exact message from docs/spec/cli-options.md
+        # § Error Messages reaches the operator. Wrapping via _rollback_register
+        # would prepend "prompt resolution failed:" and append "Rolled back
+        # registration of <id>." (with a stray ".." when the inner message
+        # already ends in a period), and would also downgrade UsageError exit
+        # code 2 → ClickException exit 1.
+        _deregister_with_warning(new_agent_id, session_id=session_id)
+        raise
 
     if coding_agent == "claude":
         spawn_command = _build_claude_command(prompt, display_name=name)
