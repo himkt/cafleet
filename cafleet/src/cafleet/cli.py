@@ -810,6 +810,15 @@ def _read_prompt_file(path: str) -> str:
         raise click.ClickException(
             f"--prompt-file {path}: file is not valid UTF-8."
         ) from exc
+    except OSError as exc:
+        # Catches FileNotFoundError (file disappeared between is_file() and
+        # read), EIO, ENOSPC, and every other I/O failure that surfaces as an
+        # OSError subclass. Map them all to "file is not readable" so the
+        # output stays inside the documented § 6 catalog instead of bubbling
+        # as an unhandled traceback.
+        raise click.ClickException(
+            f"--prompt-file {path}: file is not readable."
+        ) from exc
     if content == "" or content.isspace():
         raise click.ClickException(f"--prompt-file {path}: file is empty.")
     return content
