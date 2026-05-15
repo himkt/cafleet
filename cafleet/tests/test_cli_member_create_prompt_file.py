@@ -1,6 +1,8 @@
 """Tests for ``--prompt-file`` on ``cafleet member create`` (design doc 0000059)."""
 
 import json
+import os
+import sys
 import uuid
 
 import click
@@ -348,6 +350,42 @@ def test_prompt_file_invalid_utf8(
     assert result.exit_code == 1, result.output
     assert "file is not valid UTF-8" in result.output
     assert len(split_window_recorder) == 0
+
+
+# --- not_readable: design doc 0000059 §5 + §6. ``Path.read_text`` raises
+# ``PermissionError`` when the OS denies read access; the helper converts it
+# to ``ClickException`` (exit 1) with the ``file is not readable`` message.
+# Skipped on Windows (no POSIX permission semantics) and when running as
+# root (root bypasses the read bit). ---
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="POSIX-only test; root bypasses the read-permission check",
+)
+def test_prompt_file_not_readable(
+    tmp_path,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    session_id, director_id, runner = bootstrapped_session
+    unreadable_file = tmp_path / "unreadable.md"
+    unreadable_file.write_text("hello", encoding="utf-8")
+    unreadable_file.chmod(0o000)
+    try:
+        result = _invoke_member_create(
+            runner,
+            session_id,
+            director_id,
+            prompt_file=str(unreadable_file),
+        )
+        assert result.exit_code == 1, result.output
+        assert "file is not readable" in result.output
+        assert str(unreadable_file) in result.output
+        assert len(split_window_recorder) == 0
+    finally:
+        unreadable_file.chmod(0o644)
 
 
 # --- preserves_trailing_newline / preserves_surrounding_whitespace: design
