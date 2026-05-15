@@ -781,13 +781,20 @@ def _load_authorized_member(
 
 
 def _read_prompt_file(path: str) -> str:
-    """Read the spawn prompt from a file, validating absolute path / existence / UTF-8 / non-empty.
+    """Read the spawn prompt from a file, validating absolute path / readability / UTF-8 / non-empty.
 
-    Owns the four error surfaces from design 0000059 § 6 in this order: relative
-    path → ``UsageError``; missing or non-regular file → ``ClickException``;
-    permission / UTF-8 decode failures → ``ClickException``; zero-byte or
-    whitespace-only contents → ``ClickException``. Returns the file body
-    verbatim — no stripping, trailing newlines preserved.
+    Owns the four error surfaces from design 0000059 § 6: relative path →
+    ``UsageError``; missing / non-regular file → ``ClickException``;
+    permission / generic-I/O failures → ``ClickException``; invalid UTF-8 →
+    ``ClickException``; zero-byte or whitespace-only contents →
+    ``ClickException``. Returns the file body verbatim — no stripping,
+    trailing newlines preserved.
+
+    The existence and regular-file checks ride entirely on the
+    ``read_bytes()`` exception surface (no ``is_file()`` pre-check), so a
+    path on which we lack traverse permission cannot leak through a stat
+    gate and surface as the wrong message — ``PermissionError`` from
+    ``read_bytes`` lands in the ``file is not readable`` branch directly.
     """
     if not Path(path).is_absolute():
         raise click.UsageError(
@@ -796,18 +803,15 @@ def _read_prompt_file(path: str) -> str:
             "see Skill(cafleet:base-dir)."
         )
     file_path = Path(path)
-    if not file_path.is_file():
-        raise click.ClickException(
-            f"--prompt-file {path}: file does not exist or is not a regular file."
-        )
     try:
         # read_bytes() + decode() instead of read_text() so universal-newline
         # translation does NOT collapse CRLF / CR to LF — the success-criterion
         # promises the file body lands in the spawn argv byte-for-byte verbatim.
         content = file_path.read_bytes().decode("utf-8")
-    except FileNotFoundError as exc:
-        # File disappeared between is_file() above and read_bytes() here. The
-        # § 6 catalog uses the same message as the pre-read existence check.
+    except (FileNotFoundError, IsADirectoryError) as exc:
+        # FileNotFoundError → the path does not name an existing file.
+        # IsADirectoryError → the path names a directory, not a regular file.
+        # Both map to the § 6 "missing or non-regular file" surface.
         raise click.ClickException(
             f"--prompt-file {path}: file does not exist or is not a regular file."
         ) from exc
@@ -821,8 +825,8 @@ def _read_prompt_file(path: str) -> str:
         ) from exc
     except OSError as exc:
         # Reserved for true I/O failures (EIO, ENOSPC, EBUSY, …). The earlier
-        # PermissionError / FileNotFoundError branches handle the OSError
-        # subclasses that have a more precise § 6 message.
+        # FileNotFoundError / IsADirectoryError / PermissionError branches
+        # handle the OSError subclasses that have a more precise § 6 message.
         raise click.ClickException(
             f"--prompt-file {path}: file is not readable."
         ) from exc
