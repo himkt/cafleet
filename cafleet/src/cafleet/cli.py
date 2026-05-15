@@ -936,18 +936,15 @@ def member_create(
 
     try:
         prompt = _resolve_prompt(ctx, agent_id, new_agent_id, prompt_argv, prompt_file)
-    except click.UsageError:
-        # Preserve the UsageError exit code (2) — wrapping in ClickException
-        # would downgrade it to exit 1 and hide the absolute-path / unknown-
-        # placeholder usage hint from the operator.
+    except (click.UsageError, click.ClickException):
+        # Re-raise unwrapped so the exact message from docs/spec/cli-options.md
+        # § Error Messages reaches the operator. Wrapping via _rollback_register
+        # would prepend "prompt resolution failed:" and append "Rolled back
+        # registration of <id>." (with a stray ".." when the inner message
+        # already ends in a period), and would also downgrade UsageError exit
+        # code 2 → ClickException exit 1.
         _deregister_with_warning(new_agent_id, session_id=session_id)
         raise
-    except click.ClickException as exc:
-        _rollback_register(
-            new_agent_id,
-            session_id=session_id,
-            reason=f"prompt resolution failed: {exc}",
-        )
 
     if coding_agent == "claude":
         spawn_command = _build_claude_command(prompt, display_name=name)
