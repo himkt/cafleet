@@ -19,7 +19,7 @@ Run the following commands on your terminal:
 
 > [!IMPORTANT]
 >
-> Make sure whther the skills are correctly installed. You can see available skills by running `/skills` on Claude Code prompt.
+> Make sure whether the skills are correctly installed. You can see available skills by running `/skills` on Claude Code prompt.
 > 
 > Typically, the config entries like following would be written in `~/.claude/settings.json`:
 >
@@ -30,8 +30,8 @@ Run the following commands on your terminal:
 > "extraKnownMarketplaces": {
 >   "cafleet": {
 >     "source": {
->       "source": "directory",
->       "path": "/home/himkt/work/himkt/cafleet"
+>       "source": "github",
+>       "path": "himkt/cafleet"
 >     }
 >   }
 > },
@@ -48,7 +48,7 @@ codex plugin marketplace add himkt/cafleet
 
 > [!IMPORTANT]
 >
-> Make sure whther the skills are correctly installed. You can see available skills by running `/skills` on Codex prompt.
+> Make sure whether the skills are correctly installed. You can see available skills by running `/skills` on Codex prompt.
 > 
 > Typically, the config entries like following would be written in `~/.codex/config.toml`:
 >
