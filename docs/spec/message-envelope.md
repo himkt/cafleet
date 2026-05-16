@@ -128,7 +128,7 @@ build OK
 
 Optional segments `| kind:<kind>` and `| origin:<id8>` are appended to line 1 when the task is a broadcast summary (`type != "unicast"`) or has a non-NULL `origin_task_id`, respectively. The body line is omitted entirely when the resulting body is the empty string.
 
-`--full` switches to a six-line block that mirrors the `--full` JSON keys one-per-line. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. The 10-codepoint `...` suffix from the pre-design-0049 era is replaced with the single Unicode codepoint `…` (U+2026) at the configured `CAFLEET_MAX_TEXT_LEN` codepoint count (default 200).
+`--full` switches to a six-line block that mirrors the `--full` JSON keys one-per-line. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. The truncation suffix is the single Unicode codepoint `…` (U+2026), applied at the configured `CAFLEET_MAX_TEXT_LEN` codepoint count (default 200).
 
 ## Flag cross-reference
 

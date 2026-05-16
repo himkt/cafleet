@@ -1,10 +1,10 @@
-"""Per-tick baseline measurement STUB for design doc 0000049 (token reduction).
+"""Per-tick baseline measurement STUB for token-reduction tracking.
 
-This file is a **deferred stub** of the originally-scoped Step 0 baseline
-script. The original target was a 10-minute idle window with periodic
-``/loop``-tick captures; the operator deferred that measurement when
-Surface 13 was authorized to ship with character-anchored regression
-tests as the canonical contract.
+This file is a **deferred stub** of the originally-scoped baseline script.
+The original target was a 10-minute idle window with periodic ``/loop``-tick
+captures; the operator deferred that measurement when the slim wire format
+was authorized to ship with character-anchored regression tests as the
+canonical contract.
 
 What this script ACTUALLY does today (single-shot stub):
 
@@ -153,13 +153,13 @@ def _write_results(
     timestamp = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     breakdown_lines = "\n".join(f"- {label}: {n} bytes" for label, n in breakdown)
     content = (
-        "# Token-budget measurement results — design doc 0000049\n"
+        "# Token-budget measurement results\n"
         "\n"
         "Per-tick byte counts of the Director monitoring commands run against an\n"
         "isolated 3-member idle CAFleet session. Updated by\n"
         "`tests/token_budget/scenarios/idle_3_member_baseline_stub.py`.\n"
         "\n"
-        "## Pre-design-0049 baseline\n"
+        "## Baseline\n"
         "\n"
         f"- captured_at: {timestamp}\n"
         "- scenario: idle_3_member_baseline_stub\n"

@@ -208,7 +208,7 @@ Each entry follows the docstring-stripping rule: drop the `(design NNNNNN[§X|St
 
 ### Step 7: Verify the cleanup is complete
 
-- [x] Run `grep -rEn 'design 0[0-9]{6}|per design [0-9]|see design [0-9]|added in design [0-9]|deprecated in design [0-9]|design-docs/[0-9]{7}' --include='*.md' --include='*.py' --include='*.ts' --include='*.tsx' --include='*.js' --include='*.json' --include='*.toml' --include='*.sh' --include='.gitignore' --exclude-dir=design-docs --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=dist .` from the repo root. <!-- completed: 2026-05-16T12:25 -->
+- [x] Run `grep -rEn 'design 0[0-9]{6}|per design [0-9]|see design [0-9]|added in design [0-9]|deprecated in design [0-9]|design-docs/[0-9]{7}|design doc 0[0-9]{6}|[Pp]re-design-0[0-9]+' --include='*.md' --include='*.py' --include='*.ts' --include='*.tsx' --include='*.js' --include='*.json' --include='*.toml' --include='*.sh' --include='.gitignore' --exclude-dir=design-docs --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=dist .` from the repo root. <!-- completed: 2026-05-16T12:25 -->
 - [x] Confirm the residual matches are confined to: `CLAUDE.md` lines 21-25 (the registry), `.claude/rules/design-doc-numbering.md`, `skills/design-doc/`, `skills/design-doc-create/`, `skills/design-doc-execute/`, `skills/design-doc-interview/`, `cafleet/src/cafleet/base_dir.py:213` (the docstring example), `cafleet/tests/test_base_dir*.py` (the `0000099` synthetic-slug fixtures), and `skills/base-dir/SKILL.md:25` (the resolver CLI-usage example). <!-- completed: 2026-05-16T12:25 -->
 
 ### Step 8: Validate the project still builds and tests pass
