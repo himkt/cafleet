@@ -261,7 +261,7 @@ Per project rule `.claude/rules/design-doc-numbering.md`, documentation MUST lan
 
 - [x] Rewrite § *Procedure* to document the positional `TASK_NAME` branch as the primary path for task-aware consuming skills. The no-positional `AskUserQuestion` branch remains documented for the shared-root case. <!-- completed: 2026-05-16T00:26 -->
 - [x] Update the § *CLI surface* code block to show `cafleet base-dir resolve [TASK_NAME] [--json]` and remove `--path`. <!-- completed: 2026-05-16T00:26 -->
-- [x] Add a new sub-section documenting the absolute-path-arg recognition rules (ancestor match against `researches/<slug>/` or `design-docs/<NNNNNNN>-<slug>/`). <!-- completed: 2026-05-16T00:26 -->
+- [x] ~~Add a new sub-section documenting the absolute-path-arg recognition rules~~ — superseded: the bucket-pattern matching was removed in the architectural simplification; the absolute-path rule is now "strictly under repo root → verbatim; else → unset", documented in § *Step 0* of `skills/base-dir/SKILL.md`. <!-- completed: 2026-05-16T01:55 (later simplified) -->
 - [x] Update § *Anchor file* to note that anchors are now written inside task folders too, and add `"task-scope"` to the documented `source` enum. <!-- completed: 2026-05-16T00:26 -->
 
 ### Step 3: Update the 5 consuming skills' SKILL.md files

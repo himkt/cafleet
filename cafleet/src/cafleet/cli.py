@@ -457,13 +457,15 @@ def base_dir_resolve(ctx: click.Context, task_name: str | None, as_json: bool) -
     ``needs-user-input`` when CWD is ``$HOME`` / under ``$HOME/.claude`` and
     no usable anchor exists.
 
-    With a positional ``TASK_NAME`` (relative path like ``researches/<slug>``
-    or ``design-docs/<NNNNNNN>-<slug>``, or an absolute path inside such a
-    folder): engages the task-scope branch — auto-creates the task folder,
-    writes a per-task anchor with ``source: "task-scope"``, and returns the
-    task folder as ``${BASE}``. When CWD has no ``.git`` ancestor, the task-
-    scope branch exits 1 with a plain-text stderr message and emits no JSON
-    payload, even with ``--json``.
+    With a positional ``TASK_NAME`` (relative path the consuming skill picks,
+    e.g. ``researches/<slug>`` or ``design-docs/<NNNNNNN>-<slug>``, or an
+    absolute path strictly under the inferred repo root): engages the
+    task-scope branch — treats the resolved path as the task folder verbatim
+    (no skill-specific ancestor walk), auto-creates it, writes a per-task
+    anchor with ``source: "task-scope"``, and returns the task folder as
+    ``${BASE}``. When CWD has no ``.git`` ancestor, the task-scope branch
+    exits 1 with a plain-text stderr message and emits no JSON payload, even
+    with ``--json``.
     """
     try:
         result = base_dir.resolve(task_name=task_name)

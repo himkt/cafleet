@@ -132,9 +132,9 @@ The two subcommands live under the `cafleet` CLI as the `base-dir` subgroup. Lik
 #
 # Positional form: TASK_NAME is a relative path under the inferred repo root
 # (e.g. researches/<slug>, design-docs/<NNNNNNN>-<slug>) or an absolute path
-# whose ancestor matches one of those task-folder patterns. The CLI auto-creates
-# the task folder, writes <task-folder>/.cafleet-base-dir.json with
-# source: "task-scope", and returns the task folder as the resolved base.
+# strictly under the repo root. The CLI auto-creates the task folder (verbatim
+# — no skill-specific ancestor walk), writes <task-folder>/.cafleet-base-dir.json
+# with source: "task-scope", and returns the task folder as the resolved base.
 cafleet base-dir resolve [TASK_NAME] [--json]
 
 # Possible JSON outputs:
