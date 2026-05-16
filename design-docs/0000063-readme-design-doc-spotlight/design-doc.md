@@ -1,7 +1,7 @@
 # README — Spotlight design-doc-driven development; collapse the duplicate Coding agents H3
 
 **Status**: Approved
-**Progress**: 5/17 tasks complete
+**Progress**: 9/17 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -195,10 +195,10 @@ The historical record of the removal lives in this design doc (Status: Complete 
 
 ### Step 3: Insert new `## Design-doc-driven development` section
 
-- [ ] Before inserting the new section, open `skills/design-doc-create/SKILL.md`, `skills/design-doc-interview/SKILL.md`, and `skills/design-doc-execute/SKILL.md`. Read each file's frontmatter `description` and the `Role` table at the top of the body. Confirm the one-line role descriptions in §5's bullet list still match reality (Drafter+Reviewer for create, Analyzer for interview, Programmer+Tester+optional Verifier for execute). If any role table has drifted, adjust the README bullet text to match — do NOT edit the SKILL.md. <!-- completed: -->
-- [ ] Before finalising the pitch paragraph, verify its wording does not include an unverifiable absolute about pre-skill design docs. The §5 verbatim text uses present tense ("Design documents under `design-docs/` are authored, validated, and implemented through the three CAFleet design-doc skills") deliberately, since the three skills were introduced at specific design-doc numbers (the latest is `/cafleet:design-doc-interview` at design 0000045) and pre-skill documents were authored manually. Reject any rewording that re-introduces a historical universal ("Every design document was authored using these skills"). <!-- completed: -->
-- [ ] Insert the new `## Design-doc-driven development` H2 (verbatim text from §5) immediately after the closing line of `## Simple example to use CAFleet on Claude Code or Codex` and immediately before the `## CLI cheatsheet` H2. Preserve one blank line above the new heading and one blank line below the closing `[design-docs/](design-docs/)` line. <!-- completed: -->
-- [ ] Confirm the bullet list has exactly 3 items, the pitch paragraph is exactly 3 sentences, and the closing line is exactly one sentence with exactly one link target (`design-docs/`). <!-- completed: -->
+- [x] Before inserting the new section, open `skills/design-doc-create/SKILL.md`, `skills/design-doc-interview/SKILL.md`, and `skills/design-doc-execute/SKILL.md`. Read each file's frontmatter `description` and the `Role` table at the top of the body. Confirm the one-line role descriptions in §5's bullet list still match reality (Drafter+Reviewer for create, Analyzer for interview, Programmer+Tester+optional Verifier for execute). If any role table has drifted, adjust the README bullet text to match — do NOT edit the SKILL.md. <!-- completed: 2026-05-16T14:03 -->
+- [x] Before finalising the pitch paragraph, verify its wording does not include an unverifiable absolute about pre-skill design docs. The §5 verbatim text uses present tense ("Design documents under `design-docs/` are authored, validated, and implemented through the three CAFleet design-doc skills") deliberately, since the three skills were introduced at specific design-doc numbers (the latest is `/cafleet:design-doc-interview` at design 0000045) and pre-skill documents were authored manually. Reject any rewording that re-introduces a historical universal ("Every design document was authored using these skills"). <!-- completed: 2026-05-16T14:03 -->
+- [x] Insert the new `## Design-doc-driven development` H2 (verbatim text from §5) immediately after the closing line of `## Simple example to use CAFleet on Claude Code or Codex` and immediately before the `## CLI cheatsheet` H2. Preserve one blank line above the new heading and one blank line below the closing `[design-docs/](design-docs/)` line. <!-- completed: 2026-05-16T14:03 -->
+- [x] Confirm the bullet list has exactly 3 items, the pitch paragraph is exactly 3 sentences, and the closing line is exactly one sentence with exactly one link target (`design-docs/`). <!-- completed: 2026-05-16T14:03 -->
 
 ### Step 4: Verification
 

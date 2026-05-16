@@ -132,6 +132,16 @@ Claude (the Director) bootstraps a CAFleet session, spawns a Drafter and a Revie
 
 Want more? See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for the raw broker primitives and [`skills/design-doc-create/SKILL.md`](skills/design-doc-create/SKILL.md) for the orchestration this example uses.
 
+## Design-doc-driven development
+
+CAFleet itself is developed end-to-end using CAFleet. Design documents under `design-docs/` are authored, validated, and implemented through the three CAFleet design-doc skills — the same skills you get when you install the plugin. The same Director-and-members orchestration that the Simple example above kicks off is how the CAFleet repo grows.
+
+- `/cafleet:design-doc-create` — Director spawns a Drafter and a Reviewer, drives the clarification → draft → review loop, lands a polished design doc on disk.
+- `/cafleet:design-doc-interview` — Director spawns a short-lived Analyzer, drives multi-round `AskUserQuestion` validation, writes `COMMENT(claude)` annotations inline.
+- `/cafleet:design-doc-execute` — Director spawns a Programmer and a Tester (and optionally a Verifier), drives the TDD cycle step-by-step, commits after each phase, then runs the PR + Copilot-review loop.
+
+See the [`design-docs/`](design-docs/) directory for every design document this repo has shipped.
+
 ## CLI cheatsheet
 
 | Command group | One-line purpose |
