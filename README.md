@@ -1,8 +1,6 @@
 # CAFleet
 
-A message broker and agent registry for coding agents — a Claude Code plugin plus a local broker CLI.
-
-> **CAFleet is a local-only tool.** It runs on a single developer machine without authentication. Do not expose the broker on a shared network unless you accept that every listener can see and act within every session.
+Agent Teams reinvented for collaborative coding supporting Claude Code and Codex, with full code transparency.
 
 ## Install
 
