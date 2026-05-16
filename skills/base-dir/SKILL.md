@@ -47,8 +47,8 @@ The CLI checks whether the absolute path is strictly under the inferred repo roo
 
 | Consumer | Canonical relpath form | Canonicalization steps |
 |:--|:--|:--|
-| `/cafleet:design-doc-create` / `/cafleet:design-doc-execute` / `/cafleet:design-doc-interview` | `design-docs/<slug>` | (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`. Absolute paths pass through verbatim. |
-| `/cafleet:research-report` / `/cafleet:research-presentation` | `researches/<topic-slug>` | (1) strip trailing `/report.md` (or other known per-topic filenames) if present; (2) strip leading `researches/` if present; (3) prepend `researches/`. Absolute paths pass through verbatim. |
+| `/cafleet:design-doc-create` / `/cafleet:design-doc-execute` / `/cafleet:design-doc-interview` | `design-docs/<slug>` | (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`. **Absolute paths**: apply the same `/design-doc.md` strip (the resolver does not fold child filenames; a child file path becomes a directory named after the file). |
+| `/cafleet:research-report` / `/cafleet:research-presentation` | `researches/<topic-slug>` | (1) strip trailing `/report.md` (or other known per-topic filenames) if present; (2) strip leading `researches/` if present; (3) prepend `researches/`. **Absolute paths**: apply the same `/report.md` strip (the resolver does not fold child filenames; a child file path becomes a directory named after the file). |
 
 The stripping logic is skill-specific because each skill knows the file conventions inside its own bucket. The resolver stays bucket-agnostic. Skipping canonicalization causes the resolver to create a directory literally named `design-doc.md` (or `report.md`, etc.) and anchor the wrong BASE.
 
