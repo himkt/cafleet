@@ -1,6 +1,6 @@
 # README — Spotlight design-doc-driven development; collapse the duplicate Coding agents H3
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 17/17 tasks complete
 **Last Updated**: 2026-05-16
 
@@ -222,3 +222,4 @@ The historical record of the removal lives in this design doc (Status: Complete 
 | 2026-05-16 | Reviewer round 2: Background paragraph rewritten to match the §5 present-tense framing (drop the leftover "every design document … was authored end-to-end" universal that §5 had already disavowed); internal consistency between Background and §5 restored. |
 | 2026-05-16 | Approved by user. Status set to Approved; ready for /design-doc-execute. |
 | 2026-05-16 | Execution: addressed Copilot review round 1 (polished Codex NOTE grammar, clarified success criterion scope wording). Dismissed Copilot round 2 (NOTE first-person voice + sandbox callout capitalization) as voice-preserving / verbatim-preserved-per-§3 per user direction. User-requested mid-execution addition: recommended `rules/cafleet.rules` example added to `#### Codex` install subsection (auto-approve `cafleet *`, prompt on `cafleet member exec`). This is a scope expansion beyond the original spec (§3 only specified relocation of the sandbox IMPORTANT and one cross-reference line) — accepted as user-authorized in-execution addition. |
+| 2026-05-16 | Status set to Complete after user approval and finalize. PR #78 opened, Copilot review loop ran 1 fix round (grammar polish + scope wording) and was dismissed for round 2 (subjective voice/style). Branch ready for merge. |
