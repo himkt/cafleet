@@ -24,17 +24,39 @@ Run the following commands on your terminal:
 > Typically, the config entries like following would be written in `~/.claude/settings.json`:
 >
 > ```json
-> "enabledPlugins": {
->   "cafleet@cafleet": true
-> },
-> "extraKnownMarketplaces": {
->   "cafleet": {
->     "source": {
->       "source": "github",
->       "path": "himkt/cafleet"
+> {
+>   "permissions": {
+>     "allow": [
+>       "Bash(cafleet *)",
+>       "Skill(cafleet:agent-team-monitoring)",
+>       "Skill(cafleet:agent-team-supervision)",
+>       "Skill(cafleet:base-dir)",
+>       "Skill(cafleet:cafleet)",
+>       "Skill(cafleet:create-figure)",
+>       "Skill(cafleet:design-doc)",
+>       "Skill(cafleet:design-doc-create)",
+>       "Skill(cafleet:design-doc-execute)",
+>       "Skill(cafleet:design-doc-interview)",
+>       "Skill(cafleet:my-slidev)",
+>       "Skill(cafleet:research-presentation)",
+>       "Skill(cafleet:research-report)"
+>     ],
+>     "ask": [
+>       "Bash(cafleet * member exec *)"
+>     ]
+>   },
+>   "enabledPlugins": {
+>     "cafleet@cafleet": true
+>   },
+>   "extraKnownMarketplaces": {
+>     "cafleet": {
+>       "source": {
+>         "source": "github",
+>         "path": "himkt/cafleet"
+>       }
 >     }
 >   }
-> },
+> }
 > ```
 >
 
@@ -62,7 +84,12 @@ codex plugin marketplace add himkt/cafleet
 > [plugins."cafleet@cafleet"]
 > enabled = true
 > ```
+> 
+
+> [!NOTE]
 >
+> I'm Codex beginner, so contribution are super welcome how to configure auto-approve cafleet commands on Codex... :bow:
+> 
 
 ### Install CAFleet CLI (required for CAFleet to function)
 
