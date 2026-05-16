@@ -6,6 +6,8 @@ A message broker and agent registry for coding agents — a Claude Code plugin p
 
 ## Install
 
+CAFleet works with two coding agents: `claude` (Claude Code) and `codex` (OpenAI Codex CLI). Install the plugin in whichever one you use — the broker CLI is shared.
+
 ### Install CAFleet skills
 
 #### Claude Code
@@ -68,6 +70,11 @@ Run the following command on your terminal
 codex plugin marketplace add himkt/cafleet
 ```
 
+> [!NOTE]
+>
+> I'm a Codex beginner, so contributions are super welcome — especially help configuring auto-approve for cafleet commands on Codex... :bow:
+> 
+
 > [!IMPORTANT]
 >
 > Make sure whether the skills are correctly installed. You can see available skills by running `/skills` on Codex prompt.
@@ -86,10 +93,33 @@ codex plugin marketplace add himkt/cafleet
 > ```
 > 
 
-> [!NOTE]
+> [!IMPORTANT]
+> Codex members need the cafleet DB directory to be writable from inside the codex sandbox. Add it to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads (e.g. `~/.codex/config.toml`):
 >
-> I'm Codex beginner, so contribution are super welcome how to configure auto-approve cafleet commands on Codex... :bow:
-> 
+> ```toml
+> [sandbox_workspace_write]
+> writable_roots = ["/home/<you>/.local/share/cafleet"]
+> ```
+>
+> Use the absolute path matching `CAFLEET_DATABASE_URL` or the default XDG location.
+
+Recommended Codex rules for `cafleet` commands — drop into your codex rules file (e.g. `~/.codex/rules/cafleet.rules`) to auto-approve the broker CLI while keeping `cafleet member exec` (which runs arbitrary shell on a member pane) gated behind a prompt:
+
+```
+prefix_rule(
+    pattern = ["cafleet"],
+    decision = "allow",
+    justification = "All cafleet subcommands are allowed by default",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "exec"],
+    decision = "prompt",
+    justification = "cafleet member exec runs arbitrary commands on a member; require approval",
+)
+```
+
+For codex CLI version pin and operational specifics, see [docs/codex-members.md](docs/codex-members.md).
 
 ### Install CAFleet CLI (required for CAFleet to function)
 
@@ -118,6 +148,16 @@ Claude (the Director) bootstraps a CAFleet session, spawns a Drafter and a Revie
 
 Want more? See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for the raw broker primitives and [`skills/design-doc-create/SKILL.md`](skills/design-doc-create/SKILL.md) for the orchestration this example uses.
 
+## Design-doc-driven development
+
+CAFleet itself is developed end-to-end using CAFleet. Design documents under `design-docs/` are authored, validated, and implemented through the three CAFleet design-doc skills — the same skills you get when you install the plugin. The same Director-and-members orchestration that the Simple example above kicks off is how the CAFleet repo grows.
+
+- `/cafleet:design-doc-create` — Director spawns a Drafter and a Reviewer, drives the clarification → draft → review loop, lands a polished design doc on disk.
+- `/cafleet:design-doc-interview` — Director spawns a short-lived Analyzer, drives multi-round `AskUserQuestion` validation, writes `COMMENT(claude)` annotations inline.
+- `/cafleet:design-doc-execute` — Director spawns a Programmer and a Tester (and optionally a Verifier), drives the TDD cycle step-by-step, commits after each phase, then runs the PR + Copilot-review loop.
+
+See the [`design-docs/`](design-docs/) directory for every design document this repo has shipped.
+
 ## CLI cheatsheet
 
 | Command group | One-line purpose |
@@ -145,20 +185,6 @@ Want more? See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for the raw 
 | `--activity` | `member list` | Add per-member `last_sent` / `last_recv` / `last_ack` / `idle` columns aggregated from `tasks`. |
 | `--lines` / `--tail` / `--ansi` / `--no-ansi` | `member capture` | Default `--lines 30` (was 80); `--tail` is an alias for `--lines`; `--no-ansi` (default) strips ANSI escapes. |
 | `CAFLEET_MAX_TEXT_LEN` | env var | Body-truncation codepoint limit (default `200`). See "Message body truncation" below. |
-
-### Coding agents
-
-cafleet supports two coding-agent binaries for member panes: `claude` (Claude Code) and `codex` (OpenAI Codex CLI). Pass `--coding-agent {claude,codex}` on `cafleet session create` (operator-declared metadata for the root Director) and `cafleet member create` (selects the spawn-command builder and records the placement). The default is `claude`, so existing invocations are unchanged. A single Director may spawn both `claude` and `codex` members in the same session. Operational details for codex members — including the codex CLI version pin and verification recipe — live in [docs/codex-members.md](docs/codex-members.md).
-
-> [!IMPORTANT]
-> Codex members need the cafleet DB directory to be writable from inside the codex sandbox. Add it to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads (e.g. `~/.codex/config.toml`):
->
-> ```toml
-> [sandbox_workspace_write]
-> writable_roots = ["/home/<you>/.local/share/cafleet"]
-> ```
->
-> Use the absolute path matching `CAFLEET_DATABASE_URL` or the default XDG location.
 
 ### Message body truncation
 
