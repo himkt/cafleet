@@ -205,21 +205,12 @@ def _resolve_task_scope(task_name: str, *, cwd: Path) -> dict[str, Any]:
         task_folder = matched
     else:
         joined = (repo_root / candidate).resolve(strict=False)
-        # Reject traversal: a relative TASK_NAME must resolve to a path under
-        # (or equal to) repo_root. Without this guard, "../outside" would
-        # silently create directories and anchors outside the repo.
         if joined != repo_root and not _is_under(joined, repo_root):
             raise RuntimeError(
                 f"task_name {task_name!r} resolves outside the repo root "
                 f"({joined} is not under {repo_root}); refusing to create "
                 f"a task folder outside the repo."
             )
-        # Normalize through the task-folder matcher so a relative
-        # slug-plus-filename like "design-docs/0000060-foo/design-doc.md"
-        # resolves to the slug folder, not to a directory literally named
-        # "design-doc.md". Falls back to the joined path verbatim when no
-        # ancestor sits in a recognized task bucket — preserves the simple
-        # "design-docs/<slug>" / "researches/<slug>" cases unchanged.
         matched = _match_known_task_pattern(joined, repo_root)
         task_folder = matched if matched is not None else joined
 
