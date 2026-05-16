@@ -1,26 +1,9 @@
 """Per-command tests for the ``--full`` truncation flag on ``cafleet message *``.
 
-Helper-level tests in ``test_output.py`` already cover ``truncate_text`` and
-``truncate_task_text``. These tests verify the user-facing message subcommands
-exercise truncation correctly:
-
-- ``message poll`` / ``message show`` / ``message send`` truncate the body to
-  10 codepoints + ``...`` by default and emit the full body when ``--full`` is
-  supplied. Tests assert the regression guard from the design doc: non-text
-  fields (``task_id``, ``status_state``, ``from_agent_id``, ``to_agent_id``,
-  ``type``) are byte-identical between the two modes, proving the helper does
-  not mutate siblings of ``task['text']``.
-- ``message broadcast`` is intentionally exempt. The broker returns a single
-  ``broadcast_summary`` envelope whose text is generated server-side and
-  carries no user-supplied body — truncating it would only obscure
-  operator-relevant detail (notifications-sent count, etc.). Its tests assert
-  the summary text passes through verbatim and ``notifications_sent_count``
-  is preserved in ``--json`` output, regardless of ``--full``.
-
-``message ack`` and ``message cancel`` reuse the same ``_client_command``
-wiring as ``message send`` / ``message show`` — the design doc Step 4 last
-bullet explicitly skips per-command tests for them; the helper-level tests
-cover the truncate_task_text behavior on the same task shape.
+Per principle (iii) of design 0000061: per-command + per-mode +
+per-default/full fragmentation collapses to a small set of parametrized
+matrix tests covering ``poll``, ``show``, ``send`` (truncated) and
+``broadcast`` (verbatim).
 """
 
 import json
@@ -34,6 +17,7 @@ from cafleet.cli import cli
 
 LONG_BODY = "x" * 300
 TRUNCATED_BODY = "x" * 200 + "…"
+SUMMARY_TEXT = "Broadcast sent to 3 recipients"
 
 
 @pytest.fixture
@@ -67,7 +51,6 @@ def _stub_verify(monkeypatch):
 
 
 def _task_payload(task_id, *, sender, recipient, text, type_="unicast"):
-    """Build a flat typed-column task dict (post-Surface-14 shape)."""
     return {
         "task_id": task_id,
         "context_id": recipient,
@@ -82,578 +65,7 @@ def _task_payload(task_id, *, sender, recipient, text, type_="unicast"):
     }
 
 
-def test_message_poll_truncation__default_truncates_text_in_text_output(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "poll_tasks",
-        lambda *_a, **_k: [
-            _task_payload("t-1", sender="from-1", recipient=agent_id, text=LONG_BODY)
-        ],
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert TRUNCATED_BODY in result.output
-    assert LONG_BODY not in result.output
-
-
-def test_message_poll_truncation__full_emits_full_text_in_text_output(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "poll_tasks",
-        lambda *_a, **_k: [
-            _task_payload("t-1", sender="from-1", recipient=agent_id, text=LONG_BODY)
-        ],
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-            "--full",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert LONG_BODY in result.output
-    assert TRUNCATED_BODY not in result.output
-
-
-def test_message_poll_truncation__default_truncates_text_in_json_output(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "poll_tasks",
-        lambda *_a, **_k: [
-            _task_payload("t-1", sender="from-1", recipient=agent_id, text=LONG_BODY)
-        ],
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload[0]["text"] == TRUNCATED_BODY
-
-
-def test_message_poll_truncation__full_emits_full_text_in_json_output(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "poll_tasks",
-        lambda *_a, **_k: [
-            _task_payload("t-1", sender="from-1", recipient=agent_id, text=LONG_BODY)
-        ],
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-            "--full",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload[0]["text"] == LONG_BODY
-
-
-def test_message_poll_truncation__empty_inbox_unchanged_by_full_flag(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(broker, "poll_tasks", lambda *_a, **_k: [])
-    default = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-        ],
-    )
-    full = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-            "--full",
-        ],
-    )
-    assert default.exit_code == 0, default.output
-    assert full.exit_code == 0, full.output
-    assert default.output == full.output
-
-
-def test_message_poll_truncation__list_of_three_tasks_each_truncated(
-    runner, session_id, agent_id, monkeypatch
-):
-    bodies = [LONG_BODY + "X", LONG_BODY + "Y", LONG_BODY + "Z"]
-    monkeypatch.setattr(
-        broker,
-        "poll_tasks",
-        lambda *_a, **_k: [
-            _task_payload(
-                f"t-{i}", sender=f"from-{i}", recipient=agent_id, text=bodies[i]
-            )
-            for i in range(3)
-        ],
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert len(payload) == 3
-    for item in payload:
-        assert item["text"] == TRUNCATED_BODY
-
-
-def test_message_poll_truncation__non_text_fields_byte_identical_between_default_and_full(
-    runner, session_id, agent_id, monkeypatch
-):
-    def fresh_payload():
-        return [
-            _task_payload("t-1", sender="from-1", recipient=agent_id, text=LONG_BODY)
-        ]
-
-    monkeypatch.setattr(broker, "poll_tasks", lambda *_a, **_k: fresh_payload())
-    default_res = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-        ],
-    )
-    full_res = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-            "--full",
-        ],
-    )
-    assert default_res.exit_code == 0, default_res.output
-    assert full_res.exit_code == 0, full_res.output
-
-    default_task = json.loads(default_res.output)[0]
-    full_task = json.loads(full_res.output)[0]
-    # Default emits the compact rendered shape; full emits the typed-column
-    # shape. Compact keys map to typed-column counterparts:
-    assert default_task["id"] == full_task["task_id"][:8]
-    assert default_task["from"] == full_task["from_agent_id"][:8]
-    assert default_task["ts"] == full_task["status_timestamp"]
-
-
-def test_message_show_truncation__default_truncates_text_in_text_output(
-    runner, session_id, agent_id, task_id, other_agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "get_task",
-        lambda *_a, **_k: {
-            "task": _task_payload(
-                task_id, sender=other_agent_id, recipient=agent_id, text=LONG_BODY
-            )
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "show",
-            "--agent-id",
-            agent_id,
-            "--task-id",
-            task_id,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert TRUNCATED_BODY in result.output
-    assert LONG_BODY not in result.output
-
-
-def test_message_show_truncation__full_emits_full_text_in_text_output(
-    runner, session_id, agent_id, task_id, other_agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "get_task",
-        lambda *_a, **_k: {
-            "task": _task_payload(
-                task_id, sender=other_agent_id, recipient=agent_id, text=LONG_BODY
-            )
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "show",
-            "--agent-id",
-            agent_id,
-            "--task-id",
-            task_id,
-            "--full",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert LONG_BODY in result.output
-
-
-def test_message_show_truncation__default_truncates_text_in_json_output(
-    runner, session_id, agent_id, task_id, other_agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "get_task",
-        lambda *_a, **_k: {
-            "task": _task_payload(
-                task_id, sender=other_agent_id, recipient=agent_id, text=LONG_BODY
-            )
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "show",
-            "--agent-id",
-            agent_id,
-            "--task-id",
-            task_id,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload["task"]["text"] == TRUNCATED_BODY
-
-
-def test_message_show_truncation__full_emits_full_text_in_json_output(
-    runner, session_id, agent_id, task_id, other_agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "get_task",
-        lambda *_a, **_k: {
-            "task": _task_payload(
-                task_id, sender=other_agent_id, recipient=agent_id, text=LONG_BODY
-            )
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "show",
-            "--agent-id",
-            agent_id,
-            "--task-id",
-            task_id,
-            "--full",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload["task"]["text"] == LONG_BODY
-
-
-def test_message_show_truncation__non_text_fields_byte_identical_between_default_and_full(
-    runner, session_id, agent_id, task_id, other_agent_id, monkeypatch
-):
-    def fresh_payload():
-        return {
-            "task": _task_payload(
-                task_id, sender=other_agent_id, recipient=agent_id, text=LONG_BODY
-            )
-        }
-
-    monkeypatch.setattr(broker, "get_task", lambda *_a, **_k: fresh_payload())
-    default_res = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "show",
-            "--agent-id",
-            agent_id,
-            "--task-id",
-            task_id,
-        ],
-    )
-    full_res = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "show",
-            "--agent-id",
-            agent_id,
-            "--task-id",
-            task_id,
-            "--full",
-        ],
-    )
-    assert default_res.exit_code == 0, default_res.output
-    assert full_res.exit_code == 0, full_res.output
-
-    default_task = json.loads(default_res.output)["task"]
-    full_task = json.loads(full_res.output)["task"]
-    # Default emits the compact rendered shape; full emits the typed-column shape.
-    assert default_task["id"] == full_task["task_id"][:8]
-    assert default_task["from"] == full_task["from_agent_id"][:8]
-    assert default_task["ts"] == full_task["status_timestamp"]
-
-
-def test_message_send_truncation__default_truncates_echo_in_text_output(
-    runner, session_id, agent_id, task_id, other_agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "send_message",
-        lambda *_a, **_k: {
-            "task": _task_payload(
-                task_id, sender=agent_id, recipient=other_agent_id, text=LONG_BODY
-            )
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "send",
-            "--agent-id",
-            agent_id,
-            "--to",
-            other_agent_id,
-            "--text",
-            LONG_BODY,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert "Message sent." in result.output
-    assert TRUNCATED_BODY in result.output
-    assert LONG_BODY not in result.output
-
-
-def test_message_send_truncation__full_emits_full_echo_in_text_output(
-    runner, session_id, agent_id, task_id, other_agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "send_message",
-        lambda *_a, **_k: {
-            "task": _task_payload(
-                task_id, sender=agent_id, recipient=other_agent_id, text=LONG_BODY
-            )
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "send",
-            "--agent-id",
-            agent_id,
-            "--to",
-            other_agent_id,
-            "--text",
-            LONG_BODY,
-            "--full",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert LONG_BODY in result.output
-
-
-def test_message_send_truncation__default_truncates_echo_in_json_output(
-    runner, session_id, agent_id, task_id, other_agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "send_message",
-        lambda *_a, **_k: {
-            "task": _task_payload(
-                task_id, sender=agent_id, recipient=other_agent_id, text=LONG_BODY
-            )
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "send",
-            "--agent-id",
-            agent_id,
-            "--to",
-            other_agent_id,
-            "--text",
-            LONG_BODY,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload["task"]["text"] == TRUNCATED_BODY
-
-
-def test_message_send_truncation__full_emits_full_echo_in_json_output(
-    runner, session_id, agent_id, task_id, other_agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "send_message",
-        lambda *_a, **_k: {
-            "task": _task_payload(
-                task_id, sender=agent_id, recipient=other_agent_id, text=LONG_BODY
-            )
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "send",
-            "--agent-id",
-            agent_id,
-            "--to",
-            other_agent_id,
-            "--text",
-            LONG_BODY,
-            "--full",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload["task"]["text"] == LONG_BODY
-
-
-def test_message_send_truncation__non_text_fields_byte_identical_between_default_and_full(
-    runner, session_id, agent_id, task_id, other_agent_id, monkeypatch
-):
-    def fresh_payload():
-        return {
-            "task": _task_payload(
-                task_id, sender=agent_id, recipient=other_agent_id, text=LONG_BODY
-            )
-        }
-
-    monkeypatch.setattr(broker, "send_message", lambda *_a, **_k: fresh_payload())
-    common = [
-        "--json",
-        "message",
-        "send",
-        "--agent-id",
-        agent_id,
-        "--to",
-        other_agent_id,
-        "--text",
-        LONG_BODY,
-    ]
-    default_res = runner.invoke(cli, ["--session-id", session_id, *common])
-    full_res = runner.invoke(cli, ["--session-id", session_id, *common, "--full"])
-    assert default_res.exit_code == 0, default_res.output
-    assert full_res.exit_code == 0, full_res.output
-
-    default_task = json.loads(default_res.output)["task"]
-    full_task = json.loads(full_res.output)["task"]
-    # Default emits the compact rendered shape; full emits the typed-column shape.
-    assert default_task["id"] == full_task["task_id"][:8]
-    assert default_task["from"] == full_task["from_agent_id"][:8]
-    assert default_task["ts"] == full_task["status_timestamp"]
-
-
-SUMMARY_TEXT = "Broadcast sent to 3 recipients"
-
-
 def _broadcast_summary_payload(task_id, *, sender, count):
-    """Single-element envelope list mirroring ``broker.broadcast_message``.
-
-    The real broker does not return a per-recipient task list — it returns a
-    single ``broadcast_summary`` task (flat typed-column shape post-Surface-14)
-    plus a sibling ``notifications_sent_count`` on the envelope. The summary
-    text is intentionally longer than the truncation limit (~30 codepoints) so
-    any accidental truncation would surface in these tests.
-    """
     return [
         {
             "task": {
@@ -673,185 +85,164 @@ def _broadcast_summary_payload(task_id, *, sender, count):
     ]
 
 
-# --- message_broadcast_no_truncation: ``message broadcast`` returns a
-# ``broadcast_summary`` envelope, not a list of per-recipient delivery tasks.
-# The summary text is generated by the broker and carries no user-supplied
-# body, so truncating it would only obscure operator-relevant detail
-# (notifications-sent count, etc.). The subcommand therefore disables
-# ``truncates_task_text`` and the ``--full`` flag is a no-op here. ---
-
-
-def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_in_text_output(
-    runner, session_id, agent_id, task_id, monkeypatch
-):
+def _setup_subcommand(monkeypatch, subcommand, session_id, agent_id, other_agent_id, task_id):
+    """Patch the broker call and return the CLI argv prefix for the chosen subcommand."""
+    if subcommand == "poll":
+        monkeypatch.setattr(
+            broker,
+            "poll_tasks",
+            lambda *_a, **_k: [
+                _task_payload("t-1", sender="from-1", recipient=agent_id, text=LONG_BODY)
+            ],
+        )
+        return ["message", "poll", "--agent-id", agent_id], "list"
+    if subcommand == "show":
+        monkeypatch.setattr(
+            broker,
+            "get_task",
+            lambda *_a, **_k: {
+                "task": _task_payload(
+                    task_id, sender=other_agent_id, recipient=agent_id, text=LONG_BODY
+                )
+            },
+        )
+        return [
+            "message", "show", "--agent-id", agent_id, "--task-id", task_id
+        ], "envelope"
+    # send
     monkeypatch.setattr(
         broker,
-        "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
+        "send_message",
+        lambda *_a, **_k: {
+            "task": _task_payload(
+                task_id, sender=agent_id, recipient=other_agent_id, text=LONG_BODY
+            )
+        },
     )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "broadcast",
-            "--agent-id",
-            agent_id,
-            "--text",
-            LONG_BODY,
-        ],
+    return [
+        "message", "send", "--agent-id", agent_id,
+        "--to", other_agent_id, "--text", LONG_BODY,
+    ], "envelope"
+
+
+@pytest.mark.parametrize("subcommand", ["poll", "show", "send"])
+@pytest.mark.parametrize("full", [False, True])
+def test_truncation__poll_show_send_text_output(
+    runner, session_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand, full
+):
+    args, _shape = _setup_subcommand(
+        monkeypatch, subcommand, session_id, agent_id, other_agent_id, task_id
     )
+    full_args = args + (["--full"] if full else [])
+    result = runner.invoke(cli, ["--session-id", session_id, *full_args])
     assert result.exit_code == 0, result.output
-    # Post-Step 6: default emits a compact 1-line summary with the recipient
-    # count; the verbose summary text is reserved for ``--full``.
-    assert "broadcast id=" in result.output
-    assert "recipients=" in result.output
+    if full:
+        assert LONG_BODY in result.output
+    else:
+        assert TRUNCATED_BODY in result.output
+        assert LONG_BODY not in result.output
 
 
-def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_with_full_in_text_output(
-    runner, session_id, agent_id, task_id, monkeypatch
+@pytest.mark.parametrize("subcommand", ["poll", "show", "send"])
+@pytest.mark.parametrize("full", [False, True])
+def test_truncation__poll_show_send_json_output(
+    runner, session_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand, full
 ):
-    monkeypatch.setattr(
-        broker,
-        "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
+    args, shape = _setup_subcommand(
+        monkeypatch, subcommand, session_id, agent_id, other_agent_id, task_id
     )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "broadcast",
-            "--agent-id",
-            agent_id,
-            "--text",
-            LONG_BODY,
-            "--full",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert SUMMARY_TEXT in result.output
-
-
-def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_in_json_output(
-    runner, session_id, agent_id, task_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "broadcast",
-            "--agent-id",
-            agent_id,
-            "--text",
-            LONG_BODY,
-        ],
-    )
+    full_args = args + (["--full"] if full else [])
+    result = runner.invoke(cli, ["--session-id", session_id, "--json", *full_args])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert len(payload) == 1
-    # Post-Step 8: default ``CAFLEET_MAX_TEXT_LEN`` is 200 codepoints, so the
-    # 31-codepoint summary text passes through unchanged. ``--full`` keeps
-    # the summary text identical (it bypasses truncation regardless).
-    assert payload[0]["task"]["text"] == SUMMARY_TEXT
+    if shape == "list":
+        task = payload[0]
+    else:
+        task = payload["task"]
+    expected = LONG_BODY if full else TRUNCATED_BODY
+    assert task["text"] == expected
 
 
-def test_message_broadcast_no_truncation__summary_text_emitted_verbatim_with_full_in_json_output(
-    runner, session_id, agent_id, task_id, monkeypatch
+@pytest.mark.parametrize("subcommand", ["poll", "show", "send"])
+def test_truncation__non_text_fields_byte_identical_between_default_and_full(
+    runner, session_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand
 ):
-    monkeypatch.setattr(
-        broker,
-        "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
+    args, shape = _setup_subcommand(
+        monkeypatch, subcommand, session_id, agent_id, other_agent_id, task_id
     )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "broadcast",
-            "--agent-id",
-            agent_id,
-            "--text",
-            LONG_BODY,
-            "--full",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload[0]["task"]["text"] == SUMMARY_TEXT
-
-
-def test_message_broadcast_no_truncation__notifications_sent_count_preserved_in_json_output(
-    runner, session_id, agent_id, task_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=7),
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "broadcast",
-            "--agent-id",
-            agent_id,
-            "--text",
-            LONG_BODY,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload[0]["notifications_sent_count"] == 7
-
-
-def test_message_broadcast_no_truncation__default_and_full_json_output_diverge(
-    runner, session_id, agent_id, task_id, monkeypatch
-):
-    """Post-Step 6: default JSON is the compact rendered envelope, ``--full``
-    restores the typed-column shape with the un-truncated summary text."""
-
-    def fresh_payload():
-        return _broadcast_summary_payload(task_id, sender=agent_id, count=5)
-
-    monkeypatch.setattr(broker, "broadcast_message", lambda *_a, **_k: fresh_payload())
-    common = [
-        "--json",
-        "message",
-        "broadcast",
-        "--agent-id",
-        agent_id,
-        "--text",
-        LONG_BODY,
-    ]
-    default_res = runner.invoke(cli, ["--session-id", session_id, *common])
-    full_res = runner.invoke(cli, ["--session-id", session_id, *common, "--full"])
+    default_res = runner.invoke(cli, ["--session-id", session_id, "--json", *args])
+    full_res = runner.invoke(cli, ["--session-id", session_id, "--json", *args, "--full"])
     assert default_res.exit_code == 0, default_res.output
     assert full_res.exit_code == 0, full_res.output
+    if shape == "list":
+        default_task = json.loads(default_res.output)[0]
+        full_task = json.loads(full_res.output)[0]
+    else:
+        default_task = json.loads(default_res.output)["task"]
+        full_task = json.loads(full_res.output)["task"]
+    assert default_task["id"] == full_task["task_id"][:8]
+    assert default_task["from"] == full_task["from_agent_id"][:8]
+    assert default_task["ts"] == full_task["status_timestamp"]
 
-    default_task = json.loads(default_res.output)[0]["task"]
-    full_task = json.loads(full_res.output)[0]["task"]
-    # Compact rendered envelope keys vs typed-column keys.
-    assert "id" in default_task
-    assert "task_id" not in default_task
-    assert "task_id" in full_task
-    # Both modes carry the (short) summary text intact — it fits inside the
-    # 200-codepoint default limit, so neither mode truncates.
-    assert full_task["text"] == SUMMARY_TEXT
-    assert default_task["text"] == SUMMARY_TEXT
+
+@pytest.mark.parametrize("output_mode", ["text", "json"])
+@pytest.mark.parametrize("full", [False, True])
+def test_truncation__broadcast_summary_emitted_verbatim(
+    runner, session_id, agent_id, task_id, monkeypatch, output_mode, full
+):
+    monkeypatch.setattr(
+        broker,
+        "broadcast_message",
+        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
+    )
+    args = ["message", "broadcast", "--agent-id", agent_id, "--text", LONG_BODY]
+    if full:
+        args.append("--full")
+    if output_mode == "json":
+        result = runner.invoke(cli, ["--session-id", session_id, "--json", *args])
+    else:
+        result = runner.invoke(cli, ["--session-id", session_id, *args])
+    assert result.exit_code == 0, result.output
+    if output_mode == "json":
+        payload = json.loads(result.output)
+        assert len(payload) == 1
+        # Summary text fits inside default 200-codepoint limit → identical for both.
+        assert payload[0]["task"]["text"] == SUMMARY_TEXT
+        # notifications_sent_count preserved in JSON.
+        assert payload[0]["notifications_sent_count"] == 3
+        if full:
+            assert "task_id" in payload[0]["task"]
+        else:
+            assert "id" in payload[0]["task"]
+    else:
+        if full:
+            assert SUMMARY_TEXT in result.output
+        else:
+            # Compact one-line summary with recipient count.
+            assert "broadcast id=" in result.output
+            assert "recipients=" in result.output
+
+
+def test_truncation__poll_list_of_three_tasks_each_truncated(
+    runner, session_id, agent_id, monkeypatch
+):
+    bodies = [LONG_BODY + "X", LONG_BODY + "Y", LONG_BODY + "Z"]
+    monkeypatch.setattr(
+        broker,
+        "poll_tasks",
+        lambda *_a, **_k: [
+            _task_payload(
+                f"t-{i}", sender=f"from-{i}", recipient=agent_id, text=bodies[i]
+            )
+            for i in range(3)
+        ],
+    )
+    result = runner.invoke(
+        cli,
+        ["--session-id", session_id, "--json", "message", "poll", "--agent-id", agent_id],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert len(payload) == 3
+    for item in payload:
+        assert item["text"] == TRUNCATED_BODY

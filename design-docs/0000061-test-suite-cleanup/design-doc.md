@@ -1,7 +1,7 @@
 # Test Suite Cleanup — Reduce Excessive Tests in cafleet/tests/
 
 **Status**: Approved
-**Progress**: 15/33 tasks complete
+**Progress**: 22/33 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -372,13 +372,13 @@ Expected savings from incidental dedup in the untouched files: ~20 tests. Plan: 
 
 #### Step 5 tasks
 
-- [ ] Merge `test_cli_member_create_prompt_file.py` into `test_cli_member.py` per § 5.1 <!-- completed: -->
-- [ ] Collapse `test_cli_message_truncation.py` per § 5.2 <!-- completed: -->
-- [ ] Collapse `test_cli_member_capture_defaults.py` per § 5.3 <!-- completed: -->
-- [ ] Collapse `test_cli_member_send_input.py` per § 5.4 <!-- completed: -->
-- [ ] Collapse `test_cli_compact_echo.py` per § 5.5 <!-- completed: -->
-- [ ] Collapse `test_cli_pretty_flag.py` per § 5.6 <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `refactor(tests): dedup CLI test overlap (design 0000061 step 5)` <!-- completed: -->
+- [x] Merge `test_cli_member_create_prompt_file.py` into `test_cli_member.py` per § 5.1 <!-- completed: 2026-05-16T10:17 -->
+- [x] Collapse `test_cli_message_truncation.py` per § 5.2 <!-- completed: 2026-05-16T10:17 -->
+- [x] Collapse `test_cli_member_capture_defaults.py` per § 5.3 <!-- completed: 2026-05-16T10:17 -->
+- [x] Collapse `test_cli_member_send_input.py` per § 5.4 <!-- completed: 2026-05-16T10:17 -->
+- [x] Collapse `test_cli_compact_echo.py` per § 5.5 <!-- completed: 2026-05-16T10:17 -->
+- [x] Collapse `test_cli_pretty_flag.py` per § 5.6 <!-- completed: 2026-05-16T10:17 -->
+- [x] Run `mise //cafleet:test`; commit as `refactor(tests): dedup CLI test overlap (design 0000061 step 5)` <!-- completed: 2026-05-16T10:17 -->
 
 ### Step 6: Broker / output formatting consolidation
 

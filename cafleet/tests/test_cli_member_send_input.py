@@ -1,4 +1,8 @@
-"""CLI tests for ``cafleet member send-input`` (design doc 0000027)."""
+"""CLI tests for ``cafleet member send-input`` (design doc 0000027).
+
+Per principle (iii) of design 0000061: per-flag and per-payload fragmentation
+collapses to one parametrized test per behavioural group.
+"""
 
 import json
 import uuid
@@ -26,7 +30,6 @@ def session_id():
 
 @pytest.fixture(autouse=True)
 def _stub_tmux_available(monkeypatch):
-    """``ensure_tmux_available`` is a no-op for every test in this module."""
     monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
 
 
@@ -37,360 +40,202 @@ def runner():
 
 @pytest.fixture
 def happy_path_agent(monkeypatch):
-    """``broker.get_agent`` returns a well-formed target for the Director."""
     monkeypatch.setattr(broker, "get_agent", lambda *_args, **_kw: _agent())
 
 
 @pytest.fixture
 def choice_recorder(monkeypatch):
-    """Record every call into ``tmux.send_choice_key``.
-
-    Uses ``raising=False`` so the fixture also works before the Programmer
-    adds the helper to ``cafleet.tmux`` — a clean FAIL beats a setup ERROR
-    during TDD.
-    """
     calls: list[dict] = []
-
-    def fake(**kwargs):
-        calls.append(kwargs)
-
-    monkeypatch.setattr(tmux, "send_choice_key", fake, raising=False)
+    monkeypatch.setattr(tmux, "send_choice_key", lambda **kw: calls.append(kw), raising=False)
     return calls
 
 
 @pytest.fixture
 def freetext_recorder(monkeypatch):
-    """Record every call into ``tmux.send_freetext_and_submit``.
-
-    Uses ``raising=False`` so the fixture also works before the Programmer
-    adds the helper to ``cafleet.tmux``.
-    """
     calls: list[dict] = []
-
-    def fake(**kwargs):
-        calls.append(kwargs)
-
-    monkeypatch.setattr(tmux, "send_freetext_and_submit", fake, raising=False)
+    monkeypatch.setattr(
+        tmux, "send_freetext_and_submit", lambda **kw: calls.append(kw), raising=False,
+    )
     return calls
 
 
-def _invoke(runner, session_id, *extra_args, **invoke_kwargs):
-    """Helper: call ``cafleet --session-id <sid> member send-input ...``."""
-    return runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "member",
-            "send-input",
-            "--agent-id",
-            DIRECTOR_ID,
-            "--member-id",
-            MEMBER_ID,
-            *extra_args,
-        ],
-        **invoke_kwargs,
-    )
-
-
-def test_flag_validation__no_flag_supplied_exits_two(
-    runner, session_id, happy_path_agent
-):
-    result = _invoke(runner, session_id)
-    assert result.exit_code == 2, result.output
-    out = result.output or ""
-    assert "--choice and --freetext are mutually exclusive" in out
-
-
-def test_flag_validation__choice_and_freetext_combo_exits_two(
-    runner, session_id, happy_path_agent
-):
-    result = _invoke(
-        runner,
-        session_id,
-        "--choice",
-        "1",
-        "--freetext",
-        "hello",
-    )
-    assert result.exit_code == 2, result.output
-    out = result.output or ""
-    assert "--choice" in out
-    assert "--freetext" in out
-    assert "mutually exclusive" in out
-
-
-@pytest.mark.parametrize("bad_digit", ["0", "4", "5", "-1", "a"])
-def test_flag_validation__choice_out_of_range_exits_two(
-    runner, session_id, happy_path_agent, bad_digit
-):
-    """``click.IntRange(1, 3)`` rejects anything outside {1,2,3}."""
-    result = _invoke(runner, session_id, "--choice", bad_digit)
-    assert result.exit_code == 2, result.output
+def _invoke(runner, session_id, *extra_args, json_output=False):
+    args = ["--session-id", session_id]
+    if json_output:
+        args.append("--json")
+    args.extend([
+        "member", "send-input",
+        "--agent-id", DIRECTOR_ID,
+        "--member-id", MEMBER_ID,
+        *extra_args,
+    ])
+    return runner.invoke(cli, args)
 
 
 @pytest.mark.parametrize(
-    "bad_text",
+    ("scenario", "extra_args", "expected_substring"),
     [
-        "line1\nline2",
-        "trailing\n",
-        "\nleading",
-        "carriage\rreturn",
-        "mixed\r\nCRLF",
+        ("no_flag_supplied", [], "--choice and --freetext are mutually exclusive"),
+        (
+            "choice_and_freetext_combo",
+            ["--choice", "1", "--freetext", "hello"],
+            "mutually exclusive",
+        ),
+        ("choice_out_of_range_zero", ["--choice", "0"], None),
+        ("choice_out_of_range_four", ["--choice", "4"], None),
+        ("choice_out_of_range_negative", ["--choice", "-1"], None),
+        ("choice_non_integer", ["--choice", "a"], None),
+        (
+            "freetext_with_newline",
+            ["--freetext", "line1\nline2"],
+            "free text may not contain newlines",
+        ),
+        (
+            "freetext_with_trailing_newline",
+            ["--freetext", "trailing\n"],
+            "free text may not contain newlines",
+        ),
+        (
+            "freetext_with_cr",
+            ["--freetext", "carriage\rreturn"],
+            "free text may not contain newlines",
+        ),
     ],
 )
-def test_flag_validation__freetext_with_newlines_exits_two(
-    runner, session_id, happy_path_agent, bad_text
+def test_flag_validation(
+    runner, session_id, happy_path_agent, scenario, extra_args, expected_substring
 ):
-    result = _invoke(runner, session_id, "--freetext", bad_text)
+    result = _invoke(runner, session_id, *extra_args)
     assert result.exit_code == 2, result.output
-    assert "free text may not contain newlines" in (result.output or "")
+    if expected_substring is not None:
+        assert expected_substring in (result.output or "")
 
 
-def test_flag_validation__freetext_empty_string_is_accepted(
-    runner, session_id, happy_path_agent, freetext_recorder
-):
-    """Empty string is valid -- submits an empty answer to the prompt."""
-    result = _invoke(runner, session_id, "--freetext", "")
-    assert result.exit_code == 0, result.output
-    assert len(freetext_recorder) == 1
-    assert freetext_recorder[0]["text"] == ""
-
-
-def test_authorization_boundary__missing_agent_exits_one(
-    runner, session_id, monkeypatch
-):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
-    result = _invoke(runner, session_id, "--choice", "1")
-    assert result.exit_code == 1, result.output
-    assert MEMBER_ID in (result.output or "")
-    assert "not found" in (result.output or "").lower()
-
-
-def test_authorization_boundary__placement_none_exits_one_with_exact_message(
-    runner, session_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "get_agent",
-        lambda *_a, **_kw: _agent(placement=None),
-    )
-    result = _invoke(runner, session_id, "--choice", "1")
-    assert result.exit_code == 1, result.output
-    out = result.output or ""
-    assert f"agent {MEMBER_ID}" in out
-    assert "has no placement row" in out
-    assert "cafleet member create" in out
-
-
-def test_authorization_boundary__cross_director_exits_one_with_exact_message(
-    runner, session_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "get_agent",
-        lambda *_a, **_kw: _agent(
-            placement=_placement(director_agent_id=OTHER_DIRECTOR_ID)
+@pytest.mark.parametrize(
+    ("scenario", "agent_return", "expected_substrings"),
+    [
+        ("missing_agent", None, [MEMBER_ID, "not found"]),
+        (
+            "placement_none",
+            "placement_none_sentinel",
+            [f"agent {MEMBER_ID}", "has no placement row", "cafleet member create"],
         ),
-    )
-    result = _invoke(runner, session_id, "--choice", "1")
-    assert result.exit_code == 1, result.output
-    out = result.output or ""
-    assert f"agent {MEMBER_ID}" in out
-    assert "is not a member of your team" in out
-    assert OTHER_DIRECTOR_ID in out
-
-
-def test_authorization_boundary__pending_pane_exits_one_with_exact_message(
-    runner, session_id, monkeypatch
+        (
+            "cross_director",
+            "cross_director_sentinel",
+            [f"agent {MEMBER_ID}", "is not a member of your team", OTHER_DIRECTOR_ID],
+        ),
+        (
+            "pending_pane",
+            "pending_pane_sentinel",
+            [f"member {MEMBER_ID}", "has no pane yet", "pending placement"],
+        ),
+    ],
+)
+def test_authorization_boundary(
+    runner, session_id, monkeypatch, scenario, agent_return, expected_substrings
 ):
-    monkeypatch.setattr(
-        broker,
-        "get_agent",
-        lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
-    )
+    if agent_return is None:
+        monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
+    elif agent_return == "placement_none_sentinel":
+        monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
+    elif agent_return == "cross_director_sentinel":
+        monkeypatch.setattr(
+            broker, "get_agent",
+            lambda *_a, **_kw: _agent(
+                placement=_placement(director_agent_id=OTHER_DIRECTOR_ID)
+            ),
+        )
+    else:  # pending_pane
+        monkeypatch.setattr(
+            broker, "get_agent",
+            lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
+        )
     result = _invoke(runner, session_id, "--choice", "1")
     assert result.exit_code == 1, result.output
-    out = result.output or ""
-    assert f"member {MEMBER_ID}" in out
-    assert "has no pane yet" in out
-    assert "pending placement" in out
+    out = (result.output or "").lower() if scenario == "missing_agent" else (result.output or "")
+    for needle in expected_substrings:
+        haystack = out
+        needle_check = needle.lower() if scenario == "missing_agent" else needle
+        assert needle_check in haystack
 
 
 @pytest.mark.parametrize("digit", [1, 2, 3])
-def test_choice_dispatch__choice_dispatches_with_matching_digit_and_pane(
-    runner,
-    session_id,
-    happy_path_agent,
-    choice_recorder,
-    freetext_recorder,
-    digit,
+def test_choice_dispatch__matching_digit_and_pane(
+    runner, session_id, happy_path_agent, choice_recorder, freetext_recorder, digit
 ):
     result = _invoke(runner, session_id, "--choice", str(digit))
     assert result.exit_code == 0, result.output
     assert len(choice_recorder) == 1
-    call = choice_recorder[0]
-    assert call["digit"] == digit
-    assert call["target_pane_id"] == PANE_ID
-    assert len(freetext_recorder) == 0
+    assert choice_recorder[0]["digit"] == digit
+    assert choice_recorder[0]["target_pane_id"] == PANE_ID
+    assert freetext_recorder == []
 
 
-def test_freetext_dispatch__freetext_plain_ascii_dispatches_exactly(
-    runner,
-    session_id,
-    happy_path_agent,
-    freetext_recorder,
-    choice_recorder,
+@pytest.mark.parametrize(
+    ("scenario", "payload"),
+    [
+        ("plain_ascii", "hello"),
+        ("shell_meta_literal", "$(echo pwn) `backticks` $VAR ;&&|"),
+        ("multibyte_literal", "日本語 !@# テスト ✓"),
+        ("key_name_lookalike", "Enter C-c Esc"),
+        ("empty_string", ""),
+    ],
+)
+def test_freetext_dispatch__literal_passthrough(
+    runner, session_id, happy_path_agent, freetext_recorder, choice_recorder,
+    scenario, payload,
 ):
-    result = _invoke(runner, session_id, "--freetext", "hello")
+    result = _invoke(runner, session_id, "--freetext", payload)
     assert result.exit_code == 0, result.output
     assert len(freetext_recorder) == 1
-    assert freetext_recorder[0]["text"] == "hello"
+    assert freetext_recorder[0]["text"] == payload
     assert freetext_recorder[0]["target_pane_id"] == PANE_ID
-    assert len(choice_recorder) == 0
+    assert choice_recorder == []
 
 
-def test_freetext_dispatch__freetext_shell_meta_delivered_as_literal_no_expansion(
-    runner, session_id, happy_path_agent, freetext_recorder
+@pytest.mark.parametrize(
+    ("action", "args_extra", "expected_substring", "recorder_fixture"),
+    [
+        ("choice_1", ["--choice", "1"], "Sent choice 1 to member ", "choice_recorder"),
+        ("choice_2", ["--choice", "2"], "Sent choice 2 to member ", "choice_recorder"),
+        ("choice_3", ["--choice", "3"], "Sent choice 3 to member ", "choice_recorder"),
+        (
+            "freetext",
+            ["--freetext", "hello"],
+            f"Sent free text to member {MEMBER_NAME} ({PANE_ID}).",
+            "freetext_recorder",
+        ),
+    ],
+)
+def test_output_format__text(
+    runner, session_id, happy_path_agent, choice_recorder, freetext_recorder,
+    action, args_extra, expected_substring, recorder_fixture,
 ):
-    """Shell meta characters must reach the helper unchanged; they are
-    delivered via ``subprocess.run([...], shell=False)`` so no shell
-    ever sees them.
-    """
-    payload = "$(echo pwn) `backticks` $VAR ;&&|"
-    result = _invoke(runner, session_id, "--freetext", payload)
+    result = _invoke(runner, session_id, *args_extra)
     assert result.exit_code == 0, result.output
-    assert len(freetext_recorder) == 1
-    assert freetext_recorder[0]["text"] == payload
+    assert expected_substring in (result.output or "")
 
 
-def test_freetext_dispatch__freetext_multibyte_delivered_as_literal(
-    runner, session_id, happy_path_agent, freetext_recorder
+@pytest.mark.parametrize(
+    ("scenario", "args_extra", "expected_action", "expected_value"),
+    [
+        ("choice", ["--choice", "2"], "choice", "2"),
+        ("freetext", ["--freetext", "hello world"], "freetext", "hello world"),
+    ],
+)
+def test_output_format__json_envelope(
+    runner, session_id, happy_path_agent, choice_recorder, freetext_recorder,
+    scenario, args_extra, expected_action, expected_value,
 ):
-    payload = "日本語 !@# テスト ✓"
-    result = _invoke(runner, session_id, "--freetext", payload)
-    assert result.exit_code == 0, result.output
-    assert len(freetext_recorder) == 1
-    assert freetext_recorder[0]["text"] == payload
-
-
-def test_freetext_dispatch__freetext_key_name_lookalike_delivered_as_literal(
-    runner, session_id, happy_path_agent, freetext_recorder
-):
-    """Key-name lookalikes (Enter, C-c, Esc) must be delivered as literal
-    characters because the wrapper always uses ``-l`` for the free-text
-    step, per the design doc's key-sequence table.
-    """
-    payload = "Enter C-c Esc"
-    result = _invoke(runner, session_id, "--freetext", payload)
-    assert result.exit_code == 0, result.output
-    assert len(freetext_recorder) == 1
-    assert freetext_recorder[0]["text"] == payload
-
-
-def test_output_format__text_output_choice(
-    runner, session_id, happy_path_agent, choice_recorder
-):
-    result = _invoke(runner, session_id, "--choice", "1")
-    assert result.exit_code == 0, result.output
-    assert f"Sent choice 1 to member {MEMBER_NAME} ({PANE_ID})." in (
-        result.output or ""
-    )
-
-
-@pytest.mark.parametrize("digit", [1, 2, 3])
-def test_output_format__text_output_choice_varies_by_digit(
-    runner,
-    session_id,
-    happy_path_agent,
-    choice_recorder,
-    digit,
-):
-    result = _invoke(runner, session_id, "--choice", str(digit))
-    assert result.exit_code == 0, result.output
-    assert f"Sent choice {digit} to member " in (result.output or "")
-
-
-def test_output_format__text_output_freetext(
-    runner, session_id, happy_path_agent, freetext_recorder
-):
-    result = _invoke(runner, session_id, "--freetext", "hello")
-    assert result.exit_code == 0, result.output
-    assert f"Sent free text to member {MEMBER_NAME} ({PANE_ID})." in (
-        result.output or ""
-    )
-
-
-def test_output_format__json_output_choice_has_four_keys(
-    runner, session_id, happy_path_agent, choice_recorder
-):
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "member",
-            "send-input",
-            "--agent-id",
-            DIRECTOR_ID,
-            "--member-id",
-            MEMBER_ID,
-            "--choice",
-            "2",
-        ],
-    )
+    result = _invoke(runner, session_id, *args_extra, json_output=True)
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    assert set(data.keys()) == {
-        "member_agent_id",
-        "pane_id",
-        "action",
-        "value",
-    }
+    assert set(data.keys()) == {"member_agent_id", "pane_id", "action", "value"}
     assert data["member_agent_id"] == MEMBER_ID
     assert data["pane_id"] == PANE_ID
-    assert data["action"] == "choice"
-    assert data["value"] == "2"
-
-
-def test_output_format__json_output_freetext_has_four_keys(
-    runner, session_id, happy_path_agent, freetext_recorder
-):
-    payload = "hello world"
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "member",
-            "send-input",
-            "--agent-id",
-            DIRECTOR_ID,
-            "--member-id",
-            MEMBER_ID,
-            "--freetext",
-            payload,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-    assert set(data.keys()) == {
-        "member_agent_id",
-        "pane_id",
-        "action",
-        "value",
-    }
-    assert data["member_agent_id"] == MEMBER_ID
-    assert data["pane_id"] == PANE_ID
-    assert data["action"] == "freetext"
-    assert data["value"] == payload
-
-
-# --- bash_flag_removed: regression guard: the old ``--bash`` flag no longer
-# exists on ``cafleet member send-input``. Per .claude/rules/removal.md, the
-# absence-as-test guards against re-introduction. ---
+    assert data["action"] == expected_action
+    assert data["value"] == expected_value
 
 
 def test_bash_flag_removed__old_bash_flag_form_errors_with_no_such_option(
@@ -403,78 +248,35 @@ def test_bash_flag_removed__old_bash_flag_form_errors_with_no_such_option(
     assert "--bash" in out
 
 
-# --- freetext_bang_rejection: bang-prefix guardrail on ``--freetext``. Any
-# value whose first non-whitespace character (per ``str.lstrip()``) is ``!`` is
-# rejected with exit 2, because Claude Code's ``!`` shortcut would otherwise
-# smuggle a shell command through the AskUserQuestion path and bypass the new
-# ``cafleet member exec`` boundary. ---
-
-
-def test_freetext_bang_rejection__freetext_leading_bang_rejected(
-    runner, session_id, happy_path_agent
+@pytest.mark.parametrize(
+    ("scenario", "payload", "expect_exit", "expect_in", "expect_not_in"),
+    [
+        ("leading_bang_rejected", "!ls", 2, ["--freetext may not start with"], []),
+        ("whitespace_then_bang_rejected", "  !ls", 2, ["--freetext may not start with"], []),
+        ("lone_bang_rejected", "!", 2, ["--freetext may not start with"], []),
+        (
+            "error_wording_backend_neutral",
+            "! pwd",
+            2,
+            ["the coding agent's shell-execution shortcut", "cafleet member exec"],
+            ["Claude Code's shell-execution shortcut"],
+        ),
+        ("bang_not_in_leading_position_accepted", "hi !", 0, [], []),
+        ("empty_accepted", "", 0, [], []),
+        ("whitespace_only_accepted", "   ", 0, [], []),
+    ],
+)
+def test_freetext_bang_rejection(
+    runner, session_id, happy_path_agent, freetext_recorder,
+    scenario, payload, expect_exit, expect_in, expect_not_in,
 ):
-    result = _invoke(runner, session_id, "--freetext", "!ls")
-    assert result.exit_code == 2, result.output
-    assert "--freetext may not start with" in (result.output or "")
-
-
-# --- freetext_bang_rejection_message_is_backend_neutral: design 0000046 §5/§10.
-# The error wording must reference "the coding agent's shell-execution shortcut"
-# (not "Claude Code's") so the message is accurate for both backends. The
-# guidance to use ``cafleet member exec`` for shell dispatch is preserved. ---
-
-
-def test_freetext_bang_rejection__error_wording_is_backend_neutral(
-    runner, session_id, happy_path_agent
-):
-    result = _invoke(runner, session_id, "--freetext", "! pwd")
-    assert result.exit_code == 2, result.output
+    result = _invoke(runner, session_id, "--freetext", payload)
+    assert result.exit_code == expect_exit, result.output
     out = result.output or ""
-    assert "the coding agent's shell-execution shortcut" in out
-    # The guidance to use ``cafleet member exec`` for shell dispatch is preserved.
-    assert "cafleet member exec" in out
-    # The old, claude-specific phrasing must not survive the softening.
-    assert "Claude Code's shell-execution shortcut" not in out
-
-
-def test_freetext_bang_rejection__freetext_whitespace_then_bang_rejected(
-    runner, session_id, happy_path_agent
-):
-    result = _invoke(runner, session_id, "--freetext", "  !ls")
-    assert result.exit_code == 2, result.output
-    assert "--freetext may not start with" in (result.output or "")
-
-
-def test_freetext_bang_rejection__freetext_lone_bang_rejected(
-    runner, session_id, happy_path_agent
-):
-    result = _invoke(runner, session_id, "--freetext", "!")
-    assert result.exit_code == 2, result.output
-    assert "--freetext may not start with" in (result.output or "")
-
-
-def test_freetext_bang_rejection__freetext_bang_not_in_leading_position_accepted(
-    runner, session_id, happy_path_agent, freetext_recorder
-):
-    result = _invoke(runner, session_id, "--freetext", "hi !")
-    assert result.exit_code == 0, result.output
-    assert len(freetext_recorder) == 1
-    assert freetext_recorder[0]["text"] == "hi !"
-
-
-def test_freetext_bang_rejection__freetext_empty_still_accepted(
-    runner, session_id, happy_path_agent, freetext_recorder
-):
-    result = _invoke(runner, session_id, "--freetext", "")
-    assert result.exit_code == 0, result.output
-    assert len(freetext_recorder) == 1
-    assert freetext_recorder[0]["text"] == ""
-
-
-def test_freetext_bang_rejection__freetext_whitespace_only_accepted(
-    runner, session_id, happy_path_agent, freetext_recorder
-):
-    result = _invoke(runner, session_id, "--freetext", "   ")
-    assert result.exit_code == 0, result.output
-    assert len(freetext_recorder) == 1
-    assert freetext_recorder[0]["text"] == "   "
+    for needle in expect_in:
+        assert needle in out
+    for needle in expect_not_in:
+        assert needle not in out
+    if expect_exit == 0:
+        assert len(freetext_recorder) == 1
+        assert freetext_recorder[0]["text"] == payload
