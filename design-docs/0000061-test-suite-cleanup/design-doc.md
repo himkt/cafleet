@@ -1,7 +1,7 @@
 # Test Suite Cleanup — Reduce Excessive Tests in cafleet/tests/
 
 **Status**: Approved
-**Progress**: 5/33 tasks complete
+**Progress**: 7/33 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -144,8 +144,8 @@ If a step exposes a real regression in source (not in tests) — `STOP`, raise a
 
 #### Step 2 tasks
 
-- [ ] Delete `cafleet/tests/test_db_pragmas.py` <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `chore: drop PRAGMA boilerplate tests (design 0000061 step 2)` <!-- completed: -->
+- [x] Delete `cafleet/tests/test_db_pragmas.py` <!-- completed: 2026-05-16T09:50 -->
+- [x] Run `mise //cafleet:test`; commit as `chore: drop PRAGMA boilerplate tests (design 0000061 step 2)` <!-- completed: 2026-05-16T09:50 -->
 
 ### Step 3: Consolidate per-key projection fragmentations
 
