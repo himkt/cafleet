@@ -4,8 +4,9 @@ Owns the deterministic side of `${BASE}` resolution: anchor file
 read / write / validate, the no-positional resolution branches
 (`resolved` / `needs-user-input`), the positional `task_name` task-scope
 branch (`resolved` with `source="task-scope"`, or `unset` when an absolute
-path lives outside any recognized task folder), the fatal `AnchorError`
-raise on schema / version mismatch, and the `<unset>` sentinel.
+path lies outside the inferred repo root or equals the repo root itself),
+the fatal `AnchorError` raise on schema / version mismatch, and the
+`<unset>` sentinel.
 
 The `AskUserQuestion` branch lives in Claude's tool context — this module
 only reports `status="needs-user-input"` with the candidates Claude should

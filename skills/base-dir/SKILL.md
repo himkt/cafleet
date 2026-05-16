@@ -70,7 +70,7 @@ The CLI returns one of three JSON shapes (plus a fourth fatal branch that exits 
 | `needs-user-input` | The CLI could not resolve deterministically (CWD is `$HOME` or under `$HOME/.claude`, and no usable anchor exists). The `candidates` field lists the options to present. | Go to Step 2. |
 | (no JSON — non-zero exit) | Anchor schema mismatch, version mismatch, or other fatal condition. The CLI exits non-zero with an error message on stderr; no JSON payload is emitted. | Surface the error and stop — do NOT fall back to `/tmp`. |
 
-The `unset` status is emitted only by the positional branch (Step 0) when an absolute-path `TASK_NAME` lives outside any recognized task folder; the no-positional probe never produces it.
+The `unset` status is emitted only by the positional branch (Step 0) when an absolute-path `TASK_NAME` lies outside the inferred repo root (or equals the repo root itself); the no-positional probe never produces it.
 
 ### Step 2. AskUserQuestion (only when `status == "needs-user-input"`)
 

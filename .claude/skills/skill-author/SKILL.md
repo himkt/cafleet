@@ -76,7 +76,7 @@ The CLI:
 
 Use the returned `base` field as `${BASE}` for the rest of the run. **Every** scratch / audit / figure / spawn-prompt-render write the skill performs MUST live under `${BASE}` — never `/tmp`, never the repo root.
 
-The CLI's positional branch also accepts an absolute path; if any ancestor of that path matches a recognized task-folder pattern, the CLI returns the matching ancestor as the task folder. If no ancestor matches, the CLI returns `{status: "unset", base: null, source: "absolute-path-arg", anchor: null}` — the literal sentinel `<unset>` for `${BASE}`. When `${BASE}` is `<unset>`, the skill MUST guard every BASE-derived write with an explicit `${BASE} != <unset>` check, omit the `BASE:` line from any spawn prompt entirely, and never fall back to `/tmp`. The standardized loud-error message is `Error: BASE is <unset>; refusing to fall back to /tmp`.
+The CLI's positional branch also accepts an absolute path. If the path lies strictly under the inferred repo root, the CLI returns it verbatim as the task folder — the resolver does NOT walk ancestors or match skill-specific bucket patterns. If the path lies outside the repo root (or equals the repo root, which would clobber the shared-root anchor), the CLI returns `{status: "unset", base: null, source: "absolute-path-arg", anchor: null}` — the literal sentinel `<unset>` for `${BASE}`. **Consumer-strips contract**: because the resolver does not fold child paths, each consuming skill MUST canonicalize its argument to the actual task-folder relpath (strip trailing filenames like `/design-doc.md`, strip leading bucket prefixes like `design-docs/`, then prepend its own bucket) BEFORE calling the resolver. When `${BASE}` is `<unset>`, the skill MUST guard every BASE-derived write with an explicit `${BASE} != <unset>` check, omit the `BASE:` line from any spawn prompt entirely, and never fall back to `/tmp`. The standardized loud-error message is `Error: BASE is <unset>; refusing to fall back to /tmp`.
 
 When CWD has no `.git` ancestor (typical when CWD is `$HOME` or under `$HOME/.claude`) AND a positional `TASK_NAME` is supplied, the CLI exits 1 with `cannot resolve task-scope base-dir: no .git ancestor found from CWD <cwd>. cd to the repo root and retry.` on stderr (no JSON payload, even with `--json`). Surface this error to the user and stop.
 
@@ -215,7 +215,7 @@ Spawn prompt body references the role file by absolute path. The role file lives
 
 ### 3.6 The `${BASE} == <unset>` skip semantics
 
-When `cafleet base-dir resolve` returns `{status: "unset", base: null, ...}` (absolute-path argument outside any recognized task folder), `${BASE}` is the literal sentinel string `<unset>`. The skill MUST:
+When `cafleet base-dir resolve` returns `{status: "unset", base: null, ...}` (absolute-path argument outside the repo root, or equal to the repo root itself), `${BASE}` is the literal sentinel string `<unset>`. The skill MUST:
 
 - **Skip the audit-file write.** Do not try to write `<unset>/prompts/<role>-<UTC-compact>.md` — that is a literal path with a `<` in it, which most filesystems reject. The guard is `if BASE != "<unset>"`.
 - **Omit the `BASE:` line from the spawn prompt.** The spawn prompt does NOT include the literal string `BASE: <unset>` — the line is dropped entirely. The member's existence-check naturally treats audit-file features as disabled.
