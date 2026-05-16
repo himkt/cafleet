@@ -165,7 +165,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve <task-relpath>`]
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 <role-specific assignment text — e.g. CURRENT DATE, USER REQUEST, OUTPUT PATH, YOUR TASK ID>
 
