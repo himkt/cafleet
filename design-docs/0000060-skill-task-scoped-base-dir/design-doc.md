@@ -1,6 +1,6 @@
 # Skill Task-Scoped Base Directory
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 27/27 tasks complete
 **Last Updated**: 2026-05-16
 
@@ -324,3 +324,4 @@ Per project rule `.claude/rules/design-doc-numbering.md`, documentation MUST lan
 | 2026-05-16 | Initial draft |
 | 2026-05-16 | Reviewer round 1: resolved 12 markers (progress count, migration story, repo-root inference spec, slug-shape validation, no-repo-root failure mode, record-scope clarification, design-doc-execute Tier 3 verification downgrade, skill location & discovery, Step 1 pre-resolution, Step 4 "confirm" task removal, § 2/Step 5 reconciliation, `--path` test bullet drop). |
 | 2026-05-16 | User approval. Status → Approved. |
+| 2026-05-16 | Implementation complete via `/cafleet:design-doc-execute` (PR #73). 8 design-doc steps shipped across ~30 commits. Architectural simplification pivot mid-implementation: bucket-name knowledge removed from resolver per user directive ("no specific skill mention in the implementation"); consumer skills canonicalize their own arguments. Copilot review converged after 15 rounds — final review submitted with `state: "COMMENTED"` and body "Copilot reviewed 14 out of 15 changed files in this pull request and generated no new comments." User accepted this as the convergence signal. Status → Complete. |
