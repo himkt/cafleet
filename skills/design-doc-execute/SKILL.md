@@ -235,13 +235,13 @@ Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` se
 
   Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field (the slug folder) and `${RESOLVED_ARGS} = ${BASE}/design-doc.md` (short-circuits at Tier 1 below). On `status == "unset"` (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `${RESOLVED_ARGS}` to the literal `$ARGUMENTS` path so Tier 1 / Tier 2 still run against the user-supplied path, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
 
-- **`$ARGUMENTS` absent** (the discover-all-approved-docs flow): use the no-positional resolver:
+- **`$ARGUMENTS` absent** (the discover-all-approved-docs flow): the no-argument form scans `<repo-root>/design-docs/`, so the Director MUST invoke from the repo root. Verify with `git rev-parse --show-toplevel` and abort with a clear "invoke from the repo root" error if `cwd` differs. Then use the no-positional resolver:
 
   ```bash
   cafleet base-dir resolve --json
   ```
 
-  Branch on the returned `status` per `Skill(cafleet:base-dir)` Steps 1–2: on `status == "resolved"`, set `${BASE}` to the returned `base` field (the repo root); on `status == "needs-user-input"`, drive `AskUserQuestion` on the returned `candidates`, persist the answer via `cafleet base-dir record`, and re-resolve. Only after `${BASE}` is concrete, set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
+  Branch on the returned `status` per `Skill(cafleet:base-dir)` Steps 1–2: on `status == "resolved"`, set `${BASE}` to the returned `base` field (which is the repo root because we just verified `cwd == repo root`); on `status == "needs-user-input"`, drive `AskUserQuestion` on the returned `candidates`, persist the answer via `cafleet base-dir record`, and re-resolve. Only after `${BASE}` is concrete, set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
 
 #### Phase 2: Three-Tier Detection
 
