@@ -243,7 +243,7 @@ Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` se
   cafleet base-dir resolve --json
   ```
 
-  Set `${BASE}` to the returned `base` field (the repo root) and `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
+  Branch on the returned `status` per `Skill(cafleet:base-dir)` Steps 1–2: on `status == "resolved"`, set `${BASE}` to the returned `base` field (the repo root); on `status == "needs-user-input"`, drive `AskUserQuestion` on the returned `candidates`, persist the answer via `cafleet base-dir record`, and re-resolve. Only after `${BASE}` is concrete, set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
 
 #### Phase 2: Three-Tier Detection
 

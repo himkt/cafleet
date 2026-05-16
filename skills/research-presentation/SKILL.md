@@ -83,9 +83,9 @@ Step 5 (cleanup) is autonomous — no user prompt.
      cafleet base-dir resolve $ARGUMENTS --json
      ```
 
-     The CLI inspects ancestors for a recognized `researches/<slug>/` pattern and returns the matching ancestor as the task folder. If no ancestor matches, the resolver returns the `unset` shape — error out with the same "No report.md" message in step 4 once the missing folder is detected.
+     The CLI inspects ancestors for a recognized `researches/<slug>/` pattern and returns the matching ancestor as the task folder.
 
-   Use the returned `base` field as `${FOLDER}` (and `${BASE}`) for the rest of this run. The task folder IS the report folder; there is no further `${BASE}/researches/...` concatenation.
+   Branch on the returned `status`: on `status == "resolved"`, set both `${FOLDER}` and `${BASE}` to the returned `base` field (the task folder IS the report folder; no further `${BASE}/researches/...` concatenation). On `status == "unset"` (absolute `$ARGUMENTS` outside any recognized task pattern), set `${FOLDER}` to the literal `$ARGUMENTS` path so the report-folder check in step 4 still runs against the user's intended path, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
 4. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run `/cafleet:research-report` first to generate a report."
 5. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts. The audit-file path `${BASE}/prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<topic-folder>/prompts/`, not under the repo root.
 
