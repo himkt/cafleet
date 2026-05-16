@@ -1,6 +1,6 @@
 # SQLite Data Model Specification
 
-After [design 0000049 Surface 14](../../design-docs/0000049-token-reduction/design-doc.md), the `Task` payload is fully relational — the `tasks.task_json` blob was dropped and every routing field plus the message body lives in its own typed column (see `cafleet/src/cafleet/broker.py`). The only remaining JSON `TEXT` blob is `agents.agent_card_json`, which still stores an `AgentCard`-shaped document; CAFleet does not maintain Pydantic models for either shape.
+The `Task` payload is fully relational: every routing field plus the message body lives in its own typed column (see `cafleet/src/cafleet/broker.py`). The only JSON `TEXT` blob is `agents.agent_card_json`, which stores an `AgentCard`-shaped document; CAFleet does not maintain Pydantic models for either shape.
 
 The model is now **predominantly relational**: every queried field on `tasks` is a typed column, and the only opaque payload is the `agent_card_json` document on `agents`. The previous "relational + document hybrid" framing applied to the pre-Surface-14 schema and no longer reflects the on-disk layout.
 
@@ -30,7 +30,7 @@ Session deletion is a **soft-delete**: `broker.delete_session` sets `deleted_at=
 2. `INSERT INTO agents (...)` for the hardcoded root Director (`name='Director'`, `description='Root Director for this session'`, `status='active'`).
 3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` (the root has no parent Director) and `coding_agent='unknown'` (auto-detection is deferred).
 4. `UPDATE sessions SET director_agent_id = <director's agent_id> WHERE session_id = <new>`.
-5. `INSERT INTO agents (...)` for the built-in `Administrator` (per design 0000025) with `agent_card_json.cafleet.kind == 'builtin-administrator'`. The Administrator never gets an `agent_placements` row.
+5. `INSERT INTO agents (...)` for the built-in `Administrator` with `agent_card_json.cafleet.kind == 'builtin-administrator'`. The Administrator never gets an `agent_placements` row.
 
 The `tmux` context (`session`, `window_id`, `pane_id`) is read **before** the transaction opens, so any tmux failure surfaces as `Error: cafleet session create must be run inside a tmux session` and exit 1 without touching the DB. Rollback covers all five operations — a failure in any step leaves the DB unchanged.
 
@@ -103,7 +103,7 @@ A future `rename_agent` broker function MUST apply the same guard. `broker.broad
 | `status_state` | `TEXT` | `NOT NULL` | TaskState enum value (e.g., `TASK_STATE_INPUT_REQUIRED`). |
 | `status_timestamp` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; updated on every state change. Used for `ORDER BY DESC`. |
 | `origin_task_id` | `TEXT` | nullable | Broadcast grouping link. `NULL` on unicast deliveries. On broadcast delivery rows, holds the summary task's `task_id`, shared across every delivery row in the same broadcast. On the broadcast summary row itself, holds its own `task_id` (self-reference) so the delivery rows and the summary row all share a single grouping value. Historical rows from before the migration are `NULL`. |
-| `text` | `TEXT` | `NOT NULL` | Message body. Replaces the legacy `task_json` blob's `artifacts[0].parts[0].text` round-trip. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time (the migration backfilled the same value via `json_extract` from the pre-Surface-14 JSON blob, which already carried that generated string). Added by Alembic revision `0009_drop_task_json_add_text` (design 0000049 Surface 14). |
+| `text` | `TEXT` | `NOT NULL` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time. Added by Alembic revision `0009_drop_task_json_add_text`. |
 
 Indexes:
 
@@ -116,7 +116,7 @@ Indexes:
 
 #### `tasks.task_json` removal (Alembic `0009_drop_task_json_add_text`)
 
-The `task_json` JSON blob column was dropped in design 0000049 Surface 14. The columns above (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, plus the new `text`) are sufficient to reconstruct every shape the broker, CLI, and WebUI need; the redundant blob added cost on every poll without unique data.
+`task_json` is not part of the schema; the columns above (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, plus `text`) are sufficient to reconstruct every shape the broker, CLI, and WebUI need.
 
 Migration shape — a **single Alembic revision** so no in-between binary version sees a column the other does not (see `cafleet/src/cafleet/alembic/versions/0009_drop_task_json_add_text.py` for the canonical implementation):
 
@@ -129,11 +129,11 @@ Migration shape — a **single Alembic revision** so no in-between binary versio
 **Migration risk**: irreversible without backup. Operators MUST take a backup before running `cafleet db init` against a populated database:
 
 ```bash
-cp ~/.local/share/cafleet/registry.db ~/.local/share/cafleet/registry.db.pre-0049.bak
+cp ~/.local/share/cafleet/registry.db ~/.local/share/cafleet/registry.db.pre-typed-columns.bak
 cafleet db init
 ```
 
-Restore is `cp registry.db.pre-0049.bak registry.db` followed by re-running the older `cafleet` binary. There is no programmatic downgrade — the `task_json` blob is gone after upgrade and the typed columns do not preserve the historical `metadata.kind`, `artifactId`, or `contextId` constants the blob carried.
+Restore is `cp registry.db.pre-typed-columns.bak registry.db` followed by re-running the older `cafleet` binary. There is no programmatic downgrade — the `task_json` blob is gone after upgrade and the typed columns do not preserve the historical `metadata.kind`, `artifactId`, or `contextId` constants the blob carried.
 
 Callers rewritten in lockstep (no bridge period — single Alembic revision plus a single broker-side commit):
 

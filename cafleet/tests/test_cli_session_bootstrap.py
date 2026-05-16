@@ -1,4 +1,4 @@
-"""CLI-level tests for the session-bootstrap surface (design 0000026)."""
+"""CLI-level tests for the session-bootstrap surface."""
 
 import json
 import sqlite3
@@ -198,7 +198,7 @@ def test_session_create_json_output__placement_sub_dict_matches_spec(
     placement = data["director"]["placement"]
 
     assert placement["director_agent_id"] is None
-    # Default --coding-agent is 'claude' (design 0000046 §1).
+    # Default --coding-agent is 'claude'.
     assert placement["coding_agent"] == "claude"
     assert placement["tmux_session"] == _FAKE_DIRECTOR_CTX.session
     assert placement["tmux_window_id"] == _FAKE_DIRECTOR_CTX.window_id
@@ -206,8 +206,8 @@ def test_session_create_json_output__placement_sub_dict_matches_spec(
     assert "created_at" in placement
 
 
-# --- session_create_coding_agent: design 0000046 §1. ``--coding-agent``
-# on ``cafleet session create`` is operator-declared metadata that lands in
+# --- session_create_coding_agent: ``--coding-agent`` on
+# ``cafleet session create`` is operator-declared metadata that lands in
 # ``placement.coding_agent`` for the root Director. The session-create path
 # does NOT spawn anything, so the test does not need a fake codex binary.
 # ---
@@ -238,9 +238,7 @@ def test_session_create_coding_agent__claude_records_claude_in_placement(
 
 
 def test_session_create_coding_agent__default_is_claude(db_file, mock_tmux_ok):
-    """No flag → 'claude' (design 0000046 §9). 'unknown' must not appear
-    for newly-created sessions.
-    """
+    """No flag → 'claude'. 'unknown' must not appear for newly-created sessions."""
     runner = CliRunner()
     result = runner.invoke(cli, ["session", "create", "--json"])
     assert result.exit_code == 0, result.output

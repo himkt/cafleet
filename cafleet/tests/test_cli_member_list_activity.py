@@ -1,4 +1,4 @@
-"""Tests for ``cafleet member list --activity`` (design doc 0000049, Surface 8).
+"""Tests for ``cafleet member list --activity``.
 
 The CLI surfaces the new aggregation via an opt-in ``--activity`` flag on
 ``cafleet member list``. Two requirements:

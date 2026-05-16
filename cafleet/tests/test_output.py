@@ -1,8 +1,4 @@
-"""Tests for ``cafleet.output`` formatting helpers.
-
-Per principle (ii)/(iii) of design 0000061: per-helper parametrized
-"shape + behaviour" pairs.
-"""
+"""Tests for ``cafleet.output`` formatting helpers."""
 
 import pytest
 

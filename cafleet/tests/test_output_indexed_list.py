@@ -1,7 +1,4 @@
-"""Tests for ``format_indexed_list``.
-
-Per principle (ii) of design 0000061: per-API parametrized "shape + behaviour" pairs.
-"""
+"""Tests for ``format_indexed_list``."""
 
 from cafleet.output import format_agent, format_indexed_list, format_task
 

@@ -1,4 +1,4 @@
-"""Tests for the ``_client_command`` decorator (design 0000041 §A.1).
+"""Tests for the ``_client_command`` decorator.
 
 The Programmer adds a private decorator ``_client_command`` to ``cli.py``
 that subsumes the ``--session-id`` guard, optional ``--agent-id``-belongs-to-session

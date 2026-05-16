@@ -4,7 +4,7 @@
 
 ## `--full` (cross-subcommand escape hatch)
 
-`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch. A single flag covers four overloaded surfaces. Per-subcommand granular variants (`--full-envelope` / `--full-recipients` / `--full-card` / `--full-body`) were considered and rejected — see design 0000049 Concerns §1.
+`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch. A single flag covers four overloaded surfaces. Per-subcommand granular variants (`--full-envelope` / `--full-recipients` / `--full-card` / `--full-body`) were considered and rejected.
 
 | Subcommand | Default | `--full` |
 |---|---|---|

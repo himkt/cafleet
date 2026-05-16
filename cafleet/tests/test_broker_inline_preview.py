@@ -1,8 +1,4 @@
-"""Surface 15 — broker-side wiring of ``send_inline_preview`` (design 0000049 Step 4).
-
-Per principle (ii)/(iii) of design 0000061: per-kwarg fragmented assertions
-collapse into per-behaviour parametrized tests.
-"""
+"""Broker-side wiring of ``send_inline_preview``."""
 
 import pytest
 

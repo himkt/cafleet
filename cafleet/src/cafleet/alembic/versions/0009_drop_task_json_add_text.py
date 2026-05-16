@@ -4,12 +4,12 @@ Revision ID: 0009
 Revises: 0008
 Create Date: 2026-05-05
 
-Surface 14 of design 0000049: replace the redundant ``Task.task_json`` JSON
-blob with a typed ``Task.text`` column. The other typed columns
-(``task_id``, ``context_id``, ``from_agent_id``, ``to_agent_id``, ``type``,
-``created_at``, ``status_state``, ``status_timestamp``, ``origin_task_id``)
-were already promoted in earlier revisions; this migration removes the last
-JSON blob so every read path is a direct typed-column SELECT.
+Replace the redundant ``Task.task_json`` JSON blob with a typed
+``Task.text`` column. The other typed columns (``task_id``, ``context_id``,
+``from_agent_id``, ``to_agent_id``, ``type``, ``created_at``,
+``status_state``, ``status_timestamp``, ``origin_task_id``) were already
+promoted in earlier revisions; this migration removes the last JSON blob so
+every read path is a direct typed-column SELECT.
 
 Migration shape (single revision, no in-between binary state):
 
@@ -54,12 +54,12 @@ def upgrade() -> None:
         bad_ids = ", ".join(r[0] for r in bad_rows[:5])
         suffix = f" (and {len(bad_rows) - 5} more)" if len(bad_rows) > 5 else ""
         raise RuntimeError(
-            "Pre-flight check failed for design 0000049 Surface 14 migration: "
+            "Pre-flight check failed for tasks.task_json drop migration: "
             f"{len(bad_rows)} task row(s) have a NULL body at "
             "json_extract(task_json, '$.artifacts[0].parts[0].text'). "
             f"Offending task_id(s): {bad_ids}{suffix}. "
-            "Restore from the pre-0049 backup, repair or remove the offending "
-            "rows, and re-run 'cafleet db init'."
+            "Restore from the pre-typed-columns backup, repair or remove the "
+            "offending rows, and re-run 'cafleet db init'."
         )
 
     with op.batch_alter_table("tasks") as batch_op:

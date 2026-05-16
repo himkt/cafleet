@@ -1,4 +1,4 @@
-"""Post-Surface-14 typed-column broker shape (design 0000049 Step 2).
+"""Typed-column broker shape.
 
 Every public broker caller returns a flat dict whose keys map 1:1 onto the
 typed ``Task`` columns plus the ``text`` body column — no ``metadata``

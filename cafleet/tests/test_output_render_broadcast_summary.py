@@ -1,8 +1,4 @@
-"""Surface 4 — broadcast summary omits ``recipient_ids`` (design 0000049 Step 7).
-
-Per principle (ii) of design 0000061: per-key projection chains collapse
-into "full envelope" + "recipient-count formatting" tests.
-"""
+"""Broadcast summary omits ``recipient_ids``."""
 
 import pytest
 

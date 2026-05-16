@@ -1,4 +1,4 @@
-"""Tests for the ``cafleet --version`` global CLI flag (design 0000031)."""
+"""Tests for the ``cafleet --version`` global CLI flag."""
 
 from importlib.metadata import version
 

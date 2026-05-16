@@ -1,9 +1,4 @@
-"""Broker-level session bootstrap tests (design doc 0000026).
-
-Per principle (ii)/(iii) of design 0000061: per-API parametrized "shape +
-behaviour" pairs covering bootstrap, rollback, delete cascade, soft-delete
-filtering, and director protection.
-"""
+"""Broker-level session bootstrap tests."""
 
 import uuid
 from unittest.mock import Mock

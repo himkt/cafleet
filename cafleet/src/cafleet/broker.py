@@ -318,9 +318,9 @@ def register_agent(
     """Register a new agent in the session and optionally create its placement.
 
     Rejects soft-deleted sessions with a message that differs from the
-    "not found" case so callers can surface the right recovery hint
-    (design 0000026). When ``placement`` is supplied, the named Director
-    must be active in the same session and must not be the Administrator.
+    "not found" case so callers can surface the right recovery hint. When
+    ``placement`` is supplied, the named Director must be active in the
+    same session and must not be the Administrator.
     """
     sess = get_session(session_id)
     if sess is None:
@@ -751,8 +751,7 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
     """Fan out one delivery task per active non-admin peer plus a sender summary.
 
     Administrators are excluded at the SQL layer via ``json_extract`` so the
-    card blob stays in the database; they are write-only identities per
-    design 0000025 §E.
+    card blob stays in the database; they are write-only identities.
     """
     summary_task_id = str(uuid.uuid4())
 

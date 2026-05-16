@@ -1,4 +1,4 @@
-"""Unit and CLI tests for cafleet.base_dir (design 0000055)."""
+"""Unit and CLI tests for cafleet.base_dir."""
 
 import json
 import re
@@ -175,7 +175,7 @@ def test_resolve_cwd_equals_home_probes_anchors_in_order(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Unit tests — resolve() task-scope branch (design 0000060)
+# Unit tests — resolve() task-scope branch
 # ---------------------------------------------------------------------------
 
 

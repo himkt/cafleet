@@ -1,8 +1,4 @@
-"""Surfaces 3 + 17 — compact list formatters and dropped ``[N]`` index labels.
-
-Per principle (ii)/(iii) of design 0000061: per-helper parametrized
-"shape + behaviour" pairs.
-"""
+"""Compact list formatters and dropped ``[N]`` index labels."""
 
 from cafleet import output
 

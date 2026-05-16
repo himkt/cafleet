@@ -1,10 +1,4 @@
-"""Tests for ``cafleet.tmux`` (all subprocesses mocked).
-
-Per principle (v) of design 0000061: one parametrized test per public tmux
-helper. argv-construction, return-value branches, ``ignore_missing``
-semantics, and clock-driven polling each fold into a per-helper test row
-matrix instead of one ``def`` per scenario.
-"""
+"""Tests for ``cafleet.tmux`` (all subprocesses mocked)."""
 
 import pytest
 

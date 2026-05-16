@@ -1,8 +1,4 @@
-"""Tests for ``cafleet session *`` CLI verbs.
-
-Per principle (ii)/(iii) of design 0000061: per-verb parametrized
-"shape + behaviour" pairs.
-"""
+"""Tests for ``cafleet session *`` CLI verbs."""
 
 import json
 import sqlite3

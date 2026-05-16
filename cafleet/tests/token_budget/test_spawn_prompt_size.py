@@ -1,10 +1,9 @@
-"""Member spawn-prompt size budget (design doc 0000049, Surface 6 + 13).
+"""Member spawn-prompt size budget.
 
 The slim spawn prompt is one of the dominant per-spawn token costs (every
-``cafleet member create`` pays it once). The Surface 6 target is ≤ 70
-tokens after substitution; converting at ~6 chars / token gives a
-generous ~420-character budget that flags any reversion to multi-paragraph
-prose.
+``cafleet member create`` pays it once). The target is ≤ 70 tokens after
+substitution; converting at ~6 chars / token gives a generous ~420-character
+budget that flags any reversion to multi-paragraph prose.
 """
 
 from cafleet.cli import _MEMBER_PROMPT_TEMPLATE
@@ -56,8 +55,8 @@ def test_spawn_prompt_substitutes_three_placeholders():
 
 
 def test_spawn_prompt_at_most_4_lines():
-    """Slim prompt = ≤ 4 newline-separated lines after substitution. Surface
-    6's target was 2 lines; 4 leaves headroom for a future single 1-line
+    """Slim prompt = ≤ 4 newline-separated lines after substitution. The
+    canonical shape is 2 lines; 4 leaves headroom for a future single 1-line
     addition without the test going stale."""
     materialized = _materialize()
     line_count = materialized.count("\n") + 1
