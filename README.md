@@ -38,7 +38,7 @@ Run the following commands on your terminal:
 > ```
 >
 
-### Install the plugin in Codex
+#### Codex
 
 Run the following command on your terminal
 
@@ -73,7 +73,7 @@ cafleet db init             # apply schema migrations (idempotent; rerun after u
 
 The default database is `~/.local/share/cafleet/registry.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
 
-## Try it
+## Simple example to use CAFleet on Claude Code or Codex
 
 In any tmux session, paste this into Claude Code:
 
