@@ -77,13 +77,13 @@ Step 5 (cleanup) is autonomous — no user prompt.
      cafleet base-dir resolve researches/$CANONICAL_SLUG --json
      ```
 
-   - If `$ARGUMENTS` is an absolute path (e.g. `/abs/path/to/researches/my-topic`), pass it through positionally:
+   - If `$ARGUMENTS` is an absolute path (e.g. `/abs/path/to/researches/my-topic`), **canonicalize first**: strip a trailing `/report.md` if present. Store the canonicalized absolute folder path in `$CANONICAL_ABS` and call:
 
      ```bash
-     cafleet base-dir resolve $ARGUMENTS --json
+     cafleet base-dir resolve "$CANONICAL_ABS" --json
      ```
 
-     The CLI treats the absolute path as the task folder verbatim if it is strictly under the inferred repo root; otherwise returns the `unset` shape. **Strip any trailing filename (e.g. `/report.md`) from `$ARGUMENTS` BEFORE calling the resolver** — the resolver does no folding, so a child path like `/abs/path/to/researches/my-topic/report.md` would create and anchor a `report.md` directory instead of the topic folder.
+     The CLI treats the canonicalized absolute path as the task folder verbatim if it is strictly under the inferred repo root; otherwise returns the `unset` shape. The resolver does no filename folding, so a raw child path like `/abs/path/to/researches/my-topic/report.md` would create and anchor a `report.md` directory instead of the topic folder.
 
    Branch on the returned `status`: on `status == "resolved"`, set both `${FOLDER}` and `${BASE}` to the returned `base` field (the task folder IS the report folder; no further `${BASE}/researches/...` concatenation). On `status == "unset"` (absolute `$ARGUMENTS` outside the repo root), set `${FOLDER}` to the **canonicalized** absolute path (the same trailing-`/report.md`-stripped path you passed to the resolver) so the report-folder check in step 4 still runs against a folder rather than a file, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
 4. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run `/cafleet:research-report` first to generate a report."

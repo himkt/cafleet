@@ -115,7 +115,7 @@ The anchor at `/tmp/claude-code/.cafleet-base-dir.json` does NOT survive reboot 
 
 When `${BASE}` is a git-repo CWD (the normal case in this project), the anchor file would otherwise show up in `git status`.
 
-1. **Host projects should exclude `/.cafleet-base-dir.json` at the repo root in their own `.gitignore`** so the anchor file does not surface as untracked.
+1. **Host projects should exclude `.cafleet-base-dir.json` (unanchored — matches both the repo-root anchor AND per-task anchors under `<task-folder>/.cafleet-base-dir.json` written by the positional task-scope branch)** so anchor files do not surface as untracked. This project's `.gitignore` uses the unanchored pattern.
 2. **`cafleet base-dir record` does NOT mutate any `.gitignore`** — silently editing a user repo's gitignore as a side-effect would be a surprising write.
 3. **Users who do not want anchor noise in arbitrary repos should add `.cafleet-base-dir.json` to their global excludes** (`~/.config/git/ignore` or `core.excludesFile`). The first `record` call under a fresh git-repo BASE prints a one-line stderr tip pointing at this recommendation.
 
