@@ -1,7 +1,7 @@
 # Skill Task-Scoped Base Directory
 
 **Status**: Approved
-**Progress**: 4/27 tasks complete
+**Progress**: 8/27 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -245,10 +245,10 @@ Per project rule `.claude/rules/design-doc-numbering.md`, documentation MUST lan
 
 ### Step 2: Update the base-dir skill (`skills/base-dir/SKILL.md`)
 
-- [ ] Rewrite § *Procedure* to document the positional `TASK_NAME` branch as the primary path for task-aware consuming skills. The no-positional `AskUserQuestion` branch remains documented for the shared-root case. <!-- completed: -->
-- [ ] Update the § *CLI surface* code block to show `cafleet base-dir resolve [TASK_NAME] [--json]` and remove `--path`. <!-- completed: -->
-- [ ] Add a new sub-section documenting the absolute-path-arg recognition rules (ancestor match against `researches/<slug>/` or `design-docs/<NNNNNNN>-<slug>/`). <!-- completed: -->
-- [ ] Update § *Anchor file* to note that anchors are now written inside task folders too, and add `"task-scope"` to the documented `source` enum. <!-- completed: -->
+- [x] Rewrite § *Procedure* to document the positional `TASK_NAME` branch as the primary path for task-aware consuming skills. The no-positional `AskUserQuestion` branch remains documented for the shared-root case. <!-- completed: 2026-05-16T00:26 -->
+- [x] Update the § *CLI surface* code block to show `cafleet base-dir resolve [TASK_NAME] [--json]` and remove `--path`. <!-- completed: 2026-05-16T00:26 -->
+- [x] Add a new sub-section documenting the absolute-path-arg recognition rules (ancestor match against `researches/<slug>/` or `design-docs/<NNNNNNN>-<slug>/`). <!-- completed: 2026-05-16T00:26 -->
+- [x] Update § *Anchor file* to note that anchors are now written inside task folders too, and add `"task-scope"` to the documented `source` enum. <!-- completed: 2026-05-16T00:26 -->
 
 ### Step 3: Update the 5 consuming skills' SKILL.md files
 
