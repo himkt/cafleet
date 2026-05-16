@@ -19,9 +19,11 @@ from pathlib import Path
 import pytest
 
 from cafleet.base_dir import (
+    ANCHOR_FILENAME,
     UNSET_SENTINEL,
     extract_spawn_templates,
     record,
+    resolve,
     substitute_base_in_prompt,
     write_audit_file,
 )
@@ -184,3 +186,65 @@ def test_director_side_audit_writes_land_under_base_not_tmp(tmp_path):
     assert files_after_unset == expected, (
         "audit-write helper wrote a file despite BASE=<unset>"
     )
+
+
+# ---------------------------------------------------------------------------
+# Design 0000060 — task-scoped spawn-prompt audit-write flow
+# ---------------------------------------------------------------------------
+
+
+def test_task_scoped_spawn_audit_lands_in_task_folder_not_repo_root(tmp_path):
+    """End-to-end: a fake consuming skill resolves a task-scoped BASE, substitutes it into
+    a fenced spawn-prompt template, and persists the rendered prompt as an audit file. The
+    audit file MUST land at ``<task-folder>/prompts/<role>-<ts>.md`` — never at
+    ``<repo-root>/prompts/``."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+
+    # 1. Director resolves the task-scoped BASE for this run.
+    result = resolve(task_name="design-docs/0000099-end-to-end", cwd=repo_root)
+    assert result["status"] == "resolved"
+    base = result["base"]
+    expected_task_folder = repo_root / "design-docs" / "0000099-end-to-end"
+    assert base == str(expected_task_folder)
+    assert result["source"] == "task-scope"
+    assert (expected_task_folder / ANCHOR_FILENAME).exists()
+
+    # 2. The consuming skill's SKILL.md contains a fenced spawn-prompt template.
+    skill_md_body = (
+        "Some intro markdown...\n"
+        "\n"
+        "```text\n"
+        "SESSION ID: {session_id}\n"
+        "DIRECTOR AGENT ID: {director_agent_id}\n"
+        "YOUR AGENT ID: {agent_id}\n"
+        "BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]\n"
+        "ROLE: drafter\n"
+        "...body of the spawn prompt...\n"
+        "```\n"
+        "\n"
+        "More trailing markdown.\n"
+    )
+    templates = extract_spawn_templates(skill_md_body)
+    assert len(templates) == 1, "expected exactly one extracted spawn template"
+
+    # 3. Director substitutes the task-scoped BASE into the rendered prompt.
+    rendered = substitute_base_in_prompt(templates[0], base=base)
+    assert f"BASE: {base}" in rendered
+    assert BASE_MARKER not in rendered
+
+    # 4. Persist the rendered spawn prompt as an audit file under BASE/prompts/.
+    audit_filename = "prompts/drafter-2026-05-16T12-00-00.md"
+    audit_path = write_audit_file(base=base, filename=audit_filename, content=rendered)
+
+    # 5. The audit file lives under the task folder, NOT the repo root.
+    expected_audit_path = (
+        expected_task_folder / "prompts" / "drafter-2026-05-16T12-00-00.md"
+    )
+    assert audit_path == expected_audit_path
+    assert audit_path.is_file()
+    assert audit_path.read_text() == rendered
+
+    # The repo-root prompts/ directory must NOT exist — no bypass to repo root.
+    assert not (repo_root / "prompts").exists()

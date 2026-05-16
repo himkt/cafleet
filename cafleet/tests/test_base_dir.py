@@ -47,17 +47,6 @@ def _write_anchor(
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_absolute_path_argument_returns_unset():
-    """Absolute-path argument bypasses BASE entirely: returns the <unset> sentinel."""
-    result = resolve(path="/abs/path/to/foo")
-    assert result == {
-        "status": "unset",
-        "base": None,
-        "source": "absolute-path-arg",
-        "anchor": None,
-    }
-
-
 def test_resolve_cwd_outside_home_returns_cwd(tmp_path):
     """CWD-deterministic branch: CWD outside HOME returns CWD as BASE."""
     home = tmp_path / "home"
@@ -186,6 +175,140 @@ def test_resolve_cwd_equals_home_probes_anchors_in_order(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Unit tests — resolve() task-scope branch (design 0000060)
+# ---------------------------------------------------------------------------
+
+
+def _make_repo_root(tmp_path: Path) -> Path:
+    """Create a fake git repo root under ``tmp_path`` and return it."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    return repo_root
+
+
+def test_resolve_relative_task_name_creates_folder_and_writes_anchor(tmp_path):
+    """Bullet 1: A relative ``task_name`` resolves under the inferred repo root, auto-creates
+    the folder, and writes a task-scope anchor."""
+    repo_root = _make_repo_root(tmp_path)
+    task_name = "design-docs/0000099-test-thing"
+
+    result = resolve(task_name=task_name, cwd=repo_root)
+
+    task_folder = repo_root / "design-docs" / "0000099-test-thing"
+    assert task_folder.is_dir(), "task folder must be auto-created"
+    assert result == {
+        "status": "resolved",
+        "base": str(task_folder),
+        "source": "task-scope",
+        "anchor": str(task_folder / ANCHOR_FILENAME),
+        "task_name": task_name,
+    }
+    anchor_data = json.loads((task_folder / ANCHOR_FILENAME).read_text())
+    assert anchor_data["version"] == 1
+    assert anchor_data["base"] == str(task_folder)
+    assert anchor_data["source"] == "task-scope"
+    assert re.match(
+        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}\+00:00$",
+        anchor_data["resolved_at"],
+    ), f"resolved_at not ISO 8601 microsecond+00:00: {anchor_data['resolved_at']!r}"
+
+
+def test_resolve_relative_task_name_reads_anchor_on_second_call(tmp_path):
+    """Bullet 2: Re-invoking with the same ``task_name`` re-reads the existing anchor
+    (``source='anchor'``)."""
+    repo_root = _make_repo_root(tmp_path)
+    task_name = "researches/topic-foo"
+
+    first = resolve(task_name=task_name, cwd=repo_root)
+    assert first["source"] == "task-scope"
+
+    second = resolve(task_name=task_name, cwd=repo_root)
+    assert second == {
+        "status": "resolved",
+        "base": first["base"],
+        "source": "anchor",
+        "anchor": first["anchor"],
+        "task_name": task_name,
+    }
+
+
+def test_resolve_absolute_path_inside_researches_resolves_to_slug_folder(tmp_path):
+    """Bullet 3: An absolute ``task_name`` whose path lives inside
+    ``researches/<slug>/...`` resolves to that slug folder (not the inner file)."""
+    repo_root = _make_repo_root(tmp_path)
+    research_folder = repo_root / "researches" / "topic-foo"
+    research_folder.mkdir(parents=True)
+    inner = research_folder / "report.md"
+
+    result = resolve(task_name=str(inner), cwd=repo_root)
+
+    assert result == {
+        "status": "resolved",
+        "base": str(research_folder),
+        "source": "task-scope",
+        "anchor": str(research_folder / ANCHOR_FILENAME),
+        "task_name": str(inner),
+    }
+
+
+def test_resolve_absolute_path_inside_design_docs_resolves_to_slug_folder(tmp_path):
+    """Bullet 4: An absolute ``task_name`` whose path lives inside
+    ``design-docs/<NNNNNNN>-<slug>/...`` resolves to that slug folder."""
+    repo_root = _make_repo_root(tmp_path)
+    dd_folder = repo_root / "design-docs" / "0000060-skill-task-scoped-base-dir"
+    dd_folder.mkdir(parents=True)
+    inner = dd_folder / "design-doc.md"
+
+    result = resolve(task_name=str(inner), cwd=repo_root)
+
+    assert result == {
+        "status": "resolved",
+        "base": str(dd_folder),
+        "source": "task-scope",
+        "anchor": str(dd_folder / ANCHOR_FILENAME),
+        "task_name": str(inner),
+    }
+
+
+def test_resolve_absolute_path_outside_recognized_pattern_returns_unset(tmp_path):
+    """Bullet 5: An absolute ``task_name`` outside any recognized task-folder pattern
+    returns the ``<unset>`` shape (existing absolute-path-arg semantics preserved)."""
+    repo_root = _make_repo_root(tmp_path)
+    outside = tmp_path / "outside" / "random.md"
+
+    result = resolve(task_name=str(outside), cwd=repo_root)
+
+    assert result == {
+        "status": "unset",
+        "base": None,
+        "source": "absolute-path-arg",
+        "anchor": None,
+        "task_name": str(outside),
+    }
+
+
+def test_resolve_absolute_path_with_bad_design_docs_slug_returns_unset(tmp_path):
+    """Bullet 6: ``design-docs/garbage`` fails the ``^\\d{7}-`` slug regex in
+    ``_match_known_task_pattern`` and produces no anchor."""
+    repo_root = _make_repo_root(tmp_path)
+    bad_folder = repo_root / "design-docs" / "garbage"
+    bad_folder.mkdir(parents=True)
+    inner = bad_folder / "doc.md"
+
+    result = resolve(task_name=str(inner), cwd=repo_root)
+
+    assert result == {
+        "status": "unset",
+        "base": None,
+        "source": "absolute-path-arg",
+        "anchor": None,
+        "task_name": str(inner),
+    }
+    assert not (bad_folder / ANCHOR_FILENAME).exists()
+
+
+# ---------------------------------------------------------------------------
 # Unit tests — record()
 # ---------------------------------------------------------------------------
 
@@ -255,20 +378,7 @@ def test_cli_resolve_emits_documented_json_shape(tmp_path, runner, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(base_dir_module, "_TMP_CANDIDATE", fake_tmp_candidate)
 
-    # Branch 1: absolute-path-arg → status="unset"
-    result = runner.invoke(
-        cli, ["base-dir", "resolve", "--json", "--path", "/abs/path"]
-    )
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-    assert data == {
-        "status": "unset",
-        "base": None,
-        "source": "absolute-path-arg",
-        "anchor": None,
-    }
-
-    # Branch 2: cwd-inference (first call, no anchor)
+    # Branch 1: cwd-inference (first call, no anchor)
     proj = tmp_path / "proj"
     proj.mkdir()
     monkeypatch.chdir(proj)
@@ -282,7 +392,7 @@ def test_cli_resolve_emits_documented_json_shape(tmp_path, runner, monkeypatch):
         "anchor": str(proj / ANCHOR_FILENAME),
     }
 
-    # Branch 3: anchor (second call, anchor now exists)
+    # Branch 2: anchor (second call, anchor now exists)
     result = runner.invoke(cli, ["base-dir", "resolve", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
@@ -293,7 +403,7 @@ def test_cli_resolve_emits_documented_json_shape(tmp_path, runner, monkeypatch):
         "anchor": str(proj / ANCHOR_FILENAME),
     }
 
-    # Branch 4: needs-user-input (CWD == HOME, no anchors)
+    # Branch 3: needs-user-input (CWD == HOME, no anchors)
     monkeypatch.chdir(home)
     result = runner.invoke(cli, ["base-dir", "resolve", "--json"])
     assert result.exit_code == 0, result.output
@@ -390,3 +500,33 @@ def test_resolve_rejects_unknown_anchor_version(tmp_path, runner, monkeypatch):
     _write_anchor(proj / ANCHOR_FILENAME, base=str(proj), version=0)
     result = runner.invoke(cli, ["base-dir", "resolve", "--json"])
     assert result.exit_code != 0
+
+
+def test_cli_resolve_task_name_outside_git_repo_exits_1_no_json(
+    tmp_path, runner, monkeypatch
+):
+    """Bullet 7 (no-repo-root failure): a positional ``task_name`` invoked when CWD has no
+    ``.git`` ancestor exits 1 with the standardized stderr message and emits no JSON payload,
+    even with ``--json``. The Python-level resolver raises ``RuntimeError`` for the same
+    scenario."""
+    home = tmp_path / "home"
+    home.mkdir()
+    nowhere = tmp_path / "nowhere"
+    nowhere.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(nowhere)
+
+    result = runner.invoke(
+        cli, ["base-dir", "resolve", "--json", "design-docs/0000099-x"]
+    )
+
+    assert result.exit_code != 0
+    combined = (result.output or "") + (result.stderr or "")
+    assert "no .git ancestor" in combined
+    # The error is plain text, not a JSON payload — parsing the combined output as JSON fails.
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(combined)
+
+    # The Python-level resolver raises RuntimeError from the same scenario.
+    with pytest.raises(RuntimeError, match=r"no \.git ancestor"):
+        resolve(task_name="design-docs/0000099-x", cwd=nowhere)
