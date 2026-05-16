@@ -1,7 +1,7 @@
 # README — Spotlight design-doc-driven development; collapse the duplicate Coding agents H3
 
 **Status**: Approved
-**Progress**: 0/17 tasks complete
+**Progress**: 3/17 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -184,9 +184,9 @@ The historical record of the removal lives in this design doc (Status: Complete 
 
 ### Step 1: Edit `## Install` — add coding-agent intro paragraph, relocate Codex sandbox callout, append cross-reference
 
-- [ ] Insert the new coding-agent intro paragraph (verbatim text from §2) immediately after the `## Install` heading and before the `### Install CAFleet skills` heading. Preserve one blank line above and below the new paragraph. <!-- completed: -->
-- [ ] Move the Codex sandbox `> [!IMPORTANT]` callout (verbatim text from §3) from `### Coding agents` to the end of `#### Codex` inside `### Install CAFleet skills`. Place it AFTER the existing skill-verification `> [!IMPORTANT]` callout, separated by exactly one blank line. Preserve the TOML code fence and indentation byte-for-byte. <!-- completed: -->
-- [ ] Append the one-line cross-reference `For codex CLI version pin and operational specifics, see [docs/codex-members.md](docs/codex-members.md).` (verbatim from §3) immediately after the second `> [!IMPORTANT]` callout in `#### Codex`, separated by one blank line above and one blank line below. This is the only inbound link to `docs/codex-members.md` from `README.md` after the change. <!-- completed: -->
+- [x] Insert the new coding-agent intro paragraph (verbatim text from §2) immediately after the `## Install` heading and before the `### Install CAFleet skills` heading. Preserve one blank line above and below the new paragraph. <!-- completed: 2026-05-16T13:57 -->
+- [x] Move the Codex sandbox `> [!IMPORTANT]` callout (verbatim text from §3) from `### Coding agents` to the end of `#### Codex` inside `### Install CAFleet skills`. Place it AFTER the existing skill-verification `> [!IMPORTANT]` callout, separated by exactly one blank line. Preserve the TOML code fence and indentation byte-for-byte. <!-- completed: 2026-05-16T13:57 -->
+- [x] Append the one-line cross-reference `For codex CLI version pin and operational specifics, see [docs/codex-members.md](docs/codex-members.md).` (verbatim from §3) immediately after the second `> [!IMPORTANT]` callout in `#### Codex`, separated by one blank line above and one blank line below. This is the only inbound link to `docs/codex-members.md` from `README.md` after the change. <!-- completed: 2026-05-16T13:57 -->
 
 ### Step 2: Edit `## CLI cheatsheet` — remove `### Coding agents` H3 entirely
 

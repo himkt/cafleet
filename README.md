@@ -6,6 +6,8 @@ A message broker and agent registry for coding agents — a Claude Code plugin p
 
 ## Install
 
+CAFleet works with two coding agents: `claude` (Claude Code) and `codex` (OpenAI Codex CLI). Install the plugin in whichever one you use — the broker CLI is shared.
+
 ### Install CAFleet skills
 
 #### Claude Code
@@ -68,6 +70,11 @@ Run the following command on your terminal
 codex plugin marketplace add himkt/cafleet
 ```
 
+> [!NOTE]
+>
+> I'm Codex beginner, so contribution are super welcome how to configure auto-approve cafleet commands on Codex... :bow:
+> 
+
 > [!IMPORTANT]
 >
 > Make sure whether the skills are correctly installed. You can see available skills by running `/skills` on Codex prompt.
@@ -86,10 +93,17 @@ codex plugin marketplace add himkt/cafleet
 > ```
 > 
 
-> [!NOTE]
+> [!IMPORTANT]
+> Codex members need the cafleet DB directory to be writable from inside the codex sandbox. Add it to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads (e.g. `~/.codex/config.toml`):
 >
-> I'm Codex beginner, so contribution are super welcome how to configure auto-approve cafleet commands on Codex... :bow:
-> 
+> ```toml
+> [sandbox_workspace_write]
+> writable_roots = ["/home/<you>/.local/share/cafleet"]
+> ```
+>
+> Use the absolute path matching `CAFLEET_DATABASE_URL` or the default XDG location.
+
+For codex CLI version pin and operational specifics, see [docs/codex-members.md](docs/codex-members.md).
 
 ### Install CAFleet CLI (required for CAFleet to function)
 
