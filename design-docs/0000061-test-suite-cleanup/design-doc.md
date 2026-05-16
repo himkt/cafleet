@@ -1,7 +1,7 @@
 # Test Suite Cleanup — Reduce Excessive Tests in cafleet/tests/
 
 **Status**: Approved
-**Progress**: 0/33 tasks complete
+**Progress**: 5/33 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -124,11 +124,11 @@ If a step exposes a real regression in source (not in tests) — `STOP`, raise a
 
 #### Step 1 tasks
 
-- [ ] Delete `cafleet/tests/test_alembic_0002_upgrade.py` <!-- completed: -->
-- [ ] Delete `cafleet/tests/test_alembic_0006_upgrade.py` <!-- completed: -->
-- [ ] Delete `cafleet/tests/test_alembic_0008_upgrade.py` <!-- completed: -->
-- [ ] Delete `cafleet/tests/test_alembic_typed_columns_upgrade.py` <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `chore: drop per-revision alembic regression tests (design 0000061 step 1)` <!-- completed: -->
+- [x] Delete `cafleet/tests/test_alembic_0002_upgrade.py` <!-- completed: 2026-05-16T09:48 -->
+- [x] Delete `cafleet/tests/test_alembic_0006_upgrade.py` <!-- completed: 2026-05-16T09:48 -->
+- [x] Delete `cafleet/tests/test_alembic_0008_upgrade.py` <!-- completed: 2026-05-16T09:48 -->
+- [x] Delete `cafleet/tests/test_alembic_typed_columns_upgrade.py` <!-- completed: 2026-05-16T09:48 -->
+- [x] Run `mise //cafleet:test`; commit as `chore: drop per-revision alembic regression tests (design 0000061 step 1)` <!-- completed: 2026-05-16T09:48 -->
 
 ### Step 2: Delete PRAGMA / library-boilerplate tests
 
