@@ -1,7 +1,7 @@
 # Test Suite Cleanup — Reduce Excessive Tests in cafleet/tests/
 
 **Status**: Approved
-**Progress**: 7/33 tasks complete
+**Progress**: 10/33 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -211,9 +211,9 @@ Target post-rewrite count is **12 tests**: 9 newly-written rewrites + 3 budget-t
 
 #### Step 3 tasks
 
-- [ ] Rewrite `cafleet/tests/test_broker_typed_columns.py` from 53 to 8 tests per § 3.1 <!-- completed: -->
-- [ ] Rewrite `cafleet/tests/test_output_render_task.py` from 42 to 12 tests per § 3.2 (9 new + 3 budget kept) <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `refactor(tests): consolidate per-key projection chains (design 0000061 step 3)` <!-- completed: -->
+- [x] Rewrite `cafleet/tests/test_broker_typed_columns.py` from 53 to 8 tests per § 3.1 <!-- completed: 2026-05-16T09:55 -->
+- [x] Rewrite `cafleet/tests/test_output_render_task.py` from 42 to 12 tests per § 3.2 (9 new + 3 budget kept) <!-- completed: 2026-05-16T09:55 -->
+- [x] Run `mise //cafleet:test`; commit as `refactor(tests): consolidate per-key projection chains (design 0000061 step 3)` <!-- completed: 2026-05-16T09:55 -->
 
 ### Step 4: Parametrize tmux argument-construction tests
 
