@@ -139,6 +139,7 @@ def _resolve_task_scope(task_name: str, *, cwd: Path) -> dict[str, Any]:
             f"cannot resolve task-scope base-dir: no .git ancestor "
             f"found from CWD {cwd}. cd to the repo root and retry."
         )
+    repo_root = repo_root.resolve(strict=False)
 
     candidate = Path(task_name)
     if candidate.is_absolute():
