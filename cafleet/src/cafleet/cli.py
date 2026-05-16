@@ -470,10 +470,11 @@ def base_dir_resolve(ctx: click.Context, task_name: str | None, as_json: bool) -
     try:
         result = base_dir.resolve(task_name=task_name)
     except RuntimeError as exc:
-        # Plain-text stderr exit per design 0000060 §Spec 2 *No-repo-root failure mode* —
-        # no JSON payload, even when --json is passed.
-        click.echo(str(exc), err=True)
-        ctx.exit(1)
+        if task_name is not None:
+            # Task-scope branch: plain-text stderr per design 0000060 §Spec 2.
+            click.echo(str(exc), err=True)
+            ctx.exit(1)
+        raise click.ClickException(str(exc)) from exc
     except (base_dir.AnchorError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
