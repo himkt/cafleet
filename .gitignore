@@ -29,7 +29,9 @@ __pycache__/
 
 # ==== CAFleet runtime artifacts at the repo root ====
 # Anchor file written by `cafleet base-dir record` (design 0000055).
-/.cafleet-base-dir.json
+# Also matches per-task anchors written by the positional `cafleet base-dir resolve <task-name>`
+# branch (design 0000060) inside <repo>/researches/<slug>/ and <repo>/design-docs/<NNNNNNN>-<slug>/.
+.cafleet-base-dir.json
 
 # Legacy spawn-prompt audit directory at the repo root. Audit files are now
 # written under per-task folders (`researches/<slug>/prompts/`,
