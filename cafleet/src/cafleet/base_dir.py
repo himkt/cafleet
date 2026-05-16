@@ -1,4 +1,4 @@
-"""Base directory resolver for CAFleet (design 0000055; task-scope branch design 0000060).
+"""Base directory resolver for CAFleet.
 
 Owns the deterministic side of `${BASE}` resolution: anchor file
 read / write / validate, the no-positional resolution branches
@@ -366,7 +366,7 @@ def substitute_base_in_prompt(prompt: str, *, base: str) -> str:
 
     When ``base`` is the ``<unset>`` sentinel, the entire ``BASE:`` line is
     removed — the literal string ``BASE: <unset>`` is never written into a
-    spawn prompt (per §Specification 5 item 2 of design 0000055).
+    spawn prompt.
     """
     if base == UNSET_SENTINEL:
         lines = prompt.splitlines(keepends=True)

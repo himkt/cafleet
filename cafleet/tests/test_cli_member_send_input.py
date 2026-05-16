@@ -1,8 +1,4 @@
-"""CLI tests for ``cafleet member send-input`` (design doc 0000027).
-
-Per principle (iii) of design 0000061: per-flag and per-payload fragmentation
-collapses to one parametrized test per behavioural group.
-"""
+"""CLI tests for ``cafleet member send-input``."""
 
 import json
 import uuid

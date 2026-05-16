@@ -1,8 +1,4 @@
-"""Tests for ``broker`` messaging operations.
-
-Per principle (ii)/(iii) of design 0000061: per-key projection chains
-collapse into per-API parametrized "shape + behaviour" pairs.
-"""
+"""Tests for ``broker`` messaging operations."""
 
 import uuid
 

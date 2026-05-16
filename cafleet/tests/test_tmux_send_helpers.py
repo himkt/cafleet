@@ -1,8 +1,4 @@
-"""Tests for ``cafleet.tmux.send_choice_key`` and
-``cafleet.tmux.send_freetext_and_submit`` (Surface-12 keystroke helpers).
-
-Per principle (v) of design 0000061: one parametrized test per helper.
-"""
+"""Tests for ``cafleet.tmux.send_choice_key`` and ``cafleet.tmux.send_freetext_and_submit``."""
 
 import pytest
 

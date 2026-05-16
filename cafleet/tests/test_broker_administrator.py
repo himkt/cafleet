@@ -1,8 +1,4 @@
-"""Tests for Administrator agent helpers, constants, and broker guards.
-
-Per principle (ii)/(iii) of design 0000061: per-feature parametrized
-"shape + behaviour" pairs.
-"""
+"""Tests for Administrator agent helpers, constants, and broker guards."""
 
 import json
 

@@ -1,8 +1,4 @@
-"""Surface 5 — configurable text truncation (design 0000049 Step 8).
-
-Per principle (ii) of design 0000061: parametrized "env var × limit value"
-matrix.
-"""
+"""Configurable text truncation."""
 
 import pytest
 

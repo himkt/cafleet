@@ -1,19 +1,18 @@
-"""Per-poll envelope size budget (design doc 0000049, Surface 1 + 13).
+"""Per-poll envelope size budget.
 
 The compact rendered envelope (default ``output.format_json(..., pretty=False)``
-+ ``output.render_task``) MUST stay materially smaller than the legacy
-indented envelope. The pass criterion below is a fixture-anchored
-**UTF-8 byte** budget rather than a derived percentage so the test detects
-ALL classes of regression — extra fields, longer keys, removed truncation,
-multi-byte content sneaking in, etc.
++ ``output.render_task``) MUST stay materially smaller than the indented
+envelope. The pass criterion below is a fixture-anchored **UTF-8 byte**
+budget rather than a derived percentage so the test detects ALL classes
+of regression — extra fields, longer keys, removed truncation, multi-byte
+content sneaking in, etc.
 
 Tokenizer choice: tests assert UTF-8 byte counts (cheap, deterministic).
 The on-wire cost is bytes, not Python codepoints — the Unicode ellipsis
 ``…`` is 1 codepoint but 3 UTF-8 bytes, so ``len(s)`` would under-count.
-A real-tokenizer cross-check belongs in a separate helper (Step 15
-implementation note). 1 token ≈ 4 bytes for English text in the GPT-style
-tokenizers cafleet's downstream coding agents use, so the byte budgets
-below convert at roughly the same ratio.
+1 token ≈ 4 bytes for English text in the GPT-style tokenizers cafleet's
+downstream coding agents use, so the byte budgets below convert at roughly
+the same ratio.
 """
 
 from cafleet import output
@@ -108,10 +107,9 @@ def test_compact_envelope_fits_within_byte_budget():
 def test_compact_slim_envelope_at_most_30pct_of_pretty_full():
     """Compact rendered (slim ``render_task``) ≤ 30 % of pretty rendered
     (full / un-projected ``render_task(full=True)``) for the SAME fixture,
-    measured in UTF-8 bytes (the on-wire cost). This is the cumulative-
-    savings story from the design doc: the default wire format
-    (compact + projected) is what an agent actually pays for, and the
-    pretty + full form is what the legacy envelope cost."""
+    measured in UTF-8 bytes (the on-wire cost). The default wire format
+    (compact + projected) is what an agent actually pays for; the pretty +
+    full form is the un-projected baseline."""
     fixture = _five_unicast_fixture()
     compact_slim = output.format_json(
         [output.render_task(t, full=False) for t in fixture],

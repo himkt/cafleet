@@ -1,4 +1,4 @@
-"""CLI tests for ``cafleet member exec`` (design doc 0000038)."""
+"""CLI tests for ``cafleet member exec``."""
 
 import json
 import uuid

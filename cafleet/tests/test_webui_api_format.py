@@ -1,8 +1,4 @@
-"""Tests for the ``webui_api`` message formatter.
-
-Per principle (ii) of design 0000061: per-field assertions collapse into
-"shape + behaviour" pairs.
-"""
+"""Tests for the ``webui_api`` message formatter."""
 
 import pytest
 

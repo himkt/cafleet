@@ -1,8 +1,4 @@
-"""Tests for ``output.render_agent`` (design doc 0000049, Surface 18, Step 16).
-
-Per principle (ii)/(iii) of design 0000061: per-field projection chains
-collapse into per-behaviour parametrized tests.
-"""
+"""Tests for ``output.render_agent``."""
 
 import json
 

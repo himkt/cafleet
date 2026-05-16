@@ -123,11 +123,6 @@ def render_agent(agent: dict, *, full: bool = False) -> dict:
     ``description`` (truncated to 60 codepoints + ``…`` suffix), ``status``,
     plus ``coding_agent`` when the source dict carries a ``placement`` with
     that key. ``full=True`` returns ``agent`` unchanged.
-
-    Surface 18 (design 0000049): drops the per-row token cost on
-    ``cafleet agent list`` / ``agent show`` from ~300–500 tok to ≤80 tok by
-    omitting ``registered_at``, ``kind``, the nested ``placement`` blob, and
-    by prefix-rendering ``agent_id``.
     """
     if full:
         return agent
@@ -311,10 +306,10 @@ def _agent_id_for_column(agent_id: str) -> str:
 def format_member_list_activity(members: list) -> str:
     """Render the activity-augmented member roster as text.
 
-    Surface 8 (design 0000049): one row per member with the four activity
-    proxies — ``last_sent`` / ``last_recv`` / ``last_ack`` / ``idle``.
-    Timestamps are rendered as ``HH:MM:SS`` (the time portion of the ISO
-    string); ``idle`` is humanized to ``Ns`` / ``Nm`` / ``Nh``.
+    One row per member with the four activity proxies —
+    ``last_sent`` / ``last_recv`` / ``last_ack`` / ``idle``. Timestamps are
+    rendered as ``HH:MM:SS`` (the time portion of the ISO string);
+    ``idle`` is humanized to ``Ns`` / ``Nm`` / ``Nh``.
     """
     if not members:
         return "0 members."

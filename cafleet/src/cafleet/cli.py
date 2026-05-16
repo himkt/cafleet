@@ -471,7 +471,7 @@ def base_dir_resolve(ctx: click.Context, task_name: str | None, as_json: bool) -
         result = base_dir.resolve(task_name=task_name)
     except RuntimeError as exc:
         if task_name is not None:
-            # Task-scope branch: plain-text stderr per design 0000060 §Spec 2.
+            # Task-scope branch: plain-text stderr.
             click.echo(str(exc), err=True)
             ctx.exit(1)
         raise click.ClickException(str(exc)) from exc
@@ -799,7 +799,7 @@ def _load_authorized_member(
 def _read_prompt_file(path: str) -> str:
     """Read the spawn prompt from a file, validating absolute path / readability / UTF-8 / non-empty.
 
-    Owns the five error surfaces from design 0000059 § 6: relative path →
+    Owns the five error surfaces: relative path →
     ``UsageError``; missing / non-regular file → ``ClickException``;
     permission / generic-I/O failures → ``ClickException``; invalid UTF-8 →
     ``ClickException``; zero-byte or whitespace-only contents →

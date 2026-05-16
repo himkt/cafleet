@@ -1,10 +1,9 @@
-"""Surface 1 — compact rendered envelope (design 0000049 Step 3).
+"""Compact rendered envelope.
 
 Tests for ``output.render_task`` compact projection, ``output.format_json``
 pretty/compact behaviour, and the 2-line ``output.format_task`` text
-rendering. The 5-task fixture budget assertion is the load-bearing reduction
-check named in design 0000049 — compact mode must be ≤ 30 % of indented
-baseline.
+rendering. The 5-task fixture budget assertion enforces that compact mode
+must be ≤ 30 % of the indented baseline.
 """
 
 import json

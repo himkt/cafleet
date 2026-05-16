@@ -1,9 +1,4 @@
-"""Tests for ``cafleet member capture`` defaults (design doc 0000049, Surface 9).
-
-Per principle (iii) of design 0000061: per-flag fragmented assertions collapse
-into a small set of parametrized "shape + behaviour" tests covering line
-defaults, ANSI stripping, CR defragmentation, and JSON envelope parity.
-"""
+"""Tests for ``cafleet member capture`` defaults."""
 
 import json
 

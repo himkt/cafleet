@@ -1,8 +1,4 @@
-"""Tests for ``broker`` WebUI query operations.
-
-Per principle (ii)/(iii) of design 0000061: per-API parametrized "shape +
-behaviour" pairs.
-"""
+"""Tests for ``broker`` WebUI query operations."""
 
 import uuid
 

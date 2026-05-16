@@ -2,11 +2,11 @@
 
 The shape of a `Task` envelope as it is persisted in SQLite, returned by the broker layer, and rendered by the CLI.
 
-This document covers the **post-design-0049** shape only. The legacy nested envelope (`artifacts[].parts[].text`, `metadata.fromAgentId`, `metadata.toAgentId`, `metadata.type`, `kind`, `history`, `contextId`-as-payload-field) is removed — the broker no longer constructs it, the CLI no longer renders it, and the WebUI no longer consumes it. See [design-docs/0000001-a2a-registry-broker/](../../design-docs/0000001-a2a-registry-broker/) for the historical record of the inherited convention; nothing in the current codebase depends on that shape.
+This document covers the canonical envelope shape: the broker constructs it, the CLI renders it, and the WebUI consumes it.
 
 ## Persisted shape (typed columns)
 
-After [design 0000049 Surface 14](../../design-docs/0000049-token-reduction/design-doc.md), every message lives in `tasks` as a flat row of typed columns. There is no JSON blob — `tasks.task_json` was dropped and replaced with `tasks.text` plus the columns that already existed.
+Every message lives in `tasks` as a flat row of typed columns. There is no JSON blob — `tasks.text` carries the message body and the remaining typed columns carry the routing and lifecycle fields.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -128,7 +128,7 @@ build OK
 
 Optional segments `| kind:<kind>` and `| origin:<id8>` are appended to line 1 when the task is a broadcast summary (`type != "unicast"`) or has a non-NULL `origin_task_id`, respectively. The body line is omitted entirely when the resulting body is the empty string.
 
-`--full` switches to a six-line block that mirrors the `--full` JSON keys one-per-line. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. The 10-codepoint `...` suffix from the pre-design-0049 era is replaced with the single Unicode codepoint `…` (U+2026) at the configured `CAFLEET_MAX_TEXT_LEN` codepoint count (default 200).
+`--full` switches to a six-line block that mirrors the `--full` JSON keys one-per-line. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. The truncation suffix is the single Unicode codepoint `…` (U+2026), applied at the configured `CAFLEET_MAX_TEXT_LEN` codepoint count (default 200).
 
 ## Flag cross-reference
 
@@ -141,8 +141,3 @@ The flags that govern envelope rendering are documented in [cli-options.md](cli-
 
 `CAFLEET_MAX_TEXT_LEN` (default `200`) controls body truncation in the rendered envelope; it is documented under [Message Body Truncation](cli-options.md#message-body-truncation).
 
-## Changes from the inherited convention
-
-The previous nested envelope shape — modelled after the inherited `Task` / `Message` / `Artifact` / `Part` types — wrapped the body in `artifacts[0].parts[0].text`, the routing identifiers in `metadata.fromAgentId` / `metadata.toAgentId` / `metadata.type`, the constants `kind: "text"` and `artifactId`, the always-empty `history`, and the `contextId`-as-payload-field that always equalled the recipient's own `agent_id`. cafleet has no external consumers that depend on that exact shape, so design 0000049 dropped it entirely. The `tasks.task_json` blob that persisted the legacy shape is dropped in the same single Alembic revision that introduces `tasks.text`.
-
-The historical record of the inherited convention lives in [design-docs/0000001-a2a-registry-broker/](../../design-docs/0000001-a2a-registry-broker/). It is preserved for context only; the current codebase does not depend on the legacy shape, and new code paths MUST consume the typed-column envelope documented above.

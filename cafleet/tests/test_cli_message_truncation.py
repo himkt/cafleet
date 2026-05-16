@@ -1,10 +1,4 @@
-"""Per-command tests for the ``--full`` truncation flag on ``cafleet message *``.
-
-Per principle (iii) of design 0000061: per-command + per-mode +
-per-default/full fragmentation collapses to a small set of parametrized
-matrix tests covering ``poll``, ``show``, ``send`` (truncated) and
-``broadcast`` (verbatim).
-"""
+"""Per-command tests for the ``--full`` truncation flag on ``cafleet message *``."""
 
 import json
 import uuid

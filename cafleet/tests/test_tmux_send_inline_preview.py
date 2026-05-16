@@ -1,9 +1,4 @@
-"""Surface 15 — ``tmux.send_inline_preview`` keystroke helper (design 0000049 Step 4).
-
-Per principle (v) of design 0000061: one parametrized test per behavioural
-contract — happy-path shape, failure-mode return branches, and the
-``send_poll_trigger`` preservation guard.
-"""
+"""``tmux.send_inline_preview`` keystroke helper."""
 
 import pytest
 

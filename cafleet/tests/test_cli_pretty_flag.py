@@ -1,8 +1,4 @@
-"""CLI integration tests for ``--pretty`` flag + ``_client_command`` wiring.
-
-Per principle (iii) of design 0000061: per-flag fragmentation collapses to
-parametrized "shape + behaviour" tests.
-"""
+"""CLI integration tests for ``--pretty`` flag + ``_client_command`` wiring."""
 
 import json
 import re

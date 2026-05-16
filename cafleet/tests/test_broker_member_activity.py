@@ -1,8 +1,4 @@
-"""Tests for ``broker.list_members_with_activity`` (design doc 0000049, Surface 8).
-
-Per principle (ii)/(iii) of design 0000061: per-key fragmentation collapses
-into per-behaviour parametrized tests.
-"""
+"""Tests for ``broker.list_members_with_activity``."""
 
 import uuid
 

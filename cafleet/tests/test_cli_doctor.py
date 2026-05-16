@@ -1,4 +1,4 @@
-"""CLI tests for the ``cafleet doctor`` subcommand (design 0000032 §2)."""
+"""CLI tests for the ``cafleet doctor`` subcommand."""
 
 import json
 

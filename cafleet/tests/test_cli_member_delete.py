@@ -522,11 +522,10 @@ def test_pending_placement__pending_pane_id_skips_send_exit(
 def test_tmux_error_on_send_exit__send_exit_failure_now_exits_one_with_recovery_wording(
     runner, session_id, monkeypatch, deregister_recorder
 ):
-    """Under design 0000032 §3, send_exit TmuxError is a hard exit-1.
+    """send_exit TmuxError is a hard exit-1.
 
-    The old behavior was warning-and-continue with `tmux kill-pane -t <pane>`
-    in the warning text. The new wording points operators at `cafleet doctor`
-    and `--force` instead, with no raw tmux command exposed.
+    The wording points operators at `cafleet doctor` and `--force`, with no
+    raw tmux command exposed.
     """
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
 

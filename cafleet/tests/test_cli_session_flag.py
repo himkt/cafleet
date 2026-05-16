@@ -1,4 +1,4 @@
-"""Tests for the ``cafleet --session-id <uuid>`` global CLI flag (design 0000023)."""
+"""Tests for the ``cafleet --session-id <uuid>`` global CLI flag."""
 
 import json
 import sqlite3

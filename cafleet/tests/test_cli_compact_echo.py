@@ -1,8 +1,4 @@
-"""Surface 3 — slim broadcast echo + ``--quiet`` writes (design 0000049 Step 6).
-
-Per principle (iii) of design 0000061: per-command + per-mode fragmentation
-collapses to a small set of parametrized tests.
-"""
+"""Slim broadcast echo and ``--quiet`` writes."""
 
 import uuid
 

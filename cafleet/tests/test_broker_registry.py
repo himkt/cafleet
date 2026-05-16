@@ -1,8 +1,4 @@
-"""Tests for ``broker`` session + registry operations.
-
-Per principle (ii)/(iii) of design 0000061: per-key projection chains collapse
-into per-API parametrized "shape + behaviour" pairs.
-"""
+"""Tests for ``broker`` session + registry operations."""
 
 import json
 import uuid

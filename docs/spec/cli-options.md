@@ -22,13 +22,13 @@ Placed **before** the subcommand:
 | Flag | Required | Notes |
 |---|---|---|
 | `--json` | no | Emit JSON output. Default JSON encoding is compact (`json.dumps(..., separators=(",",":"))`); pair with `--pretty` for indented output. |
-| `--pretty` | no | Switch JSON output from the compact default to indented (`json.dumps(..., indent=2)`). No effect on text-mode output. Composes orthogonally with `--json`. Added by design 0000049 Surface 1. |
+| `--pretty` | no | Switch JSON output from the compact default to indented (`json.dumps(..., indent=2)`). No effect on text-mode output. Composes orthogonally with `--json`. |
 | `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
 ### `--full` semantics (cross-subcommand escape hatch)
 
-`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch. A single flag covers four overloaded surfaces — design 0000049 Concerns §1 documents the deliberate decision to keep one flag rather than introduce `--full-envelope` / `--full-recipients` / `--full-card` / `--full-body` variants:
+`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch. A single flag covers four overloaded surfaces — deliberately one flag rather than `--full-envelope` / `--full-recipients` / `--full-card` / `--full-body` variants:
 
 | Subcommand | Default behavior | `--full` behavior |
 |---|---|---|
@@ -91,7 +91,7 @@ The five subcommands that emit a user-supplied delivery body — `cafleet messag
 |---|---|---|---|
 | `CAFLEET_MAX_TEXT_LEN` | `Settings.max_text_len` | `200` | Maximum codepoint length of the rendered `text` body before the `…` suffix is appended. Wired via `Field(validation_alias="CAFLEET_MAX_TEXT_LEN")` on `Settings`, matching the `CAFLEET_`-prefixed convention already used by `CAFLEET_DATABASE_URL`, `CAFLEET_BROKER_HOST`, and `CAFLEET_BROKER_PORT`. Also used by `agent.description` truncation (limit `60`, hard-coded) and metadata-string truncation (limit `80`, hard-coded). |
 
-The suffix changed from the three ASCII characters `...` to the single Unicode codepoint `…` (U+2026 HORIZONTAL ELLIPSIS) in design 0000049 Surface 5; the suffix is exactly one codepoint with no count and no companion `text_length` field.
+The suffix is the single Unicode codepoint `…` (U+2026 HORIZONTAL ELLIPSIS) — exactly one codepoint with no count and no companion `text_length` field.
 
 `cafleet message broadcast` is different — `broker.broadcast_message` returns a `broadcast_summary` task whose top-level `text` column is a broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. Post-Surface-14 the task envelope is a flat typed-column dict with no `metadata` / `artifacts` wrappers; see [message-envelope.md](./message-envelope.md) for the canonical schema. Truncating that summary would hide the recipient count, so `message_broadcast` runs with `truncates_task_text=False` and its summary always emits in full. The `--full` Click option is preserved on `message broadcast` for flag-surface consistency across all six subcommands but is a no-op there.
 
@@ -107,7 +107,7 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 | Flag | Required | Notes |
 |---|---|---|
 | `--full` | no | Per-subcommand option (placed after the subcommand name, like `--agent-id` and `--task-id`). Disables truncation; emits the full message body and the full typed-column envelope. Composes orthogonally with `--json`. See [`--full` semantics](#full-semantics-cross-subcommand-escape-hatch) for the cross-subcommand summary. |
-| `--quiet` | no | On `message send`, `message ack`, and `member ping`: emit only the new task id (8-char prefix) on stdout, nothing else. Mutually exclusive with `--full`; the two are not expected to be combined. Added by design 0000049 Surface 3. |
+| `--quiet` | no | On `message send`, `message ack`, and `member ping`: emit only the new task id (8-char prefix) on stdout, nothing else. Mutually exclusive with `--full`; the two are not expected to be combined. |
 
 Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split.
 
@@ -181,7 +181,7 @@ administrator:    <administrator_agent_id>
 
 `placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is the value of `--coding-agent` (default `"claude"`); operators running the codex CLI in the calling pane should pass `--coding-agent codex` so the placement metadata is accurate. cafleet does not spawn the root Director's coding-agent process and cannot auto-detect what is running in the calling pane.
 
-Attempting `cafleet --session-id <session_id> agent deregister --agent-id <director_agent_id>` is rejected by the broker with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` and exits 1. Attempting `cafleet --session-id <session_id> agent deregister --agent-id <administrator_agent_id>` is rejected with `Error: Administrator cannot be deregistered` (exit 1) via the `AdministratorProtectedError` path from design 0000025.
+Attempting `cafleet --session-id <session_id> agent deregister --agent-id <director_agent_id>` is rejected by the broker with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` and exits 1. Attempting `cafleet --session-id <session_id> agent deregister --agent-id <administrator_agent_id>` is rejected with `Error: Administrator cannot be deregistered` (exit 1) via the `AdministratorProtectedError` path.
 
 ### `session list`
 
@@ -398,7 +398,7 @@ Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet
 | Flag | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID |
-| `--activity` | no | Aggregate per-member activity timestamps from the `tasks` table and render `last_sent`, `last_recv`, `last_ack`, and `idle` columns alongside the default member columns. The aggregation filters `Task.type != 'broadcast_summary'` for the `last_ack` proxy (mirrors `poll_tasks`). Added by design 0000049 Surface 8 — primary inputs to the Director's `/loop` monitoring tick. |
+| `--activity` | no | Aggregate per-member activity timestamps from the `tasks` table and render `last_sent`, `last_recv`, `last_ack`, and `idle` columns alongside the default member columns. The aggregation filters `Task.type != 'broadcast_summary'` for the `last_ack` proxy (mirrors `poll_tasks`). Primary inputs to the Director's `/loop` monitoring tick. |
 
 #### `member list --activity` output
 
@@ -420,11 +420,11 @@ $ cafleet --session-id <s> member list --agent-id <d> --activity
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID |
 | `--member-id` | yes | Target member's agent ID |
-| `--lines` | no | Number of trailing lines to capture (default: **30**, lowered from 80 in design 0000049 Surface 9). |
-| `--tail` | no | Alias for `--lines`. Added by design 0000049 Surface 9 for muscle-memory consistency with `tail -n`. |
-| `--ansi` / `--no-ansi` | no | Default `--no-ansi`: ANSI escape sequences are stripped via `re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)` and carriage-return fragments are de-fragmented for TUI redraws. Pass `--ansi` to disable post-processing and emit the raw tmux capture. Added by design 0000049 Surface 9. |
+| `--lines` | no | Number of trailing lines to capture (default: **30**). |
+| `--tail` | no | Alias for `--lines`, for muscle-memory consistency with `tail -n`. |
+| `--ansi` / `--no-ansi` | no | Default `--no-ansi`: ANSI escape sequences are stripped via `re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)` and carriage-return fragments are de-fragmented for TUI redraws. Pass `--ansi` to disable post-processing and emit the raw tmux capture. |
 
-The lowered default reflects the per-tick cost analysis in design 0000049 (raw 200-line capture per member dominates Director token cost). `--lines 30` is calibrated to keep stalled `AskUserQuestion` prompt headers visible; if a stalled-prompt fixture truncates the prompt header, the default is bumped to 50.
+The default is calibrated against per-tick cost — a raw 200-line capture per member would dominate Director token cost. `--lines 30` keeps stalled `AskUserQuestion` prompt headers visible; if a stalled-prompt fixture truncates the prompt header, the default is bumped to 50.
 
 ### `member send-input`
 

@@ -1,8 +1,4 @@
-"""Tests for the ``cafleet server`` CLI subcommand (design doc 0000028).
-
-Per principle (ii) of design 0000061: per-flag fragmentation collapses
-into parametrized "shape + behaviour" pairs.
-"""
+"""Tests for the ``cafleet server`` CLI subcommand."""
 
 import uuid
 

@@ -1,11 +1,9 @@
-"""Per-subcommand ``--help`` line budgets (design doc 0000049, Surface 19,
-Step 17).
+"""Per-subcommand ``--help`` line budgets.
 
-Step 17 audits every ``@click.option(help=...)`` in ``cli.py`` (~80 sites)
-and reduces multi-sentence helps to single phrases. Narrative explanation
-lives in ``docs/spec/cli-options.md`` instead. The budgets below are tight
-enough that any subcommand still carrying a wrapped multi-line option help
-will fail until the trim lands.
+These budgets keep every ``@click.option(help=...)`` in ``cli.py`` (~80
+sites) reduced to single phrases. Narrative explanation lives in
+``docs/spec/cli-options.md`` instead. The budgets below are tight enough
+that any subcommand carrying a wrapped multi-line option help will fail.
 
 Why per-subcommand line counts (not aggregate token bytes only)? Agents that
 mistype a flag and fall into ``--help`` pay the per-subcommand cost, not the

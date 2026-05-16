@@ -1,4 +1,4 @@
-"""Tests for the inlined coding-agent spawn helpers in ``cli.py`` (design 0000046).
+"""Tests for the inlined coding-agent spawn helpers in ``cli.py``.
 
 Two backends are supported: ``claude`` and ``codex``. The CLI module exposes
 five module-level symbols that drive the spawn pipeline:
