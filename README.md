@@ -6,24 +6,65 @@ A message broker and agent registry for coding agents — a Claude Code plugin p
 
 ## Install
 
-### Install the plugin in Claude Code
+### Install CAFleet skills
+
+#### Claude Code
+
+Run the following commands on your terminal:
 
 ```
 /plugin marketplace add himkt/cafleet
 /plugin install cafleet@himkt-cafleet
 ```
 
-This adds 11 plugin-packaged skills under the `cafleet` namespace: `/cafleet:cafleet`, `/cafleet:agent-team-monitoring`, `/cafleet:agent-team-supervision`, `/cafleet:design-doc`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`, `/cafleet:create-figure`, `/cafleet:my-slidev`, `/cafleet:research-presentation`, `/cafleet:research-report`. Run `/help` in Claude Code to see them.
+> [!IMPORTANT]
+>
+> Make sure whether the skills are correctly installed. You can see available skills by running `/skills` on Claude Code prompt.
+> 
+> Typically, the config entries like following would be written in `~/.claude/settings.json`:
+>
+> ```json
+> "enabledPlugins": {
+>   "cafleet@cafleet": true
+> },
+> "extraKnownMarketplaces": {
+>   "cafleet": {
+>     "source": {
+>       "source": "github",
+>       "path": "himkt/cafleet"
+>     }
+>   }
+> },
+> ```
+>
 
-### Install the plugin in Codex
+#### Codex
+
+Run the following command on your terminal
 
 ```
 codex plugin marketplace add himkt/cafleet
 ```
 
-Then complete the in-UI install when prompted by `codex`. The same 11 plugin-packaged skills (`cafleet`, `agent-team-monitoring`, `agent-team-supervision`, `design-doc`, `design-doc-create`, `design-doc-execute`, `design-doc-interview`, `create-figure`, `my-slidev`, `research-presentation`, `research-report`) land in Codex from the shared `skills/` tree.
+> [!IMPORTANT]
+>
+> Make sure whether the skills are correctly installed. You can see available skills by running `/skills` on Codex prompt.
+> 
+> Typically, the config entries like following would be written in `~/.codex/config.toml`:
+>
+> ```toml
+> [marketplaces.cafleet]
+> last_updated = "2026-05-16T11:56:51Z"
+> last_revision = "03a8caa66c8a7981345d74fe3aec9a6e498792a1"
+> source_type = "git"
+> source = "https://github.com/himkt/cafleet.git"
+>
+> [plugins."cafleet@cafleet"]
+> enabled = true
+> ```
+>
 
-### Install the broker CLI (required for the plugin to function)
+### Install CAFleet CLI (required for CAFleet to function)
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
@@ -32,7 +73,7 @@ cafleet db init             # apply schema migrations (idempotent; rerun after u
 
 The default database is `~/.local/share/cafleet/registry.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
 
-## Try it
+## Simple example to use CAFleet on Claude Code or Codex
 
 In any tmux session, paste this into Claude Code:
 
