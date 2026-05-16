@@ -1,7 +1,7 @@
 # Test Suite Cleanup — Reduce Excessive Tests in cafleet/tests/
 
-**Status**: Approved
-**Progress**: 0/33 tasks complete
+**Status**: Complete
+**Progress**: 33/33 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -10,12 +10,12 @@ The cafleet test suite has grown to **841 test functions across 57 Python files*
 
 ## Success Criteria
 
-- [ ] Test function count reduced from **841 → ≤ 400** (≥ 52% reduction, satisfying the AGGRESSIVE ≥ 50% target). Stretch goal: ≤ 340 (≥ 60%) if Step 5 incidental dedup achieves ≥ 30% trim of the untouched-CLI carve-out.
-- [ ] `mise //cafleet:test` exits 0 after every commit in the six-step sequence.
-- [ ] No regression in behavioural coverage of the public CLI surface (`cafleet message *`, `cafleet agent *`, `cafleet session *`, `cafleet member *`, `cafleet db init`, `cafleet base-dir *`, `cafleet doctor`).
-- [ ] The five principles in § *Principles* are documented in this doc and applied uniformly; the lint pass surfaces no new tests violating principle (ii) or (iii) on review.
-- [ ] Files in § *Off-Limits* are unchanged.
-- [ ] `cafleet/tests/conftest.py` and the four helper modules (`_helpers.py`, `_broker_helpers.py`, `_member_cli_helpers.py`, `__init__.py`) are unchanged in this design — no symbols added, no symbols removed.
+- [x] Test function count reduced from **841 → ≤ 400** (≥ 52% reduction, satisfying the AGGRESSIVE ≥ 50% target). Stretch goal: ≤ 340 (≥ 60%) if Step 5 incidental dedup achieves ≥ 30% trim of the untouched-CLI carve-out. *(Actual: 368 def — 56.2% reduction; stretch target not met but main target satisfied.)*
+- [x] `mise //cafleet:test` exits 0 after every commit in the six-step sequence.
+- [x] No regression in behavioural coverage of the public CLI surface (`cafleet message *`, `cafleet agent *`, `cafleet session *`, `cafleet member *`, `cafleet db init`, `cafleet base-dir *`, `cafleet doctor`).
+- [x] The five principles in § *Principles* are documented in this doc and applied uniformly; the lint pass surfaces no new tests violating principle (ii) or (iii) on review.
+- [x] Files in § *Off-Limits* are unchanged.
+- [x] `cafleet/tests/conftest.py` and the four helper modules (`_helpers.py`, `_broker_helpers.py`, `_member_cli_helpers.py`, `__init__.py`) are unchanged in this design — no symbols added, no symbols removed.
 
 ---
 
@@ -124,11 +124,11 @@ If a step exposes a real regression in source (not in tests) — `STOP`, raise a
 
 #### Step 1 tasks
 
-- [ ] Delete `cafleet/tests/test_alembic_0002_upgrade.py` <!-- completed: -->
-- [ ] Delete `cafleet/tests/test_alembic_0006_upgrade.py` <!-- completed: -->
-- [ ] Delete `cafleet/tests/test_alembic_0008_upgrade.py` <!-- completed: -->
-- [ ] Delete `cafleet/tests/test_alembic_typed_columns_upgrade.py` <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `chore: drop per-revision alembic regression tests (design 0000061 step 1)` <!-- completed: -->
+- [x] Delete `cafleet/tests/test_alembic_0002_upgrade.py` <!-- completed: 2026-05-16T09:48 -->
+- [x] Delete `cafleet/tests/test_alembic_0006_upgrade.py` <!-- completed: 2026-05-16T09:48 -->
+- [x] Delete `cafleet/tests/test_alembic_0008_upgrade.py` <!-- completed: 2026-05-16T09:48 -->
+- [x] Delete `cafleet/tests/test_alembic_typed_columns_upgrade.py` <!-- completed: 2026-05-16T09:48 -->
+- [x] Run `mise //cafleet:test`; commit as `chore: drop per-revision alembic regression tests (design 0000061 step 1)` <!-- completed: 2026-05-16T09:48 -->
 
 ### Step 2: Delete PRAGMA / library-boilerplate tests
 
@@ -144,8 +144,8 @@ If a step exposes a real regression in source (not in tests) — `STOP`, raise a
 
 #### Step 2 tasks
 
-- [ ] Delete `cafleet/tests/test_db_pragmas.py` <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `chore: drop PRAGMA boilerplate tests (design 0000061 step 2)` <!-- completed: -->
+- [x] Delete `cafleet/tests/test_db_pragmas.py` <!-- completed: 2026-05-16T09:50 -->
+- [x] Run `mise //cafleet:test`; commit as `chore: drop PRAGMA boilerplate tests (design 0000061 step 2)` <!-- completed: 2026-05-16T09:50 -->
 
 ### Step 3: Consolidate per-key projection fragmentations
 
@@ -211,9 +211,9 @@ Target post-rewrite count is **12 tests**: 9 newly-written rewrites + 3 budget-t
 
 #### Step 3 tasks
 
-- [ ] Rewrite `cafleet/tests/test_broker_typed_columns.py` from 53 to 8 tests per § 3.1 <!-- completed: -->
-- [ ] Rewrite `cafleet/tests/test_output_render_task.py` from 42 to 12 tests per § 3.2 (9 new + 3 budget kept) <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `refactor(tests): consolidate per-key projection chains (design 0000061 step 3)` <!-- completed: -->
+- [x] Rewrite `cafleet/tests/test_broker_typed_columns.py` from 53 to 8 tests per § 3.1 <!-- completed: 2026-05-16T09:55 -->
+- [x] Rewrite `cafleet/tests/test_output_render_task.py` from 42 to 12 tests per § 3.2 (9 new + 3 budget kept) <!-- completed: 2026-05-16T09:55 -->
+- [x] Run `mise //cafleet:test`; commit as `refactor(tests): consolidate per-key projection chains (design 0000061 step 3)` <!-- completed: 2026-05-16T09:55 -->
 
 ### Step 4: Parametrize tmux argument-construction tests
 
@@ -256,11 +256,11 @@ Current shape: 3 tests pinning `default_lines == 30`, override semantics, and no
 
 #### Step 4 tasks
 
-- [ ] Rewrite `cafleet/tests/test_tmux.py` from 34 to 8 parametrized tests per § 4.1 <!-- completed: -->
-- [ ] Rewrite `cafleet/tests/test_tmux_send_helpers.py` from 12 to ~3 parametrized tests per § 4.2 <!-- completed: -->
-- [ ] Rewrite `cafleet/tests/test_tmux_send_inline_preview.py` from 15 to ~3 tests per § 4.3 <!-- completed: -->
-- [ ] Delete `cafleet/tests/test_tmux_capture_defaults.py` per § 4.4 <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `refactor(tests): parametrize tmux argv-construction tests (design 0000061 step 4)` <!-- completed: -->
+- [x] Rewrite `cafleet/tests/test_tmux.py` from 34 to 8 parametrized tests per § 4.1 <!-- completed: 2026-05-16T10:02 -->
+- [x] Rewrite `cafleet/tests/test_tmux_send_helpers.py` from 12 to ~3 parametrized tests per § 4.2 <!-- completed: 2026-05-16T10:02 -->
+- [x] Rewrite `cafleet/tests/test_tmux_send_inline_preview.py` from 15 to ~3 tests per § 4.3 <!-- completed: 2026-05-16T10:02 -->
+- [x] Delete `cafleet/tests/test_tmux_capture_defaults.py` per § 4.4 <!-- completed: 2026-05-16T10:02 -->
+- [x] Run `mise //cafleet:test`; commit as `refactor(tests): parametrize tmux argv-construction tests (design 0000061 step 4)` <!-- completed: 2026-05-16T10:02 -->
 
 ### Step 5: CLI overlap dedup
 
@@ -372,13 +372,13 @@ Expected savings from incidental dedup in the untouched files: ~20 tests. Plan: 
 
 #### Step 5 tasks
 
-- [ ] Merge `test_cli_member_create_prompt_file.py` into `test_cli_member.py` per § 5.1 <!-- completed: -->
-- [ ] Collapse `test_cli_message_truncation.py` per § 5.2 <!-- completed: -->
-- [ ] Collapse `test_cli_member_capture_defaults.py` per § 5.3 <!-- completed: -->
-- [ ] Collapse `test_cli_member_send_input.py` per § 5.4 <!-- completed: -->
-- [ ] Collapse `test_cli_compact_echo.py` per § 5.5 <!-- completed: -->
-- [ ] Collapse `test_cli_pretty_flag.py` per § 5.6 <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `refactor(tests): dedup CLI test overlap (design 0000061 step 5)` <!-- completed: -->
+- [x] Merge `test_cli_member_create_prompt_file.py` into `test_cli_member.py` per § 5.1 <!-- completed: 2026-05-16T10:17 -->
+- [x] Collapse `test_cli_message_truncation.py` per § 5.2 <!-- completed: 2026-05-16T10:17 -->
+- [x] Collapse `test_cli_member_capture_defaults.py` per § 5.3 <!-- completed: 2026-05-16T10:17 -->
+- [x] Collapse `test_cli_member_send_input.py` per § 5.4 <!-- completed: 2026-05-16T10:17 -->
+- [x] Collapse `test_cli_compact_echo.py` per § 5.5 <!-- completed: 2026-05-16T10:17 -->
+- [x] Collapse `test_cli_pretty_flag.py` per § 5.6 <!-- completed: 2026-05-16T10:17 -->
+- [x] Run `mise //cafleet:test`; commit as `refactor(tests): dedup CLI test overlap (design 0000061 step 5)` <!-- completed: 2026-05-16T10:17 -->
 
 ### Step 6: Broker / output formatting consolidation
 
@@ -560,21 +560,21 @@ Net delete: 11.
 
 #### Step 6 tasks
 
-- [ ] Consolidate `test_broker_messaging.py` per § 6.1 <!-- completed: -->
-- [ ] Consolidate `test_broker_registry.py` per § 6.2 <!-- completed: -->
-- [ ] Consolidate `test_broker_webui.py` per § 6.3 <!-- completed: -->
-- [ ] Consolidate `test_session_bootstrap.py` per § 6.4 <!-- completed: -->
-- [ ] Consolidate `test_session_cli.py` per § 6.5 <!-- completed: -->
-- [ ] Consolidate `test_broker_administrator.py` per § 6.6 <!-- completed: -->
-- [ ] Consolidate `test_broker_inline_preview.py` per § 6.7 <!-- completed: -->
-- [ ] Consolidate `test_broker_member_activity.py` per § 6.8 <!-- completed: -->
-- [ ] Consolidate the 6 output-formatting files per § 6.9 (one PR, but commit may stage them together) <!-- completed: -->
-- [ ] Consolidate `test_server_cli.py` and `test_webui_api_format.py` per § 6.10 <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `refactor(tests): consolidate broker/output formatting tests (design 0000061 step 6)` <!-- completed: -->
+- [x] Consolidate `test_broker_messaging.py` per § 6.1 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_broker_registry.py` per § 6.2 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_broker_webui.py` per § 6.3 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_session_bootstrap.py` per § 6.4 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_session_cli.py` per § 6.5 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_broker_administrator.py` per § 6.6 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_broker_inline_preview.py` per § 6.7 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_broker_member_activity.py` per § 6.8 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate the 6 output-formatting files per § 6.9 (one PR, but commit may stage them together) <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_server_cli.py` and `test_webui_api_format.py` per § 6.10 <!-- completed: 2026-05-16T10:31 -->
+- [x] Run `mise //cafleet:test`; commit as `refactor(tests): consolidate broker/output formatting tests (design 0000061 step 6)` <!-- completed: 2026-05-16T10:31 -->
 
 ### Step 7: Final verification
 
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`. Confirm all exit 0 and the test count is in the **≤ 400** band (stretch: ≤ 340 if Step 5 incidental dedup achieved ≥ 30%). Tally the per-file post-cleanup counts in a comment on the design doc PR for the reviewer. <!-- completed: -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`. Confirm all exit 0 and the test count is in the **≤ 400** band (stretch: ≤ 340 if Step 5 incidental dedup achieved ≥ 30%). Tally the per-file post-cleanup counts in a comment on the design doc PR for the reviewer. <!-- completed: 2026-05-16T10:36 -->
 
 ---
 
@@ -612,3 +612,4 @@ The "Before" grand total of 841 matches the `grep -cE "^def test_"` count over `
 |:--|:--|
 | 2026-05-16 | Initial draft. |
 | 2026-05-16 | Round 2 (Director-resolved): reconciled Success Criteria ceiling (≤ 400, stretch ≤ 340) with Projected totals (~360); removed `test_session_cli` double-count from Step 5 carve-out; corrected § 3.2, § 5.1, § 5.4 target counts; added base-dir off-limits rationale; dropped `_helpers.py` mutation directive from Step 1; enumerated § 4.1 per-helper parametrize table; enumerated § 6.3–§ 6.8 target test shapes; clarified § 4.4 ordering invariant. |
+| 2026-05-16 | Implementation complete. PR #74. Final def count: 368 (-473, 56.2% reduction; main target ≤ 400 met). Copilot review surfaced 1 issue (broker_session fixture missing on test_register_agent_placement__user_director_path_still_works), fixed in commit 7c8dc8b. |

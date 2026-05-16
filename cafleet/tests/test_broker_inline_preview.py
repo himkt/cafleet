@@ -1,16 +1,7 @@
 """Surface 15 — broker-side wiring of ``send_inline_preview`` (design 0000049 Step 4).
 
-Asserts that ``broker._try_notify_recipient`` invokes the new
-``tmux.send_inline_preview`` helper instead of the previous
-``tmux.send_poll_trigger`` keystroke. The auto-fire path is replaced with
-the inline preview wholesale; the queue still holds the message of record,
-so simulated tmux failures don't lose the delivery — the recipient catches
-up via ``cafleet message poll`` on the next opportunity.
-
-``cafleet member ping`` (the manual Director re-poke primitive) keeps
-calling ``send_poll_trigger``; that wiring is exercised by
-``tests/test_cli_member_ping.py`` and the helper's preservation guard lives
-in ``test_tmux_send_inline_preview.py``.
+Per principle (ii)/(iii) of design 0000061: per-kwarg fragmented assertions
+collapse into per-behaviour parametrized tests.
 """
 
 import pytest
@@ -26,7 +17,6 @@ def _autouse_broker(broker_session):
 
 @pytest.fixture
 def inline_preview_calls(monkeypatch):
-    """Stub ``cafleet.tmux.send_inline_preview`` and capture every call's kwargs."""
     captured: list[dict] = []
 
     def stub(*args, **kwargs):
@@ -39,12 +29,6 @@ def inline_preview_calls(monkeypatch):
 
 @pytest.fixture
 def poll_trigger_call_count(monkeypatch):
-    """Stub ``cafleet.tmux.send_poll_trigger`` and count invocations.
-
-    Post-Surface-15 the broker auto-fire path must NOT call this helper at
-    all. ``cafleet member ping`` still does — but that is dispatched via
-    its own CLI command, not via ``broker.send_message``.
-    """
     counter = {"n": 0}
 
     def stub(*_args, **_kwargs):
@@ -55,12 +39,7 @@ def poll_trigger_call_count(monkeypatch):
     return counter
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _create_session() -> dict:
+def _create_session():
     return broker.create_session(
         label=None,
         director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
@@ -68,16 +47,7 @@ def _create_session() -> dict:
     )
 
 
-def _register_agent(session_id: str, name: str) -> dict:
-    return broker.register_agent(
-        session_id=session_id,
-        name=name,
-        description=f"{name} description",
-    )
-
-
-def _register_member(session_id: str, name: str, director_id: str, pane: str) -> dict:
-    """Register an agent with a placement so the auto-fire path resolves a pane."""
+def _register_member(session_id, name, director_id, pane):
     return broker.register_agent(
         session_id=session_id,
         name=name,
@@ -92,14 +62,7 @@ def _register_member(session_id: str, name: str, director_id: str, pane: str) ->
     )
 
 
-def _setup_two_agents() -> tuple[str, str, str]:
-    """Bootstrap a session and register sender + recipient WITH placements.
-
-    Both agents carry a tmux ``pane_id`` so the broker's auto-fire path
-    actually keystrokes ``send_inline_preview``. The dedicated
-    ``test_recipient_without_placement__skips_inline_preview`` test below
-    overrides this setup to register a placement-less recipient.
-    """
+def _setup_two_agents():
     s = _create_session()
     sid = s["session_id"]
     director_id = s["director"]["agent_id"]
@@ -108,91 +71,26 @@ def _setup_two_agents() -> tuple[str, str, str]:
     return sid, sender["agent_id"], recipient["agent_id"]
 
 
-# ---------------------------------------------------------------------------
-# 1. send_message auto-fire calls send_inline_preview
-# ---------------------------------------------------------------------------
-
-
-def test_send_message__auto_fire_calls_send_inline_preview(inline_preview_calls):
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "hello")
-    assert len(inline_preview_calls) == 1
-
-
-def test_send_message__auto_fire_does_not_call_send_poll_trigger(
+def test_send_message__auto_fire_invokes_inline_preview_with_full_kwargs(
     inline_preview_calls,
-    poll_trigger_call_count,
 ):
-    """Surface 15: the broker auto-fire path stops keystroking poll commands."""
     sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "hello")
-    assert poll_trigger_call_count["n"] == 0
-
-
-def test_send_message__inline_preview_carries_recipient_pane(inline_preview_calls):
-    """The helper is invoked with the recipient's tmux pane id."""
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "hello")
-    [call] = inline_preview_calls
-    pane_id = call["kwargs"].get("target_pane_id")
-    if pane_id is None and call["args"]:
-        pane_id = call["args"][0]
-    # Director was bootstrapped at "%0" by ``_create_session``; the
-    # recipient was registered after the Director and has no placement
-    # row yet — so the broker's auto-fire path skips notification when
-    # the recipient has no pane (returns False, no inline_preview call).
-    # That branch is exercised in the no-placement test below; here we
-    # confirm the call path survives and at minimum carries a string
-    # ``target_pane_id`` (or positional first arg).
-    assert pane_id is not None
+    result = broker.send_message(sid, sender, recipient, "Did the API change?")
+    assert len(inline_preview_calls) == 1
+    call = inline_preview_calls[0]
+    kwargs = call["kwargs"]
+    pane_id = kwargs.get("target_pane_id") or (
+        call["args"][0] if call["args"] else None
+    )
     assert isinstance(pane_id, str)
+    assert pane_id
+    assert kwargs.get("task_id_8") == result["task"]["task_id"][:8]
+    assert kwargs.get("sender_8") == sender[:8]
+    assert kwargs.get("ts") == result["task"]["status_timestamp"]
+    assert kwargs.get("text") == "Did the API change?"
 
 
-def test_send_message__inline_preview_kwargs_include_task_id_8(inline_preview_calls):
-    """The helper receives an 8-char ``task_id_8`` derived from the new task."""
-    sid, sender, recipient = _setup_two_agents()
-    result = broker.send_message(sid, sender, recipient, "hello")
-    [call] = inline_preview_calls
-    task_id_8 = call["kwargs"].get("task_id_8")
-    assert task_id_8 is not None
-    assert task_id_8 == result["task"]["task_id"][:8]
-
-
-def test_send_message__inline_preview_kwargs_include_sender_8(inline_preview_calls):
-    """The helper receives an 8-char ``sender_8`` derived from the sender's UUID."""
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "hello")
-    [call] = inline_preview_calls
-    sender_8 = call["kwargs"].get("sender_8")
-    assert sender_8 is not None
-    assert sender_8 == sender[:8]
-
-
-def test_send_message__inline_preview_kwargs_include_ts(inline_preview_calls):
-    """The helper receives a ``ts`` matching the persisted ``status_timestamp``."""
-    sid, sender, recipient = _setup_two_agents()
-    result = broker.send_message(sid, sender, recipient, "hello")
-    [call] = inline_preview_calls
-    ts = call["kwargs"].get("ts")
-    assert ts is not None
-    assert ts == result["task"]["status_timestamp"]
-
-
-def test_send_message__inline_preview_kwargs_include_text(inline_preview_calls):
-    """The helper receives the ``text`` body verbatim — no truncation in the wire."""
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "Did the API change?")
-    [call] = inline_preview_calls
-    text = call["kwargs"].get("text")
-    assert text == "Did the API change?"
-
-
-# ---------------------------------------------------------------------------
-# 2. Three sequential sends → three inline previews, zero poll triggers
-# ---------------------------------------------------------------------------
-
-
-def test_three_sequential_sends__three_inline_previews_zero_poll_triggers(
+def test_send_message__sequential_sends_produce_distinct_previews_no_poll_trigger(
     inline_preview_calls,
     poll_trigger_call_count,
 ):
@@ -200,83 +98,31 @@ def test_three_sequential_sends__three_inline_previews_zero_poll_triggers(
     broker.send_message(sid, sender, recipient, "msg1")
     broker.send_message(sid, sender, recipient, "msg2")
     broker.send_message(sid, sender, recipient, "msg3")
-
     assert len(inline_preview_calls) == 3
     assert poll_trigger_call_count["n"] == 0
-
-
-def test_three_sequential_sends__each_preview_carries_distinct_task_id_8(
-    inline_preview_calls,
-):
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "msg1")
-    broker.send_message(sid, sender, recipient, "msg2")
-    broker.send_message(sid, sender, recipient, "msg3")
-
-    task_id_8s = [call["kwargs"]["task_id_8"] for call in inline_preview_calls]
-    assert len(set(task_id_8s)) == 3, (
-        f"each send should produce a distinct 8-char task id; got {task_id_8s!r}"
-    )
-
-
-def test_three_sequential_sends__each_preview_carries_distinct_text(
-    inline_preview_calls,
-):
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "msg1")
-    broker.send_message(sid, sender, recipient, "msg2")
-    broker.send_message(sid, sender, recipient, "msg3")
-
-    texts = [call["kwargs"]["text"] for call in inline_preview_calls]
+    task_id_8s = [c["kwargs"]["task_id_8"] for c in inline_preview_calls]
+    assert len(set(task_id_8s)) == 3
+    texts = [c["kwargs"]["text"] for c in inline_preview_calls]
     assert texts == ["msg1", "msg2", "msg3"]
 
 
-# ---------------------------------------------------------------------------
-# 3. Fallback — tmux failure does not lose the message
-# ---------------------------------------------------------------------------
-
-
-def test_inline_preview_failure__message_still_persisted_in_queue(monkeypatch):
-    """Simulated tmux failure (helper returns False) — the recipient still
-    catches up via a manual ``cafleet message poll``."""
+def test_inline_preview_failure__message_persisted_and_notification_flag_false(
+    monkeypatch, poll_trigger_call_count
+):
     monkeypatch.setattr(tmux, "send_inline_preview", lambda *_a, **_k: False)
     sid, sender, recipient = _setup_two_agents()
-
     sent = broker.send_message(sid, sender, recipient, "delivered despite tmux down")
-
     assert sent["notification_sent"] is False
     [polled] = broker.poll_tasks(recipient)
     assert polled["task_id"] == sent["task"]["task_id"]
     assert polled["text"] == "delivered despite tmux down"
-
-
-def test_inline_preview_failure__notification_sent_flag_is_false(monkeypatch):
-    """The wrapper return reflects the helper's False — operator can detect."""
-    monkeypatch.setattr(tmux, "send_inline_preview", lambda *_a, **_k: False)
-    sid, sender, recipient = _setup_two_agents()
-    sent = broker.send_message(sid, sender, recipient, "anyway")
-    assert sent["notification_sent"] is False
-
-
-def test_inline_preview_failure__does_not_fall_back_to_send_poll_trigger(
-    monkeypatch,
-    poll_trigger_call_count,
-):
-    """When ``send_inline_preview`` returns False, the broker MUST NOT fall
-    back to ``send_poll_trigger`` — that would keystroke a poll command into
-    the recipient's pane, which is exactly the regression Surface 15 removes."""
-    monkeypatch.setattr(tmux, "send_inline_preview", lambda *_a, **_k: False)
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "delivery one")
+    # Must NOT fall back to send_poll_trigger.
     assert poll_trigger_call_count["n"] == 0
 
 
 def test_inline_preview_failure__subsequent_sends_still_attempt_preview(
-    monkeypatch,
-    poll_trigger_call_count,
+    monkeypatch, poll_trigger_call_count
 ):
-    """A failed first preview must not disable the auto-fire path; a later
-    send still attempts the inline preview."""
     attempts: list[bool] = []
 
     def stub(*_a, **_k):
@@ -288,39 +134,45 @@ def test_inline_preview_failure__subsequent_sends_still_attempt_preview(
     broker.send_message(sid, sender, recipient, "first")
     broker.send_message(sid, sender, recipient, "second")
     broker.send_message(sid, sender, recipient, "third")
-
     assert len(attempts) == 3
     assert poll_trigger_call_count["n"] == 0
 
 
-# ---------------------------------------------------------------------------
-# 4. Self-send and missing-pane skip
-# ---------------------------------------------------------------------------
-
-
-def test_self_send__skips_inline_preview(inline_preview_calls):
-    """A sender addressing themselves never triggers a preview into their
-    own pane — same skip-condition as the prior poll-trigger path."""
-    sid, sender, _recipient = _setup_two_agents()
-    broker.send_message(sid, sender, sender, "self")
+@pytest.mark.parametrize(
+    "scenario",
+    ["self_send", "recipient_without_placement"],
+)
+def test_send_message__skip_conditions(inline_preview_calls, scenario):
+    if scenario == "self_send":
+        sid, sender, _recipient = _setup_two_agents()
+        broker.send_message(sid, sender, sender, "self")
+    else:
+        s = _create_session()
+        sid = s["session_id"]
+        director_id = s["director"]["agent_id"]
+        sender = _register_member(sid, "sender", director_id, "%1")
+        recipient = broker.register_agent(
+            session_id=sid,
+            name="lonely",
+            description="no placement",
+        )
+        sent = broker.send_message(
+            sid,
+            sender["agent_id"],
+            recipient["agent_id"],
+            "to placement-less peer",
+        )
+        # Message still landed in queue.
+        [polled] = broker.poll_tasks(recipient["agent_id"])
+        assert polled["task_id"] == sent["task"]["task_id"]
+    # In both scenarios the preview is skipped.
     assert inline_preview_calls == []
 
 
-def test_recipient_without_placement__skips_inline_preview(inline_preview_calls):
-    """When the recipient has no ``agent_placements`` row (no tmux pane),
-    the broker auto-fire path skips notification silently — the message
-    is still persisted to the queue."""
-    s = _create_session()
-    sid = s["session_id"]
-    director_id = s["director"]["agent_id"]
-    sender = _register_member(sid, "sender", director_id, "%1")
-    # Recipient registered without a placement — broker must skip preview.
-    recipient = _register_agent(sid, "lonely")
-    sent = broker.send_message(
-        sid, sender["agent_id"], recipient["agent_id"], "to placement-less peer"
-    )
-
-    assert inline_preview_calls == []
-    # The message still landed in the queue.
-    [polled] = broker.poll_tasks(recipient["agent_id"])
-    assert polled["task_id"] == sent["task"]["task_id"]
+def test_send_message__auto_fire_never_calls_send_poll_trigger_on_success(
+    inline_preview_calls,
+    poll_trigger_call_count,
+):
+    sid, sender, recipient = _setup_two_agents()
+    broker.send_message(sid, sender, recipient, "hello")
+    assert poll_trigger_call_count["n"] == 0

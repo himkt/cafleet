@@ -1,4 +1,8 @@
-"""Tests for ``broker`` WebUI query operations."""
+"""Tests for ``broker`` WebUI query operations.
+
+Per principle (ii)/(iii) of design 0000061: per-API parametrized "shape +
+behaviour" pairs.
+"""
 
 import uuid
 
@@ -19,7 +23,10 @@ def _autouse_broker(broker_session):
     return broker_session
 
 
-def test_list_session_agents__returns_active_agents():
+# --- list_session_agents ------------------------------------------------
+
+
+def test_list_session_agents__active_shape_required_keys_and_session_scope():
     session = _create_session()
     sid = session["session_id"]
     _register_agent(sid, name="active-1")
@@ -27,392 +34,208 @@ def test_list_session_agents__returns_active_agents():
 
     result = broker.list_session_agents(sid)
     assert len(result) == 4
-    names = {a["name"] for a in result}
-    assert "active-1" in names
-    assert "active-2" in names
-    assert "Director" in names
-    assert "Administrator" in names
+    assert {a["name"] for a in result} == {
+        "active-1",
+        "active-2",
+        "Director",
+        "Administrator",
+    }
+    agent = result[0]
+    for key in ("agent_id", "name", "description", "status", "registered_at"):
+        assert key in agent
+    assert agent["status"] == "active"
+
+    # Newly-created session lists exactly Director + Administrator.
+    bare = _create_session()
+    bare_result = broker.list_session_agents(bare["session_id"])
+    assert {a["name"] for a in bare_result} == {"Director", "Administrator"}
+
+    # Scoped per session.
+    other = _create_session()
+    _register_agent(other["session_id"], name="in-other")
+    assert "in-other" not in {a["name"] for a in broker.list_session_agents(sid)}
 
 
-def test_list_session_agents__active_agents_have_active_status():
-    session = _create_session()
-    sid = session["session_id"]
-    _register_agent(sid, name="agent")
-
-    result = broker.list_session_agents(sid)
-    assert result[0]["status"] == "active"
-
-
-def test_list_session_agents__includes_deregistered_agents_with_tasks():
+def test_list_session_agents__deregistered_with_or_without_tasks():
     sid, sender, recipient = _setup_two_agents()
-
-    broker.send_message(sid, sender, recipient, "keep me visible")
+    broker.send_message(sid, sender, recipient, "keep visible")
     broker.deregister_agent(recipient)
-
     result = broker.list_session_agents(sid)
-    agent_ids = {a["agent_id"] for a in result}
-    assert recipient in agent_ids
-
     deregistered = [a for a in result if a["agent_id"] == recipient]
     assert deregistered[0]["status"] == "deregistered"
 
-
-def test_list_session_agents__excludes_deregistered_agents_without_tasks():
-    session = _create_session()
-    sid = session["session_id"]
-    agent = _register_agent(sid, name="ghost")
-    broker.deregister_agent(agent["agent_id"])
-
+    ghost = _register_agent(sid, name="ghost")
+    broker.deregister_agent(ghost["agent_id"])
     result = broker.list_session_agents(sid)
-    agent_ids = {a["agent_id"] for a in result}
-    assert agent["agent_id"] not in agent_ids
+    assert ghost["agent_id"] not in {a["agent_id"] for a in result}
 
 
-def test_list_session_agents__newly_created_session_returns_bootstrap_pair():
-    session = _create_session()
-    result = broker.list_session_agents(session["session_id"])
-    assert len(result) == 2
-    names = {a["name"] for a in result}
-    assert names == {"Director", "Administrator"}
-
-
-def test_list_session_agents__result_contains_required_keys():
+@pytest.mark.parametrize(
+    ("scenario", "expected_kind"),
+    [
+        ("administrator", ADMINISTRATOR_KIND),
+        ("user_agent", "user"),
+    ],
+)
+def test_get_agent__kind_field(scenario, expected_kind):
     session = _create_session()
     sid = session["session_id"]
-    _register_agent(sid, name="keyed")
+    if scenario == "administrator":
+        agent_id = session["administrator_agent_id"]
+    else:
+        agent_id = _register_agent(sid, name="regular")["agent_id"]
+    result = broker.get_agent(agent_id, sid)
+    assert result["kind"] == expected_kind
 
-    result = broker.list_session_agents(sid)
-    agent = result[0]
-    assert "agent_id" in agent
-    assert "name" in agent
-    assert "description" in agent
-    assert "status" in agent
-    assert "registered_at" in agent
-
-
-def test_list_session_agents__scoped_to_session():
-    session_a = _create_session()
-    session_b = _create_session()
-    _register_agent(session_a["session_id"], name="in-a")
-    _register_agent(session_b["session_id"], name="in-b")
-
-    result = broker.list_session_agents(session_a["session_id"])
-    assert len(result) == 3
-    names = {a["name"] for a in result}
-    assert "in-a" in names
-    assert "Director" in names
-    assert "Administrator" in names
-    assert "in-b" not in names
+    # All list_session_agents entries have a kind in {administrator, user}.
+    all_entries = broker.list_session_agents(sid)
+    for entry in all_entries:
+        assert entry["kind"] in {ADMINISTRATOR_KIND, "user"}
 
 
-# --- list_session_agents_kind: testing at the broker layer covers the public HTTP
-# surface because webui_api.py is a thin passthrough around broker.list_session_agents. ---
+# --- list_inbox ---------------------------------------------------------
 
 
-def test_list_session_agents_kind__entries_include_kind_field():
-    session = _create_session()
-    sid = session["session_id"]
-    _register_agent(sid, name="user-a")
-    _register_agent(sid, name="user-b")
-
-    result = broker.list_session_agents(sid)
-    for entry in result:
-        assert "kind" in entry
-
-
-def test_list_session_agents_kind__administrator_marked_as_builtin_administrator():
-    session = _create_session()
-    sid = session["session_id"]
-    _register_agent(sid, name="user-a")
-    _register_agent(sid, name="user-b")
-
-    result = broker.list_session_agents(sid)
-    admins = [e for e in result if e["kind"] == ADMINISTRATOR_KIND]
-    users = [e for e in result if e["kind"] == "user"]
-
-    assert len(admins) == 1
-    assert admins[0]["name"] == "Administrator"
-    assert admins[0]["agent_id"] == session["administrator_agent_id"]
-
-    assert len(users) == 3
-    user_names = {e["name"] for e in users}
-    assert user_names == {"Director", "user-a", "user-b"}
-
-
-def test_list_session_agents_kind__kind_values_are_restricted_to_known_set():
-    session = _create_session()
-    sid = session["session_id"]
-    _register_agent(sid, name="user-a")
-
-    result = broker.list_session_agents(sid)
-    valid_kinds = {ADMINISTRATOR_KIND, "user"}
-    for entry in result:
-        assert entry["kind"] in valid_kinds
-
-
-def test_get_agent_kind__get_agent_for_administrator_returns_builtin_administrator():
-    session = _create_session()
-    sid = session["session_id"]
-    admin_id = session["administrator_agent_id"]
-
-    result = broker.get_agent(admin_id, sid)
-    assert result is not None
-    assert "kind" in result
-    assert result["kind"] == ADMINISTRATOR_KIND
-
-
-def test_get_agent_kind__get_agent_for_user_returns_user_kind():
-    session = _create_session()
-    sid = session["session_id"]
-    user = _register_agent(sid, name="regular")
-
-    result = broker.get_agent(user["agent_id"], sid)
-    assert result is not None
-    assert "kind" in result
-    assert result["kind"] == "user"
-
-
-def test_list_inbox__returns_inbox_tasks():
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "msg1")
-    broker.send_message(sid, sender, recipient, "msg2")
-
-    result = broker.list_inbox(recipient)
-    assert len(result) == 2
-
-
-def test_list_inbox__returns_empty_when_no_tasks():
-    session = _create_session()
-    agent = _register_agent(session["session_id"], name="idle")
-    result = broker.list_inbox(agent["agent_id"])
-    assert result == []
-
-
-def test_list_inbox__ordered_by_status_timestamp_desc():
+def test_list_inbox__shape_ordering_and_typed_columns():
     sid, sender, recipient = _setup_two_agents()
     broker.send_message(sid, sender, recipient, "first")
     broker.send_message(sid, sender, recipient, "second")
-
     result = broker.list_inbox(recipient)
     assert len(result) == 2
-    ts0 = result[0]["status_timestamp"]
-    ts1 = result[1]["status_timestamp"]
-    assert ts0 >= ts1
-
-
-def test_list_inbox__filters_out_broadcast_summary():
-    sid, sender, _b_id, _ = _setup_three_agents()
-    broker.broadcast_message(sid, sender, "broadcast")
-
-    sender_inbox = broker.list_inbox(sender)
-    summaries = [t for t in sender_inbox if t["type"] == "broadcast_summary"]
-    assert len(summaries) == 0
-
-
-def test_list_inbox__only_returns_tasks_where_context_id_matches():
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "for-recipient")
-
-    sender_inbox = broker.list_inbox(sender)
-    assert len(sender_inbox) == 0
-
-
-def test_list_inbox__returns_typed_column_dicts():
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "raw")
-
-    result = broker.list_inbox(recipient)
-    assert len(result) == 1
+    # Most recent first.
+    assert result[0]["status_timestamp"] >= result[1]["status_timestamp"]
     entry = result[0]
-    assert isinstance(entry, dict)
     assert "task_id" in entry
     assert "text" in entry
     assert "task_json" not in entry
 
-
-def test_list_sent__returns_sent_tasks():
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "sent1")
-    broker.send_message(sid, sender, recipient, "sent2")
-
-    result = broker.list_sent(sender)
-    assert len(result) == 2
+    # Empty inbox case.
+    idle = _register_agent(_create_session()["session_id"], name="idle")
+    assert broker.list_inbox(idle["agent_id"]) == []
 
 
-def test_list_sent__returns_empty_when_no_sent_tasks():
-    session = _create_session()
-    agent = _register_agent(session["session_id"], name="quiet")
-    result = broker.list_sent(agent["agent_id"])
-    assert result == []
+def test_list_inbox__filters_broadcast_summary_and_context_id_scope():
+    sid, sender, _b_id, _ = _setup_three_agents()
+    broker.broadcast_message(sid, sender, "broadcast")
+    summaries = [
+        t for t in broker.list_inbox(sender) if t["type"] == "broadcast_summary"
+    ]
+    assert summaries == []
+
+    sid2, sender2, recipient2 = _setup_two_agents()
+    broker.send_message(sid2, sender2, recipient2, "for-recipient")
+    assert broker.list_inbox(sender2) == []
 
 
-def test_list_sent__ordered_by_status_timestamp_desc():
+# --- list_sent ----------------------------------------------------------
+
+
+def test_list_sent__shape_ordering_and_typed_columns():
     sid, sender, recipient = _setup_two_agents()
     broker.send_message(sid, sender, recipient, "first")
     broker.send_message(sid, sender, recipient, "second")
-
     result = broker.list_sent(sender)
     assert len(result) == 2
-    ts0 = result[0]["status_timestamp"]
-    ts1 = result[1]["status_timestamp"]
-    assert ts0 >= ts1
-
-
-def test_list_sent__filters_out_broadcast_summary():
-    sid, sender, _b_id, _ = _setup_three_agents()
-    broker.broadcast_message(sid, sender, "broadcast")
-
-    sent = broker.list_sent(sender)
-    summaries = [t for t in sent if t["type"] == "broadcast_summary"]
-    assert len(summaries) == 0
-
-
-def test_list_sent__only_returns_tasks_from_agent():
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "from-sender")
-
-    recipient_sent = broker.list_sent(recipient)
-    assert len(recipient_sent) == 0
-
-
-def test_list_sent__returns_typed_column_dicts():
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "raw")
-
-    result = broker.list_sent(sender)
-    assert len(result) == 1
+    assert result[0]["status_timestamp"] >= result[1]["status_timestamp"]
     entry = result[0]
-    assert isinstance(entry, dict)
     assert "task_id" in entry
     assert "text" in entry
     assert "task_json" not in entry
 
-
-def test_list_timeline__returns_timeline_entries():
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "timeline entry")
-
-    result = broker.list_timeline(sid)
-    assert len(result) == 1
+    quiet = _register_agent(_create_session()["session_id"], name="quiet")
+    assert broker.list_sent(quiet["agent_id"]) == []
 
 
-def test_list_timeline__returns_empty_for_no_tasks():
-    session = _create_session()
-    result = broker.list_timeline(session["session_id"])
-    assert result == []
+def test_list_sent__filters_broadcast_summary_and_from_agent_scope():
+    sid, sender, _b_id, _ = _setup_three_agents()
+    broker.broadcast_message(sid, sender, "broadcast")
+    summaries = [
+        t for t in broker.list_sent(sender) if t["type"] == "broadcast_summary"
+    ]
+    assert summaries == []
+
+    sid2, sender2, recipient2 = _setup_two_agents()
+    broker.send_message(sid2, sender2, recipient2, "from-sender")
+    assert broker.list_sent(recipient2) == []
 
 
-def test_list_timeline__entry_has_typed_column_keys():
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "structured")
-
-    result = broker.list_timeline(sid)
-    assert len(result) == 1
-    entry = result[0]
-    assert "task_id" in entry
-    assert "origin_task_id" in entry
-    assert "created_at" in entry
-    assert "text" in entry
+# --- list_timeline ------------------------------------------------------
 
 
-def test_list_timeline__ordered_by_status_timestamp_desc():
+def test_list_timeline__shape_ordering_and_typed_columns():
     sid, sender, recipient = _setup_two_agents()
     broker.send_message(sid, sender, recipient, "first")
     broker.send_message(sid, sender, recipient, "second")
-
     result = broker.list_timeline(sid)
     assert len(result) == 2
     assert result[0]["created_at"] >= result[1]["created_at"]
+    entry = result[0]
+    for key in ("task_id", "origin_task_id", "created_at", "text"):
+        assert key in entry
+
+    assert broker.list_timeline(_create_session()["session_id"]) == []
 
 
-def test_list_timeline__filters_broadcast_summary():
-    sid, sender, _b_id, _c_id = _setup_three_agents()
+def test_list_timeline__filters_broadcast_summary_includes_delivery():
+    sid, sender, _b_id, _ = _setup_three_agents()
     broker.broadcast_message(sid, sender, "broadcast")
-
     result = broker.list_timeline(sid)
-    for entry in result:
-        assert entry["type"] != "broadcast_summary"
-
-
-def test_list_timeline__scoped_to_session():
-    session_a = _create_session()
-    session_b = _create_session()
-    sid_a = session_a["session_id"]
-    sid_b = session_b["session_id"]
-
-    a1 = _register_agent(sid_a, name="a1")
-    a2 = _register_agent(sid_a, name="a2")
-    b1 = _register_agent(sid_b, name="b1")
-    b2 = _register_agent(sid_b, name="b2")
-
-    broker.send_message(sid_a, a1["agent_id"], a2["agent_id"], "session-a msg")
-    broker.send_message(sid_b, b1["agent_id"], b2["agent_id"], "session-b msg")
-
-    result_a = broker.list_timeline(sid_a)
-    result_b = broker.list_timeline(sid_b)
-    assert len(result_a) == 1
-    assert len(result_b) == 1
-
-
-def test_list_timeline__limit_parameter():
-    sid, sender, recipient = _setup_two_agents()
-    broker.send_message(sid, sender, recipient, "msg1")
-    broker.send_message(sid, sender, recipient, "msg2")
-    broker.send_message(sid, sender, recipient, "msg3")
-
-    result = broker.list_timeline(sid, limit=2)
-    assert len(result) == 2
-
-
-def test_list_timeline__includes_broadcast_delivery_tasks():
-    sid, sender, _b_id, _c_id = _setup_three_agents()
-    broker.broadcast_message(sid, sender, "Hello all")
-
-    result = broker.list_timeline(sid)
+    assert all(entry["type"] != "broadcast_summary" for entry in result)
+    # Delivery tasks (unicast) ARE present.
     assert len(result) >= 2
 
 
-def test_get_agent_names__returns_name_mapping():
+def test_list_timeline__session_scope_and_limit():
+    session_a = _create_session()
+    session_b = _create_session()
+    a1 = _register_agent(session_a["session_id"], name="a1")
+    a2 = _register_agent(session_a["session_id"], name="a2")
+    b1 = _register_agent(session_b["session_id"], name="b1")
+    b2 = _register_agent(session_b["session_id"], name="b2")
+    broker.send_message(
+        session_a["session_id"], a1["agent_id"], a2["agent_id"], "a-msg"
+    )
+    broker.send_message(
+        session_b["session_id"], b1["agent_id"], b2["agent_id"], "b-msg"
+    )
+    assert len(broker.list_timeline(session_a["session_id"])) == 1
+    assert len(broker.list_timeline(session_b["session_id"])) == 1
+
+    sid, sender, recipient = _setup_two_agents()
+    for body in ("m1", "m2", "m3"):
+        broker.send_message(sid, sender, recipient, body)
+    assert len(broker.list_timeline(sid, limit=2)) == 2
+
+
+# --- get_agent_names ----------------------------------------------------
+
+
+def test_get_agent_names__returns_name_mapping_basic():
     session = _create_session()
     sid = session["session_id"]
     a1 = _register_agent(sid, name="alpha")
     a2 = _register_agent(sid, name="beta")
-
     result = broker.get_agent_names([a1["agent_id"], a2["agent_id"]])
-    assert isinstance(result, dict)
-    assert result[a1["agent_id"]] == "alpha"
-    assert result[a2["agent_id"]] == "beta"
+    assert result == {a1["agent_id"]: "alpha", a2["agent_id"]: "beta"}
 
 
-def test_get_agent_names__empty_input_returns_empty_dict():
-    result = broker.get_agent_names([])
-    assert result == {}
-
-
-def test_get_agent_names__nonexistent_agent_id_absent_from_result():
-    session = _create_session()
-    agent = _register_agent(session["session_id"], name="real")
-    fake_id = str(uuid.uuid4())
-
-    result = broker.get_agent_names([agent["agent_id"], fake_id])
-    assert agent["agent_id"] in result
-    assert fake_id not in result
-
-
-def test_get_agent_names__includes_deregistered_agents():
-    session = _create_session()
-    sid = session["session_id"]
-    agent = _register_agent(sid, name="departed")
-    broker.deregister_agent(agent["agent_id"])
-
-    result = broker.get_agent_names([agent["agent_id"]])
-    assert result[agent["agent_id"]] == "departed"
-
-
-def test_get_agent_names__single_agent():
-    session = _create_session()
-    agent = _register_agent(session["session_id"], name="solo")
-
-    result = broker.get_agent_names([agent["agent_id"]])
-    assert len(result) == 1
-    assert result[agent["agent_id"]] == "solo"
+@pytest.mark.parametrize(
+    "scenario",
+    ["empty_input", "nonexistent_id_absent", "deregistered_still_resolves"],
+)
+def test_get_agent_names__edge_cases(scenario):
+    if scenario == "empty_input":
+        assert broker.get_agent_names([]) == {}
+    elif scenario == "nonexistent_id_absent":
+        session = _create_session()
+        agent = _register_agent(session["session_id"], name="real")
+        fake = str(uuid.uuid4())
+        result = broker.get_agent_names([agent["agent_id"], fake])
+        assert agent["agent_id"] in result
+        assert fake not in result
+    else:
+        session = _create_session()
+        agent = _register_agent(session["session_id"], name="departed")
+        broker.deregister_agent(agent["agent_id"])
+        result = broker.get_agent_names([agent["agent_id"]])
+        assert result[agent["agent_id"]] == "departed"

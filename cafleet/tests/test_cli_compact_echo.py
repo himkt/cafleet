@@ -1,21 +1,7 @@
 """Surface 3 — slim broadcast echo + ``--quiet`` writes (design 0000049 Step 6).
 
-Covers two CLI surfaces:
-
-1. ``cafleet message broadcast`` text echo
-   - default: a single-line summary ``broadcast id=<id8> recipients=<count>``
-     (no per-recipient envelopes)
-   - ``--full``: per-recipient envelopes via ``format_indexed_list``
-
-2. ``--quiet`` flag on ``message send`` / ``message ack`` / ``member ping``
-   - ``message send --quiet``: emits ONLY the new task id 8-char prefix on a
-     single line
-   - ``message ack --quiet``: emits ONLY the acked task id 8-char prefix
-   - ``member ping --quiet``: emits a single short line (no multi-line echo)
-   - default (no ``--quiet``): the existing verbose echo
-
-Compact pure-function tests for the helpers themselves live in
-``test_output_compact_formatters.py``.
+Per principle (iii) of design 0000061: per-command + per-mode fragmentation
+collapses to a small set of parametrized tests.
 """
 
 import uuid
@@ -25,9 +11,6 @@ from click.testing import CliRunner
 
 from cafleet import broker, tmux
 from cafleet.cli import cli
-
-LONG_BODY = "x" * 300
-TRUNCATED_BODY = "x" * 200 + "…"
 
 DIRECTOR_ID = "11111111-1111-1111-1111-111111111111"
 MEMBER_ID = "22222222-2222-2222-2222-222222222222"
@@ -78,16 +61,7 @@ def _typed_task(
     }
 
 
-# ---------------------------------------------------------------------------
-# 1. message broadcast: default 1-line summary, --full per-recipient envelopes
-# ---------------------------------------------------------------------------
-
-
-def _broadcast_summary_result(
-    *,
-    summary_id: str = "abcdef0123456789-tail",
-    recipient_count: int = 3,
-) -> list[dict]:
+def _broadcast_summary_result(*, summary_id="abcdef0123456789-tail", recipient_count=3):
     summary = _typed_task(
         task_id=summary_id,
         sender="ffffffff11112222-tail",
@@ -100,7 +74,120 @@ def _broadcast_summary_result(
     return [{"task": summary, "notifications_sent_count": recipient_count}]
 
 
-def test_broadcast_default_echo__single_line_summary(
+def _ping_setup(monkeypatch):
+    placement = {
+        "director_agent_id": DIRECTOR_ID,
+        "tmux_session": "main",
+        "tmux_window_id": "@3",
+        "tmux_pane_id": PANE_ID,
+        "coding_agent": "claude",
+        "created_at": "2026-04-16T08:00:00+00:00",
+    }
+    agent = {
+        "agent_id": MEMBER_ID,
+        "name": "Claude-B",
+        "description": "Test member",
+        "status": "active",
+        "registered_at": "2026-04-16T08:00:00+00:00",
+        "kind": "user",
+        "placement": placement,
+    }
+    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_k: agent)
+    monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
+    monkeypatch.setattr(tmux, "send_poll_trigger", lambda **_k: True, raising=False)
+
+
+def _setup_command(monkeypatch, command, session_id, agent_id):
+    if command == "broadcast":
+        monkeypatch.setattr(
+            broker,
+            "broadcast_message",
+            lambda *_a, **_k: _broadcast_summary_result(recipient_count=3),
+        )
+        return ["message", "broadcast", "--agent-id", agent_id, "--text", "hello"]
+    if command == "send":
+        monkeypatch.setattr(
+            broker,
+            "send_message",
+            lambda *_a, **_k: {
+                "task": _typed_task(text="hello"),
+                "notification_sent": True,
+            },
+        )
+        return [
+            "message",
+            "send",
+            "--agent-id",
+            agent_id,
+            "--to",
+            str(uuid.uuid4()),
+            "--text",
+            "hello",
+        ]
+    if command == "ack":
+        monkeypatch.setattr(
+            broker,
+            "ack_task",
+            lambda *_a, **_k: {
+                "task": _typed_task(text="hello", status_state="completed"),
+            },
+        )
+        return [
+            "message",
+            "ack",
+            "--agent-id",
+            agent_id,
+            "--task-id",
+            "abcdef0123456789-tail",
+        ]
+    # ping
+    _ping_setup(monkeypatch)
+    return ["member", "ping", "--agent-id", DIRECTOR_ID, "--member-id", MEMBER_ID]
+
+
+@pytest.mark.parametrize(
+    ("command", "mode", "expect_oneline", "must_not_contain"),
+    [
+        # broadcast default IS one-line; --full is multi-line.
+        ("broadcast", "default", True, []),
+        ("broadcast", "full", False, []),
+        # send / ack / ping default are multi-line; --quiet → one-line.
+        ("send", "default", False, []),
+        ("send", "quiet", True, []),
+        ("ack", "default", False, []),
+        ("ack", "quiet", True, []),
+        ("ping", "default", False, []),
+        ("ping", "quiet", True, ["dispatched", "Pinged"]),
+    ],
+)
+def test_command_echo__one_line_vs_multi_line_shape(
+    runner,
+    session_id,
+    agent_id,
+    monkeypatch,
+    command,
+    mode,
+    expect_oneline,
+    must_not_contain,
+):
+    args = _setup_command(monkeypatch, command, session_id, agent_id)
+    if mode == "quiet":
+        args.append("--quiet")
+    elif mode == "full":
+        args.append("--full")
+    result = runner.invoke(cli, ["--session-id", session_id, *args])
+    assert result.exit_code == 0, result.output
+    out = result.output.strip()
+    if expect_oneline:
+        assert "\n" not in out, f"expected one-line echo; got:\n{result.output}"
+    else:
+        # Default verbose echoes contain meaningful content beyond an 8-char id.
+        assert out != "abcdef01"
+    for forbidden in must_not_contain:
+        assert forbidden not in out
+
+
+def test_broadcast_default__canonical_summary_pattern(
     runner, session_id, agent_id, monkeypatch
 ):
     monkeypatch.setattr(
@@ -125,109 +212,18 @@ def test_broadcast_default_echo__single_line_summary(
     )
     assert result.exit_code == 0, result.output
     out = result.output.strip()
-    # Single-line summary — exactly one line of meaningful content.
-    assert "\n" not in out, (
-        f"default broadcast echo must be a single line; got:\n{result.output}"
-    )
-
-
-def test_broadcast_default_echo__contains_summary_id8(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_result(
-            summary_id="abcdef0123456789-tail", recipient_count=3
-        ),
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "broadcast",
-            "--agent-id",
-            agent_id,
-            "--text",
-            "hello",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert "abcdef01" in result.output
-
-
-def test_broadcast_default_echo__contains_recipient_count(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_result(
-            summary_id="abcdef0123456789-tail", recipient_count=3
-        ),
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "broadcast",
-            "--agent-id",
-            agent_id,
-            "--text",
-            "hello",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert "3" in result.output, (
-        f"default broadcast echo must surface recipient count; got: {result.output!r}"
-    )
-
-
-def test_broadcast_default_echo__matches_canonical_summary_pattern(
-    runner, session_id, agent_id, monkeypatch
-):
-    """Per Step 6 spec: ``broadcast id=<id8> recipients=<count>``."""
-    monkeypatch.setattr(
-        broker,
-        "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_result(
-            summary_id="abcdef0123456789-tail", recipient_count=3
-        ),
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "broadcast",
-            "--agent-id",
-            agent_id,
-            "--text",
-            "hello",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    out = result.output.strip()
-    # The canonical compact form mentioned in the Step 6 task body.
     assert "broadcast" in out
     assert "id=abcdef01" in out
     assert "recipients=3" in out
 
 
-def test_broadcast_full_echo__multi_line_per_recipient_envelopes(
+def test_broadcast_full__multi_line_per_recipient_envelopes(
     runner, session_id, agent_id, monkeypatch
 ):
     monkeypatch.setattr(
         broker,
         "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_result(
-            summary_id="abcdef0123456789-tail", recipient_count=3
-        ),
+        lambda *_a, **_k: _broadcast_summary_result(recipient_count=3),
     )
     result = runner.invoke(
         cli,
@@ -244,261 +240,15 @@ def test_broadcast_full_echo__multi_line_per_recipient_envelopes(
         ],
     )
     assert result.exit_code == 0, result.output
-    # ``--full`` should expand into the legacy verbose layout. Look for
-    # canonical legacy field labels.
     for needle in ("from:", "type:", "text:"):
-        assert needle in result.output, (
-            f"--full broadcast echo should include legacy field label "
-            f"{needle!r}; got:\n{result.output}"
-        )
+        assert needle in result.output
 
 
-# ---------------------------------------------------------------------------
-# 2. --quiet on message send
-# ---------------------------------------------------------------------------
-
-
-def test_message_send_quiet__emits_only_task_id_8(
-    runner, session_id, agent_id, monkeypatch
+@pytest.mark.parametrize("command", ["send", "ack"])
+def test_quiet__emits_only_task_id_8(
+    runner, session_id, agent_id, monkeypatch, command
 ):
-    monkeypatch.setattr(
-        broker,
-        "send_message",
-        lambda *_a, **_k: {
-            "task": _typed_task(task_id="abcdef0123456789-tail", text="hello"),
-            "notification_sent": True,
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "send",
-            "--agent-id",
-            agent_id,
-            "--to",
-            str(uuid.uuid4()),
-            "--text",
-            "hello",
-            "--quiet",
-        ],
-    )
+    args = _setup_command(monkeypatch, command, session_id, agent_id) + ["--quiet"]
+    result = runner.invoke(cli, ["--session-id", session_id, *args])
     assert result.exit_code == 0, result.output
-    out = result.output.strip()
-    assert out == "abcdef01", (
-        f"--quiet should emit only the 8-char task id; got: {result.output!r}"
-    )
-
-
-def test_message_send_default__multi_line_echo_present(
-    runner, session_id, agent_id, monkeypatch
-):
-    """Without ``--quiet`` the verbose echo persists (regression guard)."""
-    monkeypatch.setattr(
-        broker,
-        "send_message",
-        lambda *_a, **_k: {
-            "task": _typed_task(task_id="abcdef0123456789-tail", text="hello"),
-            "notification_sent": True,
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "send",
-            "--agent-id",
-            agent_id,
-            "--to",
-            str(uuid.uuid4()),
-            "--text",
-            "hello",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert result.output.strip() != "abcdef01"
-    assert "Message sent" in result.output
-
-
-# ---------------------------------------------------------------------------
-# 3. --quiet on message ack
-# ---------------------------------------------------------------------------
-
-
-def test_message_ack_quiet__emits_only_task_id_8(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "ack_task",
-        lambda *_a, **_k: {
-            "task": _typed_task(
-                task_id="abcdef0123456789-tail",
-                text="hello",
-                status_state="completed",
-            )
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "ack",
-            "--agent-id",
-            agent_id,
-            "--task-id",
-            "abcdef0123456789-tail",
-            "--quiet",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    out = result.output.strip()
-    assert out == "abcdef01", (
-        f"--quiet should emit only the 8-char task id; got: {result.output!r}"
-    )
-
-
-def test_message_ack_default__multi_line_echo_present(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "ack_task",
-        lambda *_a, **_k: {
-            "task": _typed_task(
-                task_id="abcdef0123456789-tail",
-                text="hello",
-                status_state="completed",
-            )
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "ack",
-            "--agent-id",
-            agent_id,
-            "--task-id",
-            "abcdef0123456789-tail",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert result.output.strip() != "abcdef01"
-    assert "acknowledged" in result.output.lower()
-
-
-# ---------------------------------------------------------------------------
-# 4. --quiet on member ping
-# ---------------------------------------------------------------------------
-
-
-def test_member_ping_quiet__emits_single_short_line(runner, session_id, monkeypatch):
-    """``--quiet`` collapses the multi-line ``Pinged member …`` echo to a
-    single short line. We don't pin the exact content (no task id is created
-    by ping) but we do require a single line with much less text than the
-    default echo."""
-
-    def _placement(**overrides):
-        return {
-            "director_agent_id": DIRECTOR_ID,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": PANE_ID,
-            "coding_agent": "claude",
-            "created_at": "2026-04-16T08:00:00+00:00",
-            **overrides,
-        }
-
-    def _agent(**overrides):
-        return {
-            "agent_id": MEMBER_ID,
-            "name": "Claude-B",
-            "description": "Test member",
-            "status": "active",
-            "registered_at": "2026-04-16T08:00:00+00:00",
-            "kind": "user",
-            "placement": _placement(),
-            **overrides,
-        }
-
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_k: _agent())
-    monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
-    monkeypatch.setattr(tmux, "send_poll_trigger", lambda **_k: True, raising=False)
-
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "member",
-            "ping",
-            "--agent-id",
-            DIRECTOR_ID,
-            "--member-id",
-            MEMBER_ID,
-            "--quiet",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    out = result.output.strip()
-    assert "\n" not in out, (
-        f"--quiet member ping must be a single line; got:\n{result.output}"
-    )
-    # The default echo carries words like "Pinged" / "dispatched"; --quiet should not.
-    assert "dispatched" not in out
-    assert "Pinged" not in out
-
-
-def test_member_ping_default__multi_word_echo_present(runner, session_id, monkeypatch):
-    def _placement(**overrides):
-        return {
-            "director_agent_id": DIRECTOR_ID,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": PANE_ID,
-            "coding_agent": "claude",
-            "created_at": "2026-04-16T08:00:00+00:00",
-            **overrides,
-        }
-
-    def _agent(**overrides):
-        return {
-            "agent_id": MEMBER_ID,
-            "name": "Claude-B",
-            "description": "Test member",
-            "status": "active",
-            "registered_at": "2026-04-16T08:00:00+00:00",
-            "kind": "user",
-            "placement": _placement(),
-            **overrides,
-        }
-
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_k: _agent())
-    monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
-    monkeypatch.setattr(tmux, "send_poll_trigger", lambda **_k: True, raising=False)
-
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "member",
-            "ping",
-            "--agent-id",
-            DIRECTOR_ID,
-            "--member-id",
-            MEMBER_ID,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    # Default echo already contains "Pinged member" per the existing helper.
-    assert "Pinged" in result.output
+    assert result.output.strip() == "abcdef01"

@@ -1,6 +1,13 @@
-"""Tests for ``_resolve_prompt`` and ``cafleet member create`` (design doc 0000024)."""
+"""Tests for ``_resolve_prompt`` and ``cafleet member create``.
+
+Covers placeholder substitution (default + custom + doubled brace + error
+branches), `--prompt-file` validation matrix, spawn-argv shape per backend,
+permission-mode injection, and binary-missing exit messages.
+"""
 
 import json
+import os
+import sys
 import uuid
 
 import click
@@ -29,7 +36,6 @@ def new_agent_id():
 
 @pytest.fixture
 def ctx(session_id):
-    """Minimal ``click.Context`` with ``ctx.obj['session_id']`` populated."""
     command = click.Command("member-create")
     context = click.Context(command)
     context.obj = {"session_id": session_id, "json_output": False}
@@ -38,14 +44,6 @@ def ctx(session_id):
 
 @pytest.fixture
 def mock_get_agent(monkeypatch):
-    """Make ``broker.get_agent`` return a fake director unconditionally.
-
-    Covers both the pre-fix default-only lookup AND the post-fix custom-path
-    lookup (task 2.1 adds the same director lookup to the custom branch so
-    ``director_name`` and ``director_agent_id`` are available as kwargs for
-    every ``.format`` call).
-    """
-
     def fake_get_agent(agent_id, session_id):
         return {"agent_id": agent_id, "name": "Director-X"}
 
@@ -53,162 +51,11 @@ def mock_get_agent(monkeypatch):
     return fake_get_agent
 
 
-def test_default_prompt_substitution__default_path_substitutes_all_placeholders(
-    ctx,
-    director_agent_id,
-    new_agent_id,
-    session_id,
-):
-    """Post-Surface-6: the slim spawn prompt no longer references
-    ``{director_name}`` so the substitution surface is just the three
-    UUIDs. ``broker.get_agent`` is no longer called by ``_resolve_prompt``.
-    """
-    result = _resolve_prompt(
-        ctx,
-        director_agent_id=director_agent_id,
-        new_agent_id=new_agent_id,
-        prompt_argv=(),
-    )
-    assert session_id in result
-    assert new_agent_id in result
-    assert director_agent_id in result
-    assert "{session_id}" not in result
-    assert "{agent_id}" not in result
-    assert "{director_agent_id}" not in result
-
-
-def test_custom_prompt_placeholder_substitution__custom_prompt_with_agent_id_placeholder_substitutes(
-    ctx,
-    director_agent_id,
-    new_agent_id,
-    mock_get_agent,
-):
-    result = _resolve_prompt(
-        ctx,
-        director_agent_id=director_agent_id,
-        new_agent_id=new_agent_id,
-        prompt_argv=("message", "for", "{agent_id}"),
-    )
-    assert result == f"message for {new_agent_id}"
-
-
-def test_custom_prompt_no_placeholder_pass_through__custom_prompt_without_placeholders_unchanged(
-    ctx,
-    director_agent_id,
-    new_agent_id,
-    mock_get_agent,
-):
-    result = _resolve_prompt(
-        ctx,
-        director_agent_id=director_agent_id,
-        new_agent_id=new_agent_id,
-        prompt_argv=("no", "placeholders", "here"),
-    )
-    assert result == "no placeholders here"
-
-
-# --- custom_prompt_doubled_brace_escape: design doc 2.2(d): ``{{...}}``
-# collapses to ``{...}`` without substitution. Callers embedding literal JSON
-# snippets must double their braces, and ``.format`` then collapses each pair
-# to a single literal brace. No placeholder substitution is attempted on the
-# inner tokens. Against pre-fix code this test FAILS because the custom path
-# never calls ``.format`` and returns the raw doubled-brace string. ---
-
-
-def test_custom_prompt_doubled_brace_escape__custom_prompt_with_doubled_braces_collapses_to_single(
-    ctx,
-    director_agent_id,
-    new_agent_id,
-    mock_get_agent,
-):
-    result = _resolve_prompt(
-        ctx,
-        director_agent_id=director_agent_id,
-        new_agent_id=new_agent_id,
-        prompt_argv=("data", "is", "{{not", "a", "placeholder}}", "closed"),
-    )
-    assert result == "data is {not a placeholder} closed"
-    assert new_agent_id not in result
-    assert director_agent_id not in result
-
-
-# --- custom_prompt_malformed_raises_usage_error: ``str.format`` errors must
-# convert to ``click.UsageError``. ``member_create``'s rollback path only
-# catches ``UsageError``, so a raw ``KeyError`` / ``ValueError`` would orphan
-# the just-registered agent. ---
-
-
-def test_custom_prompt_malformed_raises_usage_error__unknown_placeholder_raises_usage_error(
-    ctx,
-    director_agent_id,
-    new_agent_id,
-    mock_get_agent,
-):
-    with pytest.raises(click.UsageError) as exc_info:
-        _resolve_prompt(
-            ctx,
-            director_agent_id=director_agent_id,
-            new_agent_id=new_agent_id,
-            prompt_argv=("hello", "{foo}"),
-        )
-    message = str(exc_info.value)
-    assert "foo" in message
-    assert "{session_id}" in message
-    assert "{agent_id}" in message
-
-
-def test_custom_prompt_malformed_raises_usage_error__unmatched_brace_raises_usage_error(
-    ctx,
-    director_agent_id,
-    new_agent_id,
-    mock_get_agent,
-):
-    with pytest.raises(click.UsageError) as exc_info:
-        _resolve_prompt(
-            ctx,
-            director_agent_id=director_agent_id,
-            new_agent_id=new_agent_id,
-            prompt_argv=("hello", "{unclosed"),
-        )
-    message = str(exc_info.value)
-    assert "{{" in message
-    assert "}}" in message
-
-
-def test_custom_prompt_malformed_raises_usage_error__attribute_access_raises_usage_error(
-    ctx,
-    director_agent_id,
-    new_agent_id,
-    mock_get_agent,
-):
-    # PR #25 3rd review: ``{agent_id.foo}`` triggers str.format attribute
-    # access on the substituted string; ``str`` has no ``.foo`` so Python
-    # raises ``AttributeError``. Must be caught and converted to
-    # ``UsageError`` so the rollback path in ``member_create`` still runs.
-    with pytest.raises(click.UsageError) as exc_info:
-        _resolve_prompt(
-            ctx,
-            director_agent_id=director_agent_id,
-            new_agent_id=new_agent_id,
-            prompt_argv=("hello", "{agent_id.foo}"),
-        )
-    message = str(exc_info.value)
-    assert "{{" in message
-    assert "}}" in message
-
-
 _CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 
 @pytest.fixture
 def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
-    """Create a real session and return ``(session_id, director_agent_id, runner)``.
-
-    Spins up a fresh SQLite DB, runs ``cafleet db init`` + ``cafleet session
-    create --json``, and returns the three values every ``member create``
-    invocation needs. ``tmux.ensure_tmux_available`` / ``director_context``
-    are stubbed so ``session create`` (which demands a tmux context) succeeds.
-    """
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,
@@ -229,7 +76,6 @@ def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
 
 @pytest.fixture
 def split_window_recorder(monkeypatch):
-    """Monkeypatch ``tmux.split_window`` to capture its kwargs and return a pane."""
     calls: list[dict] = []
 
     def fake_split_window(**kwargs):
@@ -237,8 +83,6 @@ def split_window_recorder(monkeypatch):
         return "%42"
 
     monkeypatch.setattr("cafleet.tmux.split_window", fake_split_window)
-    # ``select_layout`` / ``send_exit`` are best-effort; stub them too so
-    # nothing reaches a real tmux.
     monkeypatch.setattr("cafleet.tmux.select_layout", lambda **_: None)
     monkeypatch.setattr("cafleet.tmux.send_exit", lambda **_: None, raising=False)
     return calls
@@ -246,84 +90,415 @@ def split_window_recorder(monkeypatch):
 
 @pytest.fixture
 def stub_coding_agent_binaries(monkeypatch):
-    """Pretend every coding-agent binary is on PATH.
-
-    ``_ensure_coding_agent_available(<name>)`` calls
-    ``shutil.which(<name>)``; patching it module-wide is the narrowest
-    monkeypatch that keeps the spawn alive for every backend without a real
-    binary on disk.
-    """
     monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: "/usr/bin/stub")
 
 
-# --- member_create_passes_display_name: ``cli.py`` threads ``--name`` as
-# ``display_name`` into ``_build_claude_command()``, which means the ``command``
-# kwarg handed to ``tmux.split_window`` contains ``"--name"`` + the member name. ---
-
-
-def test_member_create_passes_display_name__member_create_passes_member_name_as_display_name(
-    bootstrapped_session,
-    split_window_recorder,
-    stub_coding_agent_binaries,
+def _invoke_member_create(
+    runner: CliRunner,
+    session_id: str,
+    director_id: str,
+    *,
+    coding_agent: str = "claude",
+    prompt_file: str | None = None,
+    inline_prompt: str | None = None,
+    name: str = "Member",
+    json_output: bool = False,
 ):
-    session_id, director_id, runner = bootstrapped_session
-    result = runner.invoke(
-        cli,
+    args = ["--session-id", session_id]
+    if json_output:
+        args.append("--json")
+    args.extend(
         [
-            "--session-id",
-            session_id,
             "member",
             "create",
             "--agent-id",
             director_id,
             "--name",
-            "Drafter",
+            name,
             "--description",
-            "Drafter for PR #42",
-            "--",
-            "hello",
-        ],
+            f"{name} for tests",
+        ]
+    )
+    if coding_agent != "claude":
+        args.extend(["--coding-agent", coding_agent])
+    if prompt_file is not None:
+        args.extend(["--prompt-file", prompt_file])
+    if inline_prompt is not None:
+        args.extend(["--", inline_prompt])
+    return runner.invoke(cli, args)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "prompt_argv", "asserts"),
+    [
+        ("default_path_all_placeholders_substituted", (), "default"),
+        (
+            "custom_path_substitutes_agent_id",
+            ("message", "for", "{agent_id}"),
+            "agent_id_only",
+        ),
+        (
+            "custom_path_no_placeholders_passthrough",
+            ("no", "placeholders", "here"),
+            "passthrough",
+        ),
+        (
+            "doubled_brace_collapses_to_single",
+            ("data", "is", "{{not", "a", "placeholder}}", "closed"),
+            "doubled_brace",
+        ),
+    ],
+)
+def test_resolve_prompt__substitution_matrix(
+    ctx,
+    director_agent_id,
+    new_agent_id,
+    session_id,
+    mock_get_agent,
+    scenario,
+    prompt_argv,
+    asserts,
+):
+    result = _resolve_prompt(
+        ctx,
+        director_agent_id=director_agent_id,
+        new_agent_id=new_agent_id,
+        prompt_argv=prompt_argv,
+    )
+    if asserts == "default":
+        assert session_id in result
+        assert new_agent_id in result
+        assert director_agent_id in result
+        for raw in ("{session_id}", "{agent_id}", "{director_agent_id}"):
+            assert raw not in result
+    elif asserts == "agent_id_only":
+        assert result == f"message for {new_agent_id}"
+    elif asserts == "passthrough":
+        assert result == "no placeholders here"
+    else:
+        assert result == "data is {not a placeholder} closed"
+        assert new_agent_id not in result
+        assert director_agent_id not in result
+
+
+@pytest.mark.parametrize(
+    ("scenario", "prompt_argv", "expect_message_contains"),
+    [
+        (
+            "unknown_placeholder",
+            ("hello", "{foo}"),
+            ("foo", "{session_id}", "{agent_id}"),
+        ),
+        ("unmatched_brace", ("hello", "{unclosed"), ("{{", "}}")),
+        ("attribute_access", ("hello", "{agent_id.foo}"), ("{{", "}}")),
+    ],
+)
+def test_resolve_prompt__malformed_raises_usage_error(
+    ctx,
+    director_agent_id,
+    new_agent_id,
+    mock_get_agent,
+    scenario,
+    prompt_argv,
+    expect_message_contains,
+):
+    with pytest.raises(click.UsageError) as exc_info:
+        _resolve_prompt(
+            ctx,
+            director_agent_id=director_agent_id,
+            new_agent_id=new_agent_id,
+            prompt_argv=prompt_argv,
+        )
+    message = str(exc_info.value)
+    for needle in expect_message_contains:
+        assert needle in message
+
+
+def test_prompt_file__relative_path_rejected(
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    session_id, director_id, runner = bootstrapped_session
+    result = _invoke_member_create(
+        runner,
+        session_id,
+        director_id,
+        prompt_file="./foo.md",
+    )
+    assert result.exit_code == 2, result.output
+    assert "--prompt-file requires an absolute path" in result.output
+    assert "./foo.md" in result.output
+    assert split_window_recorder == []
+
+
+@pytest.mark.parametrize(
+    ("scenario", "fixture_setup", "expected_exit", "expected_substring"),
+    [
+        ("not_found", "missing", 1, "file does not exist or is not a regular file"),
+        (
+            "directory_not_regular",
+            "directory",
+            1,
+            "file does not exist or is not a regular file",
+        ),
+        ("empty_zero_bytes", "empty", 1, "file is empty"),
+        ("empty_whitespace_only", "whitespace", 1, "file is empty"),
+        ("invalid_utf8", "bad_utf8", 1, "file is not valid UTF-8"),
+        ("unknown_placeholder", "unknown_placeholder", 2, "Unknown placeholder"),
+    ],
+)
+def test_prompt_file__error_variants(
+    tmp_path,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    scenario,
+    fixture_setup,
+    expected_exit,
+    expected_substring,
+):
+    session_id, director_id, runner = bootstrapped_session
+    if fixture_setup == "missing":
+        target = tmp_path / "does-not-exist.md"
+    elif fixture_setup == "directory":
+        target = tmp_path / "subdir"
+        target.mkdir()
+    elif fixture_setup == "empty":
+        target = tmp_path / "empty.md"
+        target.write_bytes(b"")
+    elif fixture_setup == "whitespace":
+        target = tmp_path / "ws.md"
+        target.write_text("\n   \t\n", encoding="utf-8")
+    elif fixture_setup == "bad_utf8":
+        target = tmp_path / "bad.md"
+        target.write_bytes(b"\xff\xfe\xfd")
+    else:
+        target = tmp_path / "prompt.md"
+        target.write_text("hi {unknown}", encoding="utf-8")
+
+    result = _invoke_member_create(
+        runner,
+        session_id,
+        director_id,
+        prompt_file=str(target),
+    )
+    assert result.exit_code == expected_exit, result.output
+    assert expected_substring in result.output
+    assert split_window_recorder == []
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="POSIX-only test; root bypasses the read-permission check",
+)
+def test_prompt_file__not_readable_exits_with_message(
+    tmp_path,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    session_id, director_id, runner = bootstrapped_session
+    unreadable_file = tmp_path / "unreadable.md"
+    unreadable_file.write_text("hello", encoding="utf-8")
+    unreadable_file.chmod(0o000)
+    try:
+        result = _invoke_member_create(
+            runner,
+            session_id,
+            director_id,
+            prompt_file=str(unreadable_file),
+        )
+        assert result.exit_code == 1, result.output
+        assert "file is not readable" in result.output
+        assert str(unreadable_file) in result.output
+        assert split_window_recorder == []
+    finally:
+        unreadable_file.chmod(0o644)
+
+
+def test_prompt_file__mutually_exclusive_with_positional(
+    tmp_path,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    session_id, director_id, runner = bootstrapped_session
+    prompt_path = tmp_path / "prompt.md"
+    prompt_path.write_text("hello", encoding="utf-8")
+    result = _invoke_member_create(
+        runner,
+        session_id,
+        director_id,
+        prompt_file=str(prompt_path),
+        inline_prompt="hello positional",
+    )
+    assert result.exit_code == 2, result.output
+    assert (
+        "--prompt-file and the positional prompt argument are mutually exclusive"
+        in result.output
+    )
+    assert split_window_recorder == []
+
+
+def test_prompt_file__parity_with_positional_form(tmp_path):
+    session_id = str(uuid.uuid4())
+    director_id = str(uuid.uuid4())
+    new_agent_id = str(uuid.uuid4())
+    template = "hello {agent_id} from director {director_agent_id}"
+
+    command = click.Command("member-create")
+    ctx = click.Context(command)
+    ctx.obj = {"session_id": session_id, "json_output": False}
+
+    inline_result = _resolve_prompt(
+        ctx,
+        director_agent_id=director_id,
+        new_agent_id=new_agent_id,
+        prompt_argv=tuple(template.split(" ")),
+        prompt_file=None,
+    )
+    prompt_path = tmp_path / "prompt.md"
+    prompt_path.write_text(template, encoding="utf-8")
+    file_result = _resolve_prompt(
+        ctx,
+        director_agent_id=director_id,
+        new_agent_id=new_agent_id,
+        prompt_argv=(),
+        prompt_file=str(prompt_path),
+    )
+
+    assert inline_result == file_result
+    assert new_agent_id in file_result
+    assert director_id in file_result
+
+
+@pytest.mark.parametrize(
+    ("scenario", "content"),
+    [
+        ("preserves_trailing_newline", "hello\n"),
+        ("preserves_surrounding_whitespace", "   \n  hello world  \n   "),
+    ],
+)
+def test_prompt_file__preserves_whitespace_verbatim(
+    tmp_path,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    scenario,
+    content,
+):
+    session_id, director_id, runner = bootstrapped_session
+    prompt_path = tmp_path / "prompt.md"
+    prompt_path.write_text(content, encoding="utf-8")
+    result = _invoke_member_create(
+        runner,
+        session_id,
+        director_id,
+        prompt_file=str(prompt_path),
     )
     assert result.exit_code == 0, result.output
-    assert len(split_window_recorder) == 1
+    assert split_window_recorder[0]["command"][-1] == content
+
+
+@pytest.mark.parametrize("coding_agent", ["claude", "codex"])
+def test_member_create__backend_spawn_argv_shape(
+    tmp_path,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    coding_agent,
+):
+    session_id, director_id, runner = bootstrapped_session
+    prompt_path = tmp_path / "prompt.md"
+    prompt_path.write_text("session={session_id}", encoding="utf-8")
+    result = _invoke_member_create(
+        runner,
+        session_id,
+        director_id,
+        coding_agent=coding_agent,
+        prompt_file=str(prompt_path),
+        name=f"Member-{coding_agent}",
+    )
+    assert result.exit_code == 0, result.output
     command = split_window_recorder[0]["command"]
-    assert isinstance(command, list)
-    assert "--name" in command
-    name_index = command.index("--name")
-    assert command[name_index + 1] == "Drafter"
-    assert command[name_index + 2] == "hello"
-    assert command[0] == "claude"
+    assert command[-1] == f"session={session_id}"
+    if coding_agent == "claude":
+        assert command[0] == "claude"
+        # Member display name threaded through as --name <name>.
+        assert "--name" in command
+        name_index = command.index("--name")
+        assert command[name_index + 1] == f"Member-{coding_agent}"
+    else:
+        assert command == [
+            "codex",
+            "--ask-for-approval",
+            "never",
+            "--sandbox",
+            "workspace-write",
+            f"session={session_id}",
+        ]
+        # Codex has no --name analog.
+        assert "--name" not in command
+        assert f"Member-{coding_agent}" not in command
 
 
-# --- permission_mode: spawn argv carries ``--permission-mode dontAsk``.
-# Members spawn with the Bash tool enabled and permission prompts auto-resolve. ---
-
-
-def test_permission_mode__claude_default_injects_dontask_permission_mode(
+def test_member_create__codex_placement_records_codex(
     bootstrapped_session,
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
     session_id, director_id, runner = bootstrapped_session
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "member",
-            "create",
-            "--agent-id",
-            director_id,
-            "--name",
-            "Drafter",
-            "--description",
-            "Drafter for PR #42",
-            "--",
-            "hello",
-        ],
+    result = _invoke_member_create(
+        runner,
+        session_id,
+        director_id,
+        coding_agent="codex",
+        inline_prompt="hello",
+        name="Codex-Member",
+        json_output=True,
     )
     assert result.exit_code == 0, result.output
-    assert len(split_window_recorder) == 1
+    data = json.loads(result.output)
+    assert data["placement"]["coding_agent"] == "codex"
+
+
+@pytest.mark.parametrize("coding_agent", ["claude", "codex"])
+def test_member_create__binary_missing_exits_with_backend_specific_message(
+    bootstrapped_session,
+    split_window_recorder,
+    monkeypatch,
+    coding_agent,
+):
+    monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: None)
+    session_id, director_id, runner = bootstrapped_session
+    result = _invoke_member_create(
+        runner,
+        session_id,
+        director_id,
+        coding_agent=coding_agent,
+        inline_prompt="hello",
+        name=coding_agent.capitalize(),
+    )
+    assert result.exit_code == 1, result.output
+    assert f"binary {coding_agent} not found on PATH" in (result.output or "")
+    assert split_window_recorder == []
+
+
+def test_member_create__claude_default_injects_dontask_permission_mode(
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    session_id, director_id, runner = bootstrapped_session
+    result = _invoke_member_create(
+        runner,
+        session_id,
+        director_id,
+        inline_prompt="hello",
+        name="Drafter",
+    )
+    assert result.exit_code == 0, result.output
     command = split_window_recorder[0]["command"]
     assert "--permission-mode" in command
     perm_index = command.index("--permission-mode")
@@ -331,259 +506,5 @@ def test_permission_mode__claude_default_injects_dontask_permission_mode(
     assert command[0] == "claude"
     assert "--disallowedTools" not in command
     assert "Bash" not in command
-    # Pinned argv ordering: permission tokens before name args.
     name_index = command.index("--name")
-    assert perm_index < name_index, (
-        f"--permission-mode must precede --name; got {command!r}"
-    )
-
-
-# --- coding_agent_codex: design 0000046 §2. ``--coding-agent codex`` selects
-# the codex spawn-command builder; the resulting command list passed to
-# ``tmux.split_window`` matches the codex shape from the design doc and the
-# placement row records ``coding_agent='codex'``. ---
-
-
-def test_coding_agent_codex__spawn_command_matches_codex_shape(
-    bootstrapped_session,
-    split_window_recorder,
-    stub_coding_agent_binaries,
-):
-    session_id, director_id, runner = bootstrapped_session
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "member",
-            "create",
-            "--agent-id",
-            director_id,
-            "--name",
-            "Codex-Member",
-            "--description",
-            "codex member for PR #42",
-            "--coding-agent",
-            "codex",
-            "--",
-            "hello",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert len(split_window_recorder) == 1
-    command = split_window_recorder[0]["command"]
-    assert command == [
-        "codex",
-        "--ask-for-approval",
-        "never",
-        "--sandbox",
-        "workspace-write",
-        "hello",
-    ]
-
-
-def test_coding_agent_codex__no_dash_dash_name_in_codex_argv(
-    bootstrapped_session,
-    split_window_recorder,
-    stub_coding_agent_binaries,
-):
-    """Codex has no ``--name`` analog (design 0000046 §3). The argv must NOT
-    carry ``--name`` even though the operator supplied ``--name Codex-Member``.
-    """
-    session_id, director_id, runner = bootstrapped_session
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "member",
-            "create",
-            "--agent-id",
-            director_id,
-            "--name",
-            "Codex-Member",
-            "--description",
-            "codex member",
-            "--coding-agent",
-            "codex",
-            "--",
-            "hello",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    command = split_window_recorder[0]["command"]
-    assert "--name" not in command
-    assert "Codex-Member" not in command
-
-
-def test_coding_agent_codex__placement_records_codex(
-    bootstrapped_session,
-    split_window_recorder,
-    stub_coding_agent_binaries,
-):
-    """``placement.coding_agent`` is recorded as ``'codex'`` for codex
-    members so ``cafleet member list`` and the WebUI surface the backend
-    correctly. The CLI passes the flag value into ``broker.register_agent``'s
-    placement payload.
-    """
-    session_id, director_id, runner = bootstrapped_session
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "member",
-            "create",
-            "--agent-id",
-            director_id,
-            "--name",
-            "Codex-Member",
-            "--description",
-            "codex member",
-            "--coding-agent",
-            "codex",
-            "--",
-            "hello",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-    assert data["placement"]["coding_agent"] == "codex"
-
-
-def test_coding_agent_default_is_claude__no_flag_keeps_claude_argv(
-    bootstrapped_session,
-    split_window_recorder,
-    stub_coding_agent_binaries,
-):
-    """Regression guard: omitting ``--coding-agent`` must keep the claude
-    argv shape so existing operators see no behavior change.
-    """
-    session_id, director_id, runner = bootstrapped_session
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "member",
-            "create",
-            "--agent-id",
-            director_id,
-            "--name",
-            "Default-Claude",
-            "--description",
-            "default claude member",
-            "--",
-            "hello",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    command = split_window_recorder[0]["command"]
-    assert command[0] == "claude"
-    assert "--permission-mode" in command
-    assert "--ask-for-approval" not in command
-    assert "--sandbox" not in command
-
-
-def test_coding_agent_unknown_value_rejected__click_choice_exits_two(
-    bootstrapped_session,
-    split_window_recorder,
-    stub_coding_agent_binaries,
-):
-    """``--coding-agent foo`` is rejected by ``click.Choice`` (exit 2)."""
-    session_id, director_id, runner = bootstrapped_session
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "member",
-            "create",
-            "--agent-id",
-            director_id,
-            "--name",
-            "Bad",
-            "--description",
-            "bad",
-            "--coding-agent",
-            "foo",
-            "--",
-            "hello",
-        ],
-    )
-    assert result.exit_code == 2, result.output
-    assert "--coding-agent" in (result.output or "")
-    # No spawn happened — Click rejected the input before we reached split_window.
-    assert len(split_window_recorder) == 0
-
-
-def test_coding_agent_codex_binary_missing__exits_with_codex_message(
-    bootstrapped_session,
-    split_window_recorder,
-    monkeypatch,
-):
-    """``--coding-agent codex`` and codex absent on PATH → exit 1 with
-    ``binary codex not found on PATH``. The check must be backend-aware:
-    when codex is the requested binary, the error names codex (not claude)
-    even if claude happens to also be missing.
-    """
-    monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: None)
-    session_id, director_id, runner = bootstrapped_session
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "member",
-            "create",
-            "--agent-id",
-            director_id,
-            "--name",
-            "Codex",
-            "--description",
-            "codex member",
-            "--coding-agent",
-            "codex",
-            "--",
-            "hello",
-        ],
-    )
-    assert result.exit_code == 1, result.output
-    assert "binary codex not found on PATH" in (result.output or "")
-    assert len(split_window_recorder) == 0
-
-
-def test_default_path_claude_binary_missing__exits_with_claude_message(
-    bootstrapped_session,
-    split_window_recorder,
-    monkeypatch,
-):
-    """No ``--coding-agent`` flag (default-claude path) and claude absent
-    on PATH → exit 1 with ``binary claude not found on PATH``. Symmetric
-    to the codex case above; guards the default-path error-message
-    contract from regressing now that the binary-availability check goes
-    through the generic ``_ensure_coding_agent_available(binary_name)``.
-    """
-    monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: None)
-    session_id, director_id, runner = bootstrapped_session
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "member",
-            "create",
-            "--agent-id",
-            director_id,
-            "--name",
-            "Claude",
-            "--description",
-            "default-claude member",
-            "--",
-            "hello",
-        ],
-    )
-    assert result.exit_code == 1, result.output
-    assert "binary claude not found on PATH" in (result.output or "")
-    assert len(split_window_recorder) == 0
+    assert perm_index < name_index

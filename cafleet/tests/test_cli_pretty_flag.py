@@ -1,15 +1,7 @@
-"""CLI integration tests for the Surface 1 ``--pretty`` flag and the
-``_client_command`` envelope-slim + body-truncation wiring (design 0000049 Step 3).
+"""CLI integration tests for ``--pretty`` flag + ``_client_command`` wiring.
 
-Exercises:
-
-- New global ``--pretty`` flag at the ``cafleet`` root group.
-- Default JSON mode is **compact** (no whitespace separators / newlines).
-- ``--pretty --json`` switches to indented JSON.
-- Text mode is the new 2-line-per-task render unless ``--full`` is passed.
-- ``--full`` disables BOTH the envelope-slim (so verbose layout returns) AND
-  the body-truncation (so the full message body emits) — one flag, both
-  toggles, per Surface 1 Step 3 success criterion.
+Per principle (iii) of design 0000061: per-flag fragmentation collapses to
+parametrized "shape + behaviour" tests.
 """
 
 import json
@@ -69,28 +61,27 @@ def _typed_task(
     }
 
 
-# ---------------------------------------------------------------------------
-# Global --pretty flag
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "default_off_compact",
+        "explicit_on_indented",
+        "can_precede_session_id",
+        "listed_in_root_help",
+    ],
+)
+def test_pretty_flag(runner, session_id, agent_id, monkeypatch, scenario):
+    if scenario == "listed_in_root_help":
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        assert "--pretty" in result.output
+        return
 
-
-def test_pretty_flag_exists__cli_help_lists_pretty_at_root(runner):
-    result = runner.invoke(cli, ["--help"])
-    assert result.exit_code == 0
-    assert "--pretty" in result.output
-
-
-def test_pretty_flag_default_off__json_default_is_compact_no_whitespace(
-    runner, session_id, agent_id, monkeypatch
-):
     monkeypatch.setattr(
-        broker,
-        "poll_tasks",
-        lambda *_a, **_k: [_typed_task(text="short")],
+        broker, "poll_tasks", lambda *_a, **_k: [_typed_task(text="short")]
     )
-    result = runner.invoke(
-        cli,
-        [
+    if scenario == "default_off_compact":
+        args = [
             "--session-id",
             session_id,
             "--json",
@@ -98,97 +89,102 @@ def test_pretty_flag_default_off__json_default_is_compact_no_whitespace(
             "poll",
             "--agent-id",
             agent_id,
-        ],
-    )
+        ]
+    elif scenario == "explicit_on_indented":
+        args = [
+            "--session-id",
+            session_id,
+            "--json",
+            "--pretty",
+            "message",
+            "poll",
+            "--agent-id",
+            agent_id,
+        ]
+    else:  # can_precede_session_id
+        args = [
+            "--pretty",
+            "--session-id",
+            session_id,
+            "--json",
+            "message",
+            "poll",
+            "--agent-id",
+            agent_id,
+        ]
+
+    result = runner.invoke(cli, args)
     assert result.exit_code == 0, result.output
     payload = result.output.strip()
     parsed = json.loads(payload)
     assert isinstance(parsed, list)
-    assert "\n" not in payload
-    assert ", " not in payload
-    assert ": " not in payload
+    if scenario == "default_off_compact":
+        assert "\n" not in payload
+        assert ", " not in payload
+        assert ": " not in payload
+    else:
+        assert "\n" in payload
+        assert re.search(r"\n  ", payload)
 
 
-def test_pretty_flag_on__json_with_pretty_uses_indented_form(
-    runner, session_id, agent_id, monkeypatch
+@pytest.mark.parametrize("subcommand", ["poll", "show", "send"])
+def test_compact_json__envelope_shape(
+    runner, session_id, agent_id, monkeypatch, subcommand
 ):
-    monkeypatch.setattr(
-        broker,
-        "poll_tasks",
-        lambda *_a, **_k: [_typed_task(text="short")],
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "--pretty",
+    if subcommand == "poll":
+        monkeypatch.setattr(
+            broker,
+            "poll_tasks",
+            lambda *_a, **_k: [
+                _typed_task(
+                    task_id="abcdef0123456789-tail-stuff-here",
+                    sender="zyxwvutsrqponmlk-tail-stuff",
+                )
+            ],
+        )
+        args = ["message", "poll", "--agent-id", agent_id]
+    elif subcommand == "show":
+        monkeypatch.setattr(
+            broker,
+            "get_task",
+            lambda *_a, **_k: {
+                "task": _typed_task(task_id="abcdef0123456789-tail-stuff-here")
+            },
+        )
+        args = [
             "message",
-            "poll",
+            "show",
             "--agent-id",
             agent_id,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    payload = result.output.strip()
-    json.loads(payload)  # still valid JSON
-    assert "\n" in payload
-    # ``json.dumps(indent=2)`` emits two-space indentation
-    assert re.search(r"\n  ", payload)
-
-
-def test_pretty_flag_position__pretty_can_precede_session_id(
-    runner, session_id, agent_id, monkeypatch
-):
-    """``--pretty`` is a global option; it must work in either order at the root."""
-    monkeypatch.setattr(broker, "poll_tasks", lambda *_a, **_k: [_typed_task()])
-    result = runner.invoke(
-        cli,
-        [
-            "--pretty",
-            "--session-id",
-            session_id,
-            "--json",
+            "--task-id",
+            "abcdef0123456789-tail",
+        ]
+    else:  # send
+        monkeypatch.setattr(
+            broker,
+            "send_message",
+            lambda *_a, **_k: {
+                "task": _typed_task(task_id="abcdef0123456789-tail-stuff-here"),
+                "notification_sent": True,
+            },
+        )
+        args = [
             "message",
-            "poll",
+            "send",
             "--agent-id",
             agent_id,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert "\n" in result.output
+            "--to",
+            str(uuid.uuid4()),
+            "--text",
+            "ignored",
+        ]
 
-
-# ---------------------------------------------------------------------------
-# Compact rendered envelope in JSON output
-# ---------------------------------------------------------------------------
-
-
-def test_compact_json__poll_output_has_only_compact_keys(
-    runner, session_id, agent_id, monkeypatch
-):
-    """Default JSON poll output must contain only the compact-render keys."""
-    monkeypatch.setattr(broker, "poll_tasks", lambda *_a, **_k: [_typed_task()])
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-        ],
-    )
+    result = runner.invoke(cli, ["--session-id", session_id, "--json", *args])
     assert result.exit_code == 0, result.output
     parsed = json.loads(result.output)
-    assert isinstance(parsed, list)
-    assert parsed
-    rendered = parsed[0]
+    rendered = parsed[0] if subcommand == "poll" else parsed.get("task", parsed)
     assert set(rendered.keys()).issubset({"id", "from", "ts", "text", "kind", "origin"})
-    # Compact must NOT carry the long-form typed-column keys.
+    assert rendered["id"] == "abcdef01"
     for forbidden in (
         "task_id",
         "context_id",
@@ -199,55 +195,22 @@ def test_compact_json__poll_output_has_only_compact_keys(
         "origin_task_id",
         "type",
     ):
-        assert forbidden not in rendered, (
-            f"compact JSON should not include {forbidden!r}; "
-            f"got keys: {sorted(rendered.keys())}"
-        )
+        assert forbidden not in rendered
 
 
-def test_compact_json__poll_output_uses_8_char_id_prefixes(
-    runner, session_id, agent_id, monkeypatch
+@pytest.mark.parametrize(
+    "scenario",
+    ["restores_typed_columns", "disables_body_truncation"],
+)
+def test_full_flag__restores_long_form(
+    runner, session_id, agent_id, monkeypatch, scenario
 ):
     monkeypatch.setattr(
         broker,
         "poll_tasks",
         lambda *_a, **_k: [
-            _typed_task(
-                task_id="abcdef0123456789-tail-stuff-here",
-                sender="zyxwvutsrqponmlk-tail-stuff",
-            )
+            _typed_task(task_id="abcdef0123456789-tail", text=LONG_BODY)
         ],
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    [rendered] = json.loads(result.output)
-    assert rendered["id"] == "abcdef01"
-    assert rendered["from"] == "zyxwvuts"
-
-
-# ---------------------------------------------------------------------------
-# --full restores the verbose envelope in JSON mode
-# ---------------------------------------------------------------------------
-
-
-def test_full_flag_in_json_mode__restores_typed_column_long_form(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "poll_tasks",
-        lambda *_a, **_k: [_typed_task(task_id="abcdef0123456789-tail")],
     )
     result = runner.invoke(
         cli,
@@ -264,43 +227,18 @@ def test_full_flag_in_json_mode__restores_typed_column_long_form(
     )
     assert result.exit_code == 0, result.output
     [rendered] = json.loads(result.output)
-    assert rendered["task_id"] == "abcdef0123456789-tail"
-    assert "context_id" in rendered
-    assert "to_agent_id" in rendered
-    assert "status_state" in rendered
+    if scenario == "restores_typed_columns":
+        assert rendered["task_id"] == "abcdef0123456789-tail"
+        assert "context_id" in rendered
+        assert "to_agent_id" in rendered
+        assert "status_state" in rendered
+    else:
+        assert rendered["text"] == LONG_BODY
 
 
-def test_full_flag_in_json_mode__also_disables_body_truncation(
+def test_default_mode__body_truncation_under_compact_envelope(
     runner, session_id, agent_id, monkeypatch
 ):
-    """One ``--full`` toggle drives BOTH envelope-slim AND body-truncation off."""
-    monkeypatch.setattr(
-        broker,
-        "poll_tasks",
-        lambda *_a, **_k: [_typed_task(text=LONG_BODY)],
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-            "--full",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    [rendered] = json.loads(result.output)
-    assert rendered["text"] == LONG_BODY
-
-
-def test_default_mode__body_truncation_still_applies_under_compact_envelope(
-    runner, session_id, agent_id, monkeypatch
-):
-    """Without ``--full``: compact envelope AND truncated body."""
     monkeypatch.setattr(
         broker,
         "poll_tasks",
@@ -323,137 +261,21 @@ def test_default_mode__body_truncation_still_applies_under_compact_envelope(
     assert rendered["text"] == TRUNCATED_BODY
 
 
-# ---------------------------------------------------------------------------
-# Text mode 2-line render
-# ---------------------------------------------------------------------------
-
-
-def test_text_mode_default__poll_output_is_two_lines_per_task(
-    runner, session_id, agent_id, monkeypatch
-):
-    """Text mode renders 2 lines per task (line 1 envelope, line 2 body)."""
-    monkeypatch.setattr(
-        broker,
-        "poll_tasks",
-        lambda *_a, **_k: [_typed_task(text="hello")],
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    # Surface 17 dropped the legacy "[N]" indexed-list prefix; items are
-    # now blank-line separated. Assert the body line "hello" and the
-    # per-task envelope line ("[<id8> | from:<id8> | <ts>]") both appear.
-    assert "hello" in result.output
-    assert re.search(r"\[abcdef01 \| from:[a-zA-Z0-9]{8} \| 2026-", result.output), (
-        f"compact envelope line missing; output was:\n{result.output}"
-    )
-
-
-def test_text_mode_full__poll_output_uses_legacy_verbose_layout(
-    runner, session_id, agent_id, monkeypatch
-):
+@pytest.mark.parametrize("scenario", ["default_two_lines", "full_legacy_verbose"])
+def test_text_mode(runner, session_id, agent_id, monkeypatch, scenario):
     monkeypatch.setattr(
         broker,
         "poll_tasks",
         lambda *_a, **_k: [_typed_task(text="hello world body")],
     )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "message",
-            "poll",
-            "--agent-id",
-            agent_id,
-            "--full",
-        ],
-    )
+    args = ["--session-id", session_id, "message", "poll", "--agent-id", agent_id]
+    if scenario == "full_legacy_verbose":
+        args.append("--full")
+    result = runner.invoke(cli, args)
     assert result.exit_code == 0, result.output
-    # Legacy verbose layout has dedicated lines for id/state/from/to/type/text.
-    for needle in ("id:", "state:", "from:", "to:", "type:", "text:"):
-        assert needle in result.output, (
-            f"legacy field label {needle!r} missing under --full; "
-            f"output was:\n{result.output}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# Cross-subcommand sanity: message show + send obey the same toggle
-# ---------------------------------------------------------------------------
-
-
-def test_compact_json__message_show_default_returns_compact_envelope(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "get_task",
-        lambda *_a, **_k: {
-            "task": _typed_task(task_id="aaaaaaaa11112222-tail", text=LONG_BODY)
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "show",
-            "--agent-id",
-            agent_id,
-            "--task-id",
-            "aaaaaaaa11112222-tail",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    parsed = json.loads(result.output)
-    inner = parsed["task"] if isinstance(parsed, dict) and "task" in parsed else parsed
-    assert "id" in inner
-    assert "from" in inner
-    assert "task_id" not in inner
-
-
-def test_compact_json__message_send_default_returns_compact_envelope(
-    runner, session_id, agent_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "send_message",
-        lambda *_a, **_k: {
-            "task": _typed_task(task_id="bbbbbbbb33334444-tail", text=LONG_BODY),
-            "notification_sent": True,
-        },
-    )
-    result = runner.invoke(
-        cli,
-        [
-            "--session-id",
-            session_id,
-            "--json",
-            "message",
-            "send",
-            "--agent-id",
-            agent_id,
-            "--to",
-            str(uuid.uuid4()),
-            "--text",
-            "ignored under stub",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    parsed = json.loads(result.output)
-    assert isinstance(parsed, dict)
-    inner = parsed.get("task", parsed)
-    assert "id" in inner
-    assert "task_id" not in inner
+    if scenario == "default_two_lines":
+        assert "hello world body" in result.output
+        assert re.search(r"\[abcdef01 \| from:[a-zA-Z0-9]{8} \| 2026-", result.output)
+    else:
+        for needle in ("id:", "state:", "from:", "to:", "type:", "text:"):
+            assert needle in result.output
