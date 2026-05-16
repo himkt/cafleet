@@ -293,8 +293,8 @@ Per project rule `.claude/rules/design-doc-numbering.md`, documentation MUST lan
 - [x] In `cafleet/tests/test_base_dir.py`, add unit tests:
   - Relative `task_name` resolves under the inferred repo root; folder is auto-created; anchor written with `source: "task-scope"`.
   - Same `task_name` invoked twice in a row: second call reads the existing anchor with `source: "anchor"`.
-  - Absolute `task_name` that lives inside `researches/<slug>/...` resolves to that slug folder.
-  - Absolute `task_name` that lives inside `design-docs/<NNNNNNN>-<slug>/...` resolves to that slug folder.
+  - ~~Absolute `task_name` that lives inside `researches/<slug>/...` resolves to that slug folder.~~ — superseded: under the bucket-agnostic resolver, any absolute path strictly under repo_root resolves to that path verbatim; consumers strip child filenames themselves.
+  - ~~Absolute `task_name` that lives inside `design-docs/<NNNNNNN>-<slug>/...` resolves to that slug folder.~~ — superseded as above.
   - Absolute `task_name` outside the inferred repo root (or equal to the repo root) returns `<unset>` (existing absolute-path-arg semantics preserved; the resolver does not walk skill-specific bucket patterns).
   - ~~Slug-shape rejection~~: superseded — the resolver has no slug-shape concept under the bucket-agnostic contract; consumers canonicalize their own argument before calling.
   - No-repo-root failure mode: CWD outside any git ancestor + positional `task_name` → exit 1 with the stderr message specified in § 2; no JSON payload even with `--json`. <!-- completed: 2026-05-16T01:14 (Tester Phase A; commit 9969ed7) -->

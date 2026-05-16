@@ -71,10 +71,10 @@ Step 5 (cleanup) is autonomous — no user prompt.
 2. Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract.
 3. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
 
-   - If `$ARGUMENTS` is a relative folder name (e.g. `my-topic`), call:
+   - If `$ARGUMENTS` is a relative folder name (e.g. `my-topic`), **canonicalize first**: strip a trailing `/report.md` if present, strip a leading `researches/` prefix if present, then prepend `researches/`. The resolver does no folding, so passing `researches/my-topic` raw would resolve `researches/researches/my-topic`. Call:
 
      ```bash
-     cafleet base-dir resolve researches/$ARGUMENTS --json
+     cafleet base-dir resolve researches/$CANONICAL_SLUG --json
      ```
 
    - If `$ARGUMENTS` is an absolute path (e.g. `/abs/path/to/researches/my-topic`), pass it through positionally:
