@@ -1,3 +1,9 @@
+"""Tests for ``cafleet session *`` CLI verbs.
+
+Per principle (ii)/(iii) of design 0000061: per-verb parametrized
+"shape + behaviour" pairs.
+"""
+
 import json
 import sqlite3
 import uuid
@@ -17,12 +23,6 @@ def _autouse_reset_engine(_reset_engine_singletons):
 
 @pytest.fixture(autouse=True)
 def _mock_tmux_for_session_create(monkeypatch):
-    """Let ``session create`` succeed without a real tmux pane.
-
-    Tests in this file predate the 0000026 director-context dependency,
-    so a blanket stub is applied here; the outside-tmux failure path is
-    covered explicitly in ``test_cli_session_bootstrap.py``.
-    """
     ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
     monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
     monkeypatch.setattr("cafleet.tmux.director_context", lambda: ctx)
@@ -45,9 +45,7 @@ def _seed_session(db_path, session_id: str, label: str | None = None) -> None:
         conn.close()
 
 
-def _seed_agent(
-    db_path, agent_id: str, session_id: str, *, status: str = "active"
-) -> None:
+def _seed_agent(db_path, agent_id: str, session_id: str, *, status: str = "active") -> None:
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
@@ -56,13 +54,8 @@ def _seed_agent(
             "registered_at, deregistered_at, agent_card_json) "
             "VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
             (
-                agent_id,
-                session_id,
-                f"agent-{agent_id[:8]}",
-                "test agent",
-                status,
-                "2026-01-01T00:00:00+00:00",
-                "{}",
+                agent_id, session_id, f"agent-{agent_id[:8]}", "test agent",
+                status, "2026-01-01T00:00:00+00:00", "{}",
             ),
         )
         conn.commit()
@@ -70,7 +63,7 @@ def _seed_agent(
         conn.close()
 
 
-def _session_rows(db_path) -> list[tuple]:
+def _session_rows(db_path):
     conn = sqlite3.connect(str(db_path))
     try:
         return conn.execute(
@@ -91,152 +84,78 @@ def _session_deleted_at(db_path, session_id: str) -> str | None:
     return None if row is None else row[0]
 
 
-def test_session_create__creates_session_with_uuid(tmp_path, monkeypatch):
+@pytest.fixture
+def fresh_db(tmp_path, monkeypatch):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
+        config.settings, "database_url", f"sqlite+aiosqlite:///{db_file}",
     )
     runner = CliRunner()
     _init_db(runner)
+    return db_file, runner
 
-    result = runner.invoke(cli, ["session", "create"])
 
+@pytest.mark.parametrize("output_mode", ["text", "json"])
+def test_session_create__happy_path(fresh_db, output_mode):
+    db_file, runner = fresh_db
+    args = ["session", "create"]
+    if output_mode == "json":
+        args.append("--json")
+    result = runner.invoke(cli, args)
     assert result.exit_code == 0, result.output
-    output = result.output.strip()
-    found_uuid = None
-    for word in output.split():
-        try:
-            uuid.UUID(word)
-            found_uuid = word
-            break
-        except ValueError:
-            continue
-    assert found_uuid is not None
-
+    if output_mode == "json":
+        data = json.loads(result.output)
+        assert "session_id" in data
+        uuid.UUID(data["session_id"])
+    else:
+        # Find a UUID in the text output.
+        found = next(
+            (w for w in result.output.split() if _is_uuid(w)),
+            None,
+        )
+        assert found is not None
     rows = _session_rows(db_file)
-    session_ids = [r[0] for r in rows]
-    assert found_uuid in session_ids
+    assert len(rows) == 1
 
 
-def test_session_create__creates_session_with_label(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
+def _is_uuid(word: str) -> bool:
+    try:
+        uuid.UUID(word)
+        return True
+    except ValueError:
+        return False
 
+
+def test_session_create__label_round_trip_and_default_none(fresh_db):
+    db_file, runner = fresh_db
     result = runner.invoke(cli, ["session", "create", "--label", "PR-42 review"])
-
     assert result.exit_code == 0, result.output
+    assert _session_rows(db_file)[0][1] == "PR-42 review"
 
-    rows = _session_rows(db_file)
-    assert len(rows) == 1
-    assert rows[0][1] == "PR-42 review"
-
-
-def test_session_create__creates_session_without_label(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    result = runner.invoke(cli, ["session", "create"])
-    assert result.exit_code == 0
-
-    rows = _session_rows(db_file)
-    assert len(rows) == 1
-    assert rows[0][1] is None
+    # Default label is None.
+    result2 = runner.invoke(cli, ["session", "create"])
+    assert result2.exit_code == 0
+    labels = sorted([r[1] or "" for r in _session_rows(db_file)])
+    assert "" in labels
+    assert "PR-42 review" in labels
 
 
-def test_session_create__creates_session_json_output(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    result = runner.invoke(cli, ["session", "create", "--label", "test", "--json"])
-
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-    assert "session_id" in data
-    uuid.UUID(data["session_id"])
-    assert data["label"] == "test"
-
-
-def test_session_create__each_create_mints_unique_id(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
+def test_session_create__each_create_mints_unique_id(fresh_db):
+    db_file, runner = fresh_db
     r1 = runner.invoke(cli, ["session", "create", "--json"])
     r2 = runner.invoke(cli, ["session", "create", "--json"])
-
-    assert r1.exit_code == 0
-    assert r2.exit_code == 0
-
-    id1 = json.loads(r1.output)["session_id"]
-    id2 = json.loads(r2.output)["session_id"]
-    assert id1 != id2
-
-    rows = _session_rows(db_file)
-    assert len(rows) == 2
+    assert json.loads(r1.output)["session_id"] != json.loads(r2.output)["session_id"]
+    assert len(_session_rows(db_file)) == 2
 
 
-def test_session_create__json_output_includes_administrator_agent_id(
-    tmp_path, monkeypatch
-):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
+def test_session_create__bootstraps_administrator_recorded_in_db(fresh_db):
+    db_file, runner = fresh_db
     result = runner.invoke(cli, ["session", "create", "--json"])
-
     assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-    assert "administrator_agent_id" in data
-    uuid.UUID(data["administrator_agent_id"])
-
-
-def test_session_create__json_administrator_agent_id_matches_db_row(
-    tmp_path, monkeypatch
-):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    result = runner.invoke(cli, ["session", "create", "--json"])
-    assert result.exit_code == 0
     data = json.loads(result.output)
     sid = data["session_id"]
     admin_id = data["administrator_agent_id"]
+    uuid.UUID(admin_id)
 
     conn = sqlite3.connect(str(db_file))
     try:
@@ -247,394 +166,117 @@ def test_session_create__json_administrator_agent_id_matches_db_row(
         ).fetchall()
     finally:
         conn.close()
-
     assert len(rows) == 1
-    _row_agent_id, row_session_id, row_name, row_status, row_card_json = rows[0]
-    assert row_session_id == sid
+    _aid, row_sid, row_name, row_status, row_card = rows[0]
+    assert row_sid == sid
     assert row_name == "Administrator"
     assert row_status == "active"
-    card = json.loads(row_card_json)
+    card = json.loads(row_card)
     assert card["cafleet"]["kind"] == "builtin-administrator"
 
 
-# NOTE: the former ``test_non_json_output_unchanged_single_uuid_line``
-# (design 0000025 §B guard that the text path prints exactly one line)
-# is deliberately removed here. Design 0000026 §CLI-surface supersedes
-# that contract with a 7-line text shape (session_id, director
-# agent_id, label, created_at, director_name, pane, administrator).
-# The equivalent assertions for the NEW shape live in
-# ``test_cli_session_bootstrap.py::test_session_create_text_output__*``.
-
-
-def test_session_list__lists_empty(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    result = runner.invoke(cli, ["session", "list"])
-
-    assert result.exit_code == 0, result.output
-
-
-def test_session_list__lists_sessions_with_agent_count(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
+@pytest.mark.parametrize("output_mode", ["text", "json"])
+def test_session_list__shape_and_agent_count(fresh_db, output_mode):
+    db_file, runner = fresh_db
     sid = str(uuid.uuid4())
     _seed_session(db_file, sid, label="test-session")
     _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
     _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
     _seed_agent(db_file, str(uuid.uuid4()), sid, status="deregistered")
 
-    result = runner.invoke(cli, ["session", "list"])
-
+    args = ["session", "list"]
+    if output_mode == "json":
+        args.append("--json")
+    result = runner.invoke(cli, args)
     assert result.exit_code == 0
-    assert sid in result.output
-    assert "test-session" in result.output
+    if output_mode == "json":
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["session_id"] == sid
+        assert data[0]["label"] == "test-session"
+        assert data[0]["agent_count"] == 2  # active only
+    else:
+        assert sid in result.output
+        assert "test-session" in result.output
 
 
-def test_session_list__lists_json_output(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
+@pytest.mark.parametrize(
+    ("scenario", "expected_exit", "expected_in", "expected_not_in"),
+    [
+        ("existing_active", 0, ["show-test"], ["deleted_at"]),
+        ("missing", 1, ["not found"], []),
+        ("soft_deleted_surfaces_deleted_at", 0, ["deleted_at:", "2026-04-16T10:00:00+00:00"], []),
+    ],
+)
+def test_session_show__shape_and_branches(
+    fresh_db, scenario, expected_exit, expected_in, expected_not_in
+):
+    db_file, runner = fresh_db
+    if scenario == "existing_active":
+        sid = str(uuid.uuid4())
+        _seed_session(db_file, sid, label="show-test")
+        target = sid
+    elif scenario == "missing":
+        target = str(uuid.uuid4())
+    else:
+        sid = str(uuid.uuid4())
+        _seed_session(db_file, sid, label="audit-me")
+        conn = sqlite3.connect(str(db_file))
+        try:
+            conn.execute(
+                "UPDATE sessions SET deleted_at = ? WHERE session_id = ?",
+                ("2026-04-16T10:00:00+00:00", sid),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        target = sid
 
-    sid = str(uuid.uuid4())
-    _seed_session(db_file, sid, label="json-test")
-    _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
-
-    result = runner.invoke(cli, ["session", "list", "--json"])
-
-    assert result.exit_code == 0
-    data = json.loads(result.output)
-    assert isinstance(data, list)
-    assert len(data) == 1
-    assert data[0]["session_id"] == sid
-    assert data[0]["label"] == "json-test"
-    assert data[0]["agent_count"] == 1
-
-
-def test_session_list__lists_multiple_sessions(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    sid_a = str(uuid.uuid4())
-    sid_b = str(uuid.uuid4())
-    _seed_session(db_file, sid_a, label="session-a")
-    _seed_session(db_file, sid_b, label="session-b")
-
-    result = runner.invoke(cli, ["session", "list", "--json"])
-
-    assert result.exit_code == 0
-    data = json.loads(result.output)
-    assert len(data) == 2
-    ids = {d["session_id"] for d in data}
-    assert sid_a in ids
-    assert sid_b in ids
+    result = runner.invoke(cli, ["session", "show", target])
+    assert result.exit_code == expected_exit, result.output
+    out = result.output.lower() if scenario == "missing" else result.output
+    for needle in expected_in:
+        check = needle.lower() if scenario == "missing" else needle
+        assert check in out
+    for needle in expected_not_in:
+        assert needle not in result.output
 
 
-def test_session_list__agent_count_only_active(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
+def test_session_delete__soft_deletes_and_marks_row(fresh_db):
+    db_file, runner = fresh_db
     sid = str(uuid.uuid4())
     _seed_session(db_file, sid)
     _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
-    _seed_agent(db_file, str(uuid.uuid4()), sid, status="deregistered")
-    _seed_agent(db_file, str(uuid.uuid4()), sid, status="deregistered")
-
-    result = runner.invoke(cli, ["session", "list", "--json"])
-
-    assert result.exit_code == 0
-    data = json.loads(result.output)
-    assert data[0]["agent_count"] == 1
-
-
-def test_session_show__shows_existing_session(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    sid = str(uuid.uuid4())
-    _seed_session(db_file, sid, label="show-test")
-
-    result = runner.invoke(cli, ["session", "show", sid])
-
-    assert result.exit_code == 0, result.output
-    assert sid in result.output
-    assert "show-test" in result.output
-
-
-def test_session_show__shows_json_output(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    sid = str(uuid.uuid4())
-    _seed_session(db_file, sid, label="json-show")
-
-    result = runner.invoke(cli, ["session", "show", sid, "--json"])
-
-    assert result.exit_code == 0
-    data = json.loads(result.output)
-    assert data["session_id"] == sid
-    assert data["label"] == "json-show"
-    assert "created_at" in data
-
-
-def test_session_show__missing_session_exits_nonzero(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    fake_id = str(uuid.uuid4())
-    result = runner.invoke(cli, ["session", "show", fake_id])
-
-    assert result.exit_code == 1, result.output
-    output_lower = result.output.lower()
-    assert "not found" in output_lower
-
-
-def test_session_show__soft_deleted_session_surfaces_deleted_at_line(
-    tmp_path, monkeypatch
-):
-    """Design 0000026: ``get_session`` intentionally returns soft-deleted
-    rows (exposing ``deleted_at`` for audit), but pre-fix the text output
-    dropped that field, so a soft-deleted session was visually identical
-    to an active one. This regression guard pins the new behavior: when
-    ``deleted_at`` is non-NULL, text output includes a ``deleted_at:``
-    line so users can distinguish it without parsing JSON.
-    """
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    sid = str(uuid.uuid4())
-    _seed_session(db_file, sid, label="audit-me")
-    # Flip deleted_at directly; bypass the cascade so the rest of the DB
-    # stays untouched and we only pin the show-output behavior.
-    conn = sqlite3.connect(str(db_file))
-    try:
-        conn.execute(
-            "UPDATE sessions SET deleted_at = ? WHERE session_id = ?",
-            ("2026-04-16T10:00:00+00:00", sid),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    result = runner.invoke(cli, ["session", "show", sid])
-
-    assert result.exit_code == 0, result.output
-    assert "deleted_at:" in result.output
-    assert "2026-04-16T10:00:00+00:00" in result.output
-
-
-def test_session_show__active_session_does_not_print_deleted_at_line(
-    tmp_path, monkeypatch
-):
-    """Symmetric check: an active (``deleted_at IS NULL``) session must
-    NOT show a ``deleted_at:`` line — otherwise users would see a blank
-    or misleading field on every healthy session.
-    """
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    sid = str(uuid.uuid4())
-    _seed_session(db_file, sid, label="live-session")
-
-    result = runner.invoke(cli, ["session", "show", sid])
-
-    assert result.exit_code == 0, result.output
-    assert "deleted_at" not in result.output
-
-
-def test_session_delete__deletes_session(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    sid = str(uuid.uuid4())
-    _seed_session(db_file, sid)
+    _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
 
     result = runner.invoke(cli, ["session", "delete", sid])
-
     assert result.exit_code == 0, result.output
-    # Soft delete: row stays but deleted_at is set, list_sessions hides it.
-    rows = _session_rows(db_file)
-    session_ids = [r[0] for r in rows]
-    assert sid in session_ids
+    # Row persists, deleted_at set.
+    assert sid in [r[0] for r in _session_rows(db_file)]
     assert _session_deleted_at(db_file, sid) is not None
     assert "deleted" in result.output.lower()
 
 
-def test_session_delete__delete_nonexistent_session(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
+def test_session_delete__nonexistent_session_handles_gracefully(fresh_db):
+    _db_file, runner = fresh_db
     fake_id = str(uuid.uuid4())
     result = runner.invoke(cli, ["session", "delete", fake_id])
-
+    # Either exits non-zero or returns SystemExit — never crashes uncleanly.
     assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
-def test_session_delete__delete_session_with_active_agents_succeeds(
-    tmp_path, monkeypatch
-):
-    """Session with active agents soft-deletes successfully and flips them
-    to ``deregistered``.
+def test_session_group_structure__subcommands_under_session_not_db(fresh_db):
+    _db_file, runner = fresh_db
+    help_result = runner.invoke(cli, ["session", "--help"])
+    assert help_result.exit_code == 0
+    out = help_result.output.lower()
+    for verb in ("create", "list", "show", "delete"):
+        assert verb in out
 
-    Design 0000026: ``session delete`` is a soft delete that deregisters
-    every active agent in the session (including the root Director and
-    the Administrator) in the same transaction. The session row stays
-    but gains a ``deleted_at`` timestamp.
-    """
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
+    # session is NOT exposed under db.
+    not_under_db = runner.invoke(cli, ["db", "session", "create"])
+    assert not_under_db.exit_code == 2, not_under_db.output
 
-    sid = str(uuid.uuid4())
-    _seed_session(db_file, sid)
-    _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
-    _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
-
-    result = runner.invoke(cli, ["session", "delete", sid])
-
-    assert result.exit_code == 0, result.output
-    assert _session_deleted_at(db_file, sid) is not None
-
-
-def test_session_delete__delete_session_with_deregistered_agents_succeeds(
-    tmp_path, monkeypatch
-):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    sid = str(uuid.uuid4())
-    _seed_session(db_file, sid)
-    _seed_agent(db_file, str(uuid.uuid4()), sid, status="deregistered")
-
-    result = runner.invoke(cli, ["session", "delete", sid])
-
-    assert result.exit_code == 0, result.output
-    assert _session_deleted_at(db_file, sid) is not None
-
-
-def test_db_init_no_auto_session__db_init_creates_no_sessions(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_db(runner)
-
-    rows = _session_rows(db_file)
+    # db init creates no sessions (regression guard).
+    rows = _session_rows(_db_file)
     assert len(rows) == 0
-
-
-def test_session_group_structure__session_group_exists(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    result = runner.invoke(cli, ["session", "--help"])
-
-    assert result.exit_code == 0, result.output
-    output_lower = result.output.lower()
-    assert "create" in output_lower
-    assert "list" in output_lower
-    assert "show" in output_lower
-    assert "delete" in output_lower
-
-
-def test_session_group_structure__session_is_not_under_db(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    result = runner.invoke(cli, ["db", "session", "create"])
-
-    assert result.exit_code == 2, result.output

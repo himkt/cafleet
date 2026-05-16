@@ -1,7 +1,7 @@
 # Test Suite Cleanup — Reduce Excessive Tests in cafleet/tests/
 
 **Status**: Approved
-**Progress**: 22/33 tasks complete
+**Progress**: 33/33 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -560,17 +560,17 @@ Net delete: 11.
 
 #### Step 6 tasks
 
-- [ ] Consolidate `test_broker_messaging.py` per § 6.1 <!-- completed: -->
-- [ ] Consolidate `test_broker_registry.py` per § 6.2 <!-- completed: -->
-- [ ] Consolidate `test_broker_webui.py` per § 6.3 <!-- completed: -->
-- [ ] Consolidate `test_session_bootstrap.py` per § 6.4 <!-- completed: -->
-- [ ] Consolidate `test_session_cli.py` per § 6.5 <!-- completed: -->
-- [ ] Consolidate `test_broker_administrator.py` per § 6.6 <!-- completed: -->
-- [ ] Consolidate `test_broker_inline_preview.py` per § 6.7 <!-- completed: -->
-- [ ] Consolidate `test_broker_member_activity.py` per § 6.8 <!-- completed: -->
-- [ ] Consolidate the 6 output-formatting files per § 6.9 (one PR, but commit may stage them together) <!-- completed: -->
-- [ ] Consolidate `test_server_cli.py` and `test_webui_api_format.py` per § 6.10 <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `refactor(tests): consolidate broker/output formatting tests (design 0000061 step 6)` <!-- completed: -->
+- [x] Consolidate `test_broker_messaging.py` per § 6.1 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_broker_registry.py` per § 6.2 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_broker_webui.py` per § 6.3 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_session_bootstrap.py` per § 6.4 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_session_cli.py` per § 6.5 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_broker_administrator.py` per § 6.6 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_broker_inline_preview.py` per § 6.7 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_broker_member_activity.py` per § 6.8 <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate the 6 output-formatting files per § 6.9 (one PR, but commit may stage them together) <!-- completed: 2026-05-16T10:31 -->
+- [x] Consolidate `test_server_cli.py` and `test_webui_api_format.py` per § 6.10 <!-- completed: 2026-05-16T10:31 -->
+- [x] Run `mise //cafleet:test`; commit as `refactor(tests): consolidate broker/output formatting tests (design 0000061 step 6)` <!-- completed: 2026-05-16T10:31 -->
 
 ### Step 7: Final verification
 
