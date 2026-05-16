@@ -308,6 +308,75 @@ def test_resolve_absolute_path_with_bad_design_docs_slug_returns_unset(tmp_path)
     assert not (bad_folder / ANCHOR_FILENAME).exists()
 
 
+def test_resolve_relative_slug_plus_filename_normalizes_to_slug_folder(tmp_path):
+    """Regression: a relative ``task_name`` like ``design-docs/<slug>/design-doc.md`` resolves
+    to the slug folder, not to a directory literally named ``design-doc.md`` (Copilot finding
+    on the §Spec 2 relative branch)."""
+    repo_root = _make_repo_root(tmp_path)
+    task_name = "design-docs/0000099-with-filename/design-doc.md"
+
+    result = resolve(task_name=task_name, cwd=repo_root)
+
+    expected_task_folder = repo_root / "design-docs" / "0000099-with-filename"
+    assert result == {
+        "status": "resolved",
+        "base": str(expected_task_folder),
+        "source": "task-scope",
+        "anchor": str(expected_task_folder / ANCHOR_FILENAME),
+        "task_name": task_name,
+    }
+    # The slug folder is created; no spurious "design-doc.md" directory
+    # appears underneath it.
+    assert expected_task_folder.is_dir()
+    nested_dir = expected_task_folder / "design-doc.md"
+    assert not nested_dir.exists() or nested_dir.is_file()
+
+
+def test_resolve_relative_researches_slug_plus_filename_normalizes_to_slug_folder(
+    tmp_path,
+):
+    """Regression: same as the design-docs case but for ``researches/<slug>/<file>``."""
+    repo_root = _make_repo_root(tmp_path)
+    task_name = "researches/topic-foo/00-scout-bar.md"
+
+    result = resolve(task_name=task_name, cwd=repo_root)
+
+    expected_task_folder = repo_root / "researches" / "topic-foo"
+    assert result == {
+        "status": "resolved",
+        "base": str(expected_task_folder),
+        "source": "task-scope",
+        "anchor": str(expected_task_folder / ANCHOR_FILENAME),
+        "task_name": task_name,
+    }
+    assert expected_task_folder.is_dir()
+
+
+def test_resolve_relative_traversal_escape_is_rejected(tmp_path):
+    """Regression: a relative ``task_name`` that resolves outside the repo root (e.g.
+    ``../outside``) is rejected with a ``RuntimeError`` rather than silently creating
+    directories and anchors elsewhere (Copilot finding on the §Spec 2 relative branch)."""
+    repo_root = _make_repo_root(tmp_path)
+
+    with pytest.raises(RuntimeError, match=r"resolves outside the repo root"):
+        resolve(task_name="../outside", cwd=repo_root)
+
+    # Nothing was created on the filesystem for the rejected path.
+    assert not (tmp_path / "outside").exists()
+    assert not (tmp_path / "outside" / ANCHOR_FILENAME).exists()
+
+
+def test_resolve_relative_traversal_via_intermediate_dot_dot_is_rejected(tmp_path):
+    """Regression: paths with ``..`` segments mid-path that still escape the repo root
+    are rejected even when the literal first segment looks innocuous."""
+    repo_root = _make_repo_root(tmp_path)
+
+    with pytest.raises(RuntimeError, match=r"resolves outside the repo root"):
+        resolve(task_name="design-docs/../../escaped", cwd=repo_root)
+
+    assert not (tmp_path / "escaped").exists()
+
+
 # ---------------------------------------------------------------------------
 # Unit tests — record()
 # ---------------------------------------------------------------------------

@@ -225,7 +225,7 @@ Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` se
     cafleet base-dir resolve design-docs/$ARGUMENTS --json
     ```
 
-  - Relative slug + filename (e.g. `0000060-foo/design-doc.md`): same form — the resolver joins the relpath against the inferred repo root and the trailing `design-doc.md` segment is preserved in the joined path.
+  - Relative slug + filename (e.g. `0000060-foo/design-doc.md`): same form — the resolver joins the relpath against the inferred repo root, then walks the result through the task-folder matcher and strips the trailing filename so `${BASE}` lands on the slug folder (`<repo>/design-docs/0000060-foo/`), not on a literal `design-doc.md` directory.
 
   - Absolute path (e.g. `/abs/path/to/design-docs/0000060-foo/design-doc.md`): pass through positionally:
 
