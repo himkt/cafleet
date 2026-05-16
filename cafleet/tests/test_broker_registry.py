@@ -149,7 +149,9 @@ def test_register_agent__validation_failures(scenario, expected_match):
     if scenario == "missing_session":
         with pytest.raises(click.UsageError, match=expected_match):
             broker.register_agent(
-                session_id=str(uuid.uuid4()), name="orphan", description="no session",
+                session_id=str(uuid.uuid4()),
+                name="orphan",
+                description="no session",
             )
         return
 
@@ -158,8 +160,10 @@ def test_register_agent__validation_failures(scenario, expected_match):
     if scenario == "director_not_found":
         placement = {
             "director_agent_id": str(uuid.uuid4()),
-            "tmux_session": "main", "tmux_window_id": "@1",
-            "tmux_pane_id": None, "coding_agent": "claude",
+            "tmux_session": "main",
+            "tmux_window_id": "@1",
+            "tmux_pane_id": None,
+            "coding_agent": "claude",
         }
         with pytest.raises(click.UsageError, match=expected_match):
             _register_agent(sid, name="orphan-member", placement=placement)
@@ -168,20 +172,26 @@ def test_register_agent__validation_failures(scenario, expected_match):
         session2 = _create_session()
         placement = {
             "director_agent_id": director["agent_id"],
-            "tmux_session": "main", "tmux_window_id": "@1",
-            "tmux_pane_id": None, "coding_agent": "claude",
+            "tmux_session": "main",
+            "tmux_window_id": "@1",
+            "tmux_pane_id": None,
+            "coding_agent": "claude",
         }
         with pytest.raises(click.UsageError, match=expected_match):
             _register_agent(
-                session2["session_id"], name="cross-session-member", placement=placement,
+                session2["session_id"],
+                name="cross-session-member",
+                placement=placement,
             )
     else:  # director_deregistered
         director = _register_agent(sid, name="director")
         broker.deregister_agent(director["agent_id"])
         placement = {
             "director_agent_id": director["agent_id"],
-            "tmux_session": "main", "tmux_window_id": "@1",
-            "tmux_pane_id": None, "coding_agent": "claude",
+            "tmux_session": "main",
+            "tmux_window_id": "@1",
+            "tmux_pane_id": None,
+            "coding_agent": "claude",
         }
         with pytest.raises(click.UsageError, match=expected_match):
             _register_agent(sid, name="late-member", placement=placement)
@@ -195,8 +205,10 @@ def test_register_agent__placement_stored_or_absent(with_placement):
         director = _register_agent(sid, name="director")
         placement = {
             "director_agent_id": director["agent_id"],
-            "tmux_session": "main", "tmux_window_id": "@1",
-            "tmux_pane_id": None, "coding_agent": "claude",
+            "tmux_session": "main",
+            "tmux_window_id": "@1",
+            "tmux_pane_id": None,
+            "coding_agent": "claude",
         }
         member = _register_agent(sid, name="member", placement=placement)
         fetched = broker.get_agent(member["agent_id"], sid)
@@ -302,7 +314,10 @@ def test_verify_agent_session__matrix(scenario, expected):
     elif scenario == "agent_in_different_session":
         other = _create_session()
         agent = _register_agent(sid, name="there")
-        assert broker.verify_agent_session(agent["agent_id"], other["session_id"]) is expected
+        assert (
+            broker.verify_agent_session(agent["agent_id"], other["session_id"])
+            is expected
+        )
     else:
         assert broker.verify_agent_session(str(uuid.uuid4()), sid) is expected
 
@@ -341,8 +356,10 @@ def test_deregister_agent__deletes_placement():
     director = _register_agent(sid, name="director")
     placement = {
         "director_agent_id": director["agent_id"],
-        "tmux_session": "main", "tmux_window_id": "@1",
-        "tmux_pane_id": None, "coding_agent": "claude",
+        "tmux_session": "main",
+        "tmux_window_id": "@1",
+        "tmux_pane_id": None,
+        "coding_agent": "claude",
     }
     member = _register_agent(sid, name="member", placement=placement)
     broker.deregister_agent(member["agent_id"])
@@ -358,8 +375,10 @@ def test_update_placement_pane_id__updates_and_persists():
     director = _register_agent(sid, name="director")
     placement = {
         "director_agent_id": director["agent_id"],
-        "tmux_session": "main", "tmux_window_id": "@1",
-        "tmux_pane_id": None, "coding_agent": "claude",
+        "tmux_session": "main",
+        "tmux_window_id": "@1",
+        "tmux_pane_id": None,
+        "coding_agent": "claude",
     }
     member = _register_agent(sid, name="member", placement=placement)
     result = broker.update_placement_pane_id(member["agent_id"], "%42")
@@ -388,8 +407,10 @@ def test_list_members__returns_members_with_placement_info():
     did = director["agent_id"]
     placement = {
         "director_agent_id": did,
-        "tmux_session": "main", "tmux_window_id": "@1",
-        "tmux_pane_id": None, "coding_agent": "claude",
+        "tmux_session": "main",
+        "tmux_window_id": "@1",
+        "tmux_pane_id": None,
+        "coding_agent": "claude",
     }
     _register_agent(sid, name="member-1", placement=placement)
     _register_agent(sid, name="member-2", placement=placement)
@@ -412,13 +433,17 @@ def test_list_members__per_director_isolation_and_empty_case():
     lonely = _register_agent(sid, name="lonely-director")
     placement1 = {
         "director_agent_id": dir1["agent_id"],
-        "tmux_session": "main", "tmux_window_id": "@1",
-        "tmux_pane_id": None, "coding_agent": "claude",
+        "tmux_session": "main",
+        "tmux_window_id": "@1",
+        "tmux_pane_id": None,
+        "coding_agent": "claude",
     }
     placement2 = {
         "director_agent_id": dir2["agent_id"],
-        "tmux_session": "main", "tmux_window_id": "@2",
-        "tmux_pane_id": None, "coding_agent": "claude",
+        "tmux_session": "main",
+        "tmux_window_id": "@2",
+        "tmux_pane_id": None,
+        "coding_agent": "claude",
     }
     _register_agent(sid, name="m1-of-d1", placement=placement1)
     _register_agent(sid, name="m2-of-d2", placement=placement2)

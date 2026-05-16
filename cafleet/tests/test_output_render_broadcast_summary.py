@@ -26,9 +26,16 @@ def test_broadcast_summary__exactly_typed_column_keys_no_recipient_ids_no_metada
     summary = result["task"]
 
     expected_keys = {
-        "task_id", "context_id", "from_agent_id", "to_agent_id",
-        "type", "created_at", "status_state", "status_timestamp",
-        "origin_task_id", "text",
+        "task_id",
+        "context_id",
+        "from_agent_id",
+        "to_agent_id",
+        "type",
+        "created_at",
+        "status_state",
+        "status_timestamp",
+        "origin_task_id",
+        "text",
     }
     extra = set(summary.keys()) - expected_keys
     assert not extra, f"unexpected extras: {sorted(extra)}"

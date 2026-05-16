@@ -49,11 +49,15 @@ def _create_session():
 
 def _register_member(session_id, name, director_id, pane):
     return broker.register_agent(
-        session_id=session_id, name=name, description=f"{name} description",
+        session_id=session_id,
+        name=name,
+        description=f"{name} description",
         placement={
             "director_agent_id": director_id,
-            "tmux_session": "main", "tmux_window_id": "@3",
-            "tmux_pane_id": pane, "coding_agent": "claude",
+            "tmux_session": "main",
+            "tmux_window_id": "@3",
+            "tmux_pane_id": pane,
+            "coding_agent": "claude",
         },
     )
 
@@ -67,14 +71,19 @@ def _setup_two_agents():
     return sid, sender["agent_id"], recipient["agent_id"]
 
 
-def test_send_message__auto_fire_invokes_inline_preview_with_full_kwargs(inline_preview_calls):
+def test_send_message__auto_fire_invokes_inline_preview_with_full_kwargs(
+    inline_preview_calls,
+):
     sid, sender, recipient = _setup_two_agents()
     result = broker.send_message(sid, sender, recipient, "Did the API change?")
     assert len(inline_preview_calls) == 1
     call = inline_preview_calls[0]
     kwargs = call["kwargs"]
-    pane_id = kwargs.get("target_pane_id") or (call["args"][0] if call["args"] else None)
-    assert isinstance(pane_id, str) and pane_id
+    pane_id = kwargs.get("target_pane_id") or (
+        call["args"][0] if call["args"] else None
+    )
+    assert isinstance(pane_id, str)
+    assert pane_id
     assert kwargs.get("task_id_8") == result["task"]["task_id"][:8]
     assert kwargs.get("sender_8") == sender[:8]
     assert kwargs.get("ts") == result["task"]["status_timestamp"]
@@ -82,7 +91,8 @@ def test_send_message__auto_fire_invokes_inline_preview_with_full_kwargs(inline_
 
 
 def test_send_message__sequential_sends_produce_distinct_previews_no_poll_trigger(
-    inline_preview_calls, poll_trigger_call_count,
+    inline_preview_calls,
+    poll_trigger_call_count,
 ):
     sid, sender, recipient = _setup_two_agents()
     broker.send_message(sid, sender, recipient, "msg1")
@@ -142,10 +152,15 @@ def test_send_message__skip_conditions(inline_preview_calls, scenario):
         director_id = s["director"]["agent_id"]
         sender = _register_member(sid, "sender", director_id, "%1")
         recipient = broker.register_agent(
-            session_id=sid, name="lonely", description="no placement",
+            session_id=sid,
+            name="lonely",
+            description="no placement",
         )
         sent = broker.send_message(
-            sid, sender["agent_id"], recipient["agent_id"], "to placement-less peer",
+            sid,
+            sender["agent_id"],
+            recipient["agent_id"],
+            "to placement-less peer",
         )
         # Message still landed in queue.
         [polled] = broker.poll_tasks(recipient["agent_id"])
@@ -155,7 +170,8 @@ def test_send_message__skip_conditions(inline_preview_calls, scenario):
 
 
 def test_send_message__auto_fire_never_calls_send_poll_trigger_on_success(
-    inline_preview_calls, poll_trigger_call_count,
+    inline_preview_calls,
+    poll_trigger_call_count,
 ):
     sid, sender, recipient = _setup_two_agents()
     broker.send_message(sid, sender, recipient, "hello")

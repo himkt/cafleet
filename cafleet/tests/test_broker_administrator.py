@@ -67,12 +67,22 @@ def test_administrator_kind_constant__value_and_type():
         ),
         (
             "missing_kind_field",
-            {"name": "x", "description": "y", "skills": [], "cafleet": {"other": "value"}},
+            {
+                "name": "x",
+                "description": "y",
+                "skills": [],
+                "cafleet": {"other": "value"},
+            },
             False,
         ),
         (
             "kind_is_user",
-            {"name": "x", "description": "y", "skills": [], "cafleet": {"kind": "user"}},
+            {
+                "name": "x",
+                "description": "y",
+                "skills": [],
+                "cafleet": {"kind": "user"},
+            },
             False,
         ),
     ],
@@ -121,13 +131,17 @@ def test_register_agent_placement__administrator_cannot_be_director(broker_sessi
     admin_id = session["administrator_agent_id"]
     placement = {
         "director_agent_id": admin_id,
-        "tmux_session": "main", "tmux_window_id": "@1",
-        "tmux_pane_id": None, "coding_agent": "claude",
+        "tmux_session": "main",
+        "tmux_window_id": "@1",
+        "tmux_pane_id": None,
+        "coding_agent": "claude",
     }
     with pytest.raises(click.ClickException) as exc_info:
         broker.register_agent(
-            session_id=sid, name="rejected-member",
-            description="should not exist", placement=placement,
+            session_id=sid,
+            name="rejected-member",
+            description="should not exist",
+            placement=placement,
         )
     assert "Administrator cannot be a director" in str(exc_info.value)
 
@@ -145,12 +159,16 @@ def test_register_agent_placement__user_director_path_still_works():
     )
     placement = {
         "director_agent_id": director["agent_id"],
-        "tmux_session": "main", "tmux_window_id": "@1",
-        "tmux_pane_id": None, "coding_agent": "claude",
+        "tmux_session": "main",
+        "tmux_window_id": "@1",
+        "tmux_pane_id": None,
+        "coding_agent": "claude",
     }
     member = broker.register_agent(
-        session_id=sid, name="member",
-        description="member of a user director", placement=placement,
+        session_id=sid,
+        name="member",
+        description="member of a user director",
+        placement=placement,
     )
     fetched = broker.get_agent(member["agent_id"], sid)
     assert fetched["placement"]["director_agent_id"] == director["agent_id"]

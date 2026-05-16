@@ -35,7 +35,10 @@ def test_list_session_agents__active_shape_required_keys_and_session_scope():
     result = broker.list_session_agents(sid)
     assert len(result) == 4
     assert {a["name"] for a in result} == {
-        "active-1", "active-2", "Director", "Administrator",
+        "active-1",
+        "active-2",
+        "Director",
+        "Administrator",
     }
     agent = result[0]
     for key in ("agent_id", "name", "description", "status", "registered_at"):
@@ -114,7 +117,9 @@ def test_list_inbox__shape_ordering_and_typed_columns():
 def test_list_inbox__filters_broadcast_summary_and_context_id_scope():
     sid, sender, _b_id, _ = _setup_three_agents()
     broker.broadcast_message(sid, sender, "broadcast")
-    summaries = [t for t in broker.list_inbox(sender) if t["type"] == "broadcast_summary"]
+    summaries = [
+        t for t in broker.list_inbox(sender) if t["type"] == "broadcast_summary"
+    ]
     assert summaries == []
 
     sid2, sender2, recipient2 = _setup_two_agents()
@@ -144,7 +149,9 @@ def test_list_sent__shape_ordering_and_typed_columns():
 def test_list_sent__filters_broadcast_summary_and_from_agent_scope():
     sid, sender, _b_id, _ = _setup_three_agents()
     broker.broadcast_message(sid, sender, "broadcast")
-    summaries = [t for t in broker.list_sent(sender) if t["type"] == "broadcast_summary"]
+    summaries = [
+        t for t in broker.list_sent(sender) if t["type"] == "broadcast_summary"
+    ]
     assert summaries == []
 
     sid2, sender2, recipient2 = _setup_two_agents()
@@ -185,8 +192,12 @@ def test_list_timeline__session_scope_and_limit():
     a2 = _register_agent(session_a["session_id"], name="a2")
     b1 = _register_agent(session_b["session_id"], name="b1")
     b2 = _register_agent(session_b["session_id"], name="b2")
-    broker.send_message(session_a["session_id"], a1["agent_id"], a2["agent_id"], "a-msg")
-    broker.send_message(session_b["session_id"], b1["agent_id"], b2["agent_id"], "b-msg")
+    broker.send_message(
+        session_a["session_id"], a1["agent_id"], a2["agent_id"], "a-msg"
+    )
+    broker.send_message(
+        session_b["session_id"], b1["agent_id"], b2["agent_id"], "b-msg"
+    )
     assert len(broker.list_timeline(session_a["session_id"])) == 1
     assert len(broker.list_timeline(session_b["session_id"])) == 1
 

@@ -37,14 +37,21 @@ def director_context():
 def _bootstrap(label=None, ctx=None, coding_agent="claude"):
     return broker.create_session(
         label=label,
-        director_context=ctx or DirectorContext(session="main", window_id="@1", pane_id="%0"),
+        director_context=ctx
+        or DirectorContext(session="main", window_id="@1", pane_id="%0"),
         coding_agent=coding_agent,
     )
 
 
 def test_bootstrap__top_level_envelope_and_director_subdict(director_context):
     result = _bootstrap(label="bootstrap-1", ctx=director_context)
-    for key in ("session_id", "label", "created_at", "administrator_agent_id", "director"):
+    for key in (
+        "session_id",
+        "label",
+        "created_at",
+        "administrator_agent_id",
+        "director",
+    ):
         assert key in result
     director = result["director"]
     for key in ("agent_id", "name", "description", "registered_at", "placement"):
@@ -113,7 +120,9 @@ def test_bootstrap__label_handling_and_unique_ids(director_context, label):
     assert r1["administrator_agent_id"] != r2["administrator_agent_id"]
 
 
-def test_bootstrap__atomic_rollback_on_failure(broker_session, director_context, monkeypatch):
+def test_bootstrap__atomic_rollback_on_failure(
+    broker_session, director_context, monkeypatch
+):
     class _BoomPlacement:
         def __init__(self, *args, **kwargs):
             raise RuntimeError("injected failure after INSERT agents")
@@ -121,7 +130,9 @@ def test_bootstrap__atomic_rollback_on_failure(broker_session, director_context,
     monkeypatch.setattr(broker, "AgentPlacement", _BoomPlacement)
     with pytest.raises(RuntimeError, match="injected failure"):
         broker.create_session(
-            label="rollback", director_context=director_context, coding_agent="claude",
+            label="rollback",
+            director_context=director_context,
+            coding_agent="claude",
         )
 
     with broker_session() as s:
@@ -196,15 +207,23 @@ def test_register_agent__rejects_dead_sessions(
 
     with pytest.raises(click.UsageError) as exc_info:
         broker.register_agent(
-            session_id=sid, name="late-comer", description="too late",
+            session_id=sid,
+            name="late-comer",
+            description="too late",
         )
     msg = str(exc_info.value)
-    assert expected_substring in msg.lower() if scenario == "unknown_session" else expected_substring in msg
+    assert (
+        expected_substring in msg.lower()
+        if scenario == "unknown_session"
+        else expected_substring in msg
+    )
     if must_not_contain is not None:
         assert must_not_contain not in msg.lower()
 
 
-def test_list_sessions__hides_soft_deleted_but_get_session_still_returns(director_context):
+def test_list_sessions__hides_soft_deleted_but_get_session_still_returns(
+    director_context,
+):
     alive = _bootstrap(label="alive", ctx=director_context)
     dead = _bootstrap(label="dead", ctx=director_context)
     broker.delete_session(dead["session_id"])
@@ -247,7 +266,9 @@ def test_deregister_agent__root_director_protected_non_root_unaffected(
 
     # Non-root member can still be deregistered.
     member = broker.register_agent(
-        session_id=sid, name="regular-member", description="regular",
+        session_id=sid,
+        name="regular-member",
+        description="regular",
     )
     assert broker.deregister_agent(member["agent_id"]) is True
 
@@ -258,20 +279,29 @@ def test_send_message__notification_invokes_inline_preview_with_director_pane(
     mock_preview = Mock(return_value=True)
     monkeypatch.setattr("cafleet.tmux.send_inline_preview", mock_preview)
     result = broker.create_session(
-        label="notify", director_context=director_context, coding_agent="claude",
+        label="notify",
+        director_context=director_context,
+        coding_agent="claude",
     )
     sid = result["session_id"]
     root_director_id = result["director"]["agent_id"]
     member = broker.register_agent(
-        session_id=sid, name="member", description="member under root",
+        session_id=sid,
+        name="member",
+        description="member under root",
         placement={
             "director_agent_id": root_director_id,
-            "tmux_session": "main", "tmux_window_id": "@1",
-            "tmux_pane_id": "%1", "coding_agent": "claude",
+            "tmux_session": "main",
+            "tmux_window_id": "@1",
+            "tmux_pane_id": "%1",
+            "coding_agent": "claude",
         },
     )
     response = broker.send_message(
-        sid, member["agent_id"], to=root_director_id, text="hi director",
+        sid,
+        member["agent_id"],
+        to=root_director_id,
+        text="hi director",
     )
     assert response["notification_sent"] is True
     assert mock_preview.call_count == 1

@@ -46,7 +46,9 @@ def happy_path_agent(monkeypatch):
 @pytest.fixture
 def choice_recorder(monkeypatch):
     calls: list[dict] = []
-    monkeypatch.setattr(tmux, "send_choice_key", lambda **kw: calls.append(kw), raising=False)
+    monkeypatch.setattr(
+        tmux, "send_choice_key", lambda **kw: calls.append(kw), raising=False
+    )
     return calls
 
 
@@ -54,7 +56,10 @@ def choice_recorder(monkeypatch):
 def freetext_recorder(monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(
-        tmux, "send_freetext_and_submit", lambda **kw: calls.append(kw), raising=False,
+        tmux,
+        "send_freetext_and_submit",
+        lambda **kw: calls.append(kw),
+        raising=False,
     )
     return calls
 
@@ -63,12 +68,17 @@ def _invoke(runner, session_id, *extra_args, json_output=False):
     args = ["--session-id", session_id]
     if json_output:
         args.append("--json")
-    args.extend([
-        "member", "send-input",
-        "--agent-id", DIRECTOR_ID,
-        "--member-id", MEMBER_ID,
-        *extra_args,
-    ])
+    args.extend(
+        [
+            "member",
+            "send-input",
+            "--agent-id",
+            DIRECTOR_ID,
+            "--member-id",
+            MEMBER_ID,
+            *extra_args,
+        ]
+    )
     return runner.invoke(cli, args)
 
 
@@ -138,22 +148,30 @@ def test_authorization_boundary(
     if agent_return is None:
         monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
     elif agent_return == "placement_none_sentinel":
-        monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
+        monkeypatch.setattr(
+            broker, "get_agent", lambda *_a, **_kw: _agent(placement=None)
+        )
     elif agent_return == "cross_director_sentinel":
         monkeypatch.setattr(
-            broker, "get_agent",
+            broker,
+            "get_agent",
             lambda *_a, **_kw: _agent(
                 placement=_placement(director_agent_id=OTHER_DIRECTOR_ID)
             ),
         )
     else:  # pending_pane
         monkeypatch.setattr(
-            broker, "get_agent",
+            broker,
+            "get_agent",
             lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
         )
     result = _invoke(runner, session_id, "--choice", "1")
     assert result.exit_code == 1, result.output
-    out = (result.output or "").lower() if scenario == "missing_agent" else (result.output or "")
+    out = (
+        (result.output or "").lower()
+        if scenario == "missing_agent"
+        else (result.output or "")
+    )
     for needle in expected_substrings:
         haystack = out
         needle_check = needle.lower() if scenario == "missing_agent" else needle
@@ -183,8 +201,13 @@ def test_choice_dispatch__matching_digit_and_pane(
     ],
 )
 def test_freetext_dispatch__literal_passthrough(
-    runner, session_id, happy_path_agent, freetext_recorder, choice_recorder,
-    scenario, payload,
+    runner,
+    session_id,
+    happy_path_agent,
+    freetext_recorder,
+    choice_recorder,
+    scenario,
+    payload,
 ):
     result = _invoke(runner, session_id, "--freetext", payload)
     assert result.exit_code == 0, result.output
@@ -209,8 +232,15 @@ def test_freetext_dispatch__literal_passthrough(
     ],
 )
 def test_output_format__text(
-    runner, session_id, happy_path_agent, choice_recorder, freetext_recorder,
-    action, args_extra, expected_substring, recorder_fixture,
+    runner,
+    session_id,
+    happy_path_agent,
+    choice_recorder,
+    freetext_recorder,
+    action,
+    args_extra,
+    expected_substring,
+    recorder_fixture,
 ):
     result = _invoke(runner, session_id, *args_extra)
     assert result.exit_code == 0, result.output
@@ -225,8 +255,15 @@ def test_output_format__text(
     ],
 )
 def test_output_format__json_envelope(
-    runner, session_id, happy_path_agent, choice_recorder, freetext_recorder,
-    scenario, args_extra, expected_action, expected_value,
+    runner,
+    session_id,
+    happy_path_agent,
+    choice_recorder,
+    freetext_recorder,
+    scenario,
+    args_extra,
+    expected_action,
+    expected_value,
 ):
     result = _invoke(runner, session_id, *args_extra, json_output=True)
     assert result.exit_code == 0, result.output
@@ -252,7 +289,13 @@ def test_bash_flag_removed__old_bash_flag_form_errors_with_no_such_option(
     ("scenario", "payload", "expect_exit", "expect_in", "expect_not_in"),
     [
         ("leading_bang_rejected", "!ls", 2, ["--freetext may not start with"], []),
-        ("whitespace_then_bang_rejected", "  !ls", 2, ["--freetext may not start with"], []),
+        (
+            "whitespace_then_bang_rejected",
+            "  !ls",
+            2,
+            ["--freetext may not start with"],
+            [],
+        ),
         ("lone_bang_rejected", "!", 2, ["--freetext may not start with"], []),
         (
             "error_wording_backend_neutral",
@@ -267,8 +310,15 @@ def test_bash_flag_removed__old_bash_flag_form_errors_with_no_such_option(
     ],
 )
 def test_freetext_bang_rejection(
-    runner, session_id, happy_path_agent, freetext_recorder,
-    scenario, payload, expect_exit, expect_in, expect_not_in,
+    runner,
+    session_id,
+    happy_path_agent,
+    freetext_recorder,
+    scenario,
+    payload,
+    expect_exit,
+    expect_in,
+    expect_not_in,
 ):
     result = _invoke(runner, session_id, "--freetext", payload)
     assert result.exit_code == expect_exit, result.output

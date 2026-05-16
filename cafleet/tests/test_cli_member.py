@@ -107,16 +107,18 @@ def _invoke_member_create(
     args = ["--session-id", session_id]
     if json_output:
         args.append("--json")
-    args.extend([
-        "member",
-        "create",
-        "--agent-id",
-        director_id,
-        "--name",
-        name,
-        "--description",
-        f"{name} for tests",
-    ])
+    args.extend(
+        [
+            "member",
+            "create",
+            "--agent-id",
+            director_id,
+            "--name",
+            name,
+            "--description",
+            f"{name} for tests",
+        ]
+    )
     if coding_agent != "claude":
         args.extend(["--coding-agent", coding_agent])
     if prompt_file is not None:
@@ -135,7 +137,11 @@ def _invoke_member_create(
             ("message", "for", "{agent_id}"),
             "agent_id_only",
         ),
-        ("custom_path_no_placeholders_passthrough", ("no", "placeholders", "here"), "passthrough"),
+        (
+            "custom_path_no_placeholders_passthrough",
+            ("no", "placeholders", "here"),
+            "passthrough",
+        ),
         (
             "doubled_brace_collapses_to_single",
             ("data", "is", "{{not", "a", "placeholder}}", "closed"),
@@ -144,8 +150,14 @@ def _invoke_member_create(
     ],
 )
 def test_resolve_prompt__substitution_matrix(
-    ctx, director_agent_id, new_agent_id, session_id, mock_get_agent,
-    scenario, prompt_argv, asserts,
+    ctx,
+    director_agent_id,
+    new_agent_id,
+    session_id,
+    mock_get_agent,
+    scenario,
+    prompt_argv,
+    asserts,
 ):
     result = _resolve_prompt(
         ctx,
@@ -172,14 +184,23 @@ def test_resolve_prompt__substitution_matrix(
 @pytest.mark.parametrize(
     ("scenario", "prompt_argv", "expect_message_contains"),
     [
-        ("unknown_placeholder", ("hello", "{foo}"), ("foo", "{session_id}", "{agent_id}")),
+        (
+            "unknown_placeholder",
+            ("hello", "{foo}"),
+            ("foo", "{session_id}", "{agent_id}"),
+        ),
         ("unmatched_brace", ("hello", "{unclosed"), ("{{", "}}")),
         ("attribute_access", ("hello", "{agent_id.foo}"), ("{{", "}}")),
     ],
 )
 def test_resolve_prompt__malformed_raises_usage_error(
-    ctx, director_agent_id, new_agent_id, mock_get_agent,
-    scenario, prompt_argv, expect_message_contains,
+    ctx,
+    director_agent_id,
+    new_agent_id,
+    mock_get_agent,
+    scenario,
+    prompt_argv,
+    expect_message_contains,
 ):
     with pytest.raises(click.UsageError) as exc_info:
         _resolve_prompt(
@@ -194,11 +215,16 @@ def test_resolve_prompt__malformed_raises_usage_error(
 
 
 def test_prompt_file__relative_path_rejected(
-    bootstrapped_session, split_window_recorder, stub_coding_agent_binaries,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
 ):
     session_id, director_id, runner = bootstrapped_session
     result = _invoke_member_create(
-        runner, session_id, director_id, prompt_file="./foo.md",
+        runner,
+        session_id,
+        director_id,
+        prompt_file="./foo.md",
     )
     assert result.exit_code == 2, result.output
     assert "--prompt-file requires an absolute path" in result.output
@@ -210,7 +236,12 @@ def test_prompt_file__relative_path_rejected(
     ("scenario", "fixture_setup", "expected_exit", "expected_substring"),
     [
         ("not_found", "missing", 1, "file does not exist or is not a regular file"),
-        ("directory_not_regular", "directory", 1, "file does not exist or is not a regular file"),
+        (
+            "directory_not_regular",
+            "directory",
+            1,
+            "file does not exist or is not a regular file",
+        ),
         ("empty_zero_bytes", "empty", 1, "file is empty"),
         ("empty_whitespace_only", "whitespace", 1, "file is empty"),
         ("invalid_utf8", "bad_utf8", 1, "file is not valid UTF-8"),
@@ -218,8 +249,14 @@ def test_prompt_file__relative_path_rejected(
     ],
 )
 def test_prompt_file__error_variants(
-    tmp_path, bootstrapped_session, split_window_recorder, stub_coding_agent_binaries,
-    scenario, fixture_setup, expected_exit, expected_substring,
+    tmp_path,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    scenario,
+    fixture_setup,
+    expected_exit,
+    expected_substring,
 ):
     session_id, director_id, runner = bootstrapped_session
     if fixture_setup == "missing":
@@ -241,7 +278,10 @@ def test_prompt_file__error_variants(
         target.write_text("hi {unknown}", encoding="utf-8")
 
     result = _invoke_member_create(
-        runner, session_id, director_id, prompt_file=str(target),
+        runner,
+        session_id,
+        director_id,
+        prompt_file=str(target),
     )
     assert result.exit_code == expected_exit, result.output
     assert expected_substring in result.output
@@ -253,7 +293,10 @@ def test_prompt_file__error_variants(
     reason="POSIX-only test; root bypasses the read-permission check",
 )
 def test_prompt_file__not_readable_exits_with_message(
-    tmp_path, bootstrapped_session, split_window_recorder, stub_coding_agent_binaries,
+    tmp_path,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
 ):
     session_id, director_id, runner = bootstrapped_session
     unreadable_file = tmp_path / "unreadable.md"
@@ -261,7 +304,10 @@ def test_prompt_file__not_readable_exits_with_message(
     unreadable_file.chmod(0o000)
     try:
         result = _invoke_member_create(
-            runner, session_id, director_id, prompt_file=str(unreadable_file),
+            runner,
+            session_id,
+            director_id,
+            prompt_file=str(unreadable_file),
         )
         assert result.exit_code == 1, result.output
         assert "file is not readable" in result.output
@@ -272,14 +318,20 @@ def test_prompt_file__not_readable_exits_with_message(
 
 
 def test_prompt_file__mutually_exclusive_with_positional(
-    tmp_path, bootstrapped_session, split_window_recorder, stub_coding_agent_binaries,
+    tmp_path,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
 ):
     session_id, director_id, runner = bootstrapped_session
     prompt_path = tmp_path / "prompt.md"
     prompt_path.write_text("hello", encoding="utf-8")
     result = _invoke_member_create(
-        runner, session_id, director_id,
-        prompt_file=str(prompt_path), inline_prompt="hello positional",
+        runner,
+        session_id,
+        director_id,
+        prompt_file=str(prompt_path),
+        inline_prompt="hello positional",
     )
     assert result.exit_code == 2, result.output
     assert (
@@ -300,14 +352,20 @@ def test_prompt_file__parity_with_positional_form(tmp_path):
     ctx.obj = {"session_id": session_id, "json_output": False}
 
     inline_result = _resolve_prompt(
-        ctx, director_agent_id=director_id, new_agent_id=new_agent_id,
-        prompt_argv=tuple(template.split(" ")), prompt_file=None,
+        ctx,
+        director_agent_id=director_id,
+        new_agent_id=new_agent_id,
+        prompt_argv=tuple(template.split(" ")),
+        prompt_file=None,
     )
     prompt_path = tmp_path / "prompt.md"
     prompt_path.write_text(template, encoding="utf-8")
     file_result = _resolve_prompt(
-        ctx, director_agent_id=director_id, new_agent_id=new_agent_id,
-        prompt_argv=(), prompt_file=str(prompt_path),
+        ctx,
+        director_agent_id=director_id,
+        new_agent_id=new_agent_id,
+        prompt_argv=(),
+        prompt_file=str(prompt_path),
     )
 
     assert inline_result == file_result
@@ -323,14 +381,21 @@ def test_prompt_file__parity_with_positional_form(tmp_path):
     ],
 )
 def test_prompt_file__preserves_whitespace_verbatim(
-    tmp_path, bootstrapped_session, split_window_recorder, stub_coding_agent_binaries,
-    scenario, content,
+    tmp_path,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    scenario,
+    content,
 ):
     session_id, director_id, runner = bootstrapped_session
     prompt_path = tmp_path / "prompt.md"
     prompt_path.write_text(content, encoding="utf-8")
     result = _invoke_member_create(
-        runner, session_id, director_id, prompt_file=str(prompt_path),
+        runner,
+        session_id,
+        director_id,
+        prompt_file=str(prompt_path),
     )
     assert result.exit_code == 0, result.output
     assert split_window_recorder[0]["command"][-1] == content
@@ -338,15 +403,22 @@ def test_prompt_file__preserves_whitespace_verbatim(
 
 @pytest.mark.parametrize("coding_agent", ["claude", "codex"])
 def test_member_create__backend_spawn_argv_shape(
-    tmp_path, bootstrapped_session, split_window_recorder, stub_coding_agent_binaries,
+    tmp_path,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
     coding_agent,
 ):
     session_id, director_id, runner = bootstrapped_session
     prompt_path = tmp_path / "prompt.md"
-    prompt_path.write_text(f"session={{session_id}}", encoding="utf-8")
+    prompt_path.write_text("session={session_id}", encoding="utf-8")
     result = _invoke_member_create(
-        runner, session_id, director_id, coding_agent=coding_agent,
-        prompt_file=str(prompt_path), name=f"Member-{coding_agent}",
+        runner,
+        session_id,
+        director_id,
+        coding_agent=coding_agent,
+        prompt_file=str(prompt_path),
+        name=f"Member-{coding_agent}",
     )
     assert result.exit_code == 0, result.output
     command = split_window_recorder[0]["command"]
@@ -372,13 +444,19 @@ def test_member_create__backend_spawn_argv_shape(
 
 
 def test_member_create__codex_placement_records_codex(
-    bootstrapped_session, split_window_recorder, stub_coding_agent_binaries,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
 ):
     session_id, director_id, runner = bootstrapped_session
     result = _invoke_member_create(
-        runner, session_id, director_id,
-        coding_agent="codex", inline_prompt="hello",
-        name="Codex-Member", json_output=True,
+        runner,
+        session_id,
+        director_id,
+        coding_agent="codex",
+        inline_prompt="hello",
+        name="Codex-Member",
+        json_output=True,
     )
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
@@ -387,13 +465,20 @@ def test_member_create__codex_placement_records_codex(
 
 @pytest.mark.parametrize("coding_agent", ["claude", "codex"])
 def test_member_create__binary_missing_exits_with_backend_specific_message(
-    bootstrapped_session, split_window_recorder, monkeypatch, coding_agent,
+    bootstrapped_session,
+    split_window_recorder,
+    monkeypatch,
+    coding_agent,
 ):
     monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: None)
     session_id, director_id, runner = bootstrapped_session
     result = _invoke_member_create(
-        runner, session_id, director_id,
-        coding_agent=coding_agent, inline_prompt="hello", name=coding_agent.capitalize(),
+        runner,
+        session_id,
+        director_id,
+        coding_agent=coding_agent,
+        inline_prompt="hello",
+        name=coding_agent.capitalize(),
     )
     assert result.exit_code == 1, result.output
     assert f"binary {coding_agent} not found on PATH" in (result.output or "")
@@ -401,11 +486,17 @@ def test_member_create__binary_missing_exits_with_backend_specific_message(
 
 
 def test_member_create__claude_default_injects_dontask_permission_mode(
-    bootstrapped_session, split_window_recorder, stub_coding_agent_binaries,
+    bootstrapped_session,
+    split_window_recorder,
+    stub_coding_agent_binaries,
 ):
     session_id, director_id, runner = bootstrapped_session
     result = _invoke_member_create(
-        runner, session_id, director_id, inline_prompt="hello", name="Drafter",
+        runner,
+        session_id,
+        director_id,
+        inline_prompt="hello",
+        name="Drafter",
     )
     assert result.exit_code == 0, result.output
     command = split_window_recorder[0]["command"]

@@ -18,7 +18,9 @@ from cafleet.config import Settings
         ("invalid_non_integer_raises", "not-a-number", "raises"),
     ],
 )
-def test_settings__max_text_len_env_handling(monkeypatch, scenario, env_value, expected_value_or_raises):
+def test_settings__max_text_len_env_handling(
+    monkeypatch, scenario, env_value, expected_value_or_raises
+):
     if env_value is None:
         monkeypatch.delenv("CAFLEET_MAX_TEXT_LEN", raising=False)
     else:
@@ -37,9 +39,25 @@ def test_settings__max_text_len_env_handling(monkeypatch, scenario, env_value, e
 
 
 @pytest.mark.parametrize(
-    ("scenario", "settings_max", "body_len", "explicit_limit", "full", "expected_len", "starts_with"),
+    (
+        "scenario",
+        "settings_max",
+        "body_len",
+        "explicit_limit",
+        "full",
+        "expected_len",
+        "starts_with",
+    ),
     [
-        ("default_settings_200_truncates_250_body", 200, 250, None, False, 201, "a" * 200),
+        (
+            "default_settings_200_truncates_250_body",
+            200,
+            250,
+            None,
+            False,
+            201,
+            "a" * 200,
+        ),
         ("default_settings_200_passes_150_body", 200, 150, None, False, 150, "a" * 150),
         ("settings_50_truncates_100_body", 50, 100, None, False, 51, "a" * 50),
         ("explicit_limit_overrides_settings", 200, 100, 10, False, 11, "a" * 10),
@@ -47,7 +65,14 @@ def test_settings__max_text_len_env_handling(monkeypatch, scenario, env_value, e
     ],
 )
 def test_truncate_text__settings_default_and_explicit_limit(
-    monkeypatch, scenario, settings_max, body_len, explicit_limit, full, expected_len, starts_with
+    monkeypatch,
+    scenario,
+    settings_max,
+    body_len,
+    explicit_limit,
+    full,
+    expected_len,
+    starts_with,
 ):
     monkeypatch.setattr("cafleet.config.settings.max_text_len", settings_max)
     body = "a" * body_len
@@ -78,7 +103,12 @@ def test_truncate_text__suffix_is_horizontal_ellipsis_u2026_and_multibyte_safe()
 
 
 @pytest.mark.parametrize(
-    ("scenario", "description", "expected_present_in_render", "expected_absent_in_render"),
+    (
+        "scenario",
+        "description",
+        "expected_present_in_render",
+        "expected_absent_in_render",
+    ),
     [
         ("long_truncated_to_60_plus_ellipsis", "x" * 200, "x" * 60 + "…", "x" * 200),
         ("short_passes_through", "y" * 30, "y" * 30, "…"),
@@ -105,8 +135,10 @@ def test_truncate_task_text__full_true_bypasses_and_default_uses_settings(monkey
     # full=True bypasses regardless of settings.
     monkeypatch.setattr("cafleet.config.settings.max_text_len", 10)
     task = {
-        "task_id": "tid", "context_id": "ctx",
-        "from_agent_id": "fid", "to_agent_id": "tid",
+        "task_id": "tid",
+        "context_id": "ctx",
+        "from_agent_id": "fid",
+        "to_agent_id": "tid",
         "type": "unicast",
         "created_at": "2026-05-05T12:00:00.000000+00:00",
         "status_state": "input_required",

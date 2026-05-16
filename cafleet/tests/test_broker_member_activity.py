@@ -29,11 +29,15 @@ def _bootstrap_session():
 def _register_member(session_id, director_id, name, pane):
     placement = {
         "director_agent_id": director_id,
-        "tmux_session": "main", "tmux_window_id": "@3",
-        "tmux_pane_id": pane, "coding_agent": "claude",
+        "tmux_session": "main",
+        "tmux_window_id": "@3",
+        "tmux_pane_id": pane,
+        "coding_agent": "claude",
     }
     agent = broker.register_agent(
-        session_id=session_id, name=name, description=f"member {name}",
+        session_id=session_id,
+        name=name,
+        description=f"member {name}",
         placement=placement,
     )
     return agent["agent_id"]
@@ -90,7 +94,9 @@ def test_list_members_with_activity__last_ack_tracks_real_acks_only():
 
 
 @pytest.mark.parametrize("column", ["last_recv", "last_ack"])
-def test_list_members_with_activity__broadcast_summary_filtered_from_proxy_columns(column):
+def test_list_members_with_activity__broadcast_summary_filtered_from_proxy_columns(
+    column,
+):
     sid, director_id, a, _b, _c = _setup_three_member_team()
     # Alice broadcasts; her own broadcast_summary lands in her context with
     # status_state='completed'. Neither last_recv nor last_ack should register it.

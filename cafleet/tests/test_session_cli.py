@@ -45,7 +45,9 @@ def _seed_session(db_path, session_id: str, label: str | None = None) -> None:
         conn.close()
 
 
-def _seed_agent(db_path, agent_id: str, session_id: str, *, status: str = "active") -> None:
+def _seed_agent(
+    db_path, agent_id: str, session_id: str, *, status: str = "active"
+) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
@@ -54,8 +56,13 @@ def _seed_agent(db_path, agent_id: str, session_id: str, *, status: str = "activ
             "registered_at, deregistered_at, agent_card_json) "
             "VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
             (
-                agent_id, session_id, f"agent-{agent_id[:8]}", "test agent",
-                status, "2026-01-01T00:00:00+00:00", "{}",
+                agent_id,
+                session_id,
+                f"agent-{agent_id[:8]}",
+                "test agent",
+                status,
+                "2026-01-01T00:00:00+00:00",
+                "{}",
             ),
         )
         conn.commit()
@@ -88,7 +95,9 @@ def _session_deleted_at(db_path, session_id: str) -> str | None:
 def fresh_db(tmp_path, monkeypatch):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
-        config.settings, "database_url", f"sqlite+aiosqlite:///{db_file}",
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
     )
     runner = CliRunner()
     _init_db(runner)
@@ -205,7 +214,12 @@ def test_session_list__shape_and_agent_count(fresh_db, output_mode):
     [
         ("existing_active", 0, ["show-test"], ["deleted_at"]),
         ("missing", 1, ["not found"], []),
-        ("soft_deleted_surfaces_deleted_at", 0, ["deleted_at:", "2026-04-16T10:00:00+00:00"], []),
+        (
+            "soft_deleted_surfaces_deleted_at",
+            0,
+            ["deleted_at:", "2026-04-16T10:00:00+00:00"],
+            [],
+        ),
     ],
 )
 def test_session_show__shape_and_branches(

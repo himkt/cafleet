@@ -71,9 +71,9 @@ def test_director_context__parses_display_message_and_requires_tmux_pane(monkeyp
 
 def test_split_window__argv_construction(monkeypatch, run_recorder):
     # 1. Returns captured pane id and includes -P/-F/-e flags.
-    monkeypatch.setattr(tmux, "_run", lambda args, **_kw: (
-        run_recorder.append(list(args)) or "%7\n"
-    ))
+    monkeypatch.setattr(
+        tmux, "_run", lambda args, **_kw: run_recorder.append(list(args)) or "%7\n"
+    )
     pane_id = tmux.split_window(
         target_window_id="@3",
         env={"CAFLEET_DATABASE_URL": "sqlite+aiosqlite:////tmp/registry.db"},
@@ -96,9 +96,9 @@ def test_split_window__argv_construction(monkeypatch, run_recorder):
 
     # 3. Command is appended directly after env flags.
     run_recorder.clear()
-    monkeypatch.setattr(tmux, "_run", lambda args, **_kw: (
-        run_recorder.append(list(args)) or "%8\n"
-    ))
+    monkeypatch.setattr(
+        tmux, "_run", lambda args, **_kw: run_recorder.append(list(args)) or "%8\n"
+    )
     tmux.split_window(
         target_window_id="@5",
         env={},
@@ -386,10 +386,12 @@ def test_wait_for_pane_gone__polling_branches(
     call_count = {"n": 0}
 
     if pane_exists_seq == "always_true":
+
         def fake_pane_exists(*, target_pane_id):
             poll_calls.append(target_pane_id)
             return True
     elif pane_exists_seq == "raise_on_second":
+
         def fake_pane_exists(*, target_pane_id):
             call_count["n"] += 1
             if call_count["n"] >= 2:
@@ -409,9 +411,7 @@ def test_wait_for_pane_gone__polling_branches(
             tmux.wait_for_pane_gone(target_pane_id="%7", timeout=2.0, interval=0.5)
         assert call_count["n"] == 2
     else:
-        result = tmux.wait_for_pane_gone(
-            target_pane_id="%7", timeout=2.0, interval=0.5
-        )
+        result = tmux.wait_for_pane_gone(target_pane_id="%7", timeout=2.0, interval=0.5)
         assert result is expected_result
         assert len(poll_calls) == expected_poll_count
 
@@ -427,7 +427,12 @@ def test_wait_for_pane_gone__polling_branches(
         ("rejects_carriage_return", "carriage\rreturn", "(?i)newline", None),
         ("rejects_crlf", "mixed\r\nCRLF", "(?i)newline", None),
         ("rejects_empty", "", "send_bash_command: command may not be empty", None),
-        ("rejects_blank_space", "   ", "send_bash_command: command may not be empty", None),
+        (
+            "rejects_blank_space",
+            "   ",
+            "send_bash_command: command may not be empty",
+            None,
+        ),
         ("rejects_tab", "\t", "send_bash_command: command may not be empty", None),
     ],
 )

@@ -63,7 +63,12 @@ def _typed_task(
 
 @pytest.mark.parametrize(
     "scenario",
-    ["default_off_compact", "explicit_on_indented", "can_precede_session_id", "listed_in_root_help"],
+    [
+        "default_off_compact",
+        "explicit_on_indented",
+        "can_precede_session_id",
+        "listed_in_root_help",
+    ],
 )
 def test_pretty_flag(runner, session_id, agent_id, monkeypatch, scenario):
     if scenario == "listed_in_root_help":
@@ -72,18 +77,40 @@ def test_pretty_flag(runner, session_id, agent_id, monkeypatch, scenario):
         assert "--pretty" in result.output
         return
 
-    monkeypatch.setattr(broker, "poll_tasks", lambda *_a, **_k: [_typed_task(text="short")])
+    monkeypatch.setattr(
+        broker, "poll_tasks", lambda *_a, **_k: [_typed_task(text="short")]
+    )
     if scenario == "default_off_compact":
-        args = ["--session-id", session_id, "--json", "message", "poll", "--agent-id", agent_id]
+        args = [
+            "--session-id",
+            session_id,
+            "--json",
+            "message",
+            "poll",
+            "--agent-id",
+            agent_id,
+        ]
     elif scenario == "explicit_on_indented":
         args = [
-            "--session-id", session_id, "--json", "--pretty",
-            "message", "poll", "--agent-id", agent_id,
+            "--session-id",
+            session_id,
+            "--json",
+            "--pretty",
+            "message",
+            "poll",
+            "--agent-id",
+            agent_id,
         ]
     else:  # can_precede_session_id
         args = [
-            "--pretty", "--session-id", session_id, "--json",
-            "message", "poll", "--agent-id", agent_id,
+            "--pretty",
+            "--session-id",
+            session_id,
+            "--json",
+            "message",
+            "poll",
+            "--agent-id",
+            agent_id,
         ]
 
     result = runner.invoke(cli, args)
@@ -106,7 +133,8 @@ def test_compact_json__envelope_shape(
 ):
     if subcommand == "poll":
         monkeypatch.setattr(
-            broker, "poll_tasks",
+            broker,
+            "poll_tasks",
             lambda *_a, **_k: [
                 _typed_task(
                     task_id="abcdef0123456789-tail-stuff-here",
@@ -117,40 +145,55 @@ def test_compact_json__envelope_shape(
         args = ["message", "poll", "--agent-id", agent_id]
     elif subcommand == "show":
         monkeypatch.setattr(
-            broker, "get_task",
+            broker,
+            "get_task",
             lambda *_a, **_k: {
                 "task": _typed_task(task_id="abcdef0123456789-tail-stuff-here")
             },
         )
         args = [
-            "message", "show", "--agent-id", agent_id,
-            "--task-id", "abcdef0123456789-tail",
+            "message",
+            "show",
+            "--agent-id",
+            agent_id,
+            "--task-id",
+            "abcdef0123456789-tail",
         ]
     else:  # send
         monkeypatch.setattr(
-            broker, "send_message",
+            broker,
+            "send_message",
             lambda *_a, **_k: {
                 "task": _typed_task(task_id="abcdef0123456789-tail-stuff-here"),
                 "notification_sent": True,
             },
         )
         args = [
-            "message", "send", "--agent-id", agent_id,
-            "--to", str(uuid.uuid4()), "--text", "ignored",
+            "message",
+            "send",
+            "--agent-id",
+            agent_id,
+            "--to",
+            str(uuid.uuid4()),
+            "--text",
+            "ignored",
         ]
 
     result = runner.invoke(cli, ["--session-id", session_id, "--json", *args])
     assert result.exit_code == 0, result.output
     parsed = json.loads(result.output)
-    if subcommand == "poll":
-        rendered = parsed[0]
-    else:
-        rendered = parsed.get("task", parsed)
+    rendered = parsed[0] if subcommand == "poll" else parsed.get("task", parsed)
     assert set(rendered.keys()).issubset({"id", "from", "ts", "text", "kind", "origin"})
     assert rendered["id"] == "abcdef01"
     for forbidden in (
-        "task_id", "context_id", "from_agent_id", "to_agent_id",
-        "status_state", "created_at", "origin_task_id", "type",
+        "task_id",
+        "context_id",
+        "from_agent_id",
+        "to_agent_id",
+        "status_state",
+        "created_at",
+        "origin_task_id",
+        "type",
     ):
         assert forbidden not in rendered
 
@@ -163,14 +206,23 @@ def test_full_flag__restores_long_form(
     runner, session_id, agent_id, monkeypatch, scenario
 ):
     monkeypatch.setattr(
-        broker, "poll_tasks",
-        lambda *_a, **_k: [_typed_task(task_id="abcdef0123456789-tail", text=LONG_BODY)],
+        broker,
+        "poll_tasks",
+        lambda *_a, **_k: [
+            _typed_task(task_id="abcdef0123456789-tail", text=LONG_BODY)
+        ],
     )
     result = runner.invoke(
         cli,
         [
-            "--session-id", session_id, "--json", "message", "poll",
-            "--agent-id", agent_id, "--full",
+            "--session-id",
+            session_id,
+            "--json",
+            "message",
+            "poll",
+            "--agent-id",
+            agent_id,
+            "--full",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -188,14 +240,20 @@ def test_default_mode__body_truncation_under_compact_envelope(
     runner, session_id, agent_id, monkeypatch
 ):
     monkeypatch.setattr(
-        broker, "poll_tasks",
+        broker,
+        "poll_tasks",
         lambda *_a, **_k: [_typed_task(text=LONG_BODY)],
     )
     result = runner.invoke(
         cli,
         [
-            "--session-id", session_id, "--json", "message", "poll",
-            "--agent-id", agent_id,
+            "--session-id",
+            session_id,
+            "--json",
+            "message",
+            "poll",
+            "--agent-id",
+            agent_id,
         ],
     )
     assert result.exit_code == 0, result.output
@@ -206,7 +264,8 @@ def test_default_mode__body_truncation_under_compact_envelope(
 @pytest.mark.parametrize("scenario", ["default_two_lines", "full_legacy_verbose"])
 def test_text_mode(runner, session_id, agent_id, monkeypatch, scenario):
     monkeypatch.setattr(
-        broker, "poll_tasks",
+        broker,
+        "poll_tasks",
         lambda *_a, **_k: [_typed_task(text="hello world body")],
     )
     args = ["--session-id", session_id, "message", "poll", "--agent-id", agent_id]

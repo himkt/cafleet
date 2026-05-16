@@ -26,8 +26,10 @@ def _sample_agent_with_placement() -> dict:
         "kind": "user",
         "placement": {
             "director_agent_id": "12121212-1212-1212-1212-121212121212",
-            "tmux_session": "main", "tmux_window_id": "@3",
-            "tmux_pane_id": "%17", "coding_agent": "claude",
+            "tmux_session": "main",
+            "tmux_window_id": "@3",
+            "tmux_pane_id": "%17",
+            "coding_agent": "claude",
             "created_at": "2026-05-05T10:00:00.000000+00:00",
         },
     }
@@ -57,7 +59,9 @@ def test_render_agent_slim__shape_id_name_status_coding_agent_no_legacy_keys():
         assert forbidden not in rendered
 
     # No placement source → coding_agent absent.
-    rendered_no_placement = output.render_agent(_sample_agent_without_placement(), full=False)
+    rendered_no_placement = output.render_agent(
+        _sample_agent_without_placement(), full=False
+    )
     assert "coding_agent" not in rendered_no_placement
 
 
@@ -89,7 +93,9 @@ def test_render_agent_full__returns_unchanged_source():
 def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
-        config.settings, "database_url", f"sqlite+aiosqlite:///{db_file}",
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
     )
     monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
     monkeypatch.setattr("cafleet.tmux.director_context", lambda: _FAKE_DIRECTOR_CTX)

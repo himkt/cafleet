@@ -190,9 +190,7 @@ def test_list_apis__no_metadata_wrapping_and_filter_broadcast_summary(api):
         tasks = rows
     else:
         rows = broker.list_timeline(sid)
-        tasks = [
-            r.get("task") if isinstance(r.get("task"), dict) else r for r in rows
-        ]
+        tasks = [r.get("task") if isinstance(r.get("task"), dict) else r for r in rows]
 
     assert len(tasks) >= 1
     for task in tasks:

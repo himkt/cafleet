@@ -70,7 +70,14 @@ def test_format_member__compact_includes_backend_and_value():
 
 def test_format_member_list__header_and_row_shape_and_empty_message():
     result = format_member_list(
-        [_list_entry(agent_id="agent-001", name="Claude-B", coding_agent="claude", pane_id="%7")]
+        [
+            _list_entry(
+                agent_id="agent-001",
+                name="Claude-B",
+                coding_agent="claude",
+                pane_id="%7",
+            )
+        ]
     )
     assert "backend" in result.lower()
     data_lines = [line for line in result.split("\n") if "Claude-B" in line]
@@ -85,13 +92,30 @@ def test_format_member_list__header_and_row_shape_and_empty_message():
     [
         ("none_passthrough", None, {"full": False, "limit": 10}, None),
         ("empty_passthrough", "", {"full": False, "limit": 10}, ""),
-        ("exact_limit_unchanged", "abcdefghij", {"full": False, "limit": 10}, "abcdefghij"),
-        ("over_limit_truncated", "abcdefghijk", {"full": False, "limit": 10}, "abcdefghij…"),
+        (
+            "exact_limit_unchanged",
+            "abcdefghij",
+            {"full": False, "limit": 10},
+            "abcdefghij",
+        ),
+        (
+            "over_limit_truncated",
+            "abcdefghijk",
+            {"full": False, "limit": 10},
+            "abcdefghij…",
+        ),
         (
             "multibyte_truncated_by_codepoint",
-            "あいうえおかきくけこさ", {"full": False, "limit": 10}, "あいうえおかきくけこ…",
+            "あいうえおかきくけこさ",
+            {"full": False, "limit": 10},
+            "あいうえおかきくけこ…",
         ),
-        ("full_passthrough_long", "abcdefghijklmnopqrstuvwxyz", {"full": True}, "abcdefghijklmnopqrstuvwxyz"),
+        (
+            "full_passthrough_long",
+            "abcdefghijklmnopqrstuvwxyz",
+            {"full": True},
+            "abcdefghijklmnopqrstuvwxyz",
+        ),
         ("full_passthrough_none", None, {"full": True}, None),
         ("custom_limit_three", "abcdef", {"full": False, "limit": 3}, "abc…"),
     ],
@@ -108,11 +132,13 @@ def test_truncate_text__matrix(scenario, value, kwargs, expected):
         ("short_text_unchanged", lambda: _task("hello"), "hello"),
     ],
 )
-def test_truncate_task_text__single_envelope_shapes(scenario, make_input, expected_text):
+def test_truncate_task_text__single_envelope_shapes(
+    scenario, make_input, expected_text
+):
     data = make_input()
     result = truncate_task_text(data, full=False, limit=10)
     assert result is data
-    task = data["task"] if "task" in data else data
+    task = data.get("task", data)
     assert task["text"] == expected_text
 
 

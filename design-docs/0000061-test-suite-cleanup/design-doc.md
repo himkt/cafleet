@@ -574,7 +574,7 @@ Net delete: 11.
 
 ### Step 7: Final verification
 
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`. Confirm all exit 0 and the test count is in the **≤ 400** band (stretch: ≤ 340 if Step 5 incidental dedup achieved ≥ 30%). Tally the per-file post-cleanup counts in a comment on the design doc PR for the reviewer. <!-- completed: -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`. Confirm all exit 0 and the test count is in the **≤ 400** band (stretch: ≤ 340 if Step 5 incidental dedup achieved ≥ 30%). Tally the per-file post-cleanup counts in a comment on the design doc PR for the reviewer. <!-- completed: 2026-05-16T10:36 -->
 
 ---
 

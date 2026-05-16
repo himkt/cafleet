@@ -47,10 +47,19 @@ def test_server_help__shows_host_port_and_session_id_accepted_silently():
 @pytest.mark.parametrize(
     ("scenario", "argv", "expected_exit", "expected_host", "expected_port"),
     [
-        ("default_flags_match_settings", [], 0, settings.broker_host, settings.broker_port),
+        (
+            "default_flags_match_settings",
+            [],
+            0,
+            settings.broker_host,
+            settings.broker_port,
+        ),
         (
             "explicit_flags_override_defaults",
-            ["--host", "0.0.0.0", "--port", "9000"], 0, "0.0.0.0", 9000,
+            ["--host", "0.0.0.0", "--port", "9000"],
+            0,
+            "0.0.0.0",
+            9000,
         ),
         ("non_integer_port_rejected", ["--port", "not-a-port"], 2, None, None),
     ],
@@ -67,7 +76,9 @@ def test_server_command__flag_parsing(
         assert kwargs["port"] == expected_port
 
 
-def test_server_command__app_string_first_positional_and_handler_reached(uvicorn_recorder):
+def test_server_command__app_string_first_positional_and_handler_reached(
+    uvicorn_recorder,
+):
     runner = CliRunner()
     result = runner.invoke(cli, ["server"])
     assert result.exit_code == 0, result.output
@@ -85,9 +96,15 @@ def test_server_command__app_string_first_positional_and_handler_reached(uvicorn
     ],
 )
 def test_webui_dist_warning__matrix(
-    tmp_path, monkeypatch, capsys, scenario, default_dir_exists, explicit_override, expect_warning
+    tmp_path,
+    monkeypatch,
+    capsys,
+    scenario,
+    default_dir_exists,
+    explicit_override,
+    expect_warning,
 ):
-    _WARNING_PREFIX = "warning: admin WebUI is not built"
+    warning_prefix = "warning: admin WebUI is not built"
     if default_dir_exists:
         built = tmp_path / "dist"
         built.mkdir()
@@ -96,7 +113,8 @@ def test_webui_dist_warning__matrix(
     elif explicit_override:
         explicit_path = tmp_path / "never_built"
         monkeypatch.setattr(
-            server_mod, "default_webui_dist_dir",
+            server_mod,
+            "default_webui_dist_dir",
             lambda: tmp_path / "default_also_missing",
         )
         server_mod.create_app(webui_dist_dir=str(explicit_path))
@@ -107,27 +125,44 @@ def test_webui_dist_warning__matrix(
 
     captured = capsys.readouterr()
     if expect_warning:
-        assert _WARNING_PREFIX in captured.err
+        assert warning_prefix in captured.err
         assert "mise //admin:build" in captured.err
         assert "/ui/" in captured.err
     else:
-        assert _WARNING_PREFIX not in captured.err
+        assert warning_prefix not in captured.err
 
 
 @pytest.mark.parametrize(
     ("scenario", "env_var", "env_value", "expected_attr", "expected_value"),
     [
         ("broker_host_default_loopback", None, None, "broker_host", "127.0.0.1"),
-        ("broker_host_env_override", "CAFLEET_BROKER_HOST", "10.20.30.40", "broker_host", "10.20.30.40"),
+        (
+            "broker_host_env_override",
+            "CAFLEET_BROKER_HOST",
+            "10.20.30.40",
+            "broker_host",
+            "10.20.30.40",
+        ),
         ("broker_port_default_8000", None, None, "broker_port", 8000),
-        ("broker_port_env_override", "CAFLEET_BROKER_PORT", "9876", "broker_port", 9876),
+        (
+            "broker_port_env_override",
+            "CAFLEET_BROKER_PORT",
+            "9876",
+            "broker_port",
+            9876,
+        ),
     ],
 )
 def test_settings__broker_host_port_defaults_and_env(
     monkeypatch, scenario, env_var, env_value, expected_attr, expected_value
 ):
     # Clear both prefixed and unprefixed forms.
-    for var in ("BROKER_HOST", "BROKER_PORT", "CAFLEET_BROKER_HOST", "CAFLEET_BROKER_PORT"):
+    for var in (
+        "BROKER_HOST",
+        "BROKER_PORT",
+        "CAFLEET_BROKER_HOST",
+        "CAFLEET_BROKER_PORT",
+    ):
         monkeypatch.delenv(var, raising=False)
     if env_var is not None:
         monkeypatch.setenv(env_var, env_value)

@@ -17,8 +17,17 @@ def _autouse_broker(broker_session):
 
 
 _EXPECTED_KEYS = {
-    "task_id", "from_agent_id", "from_agent_name", "to_agent_id", "to_agent_name",
-    "type", "status", "created_at", "status_timestamp", "origin_task_id", "body",
+    "task_id",
+    "from_agent_id",
+    "from_agent_name",
+    "to_agent_id",
+    "to_agent_name",
+    "type",
+    "status",
+    "created_at",
+    "status_timestamp",
+    "origin_task_id",
+    "body",
 }
 
 
@@ -39,12 +48,16 @@ def _two_agents():
 
 def _typed_column_row(**overrides) -> dict:
     base = {
-        "task_id": "tid-1", "context_id": "a2",
-        "from_agent_id": "a1", "to_agent_id": "a2",
-        "type": "unicast", "status_state": "input_required",
+        "task_id": "tid-1",
+        "context_id": "a2",
+        "from_agent_id": "a1",
+        "to_agent_id": "a2",
+        "type": "unicast",
+        "status_state": "input_required",
         "created_at": "2026-04-30T01:00:00+00:00",
         "status_timestamp": "2026-04-30T02:00:00+00:00",
-        "origin_task_id": None, "text": "hello world",
+        "origin_task_id": None,
+        "text": "hello world",
     }
     base.update(overrides)
     return base
@@ -64,9 +77,14 @@ def test_format_messages__empty_rows_skips_lookup(monkeypatch):
 
 def test_format_messages__shape_field_mapping_and_batched_lookup(monkeypatch):
     rows = [
-        _typed_column_row(task_id="tid-2", from_agent_id="b1", to_agent_id="b2",
-                          status_state="completed", origin_task_id="origin-1",
-                          text="timeline body"),
+        _typed_column_row(
+            task_id="tid-2",
+            from_agent_id="b1",
+            to_agent_id="b2",
+            status_state="completed",
+            origin_task_id="origin-1",
+            text="timeline body",
+        ),
         _typed_column_row(task_id="tid-3", from_agent_id="b1", to_agent_id="b3"),
     ]
     lookup_calls = []
@@ -121,6 +139,9 @@ def test_format_messages__end_to_end_against_real_broker(source, expected_body):
     assert msg["type"] == "unicast"
     assert msg["status"] == "input_required"
     assert msg["body"] == expected_body
-    assert isinstance(msg["task_id"], str) and msg["task_id"]
-    assert isinstance(msg["created_at"], str) and msg["created_at"]
-    assert isinstance(msg["status_timestamp"], str) and msg["status_timestamp"]
+    assert isinstance(msg["task_id"], str)
+    assert msg["task_id"]
+    assert isinstance(msg["created_at"], str)
+    assert msg["created_at"]
+    assert isinstance(msg["status_timestamp"], str)
+    assert msg["status_timestamp"]

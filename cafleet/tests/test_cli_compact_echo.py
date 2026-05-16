@@ -100,32 +100,45 @@ def _ping_setup(monkeypatch):
 def _setup_command(monkeypatch, command, session_id, agent_id):
     if command == "broadcast":
         monkeypatch.setattr(
-            broker, "broadcast_message",
+            broker,
+            "broadcast_message",
             lambda *_a, **_k: _broadcast_summary_result(recipient_count=3),
         )
         return ["message", "broadcast", "--agent-id", agent_id, "--text", "hello"]
     if command == "send":
         monkeypatch.setattr(
-            broker, "send_message",
+            broker,
+            "send_message",
             lambda *_a, **_k: {
                 "task": _typed_task(text="hello"),
                 "notification_sent": True,
             },
         )
         return [
-            "message", "send", "--agent-id", agent_id,
-            "--to", str(uuid.uuid4()), "--text", "hello",
+            "message",
+            "send",
+            "--agent-id",
+            agent_id,
+            "--to",
+            str(uuid.uuid4()),
+            "--text",
+            "hello",
         ]
     if command == "ack":
         monkeypatch.setattr(
-            broker, "ack_task",
+            broker,
+            "ack_task",
             lambda *_a, **_k: {
                 "task": _typed_task(text="hello", status_state="completed"),
             },
         )
         return [
-            "message", "ack", "--agent-id", agent_id,
-            "--task-id", "abcdef0123456789-tail",
+            "message",
+            "ack",
+            "--agent-id",
+            agent_id,
+            "--task-id",
+            "abcdef0123456789-tail",
         ]
     # ping
     _ping_setup(monkeypatch)
@@ -148,8 +161,14 @@ def _setup_command(monkeypatch, command, session_id, agent_id):
     ],
 )
 def test_command_echo__one_line_vs_multi_line_shape(
-    runner, session_id, agent_id, monkeypatch,
-    command, mode, expect_oneline, must_not_contain,
+    runner,
+    session_id,
+    agent_id,
+    monkeypatch,
+    command,
+    mode,
+    expect_oneline,
+    must_not_contain,
 ):
     args = _setup_command(monkeypatch, command, session_id, agent_id)
     if mode == "quiet":
@@ -172,7 +191,8 @@ def test_broadcast_default__canonical_summary_pattern(
     runner, session_id, agent_id, monkeypatch
 ):
     monkeypatch.setattr(
-        broker, "broadcast_message",
+        broker,
+        "broadcast_message",
         lambda *_a, **_k: _broadcast_summary_result(
             summary_id="abcdef0123456789-tail", recipient_count=3
         ),
@@ -180,8 +200,14 @@ def test_broadcast_default__canonical_summary_pattern(
     result = runner.invoke(
         cli,
         [
-            "--session-id", session_id, "message", "broadcast",
-            "--agent-id", agent_id, "--text", "hello",
+            "--session-id",
+            session_id,
+            "message",
+            "broadcast",
+            "--agent-id",
+            agent_id,
+            "--text",
+            "hello",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -195,14 +221,22 @@ def test_broadcast_full__multi_line_per_recipient_envelopes(
     runner, session_id, agent_id, monkeypatch
 ):
     monkeypatch.setattr(
-        broker, "broadcast_message",
+        broker,
+        "broadcast_message",
         lambda *_a, **_k: _broadcast_summary_result(recipient_count=3),
     )
     result = runner.invoke(
         cli,
         [
-            "--session-id", session_id, "message", "broadcast",
-            "--agent-id", agent_id, "--text", "hello", "--full",
+            "--session-id",
+            session_id,
+            "message",
+            "broadcast",
+            "--agent-id",
+            agent_id,
+            "--text",
+            "hello",
+            "--full",
         ],
     )
     assert result.exit_code == 0, result.output

@@ -30,9 +30,16 @@ def test_send_message__returns_typed_envelope_with_task_and_notification():
     result = broker.send_message(sid, sender, recipient, "Did the API change?")
     task = result["task"]
     assert set(task.keys()) == {
-        "task_id", "context_id", "from_agent_id", "to_agent_id",
-        "type", "created_at", "status_state", "status_timestamp",
-        "origin_task_id", "text",
+        "task_id",
+        "context_id",
+        "from_agent_id",
+        "to_agent_id",
+        "type",
+        "created_at",
+        "status_state",
+        "status_timestamp",
+        "origin_task_id",
+        "text",
     }
     assert task["type"] == "unicast"
     assert task["from_agent_id"] == sender
@@ -107,12 +114,26 @@ def test_broadcast_message__delivery_shape_and_origin_link():
     ("scenario", "expected_text", "extra_assertion"),
     [
         ("no_other_agents", "Broadcast sent to 0 recipients", None),
-        ("admin_exclusion_from_user_broadcast", "Broadcast sent to 3 recipients", "admin_excluded"),
-        ("admin_broadcast_reaches_all", "Broadcast sent to 3 recipients", "admin_reaches_all"),
-        ("bootstrap_session_admin_reaches_only_director", "Broadcast sent to 1 recipients", "only_director"),
+        (
+            "admin_exclusion_from_user_broadcast",
+            "Broadcast sent to 3 recipients",
+            "admin_excluded",
+        ),
+        (
+            "admin_broadcast_reaches_all",
+            "Broadcast sent to 3 recipients",
+            "admin_reaches_all",
+        ),
+        (
+            "bootstrap_session_admin_reaches_only_director",
+            "Broadcast sent to 1 recipients",
+            "only_director",
+        ),
     ],
 )
-def test_broadcast_message__recipient_selection_matrix(scenario, expected_text, extra_assertion):
+def test_broadcast_message__recipient_selection_matrix(
+    scenario, expected_text, extra_assertion
+):
     if scenario == "no_other_agents":
         session = _create_session()
         sid = session["session_id"]
@@ -139,7 +160,9 @@ def test_broadcast_message__recipient_selection_matrix(scenario, expected_text, 
         user_b = _register_agent(sid, name="user-b")
         result = broker.broadcast_message(sid, sender["agent_id"], "hey")
         assert result[0]["task"]["text"] == expected_text
-        admin_unicasts = [t for t in broker.poll_tasks(admin_id) if t["type"] == "unicast"]
+        admin_unicasts = [
+            t for t in broker.poll_tasks(admin_id) if t["type"] == "unicast"
+        ]
         assert admin_unicasts == []
         assert len(broker.poll_tasks(user_a["agent_id"])) == 1
         assert len(broker.poll_tasks(user_b["agent_id"])) == 1
@@ -168,7 +191,14 @@ def test_poll_tasks__empty_and_non_empty_shape():
     sid, sender, recipient = _setup_two_agents()
     broker.send_message(sid, sender, recipient, "Hello")
     [task] = broker.poll_tasks(recipient)
-    for key in ("task_id", "context_id", "status_state", "from_agent_id", "type", "text"):
+    for key in (
+        "task_id",
+        "context_id",
+        "status_state",
+        "from_agent_id",
+        "type",
+        "text",
+    ):
         assert key in task
 
 
@@ -280,7 +310,9 @@ def test_ack_cancel__authorization_boundary(action, wrong_actor_role):
         ("cancel", "ack", "Cannot ACK"),
     ],
 )
-def test_ack_cancel__double_action_rejected(first_action, second_action, expected_match):
+def test_ack_cancel__double_action_rejected(
+    first_action, second_action, expected_match
+):
     sid, sender, recipient = _setup_two_agents()
     sent = broker.send_message(sid, sender, recipient, "body")
     tid = sent["task"]["task_id"]
@@ -302,7 +334,14 @@ def test_get_task__returns_full_typed_envelope():
     result = broker.get_task(sid, tid)
     task = result["task"]
     assert task["task_id"] == tid
-    for key in ("task_id", "context_id", "status_state", "from_agent_id", "type", "text"):
+    for key in (
+        "task_id",
+        "context_id",
+        "status_state",
+        "from_agent_id",
+        "type",
+        "text",
+    ):
         assert key in task
 
 

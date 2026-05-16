@@ -82,8 +82,14 @@ def test_member_capture__default_lines_and_flag_aliases(
     result = runner.invoke(
         cli,
         [
-            "--session-id", sid, "member", "capture",
-            "--agent-id", director_id, "--member-id", member_id,
+            "--session-id",
+            sid,
+            "member",
+            "capture",
+            "--agent-id",
+            director_id,
+            "--member-id",
+            member_id,
             *extra_args,
         ],
     )
@@ -119,14 +125,25 @@ def test_member_capture__default_lines_and_flag_aliases(
     ],
 )
 def test_member_capture__ansi_handling(
-    bootstrapped_member, monkeypatch,
-    scenario, raw, ansi_flag, expect_in, expect_not_in,
+    bootstrapped_member,
+    monkeypatch,
+    scenario,
+    raw,
+    ansi_flag,
+    expect_in,
+    expect_not_in,
 ):
     sid, director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
-        "--session-id", sid, "member", "capture",
-        "--agent-id", director_id, "--member-id", member_id,
+        "--session-id",
+        sid,
+        "member",
+        "capture",
+        "--agent-id",
+        director_id,
+        "--member-id",
+        member_id,
     ]
     if ansi_flag:
         args.append("--ansi")
@@ -165,14 +182,25 @@ def test_member_capture__ansi_handling(
     ],
 )
 def test_member_capture__cr_defragmentation(
-    bootstrapped_member, monkeypatch,
-    scenario, raw, ansi_flag, expect_in, expect_not_in,
+    bootstrapped_member,
+    monkeypatch,
+    scenario,
+    raw,
+    ansi_flag,
+    expect_in,
+    expect_not_in,
 ):
     sid, director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
-        "--session-id", sid, "member", "capture",
-        "--agent-id", director_id, "--member-id", member_id,
+        "--session-id",
+        sid,
+        "member",
+        "capture",
+        "--agent-id",
+        director_id,
+        "--member-id",
+        member_id,
     ]
     if ansi_flag:
         args.append("--ansi")
@@ -193,8 +221,15 @@ def test_member_capture__json_envelope_post_processed_and_lines_default(
     result = runner.invoke(
         cli,
         [
-            "--session-id", sid, "--json", "member", "capture",
-            "--agent-id", director_id, "--member-id", member_id,
+            "--session-id",
+            sid,
+            "--json",
+            "member",
+            "capture",
+            "--agent-id",
+            director_id,
+            "--member-id",
+            member_id,
         ],
     )
     assert result.exit_code == 0, result.output
