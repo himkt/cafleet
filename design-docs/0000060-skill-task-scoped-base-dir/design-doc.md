@@ -1,7 +1,7 @@
 # Skill Task-Scoped Base Directory
 
 **Status**: Approved
-**Progress**: 21/27 tasks complete
+**Progress**: 27/27 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -10,13 +10,13 @@ Move every CAFleet-orchestrated spawn-prompt audit file out of the repo root and
 
 ## Success Criteria
 
-- [ ] `cafleet base-dir resolve <task-name>` returns `{status: "resolved", base: <abs task-folder>, source: "task-scope" | "anchor", anchor: <abs anchor path>, task_name: <task-name>}` when invoked with a relative `TASK_NAME` such as `researches/my-topic` or `design-docs/0000060-skill-task-scoped-base-dir`.
-- [ ] The resolver auto-creates the task folder via `pathlib.Path(...).mkdir(parents=True, exist_ok=True)` — no shell-out to `mkdir`.
-- [ ] Each task folder carries its own `.cafleet-base-dir.json` anchor file written under the existing version 1 schema, independent of any shared-root anchor.
-- [ ] An absolute-path `TASK_NAME` whose path lives inside a recognized task-folder pattern (`<repo-root>/researches/<slug>/...` or `<repo-root>/design-docs/<NNNNNNN>-<slug>/...`) resolves to the matching task folder rather than the `<unset>` sentinel.
-- [ ] Each of the five in-scope skills (`/cafleet:research-report`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`, `/cafleet:research-presentation`) substitutes the task-folder path into the `BASE:` line of every spawn prompt, so audit files land at `<task-folder>/prompts/<role>-<UTC-compact>.md`.
-- [ ] A new project-local meta-skill at `.claude/skills/skill-author/SKILL.md` auto-loads (via its `description:` trigger) when an author starts creating a new CAFleet-orchestrated skill, and contains a complete, self-contained integration guide — no cross-skill references required to use it.
-- [ ] `cafleet/tests/test_base_dir.py` covers the positional `TASK_NAME` path: relative task name, absolute path inside a recognized task folder, absolute path outside (falls back to `<unset>`), anchor write/read at the task folder, and auto-mkdir of a non-existent task folder.
+- [x] `cafleet base-dir resolve <task-name>` returns `{status: "resolved", base: <abs task-folder>, source: "task-scope" | "anchor", anchor: <abs anchor path>, task_name: <task-name>}` when invoked with a relative `TASK_NAME` such as `researches/my-topic` or `design-docs/0000060-skill-task-scoped-base-dir`.
+- [x] The resolver auto-creates the task folder via `pathlib.Path(...).mkdir(parents=True, exist_ok=True)` — no shell-out to `mkdir`.
+- [x] Each task folder carries its own `.cafleet-base-dir.json` anchor file written under the existing version 1 schema, independent of any shared-root anchor.
+- [x] An absolute-path `TASK_NAME` whose path lives inside a recognized task-folder pattern (`<repo-root>/researches/<slug>/...` or `<repo-root>/design-docs/<NNNNNNN>-<slug>/...`) resolves to the matching task folder rather than the `<unset>` sentinel.
+- [x] Each of the five in-scope skills (`/cafleet:research-report`, `/cafleet:design-doc-create`, `/cafleet:design-doc-execute`, `/cafleet:design-doc-interview`, `/cafleet:research-presentation`) substitutes the task-folder path into the `BASE:` line of every spawn prompt, so audit files land at `<task-folder>/prompts/<role>-<UTC-compact>.md`.
+- [x] A new project-local meta-skill at `.claude/skills/skill-author/SKILL.md` auto-loads (via its `description:` trigger) when an author starts creating a new CAFleet-orchestrated skill, and contains a complete, self-contained integration guide — no cross-skill references required to use it.
+- [x] `cafleet/tests/test_base_dir.py` covers the positional `TASK_NAME` path: relative task name, absolute path inside a recognized task folder, absolute path outside (falls back to `<unset>`), anchor write/read at the task folder, and auto-mkdir of a non-existent task folder.
 
 ---
 
@@ -276,30 +276,30 @@ Per project rule `.claude/rules/design-doc-numbering.md`, documentation MUST lan
 
 ### Step 6: Tests
 
-- [ ] In `cafleet/tests/test_base_dir.py`, add unit tests:
+- [x] In `cafleet/tests/test_base_dir.py`, add unit tests:
   - Relative `task_name` resolves under the inferred repo root; folder is auto-created; anchor written with `source: "task-scope"`.
   - Same `task_name` invoked twice in a row: second call reads the existing anchor with `source: "anchor"`.
   - Absolute `task_name` that lives inside `researches/<slug>/...` resolves to that slug folder.
   - Absolute `task_name` that lives inside `design-docs/<NNNNNNN>-<slug>/...` resolves to that slug folder.
   - Absolute `task_name` outside any recognized task folder returns `<unset>` (existing behavior preserved).
   - Slug-shape rejection: `design-docs/garbage` (no `^\d{7}-` prefix) fails the `_match_known_task_pattern` check and produces no anchor.
-  - No-repo-root failure mode: CWD outside any git ancestor + positional `task_name` → exit 1 with the stderr message specified in § 2; no JSON payload even with `--json`. <!-- completed: -->
-- [ ] In `cafleet/tests/test_base_dir_spawn_flow.py` (or a new equivalent), add integration tests:
-  - End-to-end: a fake consuming skill renders a spawn prompt with the task-scoped `BASE:` line; the rendered prompt audit file lands at `<task-folder>/prompts/<role>-<ts>.md`, not at the repo root. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` and confirm no regressions. <!-- completed: -->
+  - No-repo-root failure mode: CWD outside any git ancestor + positional `task_name` → exit 1 with the stderr message specified in § 2; no JSON payload even with `--json`. <!-- completed: 2026-05-16T01:14 (Tester Phase A; commit 9969ed7) -->
+- [x] In `cafleet/tests/test_base_dir_spawn_flow.py` (or a new equivalent), add integration tests:
+  - End-to-end: a fake consuming skill renders a spawn prompt with the task-scoped `BASE:` line; the rendered prompt audit file lands at `<task-folder>/prompts/<role>-<ts>.md`, not at the repo root. <!-- completed: 2026-05-16T01:14 (Tester Phase A; commit 9969ed7) -->
+- [x] Run `mise //cafleet:test` and confirm no regressions. <!-- completed: 2026-05-16T01:25 (Programmer; 894 tests pass after Step 5 impl) -->
 
 ### Step 7: Validation against the dogfooded example
 
-- [ ] After implementation, confirm that `cafleet base-dir resolve design-docs/0000060-skill-task-scoped-base-dir` returns:
+- [x] After implementation, confirm that `cafleet base-dir resolve design-docs/0000060-skill-task-scoped-base-dir` returns:
   - `status: "resolved"`
   - `base: /home/himkt/work/himkt/cafleet/design-docs/0000060-skill-task-scoped-base-dir`
   - `source: "anchor"` (or `"task-scope"` if the anchor was never written — both are acceptable here)
-  - `anchor: /home/himkt/work/himkt/cafleet/design-docs/0000060-skill-task-scoped-base-dir/.cafleet-base-dir.json` <!-- completed: -->
-- [ ] Confirm the audit file from the Drafter spawn of THIS very design-doc-create run already lives at `<this task folder>/prompts/drafter-<ts>.md` — this is the dogfood proof. <!-- completed: -->
+  - `anchor: /home/himkt/work/himkt/cafleet/design-docs/0000060-skill-task-scoped-base-dir/.cafleet-base-dir.json` <!-- completed: 2026-05-16T01:27 (status: resolved, source: "task-scope" on first call — anchor now written) -->
+- [x] Confirm the audit file from the Drafter spawn of THIS very design-doc-create run already lives at `<this task folder>/prompts/drafter-<ts>.md` — this is the dogfood proof. <!-- completed: 2026-05-16T01:27 (drafter-20260515T230730Z.md confirmed at <task-folder>/prompts/) -->
 
 ### Step 8: One-time cleanup
 
-- [ ] Delete the existing `<repo>/prompts/` directory (its contents are stale audit artifacts from the pre-task-scope era — Spec § 9). The `/prompts/` entry added to `.gitignore` in Step 1 prevents any future strays from re-entering version control. <!-- completed: -->
+- [x] Delete the existing `<repo>/prompts/` directory (its contents are stale audit artifacts from the pre-task-scope era — Spec § 9). The `/prompts/` entry added to `.gitignore` in Step 1 prevents any future strays from re-entering version control. <!-- completed: 2026-05-16T01:27 -->
 
 ---
 
