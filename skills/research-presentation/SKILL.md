@@ -68,11 +68,26 @@ Step 5 (cleanup) is autonomous — no user prompt.
 ### Step 0: Validate Input (Director)
 
 1. If `$ARGUMENTS` is absent → error: "Usage: `/cafleet:research-presentation <folder-name>`. Specify the folder containing report.md."
-2. Load `Skill(cafleet:base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
-   - If skipped (absolute path): set `${FOLDER} = $ARGUMENTS`.
-   - If base resolved: set `${FOLDER} = ${BASE}/researches/$ARGUMENTS`. Resolve to absolute path.
-3. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run `/cafleet:research-report` first to generate a report."
-4. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts.
+2. Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract.
+3. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
+
+   - If `$ARGUMENTS` is a relative folder name (e.g. `my-topic`), **canonicalize first**: strip a trailing `/report.md` if present, strip a leading `researches/` prefix if present, then prepend `researches/`. The resolver does no folding, so passing `researches/my-topic` raw would resolve `researches/researches/my-topic`. Call:
+
+     ```bash
+     cafleet base-dir resolve researches/$CANONICAL_SLUG --json
+     ```
+
+   - If `$ARGUMENTS` is an absolute path (e.g. `/abs/path/to/researches/my-topic`), **canonicalize first**: strip a trailing `/report.md` if present. Store the canonicalized absolute folder path in `$CANONICAL_ABS` and call:
+
+     ```bash
+     cafleet base-dir resolve "$CANONICAL_ABS" --json
+     ```
+
+     The CLI treats the canonicalized absolute path as the task folder verbatim if it is strictly under the inferred repo root; otherwise returns the `unset` shape. The resolver does no filename folding, so a raw child path like `/abs/path/to/researches/my-topic/report.md` would create and anchor a `report.md` directory instead of the topic folder.
+
+   Branch on the returned `status`: on `status == "resolved"`, set both `${FOLDER}` and `${BASE}` to the returned `base` field (the task folder IS the report folder; no further `${BASE}/researches/...` concatenation). On `status == "unset"` (absolute `$ARGUMENTS` outside the repo root), set `${FOLDER}` to the **canonicalized** absolute path (the same trailing-`/report.md`-stripped path you passed to the resolver) so the report-folder check in step 4 still runs against a folder rather than a file, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
+4. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run `/cafleet:research-report` first to generate a report."
+5. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts. The audit-file path `${BASE}/prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<topic-folder>/prompts/`, not under the repo root.
 
 ### Step 1: Bootstrap CAFleet Session, Start Monitor & Spawn Presentation + Transcript (Director)
 

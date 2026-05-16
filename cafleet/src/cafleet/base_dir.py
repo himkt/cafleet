@@ -1,10 +1,12 @@
-"""Base directory resolver for CAFleet (design 0000055).
+"""Base directory resolver for CAFleet (design 0000055; task-scope branch design 0000060).
 
 Owns the deterministic side of `${BASE}` resolution: anchor file
-read / write / validate, the three returned-status branches
-(`resolved` / `unset` / `needs-user-input`) plus a fatal `AnchorError`
-raise on schema / version mismatch, and the `<unset>` sentinel returned
-on the absolute-path branch.
+read / write / validate, the no-positional resolution branches
+(`resolved` / `needs-user-input`), the positional `task_name` task-scope
+branch (`resolved` with `source="task-scope"`, or `unset` when an absolute
+path lies outside the inferred repo root or equals the repo root itself),
+the fatal `AnchorError` raise on schema / version mismatch, and the
+`<unset>` sentinel.
 
 The `AskUserQuestion` branch lives in Claude's tool context — this module
 only reports `status="needs-user-input"` with the candidates Claude should
@@ -67,10 +69,10 @@ def _validate_anchor(anchor_path: Path, data: Any) -> None:
             "Delete the anchor and re-resolve."
         )
     source_field = data.get("source")
-    if source_field not in ("cwd-inference", "askuserquestion"):
+    if source_field not in ("cwd-inference", "askuserquestion", "task-scope"):
         raise AnchorError(
             f"anchor at {anchor_path} has invalid source={source_field!r}; "
-            "must be 'cwd-inference' or 'askuserquestion'. "
+            "must be 'cwd-inference', 'askuserquestion', or 'task-scope'. "
             "Delete the anchor and re-resolve."
         )
 
@@ -115,9 +117,70 @@ def _write_anchor(anchor_path: Path, *, base: str, source: str) -> None:
     anchor_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _infer_repo_root(cwd: Path) -> Path | None:
+    for candidate in (cwd, *cwd.parents):
+        if is_git_repo_root(candidate):
+            return candidate
+    return None
+
+
+_UNSET_SHAPE = {
+    "status": "unset",
+    "base": None,
+    "source": "absolute-path-arg",
+    "anchor": None,
+}
+
+
+def _resolve_task_scope(task_name: str, *, cwd: Path) -> dict[str, Any]:
+    repo_root = _infer_repo_root(cwd)
+    if repo_root is None:
+        raise RuntimeError(
+            f"cannot resolve task-scope base-dir: no .git ancestor "
+            f"found from CWD {cwd}. cd to the repo root and retry."
+        )
+    repo_root = repo_root.resolve(strict=False)
+
+    candidate = Path(task_name)
+    if candidate.is_absolute():
+        task_folder = candidate.resolve(strict=False)
+        if task_folder == repo_root or not _is_under(task_folder, repo_root):
+            return {**_UNSET_SHAPE, "task_name": task_name}
+    else:
+        task_folder = (repo_root / candidate).resolve(strict=False)
+        if task_folder == repo_root:
+            raise RuntimeError(
+                f"task_name {task_name!r} resolves to the repo root "
+                f"({repo_root}); the repo root is not a task folder."
+            )
+        if not _is_under(task_folder, repo_root):
+            raise RuntimeError(
+                f"task_name {task_name!r} resolves outside the repo root "
+                f"({task_folder} is not under {repo_root}); refusing to create "
+                f"a task folder outside the repo."
+            )
+
+    task_folder.mkdir(parents=True, exist_ok=True)
+    anchor_path = task_folder / ANCHOR_FILENAME
+
+    if _read_consistent_anchor(anchor_path) is not None:
+        source = "anchor"
+    else:
+        _write_anchor(anchor_path, base=str(task_folder), source="task-scope")
+        source = "task-scope"
+
+    return {
+        "status": "resolved",
+        "base": str(task_folder),
+        "source": source,
+        "anchor": str(anchor_path),
+        "task_name": task_name,
+    }
+
+
 def resolve(
     *,
-    path: str | None = None,
+    task_name: str | None = None,
     cwd: Path | None = None,
     home: Path | None = None,
     tmp_candidate: Path | None = None,
@@ -125,29 +188,45 @@ def resolve(
     """Resolve the `${BASE}` output-root.
 
     Returns one of three shapes (matches the contract in
-    `skills/base-dir/SKILL.md` — three returned statuses plus a fatal-error
-    branch that is signalled via exception, not a return value):
+    `skills/base-dir/SKILL.md`):
 
-    - ``{"status": "resolved", "base": "<abs>", "source": "cwd-inference" | "anchor",
-        "anchor": "<abs>/.cafleet-base-dir.json"}``
+    - ``{"status": "resolved", "base": "<abs>", "source": "cwd-inference" | "anchor"
+        | "task-scope", "anchor": "<abs>/.cafleet-base-dir.json", ...}``
     - ``{"status": "unset", "base": None, "source": "absolute-path-arg",
-        "anchor": None}``
+        "anchor": None, "task_name": <task-name>}`` (only emitted by the
+        positional ``task_name`` branch when an absolute path lies outside
+        the inferred repo root or equals the repo root itself)
     - ``{"status": "needs-user-input", "base": None, "source": None,
         "candidates": ["<tmp-candidate>", "<cwd>"]}``
 
-    Raises ``AnchorError`` on schema / version mismatch or anchor
-    inconsistency (the fourth, fatal branch — the CLI surfaces this as a
-    non-zero exit instead of one of the JSON shapes above).
-    """
-    if path is not None and Path(path).is_absolute():
-        return {
-            "status": "unset",
-            "base": None,
-            "source": "absolute-path-arg",
-            "anchor": None,
-        }
+    When ``task_name`` is supplied, the function dispatches to the
+    task-scope branch: infers the repo root from ``cwd``, joins relative
+    paths under it (or accepts absolute paths strictly under repo_root),
+    auto-creates the task folder, and writes the anchor inline. The result
+    includes a ``task_name`` field echoing the input. The no-positional
+    path is unchanged.
 
+    **Consumer contract**: ``task_name`` MUST identify the task folder
+    itself, not a child file. The resolver creates ``<task-folder>/``
+    exactly as supplied — it does not strip trailing filenames (e.g.
+    ``/design-doc.md``) or known bucket prefixes (e.g. ``design-docs/``).
+    A consuming skill that receives ``design-docs/0000060-foo/design-doc.md``
+    from the user MUST strip the trailing ``/design-doc.md`` (and any
+    skill-specific canonicalization) before calling this function —
+    otherwise the resolver creates a directory literally named
+    ``design-doc.md`` and anchors the wrong BASE.
+
+    Raises ``AnchorError`` on schema / version mismatch or anchor
+    inconsistency (the fatal branch — the CLI surfaces this as a non-zero
+    exit instead of one of the JSON shapes above). Raises ``RuntimeError``
+    when ``task_name`` is supplied and ``cwd`` has no ``.git`` ancestor,
+    or when a relative ``task_name`` resolves to the repo root or escapes
+    it via ``..`` segments.
+    """
     cwd_path = Path(cwd) if cwd is not None else Path.cwd()
+    if task_name is not None:
+        return _resolve_task_scope(task_name, cwd=cwd_path)
+
     if home is not None:
         home_path = Path(home)
     else:

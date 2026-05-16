@@ -215,9 +215,33 @@ Before validation, resolve `$ARGUMENTS` into a concrete `design-doc.md` path.
 
 #### Phase 1: Base Directory Resolution
 
-Load `Skill(cafleet:base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
-- If skipped (absolute path): set `${RESOLVED_ARGS} = $ARGUMENTS`.
-- If base resolved: set `${RESOLVED_ARGS} = ${BASE}/design-docs/$ARGUMENTS`. Resolve to absolute path.
+Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract. Then resolve BASE based on whether `$ARGUMENTS` was supplied:
+
+- **`$ARGUMENTS` present** (the typical execute-a-specific-doc flow): canonicalize `$ARGUMENTS` and call the task-scope resolver positionally. `$ARGUMENTS` is normally a slug name (`0000060-skill-task-scoped-base-dir`) or a path containing such a slug.
+
+  - **Relative input** — accept any of: `0000060-foo`, `0000060-foo/design-doc.md`, `design-docs/0000060-foo`, `design-docs/0000060-foo/design-doc.md`. Canonicalize to `design-docs/<slug>` by: (1) stripping the trailing `/design-doc.md` if present; (2) stripping the leading `design-docs/` if present; (3) prepending `design-docs/`. The resolver itself does NOT perform this stripping (per `Skill(cafleet:base-dir)` § *Consumer contract*) — the consuming skill canonicalizes first, then calls:
+
+    ```bash
+    cafleet base-dir resolve design-docs/<slug> --json
+    ```
+
+  - **Absolute path** (e.g. `/abs/path/to/design-docs/0000060-foo/design-doc.md`): the resolver accepts only the task-folder path, not a child file. Strip the trailing `/design-doc.md` if present so the absolute path identifies the task folder, then pass through positionally:
+
+    ```bash
+    cafleet base-dir resolve <abs-task-folder> --json
+    ```
+
+    The CLI accepts the absolute path if it lies strictly under the inferred repo root; otherwise the resolver returns the `unset` shape.
+
+  Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field (the slug folder) and `${RESOLVED_ARGS} = ${BASE}/design-doc.md` (short-circuits at Tier 1 below). On `status == "unset"` (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `${RESOLVED_ARGS}` to the literal `$ARGUMENTS` path so Tier 1 / Tier 2 still run against the user-supplied path, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
+
+- **`$ARGUMENTS` absent** (the discover-all-approved-docs flow): the no-argument form scans `<repo-root>/design-docs/`, so the Director MUST invoke from the repo root. Verify with `git rev-parse --show-toplevel` and abort with a clear "invoke from the repo root" error if `cwd` differs. Then use the no-positional resolver:
+
+  ```bash
+  cafleet base-dir resolve --json
+  ```
+
+  Branch on the returned `status` per `Skill(cafleet:base-dir)` Steps 1–2: on `status == "resolved"`, set `${BASE}` to the returned `base` field (which is the repo root because we just verified `cwd == repo root`); on `status == "needs-user-input"`, drive `AskUserQuestion` on the returned `candidates`, persist the answer via `cafleet base-dir record`, and re-resolve. Only after `${BASE}` is concrete, set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
 
 #### Phase 2: Three-Tier Detection
 
@@ -230,6 +254,8 @@ Using `${RESOLVED_ARGS}`, apply a three-tier detection strategy, evaluated in or
 | 3 — Base directory | `${RESOLVED_ARGS}` is a directory containing `**/design-doc.md` (one level deep) | Enter discovery flow |
 
 Tier evaluation is sequential and short-circuits.
+
+> **Tier 3 with task-scope BASE**: When Phase 1's present-argument branch fires, `${BASE}` is one slug folder and `${RESOLVED_ARGS}` is set to `${BASE}/design-doc.md` — Tier 1 short-circuits before Tier 3 is reached, so the task-scoped BASE never exercises the discovery flow. Tier 3 is preserved for the no-argument branch, where `${BASE}` is the repo root and the discovery flow scans every approved slug under `<repo>/design-docs/`. No follow-up edit is required (per design 0000060 § 6 *Tier 3 verification*).
 
 #### Discovery Flow (Tier 3)
 
