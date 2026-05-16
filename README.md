@@ -72,7 +72,7 @@ codex plugin marketplace add himkt/cafleet
 
 > [!NOTE]
 >
-> I'm Codex beginner, so contribution are super welcome how to configure auto-approve cafleet commands on Codex... :bow:
+> I'm a Codex beginner, so contributions are super welcome — especially help configuring auto-approve for cafleet commands on Codex... :bow:
 > 
 
 > [!IMPORTANT]
