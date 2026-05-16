@@ -43,6 +43,8 @@ cafleet base-dir resolve <abs-path> --json
 
 The CLI checks whether the absolute path is strictly under the inferred repo root. If so, the path is treated as the task folder verbatim (auto-created, anchored, returned as `task-scope`). If the path lies outside the repo root or equals the repo root (which would clobber the shared-root anchor), the CLI returns the `unset` shape (`status: "unset"`, `source: "absolute-path-arg"`). No bucket-pattern ancestor walk; no skill-specific slug matching.
 
+**Consumer contract — strip child paths before calling.** The resolver creates `<task-folder>/` exactly as supplied; it does not strip trailing filenames. A consuming skill that receives `/repo/design-docs/0000060-foo/design-doc.md` from the user MUST strip the trailing `/design-doc.md` (or any similar child filename) and pass `/repo/design-docs/0000060-foo` to the resolver — otherwise the resolver creates a directory literally named `design-doc.md` and anchors the wrong BASE. Skill-specific child-path stripping logic lives in each consuming skill, since each skill knows its own conventions.
+
 When `_infer_repo_root(cwd)` returns `None` (CWD has no `.git` ancestor — typical when CWD is `$HOME` or under `$HOME/.claude`) AND a positional `TASK_NAME` is supplied, the CLI exits 1 with `cannot resolve task-scope base-dir: no .git ancestor found from CWD <cwd>. cd to the repo root and retry.` on stderr (no JSON payload, even with `--json`). `cd` to the repo root and retry.
 
 ### Step 1. Probe via the CLI (no-positional / shared-root case)

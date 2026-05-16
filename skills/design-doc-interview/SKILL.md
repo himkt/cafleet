@@ -113,7 +113,7 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
      cafleet base-dir resolve design-docs/$ARGUMENTS --json
      ```
 
-   - Relative slug + filename (e.g. `0000060-foo/design-doc.md`): same form — the resolver joins the relpath against the inferred repo root.
+   - Relative slug + filename (e.g. `0000060-foo/design-doc.md`): strip the trailing `/design-doc.md` first so only the slug is passed to the resolver — otherwise `${BASE}` would land on a directory literally named `design-doc.md` instead of the slug folder.
 
    - Absolute path (e.g. `/abs/path/to/design-docs/0000060-foo/design-doc.md`): pass through positionally:
 
