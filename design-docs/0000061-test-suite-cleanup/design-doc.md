@@ -1,7 +1,7 @@
 # Test Suite Cleanup — Reduce Excessive Tests in cafleet/tests/
 
 **Status**: Approved
-**Progress**: 10/33 tasks complete
+**Progress**: 15/33 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -256,11 +256,11 @@ Current shape: 3 tests pinning `default_lines == 30`, override semantics, and no
 
 #### Step 4 tasks
 
-- [ ] Rewrite `cafleet/tests/test_tmux.py` from 34 to 8 parametrized tests per § 4.1 <!-- completed: -->
-- [ ] Rewrite `cafleet/tests/test_tmux_send_helpers.py` from 12 to ~3 parametrized tests per § 4.2 <!-- completed: -->
-- [ ] Rewrite `cafleet/tests/test_tmux_send_inline_preview.py` from 15 to ~3 tests per § 4.3 <!-- completed: -->
-- [ ] Delete `cafleet/tests/test_tmux_capture_defaults.py` per § 4.4 <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; commit as `refactor(tests): parametrize tmux argv-construction tests (design 0000061 step 4)` <!-- completed: -->
+- [x] Rewrite `cafleet/tests/test_tmux.py` from 34 to 8 parametrized tests per § 4.1 <!-- completed: 2026-05-16T10:02 -->
+- [x] Rewrite `cafleet/tests/test_tmux_send_helpers.py` from 12 to ~3 parametrized tests per § 4.2 <!-- completed: 2026-05-16T10:02 -->
+- [x] Rewrite `cafleet/tests/test_tmux_send_inline_preview.py` from 15 to ~3 tests per § 4.3 <!-- completed: 2026-05-16T10:02 -->
+- [x] Delete `cafleet/tests/test_tmux_capture_defaults.py` per § 4.4 <!-- completed: 2026-05-16T10:02 -->
+- [x] Run `mise //cafleet:test`; commit as `refactor(tests): parametrize tmux argv-construction tests (design 0000061 step 4)` <!-- completed: 2026-05-16T10:02 -->
 
 ### Step 5: CLI overlap dedup
 
