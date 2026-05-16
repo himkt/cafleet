@@ -98,21 +98,23 @@ codex plugin marketplace add himkt/cafleet
 >
 > Use the absolute path matching `CAFLEET_DATABASE_URL` or the default XDG location.
 
-Recommended Codex rules for `cafleet` commands — drop into your codex rules file (e.g. `~/.codex/rules/cafleet.rules`) to auto-approve the broker CLI while keeping `cafleet member exec` (which runs arbitrary shell on a member pane) gated behind a prompt:
-
-```
-prefix_rule(
-    pattern = ["cafleet"],
-    decision = "allow",
-    justification = "All cafleet subcommands are allowed by default",
-)
-
-prefix_rule(
-    pattern = ["cafleet", "member", "exec"],
-    decision = "prompt",
-    justification = "cafleet member exec runs arbitrary commands on a member; require approval",
-)
-```
+> [!TIP]
+> 
+> Recommended Codex rules for `cafleet` commands — drop into your codex rules file (e.g. `~/.codex/rules/cafleet.rules`) to auto-approve the broker CLI while keeping `cafleet member exec` (which runs arbitrary shell on a member pane) gated behind a prompt:
+> 
+> ```
+> prefix_rule(
+>     pattern = ["cafleet"],
+>     decision = "allow",
+>     justification = "All cafleet subcommands are allowed by default",
+> )
+> 
+> prefix_rule(
+>     pattern = ["cafleet", "member", "exec"],
+>     decision = "prompt",
+>     justification = "cafleet member exec runs arbitrary commands on a member; require approval",
+> )
+> ```
 
 For codex CLI version pin and operational specifics, see [docs/codex-members.md](docs/codex-members.md).
 
