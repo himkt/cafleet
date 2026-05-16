@@ -1,8 +1,6 @@
 # CAFleet
 
-A message broker and agent registry for coding agents — a Claude Code plugin plus a local broker CLI.
-
-> **CAFleet is a local-only tool.** It runs on a single developer machine without authentication. Do not expose the broker on a shared network unless you accept that every listener can see and act within every session.
+Agent Teams reinvented for collaborative coding supporting Claude Code and Codex, with full code transparency.
 
 ## Install
 
@@ -70,11 +68,6 @@ Run the following command on your terminal
 codex plugin marketplace add himkt/cafleet
 ```
 
-> [!NOTE]
->
-> I'm a Codex beginner, so contributions are super welcome — especially help configuring auto-approve for cafleet commands on Codex... :bow:
-> 
-
 > [!IMPORTANT]
 >
 > Make sure whether the skills are correctly installed. You can see available skills by running `/skills` on Codex prompt.
@@ -103,21 +96,23 @@ codex plugin marketplace add himkt/cafleet
 >
 > Use the absolute path matching `CAFLEET_DATABASE_URL` or the default XDG location.
 
-Recommended Codex rules for `cafleet` commands — drop into your codex rules file (e.g. `~/.codex/rules/cafleet.rules`) to auto-approve the broker CLI while keeping `cafleet member exec` (which runs arbitrary shell on a member pane) gated behind a prompt:
-
-```
-prefix_rule(
-    pattern = ["cafleet"],
-    decision = "allow",
-    justification = "All cafleet subcommands are allowed by default",
-)
-
-prefix_rule(
-    pattern = ["cafleet", "member", "exec"],
-    decision = "prompt",
-    justification = "cafleet member exec runs arbitrary commands on a member; require approval",
-)
-```
+> [!TIP]
+> 
+> Recommended Codex rules for `cafleet` commands — drop into your codex rules file (e.g. `~/.codex/rules/cafleet.rules`) to auto-approve the broker CLI while keeping `cafleet member exec` (which runs arbitrary shell on a member pane) gated behind a prompt:
+> 
+> ```
+> prefix_rule(
+>     pattern = ["cafleet"],
+>     decision = "allow",
+>     justification = "All cafleet subcommands are allowed by default",
+> )
+> 
+> prefix_rule(
+>     pattern = ["cafleet", "member", "exec"],
+>     decision = "prompt",
+>     justification = "cafleet member exec runs arbitrary commands on a member; require approval",
+> )
+> ```
 
 For codex CLI version pin and operational specifics, see [docs/codex-members.md](docs/codex-members.md).
 
@@ -130,33 +125,33 @@ cafleet db init             # apply schema migrations (idempotent; rerun after u
 
 The default database is `~/.local/share/cafleet/registry.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
 
-## Simple example to use CAFleet on Claude Code or Codex
+## Simple example to use CAFleet
 
-In any tmux session, paste this into Claude Code:
+Provide the following prompt to Claude Code or Codex to see how it works.
 
 ```
+I want to see how cafleet works.
+Please create a team with two teammates using cafleet and let them communicate each other.
+After the demonstration, please shutdown the team.
+```
+
+## Real world usage; Design-doc-driven development
+
+CAFleet provides the builtin skills for Spec Driven Development (SDD). **We're using CAFleet to develop CAFleet!**
+
+Claude Code:
+
+```sh
 /cafleet:design-doc-create I want to create a simple TUI calculator
 ```
 
 Codex:
 
-```
+```sh
 $cafleet:design-doc-create I want to create a simple TUI calculator
 ```
 
-Claude (the Director) bootstraps a CAFleet session, spawns a Drafter and a Reviewer in adjacent tmux panes, drives the clarification → draft → review loop through the message broker, and lands a polished design doc at `design-docs/my-feature/design-doc.md`.
-
-Want more? See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for the raw broker primitives and [`skills/design-doc-create/SKILL.md`](skills/design-doc-create/SKILL.md) for the orchestration this example uses.
-
-## Design-doc-driven development
-
-CAFleet itself is developed end-to-end using CAFleet. Design documents under `design-docs/` are authored, validated, and implemented through the three CAFleet design-doc skills — the same skills you get when you install the plugin. The same Director-and-members orchestration that the Simple example above kicks off is how the CAFleet repo grows.
-
-- `/cafleet:design-doc-create` — Director spawns a Drafter and a Reviewer, drives the clarification → draft → review loop, lands a polished design doc on disk.
-- `/cafleet:design-doc-interview` — Director spawns a short-lived Analyzer, drives multi-round `AskUserQuestion` validation, writes `COMMENT(claude)` annotations inline.
-- `/cafleet:design-doc-execute` — Director spawns a Programmer and a Tester (and optionally a Verifier), drives the TDD cycle step-by-step, commits after each phase, then runs the PR + Copilot-review loop.
-
-See the [`design-docs/`](design-docs/) directory for every design document this repo has shipped.
+You can see the existing design docs on [`design-docs/`](design-docs/), which are actually created by the skills.
 
 ## CLI cheatsheet
 
