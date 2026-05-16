@@ -27,9 +27,10 @@ ANCHOR_VERSION = 1
 
 _TMP_CANDIDATE = Path("/tmp/claude-code")
 
-_DESIGN_DOC_SLUG_RE = re.compile(r"^\d{7}-[A-Za-z0-9_-]+$")
-_RESEARCH_SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
-_TASK_BUCKETS = ("researches", "design-docs")
+_BUCKET_SLUG_RE = {
+    "design-docs": re.compile(r"^\d{7}-[A-Za-z0-9_-]+$"),
+    "researches": re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
+}
 
 _BASE_INSERT_MARKER = (
     "[INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"
@@ -121,13 +122,6 @@ def _write_anchor(anchor_path: Path, *, base: str, source: str) -> None:
 
 
 def _infer_repo_root(cwd: Path) -> Path | None:
-    """Walk ``cwd`` and its ancestors; return the first directory containing ``.git``.
-
-    Uses :func:`is_git_repo_root` so both regular repos and git worktrees
-    (where ``.git`` is a file pointing at the worktree's gitdir) qualify.
-    Returns ``None`` when no ancestor of ``cwd`` carries ``.git`` — typically
-    when ``cwd`` is ``$HOME`` or under ``$HOME/.claude``.
-    """
     for candidate in (cwd, *cwd.parents):
         if is_git_repo_root(candidate):
             return candidate
@@ -135,36 +129,12 @@ def _infer_repo_root(cwd: Path) -> Path | None:
 
 
 def _match_known_task_pattern(path: Path, repo_root: Path) -> Path | None:
-    """Walk ``path`` and its parents; return the first ancestor that names a task folder.
-
-    A directory ``p`` matches when **all four** conditions hold:
-
-    1. ``p.parent.parent == repo_root`` — the ancestor sits exactly two
-       levels under the inferred repo root.
-    2. ``p.parent.name`` is one of the known task-bucket names
-       (``"researches"`` or ``"design-docs"``).
-    3. The slug name ``p.name`` matches the regex appropriate to its bucket
-       (``^\\d{7}-[A-Za-z0-9_-]+$`` for design-docs;
-       ``^[A-Za-z0-9][A-Za-z0-9_-]*$`` for researches).
-    4. ``p`` is a directory or does not yet exist (a regular file at ``p`` is
-       rejected — the path-by-pattern match never returns a file).
-
-    Returns ``None`` when no ancestor satisfies all four conditions.
-    """
     for candidate in (path, *path.parents):
         parent = candidate.parent
-        if parent == candidate:
-            return None
-        if parent.parent != repo_root:
+        if parent == candidate or parent.parent != repo_root:
             continue
-        bucket = parent.name
-        if bucket == "design-docs":
-            if not _DESIGN_DOC_SLUG_RE.match(candidate.name):
-                continue
-        elif bucket == "researches":
-            if not _RESEARCH_SLUG_RE.match(candidate.name):
-                continue
-        else:
+        slug_re = _BUCKET_SLUG_RE.get(parent.name)
+        if slug_re is None or not slug_re.match(candidate.name):
             continue
         if candidate.exists() and not candidate.is_dir():
             continue
@@ -172,18 +142,15 @@ def _match_known_task_pattern(path: Path, repo_root: Path) -> Path | None:
     return None
 
 
+_UNSET_SHAPE = {
+    "status": "unset",
+    "base": None,
+    "source": "absolute-path-arg",
+    "anchor": None,
+}
+
+
 def _resolve_task_scope(task_name: str, *, cwd: Path) -> dict[str, Any]:
-    """Task-scope branch of :func:`resolve`.
-
-    Auto-creates the task folder, writes (or re-reads) its anchor inline,
-    and returns the ``resolved`` shape with ``source`` set to
-    ``"task-scope"`` on first resolution or ``"anchor"`` on subsequent
-    re-reads. Returns the documented ``unset`` shape when ``task_name`` is
-    an absolute path that lives outside any recognized task-folder pattern.
-
-    Raises ``RuntimeError`` when ``cwd`` has no ``.git`` ancestor (the
-    standardized CLI message in §Spec 2 is the exception's body).
-    """
     repo_root = _infer_repo_root(cwd)
     if repo_root is None:
         raise RuntimeError(
@@ -193,16 +160,9 @@ def _resolve_task_scope(task_name: str, *, cwd: Path) -> dict[str, Any]:
 
     candidate = Path(task_name)
     if candidate.is_absolute():
-        matched = _match_known_task_pattern(candidate, repo_root)
-        if matched is None:
-            return {
-                "status": "unset",
-                "base": None,
-                "source": "absolute-path-arg",
-                "anchor": None,
-                "task_name": task_name,
-            }
-        task_folder = matched
+        task_folder = _match_known_task_pattern(candidate, repo_root)
+        if task_folder is None:
+            return {**_UNSET_SHAPE, "task_name": task_name}
     else:
         joined = (repo_root / candidate).resolve(strict=False)
         if joined != repo_root and not _is_under(joined, repo_root):
@@ -211,14 +171,12 @@ def _resolve_task_scope(task_name: str, *, cwd: Path) -> dict[str, Any]:
                 f"({joined} is not under {repo_root}); refusing to create "
                 f"a task folder outside the repo."
             )
-        matched = _match_known_task_pattern(joined, repo_root)
-        task_folder = matched if matched is not None else joined
+        task_folder = _match_known_task_pattern(joined, repo_root) or joined
 
     task_folder.mkdir(parents=True, exist_ok=True)
     anchor_path = task_folder / ANCHOR_FILENAME
 
-    existing = _read_consistent_anchor(anchor_path)
-    if existing is not None:
+    if _read_consistent_anchor(anchor_path) is not None:
         source = "anchor"
     else:
         _write_anchor(anchor_path, base=str(task_folder), source="task-scope")
