@@ -139,7 +139,7 @@ After the demonstration, please shutdown the team.
 
 ## Real world usage; Design-doc-driven development
 
-CAFleet provides the builtin skills for Spec Driven Development (SDD). You can try how I develop CAFleet using CAFleet!
+CAFleet provides the builtin skills for Spec Driven Development (SDD). **We're using CAFleet to develop CAFleet!**
 
 Claude Code:
 
