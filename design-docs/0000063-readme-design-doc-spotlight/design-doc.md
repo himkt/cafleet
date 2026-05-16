@@ -1,7 +1,7 @@
 # README — Spotlight design-doc-driven development; collapse the duplicate Coding agents H3
 
 **Status**: Approved
-**Progress**: 3/17 tasks complete
+**Progress**: 5/17 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -190,8 +190,8 @@ The historical record of the removal lives in this design doc (Status: Complete 
 
 ### Step 2: Edit `## CLI cheatsheet` — remove `### Coding agents` H3 entirely
 
-- [ ] Delete the `### Coding agents` H3 heading and its full body (the opening flag-context paragraph plus the original location of the sandbox callout). After the delete, the section ordering inside `## CLI cheatsheet` is: cheatsheet table → `### Notable flags` → `### Message body truncation` (with the `### Coding agents` slot gone). <!-- completed: -->
-- [ ] Confirm by re-reading the file that no breadcrumb sentence (`See ...`, `formerly ...`, `moved to ...`) was left behind in either the cheatsheet table area or in the surrounding sections. The removal must be silent — git history is the record. <!-- completed: -->
+- [x] Delete the `### Coding agents` H3 heading and its full body (the opening flag-context paragraph plus the original location of the sandbox callout). After the delete, the section ordering inside `## CLI cheatsheet` is: cheatsheet table → `### Notable flags` → `### Message body truncation` (with the `### Coding agents` slot gone). <!-- completed: 2026-05-16T14:01 -->
+- [x] Confirm by re-reading the file that no breadcrumb sentence (`See ...`, `formerly ...`, `moved to ...`) was left behind in either the cheatsheet table area or in the surrounding sections. The removal must be silent — git history is the record. <!-- completed: 2026-05-16T14:01 -->
 
 ### Step 3: Insert new `## Design-doc-driven development` section
 

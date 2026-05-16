@@ -160,20 +160,6 @@ Want more? See [`skills/cafleet/SKILL.md`](skills/cafleet/SKILL.md) for the raw 
 | `--lines` / `--tail` / `--ansi` / `--no-ansi` | `member capture` | Default `--lines 30` (was 80); `--tail` is an alias for `--lines`; `--no-ansi` (default) strips ANSI escapes. |
 | `CAFLEET_MAX_TEXT_LEN` | env var | Body-truncation codepoint limit (default `200`). See "Message body truncation" below. |
 
-### Coding agents
-
-cafleet supports two coding-agent binaries for member panes: `claude` (Claude Code) and `codex` (OpenAI Codex CLI). Pass `--coding-agent {claude,codex}` on `cafleet session create` (operator-declared metadata for the root Director) and `cafleet member create` (selects the spawn-command builder and records the placement). The default is `claude`, so existing invocations are unchanged. A single Director may spawn both `claude` and `codex` members in the same session. Operational details for codex members — including the codex CLI version pin and verification recipe — live in [docs/codex-members.md](docs/codex-members.md).
-
-> [!IMPORTANT]
-> Codex members need the cafleet DB directory to be writable from inside the codex sandbox. Add it to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads (e.g. `~/.codex/config.toml`):
->
-> ```toml
-> [sandbox_workspace_write]
-> writable_roots = ["/home/<you>/.local/share/cafleet"]
-> ```
->
-> Use the absolute path matching `CAFLEET_DATABASE_URL` or the default XDG location.
-
 ### Message body truncation
 
 `cafleet message {send,poll,ack,cancel,show}` truncate the message `text` body to the first `CAFLEET_MAX_TEXT_LEN` Unicode codepoints (default `200`) plus a single `…` codepoint suffix in both text and `--json` output by default. This collapses per-poll token cost for inbox-polling agents whose bodies typically run several hundred characters. Pass `--full` (per-subcommand option, placed after the subcommand name) to restore the un-truncated body and the full typed-column envelope. Empty bodies and bodies whose codepoint length is at most `CAFLEET_MAX_TEXT_LEN` pass through unchanged with no marker. `cafleet message broadcast` is different — it returns a `broadcast_summary` task whose text is a generated summary string (e.g. `Broadcast sent to N recipients`), not the original body, so its summary always emits in full. The `--full` flag is preserved on `message broadcast` for surface consistency but is a no-op. The `/ui/api/*` WebUI responses are not truncated. See [docs/spec/cli-options.md](docs/spec/cli-options.md) § Message Body Truncation and [docs/spec/message-envelope.md](docs/spec/message-envelope.md) for the full rendering rules.
