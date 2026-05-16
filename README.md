@@ -86,7 +86,7 @@ codex plugin marketplace add himkt/cafleet
 > ```
 > 
 
-> [!Note]
+> [!NOTE]
 >
 > I'm Codex beginner, so contribution are super welcome how to configure auto-approve cafleet commands on Codex... :bow:
 > 
