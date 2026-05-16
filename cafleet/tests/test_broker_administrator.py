@@ -151,7 +151,7 @@ def test_register_agent_placement__administrator_cannot_be_director(broker_sessi
     assert names == {"Director", "Administrator"}
 
 
-def test_register_agent_placement__user_director_path_still_works():
+def test_register_agent_placement__user_director_path_still_works(broker_session):
     session = _create_session_with_ctx()
     sid = session["session_id"]
     director = broker.register_agent(
