@@ -44,14 +44,16 @@ cafleet base-dir resolve [TASK_NAME] [--json]
 | Form | Behavior |
 |:--|:--|
 | `cafleet base-dir resolve` (no positional) | Unchanged from today. Returns the repo-root via cwd-inference, `/tmp/claude-code` via anchor, `<unset>` is not produced (only the absolute-path branch produces it). |
-| `cafleet base-dir resolve <relative-task-name>` | Task-scope branch. Treats `TASK_NAME` as relative to the cwd-inferred repo root. Auto-creates the task folder. Writes / reads its anchor. Returns `{status: "resolved", base: <abs task folder>, source: "task-scope" \| "anchor", anchor: <abs anchor>, task_name: <TASK_NAME>}`. |
-| `cafleet base-dir resolve <abs-path>` | Inspect the absolute path for a known task-folder pattern: any ancestor matching `<repo-root>/researches/<slug>/` or `<repo-root>/design-docs/<NNNNNNN>-<slug>/`. If matched, treat that ancestor as the task folder (auto-create + anchor + return as task-scope). If no match, return the existing `<unset>` shape (`status: "unset"`, `source: "absolute-path-arg"`). |
+| `cafleet base-dir resolve <relative-task-name>` | Task-scope branch. Treats `TASK_NAME` as relative to the cwd-inferred repo root. Joins + resolves; rejects traversal (`../escape`) and the repo-root degenerate case (`.`, `""`, `design-docs/..`) with `RuntimeError`. Auto-creates the task folder. Writes / reads its anchor. Returns `{status: "resolved", base: <abs task folder>, source: "task-scope" \| "anchor", anchor: <abs anchor>, task_name: <TASK_NAME>}`. **The resolver is general-purpose** — it does NOT know about skill-specific bucket names (`researches/`, `design-docs/`); the consuming skill picks the relpath. |
+| `cafleet base-dir resolve <abs-path>` | If the absolute path is strictly under the repo root, treat it as the task folder verbatim (auto-create + anchor + return as task-scope). If the path is outside the repo root or equal to the repo root, return the `<unset>` shape (`status: "unset"`, `source: "absolute-path-arg"`). No bucket-pattern ancestor walk; no skill-specific slug matching. |
 
 `cafleet base-dir record` is unchanged — it accepts an absolute `--base` and writes the anchor. The resolver's task-scope branch writes its anchor inline, so most callers do not need `record` for task folders; `record` remains for the explicit-`AskUserQuestion` flow that targets the shared root.
 
 ### 2. Resolution algorithm (positional `TASK_NAME` branch)
 
-The existing `resolve()` function in `cafleet/src/cafleet/base_dir.py` is extended in place: the current `path: str | None` keyword argument is **renamed to** `task_name: str | None` (the old `path` parameter is removed — there is no `path` kwarg on the new `resolve()` signature, matching the CLI's `--path` removal in § 1). When `task_name is None`, the existing no-positional logic (cwd-inference / anchor / askuserquestion / `<unset>`) runs unchanged. When `task_name is not None`, the function dispatches to the task-scope branch below.
+The existing `resolve()` function in `cafleet/src/cafleet/base_dir.py` is extended in place: the current `path: str | None` keyword argument is **renamed to** `task_name: str | None` (the old `path` parameter is removed — there is no `path` kwarg on the new `resolve()` signature, matching the CLI's `--path` removal in § 1). When `task_name is None`, the existing no-positional logic (cwd-inference / anchor / askuserquestion) runs unchanged. When `task_name is not None`, the function dispatches to the general task-scope branch below.
+
+**Resolver is skill-agnostic.** The implementation does NOT enumerate or special-case any bucket name (`researches/`, `design-docs/`, etc.) and does NOT enforce slug regex shapes. Skill-specific conventions live in the consuming skill, not in the resolver — each skill picks its own task relpath and passes it.
 
 ```text
 def resolve(*, task_name=None, cwd=None, home=None, tmp_candidate=None) -> dict:
@@ -71,13 +73,24 @@ def _resolve_task_scope(task_name: str, *, cwd: Path) -> dict:
 
     candidate = Path(task_name)
     if candidate.is_absolute():
-        task_folder = _match_known_task_pattern(candidate, repo_root)
-        if task_folder is None:
+        task_folder = candidate.resolve(strict=False)
+        if task_folder == repo_root or not _is_under(task_folder, repo_root):
             return {"status": "unset", "base": None,
                     "source": "absolute-path-arg", "anchor": None,
                     "task_name": task_name}
     else:
         task_folder = (repo_root / candidate).resolve(strict=False)
+        if task_folder == repo_root:
+            raise RuntimeError(
+                f"task_name {task_name!r} resolves to the repo root "
+                f"({repo_root}); the repo root is not a task folder."
+            )
+        if not _is_under(task_folder, repo_root):
+            raise RuntimeError(
+                f"task_name {task_name!r} resolves outside the repo root "
+                f"({task_folder} is not under {repo_root}); refusing to create "
+                f"a task folder outside the repo."
+            )
 
     task_folder.mkdir(parents=True, exist_ok=True)
     anchor_path = task_folder / ANCHOR_FILENAME
@@ -96,8 +109,9 @@ def _resolve_task_scope(task_name: str, *, cwd: Path) -> dict:
 
 Key invariants:
 
-- `_infer_repo_root(cwd)` walks upward from `cwd` using the **existing** `is_git_repo_root(p)` helper in `base_dir.py` (which returns `True` when `<p>/.git` exists — file or directory, so git worktrees are supported). It returns the first ancestor for which `is_git_repo_root` is True. If no `.git` ancestor is found (CWD is outside any git repo — typically `$HOME` or under `$HOME/.claude`), it returns `None`, which the task-scope branch surfaces as a fatal error (see *No-repo-root failure mode* below). Importantly: when the user runs `cafleet base-dir resolve design-docs/0000060-foo` from **inside** a task folder (e.g., CWD = `<repo>/design-docs/0000042-bar/`), `_infer_repo_root` walks up to `<repo>/`, not the task folder itself — so the relative-task-name path joins against the repo root, not against the inner CWD.
-- `_match_known_task_pattern(path, repo_root)` walks parents of `path` and returns the first ancestor `p` for which **all four** conditions hold: (1) `p.parent.parent == repo_root`, (2) `p.parent.name in {"researches", "design-docs"}`, (3) the slug name `p.name` matches the regex appropriate to its bucket — `^\d{7}-[A-Za-z0-9_-]+$` for `design-docs/` (matches the existing project rule in `.claude/rules/design-doc-numbering.md`), or `^[A-Za-z0-9][A-Za-z0-9_-]*$` for `researches/` (any non-empty kebab/underscore slug), and (4) `p` is a directory or does not yet exist (a regular file at `p` is rejected). Returns `None` when no ancestor satisfies all four conditions, in which case the resolver returns the `<unset>` shape exactly as today.
+- `_infer_repo_root(cwd)` walks upward from `cwd` using the **existing** `is_git_repo_root(p)` helper in `base_dir.py` (which returns `True` when `<p>/.git` exists — file or directory, so git worktrees are supported). It returns the first ancestor for which `is_git_repo_root` is True. If no `.git` ancestor is found (CWD is outside any git repo — typically `$HOME` or under `$HOME/.claude`), it returns `None`, which the task-scope branch surfaces as a fatal error (see *No-repo-root failure mode* below). Importantly: when the user runs `cafleet base-dir resolve <relpath>` from **inside** a sub-folder of the repo, `_infer_repo_root` walks up to the repo root, not the inner CWD — so the relative-task-name path joins against the repo root, not against the inner CWD.
+- **Absolute-path branch**: the resolver does not walk ancestors and does not match against any bucket name. Either the absolute path is strictly under the repo root (treat as task folder verbatim) or it is not (return `<unset>`). The `repo_root == task_folder` case also returns `<unset>` to prevent collision with the shared-root anchor.
+- **Relative-path branch**: traversal escapes (`../outside`, `design-docs/../../escaped`) and the repo-root degenerate (`.`, `""`, `design-docs/..`) raise `RuntimeError`. Otherwise the joined+resolved path is the task folder. Whatever relpath the consuming skill passes — regardless of whether it ends in a filename or a folder — is used as-is for `mkdir`. **Consuming skills are responsible for passing a relpath that is the actual task folder, not a child path.**
 - The task-folder mkdir uses `pathlib.Path.mkdir(parents=True, exist_ok=True)`. **No `subprocess.run(["mkdir", ...])`, no shell-out, no `os.makedirs` wrapper** — pathlib is the only sanctioned API.
 - `ANCHOR_FILENAME`, `ANCHOR_VERSION`, the anchor's JSON shape, and `_read_consistent_anchor` / `_write_anchor` are unchanged from today. The anchor's `source` field accepts the new value `"task-scope"` alongside the existing `"cwd-inference"` and `"askuserquestion"` (see § 3 for the explicit `_validate_anchor` / `record` split).
 

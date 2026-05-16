@@ -123,7 +123,7 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 
      The CLI inspects ancestors for a recognized `design-docs/<NNNNNNN>-<slug>/` pattern and returns the matching ancestor as the task folder.
 
-   Use the returned `base` field as `${BASE}`. Set `dir_path = ${BASE}` (the task folder IS the design-doc directory) and `doc_path = ${BASE}/design-doc.md`. There is no further `${BASE}/design-docs/...` concatenation.
+   Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field, `dir_path = ${BASE}`, and `doc_path = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). On `status == "unset"` (absolute `$ARGUMENTS` outside any recognized `design-docs/<NNNNNNN>-<slug>` pattern), set `doc_path` to the literal `$ARGUMENTS` path, derive `dir_path = dirname(doc_path)`, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
 2. Read the design document at `doc_path`. If missing or empty, report the error and stop.
 3. Run `cafleet doctor`. If it reports a problem, surface its message and stop.
 

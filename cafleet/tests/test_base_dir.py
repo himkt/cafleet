@@ -233,47 +233,27 @@ def test_resolve_relative_task_name_reads_anchor_on_second_call(tmp_path):
     }
 
 
-def test_resolve_absolute_path_inside_researches_resolves_to_slug_folder(tmp_path):
-    """Bullet 3: An absolute ``task_name`` whose path lives inside
-    ``researches/<slug>/...`` resolves to that slug folder (not the inner file)."""
+def test_resolve_absolute_path_inside_repo_root_resolves_at_that_path(tmp_path):
+    """An absolute ``task_name`` strictly under the repo root is treated as the task folder
+    verbatim — no skill-specific bucket matching, no ancestor walk."""
     repo_root = _make_repo_root(tmp_path)
-    research_folder = repo_root / "researches" / "topic-foo"
-    research_folder.mkdir(parents=True)
-    inner = research_folder / "report.md"
+    abs_folder = repo_root / "any-subdir" / "any-slug"
 
-    result = resolve(task_name=str(inner), cwd=repo_root)
+    result = resolve(task_name=str(abs_folder), cwd=repo_root)
 
     assert result == {
         "status": "resolved",
-        "base": str(research_folder),
+        "base": str(abs_folder),
         "source": "task-scope",
-        "anchor": str(research_folder / ANCHOR_FILENAME),
-        "task_name": str(inner),
+        "anchor": str(abs_folder / ANCHOR_FILENAME),
+        "task_name": str(abs_folder),
     }
+    assert abs_folder.is_dir()
 
 
-def test_resolve_absolute_path_inside_design_docs_resolves_to_slug_folder(tmp_path):
-    """Bullet 4: An absolute ``task_name`` whose path lives inside
-    ``design-docs/<NNNNNNN>-<slug>/...`` resolves to that slug folder."""
-    repo_root = _make_repo_root(tmp_path)
-    dd_folder = repo_root / "design-docs" / "0000060-skill-task-scoped-base-dir"
-    dd_folder.mkdir(parents=True)
-    inner = dd_folder / "design-doc.md"
-
-    result = resolve(task_name=str(inner), cwd=repo_root)
-
-    assert result == {
-        "status": "resolved",
-        "base": str(dd_folder),
-        "source": "task-scope",
-        "anchor": str(dd_folder / ANCHOR_FILENAME),
-        "task_name": str(inner),
-    }
-
-
-def test_resolve_absolute_path_outside_recognized_pattern_returns_unset(tmp_path):
-    """Bullet 5: An absolute ``task_name`` outside any recognized task-folder pattern
-    returns the ``<unset>`` shape (existing absolute-path-arg semantics preserved)."""
+def test_resolve_absolute_path_outside_repo_root_returns_unset(tmp_path):
+    """An absolute ``task_name`` outside the repo root returns ``<unset>`` — the resolver
+    refuses to manage paths it cannot anchor under the inferred repo."""
     repo_root = _make_repo_root(tmp_path)
     outside = tmp_path / "outside" / "random.md"
 
@@ -288,68 +268,20 @@ def test_resolve_absolute_path_outside_recognized_pattern_returns_unset(tmp_path
     }
 
 
-def test_resolve_absolute_path_with_bad_design_docs_slug_returns_unset(tmp_path):
-    """Bullet 6: ``design-docs/garbage`` fails the ``^\\d{7}-`` slug regex in
-    ``_match_known_task_pattern`` and produces no anchor."""
+def test_resolve_absolute_path_equal_to_repo_root_returns_unset(tmp_path):
+    """An absolute ``task_name`` resolving exactly to the repo root returns ``<unset>``;
+    the repo root is not a task folder (it would clobber the shared-root anchor)."""
     repo_root = _make_repo_root(tmp_path)
-    bad_folder = repo_root / "design-docs" / "garbage"
-    bad_folder.mkdir(parents=True)
-    inner = bad_folder / "doc.md"
 
-    result = resolve(task_name=str(inner), cwd=repo_root)
+    result = resolve(task_name=str(repo_root), cwd=repo_root)
 
     assert result == {
         "status": "unset",
         "base": None,
         "source": "absolute-path-arg",
         "anchor": None,
-        "task_name": str(inner),
+        "task_name": str(repo_root),
     }
-    assert not (bad_folder / ANCHOR_FILENAME).exists()
-
-
-def test_resolve_relative_slug_plus_filename_normalizes_to_slug_folder(tmp_path):
-    """Regression: a relative ``task_name`` like ``design-docs/<slug>/design-doc.md`` resolves
-    to the slug folder, not to a directory literally named ``design-doc.md`` (Copilot finding
-    on the §Spec 2 relative branch)."""
-    repo_root = _make_repo_root(tmp_path)
-    task_name = "design-docs/0000099-with-filename/design-doc.md"
-
-    result = resolve(task_name=task_name, cwd=repo_root)
-
-    expected_task_folder = repo_root / "design-docs" / "0000099-with-filename"
-    assert result == {
-        "status": "resolved",
-        "base": str(expected_task_folder),
-        "source": "task-scope",
-        "anchor": str(expected_task_folder / ANCHOR_FILENAME),
-        "task_name": task_name,
-    }
-    # The slug folder is created; no spurious "design-doc.md" directory
-    # appears underneath it.
-    assert expected_task_folder.is_dir()
-    nested_dir = expected_task_folder / "design-doc.md"
-    assert not nested_dir.exists() or nested_dir.is_file()
-
-
-def test_resolve_relative_researches_slug_plus_filename_normalizes_to_slug_folder(
-    tmp_path,
-):
-    """Regression: same as the design-docs case but for ``researches/<slug>/<file>``."""
-    repo_root = _make_repo_root(tmp_path)
-    task_name = "researches/topic-foo/00-scout-bar.md"
-
-    result = resolve(task_name=task_name, cwd=repo_root)
-
-    expected_task_folder = repo_root / "researches" / "topic-foo"
-    assert result == {
-        "status": "resolved",
-        "base": str(expected_task_folder),
-        "source": "task-scope",
-        "anchor": str(expected_task_folder / ANCHOR_FILENAME),
-        "task_name": task_name,
-    }
-    assert expected_task_folder.is_dir()
 
 
 def test_resolve_relative_traversal_escape_is_rejected(tmp_path):
@@ -375,6 +307,22 @@ def test_resolve_relative_traversal_via_intermediate_dot_dot_is_rejected(tmp_pat
         resolve(task_name="design-docs/../../escaped", cwd=repo_root)
 
     assert not (tmp_path / "escaped").exists()
+
+
+def test_resolve_relative_task_name_resolving_to_repo_root_is_rejected(tmp_path):
+    """Regression: ``task_name`` values that resolve to the repo root itself (``"."``,
+    ``""``, ``"./"``, ``"design-docs/.."``) are rejected — writing a task-scope anchor
+    at the repo root would collide with the shared-root anchor written by the
+    cwd-inference / askuserquestion branches (Copilot finding on the §Spec 2
+    relative branch)."""
+    repo_root = _make_repo_root(tmp_path)
+
+    for bad_input in (".", "", "./", "design-docs/..", "researches/.."):
+        with pytest.raises(RuntimeError, match=r"resolves to the repo root"):
+            resolve(task_name=bad_input, cwd=repo_root)
+
+    # No anchor was written at the repo root.
+    assert not (repo_root / ANCHOR_FILENAME).exists()
 
 
 # ---------------------------------------------------------------------------

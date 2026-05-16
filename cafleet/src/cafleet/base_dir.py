@@ -27,11 +27,6 @@ ANCHOR_VERSION = 1
 
 _TMP_CANDIDATE = Path("/tmp/claude-code")
 
-_BUCKET_SLUG_RE = {
-    "design-docs": re.compile(r"^\d{7}-[A-Za-z0-9_-]+$"),
-    "researches": re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
-}
-
 _BASE_INSERT_MARKER = (
     "[INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"
 )
@@ -128,20 +123,6 @@ def _infer_repo_root(cwd: Path) -> Path | None:
     return None
 
 
-def _match_known_task_pattern(path: Path, repo_root: Path) -> Path | None:
-    for candidate in (path, *path.parents):
-        parent = candidate.parent
-        if parent == candidate or parent.parent != repo_root:
-            continue
-        slug_re = _BUCKET_SLUG_RE.get(parent.name)
-        if slug_re is None or not slug_re.match(candidate.name):
-            continue
-        if candidate.exists() and not candidate.is_dir():
-            continue
-        return candidate
-    return None
-
-
 _UNSET_SHAPE = {
     "status": "unset",
     "base": None,
@@ -160,18 +141,22 @@ def _resolve_task_scope(task_name: str, *, cwd: Path) -> dict[str, Any]:
 
     candidate = Path(task_name)
     if candidate.is_absolute():
-        task_folder = _match_known_task_pattern(candidate, repo_root)
-        if task_folder is None:
+        task_folder = candidate.resolve(strict=False)
+        if task_folder == repo_root or not _is_under(task_folder, repo_root):
             return {**_UNSET_SHAPE, "task_name": task_name}
     else:
-        joined = (repo_root / candidate).resolve(strict=False)
-        if joined != repo_root and not _is_under(joined, repo_root):
+        task_folder = (repo_root / candidate).resolve(strict=False)
+        if task_folder == repo_root:
+            raise RuntimeError(
+                f"task_name {task_name!r} resolves to the repo root "
+                f"({repo_root}); the repo root is not a task folder."
+            )
+        if not _is_under(task_folder, repo_root):
             raise RuntimeError(
                 f"task_name {task_name!r} resolves outside the repo root "
-                f"({joined} is not under {repo_root}); refusing to create "
+                f"({task_folder} is not under {repo_root}); refusing to create "
                 f"a task folder outside the repo."
             )
-        task_folder = _match_known_task_pattern(joined, repo_root) or joined
 
     task_folder.mkdir(parents=True, exist_ok=True)
     anchor_path = task_folder / ANCHOR_FILENAME

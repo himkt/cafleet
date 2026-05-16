@@ -235,7 +235,7 @@ Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` se
 
     The CLI inspects ancestors for a recognized `design-docs/<NNNNNNN>-<slug>/` pattern and returns the matching ancestor as the task folder.
 
-  In every present-argument case, set `${BASE}` to the returned `base` field (the slug folder) and `${RESOLVED_ARGS} = ${BASE}/design-doc.md` — this short-circuits at Tier 1 below.
+  Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field (the slug folder) and `${RESOLVED_ARGS} = ${BASE}/design-doc.md` (short-circuits at Tier 1 below). On `status == "unset"` (absolute `$ARGUMENTS` outside any recognized `design-docs/<NNNNNNN>-<slug>` pattern), set `${RESOLVED_ARGS}` to the literal `$ARGUMENTS` path so Tier 1 / Tier 2 still run against the user-supplied path, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
 
 - **`$ARGUMENTS` absent** (the discover-all-approved-docs flow): use the no-positional resolver:
 

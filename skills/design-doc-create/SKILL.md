@@ -220,7 +220,7 @@ Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` se
 
   The CLI inspects ancestors for a recognized `design-docs/<NNNNNNN>-<slug>/` pattern and returns the matching ancestor as the task folder.
 
-Use the returned `base` field as `${BASE}`. The task folder IS the design-doc directory; set `${DOC_PATH} = ${BASE}/design-doc.md`. There is no further `${BASE}/design-docs/...` concatenation.
+Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field and `${DOC_PATH} = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). On `status == "unset"` (absolute `$ARGUMENTS` outside any recognized `design-docs/<NNNNNNN>-<slug>` pattern), set `${DOC_PATH}` to the literal `$ARGUMENTS` path so the user-supplied absolute path is preserved, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
 
 Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt. The audit-file path `${BASE}/prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<task-folder>/prompts/`, not under the repo root.
 
