@@ -141,7 +141,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 TASK: Create a Slidev presentation from the approved research report.
 REPORT:           [INSERT <folder>/report.md]
@@ -185,7 +185,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 TASK: Create a reading transcript from the approved research report.
 REPORT:   [INSERT <folder>/report.md]
@@ -298,7 +298,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 TASK: Visually verify the rendered Slidev presentation.
 SLIDE FILE:      [INSERT <folder>/slide.md]

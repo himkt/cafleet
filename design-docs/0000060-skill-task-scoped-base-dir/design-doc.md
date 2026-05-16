@@ -1,7 +1,7 @@
 # Skill Task-Scoped Base Directory
 
 **Status**: Approved
-**Progress**: 15/27 tasks complete
+**Progress**: 21/27 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -267,12 +267,12 @@ Per project rule `.claude/rules/design-doc-numbering.md`, documentation MUST lan
 
 ### Step 5: Implement resolver and CLI changes
 
-- [ ] In `cafleet/src/cafleet/base_dir.py`, refactor `resolve()` to **rename** the existing `path: str | None = None` keyword argument to `task_name: str | None = None`. The `path` parameter is removed entirely (no alias, matching the CLI's `--path` removal). Add the dispatch shown in § 2 at the top of `resolve()`: `if task_name is not None: return _resolve_task_scope(task_name, cwd=cwd_path)`. Implement `_resolve_task_scope` as a private helper using `pathlib.Path(...).mkdir(parents=True, exist_ok=True)` for auto-creation — no `subprocess`, no `os.makedirs`. <!-- completed: -->
-- [ ] Add a helper `_infer_repo_root(cwd: Path) -> Path | None` that walks `cwd` and its parents using the existing `is_git_repo_root(p)` helper; returns the first ancestor for which `.git` exists, or `None` if none found. <!-- completed: -->
-- [ ] Add a helper `_match_known_task_pattern(path: Path, repo_root: Path) -> Path | None` that walks parents of `path` and returns the first ancestor satisfying all four conditions in § 2 *Key invariants* (parent-of-parent == repo_root, parent name in `{researches, design-docs}`, slug regex `^\d{7}-[A-Za-z0-9_-]+$` for design-docs or `^[A-Za-z0-9][A-Za-z0-9_-]*$` for researches, ancestor is a directory or non-existent). Returns `None` on no match. <!-- completed: -->
-- [ ] Add `"task-scope"` to the `source` field's accepted enum in `_validate_anchor`. Do NOT add `"task-scope"` to the `record()` validation or the CLI `base_dir_record`'s `--source` Click Choice list — see Spec § 3. <!-- completed: -->
-- [ ] In `cafleet/src/cafleet/cli.py`, change `base_dir_resolve` to accept an optional positional `TASK_NAME` argument (`@click.argument("task_name", required=False)`) and remove the `--path` option. Map the `RuntimeError` raised by `_resolve_task_scope` (no `.git` ancestor) to exit code `1` with the error message on stderr; no JSON payload is emitted on this branch, even with `--json`. <!-- completed: -->
-- [ ] Wire the positional argument to `resolve(task_name=task_name, ...)`. <!-- completed: -->
+- [x] In `cafleet/src/cafleet/base_dir.py`, refactor `resolve()` to **rename** the existing `path: str | None = None` keyword argument to `task_name: str | None = None`. The `path` parameter is removed entirely (no alias, matching the CLI's `--path` removal). Add the dispatch shown in § 2 at the top of `resolve()`: `if task_name is not None: return _resolve_task_scope(task_name, cwd=cwd_path)`. Implement `_resolve_task_scope` as a private helper using `pathlib.Path(...).mkdir(parents=True, exist_ok=True)` for auto-creation — no `subprocess`, no `os.makedirs`. <!-- completed: 2026-05-16T01:25 -->
+- [x] Add a helper `_infer_repo_root(cwd: Path) -> Path | None` that walks `cwd` and its parents using the existing `is_git_repo_root(p)` helper; returns the first ancestor for which `.git` exists, or `None` if none found. <!-- completed: 2026-05-16T01:25 -->
+- [x] Add a helper `_match_known_task_pattern(path: Path, repo_root: Path) -> Path | None` that walks parents of `path` and returns the first ancestor satisfying all four conditions in § 2 *Key invariants* (parent-of-parent == repo_root, parent name in `{researches, design-docs}`, slug regex `^\d{7}-[A-Za-z0-9_-]+$` for design-docs or `^[A-Za-z0-9][A-Za-z0-9_-]*$` for researches, ancestor is a directory or non-existent). Returns `None` on no match. <!-- completed: 2026-05-16T01:25 -->
+- [x] Add `"task-scope"` to the `source` field's accepted enum in `_validate_anchor`. Do NOT add `"task-scope"` to the `record()` validation or the CLI `base_dir_record`'s `--source` Click Choice list — see Spec § 3. <!-- completed: 2026-05-16T01:25 -->
+- [x] In `cafleet/src/cafleet/cli.py`, change `base_dir_resolve` to accept an optional positional `TASK_NAME` argument (`@click.argument("task_name", required=False)`) and remove the `--path` option. Map the `RuntimeError` raised by `_resolve_task_scope` (no `.git` ancestor) to exit code `1` with the error message on stderr; no JSON payload is emitted on this branch, even with `--json`. <!-- completed: 2026-05-16T01:25 -->
+- [x] Wire the positional argument to `resolve(task_name=task_name, ...)`. <!-- completed: 2026-05-16T01:25 -->
 
 ### Step 6: Tests
 

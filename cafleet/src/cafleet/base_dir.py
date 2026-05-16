@@ -1,10 +1,11 @@
-"""Base directory resolver for CAFleet (design 0000055).
+"""Base directory resolver for CAFleet (design 0000055; task-scope branch design 0000060).
 
 Owns the deterministic side of `${BASE}` resolution: anchor file
-read / write / validate, the three returned-status branches
-(`resolved` / `unset` / `needs-user-input`) plus a fatal `AnchorError`
-raise on schema / version mismatch, and the `<unset>` sentinel returned
-on the absolute-path branch.
+read / write / validate, the no-positional resolution branches
+(`resolved` / `needs-user-input`), the positional `task_name` task-scope
+branch (`resolved` with `source="task-scope"`, or `unset` when an absolute
+path lives outside any recognized task folder), the fatal `AnchorError`
+raise on schema / version mismatch, and the `<unset>` sentinel.
 
 The `AskUserQuestion` branch lives in Claude's tool context — this module
 only reports `status="needs-user-input"` with the candidates Claude should
@@ -25,6 +26,10 @@ ANCHOR_FILENAME = ".cafleet-base-dir.json"
 ANCHOR_VERSION = 1
 
 _TMP_CANDIDATE = Path("/tmp/claude-code")
+
+_DESIGN_DOC_SLUG_RE = re.compile(r"^\d{7}-[A-Za-z0-9_-]+$")
+_RESEARCH_SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+_TASK_BUCKETS = ("researches", "design-docs")
 
 _BASE_INSERT_MARKER = (
     "[INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"
@@ -67,10 +72,10 @@ def _validate_anchor(anchor_path: Path, data: Any) -> None:
             "Delete the anchor and re-resolve."
         )
     source_field = data.get("source")
-    if source_field not in ("cwd-inference", "askuserquestion"):
+    if source_field not in ("cwd-inference", "askuserquestion", "task-scope"):
         raise AnchorError(
             f"anchor at {anchor_path} has invalid source={source_field!r}; "
-            "must be 'cwd-inference' or 'askuserquestion'. "
+            "must be 'cwd-inference', 'askuserquestion', or 'task-scope'. "
             "Delete the anchor and re-resolve."
         )
 
@@ -115,9 +120,114 @@ def _write_anchor(anchor_path: Path, *, base: str, source: str) -> None:
     anchor_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _infer_repo_root(cwd: Path) -> Path | None:
+    """Walk ``cwd`` and its ancestors; return the first directory containing ``.git``.
+
+    Uses :func:`is_git_repo_root` so both regular repos and git worktrees
+    (where ``.git`` is a file pointing at the worktree's gitdir) qualify.
+    Returns ``None`` when no ancestor of ``cwd`` carries ``.git`` — typically
+    when ``cwd`` is ``$HOME`` or under ``$HOME/.claude``.
+    """
+    for candidate in (cwd, *cwd.parents):
+        if is_git_repo_root(candidate):
+            return candidate
+    return None
+
+
+def _match_known_task_pattern(path: Path, repo_root: Path) -> Path | None:
+    """Walk ``path`` and its parents; return the first ancestor that names a task folder.
+
+    A directory ``p`` matches when **all four** conditions hold:
+
+    1. ``p.parent.parent == repo_root`` — the ancestor sits exactly two
+       levels under the inferred repo root.
+    2. ``p.parent.name`` is one of the known task-bucket names
+       (``"researches"`` or ``"design-docs"``).
+    3. The slug name ``p.name`` matches the regex appropriate to its bucket
+       (``^\\d{7}-[A-Za-z0-9_-]+$`` for design-docs;
+       ``^[A-Za-z0-9][A-Za-z0-9_-]*$`` for researches).
+    4. ``p`` is a directory or does not yet exist (a regular file at ``p`` is
+       rejected — the path-by-pattern match never returns a file).
+
+    Returns ``None`` when no ancestor satisfies all four conditions.
+    """
+    for candidate in (path, *path.parents):
+        parent = candidate.parent
+        if parent == candidate:
+            return None
+        if parent.parent != repo_root:
+            continue
+        bucket = parent.name
+        if bucket == "design-docs":
+            if not _DESIGN_DOC_SLUG_RE.match(candidate.name):
+                continue
+        elif bucket == "researches":
+            if not _RESEARCH_SLUG_RE.match(candidate.name):
+                continue
+        else:
+            continue
+        if candidate.exists() and not candidate.is_dir():
+            continue
+        return candidate
+    return None
+
+
+def _resolve_task_scope(task_name: str, *, cwd: Path) -> dict[str, Any]:
+    """Task-scope branch of :func:`resolve`.
+
+    Auto-creates the task folder, writes (or re-reads) its anchor inline,
+    and returns the ``resolved`` shape with ``source`` set to
+    ``"task-scope"`` on first resolution or ``"anchor"`` on subsequent
+    re-reads. Returns the documented ``unset`` shape when ``task_name`` is
+    an absolute path that lives outside any recognized task-folder pattern.
+
+    Raises ``RuntimeError`` when ``cwd`` has no ``.git`` ancestor (the
+    standardized CLI message in §Spec 2 is the exception's body).
+    """
+    repo_root = _infer_repo_root(cwd)
+    if repo_root is None:
+        raise RuntimeError(
+            f"cannot resolve task-scope base-dir: no .git ancestor "
+            f"found from CWD {cwd}. cd to the repo root and retry."
+        )
+
+    candidate = Path(task_name)
+    if candidate.is_absolute():
+        matched = _match_known_task_pattern(candidate, repo_root)
+        if matched is None:
+            return {
+                "status": "unset",
+                "base": None,
+                "source": "absolute-path-arg",
+                "anchor": None,
+                "task_name": task_name,
+            }
+        task_folder = matched
+    else:
+        task_folder = (repo_root / candidate).resolve(strict=False)
+
+    task_folder.mkdir(parents=True, exist_ok=True)
+    anchor_path = task_folder / ANCHOR_FILENAME
+
+    existing = _read_consistent_anchor(anchor_path)
+    if existing is not None:
+        source = "anchor"
+    else:
+        _write_anchor(anchor_path, base=str(task_folder), source="task-scope")
+        source = "task-scope"
+
+    return {
+        "status": "resolved",
+        "base": str(task_folder),
+        "source": source,
+        "anchor": str(anchor_path),
+        "task_name": task_name,
+    }
+
+
 def resolve(
     *,
-    path: str | None = None,
+    task_name: str | None = None,
     cwd: Path | None = None,
     home: Path | None = None,
     tmp_candidate: Path | None = None,
@@ -125,29 +235,34 @@ def resolve(
     """Resolve the `${BASE}` output-root.
 
     Returns one of three shapes (matches the contract in
-    `skills/base-dir/SKILL.md` — three returned statuses plus a fatal-error
-    branch that is signalled via exception, not a return value):
+    `skills/base-dir/SKILL.md`):
 
-    - ``{"status": "resolved", "base": "<abs>", "source": "cwd-inference" | "anchor",
-        "anchor": "<abs>/.cafleet-base-dir.json"}``
+    - ``{"status": "resolved", "base": "<abs>", "source": "cwd-inference" | "anchor"
+        | "task-scope", "anchor": "<abs>/.cafleet-base-dir.json", ...}``
     - ``{"status": "unset", "base": None, "source": "absolute-path-arg",
-        "anchor": None}``
+        "anchor": None, "task_name": <task-name>}`` (only emitted by the
+        positional ``task_name`` branch when an absolute path lives outside
+        any recognized task-folder pattern)
     - ``{"status": "needs-user-input", "base": None, "source": None,
         "candidates": ["<tmp-candidate>", "<cwd>"]}``
 
-    Raises ``AnchorError`` on schema / version mismatch or anchor
-    inconsistency (the fourth, fatal branch — the CLI surfaces this as a
-    non-zero exit instead of one of the JSON shapes above).
-    """
-    if path is not None and Path(path).is_absolute():
-        return {
-            "status": "unset",
-            "base": None,
-            "source": "absolute-path-arg",
-            "anchor": None,
-        }
+    When ``task_name`` is supplied, the function dispatches to the
+    task-scope branch (per design 0000060 §Spec 2): infers the repo root
+    from ``cwd``, joins relative paths under it (or matches absolute paths
+    against the known ``researches/<slug>/`` and ``design-docs/<slug>/``
+    patterns), auto-creates the task folder, and writes the anchor inline.
+    The result includes a ``task_name`` field echoing the input. The
+    no-positional path is unchanged.
 
+    Raises ``AnchorError`` on schema / version mismatch or anchor
+    inconsistency (the fatal branch — the CLI surfaces this as a non-zero
+    exit instead of one of the JSON shapes above). Raises ``RuntimeError``
+    when ``task_name`` is supplied and ``cwd`` has no ``.git`` ancestor.
+    """
     cwd_path = Path(cwd) if cwd is not None else Path.cwd()
+    if task_name is not None:
+        return _resolve_task_scope(task_name, cwd=cwd_path)
+
     if home is not None:
         home_path = Path(home)
     else:

@@ -299,7 +299,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`]
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 OUTPUT PATH: [INSERT DOC PATH]
 
 The user's request: [INSERT USER'S ORIGINAL REQUEST]
@@ -330,7 +330,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`]
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 DESIGN DOCUMENT: [INSERT DOC PATH]
 
 COMMUNICATION PROTOCOL:
@@ -374,7 +374,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`]
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 DESIGN DOCUMENT: [INSERT DOC PATH]
 
 COMMUNICATION PROTOCOL:

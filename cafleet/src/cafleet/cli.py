@@ -440,12 +440,7 @@ def base_dir_group() -> None:
 
 
 @base_dir_group.command("resolve")
-@click.option(
-    "--path",
-    "path_arg",
-    default=None,
-    help="Absolute-path argument from the consuming skill (triggers the <unset> branch).",
-)
+@click.argument("task_name", required=False)
 @click.option(
     "--json",
     "as_json",
@@ -454,14 +449,30 @@ def base_dir_group() -> None:
     help="Emit machine-parseable JSON instead of human-readable text.",
 )
 @click.pass_context
-def base_dir_resolve(ctx: click.Context, path_arg: str | None, as_json: bool) -> None:
-    """Resolve `${BASE}` non-interactively. Never prompts; on the CWD-inference
-    branch it auto-writes the anchor at `${CWD}/.cafleet-base-dir.json` so the
-    next run is idempotent. Reports the four documented status branches.
+def base_dir_resolve(ctx: click.Context, task_name: str | None, as_json: bool) -> None:
+    """Resolve `${BASE}` non-interactively.
+
+    With no positional argument: the no-positional branch infers BASE from
+    CWD (auto-writing the anchor on first call) or signals
+    ``needs-user-input`` when CWD is ``$HOME`` / under ``$HOME/.claude`` and
+    no usable anchor exists.
+
+    With a positional ``TASK_NAME`` (relative path like ``researches/<slug>``
+    or ``design-docs/<NNNNNNN>-<slug>``, or an absolute path inside such a
+    folder): engages the task-scope branch — auto-creates the task folder,
+    writes a per-task anchor with ``source: "task-scope"``, and returns the
+    task folder as ``${BASE}``. When CWD has no ``.git`` ancestor, the task-
+    scope branch exits 1 with a plain-text stderr message and emits no JSON
+    payload, even with ``--json``.
     """
     try:
-        result = base_dir.resolve(path=path_arg)
-    except (base_dir.AnchorError, RuntimeError, OSError) as exc:
+        result = base_dir.resolve(task_name=task_name)
+    except RuntimeError as exc:
+        # Plain-text stderr exit per design 0000060 §Spec 2 *No-repo-root failure mode* —
+        # no JSON payload, even when --json is passed.
+        click.echo(str(exc), err=True)
+        ctx.exit(1)
+    except (base_dir.AnchorError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     if as_json or ctx.obj["json_output"]:
@@ -479,6 +490,8 @@ def base_dir_resolve(ctx: click.Context, path_arg: str | None, as_json: bool) ->
         click.echo("candidates:")
         for c in result["candidates"]:
             click.echo(f"  - {c}")
+    if result.get("task_name"):
+        click.echo(f"task_name: {result['task_name']}")
 
 
 @base_dir_group.command("record")

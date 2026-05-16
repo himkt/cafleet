@@ -135,7 +135,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 CURRENT DATE: [INSERT today's date]
 USER REQUEST: [INSERT user's original request in full]
@@ -185,7 +185,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 CURRENT DATE: [INSERT today's date]
 YOUR ASSIGNMENT: [landscape scope and what areas to map]
@@ -253,7 +253,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
+BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
 
 CURRENT DATE: [INSERT today's date]
 YOUR NAME: researcher-NN
