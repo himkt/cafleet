@@ -68,11 +68,26 @@ Step 5 (cleanup) is autonomous — no user prompt.
 ### Step 0: Validate Input (Director)
 
 1. If `$ARGUMENTS` is absent → error: "Usage: `/cafleet:research-presentation <folder-name>`. Specify the folder containing report.md."
-2. Load `Skill(cafleet:base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
-   - If skipped (absolute path): set `${FOLDER} = $ARGUMENTS`.
-   - If base resolved: set `${FOLDER} = ${BASE}/researches/$ARGUMENTS`. Resolve to absolute path.
-3. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run `/cafleet:research-report` first to generate a report."
-4. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts.
+2. Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract.
+3. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
+
+   - If `$ARGUMENTS` is a relative folder name (e.g. `my-topic`), call:
+
+     ```bash
+     cafleet base-dir resolve researches/$ARGUMENTS --json
+     ```
+
+   - If `$ARGUMENTS` is an absolute path (e.g. `/abs/path/to/researches/my-topic`), pass it through positionally:
+
+     ```bash
+     cafleet base-dir resolve $ARGUMENTS --json
+     ```
+
+     The CLI inspects ancestors for a recognized `researches/<slug>/` pattern and returns the matching ancestor as the task folder. If no ancestor matches, the resolver returns the `unset` shape — error out with the same "No report.md" message in step 4 once the missing folder is detected.
+
+   Use the returned `base` field as `${FOLDER}` (and `${BASE}`) for the rest of this run. The task folder IS the report folder; there is no further `${BASE}/researches/...` concatenation.
+4. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run `/cafleet:research-report` first to generate a report."
+5. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts. The audit-file path `${BASE}/prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<topic-folder>/prompts/`, not under the repo root.
 
 ### Step 1: Bootstrap CAFleet Session, Start Monitor & Spawn Presentation + Transcript (Director)
 
@@ -126,7 +141,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
 
 TASK: Create a Slidev presentation from the approved research report.
 REPORT:           [INSERT <folder>/report.md]
@@ -170,7 +185,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
 
 TASK: Create a reading transcript from the approved research report.
 REPORT:   [INSERT <folder>/report.md]
@@ -283,7 +298,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
 
 TASK: Visually verify the rendered Slidev presentation.
 SLIDE FILE:      [INSERT <folder>/slide.md]

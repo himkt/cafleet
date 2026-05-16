@@ -215,9 +215,35 @@ Before validation, resolve `$ARGUMENTS` into a concrete `design-doc.md` path.
 
 #### Phase 1: Base Directory Resolution
 
-Load `Skill(cafleet:base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
-- If skipped (absolute path): set `${RESOLVED_ARGS} = $ARGUMENTS`.
-- If base resolved: set `${RESOLVED_ARGS} = ${BASE}/design-docs/$ARGUMENTS`. Resolve to absolute path.
+Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract. Then resolve BASE based on whether `$ARGUMENTS` was supplied:
+
+- **`$ARGUMENTS` present** (the typical execute-a-specific-doc flow): use the task-scope resolver positionally. `$ARGUMENTS` is normally a slug name (`0000060-skill-task-scoped-base-dir`) or a path containing such a slug.
+
+  - Relative slug (e.g. `0000060-foo`):
+
+    ```bash
+    cafleet base-dir resolve design-docs/$ARGUMENTS --json
+    ```
+
+  - Relative slug + filename (e.g. `0000060-foo/design-doc.md`): same form — the resolver joins the relpath against the inferred repo root and the trailing `design-doc.md` segment is preserved in the joined path.
+
+  - Absolute path (e.g. `/abs/path/to/design-docs/0000060-foo/design-doc.md`): pass through positionally:
+
+    ```bash
+    cafleet base-dir resolve $ARGUMENTS --json
+    ```
+
+    The CLI inspects ancestors for a recognized `design-docs/<NNNNNNN>-<slug>/` pattern and returns the matching ancestor as the task folder.
+
+  In every present-argument case, set `${BASE}` to the returned `base` field (the slug folder) and `${RESOLVED_ARGS} = ${BASE}/design-doc.md` — this short-circuits at Tier 1 below.
+
+- **`$ARGUMENTS` absent** (the discover-all-approved-docs flow): use the no-positional resolver:
+
+  ```bash
+  cafleet base-dir resolve --json
+  ```
+
+  Set `${BASE}` to the returned `base` field (the repo root) and `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
 
 #### Phase 2: Three-Tier Detection
 
@@ -230,6 +256,8 @@ Using `${RESOLVED_ARGS}`, apply a three-tier detection strategy, evaluated in or
 | 3 — Base directory | `${RESOLVED_ARGS}` is a directory containing `**/design-doc.md` (one level deep) | Enter discovery flow |
 
 Tier evaluation is sequential and short-circuits.
+
+> **Tier 3 with task-scope BASE**: When Phase 1's present-argument branch fires, `${BASE}` is one slug folder and `${RESOLVED_ARGS}` is set to `${BASE}/design-doc.md` — Tier 1 short-circuits before Tier 3 is reached, so the task-scoped BASE never exercises the discovery flow. Tier 3 is preserved for the no-argument branch, where `${BASE}` is the repo root and the discovery flow scans every approved slug under `<repo>/design-docs/`. No follow-up edit is required (per design 0000060 § 6 *Tier 3 verification*).
 
 #### Discovery Flow (Tier 3)
 
@@ -388,7 +416,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`]
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
@@ -431,7 +459,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`]
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
@@ -477,7 +505,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`]
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:

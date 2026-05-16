@@ -105,13 +105,27 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 
 ### Step 0: Path Resolution & Doc Validation (Director)
 
-1. Load `Skill(cafleet:base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
-   - If skipped (absolute path): set `doc_path = $ARGUMENTS`.
-   - If base resolved: set `doc_path = ${BASE}/design-docs/$ARGUMENTS`. Resolve to absolute path.
-   - If `doc_path` does not end with `design-doc.md`, append `/design-doc.md`.
-2. Set `dir_path = dirname(doc_path)`.
-3. Read the design document at `doc_path`. If missing or empty, report the error and stop.
-4. Run `cafleet doctor`. If it reports a problem, surface its message and stop.
+1. Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract. Then resolve the task-scoped BASE by calling the resolver positionally:
+
+   - Relative slug (e.g. `0000060-foo`):
+
+     ```bash
+     cafleet base-dir resolve design-docs/$ARGUMENTS --json
+     ```
+
+   - Relative slug + filename (e.g. `0000060-foo/design-doc.md`): same form — the resolver joins the relpath against the inferred repo root.
+
+   - Absolute path (e.g. `/abs/path/to/design-docs/0000060-foo/design-doc.md`): pass through positionally:
+
+     ```bash
+     cafleet base-dir resolve $ARGUMENTS --json
+     ```
+
+     The CLI inspects ancestors for a recognized `design-docs/<NNNNNNN>-<slug>/` pattern and returns the matching ancestor as the task folder.
+
+   Use the returned `base` field as `${BASE}`. Set `dir_path = ${BASE}` (the task folder IS the design-doc directory) and `doc_path = ${BASE}/design-doc.md`. There is no further `${BASE}/design-docs/...` concatenation.
+2. Read the design document at `doc_path`. If missing or empty, report the error and stop.
+3. Run `cafleet doctor`. If it reports a problem, surface its message and stop.
 
 ### Step 1: Progress Check (Director)
 
@@ -160,7 +174,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`]
 DESIGN DOCUMENT: [INSERT doc_path]
 ALREADY-REVIEWED SECTIONS: [INSERT JSON array from interview-progress, or "none" on fresh start]
 

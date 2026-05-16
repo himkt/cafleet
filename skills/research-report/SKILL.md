@@ -52,12 +52,18 @@ Members cannot talk to the user directly — the Director always relays. Members
 
 ### Step 0: Base Directory Selection (Director)
 
-Before creating the team, determine where output files will be saved.
+Before creating the team, resolve the task-scoped base directory for this run.
 
-1. Load `Skill(cafleet:base-dir)` and follow its procedure. (The topic argument is not a path, so the absolute-path skip rule does not apply.)
-2. Compute: `${OUTPUT_DIR} = ${BASE}/researches/[topic-slug]/`
-3. Create the output directory.
-4. Pass `${OUTPUT_DIR}` as the resolved absolute path to the Manager and all Researchers/Scouts in their spawn prompts.
+1. Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract.
+2. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
+
+   ```bash
+   cafleet base-dir resolve researches/[topic-slug] --json
+   ```
+
+   The CLI walks up from CWD via `is_git_repo_root` to infer the repo root, joins `researches/[topic-slug]` against it, auto-creates the folder via `pathlib.Path(...).mkdir(parents=True, exist_ok=True)`, writes `<task-folder>/.cafleet-base-dir.json` with `source: "task-scope"`, and returns `{status: "resolved", base: <abs task-folder>, source: "task-scope" | "anchor", anchor: <abs anchor>, task_name: "researches/[topic-slug]"}`. Use the returned `base` field as `${BASE}` for the rest of this run.
+3. `${OUTPUT_DIR} = ${BASE}` — the task folder IS the output directory. There is no further concatenation.
+4. Pass `${OUTPUT_DIR}` (i.e., `${BASE}`) as the resolved absolute path to the Manager and all Researchers/Scouts in their spawn prompts. The audit-file path `${BASE}/prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<topic-folder>/prompts/`, not under the repo root.
 
 ### Step 0a: Environment Precheck (Director — MANDATORY)
 
@@ -129,7 +135,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
 
 CURRENT DATE: [INSERT today's date]
 USER REQUEST: [INSERT user's original request in full]
@@ -179,7 +185,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
 
 CURRENT DATE: [INSERT today's date]
 YOUR ASSIGNMENT: [landscape scope and what areas to map]
@@ -247,7 +253,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve researches/<topic-slug>`]
 
 CURRENT DATE: [INSERT today's date]
 YOUR NAME: researcher-NN

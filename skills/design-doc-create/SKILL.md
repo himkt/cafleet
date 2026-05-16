@@ -204,11 +204,25 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 
 **Path resolution** (before resume detection):
 
-Load `Skill(cafleet:base-dir)` and follow its procedure with `$ARGUMENTS` as the argument.
-- If skipped (absolute path): set `${DOC_PATH} = $ARGUMENTS`.
-- If base resolved: set `${DOC_PATH} = ${BASE}/design-docs/$ARGUMENTS`. Resolve to absolute path.
+Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract. Then resolve the task-scoped BASE by calling the resolver positionally with the design-doc relpath:
 
-Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt.
+- If `$ARGUMENTS` is a relative slug (e.g. `0000060-skill-task-scoped-base-dir`), call:
+
+  ```bash
+  cafleet base-dir resolve design-docs/$ARGUMENTS --json
+  ```
+
+- If `$ARGUMENTS` is an absolute path (e.g. `/abs/path/to/design-docs/0000060-skill-task-scoped-base-dir/design-doc.md`), pass it through positionally:
+
+  ```bash
+  cafleet base-dir resolve $ARGUMENTS --json
+  ```
+
+  The CLI inspects ancestors for a recognized `design-docs/<NNNNNNN>-<slug>/` pattern and returns the matching ancestor as the task folder.
+
+Use the returned `base` field as `${BASE}`. The task folder IS the design-doc directory; set `${DOC_PATH} = ${BASE}/design-doc.md`. There is no further `${BASE}/design-docs/...` concatenation.
+
+Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt. The audit-file path `${BASE}/prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<task-folder>/prompts/`, not under the repo root.
 
 **Resume detection** (using resolved `${DOC_PATH}`):
 
@@ -285,7 +299,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`]
 OUTPUT PATH: [INSERT DOC PATH]
 
 The user's request: [INSERT USER'S ORIGINAL REQUEST]
@@ -316,7 +330,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`]
 DESIGN DOCUMENT: [INSERT DOC PATH]
 
 COMMUNICATION PROTOCOL:
@@ -360,7 +374,7 @@ Load these skills at startup:
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs task-folder path the Director resolved via `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`]
 DESIGN DOCUMENT: [INSERT DOC PATH]
 
 COMMUNICATION PROTOCOL:

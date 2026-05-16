@@ -1,7 +1,7 @@
 # Skill Task-Scoped Base Directory
 
 **Status**: Approved
-**Progress**: 8/27 tasks complete
+**Progress**: 13/27 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -252,11 +252,11 @@ Per project rule `.claude/rules/design-doc-numbering.md`, documentation MUST lan
 
 ### Step 3: Update the 5 consuming skills' SKILL.md files
 
-- [ ] `skills/research-report/SKILL.md` Step 0: replace the cafleet:base-dir invocation with `cafleet base-dir resolve researches/<topic-slug>`. Drop the `${OUTPUT_DIR} = ${BASE}/researches/<slug>/` concatenation since `${BASE}` IS the topic folder. Verify the `BASE:` line in every embedded spawn prompt now points at the task folder. <!-- completed: -->
-- [ ] `skills/research-presentation/SKILL.md` Step 0 (or equivalent): same change, with the slug the skill was handed. <!-- completed: -->
-- [ ] `skills/design-doc-create/SKILL.md` Step 0: replace the cafleet:base-dir invocation with `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`. Drop the `${DOC_PATH} = ${BASE}/design-docs/$ARGUMENTS` concatenation; `${DOC_PATH}` is now `${BASE}/design-doc.md`. <!-- completed: -->
-- [ ] `skills/design-doc-execute/SKILL.md` Step 1 Phase 1: same change. After wiring, verify the existing Tier 3 base-directory discovery flow degenerates cleanly with task-scoped `${BASE}` (one slug folder containing a single `design-doc.md`) — per Spec § 6 *design-doc-execute Tier 3 verification*. Record the outcome inline in the SKILL.md change; if Tier 3 needs a follow-up edit to behave correctly with a single-doc BASE, file the edit as part of this task. <!-- completed: -->
-- [ ] `skills/design-doc-interview/SKILL.md` Step 0: same change. <!-- completed: -->
+- [x] `skills/research-report/SKILL.md` Step 0: replace the cafleet:base-dir invocation with `cafleet base-dir resolve researches/<topic-slug>`. Drop the `${OUTPUT_DIR} = ${BASE}/researches/<slug>/` concatenation since `${BASE}` IS the topic folder. Verify the `BASE:` line in every embedded spawn prompt now points at the task folder. <!-- completed: 2026-05-16T00:32 -->
+- [x] `skills/research-presentation/SKILL.md` Step 0 (or equivalent): same change, with the slug the skill was handed. <!-- completed: 2026-05-16T00:32 -->
+- [x] `skills/design-doc-create/SKILL.md` Step 0: replace the cafleet:base-dir invocation with `cafleet base-dir resolve design-docs/<NNNNNNN>-<slug>`. Drop the `${DOC_PATH} = ${BASE}/design-docs/$ARGUMENTS` concatenation; `${DOC_PATH}` is now `${BASE}/design-doc.md`. <!-- completed: 2026-05-16T00:32 -->
+- [x] `skills/design-doc-execute/SKILL.md` Step 1 Phase 1: same change. After wiring, verify the existing Tier 3 base-directory discovery flow degenerates cleanly with task-scoped `${BASE}` (one slug folder containing a single `design-doc.md`) — per Spec § 6 *design-doc-execute Tier 3 verification*. Record the outcome inline in the SKILL.md change; if Tier 3 needs a follow-up edit to behave correctly with a single-doc BASE, file the edit as part of this task. Outcome: Tier 3 short-circuits cleanly (Tier 1 fires first when `$ARGUMENTS` is supplied because `${RESOLVED_ARGS} = ${BASE}/design-doc.md`); Tier 3 is preserved for the no-argument flow that uses the no-positional resolver (`${BASE}` = repo root, `${RESOLVED_ARGS} = ${BASE}/design-docs/`). No follow-up edit needed; documented inline in Phase 2 callout. <!-- completed: 2026-05-16T00:32 -->
+- [x] `skills/design-doc-interview/SKILL.md` Step 0: same change. <!-- completed: 2026-05-16T00:32 -->
 
 ### Step 4: Create the new meta-skill `<repo>/.claude/skills/skill-author/SKILL.md`
 
