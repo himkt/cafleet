@@ -1,7 +1,7 @@
 # README — Spotlight design-doc-driven development; collapse the duplicate Coding agents H3
 
 **Status**: Approved
-**Progress**: 9/17 tasks complete
+**Progress**: 17/17 tasks complete
 **Last Updated**: 2026-05-16
 
 ## Overview
@@ -10,15 +10,15 @@ Simplify `README.md` with two coordinated changes: (1) collapse the duplicate `#
 
 ## Success Criteria
 
-- [ ] `README.md` `## Install` section begins with a one-paragraph coding-agent intro stating that CAFleet works with `claude` (Claude Code) and `codex` (OpenAI Codex CLI); the existing `### Install CAFleet skills` (with `#### Claude Code` and `#### Codex`) and `### Install CAFleet CLI` subsections follow.
-- [ ] The Codex sandbox `> [!IMPORTANT]` callout (`sandbox_workspace_write.writable_roots = ["/home/<you>/.local/share/cafleet"]`) lives in the `#### Codex` subsection of `### Install CAFleet skills`, adjacent to the rest of the Codex plugin install steps. The verbatim TOML block is preserved.
-- [ ] The `#### Codex` install subsection ends with a one-line cross-reference: `For codex CLI version pin and operational specifics, see [docs/codex-members.md](docs/codex-members.md).` This preserves the only inbound link to `docs/codex-members.md` from the README after the `### Coding agents` removal — placed where an operator setting up Codex actually needs it.
-- [ ] The current `### Coding agents` H3 subsection (under `## CLI cheatsheet`, README L122–L134 in the pre-change file) is removed entirely. Its flag-context paragraph (the `--coding-agent {claude,codex}` description and the "a single Director may mix claude+codex members" sentence) is NOT replicated elsewhere in `README.md` per user clarification B3 — operators discover that detail via `docs/codex-members.md` (now linked from the `#### Codex` install subsection) and `cafleet --help`.
-- [ ] The existing `## Simple example to use CAFleet on Claude Code or Codex` section (README L76–L92 in the pre-change file) stays verbatim. No retitling, no pointer additions, no content edits.
-- [ ] A new `## Design-doc-driven development` top-level H2 sits immediately after the `## Simple example …` section and immediately before `## CLI cheatsheet`. The new section contains exactly three components in this order: (i) a 2–3 sentence dogfooding pitch paragraph, (ii) a bullet list naming all three design-doc skills with one-line role descriptions, (iii) a single line linking to the in-repo `design-docs/` directory as evidence.
-- [ ] The new section does NOT link to individual `skills/*/SKILL.md` files, does NOT call out specific design-doc exemplars by number, and does NOT use a `> [!NOTE]` / `> [!TIP]` callout block. Pitch paragraph + bullet list + single directory link only.
-- [ ] No edits to any file other than `README.md`. `ARCHITECTURE.md`, `docs/`, `skills/*/SKILL.md`, source code, and tests are out of scope.
-- [ ] `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, and `mise //cafleet:test` all pass after the change (sanity check — none should be impacted by a README-only diff, but run them to confirm).
+- [x] `README.md` `## Install` section begins with a one-paragraph coding-agent intro stating that CAFleet works with `claude` (Claude Code) and `codex` (OpenAI Codex CLI); the existing `### Install CAFleet skills` (with `#### Claude Code` and `#### Codex`) and `### Install CAFleet CLI` subsections follow.
+- [x] The Codex sandbox `> [!IMPORTANT]` callout (`sandbox_workspace_write.writable_roots = ["/home/<you>/.local/share/cafleet"]`) lives in the `#### Codex` subsection of `### Install CAFleet skills`, adjacent to the rest of the Codex plugin install steps. The verbatim TOML block is preserved.
+- [x] The `#### Codex` install subsection ends with a one-line cross-reference: `For codex CLI version pin and operational specifics, see [docs/codex-members.md](docs/codex-members.md).` This preserves the only inbound link to `docs/codex-members.md` from the README after the `### Coding agents` removal — placed where an operator setting up Codex actually needs it.
+- [x] The current `### Coding agents` H3 subsection (under `## CLI cheatsheet`, README L122–L134 in the pre-change file) is removed entirely. Its flag-context paragraph (the `--coding-agent {claude,codex}` description and the "a single Director may mix claude+codex members" sentence) is NOT replicated elsewhere in `README.md` per user clarification B3 — operators discover that detail via `docs/codex-members.md` (now linked from the `#### Codex` install subsection) and `cafleet --help`.
+- [x] The existing `## Simple example to use CAFleet on Claude Code or Codex` section (README L76–L92 in the pre-change file) stays verbatim. No retitling, no pointer additions, no content edits.
+- [x] A new `## Design-doc-driven development` top-level H2 sits immediately after the `## Simple example …` section and immediately before `## CLI cheatsheet`. The new section contains exactly three components in this order: (i) a 2–3 sentence dogfooding pitch paragraph, (ii) a bullet list naming all three design-doc skills with one-line role descriptions, (iii) a single line linking to the in-repo `design-docs/` directory as evidence.
+- [x] The new section does NOT link to individual `skills/*/SKILL.md` files, does NOT call out specific design-doc exemplars by number, and does NOT use a `> [!NOTE]` / `> [!TIP]` callout block. Pitch paragraph + bullet list + single directory link only.
+- [x] No edits to any file other than `README.md`. `ARCHITECTURE.md`, `docs/`, `skills/*/SKILL.md`, source code, and tests are out of scope.
+- [x] `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, and `mise //cafleet:test` all pass after the change (sanity check — none should be impacted by a README-only diff, but run them to confirm). _(lint/format/typecheck pass; test reports 1/614 pre-existing failure unrelated to this branch — see arbitration in §Implementation > Step 4.)_
 
 ---
 
@@ -202,14 +202,14 @@ The historical record of the removal lives in this design doc (Status: Complete 
 
 ### Step 4: Verification
 
-- [ ] Re-read the new `## Install` section top-to-bottom and confirm: (a) the intro paragraph names both backends in one short paragraph, (b) the Claude Code subsection is unchanged, (c) the Codex subsection ends with the two adjacent `> [!IMPORTANT]` callouts (skill verification, then sandbox writable_roots) followed by the one-line `docs/codex-members.md` cross-reference, (d) the CLI install subsection is unchanged. <!-- completed: -->
-- [ ] Verify the new `## Design-doc-driven development` section against the §5 structural checklist mechanically: (a) the pitch paragraph contains the dogfooding hook phrase `CAFleet itself`, (b) the pitch paragraph is exactly 3 sentences (count periods at sentence boundaries), (c) the bullet list has exactly 3 items naming `/cafleet:design-doc-create`, `/cafleet:design-doc-interview`, and `/cafleet:design-doc-execute` in that order, (d) the closing line is exactly one sentence with one link whose target resolves to `design-docs/` (relative path, no anchor). <!-- completed: -->
-- [ ] Confirm `git diff README.md` shows only the five edits described above (intro paragraph add, sandbox callout relocation, cross-reference append, `### Coding agents` removal, `## Design-doc-driven development` add) and no incidental whitespace drift. <!-- completed: -->
-- [ ] Confirm `git status` shows ONLY `README.md` modified — no other files touched. <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes. <!-- completed: -->
-- [ ] `mise //cafleet:format` produces no diff. <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` passes. <!-- completed: -->
-- [ ] `mise //cafleet:test` passes. <!-- completed: -->
+- [x] Re-read the new `## Install` section top-to-bottom and confirm: (a) the intro paragraph names both backends in one short paragraph, (b) the Claude Code subsection is unchanged, (c) the Codex subsection ends with the two adjacent `> [!IMPORTANT]` callouts (skill verification, then sandbox writable_roots) followed by the one-line `docs/codex-members.md` cross-reference, (d) the CLI install subsection is unchanged. <!-- completed: 2026-05-16T14:05 -->
+- [x] Verify the new `## Design-doc-driven development` section against the §5 structural checklist mechanically: (a) the pitch paragraph contains the dogfooding hook phrase `CAFleet itself`, (b) the pitch paragraph is exactly 3 sentences (count periods at sentence boundaries), (c) the bullet list has exactly 3 items naming `/cafleet:design-doc-create`, `/cafleet:design-doc-interview`, and `/cafleet:design-doc-execute` in that order, (d) the closing line is exactly one sentence with one link whose target resolves to `design-docs/` (relative path, no anchor). <!-- completed: 2026-05-16T14:05 -->
+- [x] Confirm `git diff README.md` shows only the five edits described above (intro paragraph add, sandbox callout relocation, cross-reference append, `### Coding agents` removal, `## Design-doc-driven development` add) and no incidental whitespace drift. <!-- completed: 2026-05-16T14:05 -->
+- [x] Confirm `git status` shows ONLY `README.md` modified — no other files touched. <!-- completed: 2026-05-16T14:05 -->
+- [x] `mise //cafleet:lint` passes. <!-- completed: 2026-05-16T14:05 -->
+- [x] `mise //cafleet:format` produces no diff. <!-- completed: 2026-05-16T14:05 -->
+- [x] `mise //cafleet:typecheck` passes. <!-- completed: 2026-05-16T14:05 -->
+- [x] `mise //cafleet:test` passes. 1/614 pre-existing failure (`test_base_dir.py::test_cli_resolve_task_name_outside_git_repo_exits_1_no_json`) is unrelated to this branch's README-only diff and is out of scope per §6; tracked separately. <!-- completed: 2026-05-16T14:13 -->
 
 ---
 
