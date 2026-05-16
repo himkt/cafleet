@@ -192,23 +192,34 @@ def resolve(
         | "task-scope", "anchor": "<abs>/.cafleet-base-dir.json", ...}``
     - ``{"status": "unset", "base": None, "source": "absolute-path-arg",
         "anchor": None, "task_name": <task-name>}`` (only emitted by the
-        positional ``task_name`` branch when an absolute path lives outside
-        any recognized task-folder pattern)
+        positional ``task_name`` branch when an absolute path lies outside
+        the inferred repo root or equals the repo root itself)
     - ``{"status": "needs-user-input", "base": None, "source": None,
         "candidates": ["<tmp-candidate>", "<cwd>"]}``
 
     When ``task_name`` is supplied, the function dispatches to the
-    task-scope branch (per design 0000060 §Spec 2): infers the repo root
-    from ``cwd``, joins relative paths under it (or matches absolute paths
-    against the known ``researches/<slug>/`` and ``design-docs/<slug>/``
-    patterns), auto-creates the task folder, and writes the anchor inline.
-    The result includes a ``task_name`` field echoing the input. The
-    no-positional path is unchanged.
+    task-scope branch: infers the repo root from ``cwd``, joins relative
+    paths under it (or accepts absolute paths strictly under repo_root),
+    auto-creates the task folder, and writes the anchor inline. The result
+    includes a ``task_name`` field echoing the input. The no-positional
+    path is unchanged.
+
+    **Consumer contract**: ``task_name`` MUST identify the task folder
+    itself, not a child file. The resolver creates ``<task-folder>/``
+    exactly as supplied — it does not strip trailing filenames (e.g.
+    ``/design-doc.md``) or known bucket prefixes (e.g. ``design-docs/``).
+    A consuming skill that receives ``design-docs/0000060-foo/design-doc.md``
+    from the user MUST strip the trailing ``/design-doc.md`` (and any
+    skill-specific canonicalization) before calling this function —
+    otherwise the resolver creates a directory literally named
+    ``design-doc.md`` and anchors the wrong BASE.
 
     Raises ``AnchorError`` on schema / version mismatch or anchor
     inconsistency (the fatal branch — the CLI surfaces this as a non-zero
     exit instead of one of the JSON shapes above). Raises ``RuntimeError``
-    when ``task_name`` is supplied and ``cwd`` has no ``.git`` ancestor.
+    when ``task_name`` is supplied and ``cwd`` has no ``.git`` ancestor,
+    or when a relative ``task_name`` resolves to the repo root or escapes
+    it via ``..`` segments.
     """
     cwd_path = Path(cwd) if cwd is not None else Path.cwd()
     if task_name is not None:

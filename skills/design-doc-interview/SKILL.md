@@ -105,25 +105,23 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 
 ### Step 0: Path Resolution & Doc Validation (Director)
 
-1. Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract. Then resolve the task-scoped BASE by calling the resolver positionally:
+1. Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract. Then canonicalize `$ARGUMENTS` and resolve the task-scoped BASE:
 
-   - Relative slug (e.g. `0000060-foo`):
-
-     ```bash
-     cafleet base-dir resolve design-docs/$ARGUMENTS --json
-     ```
-
-   - Relative slug + filename (e.g. `0000060-foo/design-doc.md`): strip the trailing `/design-doc.md` first so only the slug is passed to the resolver — otherwise `${BASE}` would land on a directory literally named `design-doc.md` instead of the slug folder.
-
-   - Absolute path (e.g. `/abs/path/to/design-docs/0000060-foo/design-doc.md`): pass through positionally:
+   - **Relative input** — accept any of: `0000060-foo`, `0000060-foo/design-doc.md`, `design-docs/0000060-foo`, `design-docs/0000060-foo/design-doc.md`. Canonicalize to `design-docs/<slug>` by: (1) stripping the trailing `/design-doc.md` if present; (2) stripping the leading `design-docs/` if present; (3) prepending `design-docs/`. The resolver itself does NOT perform this stripping (per `Skill(cafleet:base-dir)` § *Consumer contract*) — the consuming skill canonicalizes first, then calls:
 
      ```bash
-     cafleet base-dir resolve $ARGUMENTS --json
+     cafleet base-dir resolve design-docs/<slug> --json
      ```
 
-     The CLI inspects ancestors for a recognized `design-docs/<NNNNNNN>-<slug>/` pattern and returns the matching ancestor as the task folder.
+   - **Absolute path** (e.g. `/abs/path/to/design-docs/0000060-foo/design-doc.md`): the resolver accepts only the task-folder path, not a child file. Strip the trailing `/design-doc.md` if present so the absolute path identifies the task folder, then pass through positionally:
 
-   Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field, `dir_path = ${BASE}`, and `doc_path = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). On `status == "unset"` (absolute `$ARGUMENTS` outside any recognized `design-docs/<NNNNNNN>-<slug>` pattern), set `doc_path` to the literal `$ARGUMENTS` path, derive `dir_path = dirname(doc_path)`, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
+     ```bash
+     cafleet base-dir resolve <abs-task-folder> --json
+     ```
+
+     The CLI accepts the absolute path if it lies strictly under the inferred repo root; otherwise the resolver returns the `unset` shape.
+
+   Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field, `dir_path = ${BASE}`, and `doc_path = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). On `status == "unset"` (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `doc_path` to the literal `$ARGUMENTS` path, derive `dir_path = dirname(doc_path)`, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
 2. Read the design document at `doc_path`. If missing or empty, report the error and stop.
 3. Run `cafleet doctor`. If it reports a problem, surface its message and stop.
 
