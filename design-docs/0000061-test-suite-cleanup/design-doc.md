@@ -1,6 +1,6 @@
 # Test Suite Cleanup — Reduce Excessive Tests in cafleet/tests/
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 33/33 tasks complete
 **Last Updated**: 2026-05-16
 
@@ -10,12 +10,12 @@ The cafleet test suite has grown to **841 test functions across 57 Python files*
 
 ## Success Criteria
 
-- [ ] Test function count reduced from **841 → ≤ 400** (≥ 52% reduction, satisfying the AGGRESSIVE ≥ 50% target). Stretch goal: ≤ 340 (≥ 60%) if Step 5 incidental dedup achieves ≥ 30% trim of the untouched-CLI carve-out.
-- [ ] `mise //cafleet:test` exits 0 after every commit in the six-step sequence.
-- [ ] No regression in behavioural coverage of the public CLI surface (`cafleet message *`, `cafleet agent *`, `cafleet session *`, `cafleet member *`, `cafleet db init`, `cafleet base-dir *`, `cafleet doctor`).
-- [ ] The five principles in § *Principles* are documented in this doc and applied uniformly; the lint pass surfaces no new tests violating principle (ii) or (iii) on review.
-- [ ] Files in § *Off-Limits* are unchanged.
-- [ ] `cafleet/tests/conftest.py` and the four helper modules (`_helpers.py`, `_broker_helpers.py`, `_member_cli_helpers.py`, `__init__.py`) are unchanged in this design — no symbols added, no symbols removed.
+- [x] Test function count reduced from **841 → ≤ 400** (≥ 52% reduction, satisfying the AGGRESSIVE ≥ 50% target). Stretch goal: ≤ 340 (≥ 60%) if Step 5 incidental dedup achieves ≥ 30% trim of the untouched-CLI carve-out. *(Actual: 368 def — 56.2% reduction; stretch target not met but main target satisfied.)*
+- [x] `mise //cafleet:test` exits 0 after every commit in the six-step sequence.
+- [x] No regression in behavioural coverage of the public CLI surface (`cafleet message *`, `cafleet agent *`, `cafleet session *`, `cafleet member *`, `cafleet db init`, `cafleet base-dir *`, `cafleet doctor`).
+- [x] The five principles in § *Principles* are documented in this doc and applied uniformly; the lint pass surfaces no new tests violating principle (ii) or (iii) on review.
+- [x] Files in § *Off-Limits* are unchanged.
+- [x] `cafleet/tests/conftest.py` and the four helper modules (`_helpers.py`, `_broker_helpers.py`, `_member_cli_helpers.py`, `__init__.py`) are unchanged in this design — no symbols added, no symbols removed.
 
 ---
 
@@ -612,3 +612,4 @@ The "Before" grand total of 841 matches the `grep -cE "^def test_"` count over `
 |:--|:--|
 | 2026-05-16 | Initial draft. |
 | 2026-05-16 | Round 2 (Director-resolved): reconciled Success Criteria ceiling (≤ 400, stretch ≤ 340) with Projected totals (~360); removed `test_session_cli` double-count from Step 5 carve-out; corrected § 3.2, § 5.1, § 5.4 target counts; added base-dir off-limits rationale; dropped `_helpers.py` mutation directive from Step 1; enumerated § 4.1 per-helper parametrize table; enumerated § 6.3–§ 6.8 target test shapes; clarified § 4.4 ordering invariant. |
+| 2026-05-16 | Implementation complete. PR #74. Final def count: 368 (-473, 56.2% reduction; main target ≤ 400 met). Copilot review surfaced 1 issue (broker_session fixture missing on test_register_agent_placement__user_director_path_still_works), fixed in commit 7c8dc8b. |
