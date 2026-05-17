@@ -1,6 +1,6 @@
 # Claude Config and README Cleanup
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 12/12 tasks complete
 **Last Updated**: 2026-05-17
 
@@ -10,12 +10,12 @@ Trim the root `CLAUDE.md`, the project-local `.claude/rules/skill-discovery.md`,
 
 ## Success Criteria
 
-- [ ] Root `CLAUDE.md` no longer enumerates per-skill descriptions or specific design documents, and no longer contains a `## Skill Discovery & Authorization Scope` section.
-- [ ] `.claude/rules/skill-discovery.md` no longer exists in the repository.
-- [ ] `README.md` no longer contains the `### Notable flags` table, the `### Message body truncation` prose subsection, the `## Project structure` section, or the `## Development` section.
-- [ ] `README.md` links to a new top-level `CONTRIBUTING.md`, and the inline `docs/spec/*` pointer below the CLI cheatsheet covers message body truncation explicitly.
-- [ ] `CONTRIBUTING.md` exists at the repository root and contains the moved `Project structure` + `Development` content plus a `Contributing changes` subsection pointing at the `/cafleet:design-doc-*` skills.
-- [ ] The pre-drafting investigation already verified that every removed README flag and the truncation rules survive in `docs/spec/cli-options.md` / `docs/spec/message-envelope.md` (see Background); no additional execution-time verification is required.
+- [x] Root `CLAUDE.md` no longer enumerates per-skill descriptions or specific design documents, and no longer contains a `## Skill Discovery & Authorization Scope` section.
+- [x] `.claude/rules/skill-discovery.md` no longer exists in the repository.
+- [x] `README.md` no longer contains the `### Notable flags` table, the `### Message body truncation` prose subsection, the `## Project structure` section, or the `## Development` section.
+- [x] `README.md` links to a new top-level `CONTRIBUTING.md`, and the inline `docs/spec/*` pointer below the CLI cheatsheet covers message body truncation explicitly.
+- [x] `CONTRIBUTING.md` exists at the repository root and contains the moved `Project structure` + `Development` content plus a `Contributing changes` subsection pointing at the `/cafleet:design-doc-*` skills.
+- [x] The pre-drafting investigation already verified that every removed README flag and the truncation rules survive in `docs/spec/cli-options.md` / `docs/spec/message-envelope.md` (see Background); no additional execution-time verification is required.
 
 ---
 
@@ -253,3 +253,4 @@ This design has no code changes. Per `.claude/rules/design-doc-numbering.md`, do
 | Date | Changes |
 |------|---------|
 | 2026-05-17 | Initial draft |
+| 2026-05-17 | Execution complete: 12/12 tasks done; PR #80 opened; all six Success Criteria verified and checked off; Status flipped to Complete. |
