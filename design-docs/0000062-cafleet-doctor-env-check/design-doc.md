@@ -1,7 +1,7 @@
 # Surface `cafleet doctor` as the Canonical Env-Check Primitive for CAFleet Directors
 
 **Status**: Approved
-**Progress**: 1/3 tasks complete
+**Progress**: 2/3 tasks complete
 **Last Updated**: 2026-05-17
 
 ## Overview
@@ -123,7 +123,7 @@ The following files were considered and explicitly excluded:
 
 ### Step 2: Replace Spawn Protocol step 1 in `skills/agent-team-supervision/SKILL.md` with env-check sub-bullet + existing-text sub-bullet
 
-- [ ] Replace the single-paragraph step 1 with the two-sub-bullet form documented in § *Specification → File 2 → Change 2a*. Steps 2 and 3 remain unchanged. <!-- completed: -->
+- [x] Replace the current step-1 stub and step-2 supervision-ensure paragraph with the two-sub-bullet step 1 documented in § *Specification → File 2 → Change 2a*. Renumber the remaining steps so "Spawn the member" becomes step 2 and "Verify the member is active" becomes step 3. <!-- completed: 2026-05-17T00:52 -->
 
 ### Step 3: Prepend env-check row to the Quick Reference table in `skills/agent-team-supervision/SKILL.md`
 
