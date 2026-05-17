@@ -1,8 +1,8 @@
 # Surface `cafleet doctor` as the Canonical Env-Check Primitive for CAFleet Directors
 
 **Status**: Approved
-**Progress**: 0/3 tasks complete
-**Last Updated**: 2026-05-16
+**Progress**: 1/3 tasks complete
+**Last Updated**: 2026-05-17
 
 ## Overview
 
@@ -119,7 +119,7 @@ The following files were considered and explicitly excluded:
 
 ### Step 1: Add Step 0 "Verify pane env" to `skills/cafleet/SKILL.md` Typical Workflow
 
-- [ ] Insert the new Step 0 block (literal text in § *Specification → File 1*) directly above the existing "1. **Create a session**" line in § *Typical Workflow*. Leave the existing § *Doctor* section unchanged. <!-- completed: -->
+- [x] Insert the new Step 0 block (literal text in § *Specification → File 1*) directly above the existing "1. **Create a session**" line in § *Typical Workflow*. Leave the existing § *Doctor* section unchanged. <!-- completed: 2026-05-17T00:48 -->
 
 ### Step 2: Replace Spawn Protocol step 1 in `skills/agent-team-supervision/SKILL.md` with env-check sub-bullet + existing-text sub-bullet
 
