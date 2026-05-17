@@ -363,6 +363,10 @@ The `claude` spawn carries `--permission-mode dontAsk`; the `codex` spawn carrie
 
 The `--prompt-file` path is BOTH the spawn input AND the permanent audit artifact. CAFleet-native team skills render the prompt to `<BASE>/prompts/<role>-<UTC-compact>.md` before invoking `member create --prompt-file`, so the on-disk file is the source of truth for what was spawned. Inline `-- "<prompt>"` invocation remains supported for trivial one-line ad-hoc spawns; long, templated identity blocks must use `--prompt-file` because the rendered text otherwise exceeds the documented `tmux split-window` argv ceiling (`tmux command failed: command too long` rolls back the agent registration once the shell-quoted prompt grows past a few KB).
 
+#### Focus behavior
+
+The spawn always invokes `tmux split-window` with `-d` so the Director's pane and active window keep focus — the new member pane is created in the Director's window but is not made active.
+
 ### `member delete`
 
 | Flag | Required | Notes |

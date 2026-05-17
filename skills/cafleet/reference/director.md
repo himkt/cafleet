@@ -68,6 +68,8 @@ Whichever input mode is used, keep the prompt body itself focused: role-file pat
 
 **Pane title (claude backend only)**: `claude --name <member-name>` forwards the name to the spawned process so `#{pane_title}` shows the member name. The `codex` backend has no `--name` analog. Operators discover panes via `cafleet member list` (`pane_id` column is ground truth for both backends).
 
+**Focus behavior**: the spawn always invokes `tmux split-window` with `-d` so the Director's pane and active window keep focus — the new member pane is created in the Director's window but is not made active, and the calling client's active window is not switched.
+
 If the tmux `split-window` fails, the registered agent is rolled back. If the placement PATCH fails, the pane is `/exit`'d and the agent rolled back.
 
 ## Member Delete

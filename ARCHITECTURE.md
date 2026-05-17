@@ -152,7 +152,7 @@ The `cafleet member` CLI subgroup wraps the two-step "register an agent + spawn 
 **Atomic create flow** (`cafleet member create`):
 
 1. Register the member agent with a pending placement (`tmux_pane_id = NULL`, `coding_agent` field) via `broker.register_agent(placement=...)`.
-2. Spawn the member pane in the Director's own tmux window via `tmux split-window -t <window_id>`, capturing the new pane ID. The spawn argv is built per backend (see § Coding Agents).
+2. Spawn the member pane in the Director's own tmux window via `tmux split-window -t <window_id> -d`, capturing the new pane ID. The spawn argv is built per backend (see § Coding Agents). The `-d` flag is unconditional: the new pane is not made active, and the calling client's active window is not switched — so a Director monitoring window `@5` while its pane lives in `@3` continues to see `@5` after the spawn lands in `@3`.
 3. Patch the placement row with the real pane ID via `broker.update_placement_pane_id()`.
 4. Rebalance the window layout via `tmux select-layout main-vertical`.
 
