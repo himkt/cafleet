@@ -10,11 +10,11 @@
 
 ## Success Criteria
 
-- [ ] A Director reading `skills/cafleet/SKILL.md` Typical Workflow encounters `cafleet doctor` as Step 0 ("Verify pane env") before any `cafleet session create` call.
-- [ ] A Director reading `skills/agent-team-supervision/SKILL.md` § *Spawn Protocol* finds a sub-bullet under step 1 instructing them to run `cafleet doctor` first and abort the spawn if it exits non-zero.
-- [ ] The Quick Reference table in `skills/agent-team-supervision/SKILL.md` includes a "Verify Director pane env" row mapping to `cafleet doctor`.
-- [ ] No edits land in `~/.claude/rules/bash-command.md` or any other rule file (global or project). The skill files carry the full guidance.
-- [ ] No CLI behavior changes — `cafleet doctor` is documentation-only surfacing of an existing subcommand.
+- [x] A Director reading `skills/cafleet/SKILL.md` Typical Workflow encounters `cafleet doctor` as Step 0 ("Verify pane env") before any `cafleet session create` call.
+- [x] A Director reading `skills/agent-team-supervision/SKILL.md` § *Spawn Protocol* finds a sub-bullet under step 1 instructing them to run `cafleet doctor` first and abort the spawn if it exits non-zero.
+- [x] The Quick Reference table in `skills/agent-team-supervision/SKILL.md` includes a "Verify Director pane env" row mapping to `cafleet doctor`.
+- [x] No edits land in `~/.claude/rules/bash-command.md` or any other rule file (global or project). The skill files carry the full guidance.
+- [x] No CLI behavior changes — `cafleet doctor` is documentation-only surfacing of an existing subcommand.
 
 ---
 
@@ -83,7 +83,9 @@ Literal restructure of step 1 (the existing prose becomes the second sub-bullet)
    - **Ensure the supervision mechanism is already running** — for Claude Code Directors, the `/loop` monitor must be active; for codex Directors, one of the fallbacks listed in `Skill(agent-team-monitoring)` § Mechanism by backend (out-of-band cron driver, MCP scheduling server, user-driven nudges, or no-active-monitor synchronous mode) must be in place. See `Skill(agent-team-monitoring)` § `/loop` Prompt Template for the canonical Claude Code setup.
 ```
 
-Steps 2 and 3 are unchanged.
+Steps 2 and 3 (Spawn the member / Verify the member is active) are unchanged in **content**.
+
+> **Note on baseline drift (resolved during execution).** At execution time the actual file already had a brief 4-step shape: step 1 was a one-line `cafleet doctor` stub, step 2 was the supervision-ensure prose (the "existing step" quoted at line 74 above), and steps 3 + 4 were Spawn / Verify. The arbitrated execution consolidated the step-1 stub and the step-2 supervision-ensure prose into the new combined two-sub-bullet step 1 (the gating language is a strict superset of the stub's content), then renumbered the prior steps 3 → 2 and 4 → 3. The end-state matches the literal restructure above; only the step quoted at line 74 differs from what was actually in the file when execution started.
 
 #### Change 2b: Quick Reference row
 
