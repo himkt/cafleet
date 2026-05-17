@@ -55,8 +55,15 @@ def split_window(
     env: dict[str, str],
     command: list[str],
 ) -> str:
-    """Split the target window with ``command`` and return the new pane id."""
-    args = ["tmux", "split-window", "-t", target_window_id, "-P", "-F", "#{pane_id}"]
+    """Split the target window with ``command`` and return the new pane id.
+
+    Always invoked with ``-d`` so the new pane is not made active and the
+    calling client's active window is not switched. This behavior is
+    unconditional — there is no opt-out parameter.
+    """
+    args = [
+        "tmux", "split-window", "-t", target_window_id, "-P", "-F", "#{pane_id}", "-d",
+    ]
     for k, v in env.items():
         args += ["-e", f"{k}={v}"]
     args += command

@@ -1,7 +1,7 @@
 # `cafleet member create` keeps tmux focus on the Director pane
 
 **Status**: Approved
-**Progress**: 4/7 tasks complete
+**Progress**: 5/7 tasks complete
 **Last Updated**: 2026-05-17
 
 ## Overview
@@ -185,7 +185,7 @@ None. The user-level allow pattern that authorizes every `cafleet` invocation to
 
 ### Step 2: tmux helper
 
-- [ ] Modify `cafleet/src/cafleet/tmux.py::split_window` to always append `-d` to the argv (after `-F #{pane_id}`, before the `-e KEY=VAL` block). Update the docstring to state the behavior is unconditional. No new parameter. <!-- completed: -->
+- [x] Modify `cafleet/src/cafleet/tmux.py::split_window` to always append `-d` to the argv (after `-F #{pane_id}`, before the `-e KEY=VAL` block). Update the docstring to state the behavior is unconditional. No new parameter. <!-- completed: 2026-05-17T12:12 -->
 
 ### Step 3: Tests
 
