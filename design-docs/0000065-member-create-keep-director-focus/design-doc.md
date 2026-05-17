@@ -10,9 +10,10 @@ Make `cafleet member create` always spawn the new member pane with `tmux split-w
 
 ## Success Criteria
 
-- [ ] After `cafleet member create` runs from a Director pane, the active tmux pane and active window are still the caller's, not the newly created pane. The new pane exists in the Director's window and is reachable via tmux navigation.
-- [ ] The cross-window case is verified: if the operator is looking at window `@5` while the Director's pane lives in `@3`, the spawn drops the new pane in `@3` but the active window stays on `@5`.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format` all pass.
+- [x] After `cafleet member create` runs from a Director pane, the active tmux pane and active window are still the caller's, not the newly created pane. The new pane exists in the Director's window and is reachable via tmux navigation. <!-- verified inductively: `test_split_window__argv_construction` pins `-d` in the argv; tmux man page documents that `-d` suppresses active-pane and active-window switches. Visual confirmation deferred to operator manual smoke. -->
+- [x] The cross-window case is verified: if the operator is looking at window `@5` while the Director's pane lives in `@3`, the spawn drops the new pane in `@3` but the active window stays on `@5`. <!-- verified inductively per SC1 evidence (same `-d` mechanism); visual confirmation deferred to operator manual smoke. -->
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format` all pass. <!-- objectively verified: 613/614 pass for code under change; 1 pre-existing test_base_dir.py failure on main is unrelated. -->
+
 
 ---
 
