@@ -1,7 +1,7 @@
 # Claude Config and README Cleanup
 
 **Status**: Approved
-**Progress**: 6/12 tasks complete
+**Progress**: 12/12 tasks complete
 **Last Updated**: 2026-05-17
 
 ## Overview
@@ -239,12 +239,12 @@ This design has no code changes. Per `.claude/rules/design-doc-numbering.md`, do
 
 ### Step 4: Clean up `README.md`
 
-- [ ] Remove the `### Notable flags` table (current lines 173–182). <!-- completed: -->
-- [ ] Remove the `### Message body truncation` subsection heading and its single prose paragraph (current lines 184–186). <!-- completed: -->
-- [ ] Remove the `## Project structure` section (current lines 192–201). <!-- completed: -->
-- [ ] Remove the `## Development` section (current lines 203–222). <!-- completed: -->
-- [ ] Replace the existing `docs/spec/*` pointer line below the CLI cheatsheet (current line 171) with the extended version that names message body truncation (verbatim text in Specification § `README.md` Modified). <!-- completed: -->
-- [ ] Add a new `## Contributing` section between `## Architecture` and `## License`, linking to `CONTRIBUTING.md` (verbatim text in Specification § `README.md` Added). <!-- completed: -->
+- [x] Remove the `### Notable flags` table (current lines 173–182). <!-- completed: 2026-05-17T01:53 -->
+- [x] Remove the `### Message body truncation` subsection heading and its single prose paragraph (current lines 184–186). <!-- completed: 2026-05-17T01:53 -->
+- [x] Remove the `## Project structure` section (current lines 192–201). <!-- completed: 2026-05-17T01:53 -->
+- [x] Remove the `## Development` section (current lines 203–222). <!-- completed: 2026-05-17T01:53 -->
+- [x] Replace the existing `docs/spec/*` pointer line below the CLI cheatsheet (current line 171) with the extended version that names message body truncation (verbatim text in Specification § `README.md` Modified). <!-- completed: 2026-05-17T01:53 -->
+- [x] Add a new `## Contributing` section between `## Architecture` and `## License`, linking to `CONTRIBUTING.md` (verbatim text in Specification § `README.md` Added). <!-- completed: 2026-05-17T01:53 -->
 
 ---
 
