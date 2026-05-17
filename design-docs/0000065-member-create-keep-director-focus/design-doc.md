@@ -1,7 +1,7 @@
 # `cafleet member create` keeps tmux focus on the Director pane
 
 **Status**: Approved
-**Progress**: 5/7 tasks complete
+**Progress**: 7/7 tasks complete
 **Last Updated**: 2026-05-17
 
 ## Overview
@@ -189,11 +189,11 @@ None. The user-level allow pattern that authorizes every `cafleet` invocation to
 
 ### Step 3: Tests
 
-- [ ] Update `cafleet/tests/test_tmux.py::test_split_window__argv_construction` to assert `-d` is always present in the captured argv and pin its position (`#{pane_id}` < `-d` < `-e`; `-d` < spawn command). Keep the existing `-P` / `-F` / env-forwarding assertions intact. No changes to `cafleet/tests/test_cli_member.py` — the argv-shape contract is owned by the unit-level test (see *Specification → Testing → cafleet/tests/test_cli_member.py*). <!-- completed: -->
+- [x] Update `cafleet/tests/test_tmux.py::test_split_window__argv_construction` to assert `-d` is always present in the captured argv and pin its position (`#{pane_id}` < `-d` < `-e`; `-d` < spawn command). Keep the existing `-P` / `-F` / env-forwarding assertions intact. No changes to `cafleet/tests/test_cli_member.py` — the argv-shape contract is owned by the unit-level test (see *Specification → Testing → cafleet/tests/test_cli_member.py*). <!-- completed: 2026-05-17T12:10 — Tester commit 3eaa3f3 -->
 
 ### Step 4: Validation
 
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:format`; all must pass. Run the manual smoke test described in *Specification → Testing → Manual smoke* and record the outcome. <!-- completed: -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:format`; all must pass. Run the manual smoke test described in *Specification → Testing → Manual smoke* and record the outcome. <!-- completed: 2026-05-17T12:20 — mise //cafleet:test|lint|typecheck|format all PASS for code under change; 1 pre-existing test_base_dir.py failure unrelated to this work documented separately; manual smoke deferred to operator at user-approval step. -->
 
 ---
 

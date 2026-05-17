@@ -62,7 +62,14 @@ def split_window(
     unconditional — there is no opt-out parameter.
     """
     args = [
-        "tmux", "split-window", "-t", target_window_id, "-P", "-F", "#{pane_id}", "-d",
+        "tmux",
+        "split-window",
+        "-t",
+        target_window_id,
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "-d",
     ]
     for k, v in env.items():
         args += ["-e", f"{k}={v}"]
