@@ -146,7 +146,7 @@ The dedicated `§ Message Body Truncation` heading lives in `cli-options.md`; `m
 
 #### Added
 
-A new top-level `## Contributing` section is added near the end of `README.md` (between `## Architecture` and `## License`), pointing at the new `CONTRIBUTING.md`:
+A new top-level `## Contributing` section is added near the end of `README.md`, after `## Architecture`. `README.md` has no `## License` section; the new section is placed at end-of-file immediately after `## Architecture`, pointing at the new `CONTRIBUTING.md`:
 
 ```markdown
 ## Contributing
@@ -244,7 +244,7 @@ This design has no code changes. Per `.claude/rules/design-doc-numbering.md`, do
 - [x] Remove the `## Project structure` section (current lines 192–201). <!-- completed: 2026-05-17T01:53 -->
 - [x] Remove the `## Development` section (current lines 203–222). <!-- completed: 2026-05-17T01:53 -->
 - [x] Replace the existing `docs/spec/*` pointer line below the CLI cheatsheet (current line 171) with the extended version that names message body truncation (verbatim text in Specification § `README.md` Modified). <!-- completed: 2026-05-17T01:53 -->
-- [x] Add a new `## Contributing` section between `## Architecture` and `## License`, linking to `CONTRIBUTING.md` (verbatim text in Specification § `README.md` Added). <!-- completed: 2026-05-17T01:53 -->
+- [x] Add a new `## Contributing` section after `## Architecture` (placed at end-of-file; README has no `## License` section), linking to `CONTRIBUTING.md` (verbatim text in Specification § `README.md` Added). <!-- completed: 2026-05-17T01:53 -->
 
 ---
 
@@ -254,3 +254,4 @@ This design has no code changes. Per `.claude/rules/design-doc-numbering.md`, do
 |------|---------|
 | 2026-05-17 | Initial draft |
 | 2026-05-17 | Execution complete: 12/12 tasks done; PR #80 opened; all six Success Criteria verified and checked off; Status flipped to Complete. |
+| 2026-05-17 | Address Copilot review: tighten Specification § README.md Added and Implementation Step 4 task wording — README has no `## License` section, so the new `## Contributing` section is placed after `## Architecture` at end-of-file rather than the original "between Architecture and License" phrasing. No README content change; spec wording only. |
