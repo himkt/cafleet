@@ -1,7 +1,7 @@
 # Claude Config and README Cleanup
 
 **Status**: Approved
-**Progress**: 0/12 tasks complete
+**Progress**: 3/12 tasks complete
 **Last Updated**: 2026-05-17
 
 ## Overview
@@ -224,9 +224,9 @@ This design has no code changes. Per `.claude/rules/design-doc-numbering.md`, do
 
 ### Step 1: Trim root `CLAUDE.md`
 
-- [ ] Replace the entire `## Skills` heading-and-body block (current lines 5–15, i.e. the `## Skills` line plus the 7-bullet enumeration) with the heading + prose block shown in the code-fenced final-file view in Specification § Root `CLAUDE.md` — final structure. **The code-fenced final-file view is the authoritative target**; the blockquote that follows it repeats only the body sentence for emphasis on the verbatim wording, not as an alternative form to substitute. <!-- completed: -->
-- [ ] Remove the five `**Design document**:` bullets under `## Project: CAFleet` (current lines 21–25). <!-- completed: -->
-- [ ] Remove the entire `## Skill Discovery & Authorization Scope` section (current lines 40–44). <!-- completed: -->
+- [x] Replace the entire `## Skills` heading-and-body block (current lines 5–15, i.e. the `## Skills` line plus the 7-bullet enumeration) with the heading + prose block shown in the code-fenced final-file view in Specification § Root `CLAUDE.md` — final structure. **The code-fenced final-file view is the authoritative target**; the blockquote that follows it repeats only the body sentence for emphasis on the verbatim wording, not as an alternative form to substitute. <!-- completed: 2026-05-17T01:45 -->
+- [x] Remove the five `**Design document**:` bullets under `## Project: CAFleet` (current lines 21–25). <!-- completed: 2026-05-17T01:45 -->
+- [x] Remove the entire `## Skill Discovery & Authorization Scope` section (current lines 40–44). <!-- completed: 2026-05-17T01:45 -->
 
 ### Step 2: Remove project-local skill-discovery rules file and fix the live pointer
 
