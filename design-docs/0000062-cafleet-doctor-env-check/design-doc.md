@@ -1,7 +1,7 @@
 # Surface `cafleet doctor` as the Canonical Env-Check Primitive for CAFleet Directors
 
 **Status**: Approved
-**Progress**: 2/3 tasks complete
+**Progress**: 3/3 tasks complete
 **Last Updated**: 2026-05-17
 
 ## Overview
@@ -127,4 +127,4 @@ The following files were considered and explicitly excluded:
 
 ### Step 3: Prepend env-check row to the Quick Reference table in `skills/agent-team-supervision/SKILL.md`
 
-- [ ] Insert the literal "Verify Director pane env" row (§ *Specification → File 2 → Change 2b*) as the new first data row of the table, immediately under the header separator and above the "Start the supervision tick" row. <!-- completed: -->
+- [x] Insert the literal "Verify Director pane env" row (§ *Specification → File 2 → Change 2b*) as the new first data row of the table, immediately under the header separator and above the "Start the supervision tick" row. <!-- completed: 2026-05-17T00:54 -->

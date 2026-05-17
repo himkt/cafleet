@@ -103,7 +103,7 @@ The single rule supervision restates here: **stop the `/loop` cron (Claude Code)
 
 | Action | Primitive | Notes |
 |---|---|---|
-| Verify environment | `cafleet doctor` | Pre-flight before any `cafleet member create` call |
+| Verify Director pane env | `cafleet doctor` | Pre-spawn precondition; gating. Aborts the spawn protocol when `TMUX` / `TMUX_PANE` are missing. Replaces raw `tmux display-message` and `TMUX` env-var expansion. |
 | Start the supervision tick | `/loop` (Claude Code) or fallback driver (codex) — see `Skill(agent-team-monitoring)` | First step — before any `cafleet member create` call |
 | Spawn member | `cafleet --session-id <s> member create --agent-id <director> --name <n> --description <d> --prompt-file <abs path to ${BASE}/prompts/<role>-<UTC-compact>.md>` | Pre-spawn file IS the audit artifact (see `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*). Verify with `cafleet member list`. Inline `-- "<prompt>"` is still permitted for trivial one-line spawns. |
 | Message member | `cafleet --session-id <s> message send --agent-id <director> --to <member> --text "..."` | Broker keystrokes a 2-line inline preview into the member's pane via `tmux.send_inline_preview` |
