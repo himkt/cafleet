@@ -1,6 +1,6 @@
 # Surface `cafleet doctor` as the Canonical Env-Check Primitive for CAFleet Directors
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 3/3 tasks complete
 **Last Updated**: 2026-05-17
 
@@ -130,3 +130,9 @@ The following files were considered and explicitly excluded:
 ### Step 3: Prepend env-check row to the Quick Reference table in `skills/agent-team-supervision/SKILL.md`
 
 - [x] Insert the literal "Verify Director pane env" row (§ *Specification → File 2 → Change 2b*) as the new first data row of the table, immediately under the header separator and above the "Start the supervision tick" row. <!-- completed: 2026-05-17T00:54 -->
+
+---
+
+## Changelog
+
+- **2026-05-17** — Implemented all three steps via `/cafleet:design-doc-execute` (Director + Programmer team). Phase A skipped per documentation-only team composition. Step 2 required arbitration to consolidate a pre-existing brief `cafleet doctor` stub at file step 1 with the supervision-ensure prose at file step 2 into the new two-sub-bullet form (richer gating language strictly supersedes the stub); steps 3 → 2 and 4 → 3 renumbered. PR #79 opened with `@copilot` review; first pass surfaced four inline comments (two source, two design-doc) which were addressed in one fix-push (commit `fe78f06`) and one docs commit (`6b6cd16`). Copilot's second pass returned `state: COMMENTED` with "generated no new comments" — accepted as de-facto approval per user. Status: Approved → Complete.
