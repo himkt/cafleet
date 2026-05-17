@@ -255,3 +255,5 @@ This design has no code changes. Per `.claude/rules/design-doc-numbering.md`, do
 | 2026-05-17 | Initial draft |
 | 2026-05-17 | Execution complete: 12/12 tasks done; PR #80 opened; all six Success Criteria verified and checked off; Status flipped to Complete. |
 | 2026-05-17 | Address Copilot review: tighten Specification § README.md Added and Implementation Step 4 task wording — README has no `## License` section, so the new `## Contributing` section is placed after `## Architecture` at end-of-file rather than the original "between Architecture and License" phrasing. No README content change; spec wording only. |
+| 2026-05-17 | Address user-feedback PR inline comment: reframe CONTRIBUTING.md `## Contributing changes` lead-in from prescriptive ("New contributors should follow the same flow:") to tips-style ("Some tips for new contributors:"). |
+| 2026-05-17 | Copilot review loop exited (operator decision; Copilot's "no new comments" response on docs-only PR treated as functional approval). Team torn down: augmented `/loop` cron canceled, Programmer member deleted, session soft-deleted. |
