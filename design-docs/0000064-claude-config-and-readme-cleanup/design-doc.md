@@ -1,7 +1,7 @@
 # Claude Config and README Cleanup
 
 **Status**: Approved
-**Progress**: 5/12 tasks complete
+**Progress**: 6/12 tasks complete
 **Last Updated**: 2026-05-17
 
 ## Overview
@@ -235,7 +235,7 @@ This design has no code changes. Per `.claude/rules/design-doc-numbering.md`, do
 
 ### Step 3: Create `CONTRIBUTING.md`
 
-- [ ] Create `CONTRIBUTING.md` at the repository root with the four-section content specified in Specification § New `CONTRIBUTING.md` (intro + `Project structure` + `Development` + `Contributing changes`). <!-- completed: -->
+- [x] Create `CONTRIBUTING.md` at the repository root with the four-section content specified in Specification § New `CONTRIBUTING.md` (intro + `Project structure` + `Development` + `Contributing changes`). <!-- completed: 2026-05-17T01:51 -->
 
 ### Step 4: Clean up `README.md`
 
