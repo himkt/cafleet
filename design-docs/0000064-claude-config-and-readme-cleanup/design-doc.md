@@ -1,7 +1,7 @@
 # Claude Config and README Cleanup
 
-**Status**: Approved
-**Progress**: 0/12 tasks complete
+**Status**: Complete
+**Progress**: 12/12 tasks complete
 **Last Updated**: 2026-05-17
 
 ## Overview
@@ -10,12 +10,12 @@ Trim the root `CLAUDE.md`, the project-local `.claude/rules/skill-discovery.md`,
 
 ## Success Criteria
 
-- [ ] Root `CLAUDE.md` no longer enumerates per-skill descriptions or specific design documents, and no longer contains a `## Skill Discovery & Authorization Scope` section.
-- [ ] `.claude/rules/skill-discovery.md` no longer exists in the repository.
-- [ ] `README.md` no longer contains the `### Notable flags` table, the `### Message body truncation` prose subsection, the `## Project structure` section, or the `## Development` section.
-- [ ] `README.md` links to a new top-level `CONTRIBUTING.md`, and the inline `docs/spec/*` pointer below the CLI cheatsheet covers message body truncation explicitly.
-- [ ] `CONTRIBUTING.md` exists at the repository root and contains the moved `Project structure` + `Development` content plus a `Contributing changes` subsection pointing at the `/cafleet:design-doc-*` skills.
-- [ ] The pre-drafting investigation already verified that every removed README flag and the truncation rules survive in `docs/spec/cli-options.md` / `docs/spec/message-envelope.md` (see Background); no additional execution-time verification is required.
+- [x] Root `CLAUDE.md` no longer enumerates per-skill descriptions or specific design documents, and no longer contains a `## Skill Discovery & Authorization Scope` section.
+- [x] `.claude/rules/skill-discovery.md` no longer exists in the repository.
+- [x] `README.md` no longer contains the `### Notable flags` table, the `### Message body truncation` prose subsection, the `## Project structure` section, or the `## Development` section.
+- [x] `README.md` links to a new top-level `CONTRIBUTING.md`, and the inline `docs/spec/*` pointer below the CLI cheatsheet covers message body truncation explicitly.
+- [x] `CONTRIBUTING.md` exists at the repository root and contains the moved `Project structure` + `Development` content plus a `Contributing changes` subsection pointing at the `/cafleet:design-doc-*` skills.
+- [x] The pre-drafting investigation already verified that every removed README flag and the truncation rules survive in `docs/spec/cli-options.md` / `docs/spec/message-envelope.md` (see Background); no additional execution-time verification is required.
 
 ---
 
@@ -146,7 +146,7 @@ The dedicated `§ Message Body Truncation` heading lives in `cli-options.md`; `m
 
 #### Added
 
-A new top-level `## Contributing` section is added near the end of `README.md` (between `## Architecture` and `## License`), pointing at the new `CONTRIBUTING.md`:
+A new top-level `## Contributing` section is added near the end of `README.md`, after `## Architecture`. `README.md` has no `## License` section; the new section is placed at end-of-file immediately after `## Architecture`, pointing at the new `CONTRIBUTING.md`:
 
 ```markdown
 ## Contributing
@@ -224,27 +224,27 @@ This design has no code changes. Per `.claude/rules/design-doc-numbering.md`, do
 
 ### Step 1: Trim root `CLAUDE.md`
 
-- [ ] Replace the entire `## Skills` heading-and-body block (current lines 5–15, i.e. the `## Skills` line plus the 7-bullet enumeration) with the heading + prose block shown in the code-fenced final-file view in Specification § Root `CLAUDE.md` — final structure. **The code-fenced final-file view is the authoritative target**; the blockquote that follows it repeats only the body sentence for emphasis on the verbatim wording, not as an alternative form to substitute. <!-- completed: -->
-- [ ] Remove the five `**Design document**:` bullets under `## Project: CAFleet` (current lines 21–25). <!-- completed: -->
-- [ ] Remove the entire `## Skill Discovery & Authorization Scope` section (current lines 40–44). <!-- completed: -->
+- [x] Replace the entire `## Skills` heading-and-body block (current lines 5–15, i.e. the `## Skills` line plus the 7-bullet enumeration) with the heading + prose block shown in the code-fenced final-file view in Specification § Root `CLAUDE.md` — final structure. **The code-fenced final-file view is the authoritative target**; the blockquote that follows it repeats only the body sentence for emphasis on the verbatim wording, not as an alternative form to substitute. <!-- completed: 2026-05-17T01:45 -->
+- [x] Remove the five `**Design document**:` bullets under `## Project: CAFleet` (current lines 21–25). <!-- completed: 2026-05-17T01:45 -->
+- [x] Remove the entire `## Skill Discovery & Authorization Scope` section (current lines 40–44). <!-- completed: 2026-05-17T01:45 -->
 
 ### Step 2: Remove project-local skill-discovery rules file and fix the live pointer
 
-- [ ] Delete `.claude/rules/skill-discovery.md` from the repository. <!-- completed: -->
-- [ ] Update the right-column cell of `.claude/rules/commands.md:34` to redirect from ``see `.claude/rules/skill-discovery.md` (Authorization scope section)`` to ``see `skills/agent-team-supervision/SKILL.md` § *Authorization-Scope Guard*`` (verbatim text in Specification § `.claude/rules/commands.md` — pointer redirect). No other file gets a back-reference, deprecation note, or "see git history" pointer. <!-- completed: -->
+- [x] Delete `.claude/rules/skill-discovery.md` from the repository. <!-- completed: 2026-05-17T01:50 -->
+- [x] Update the right-column cell of `.claude/rules/commands.md:34` to redirect from ``see `.claude/rules/skill-discovery.md` (Authorization scope section)`` to ``see `skills/agent-team-supervision/SKILL.md` § *Authorization-Scope Guard*`` (verbatim text in Specification § `.claude/rules/commands.md` — pointer redirect). No other file gets a back-reference, deprecation note, or "see git history" pointer. <!-- completed: 2026-05-17T01:50 -->
 
 ### Step 3: Create `CONTRIBUTING.md`
 
-- [ ] Create `CONTRIBUTING.md` at the repository root with the four-section content specified in Specification § New `CONTRIBUTING.md` (intro + `Project structure` + `Development` + `Contributing changes`). <!-- completed: -->
+- [x] Create `CONTRIBUTING.md` at the repository root with the four-section content specified in Specification § New `CONTRIBUTING.md` (intro + `Project structure` + `Development` + `Contributing changes`). <!-- completed: 2026-05-17T01:51 -->
 
 ### Step 4: Clean up `README.md`
 
-- [ ] Remove the `### Notable flags` table (current lines 173–182). <!-- completed: -->
-- [ ] Remove the `### Message body truncation` subsection heading and its single prose paragraph (current lines 184–186). <!-- completed: -->
-- [ ] Remove the `## Project structure` section (current lines 192–201). <!-- completed: -->
-- [ ] Remove the `## Development` section (current lines 203–222). <!-- completed: -->
-- [ ] Replace the existing `docs/spec/*` pointer line below the CLI cheatsheet (current line 171) with the extended version that names message body truncation (verbatim text in Specification § `README.md` Modified). <!-- completed: -->
-- [ ] Add a new `## Contributing` section between `## Architecture` and `## License`, linking to `CONTRIBUTING.md` (verbatim text in Specification § `README.md` Added). <!-- completed: -->
+- [x] Remove the `### Notable flags` table (current lines 173–182). <!-- completed: 2026-05-17T01:53 -->
+- [x] Remove the `### Message body truncation` subsection heading and its single prose paragraph (current lines 184–186). <!-- completed: 2026-05-17T01:53 -->
+- [x] Remove the `## Project structure` section (current lines 192–201). <!-- completed: 2026-05-17T01:53 -->
+- [x] Remove the `## Development` section (current lines 203–222). <!-- completed: 2026-05-17T01:53 -->
+- [x] Replace the existing `docs/spec/*` pointer line below the CLI cheatsheet (current line 171) with the extended version that names message body truncation (verbatim text in Specification § `README.md` Modified). <!-- completed: 2026-05-17T01:53 -->
+- [x] Add a new `## Contributing` section after `## Architecture` (placed at end-of-file; README has no `## License` section), linking to `CONTRIBUTING.md` (verbatim text in Specification § `README.md` Added). <!-- completed: 2026-05-17T01:53 -->
 
 ---
 
@@ -253,3 +253,7 @@ This design has no code changes. Per `.claude/rules/design-doc-numbering.md`, do
 | Date | Changes |
 |------|---------|
 | 2026-05-17 | Initial draft |
+| 2026-05-17 | Execution complete: 12/12 tasks done; PR #80 opened; all six Success Criteria verified and checked off; Status flipped to Complete. |
+| 2026-05-17 | Address Copilot review: tighten Specification § README.md Added and Implementation Step 4 task wording — README has no `## License` section, so the new `## Contributing` section is placed after `## Architecture` at end-of-file rather than the original "between Architecture and License" phrasing. No README content change; spec wording only. |
+| 2026-05-17 | Address user-feedback PR inline comment: reframe CONTRIBUTING.md `## Contributing changes` lead-in from prescriptive ("New contributors should follow the same flow:") to tips-style ("Some tips for new contributors:"). |
+| 2026-05-17 | Copilot review loop exited (operator decision; Copilot's "no new comments" response on docs-only PR treated as functional approval). Team torn down: augmented `/loop` cron canceled, Programmer member deleted, session soft-deleted. |
