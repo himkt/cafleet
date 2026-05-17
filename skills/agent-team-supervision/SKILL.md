@@ -65,9 +65,23 @@ Every time you spawn a member:
    - **Pre-spawn env-check (gating)**: run `cafleet doctor`. If it exits non-zero or reports missing `TMUX` / `TMUX_PANE`, ABORT the spawn protocol and surface the error to the user — `cafleet member create` requires the Director to be inside a tmux pane, and silently proceeding would fail later with a less-actionable error. This is the canonical pane-identity probe; do NOT reach for raw `tmux display-message` or `TMUX` env-var expansion.
    - **Ensure the supervision mechanism is already running** — for Claude Code Directors, the `/loop` monitor must be active; for codex Directors, one of the fallbacks listed in `Skill(agent-team-monitoring)` § Mechanism by backend (out-of-band cron driver, MCP scheduling server, user-driven nudges, or no-active-monitor synchronous mode) must be in place. See `Skill(agent-team-monitoring)` § `/loop` Prompt Template for the canonical Claude Code setup.
 2. **Spawn the member** via `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name <name> --description <desc> --prompt-file <abs path to rendered prompt under ${BASE}/prompts/<role>-<UTC-compact>.md>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — see `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files* for the canonical convention (including the `${BASE} == <unset>` guarded-skip + inline-positional fallback). Inline `-- "<prompt>"` is still permitted for trivial one-line ad-hoc spawns.
-3. **Verify the member is active** by checking that `cafleet --session-id <session-id> member list --agent-id <director-agent-id>` shows the new member with a non-null `pane_id`.
+3. **Include the ready-signal directive in the spawn prompt.** Every spawn prompt MUST instruct the member, as its very first Bash call, to send `cafleet message send --to <director-agent-id> --text "ready"` (optionally `"ready: <brief role recap>"`). See `Skill(cafleet:roles/member)` § *On Spawn — Send Ready Signal* for the canonical wording. A spawn prompt missing this directive is a defect — fix the prompt and re-spawn. The ready signal is the canonical "I am alive and accepting instructions" handshake; it is the ONLY signal that confirms the coding agent inside the pane has actually booted.
+4. **Verify the member is placed** by checking that `cafleet --session-id <session-id> member list --agent-id <director-agent-id>` shows the new member with a non-null `pane_id`. This confirms the pane was created. Liveness of the coding agent inside the pane is confirmed asynchronously when the ready signal arrives — NOT by `member list`.
+5. **End the active turn after spawn-and-verify.** The ready signal arrives via broker auto-fire (member's `cafleet message send` → 2-line inline preview keystroked into your pane via `tmux.send_inline_preview`), with `/loop` tick as the time-based backstop. You process it — ACK, dispatch first task — in your next active turn. See § *Asynchronous Wait Rule* below.
 
 Never spawn members without an active supervision mechanism. Never cancel the mechanism until all work is fully complete and the team is being shut down.
+
+### Asynchronous Wait Rule
+
+The active turn consumes inputs that have already arrived and dispatches what is ready — then returns control. Waiting for things that have not yet arrived is the job of the wake-up channels: broker auto-fire keystroke into the Director's pane on every member `cafleet message send`, plus the `/loop` cron tick on its scheduled cadence.
+
+| Situation | Director action |
+|---|---|
+| Just spawned a member; ready signal not yet arrived | End the turn. Auto-fire delivers the ready signal as it lands; `/loop` is the backstop. |
+| Just dispatched to a member; reply not yet arrived | End the turn. Same wake-up channels surface the reply. |
+| Waiting on multiple members' replies before next step | End the turn. React to each arrival as its own wake-up, not all-at-once. |
+| User asks "what's the status?" while members are working | Report the asynchronous truth (e.g. "Alice is processing X; her completion will surface in my next turn"). For a live snapshot, use `cafleet member capture`. |
+| Turn finished dispatching and ACKing | End the turn. The next wake-up reopens the turn when there is something to act on. |
 
 ## User Delegation Protocol
 
