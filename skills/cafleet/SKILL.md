@@ -245,7 +245,7 @@ After soft-delete, the session is hidden from `cafleet session list` and further
    #   TMUX_PANE:     %<n>
    ```
 
-   Confirms the calling shell has `TMUX` and `TMUX_PANE` set. Reach for this BEFORE `cafleet session create` and BEFORE any `cafleet member create` call — it is the canonical pane-identity probe, replacing raw `tmux display-message` and `TMUX` / `TMUX_PANE` env-var expansion. See § *Doctor* for the full output shape and exit semantics.
+   Confirms the calling shell has `TMUX` and `TMUX_PANE` set. Reach for this BEFORE `cafleet session create` and BEFORE any `cafleet member create` call — it is the canonical pane-identity probe, replacing raw `tmux display-message` and `TMUX` / `TMUX_PANE` env-var expansion. See § *Doctor* for the subcommand's `--session-id` and env-var requirements, plus the `--json` variant.
 
 1. **Create a session** (if one does not already exist):
    ```bash
