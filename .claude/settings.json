@@ -18,8 +18,6 @@
       "Bash(bun run agent-browser --session vr-batch-* errors *)",
       "Bash(bun run agent-browser --session vr-batch-* reload)",
       "Bash(bun run agent-browser close --all)",
-      "Bash(bun run slidev *)",
-      "Bash(cafleet *)",
       "Bash(mise //admin*)",
       "Bash(mise //cafleet*)",
       "Bash(mise //:bun-install)",
@@ -27,21 +25,8 @@
       "Bash(mise //:slidev *)",
       "Bash(mise tasks)",
       "Bash(mise tasks --all)",
-      "Bash(sleep *)",
       "Bash(uv run --frozen --group research *)",
-      "Skill(update-readme)",
-      "Skill(cafleet:agent-team-monitoring)",
-      "Skill(cafleet:agent-team-supervision)",
-      "Skill(cafleet:base-dir)",
-      "Skill(cafleet:cafleet)",
-      "Skill(cafleet:create-figure)",
-      "Skill(cafleet:design-doc)",
-      "Skill(cafleet:design-doc-create)",
-      "Skill(cafleet:design-doc-execute)",
-      "Skill(cafleet:design-doc-interview)",
-      "Skill(cafleet:my-slidev)",
-      "Skill(cafleet:research-presentation)",
-      "Skill(cafleet:research-report)"
+      "Skill(update-readme)"
     ],
     "deny": [
       "Bash(bun install)",
@@ -63,9 +48,6 @@
       "Bash(uv run pytest *)",
       "Bash(uv run python -m *)",
       "Bash(uv run --package *)"
-    ],
-    "ask": [
-      "Bash(cafleet * member exec *)"
     ]
   }
 }
