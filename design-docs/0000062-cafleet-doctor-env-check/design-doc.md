@@ -1,8 +1,8 @@
 # Surface `cafleet doctor` as the Canonical Env-Check Primitive for CAFleet Directors
 
-**Status**: Approved
-**Progress**: 0/3 tasks complete
-**Last Updated**: 2026-05-16
+**Status**: Complete
+**Progress**: 3/3 tasks complete
+**Last Updated**: 2026-05-17
 
 ## Overview
 
@@ -10,11 +10,11 @@
 
 ## Success Criteria
 
-- [ ] A Director reading `skills/cafleet/SKILL.md` Typical Workflow encounters `cafleet doctor` as Step 0 ("Verify pane env") before any `cafleet session create` call.
-- [ ] A Director reading `skills/agent-team-supervision/SKILL.md` § *Spawn Protocol* finds a sub-bullet under step 1 instructing them to run `cafleet doctor` first and abort the spawn if it exits non-zero.
-- [ ] The Quick Reference table in `skills/agent-team-supervision/SKILL.md` includes a "Verify Director pane env" row mapping to `cafleet doctor`.
-- [ ] No edits land in `~/.claude/rules/bash-command.md` or any other rule file (global or project). The skill files carry the full guidance.
-- [ ] No CLI behavior changes — `cafleet doctor` is documentation-only surfacing of an existing subcommand.
+- [x] A Director reading `skills/cafleet/SKILL.md` Typical Workflow encounters `cafleet doctor` as Step 0 ("Verify pane env") before any `cafleet session create` call.
+- [x] A Director reading `skills/agent-team-supervision/SKILL.md` § *Spawn Protocol* finds a sub-bullet under step 1 instructing them to run `cafleet doctor` first and abort the spawn if it exits non-zero.
+- [x] The Quick Reference table in `skills/agent-team-supervision/SKILL.md` includes a "Verify Director pane env" row mapping to `cafleet doctor`.
+- [x] No edits land in `~/.claude/rules/bash-command.md` or any other rule file (global or project). The skill files carry the full guidance.
+- [x] No CLI behavior changes — `cafleet doctor` is documentation-only surfacing of an existing subcommand.
 
 ---
 
@@ -83,7 +83,9 @@ Literal restructure of step 1 (the existing prose becomes the second sub-bullet)
    - **Ensure the supervision mechanism is already running** — for Claude Code Directors, the `/loop` monitor must be active; for codex Directors, one of the fallbacks listed in `Skill(agent-team-monitoring)` § Mechanism by backend (out-of-band cron driver, MCP scheduling server, user-driven nudges, or no-active-monitor synchronous mode) must be in place. See `Skill(agent-team-monitoring)` § `/loop` Prompt Template for the canonical Claude Code setup.
 ```
 
-Steps 2 and 3 are unchanged.
+Steps 2 and 3 (Spawn the member / Verify the member is active) are unchanged in **content**.
+
+> **Note on baseline drift (resolved during execution).** At execution time the actual file already had a brief 4-step shape: step 1 was a one-line `cafleet doctor` stub, step 2 was the supervision-ensure prose (the "existing step" quoted at line 74 above), and steps 3 + 4 were Spawn / Verify. The arbitrated execution consolidated the step-1 stub and the step-2 supervision-ensure prose into the new combined two-sub-bullet step 1 (the gating language is a strict superset of the stub's content), then renumbered the prior steps 3 → 2 and 4 → 3. The end-state matches the literal restructure above; only the step quoted at line 74 differs from what was actually in the file when execution started.
 
 #### Change 2b: Quick Reference row
 
@@ -119,12 +121,18 @@ The following files were considered and explicitly excluded:
 
 ### Step 1: Add Step 0 "Verify pane env" to `skills/cafleet/SKILL.md` Typical Workflow
 
-- [ ] Insert the new Step 0 block (literal text in § *Specification → File 1*) directly above the existing "1. **Create a session**" line in § *Typical Workflow*. Leave the existing § *Doctor* section unchanged. <!-- completed: -->
+- [x] Insert the new Step 0 block (literal text in § *Specification → File 1*) directly above the existing "1. **Create a session**" line in § *Typical Workflow*. Leave the existing § *Doctor* section unchanged. <!-- completed: 2026-05-17T00:48 -->
 
 ### Step 2: Replace Spawn Protocol step 1 in `skills/agent-team-supervision/SKILL.md` with env-check sub-bullet + existing-text sub-bullet
 
-- [ ] Replace the single-paragraph step 1 with the two-sub-bullet form documented in § *Specification → File 2 → Change 2a*. Steps 2 and 3 remain unchanged. <!-- completed: -->
+- [x] Replace the current step-1 stub and step-2 supervision-ensure paragraph with the two-sub-bullet step 1 documented in § *Specification → File 2 → Change 2a*. Renumber the remaining steps so "Spawn the member" becomes step 2 and "Verify the member is active" becomes step 3. <!-- completed: 2026-05-17T00:52 -->
 
 ### Step 3: Prepend env-check row to the Quick Reference table in `skills/agent-team-supervision/SKILL.md`
 
-- [ ] Insert the literal "Verify Director pane env" row (§ *Specification → File 2 → Change 2b*) as the new first data row of the table, immediately under the header separator and above the "Start the supervision tick" row. <!-- completed: -->
+- [x] Insert the literal "Verify Director pane env" row (§ *Specification → File 2 → Change 2b*) as the new first data row of the table, immediately under the header separator and above the "Start the supervision tick" row. <!-- completed: 2026-05-17T00:54 -->
+
+---
+
+## Changelog
+
+- **2026-05-17** — Implemented all three steps via `/cafleet:design-doc-execute` (Director + Programmer team). Phase A skipped per documentation-only team composition. Step 2 required arbitration to consolidate a pre-existing brief `cafleet doctor` stub at file step 1 with the supervision-ensure prose at file step 2 into the new two-sub-bullet form (richer gating language strictly supersedes the stub); steps 3 → 2 and 4 → 3 renumbered. PR #79 opened with `@copilot` review; first pass surfaced four inline comments (two source, two design-doc) which were addressed in one fix-push (commit `fe78f06`) and one docs commit (`6b6cd16`). Copilot's second pass returned `state: COMMENTED` with "generated no new comments" — accepted as de-facto approval per user. Status: Approved → Complete.

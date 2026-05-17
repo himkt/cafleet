@@ -61,10 +61,11 @@ If a queued action requires a *new* decision the user has not yet made (choosing
 
 Every time you spawn a member:
 
-1. **Verify the environment** via `cafleet doctor`.
-2. **Ensure the supervision mechanism is already running** — for Claude Code Directors, the `/loop` monitor must be active; for codex Directors, one of the fallbacks listed in `Skill(agent-team-monitoring)` § Mechanism by backend (out-of-band cron driver, MCP scheduling server, user-driven nudges, or no-active-monitor synchronous mode) must be in place. See `Skill(agent-team-monitoring)` § `/loop` Prompt Template for the canonical Claude Code setup.
-3. **Spawn the member** via `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name <name> --description <desc> --prompt-file <abs path to rendered prompt under ${BASE}/prompts/<role>-<UTC-compact>.md>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — see `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files* for the canonical convention (including the `${BASE} == <unset>` guarded-skip + inline-positional fallback). Inline `-- "<prompt>"` is still permitted for trivial one-line ad-hoc spawns.
-4. **Verify the member is active** by checking that `cafleet --session-id <session-id> member list --agent-id <director-agent-id>` shows the new member with a non-null `pane_id`.
+1. **Verify env, then ensure supervision is running**:
+   - **Pre-spawn env-check (gating)**: run `cafleet doctor`. If it exits non-zero or reports missing `TMUX` / `TMUX_PANE`, ABORT the spawn protocol and surface the error to the user — `cafleet member create` requires the Director to be inside a tmux pane, and silently proceeding would fail later with a less-actionable error. This is the canonical pane-identity probe; do NOT reach for raw `tmux display-message` or `TMUX` env-var expansion.
+   - **Ensure the supervision mechanism is already running** — for Claude Code Directors, the `/loop` monitor must be active; for codex Directors, one of the fallbacks listed in `Skill(agent-team-monitoring)` § Mechanism by backend (out-of-band cron driver, MCP scheduling server, user-driven nudges, or no-active-monitor synchronous mode) must be in place. See `Skill(agent-team-monitoring)` § `/loop` Prompt Template for the canonical Claude Code setup.
+2. **Spawn the member** via `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name <name> --description <desc> --prompt-file <abs path to rendered prompt under ${BASE}/prompts/<role>-<UTC-compact>.md>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — see `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files* for the canonical convention (including the `${BASE} == <unset>` guarded-skip + inline-positional fallback). Inline `-- "<prompt>"` is still permitted for trivial one-line ad-hoc spawns.
+3. **Verify the member is active** by checking that `cafleet --session-id <session-id> member list --agent-id <director-agent-id>` shows the new member with a non-null `pane_id`.
 
 Never spawn members without an active supervision mechanism. Never cancel the mechanism until all work is fully complete and the team is being shut down.
 
@@ -102,8 +103,8 @@ The single rule supervision restates here: **stop the `/loop` cron (Claude Code)
 
 | Action | Primitive | Notes |
 |---|---|---|
-| Verify environment | `cafleet doctor` | Pre-flight before any `cafleet member create` call |
-| Start the supervision tick | `/loop` (Claude Code) or fallback driver (codex) — see `Skill(agent-team-monitoring)` | First step — before any `cafleet member create` call |
+| Verify Director pane env | `cafleet doctor` | Pre-spawn precondition; gating. Aborts the spawn protocol when `TMUX` / `TMUX_PANE` are missing. Replaces raw `tmux display-message` and `TMUX` env-var expansion. |
+| Start the supervision tick | `/loop` (Claude Code) or fallback driver (codex) — see `Skill(agent-team-monitoring)` | Required before any `cafleet member create` call (after env-check). |
 | Spawn member | `cafleet --session-id <s> member create --agent-id <director> --name <n> --description <d> --prompt-file <abs path to ${BASE}/prompts/<role>-<UTC-compact>.md>` | Pre-spawn file IS the audit artifact (see `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*). Verify with `cafleet member list`. Inline `-- "<prompt>"` is still permitted for trivial one-line spawns. |
 | Message member | `cafleet --session-id <s> message send --agent-id <director> --to <member> --text "..."` | Broker keystrokes a 2-line inline preview into the member's pane via `tmux.send_inline_preview` |
 | ACK reply | `cafleet --session-id <s> message ack --agent-id <director> --task-id <task>` | Unacknowledged tasks accumulate; ACK every reply you act on |
