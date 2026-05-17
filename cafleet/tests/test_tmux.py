@@ -64,7 +64,7 @@ def test_director_context__parses_display_message_and_requires_tmux_pane(monkeyp
 
 
 def test_split_window__argv_construction(monkeypatch, run_recorder):
-    # 1. Returns captured pane id and includes -P/-F/-e flags.
+    # 1. Returns captured pane id and includes -P/-F/-d/-e flags.
     monkeypatch.setattr(
         tmux, "_run", lambda args, **_kw: run_recorder.append(list(args)) or "%7\n"
     )
@@ -80,6 +80,15 @@ def test_split_window__argv_construction(monkeypatch, run_recorder):
     assert "-P" in argv
     assert "-F" in argv
     assert "#{pane_id}" in argv
+
+    # `-d` is always present so the new pane is not made active and the
+    # caller's active window stays put. Pin the position: after the
+    # `-F #{pane_id}` block, before the `-e` env block, and before the
+    # spawn command.
+    assert "-d" in argv
+    assert argv.index("-d") > argv.index("#{pane_id}")
+    assert argv.index("-d") < argv.index("-e")
+    assert argv.index("-d") < argv.index("claude")
 
     # 2. env vars forwarded as `-e KEY=VAL` flags.
     flag_idx = argv.index("-e")
@@ -102,6 +111,10 @@ def test_split_window__argv_construction(monkeypatch, run_recorder):
     assert appended[-4:] == ["my-binary", "--flag", "value", "prompt text"]
     # Empty env → no -e flags.
     assert "-e" not in appended
+    # `-d` is still present and precedes the spawn command even when env is
+    # empty (the helper always appends `-d` unconditionally).
+    assert "-d" in appended
+    assert appended.index("-d") < appended.index("my-binary")
 
 
 @pytest.mark.parametrize(
