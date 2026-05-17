@@ -1,5 +1,7 @@
 # CAFleet
 
+https://github.com/user-attachments/assets/a66620cb-4a81-4525-95f2-1f1f22765288
+
 Agent Teams reinvented for collaborative coding supporting Claude Code and Codex, with full code transparency.
 
 ## Install
@@ -131,7 +133,7 @@ Provide the following prompt to Claude Code or Codex to see how it works.
 
 ```
 I want to see how cafleet works.
-Please create a team with two teammates using cafleet and let them communicate each other.
+Please create a fresh team with two teammates using cafleet and let them ping-pong each other.
 After the demonstration, please shutdown the team.
 ```
 

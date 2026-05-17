@@ -12,6 +12,29 @@ This file is the role-specific anchor. Protocol details live in dedicated refere
 
 ---
 
+## On Spawn — Send Ready Signal (FIRST ACTION)
+
+On your very first turn, send a `ready` message to the Director as your first Bash call. The Director's supervision tick matches the literal `ready` prefix to detect that you are alive and accepting instructions, and dispatches your initial task on that same tick.
+
+Send the ready signal with this exact shape:
+
+```bash
+cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+  --to <director-agent-id> --text "ready"
+```
+
+Use the literal body `ready` (the Director matches that prefix). Optionally append a brief role recap after a `:` (`"ready: Alice, demo teammate"`).
+
+Then poll your inbox for the Director's first real instruction:
+
+```bash
+cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
+```
+
+If the Director has already queued your first task, it appears in the poll output — ACK and process it. If the poll returns empty, go idle. The broker keystrokes an inline preview into your pane when the Director sends one, and your next turn picks it up.
+
+---
+
 ## THE DEFAULT RULE
 
 > **WHENEVER you need to run a shell command — for ANY reason — call the Bash tool directly. Run it yourself. No prefix, no Director routing, no operator prompts.**
