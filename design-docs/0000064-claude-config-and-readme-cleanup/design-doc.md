@@ -1,7 +1,7 @@
 # Claude Config and README Cleanup
 
 **Status**: Approved
-**Progress**: 3/12 tasks complete
+**Progress**: 5/12 tasks complete
 **Last Updated**: 2026-05-17
 
 ## Overview
@@ -230,8 +230,8 @@ This design has no code changes. Per `.claude/rules/design-doc-numbering.md`, do
 
 ### Step 2: Remove project-local skill-discovery rules file and fix the live pointer
 
-- [ ] Delete `.claude/rules/skill-discovery.md` from the repository. <!-- completed: -->
-- [ ] Update the right-column cell of `.claude/rules/commands.md:34` to redirect from ``see `.claude/rules/skill-discovery.md` (Authorization scope section)`` to ``see `skills/agent-team-supervision/SKILL.md` § *Authorization-Scope Guard*`` (verbatim text in Specification § `.claude/rules/commands.md` — pointer redirect). No other file gets a back-reference, deprecation note, or "see git history" pointer. <!-- completed: -->
+- [x] Delete `.claude/rules/skill-discovery.md` from the repository. <!-- completed: 2026-05-17T01:50 -->
+- [x] Update the right-column cell of `.claude/rules/commands.md:34` to redirect from ``see `.claude/rules/skill-discovery.md` (Authorization scope section)`` to ``see `skills/agent-team-supervision/SKILL.md` § *Authorization-Scope Guard*`` (verbatim text in Specification § `.claude/rules/commands.md` — pointer redirect). No other file gets a back-reference, deprecation note, or "see git history" pointer. <!-- completed: 2026-05-17T01:50 -->
 
 ### Step 3: Create `CONTRIBUTING.md`
 
