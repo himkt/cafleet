@@ -1,6 +1,6 @@
 # `cafleet member create` keeps tmux focus on the Director pane
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 7/7 tasks complete
 **Last Updated**: 2026-05-17
 
@@ -206,3 +206,4 @@ None. The user-level allow pattern that authorizes every `cafleet` invocation to
 | 2026-05-17 | Per user feedback: drop the `--keep-focus/--no-keep-focus` flag and the `detach` helper kwarg. Make `tmux split-window -d` the unconditional behavior of `cafleet member create`. |
 | 2026-05-17 | Per reviewer feedback: drop the no-op `len(split_window_recorder) == 1` CLI integration assertion. `test_split_window__argv_construction` is the sole owner of the `-d` argv-shape contract. |
 | 2026-05-17 | Status → Approved after user sign-off. |
+| 2026-05-17 | Implementation complete. PR #83 opened; Copilot review returned 0 inline comments (state: COMMENTED), user accepted as effective approval. Status → Complete. |
