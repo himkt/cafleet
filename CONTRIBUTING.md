@@ -36,7 +36,7 @@ mise //admin:dev          # WebUI dev server (Vite)
 
 ## Contributing changes
 
-CAFleet uses its own design-doc-driven development skills to evolve the codebase. New contributors should follow the same flow:
+CAFleet uses its own design-doc-driven development skills to evolve the codebase. Some tips for new contributors:
 
 1. `/cafleet:design-doc-create <one-line description>` — orchestrates a Director / Drafter / Reviewer team to produce a design doc under `design-docs/NNNNNNN-<slug>/`.
 2. `/cafleet:design-doc-interview design-docs/NNNNNNN-<slug>` — fine-grained Q&A pass that annotates the doc with `COMMENT(claude)` markers for `/cafleet:design-doc-create` resume mode to absorb.
