@@ -2,8 +2,9 @@
 
 import pytest
 
-from cafleet import broker, tmux
-from cafleet.tmux import DirectorContext
+from cafleet import broker
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
+from cafleet.multiplexer.tmux import TmuxMultiplexer
 
 
 @pytest.fixture(autouse=True)
@@ -15,11 +16,11 @@ def _autouse_broker(broker_session):
 def inline_preview_calls(monkeypatch):
     captured: list[dict] = []
 
-    def stub(*args, **kwargs):
+    def stub(self, *args, **kwargs):
         captured.append({"args": args, "kwargs": kwargs})
         return True
 
-    monkeypatch.setattr(tmux, "send_inline_preview", stub)
+    monkeypatch.setattr(TmuxMultiplexer, "send_inline_preview", stub)
     return captured
 
 
@@ -27,11 +28,11 @@ def inline_preview_calls(monkeypatch):
 def poll_trigger_call_count(monkeypatch):
     counter = {"n": 0}
 
-    def stub(*_args, **_kwargs):
+    def stub(self, *_args, **_kwargs):
         counter["n"] += 1
         return True
 
-    monkeypatch.setattr(tmux, "send_poll_trigger", stub)
+    monkeypatch.setattr(TmuxMultiplexer, "send_poll_trigger", stub)
     return counter
 
 
@@ -105,7 +106,9 @@ def test_send_message__sequential_sends_produce_distinct_previews_no_poll_trigge
 def test_inline_preview_failure__message_persisted_and_notification_flag_false(
     monkeypatch, poll_trigger_call_count
 ):
-    monkeypatch.setattr(tmux, "send_inline_preview", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        TmuxMultiplexer, "send_inline_preview", lambda self, *_a, **_k: False
+    )
     sid, sender, recipient = _setup_two_agents()
     sent = broker.send_message(sid, sender, recipient, "delivered despite tmux down")
     assert sent["notification_sent"] is False
@@ -121,11 +124,11 @@ def test_inline_preview_failure__subsequent_sends_still_attempt_preview(
 ):
     attempts: list[bool] = []
 
-    def stub(*_a, **_k):
+    def stub(self, *_a, **_k):
         attempts.append(True)
         return False
 
-    monkeypatch.setattr(tmux, "send_inline_preview", stub)
+    monkeypatch.setattr(TmuxMultiplexer, "send_inline_preview", stub)
     sid, sender, recipient = _setup_two_agents()
     broker.send_message(sid, sender, recipient, "first")
     broker.send_message(sid, sender, recipient, "second")

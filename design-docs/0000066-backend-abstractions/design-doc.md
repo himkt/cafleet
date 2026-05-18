@@ -1,7 +1,7 @@
 # Backend Abstractions — `cafleet.coding_agent` and `cafleet.multiplexer`
 
 **Status**: Approved
-**Progress**: 17/45 tasks complete
+**Progress**: 19/45 tasks complete
 **Last Updated**: 2026-05-18
 
 ## Overview
@@ -684,8 +684,8 @@ Per the brief and D3:
 
 ### Step 5: Wire `broker.py` to the new module paths
 
-- [ ] Replace `from cafleet.tmux import DirectorContext` in `broker.py:14` with `from cafleet.multiplexer import MultiplexerContext`. Rename `DirectorContext` to `MultiplexerContext` at every site in `broker.py`. <!-- completed: -->
-- [ ] Update the local import in `broker._try_notify_recipient` (today `broker.py:85`) from `from cafleet.tmux import send_inline_preview` to `from cafleet.multiplexer.tmux import TmuxMultiplexer`; call `TmuxMultiplexer().send_inline_preview(...)`. <!-- completed: -->
+- [x] Replace `from cafleet.tmux import DirectorContext` in `broker.py:14` with `from cafleet.multiplexer import MultiplexerContext`. Rename `DirectorContext` to `MultiplexerContext` at every site in `broker.py`. <!-- completed: 2026-05-18T14:05 -->
+- [x] Update the local import in `broker._try_notify_recipient` (today `broker.py:85`) from `from cafleet.tmux import send_inline_preview` to `from cafleet.multiplexer.tmux import TmuxMultiplexer`; call `TmuxMultiplexer().send_inline_preview(...)`. <!-- completed: 2026-05-18T14:05 -->
 - [ ] Commit: `refactor: broker.py imports from cafleet.multiplexer (design 0000066 step 5)`. <!-- completed: -->
 
 ### Step 6: Test import-path updates
