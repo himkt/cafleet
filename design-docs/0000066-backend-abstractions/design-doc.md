@@ -1,7 +1,7 @@
 # Backend Abstractions — `cafleet.coding_agent` and `cafleet.multiplexer`
 
 **Status**: Approved
-**Progress**: 5/45 tasks complete
+**Progress**: 8/45 tasks complete
 **Last Updated**: 2026-05-18
 
 ## Overview
@@ -660,9 +660,9 @@ Per the brief and D3:
 
 ### Step 2: `cafleet.multiplexer` subpackage
 
-- [ ] Create `cafleet/src/cafleet/multiplexer/base.py` with `MultiplexerContext` dataclass, `Multiplexer` `@runtime_checkable` Protocol, and `poll_until_pane_gone` helper. <!-- completed: -->
-- [ ] Create `cafleet/src/cafleet/multiplexer/tmux.py` by migrating today's `cafleet/tmux.py` content. Wrap module-level functions as `TmuxMultiplexer` instance methods (stateless — methods do not touch `self` beyond `self.name`). Keep `TmuxError`, `_run`, `_run_tolerating_pane_gone`, `_PANE_GONE_MARKERS`, `_SUBMIT_DELAY`, `_send_literal_then_enter` as module-level (not on the class). Implement `wait_for_pane_gone` via `poll_until_pane_gone`. <!-- completed: -->
-- [ ] Create `cafleet/src/cafleet/multiplexer/__init__.py` exposing `Multiplexer`, `MultiplexerContext`, `TmuxMultiplexer`, `TmuxError`, `poll_until_pane_gone`, and the `MULTIPLEXERS: dict[str, Multiplexer]` registry. <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/multiplexer/base.py` with `MultiplexerContext` dataclass, `Multiplexer` `@runtime_checkable` Protocol, and `poll_until_pane_gone` helper. <!-- completed: 2026-05-18T13:13 -->
+- [x] Create `cafleet/src/cafleet/multiplexer/tmux.py` by migrating today's `cafleet/tmux.py` content. Wrap module-level functions as `TmuxMultiplexer` instance methods (stateless — methods do not touch `self` beyond `self.name`). Keep `TmuxError`, `_run`, `_run_tolerating_pane_gone`, `_PANE_GONE_MARKERS`, `_SUBMIT_DELAY`, `_send_literal_then_enter` as module-level (not on the class). Implement `wait_for_pane_gone` via `poll_until_pane_gone`. <!-- completed: 2026-05-18T13:13 -->
+- [x] Create `cafleet/src/cafleet/multiplexer/__init__.py` exposing `Multiplexer`, `MultiplexerContext`, `TmuxMultiplexer`, `TmuxError`, `poll_until_pane_gone`, and the `MULTIPLEXERS: dict[str, Multiplexer]` registry. <!-- completed: 2026-05-18T13:13 -->
 - [ ] Commit: `refactor: extract cafleet.multiplexer subpackage (design 0000066 step 2)`. The old `cafleet/src/cafleet/tmux.py` stays in place and is **not** deleted in this commit — `cli.py`, `broker.py`, and the test files still import from it. The legacy module is removed in Step 6 once every caller has been migrated. <!-- completed: -->
 
 ### Step 3: `cafleet.coding_agent` subpackage
