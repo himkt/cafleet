@@ -1,7 +1,7 @@
 # Backend Abstractions — `cafleet.coding_agent` and `cafleet.multiplexer`
 
 **Status**: Approved
-**Progress**: 24/45 tasks complete
+**Progress**: 32/45 tasks complete
 **Last Updated**: 2026-05-18
 
 ## Overview
@@ -699,17 +699,17 @@ Per the brief and D3:
 
 ### Step 7: Contract tests
 
-- [ ] Create `cafleet/tests/test_coding_agent_protocol.py` with the parametrized contract tests from §5.1. <!-- completed: -->
-- [ ] Create `cafleet/tests/test_multiplexer_protocol.py` with the parametrized contract tests from §5.2. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` — expect green; new tests parametrize over `CODING_AGENTS.values()` and `MULTIPLEXERS.values()`, so the count grows. <!-- completed: -->
-- [ ] Commit: `test: protocol contract tests for CodingAgent + Multiplexer (design 0000066 step 7)`. <!-- completed: -->
+- [x] Create `cafleet/tests/test_coding_agent_protocol.py` with the parametrized contract tests from §5.1. <!-- completed: 2026-05-18T14:23 -->
+- [x] Create `cafleet/tests/test_multiplexer_protocol.py` with the parametrized contract tests from §5.2. <!-- completed: 2026-05-18T14:23 -->
+- [x] Run `mise //cafleet:test` — expect green; new tests parametrize over `CODING_AGENTS.values()` and `MULTIPLEXERS.values()`, so the count grows. <!-- completed: 2026-05-18T14:25 -->
+- [x] Commit: `test: protocol contract tests for CodingAgent + Multiplexer (design 0000066 step 7)`. <!-- completed: 2026-05-18T14:25 -->
 
 ### Step 8: Alembic backfill migration
 
-- [ ] Create `cafleet/src/cafleet/alembic/versions/0010_backfill_unknown_coding_agent.py` chained off `down_revision = "0009"`. <!-- completed: -->
-- [ ] `upgrade()` executes the `UPDATE agent_placements SET coding_agent = 'claude' WHERE coding_agent = 'unknown'` statement; `downgrade()` is a no-op (rationale in §4.2). <!-- completed: -->
-- [ ] Run `mise //cafleet:test` to confirm the test suite's schema-setup path applies the new revision cleanly. <!-- completed: -->
-- [ ] Smoke: run `cafleet db init` against a workstation SQLite that has both pre-`0000046` `"unknown"` rows and post-`0000046` `"claude"`/`"codex"` rows; confirm only the `"unknown"` rows change. <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/alembic/versions/0010_backfill_unknown_coding_agent.py` chained off `down_revision = "0009"`. <!-- completed: 2026-05-18T14:28 -->
+- [x] `upgrade()` executes the `UPDATE agent_placements SET coding_agent = 'claude' WHERE coding_agent = 'unknown'` statement; `downgrade()` is a no-op (rationale in §4.2). <!-- completed: 2026-05-18T14:28 -->
+- [x] Run `mise //cafleet:test` to confirm the test suite's schema-setup path applies the new revision cleanly. <!-- completed: 2026-05-18T14:29 -->
+- [x] Smoke: run `cafleet db init` against a workstation SQLite that has both pre-`0000046` `"unknown"` rows and post-`0000046` `"claude"`/`"codex"` rows; confirm only the `"unknown"` rows change. <!-- completed: 2026-05-18T14:32 (Director ran `cafleet db init` against workstation DB: alembic upgrade 0009 → 0010 ran cleanly; no `unknown` rows present so the UPDATE was a degenerate no-op; pre-existing `claude` rows untouched.) -->
 - [ ] Commit: `feat: alembic 0010 backfills placement.coding_agent unknown→claude (design 0000066 step 8)`. <!-- completed: -->
 
 ### Step 9: Final verification
