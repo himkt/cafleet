@@ -1,7 +1,7 @@
 # Backend Abstractions — `cafleet.coding_agent` and `cafleet.multiplexer`
 
 **Status**: Approved
-**Progress**: 8/45 tasks complete
+**Progress**: 12/45 tasks complete
 **Last Updated**: 2026-05-18
 
 ## Overview
@@ -667,10 +667,10 @@ Per the brief and D3:
 
 ### Step 3: `cafleet.coding_agent` subpackage
 
-- [ ] Create `cafleet/src/cafleet/coding_agent/base.py` with `CodingAgent` `@runtime_checkable` Protocol and `ensure_binary_on_path` helper. <!-- completed: -->
-- [ ] Create `cafleet/src/cafleet/coding_agent/claude.py` with `ClaudeCodeAgent` — argv shape byte-identical to today's `_build_claude_command`. <!-- completed: -->
-- [ ] Create `cafleet/src/cafleet/coding_agent/codex.py` with `CodexAgent` — argv shape byte-identical to today's `_build_codex_command`. `build_spawn_argv` accepts `display_name` and ignores it. <!-- completed: -->
-- [ ] Create `cafleet/src/cafleet/coding_agent/__init__.py` exposing the Protocol, both concrete classes, the `ensure_binary_on_path` helper, and the `CODING_AGENTS: dict[str, CodingAgent]` registry. <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/coding_agent/base.py` with `CodingAgent` `@runtime_checkable` Protocol and `ensure_binary_on_path` helper. <!-- completed: 2026-05-18T13:38 -->
+- [x] Create `cafleet/src/cafleet/coding_agent/claude.py` with `ClaudeCodeAgent` — argv shape byte-identical to today's `_build_claude_command`. <!-- completed: 2026-05-18T13:38 -->
+- [x] Create `cafleet/src/cafleet/coding_agent/codex.py` with `CodexAgent` — argv shape byte-identical to today's `_build_codex_command`. `build_spawn_argv` accepts `display_name` and ignores it. <!-- completed: 2026-05-18T13:38 -->
+- [x] Create `cafleet/src/cafleet/coding_agent/__init__.py` exposing the Protocol, both concrete classes, the `ensure_binary_on_path` helper, and the `CODING_AGENTS: dict[str, CodingAgent]` registry. <!-- completed: 2026-05-18T13:38 -->
 - [ ] Commit: `refactor: extract cafleet.coding_agent subpackage (design 0000066 step 3)`. <!-- completed: -->
 
 ### Step 4: Wire `cli.py` to the registries
