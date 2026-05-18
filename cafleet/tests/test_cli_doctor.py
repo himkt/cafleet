@@ -5,9 +5,9 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from cafleet import tmux
 from cafleet.cli import cli
-from cafleet.tmux import DirectorContext, TmuxError
+from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
+from cafleet.tmux import DirectorContext
 
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 _TMUX_PANE_VALUE = "%0"
@@ -22,8 +22,10 @@ def runner():
 def mock_tmux_ok(monkeypatch):
     monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
     monkeypatch.setenv("TMUX_PANE", _TMUX_PANE_VALUE)
-    monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
-    monkeypatch.setattr(tmux, "director_context", lambda: _FAKE_DIRECTOR_CTX)
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
+    monkeypatch.setattr(
+        TmuxMultiplexer, "context_discovery", lambda self: _FAKE_DIRECTOR_CTX
+    )
 
 
 def test_doctor_text_output__text_output_has_all_four_fields(runner, mock_tmux_ok):
@@ -57,10 +59,10 @@ def test_doctor_json_output__json_output_shape(runner, mock_tmux_ok):
 def test_doctor_outside_tmux__outside_tmux_exits_one(runner, monkeypatch):
     monkeypatch.delenv("TMUX", raising=False)
 
-    def _raise():
+    def _raise(self):
         raise TmuxError("cafleet member commands must be run inside a tmux session")
 
-    monkeypatch.setattr(tmux, "ensure_tmux_available", _raise)
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", _raise)
     result = runner.invoke(cli, ["doctor"])
     assert result.exit_code == 1, result.output
     combined = (result.output or "") + (result.stderr or "")

@@ -93,8 +93,14 @@ def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
         "database_url",
         f"sqlite+aiosqlite:///{db_file}",
     )
-    monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
-    monkeypatch.setattr("cafleet.tmux.director_context", lambda: _FAKE_DIRECTOR_CTX)
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
+        lambda self: _FAKE_DIRECTOR_CTX,
+    )
 
     runner = CliRunner()
     init = runner.invoke(cli, ["db", "init"])

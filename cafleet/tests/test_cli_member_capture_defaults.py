@@ -20,8 +20,14 @@ def bootstrapped_member(tmp_path, monkeypatch, _reset_engine_singletons):
         "database_url",
         f"sqlite+aiosqlite:///{db_file}",
     )
-    monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
-    monkeypatch.setattr("cafleet.tmux.director_context", lambda: _FAKE_DIRECTOR_CTX)
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
+        lambda self: _FAKE_DIRECTOR_CTX,
+    )
 
     runner = CliRunner()
     init = runner.invoke(cli, ["db", "init"])
@@ -49,7 +55,7 @@ def bootstrapped_member(tmp_path, monkeypatch, _reset_engine_singletons):
 
 
 def _record_run(monkeypatch, *, returns: str = "") -> list[list[str]]:
-    from cafleet import tmux
+    from cafleet.multiplexer import tmux as multiplexer_tmux
 
     calls: list[list[str]] = []
 
@@ -57,7 +63,7 @@ def _record_run(monkeypatch, *, returns: str = "") -> list[list[str]]:
         calls.append(list(args))
         return returns
 
-    monkeypatch.setattr(tmux, "_run", mock_run)
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     return calls
 
 

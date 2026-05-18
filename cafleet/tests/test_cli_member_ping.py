@@ -6,8 +6,9 @@ import uuid
 import pytest
 from click.testing import CliRunner
 
-from cafleet import broker, tmux
+from cafleet import broker
 from cafleet.cli import cli
+from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
 from tests._member_cli_helpers import (
     DIRECTOR_ID,
     MEMBER_ID,
@@ -26,8 +27,8 @@ def session_id():
 
 @pytest.fixture(autouse=True)
 def _stub_tmux_available(monkeypatch):
-    """``ensure_tmux_available`` is a no-op for every test in this module."""
-    monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
+    """``ensure_available`` is a no-op for every test in this module."""
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
 
 
 @pytest.fixture
@@ -43,7 +44,7 @@ def happy_path_agent(monkeypatch):
 
 @pytest.fixture
 def poll_recorder(monkeypatch):
-    """Record every call into ``tmux.send_poll_trigger``.
+    """Record every call into ``TmuxMultiplexer.send_poll_trigger``.
 
     Uses ``raising=False`` so the fixture works before the Programmer adds
     the ``member ping`` subcommand to the CLI — clean FAIL beats setup ERROR.
@@ -52,11 +53,11 @@ def poll_recorder(monkeypatch):
     """
     calls: list[dict] = []
 
-    def fake(**kwargs):
+    def fake(self, **kwargs):
         calls.append(kwargs)
         return True
 
-    monkeypatch.setattr(tmux, "send_poll_trigger", fake, raising=False)
+    monkeypatch.setattr(TmuxMultiplexer, "send_poll_trigger", fake, raising=False)
     return calls
 
 
@@ -129,7 +130,9 @@ def test_ping_dispatch__json_output_two_keys(
 def test_send_failure__send_poll_trigger_returns_false_exits_one(
     runner, session_id, happy_path_agent, monkeypatch
 ):
-    monkeypatch.setattr(tmux, "send_poll_trigger", lambda **_kw: False, raising=False)
+    monkeypatch.setattr(
+        TmuxMultiplexer, "send_poll_trigger", lambda self, **_kw: False, raising=False
+    )
     result = _invoke(runner, session_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
@@ -141,10 +144,10 @@ def test_send_failure__send_poll_trigger_returns_false_exits_one(
 def test_send_failure__send_poll_trigger_raises_tmux_error_exits_one(
     runner, session_id, happy_path_agent, monkeypatch
 ):
-    def raise_err(**_kw):
-        raise tmux.TmuxError("simulated")
+    def raise_err(self, **_kw):
+        raise TmuxError("simulated")
 
-    monkeypatch.setattr(tmux, "send_poll_trigger", raise_err, raising=False)
+    monkeypatch.setattr(TmuxMultiplexer, "send_poll_trigger", raise_err, raising=False)
     result = _invoke(runner, session_id)
     assert result.exit_code == 1, result.output
     assert "send failed: simulated" in (result.output or "")
@@ -213,12 +216,10 @@ def test_authorization_boundary__pending_pane_exits_one_with_exact_message(
 def test_tmux_unavailable__tmux_not_available_exits_one(
     runner, session_id, happy_path_agent, monkeypatch
 ):
-    def raise_unavailable():
-        raise tmux.TmuxError(
-            "cafleet member commands must be run inside a tmux session"
-        )
+    def raise_unavailable(self):
+        raise TmuxError("cafleet member commands must be run inside a tmux session")
 
-    monkeypatch.setattr(tmux, "ensure_tmux_available", raise_unavailable)
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", raise_unavailable)
     result = _invoke(runner, session_id)
     assert result.exit_code == 1, result.output
     assert "cafleet member commands must be run inside a tmux session" in (

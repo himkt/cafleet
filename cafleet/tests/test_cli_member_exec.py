@@ -6,8 +6,9 @@ import uuid
 import pytest
 from click.testing import CliRunner
 
-from cafleet import broker, tmux
+from cafleet import broker
 from cafleet.cli import cli
+from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
 from tests._member_cli_helpers import (
     DIRECTOR_ID,
     MEMBER_ID,
@@ -26,8 +27,8 @@ def session_id():
 
 @pytest.fixture(autouse=True)
 def _stub_tmux_available(monkeypatch):
-    """``ensure_tmux_available`` is a no-op for every test in this module."""
-    monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
+    """``ensure_available`` is a no-op for every test in this module."""
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
 
 
 @pytest.fixture
@@ -43,17 +44,17 @@ def happy_path_agent(monkeypatch):
 
 @pytest.fixture
 def bash_recorder(monkeypatch):
-    """Record every call into ``tmux.send_bash_command``.
+    """Record every call into ``TmuxMultiplexer.send_bash_command``.
 
     Uses ``raising=False`` so the fixture works before the Programmer adds
     the ``member exec`` subcommand to the CLI — clean FAIL beats setup ERROR.
     """
     calls: list[dict] = []
 
-    def fake(**kwargs):
+    def fake(self, **kwargs):
         calls.append(kwargs)
 
-    monkeypatch.setattr(tmux, "send_bash_command", fake, raising=False)
+    monkeypatch.setattr(TmuxMultiplexer, "send_bash_command", fake, raising=False)
     return calls
 
 
@@ -231,12 +232,10 @@ def test_authorization_boundary__pending_pane_exits_one_with_exact_message(
 def test_tmux_unavailable__tmux_not_available_exits_one(
     runner, session_id, happy_path_agent, monkeypatch
 ):
-    def raise_unavailable():
-        raise tmux.TmuxError(
-            "cafleet member commands must be run inside a tmux session"
-        )
+    def raise_unavailable(self):
+        raise TmuxError("cafleet member commands must be run inside a tmux session")
 
-    monkeypatch.setattr(tmux, "ensure_tmux_available", raise_unavailable)
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", raise_unavailable)
     result = _invoke(runner, session_id, "git log -1")
     assert result.exit_code == 1, result.output
     assert "cafleet member commands must be run inside a tmux session" in (

@@ -9,7 +9,8 @@ from click.testing import CliRunner
 
 from cafleet import config
 from cafleet.cli import cli
-from cafleet.tmux import DirectorContext, TmuxError
+from cafleet.multiplexer.tmux import TmuxError
+from cafleet.tmux import DirectorContext
 
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
@@ -35,26 +36,24 @@ def db_file(tmp_path, monkeypatch):
 
 @pytest.fixture
 def mock_tmux_ok(monkeypatch):
-    from cafleet import cli as cli_mod
-
-    monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
-    monkeypatch.setattr("cafleet.tmux.director_context", lambda: _FAKE_DIRECTOR_CTX)
-    if hasattr(cli_mod, "ensure_tmux_available"):
-        monkeypatch.setattr(cli_mod, "ensure_tmux_available", lambda: None)
-    if hasattr(cli_mod, "director_context"):
-        monkeypatch.setattr(cli_mod, "director_context", lambda: _FAKE_DIRECTOR_CTX)
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
+        lambda self: _FAKE_DIRECTOR_CTX,
+    )
 
 
 @pytest.fixture
 def mock_tmux_unavailable(monkeypatch):
-    from cafleet import cli as cli_mod
-
-    def _raise():
+    def _raise(self):
         raise TmuxError("cafleet member commands must be run inside a tmux session")
 
-    monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", _raise)
-    if hasattr(cli_mod, "ensure_tmux_available"):
-        monkeypatch.setattr(cli_mod, "ensure_tmux_available", _raise)
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available", _raise
+    )
 
 
 def _session_rows(db_path) -> list[tuple]:

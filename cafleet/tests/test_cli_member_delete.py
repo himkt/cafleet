@@ -6,9 +6,10 @@ import uuid
 import pytest
 from click.testing import CliRunner
 
-from cafleet import broker, tmux
+from cafleet import broker
 from cafleet.cli import cli
-from cafleet.tmux import DirectorContext, TmuxError
+from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
+from cafleet.tmux import DirectorContext
 from tests._member_cli_helpers import (
     DIRECTOR_ID,
     MEMBER_ID,
@@ -38,14 +39,24 @@ def call_log() -> list[tuple]:
 
 @pytest.fixture(autouse=True)
 def _stub_tmux_entrypoints(monkeypatch):
-    monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
-    monkeypatch.setattr(tmux, "director_context", lambda: _DIRECTOR_CTX)
-    monkeypatch.setattr(tmux, "send_exit", lambda **_: None)
-    monkeypatch.setattr(tmux, "select_layout", lambda **_: None)
-    monkeypatch.setattr(tmux, "kill_pane", lambda **_: None, raising=False)
-    monkeypatch.setattr(tmux, "wait_for_pane_gone", lambda **_: True, raising=False)
-    monkeypatch.setattr(tmux, "pane_exists", lambda **_: False, raising=False)
-    monkeypatch.setattr(tmux, "capture_pane", lambda **_: "", raising=False)
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
+    monkeypatch.setattr(
+        TmuxMultiplexer, "context_discovery", lambda self: _DIRECTOR_CTX
+    )
+    monkeypatch.setattr(TmuxMultiplexer, "send_exit", lambda self, **_: None)
+    monkeypatch.setattr(TmuxMultiplexer, "select_layout", lambda self, **_: None)
+    monkeypatch.setattr(
+        TmuxMultiplexer, "kill_pane", lambda self, **_: None, raising=False
+    )
+    monkeypatch.setattr(
+        TmuxMultiplexer, "wait_for_pane_gone", lambda self, **_: True, raising=False
+    )
+    monkeypatch.setattr(
+        TmuxMultiplexer, "pane_exists", lambda self, **_: False, raising=False
+    )
+    monkeypatch.setattr(
+        TmuxMultiplexer, "capture_pane", lambda self, **_: "", raising=False
+    )
 
 
 def _make_kwargs_recorder(
@@ -61,7 +72,7 @@ def _make_kwargs_recorder(
     calls: list[dict] = []
     state: dict = {"return_value": default_return, "side_effect": None}
 
-    def fake(**kwargs):
+    def fake(self, **kwargs):
         calls.append(kwargs)
         call_log.append((func_name, kwargs))
         if stateful and state["side_effect"] is not None:
@@ -91,12 +102,14 @@ def deregister_recorder(monkeypatch, call_log):
 
 @pytest.fixture
 def send_exit_recorder(monkeypatch, call_log):
-    return _make_kwargs_recorder(monkeypatch, call_log, tmux, "send_exit")
+    return _make_kwargs_recorder(monkeypatch, call_log, TmuxMultiplexer, "send_exit")
 
 
 @pytest.fixture
 def select_layout_recorder(monkeypatch, call_log):
-    return _make_kwargs_recorder(monkeypatch, call_log, tmux, "select_layout")
+    return _make_kwargs_recorder(
+        monkeypatch, call_log, TmuxMultiplexer, "select_layout"
+    )
 
 
 @pytest.fixture
@@ -104,7 +117,7 @@ def wait_for_pane_gone_recorder(monkeypatch, call_log):
     return _make_kwargs_recorder(
         monkeypatch,
         call_log,
-        tmux,
+        TmuxMultiplexer,
         "wait_for_pane_gone",
         stateful=True,
         default_return=True,
@@ -116,7 +129,7 @@ def capture_pane_recorder(monkeypatch, call_log):
     return _make_kwargs_recorder(
         monkeypatch,
         call_log,
-        tmux,
+        TmuxMultiplexer,
         "capture_pane",
         stateful=True,
         default_return="",
@@ -125,7 +138,7 @@ def capture_pane_recorder(monkeypatch, call_log):
 
 @pytest.fixture
 def kill_pane_recorder(monkeypatch, call_log):
-    return _make_kwargs_recorder(monkeypatch, call_log, tmux, "kill_pane")
+    return _make_kwargs_recorder(monkeypatch, call_log, TmuxMultiplexer, "kill_pane")
 
 
 def _invoke(runner, session_id, *extra_args):
@@ -529,10 +542,10 @@ def test_tmux_error_on_send_exit__send_exit_failure_now_exits_one_with_recovery_
     """
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
 
-    def fake_send_exit(**_kw):
+    def fake_send_exit(self, **_kw):
         raise TmuxError("send-keys failed: pane is dead")
 
-    monkeypatch.setattr(tmux, "send_exit", fake_send_exit)
+    monkeypatch.setattr(TmuxMultiplexer, "send_exit", fake_send_exit)
     result = _invoke(runner, session_id)
 
     assert result.exit_code == 1, (result.output, getattr(result, "stderr", ""))

@@ -1,7 +1,7 @@
 # Backend Abstractions — `cafleet.coding_agent` and `cafleet.multiplexer`
 
 **Status**: Approved
-**Progress**: 12/45 tasks complete
+**Progress**: 17/45 tasks complete
 **Last Updated**: 2026-05-18
 
 ## Overview
@@ -675,11 +675,11 @@ Per the brief and D3:
 
 ### Step 4: Wire `cli.py` to the registries
 
-- [ ] Replace `_CLAUDE_BINARY` / `_CODEX_BINARY` / `_build_claude_command` / `_build_codex_command` / `_ensure_coding_agent_available` usage in `member_create` with `CODING_AGENTS[coding_agent].ensure_available()` + `.build_spawn_argv(prompt, display_name=name)`. Delete the five symbols from `cli.py`. <!-- completed: -->
-- [ ] Replace `click.Choice(["claude", "codex"])` on `session_create` and `member_create` with `click.Choice(list(CODING_AGENTS.keys()))`. <!-- completed: -->
-- [ ] Replace every `tmux.X(...)` call in `cli.py` (`session_create`, `doctor`, `member_create`, `member_delete`, `member_capture`, `member_send_input`, `member_exec`, `member_ping`, `_ensure_tmux_or_die`) with `MULTIPLEXERS["tmux"].X(...)`. <!-- completed: -->
-- [ ] Replace `tmux.TmuxError` references with the re-exported `TmuxError` from `cafleet.multiplexer`. Replace `tmux.DirectorContext` with `MultiplexerContext`. <!-- completed: -->
-- [ ] Drop the `from cafleet import ... tmux` import in `cli.py:21`; add `from cafleet.coding_agent import CODING_AGENTS` and `from cafleet.multiplexer import MULTIPLEXERS, MultiplexerContext, TmuxError`. <!-- completed: -->
+- [x] Replace `_CLAUDE_BINARY` / `_CODEX_BINARY` / `_build_claude_command` / `_build_codex_command` / `_ensure_coding_agent_available` usage in `member_create` with `CODING_AGENTS[coding_agent].ensure_available()` + `.build_spawn_argv(prompt, display_name=name)`. Delete the five symbols from `cli.py`. <!-- completed: 2026-05-18T13:43 -->
+- [x] Replace `click.Choice(["claude", "codex"])` on `session_create` and `member_create` with `click.Choice(list(CODING_AGENTS.keys()))`. <!-- completed: 2026-05-18T13:43 -->
+- [x] Replace every `tmux.X(...)` call in `cli.py` (`session_create`, `doctor`, `member_create`, `member_delete`, `member_capture`, `member_send_input`, `member_exec`, `member_ping`, `_ensure_tmux_or_die`) with `MULTIPLEXERS["tmux"].X(...)`. <!-- completed: 2026-05-18T13:44 -->
+- [x] Replace `tmux.TmuxError` references with the re-exported `TmuxError` from `cafleet.multiplexer`. Replace `tmux.DirectorContext` with `MultiplexerContext`. <!-- completed: 2026-05-18T13:44 -->
+- [x] Drop the `from cafleet import ... tmux` import in `cli.py:21`; add `from cafleet.coding_agent import CODING_AGENTS` and `from cafleet.multiplexer import MULTIPLEXERS, MultiplexerContext, TmuxError`. <!-- completed: 2026-05-18T13:43 -->
 - [ ] Commit: `refactor: cli.py uses CODING_AGENTS + MULTIPLEXERS registries (design 0000066 step 4)`. <!-- completed: -->
 
 ### Step 5: Wire `broker.py` to the new module paths
