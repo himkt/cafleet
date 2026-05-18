@@ -16,7 +16,7 @@ from cafleet.db.models import (
 from cafleet.db.models import (
     Session as SessionModel,
 )
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
 @pytest.fixture(autouse=True)

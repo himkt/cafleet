@@ -16,7 +16,7 @@ from click.testing import CliRunner
 
 from cafleet import broker, config
 from cafleet.cli import _resolve_prompt, cli
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
 @pytest.fixture

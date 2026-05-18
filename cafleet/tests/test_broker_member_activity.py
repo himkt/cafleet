@@ -5,7 +5,7 @@ import uuid
 import pytest
 
 from cafleet import broker
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
 @pytest.fixture(autouse=True)

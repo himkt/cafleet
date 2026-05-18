@@ -1,8 +1,11 @@
-"""Tests for ``cafleet.tmux.send_choice_key`` and ``cafleet.tmux.send_freetext_and_submit``."""
+"""Tests for ``TmuxMultiplexer.send_choice_key`` / ``send_freetext_and_submit``."""
 
 import pytest
 
-from cafleet import tmux
+from cafleet.multiplexer import tmux as multiplexer_tmux
+from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
+
+_tmux = TmuxMultiplexer()
 
 
 @pytest.fixture
@@ -13,7 +16,7 @@ def run_recorder(monkeypatch):
         calls.append({"args": list(args), "kwargs": dict(kwargs)})
         return ""
 
-    monkeypatch.setattr(tmux, "_run", fake_run)
+    monkeypatch.setattr(multiplexer_tmux, "_run", fake_run)
     return calls
 
 
@@ -35,11 +38,11 @@ def test_send_choice_key__argv_and_validation(
     run_recorder, scenario, pane, digit, expect_raise_match
 ):
     if expect_raise_match is not None:
-        with pytest.raises(tmux.TmuxError, match=expect_raise_match):
-            tmux.send_choice_key(target_pane_id=pane, digit=digit)
+        with pytest.raises(TmuxError, match=expect_raise_match):
+            _tmux.send_choice_key(target_pane_id=pane, digit=digit)
         assert run_recorder == []
     else:
-        tmux.send_choice_key(target_pane_id=pane, digit=digit)
+        _tmux.send_choice_key(target_pane_id=pane, digit=digit)
         assert len(run_recorder) == 1
         assert run_recorder[0]["args"] == [
             "tmux",
@@ -66,7 +69,7 @@ def test_send_choice_key__argv_and_validation(
 def test_send_freetext_and_submit__argv_and_literal_passthrough(
     run_recorder, scenario, pane, text
 ):
-    tmux.send_freetext_and_submit(target_pane_id=pane, text=text)
+    _tmux.send_freetext_and_submit(target_pane_id=pane, text=text)
     assert len(run_recorder) == 3
     assert run_recorder[0]["args"] == ["tmux", "send-keys", "-t", pane, "4"]
     assert run_recorder[1]["args"] == ["tmux", "send-keys", "-t", pane, "-l", text]
@@ -85,6 +88,6 @@ def test_send_freetext_and_submit__argv_and_literal_passthrough(
     ],
 )
 def test_send_freetext_and_submit__rejects_newlines(run_recorder, bad_text):
-    with pytest.raises(tmux.TmuxError, match="(?i)newline"):
-        tmux.send_freetext_and_submit(target_pane_id="%7", text=bad_text)
+    with pytest.raises(TmuxError, match="(?i)newline"):
+        _tmux.send_freetext_and_submit(target_pane_id="%7", text=bad_text)
     assert run_recorder == []

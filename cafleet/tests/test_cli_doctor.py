@@ -6,8 +6,8 @@ import pytest
 from click.testing import CliRunner
 
 from cafleet.cli import cli
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
-from cafleet.tmux import DirectorContext
 
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 _TMUX_PANE_VALUE = "%0"

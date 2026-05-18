@@ -20,7 +20,7 @@ from click.testing import CliRunner
 
 from cafleet import broker, config
 from cafleet.cli import cli
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 

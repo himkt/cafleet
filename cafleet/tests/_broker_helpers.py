@@ -1,13 +1,15 @@
 """Shared broker-side test helpers (session + agent setup)."""
 
 from cafleet import broker
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext
 
 
 def _create_session(label: str | None = None) -> dict:
     return broker.create_session(
         label=label,
-        director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
+        director_context=MultiplexerContext(
+            session="main", window_id="@3", pane_id="%0"
+        ),
         coding_agent="claude",
     )
 

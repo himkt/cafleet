@@ -8,8 +8,8 @@ from click.testing import CliRunner
 
 from cafleet import broker
 from cafleet.cli import cli
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
-from cafleet.tmux import DirectorContext
 from tests._member_cli_helpers import (
     DIRECTOR_ID,
     MEMBER_ID,

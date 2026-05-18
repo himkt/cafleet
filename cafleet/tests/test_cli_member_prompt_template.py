@@ -1,12 +1,4 @@
-"""Tests for ``cafleet.cli._MEMBER_PROMPT_TEMPLATE``.
-
-Renamed from ``test_cli_claude_helpers.py``: the spawn-command builders
-(``_build_claude_command`` / ``_build_codex_command``) and binary-name
-constants (``_CLAUDE_BINARY`` / ``_CODEX_BINARY`` /
-``_ensure_coding_agent_available``) were extracted into
-``cafleet.coding_agent`` under design 0000066. Only ``_MEMBER_PROMPT_TEMPLATE``
-remains a module-level constant in ``cli.py`` per design-doc §1.6.
-"""
+"""Tests for ``cafleet.cli._MEMBER_PROMPT_TEMPLATE``."""
 
 import importlib
 

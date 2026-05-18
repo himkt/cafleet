@@ -1,7 +1,7 @@
 # Backend Abstractions — `cafleet.coding_agent` and `cafleet.multiplexer`
 
 **Status**: Approved
-**Progress**: 19/45 tasks complete
+**Progress**: 24/45 tasks complete
 **Last Updated**: 2026-05-18
 
 ## Overview
@@ -690,11 +690,11 @@ Per the brief and D3:
 
 ### Step 6: Test import-path updates
 
-- [ ] Sweep `cafleet/tests/` for `cafleet.tmux` references. Update imports: `from cafleet.tmux import DirectorContext` → `from cafleet.multiplexer import MultiplexerContext as DirectorContext` (or drop the alias if the test uses fewer than ~3 occurrences). <!-- completed: -->
-- [ ] Update monkeypatch targets per the table in §3.4. For monkeypatched methods on `TmuxMultiplexer`, ensure lambdas accept `self` as the first positional arg. <!-- completed: -->
-- [ ] Rename `tests/test_tmux.py` → `tests/test_multiplexer_tmux.py` and `tests/test_tmux_send_helpers.py` → `tests/test_multiplexer_tmux_send_helpers.py`. Update the docstring at the top of each. <!-- completed: -->
-- [ ] Delete `cafleet/src/cafleet/tmux.py` now that no caller imports from it (`grep -rn "cafleet.tmux" cafleet/src cafleet/tests` should return zero matches at this point). <!-- completed: -->
-- [ ] Run `mise //cafleet:test` — expect green. <!-- completed: -->
+- [x] Sweep `cafleet/tests/` for `cafleet.tmux` references. Update imports: `from cafleet.tmux import DirectorContext` → `from cafleet.multiplexer import MultiplexerContext as DirectorContext` (or drop the alias if the test uses fewer than ~3 occurrences). <!-- completed: 2026-05-18T14:13 -->
+- [x] Update monkeypatch targets per the table in §3.4. For monkeypatched methods on `TmuxMultiplexer`, ensure lambdas accept `self` as the first positional arg. <!-- completed: 2026-05-18T14:13 -->
+- [x] Rename `tests/test_tmux.py` → `tests/test_multiplexer_tmux.py` and `tests/test_tmux_send_helpers.py` → `tests/test_multiplexer_tmux_send_helpers.py`. Update the docstring at the top of each. <!-- completed: 2026-05-18T14:15 -->
+- [x] Delete `cafleet/src/cafleet/tmux.py` now that no caller imports from it (`grep -rn "cafleet.tmux" cafleet/src cafleet/tests` should return zero matches at this point). <!-- completed: 2026-05-18T14:16 -->
+- [x] Run `mise //cafleet:test` — expect green. <!-- completed: 2026-05-18T14:17 -->
 - [ ] Commit: `refactor: migrate tests + delete legacy cafleet/tmux.py (design 0000066 step 6)`. <!-- completed: -->
 
 ### Step 7: Contract tests

@@ -9,7 +9,7 @@ from click.testing import CliRunner
 
 from cafleet import config
 from cafleet.cli import cli
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
 @pytest.fixture(autouse=True)
