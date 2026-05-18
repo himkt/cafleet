@@ -1,7 +1,7 @@
 # Backend Abstractions — `cafleet.coding_agent` and `cafleet.multiplexer`
 
 **Status**: Approved
-**Progress**: 0/45 tasks complete
+**Progress**: 5/45 tasks complete
 **Last Updated**: 2026-05-18
 
 ## Overview
@@ -651,11 +651,11 @@ Per the brief and D3:
 
 ### Step 1: Documentation Updates (lands first per `.claude/rules/design-doc-numbering.md`)
 
-- [ ] Update `ARCHITECTURE.md` — Component-Layout table: add `cafleet/coding_agent/` and `cafleet/multiplexer/` subpackage rows; remove the `tmux.py` row. Update any prose that names `cafleet.tmux` or `_build_claude_command` / `_build_codex_command`. <!-- completed: -->
-- [ ] Update `README.md` — Project Structure tree-block to match ARCHITECTURE. Run `/update-readme` to catch drift. <!-- completed: -->
-- [ ] Audit `docs/spec/cli-options.md` — confirm `--coding-agent` documentation still matches (the flag values are unchanged); add one line noting the Choice list is registry-driven if it improves clarity. If any reference to the old `cafleet.tmux` module path is found, update it to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer` for the re-exported top-level symbols). <!-- completed: -->
-- [ ] Audit `docs/codex-members.md` for `cafleet.tmux` references; if found, update them to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer`). <!-- completed: -->
-- [ ] Audit every `skills/cafleet/SKILL.md` + `skills/cafleet/reference/*.md` for `cafleet.tmux` references; if found, update them to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer`). None expected (skills describe CLI behavior, not internal module layout), but verify. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` — Component-Layout table: add `cafleet/coding_agent/` and `cafleet/multiplexer/` subpackage rows; remove the `tmux.py` row. Update any prose that names `cafleet.tmux` or `_build_claude_command` / `_build_codex_command`. <!-- completed: 2026-05-18T13:08 -->
+- [x] Update `README.md` — Project Structure tree-block to match ARCHITECTURE. Run `/update-readme` to catch drift. <!-- completed: 2026-05-18T13:08 -->
+- [x] Audit `docs/spec/cli-options.md` — confirm `--coding-agent` documentation still matches (the flag values are unchanged); add one line noting the Choice list is registry-driven if it improves clarity. If any reference to the old `cafleet.tmux` module path is found, update it to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer` for the re-exported top-level symbols). <!-- completed: 2026-05-18T13:09 -->
+- [x] Audit `docs/codex-members.md` for `cafleet.tmux` references; if found, update them to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer`). <!-- completed: 2026-05-18T13:10 -->
+- [x] Audit every `skills/cafleet/SKILL.md` + `skills/cafleet/reference/*.md` for `cafleet.tmux` references; if found, update them to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer`). None expected (skills describe CLI behavior, not internal module layout), but verify. <!-- completed: 2026-05-18T13:10 -->
 - [ ] Commit: `docs: documentation surface for design 0000066 backend abstractions`. <!-- completed: -->
 
 ### Step 2: `cafleet.multiplexer` subpackage
