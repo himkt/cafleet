@@ -1,6 +1,6 @@
 ---
 name: agent-team-monitoring
-description: "Active monitoring mechanism for CAFleet Directors. Documents the cron-like loop primitive per backend (Claude Code: CronCreate + /loop; codex: no in-session scheduling, fallback options listed) and the team-facilitation instructions (poll, ACK, dispatch queued work, health-check, escalate). Load whenever you are about to spawn or manage CAFleet team members. Foundation layer — load before agent-team-supervision."
+description: "Active monitoring mechanism for CAFleet Directors. Documents the cron-like loop primitive per backend (Claude Code: CronCreate + /loop; codex and opencode: no in-session scheduling, fallback options listed) and the team-facilitation instructions (poll, ACK, dispatch queued work, health-check, escalate). Load whenever you are about to spawn or manage CAFleet team members. Foundation layer — load before agent-team-supervision."
 ---
 
 # CAFleet Agent Team Monitoring
@@ -32,24 +32,24 @@ Claude Code's harness exposes two in-session scheduling tools the Director can c
 
 The `/loop` Prompt Template (§ `/loop` Prompt Template below) is the canonical setup — it uses `CronCreate` under the hood. **The loop is mandatory before any `cafleet member create` call** when the Director runs under Claude Code.
 
-### Codex Director
+### Codex Director / Opencode Director
 
-Codex CLI exposes **no equivalent in-session scheduling primitive** (confirmed via survey of <https://developers.openai.com/codex/cli/features> as of 2026-05). There is no `CronCreate`, no `ScheduleWakeup`, no harness-level tool the model can invoke from inside a running session to schedule a future tick. Codex Automations exist but are app-only and cannot be triggered from the local CLI.
+Neither Codex CLI (confirmed via survey of <https://developers.openai.com/codex/cli/features> as of 2026-05) nor opencode exposes an equivalent in-session scheduling primitive. There is no `CronCreate`, no `ScheduleWakeup`, no harness-level tool the model can invoke from inside a running session to schedule a future tick. Codex Automations exist but are app-only and cannot be triggered from the local CLI. Opencode's TUI similarly does not surface a self-wakeup primitive — its `--agent cafleet` binding controls the permission posture, not scheduling.
 
-This means: **a codex root Director cannot run the active `/loop` monitor.** The mechanism is unavailable.
+This means: **a codex or opencode root Director cannot run the active `/loop` monitor.** The mechanism is unavailable on either backend.
 
 #### Recommendation
 
-When active supervision of a CAFleet member team is required, **use `cafleet session create --coding-agent claude`** for the root Director. Codex members are fully supported via `cafleet member create --coding-agent codex` — only the Director needs the cron mechanism. A mixed-backend team (claude Director + codex members) is the canonical configuration for active-supervision workloads.
+When active supervision of a CAFleet member team is required, **use `cafleet session create --coding-agent claude`** for the root Director. Codex and opencode members are fully supported via `cafleet member create --coding-agent codex` (or `--coding-agent opencode`) — only the Director needs the cron mechanism. A mixed-backend team (claude Director + codex / opencode members) is the canonical configuration for active-supervision workloads.
 
-#### Fallback options when codex must be the Director
+#### Fallback options when codex or opencode must be the Director
 
-If a codex root Director is required (e.g. operator preference, codex-specific workflow, no claude binary available), one of the following fallbacks must be in place. Active supervision **without** one of these fallbacks is not supported.
+If a codex or opencode root Director is required (e.g. operator preference, backend-specific workflow, no claude binary available), one of the following fallbacks must be in place. Active supervision **without** one of these fallbacks is not supported.
 
 | Fallback | Mechanism | Operational cost |
 |---|---|---|
-| **Out-of-band cron driver** | An OS-level scheduler (`cron(8)`, systemd timer, `watch -n 60 …`) running **outside** the codex session keystrokes the supervision-tick prompt into the codex Director's tmux pane via `tmux send-keys`. (Operator-side; the Director itself never invokes raw tmux — that is forbidden by `Skill(cafleet)` § Shutdown Protocol's *use cafleet primitives only* rule. This fallback exists only because codex CLI has no in-session scheduler.) | Operator must set up + tear down the timer; not visible inside the session. |
-| **MCP scheduling server** | Codex CLI supports MCP servers. A custom MCP server can expose a scheduling tool the codex Director invokes inline. | Requires writing or installing an MCP server; configuration lives in `~/.codex/config.toml`. |
+| **Out-of-band cron driver** | An OS-level scheduler (`cron(8)`, systemd timer, `watch -n 60 …`) running **outside** the Director's session keystrokes the supervision-tick prompt into the Director's tmux pane via `tmux send-keys`. (Operator-side; the Director itself never invokes raw tmux — that is forbidden by `Skill(cafleet)` § Shutdown Protocol's *use cafleet primitives only* rule. This fallback exists because neither codex CLI nor opencode has an in-session scheduler.) | Operator must set up + tear down the timer; not visible inside the session. |
+| **MCP scheduling server** | Codex CLI supports MCP servers; a custom MCP server can expose a scheduling tool the codex Director invokes inline. Opencode also supports MCP, but per `docs/opencode-members.md` operators MUST NOT add MCP servers to any opencode config the CAFleet pane loads (MCP-contributed tools bypass the deny-list safety floor) — so this fallback is **codex-only**. | Requires writing or installing an MCP server; configuration lives in `~/.codex/config.toml`. |
 | **User-driven nudges** | The user types a tick prompt at intervals (e.g. "tick" every minute). | Manual, error-prone, doesn't scale beyond short sessions. |
 | **No active monitor — synchronous in-turn facilitation only** | The Director performs all health checks + dispatch within each of its own active turns; no scheduled wake-up. The team only progresses while the Director has an active turn. | Acceptable only for short, fully-Director-driven workflows (no long-running parallel members). The Director's idle window is the team's idle window. |
 
@@ -57,7 +57,7 @@ The fallback in use must be documented in the session's launch instructions. The
 
 ## Team-facilitation instructions
 
-On every supervision tick — whether fired by `/loop` (Claude Code) or by a fallback (codex), or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
+On every supervision tick — whether fired by `/loop` (Claude Code) or by a fallback (codex or opencode), or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
 
 1. **Poll inbox.** `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>` (optionally with `--since <iso8601>` to filter to messages received since the last tick).
 2. **ACK every message** that requires no further action: `cafleet --session-id <session-id> message ack --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.
@@ -79,7 +79,7 @@ Run this sequence once per supervision tick. Order matters — cheapest non-intr
 
 ## `/loop` Prompt Template (Claude Code only)
 
-> **Claude Code-specific.** This template depends on `CronCreate` / `ScheduleWakeup`, which are Claude Code harness tools. Codex Directors cannot use this template — see § Mechanism by backend → Codex Director for fallback options.
+> **Claude Code-specific.** This template depends on `CronCreate` / `ScheduleWakeup`, which are Claude Code harness tools. Codex and opencode Directors cannot use this template — see § Mechanism by backend → Codex Director / Opencode Director for fallback options.
 
 Substitute the literal UUIDs into every `<session-id>`, `<director-agent-id>`, and `<member-agent-id>` placeholder before passing the prompt to `/loop`. The prompt must contain literal UUIDs, **not** shell variables — the `permissions.allow` matcher only allows literal command strings. Remember: `--session-id` goes before the subcommand, `--agent-id` goes after.
 
@@ -99,7 +99,7 @@ Monitor team health (interval: 1 minute). For each member spawned via `cafleet m
 
 | Phase | Action |
 |---|---|
-| Spawn members | Start the `/loop` (Claude Code) or fallback driver (codex) BEFORE the first `cafleet member create` call, so the first tick fires while spawning completes. |
+| Spawn members | Start the `/loop` (Claude Code) or fallback driver (codex or opencode) BEFORE the first `cafleet member create` call, so the first tick fires while spawning completes. |
 | Run work | Tick at the configured cadence (1 minute is the `CronCreate` floor); do not intervene unless a tick escalates. |
 | User review | Keep the loop alive during the review cycle — revisions and re-reviews still count as in-progress work. |
 | User approves final artifact | The loop terminates itself after teardown begins (see Cleanup below). |
@@ -134,7 +134,7 @@ If `cafleet message poll` shows no recent messages from the member, fall back to
 
 If the terminal buffer shows the member paused on a 4-option choice prompt (a list of "1. …", "2. …", "3. …", "4. Type something" rows — the shape that `cafleet member send-input` is validated for), the correct unblock is `cafleet member send-input` — never raw `tmux send-keys` — and the Director MUST delegate the decision to the user BEFORE invoking the wrapper. The Director never picks the `--choice` digit or drafts the `--freetext` body on its own judgment. The full three-beat workflow (capture → user-facing decision prompt with shape-matched options → direct Bash invocation of the resolved `cafleet member send-input`, gated by the coding agent's native per-call permission prompt) and the pane-shapes table live in the cafleet skill's "Answer a member's AskUserQuestion prompt" section — that is canonical; do not duplicate the table here.
 
-> **Note that `AskUserQuestion` should be used in Claude Code.** The "delegate to the user" beat in the workflow above assumes the Director itself runs in Claude Code, where `AskUserQuestion` is the dedicated tool for putting a structured choice in front of the operator. Directors running another coding agent must substitute their own equivalent decision-elicitation surface (or fall back to a plain message to the operator). The 4-option-frame shape that `cafleet member send-input` itself targets is a Claude Code idiom — codex members do not render the same frame, so on a codex member the read-then-respond cadence applies but the `--choice` / `--freetext` keystrokes apply only when the captured buffer matches the validated 4-option layout.
+> **Note that `AskUserQuestion` should be used in Claude Code.** The "delegate to the user" beat in the workflow above assumes the Director itself runs in Claude Code, where `AskUserQuestion` is the dedicated tool for putting a structured choice in front of the operator. Directors running another coding agent must substitute their own equivalent decision-elicitation surface (or fall back to a plain message to the operator). The 4-option-frame shape that `cafleet member send-input` itself targets is a Claude Code idiom — neither codex nor opencode members render the same frame, so on a codex or opencode member the read-then-respond cadence applies but the `--choice` / `--freetext` keystrokes apply only when the captured buffer matches the validated 4-option layout.
 
 ### Escalation
 

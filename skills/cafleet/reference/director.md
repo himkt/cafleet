@@ -29,7 +29,7 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 | `--agent-id` | yes | The Director's agent ID |
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
-| `--coding-agent` | no | One of `claude` (default) or `codex`. The flag both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(["claude", "codex"])`. Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
+| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. The flag both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(["claude", "codex", "opencode"])`. Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. For the `opencode` backend, the spawn-precondition step also materializes `~/.opencode/agents/cafleet.md` from the in-source `CAFLEET_AGENT` preset on first spawn (skip-if-exists) — see [`docs/opencode-members.md`](../../../docs/opencode-members.md). |
 | `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are the spawn prompt. Mutually exclusive with the positional prompt argument. Read verbatim (no stripping); passes through the same `str.format()` substitution as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all error non-zero with the messages catalogued in [`docs/spec/cli-options.md`](../../../docs/spec/cli-options.md) § Error Messages. The canonical input mode for every CAFleet-native team-skill spawn — see § *Member Create — Scratch and audit files* below. |
 | *(positional, after `--`)* | no | Prompt for the spawned coding-agent process. Mutually exclusive with `--prompt-file`. If both are omitted the default prompt template is used. The default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
 
@@ -66,7 +66,7 @@ Whichever input mode is used, keep the prompt body itself focused: role-file pat
 
 **Backtick caveat (harness-dependent)**: Some operator environments (including this project) ship a Bash-validator hook that rejects any backtick in a `Bash` invocation — even inside single-quoted positional arguments — because the validator treats backticks as command-substitution syntax. When such a harness is in play, strip backticks from spawn-prompt bodies (use plain text where you would otherwise use markdown code spans). Path-by-reference for role docs sidesteps this entirely: the prompt body becomes short enough that backticks are easy to avoid.
 
-**Pane title (claude backend only)**: `claude --name <member-name>` forwards the name to the spawned process so `#{pane_title}` shows the member name. The `codex` backend has no `--name` analog. Operators discover panes via `cafleet member list` (`pane_id` column is ground truth for both backends).
+**Pane title (claude backend only)**: `claude --name <member-name>` forwards the name to the spawned process so `#{pane_title}` shows the member name. Neither the `codex` nor the `opencode` backend has a `--name` analog. Operators discover panes via `cafleet member list` (`pane_id` column is ground truth for all three backends).
 
 **Focus behavior**: the spawn always invokes `tmux split-window` with `-d` so the Director's pane and active window keep focus — the new member pane is created in the Director's window but is not made active, and the calling client's active window is not switched.
 
@@ -188,7 +188,7 @@ The pane is ALWAYS on the AskUserQuestion 4-option frame when `send-input` is ap
 
 ## Member Exec
 
-Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into the member's pane via `tmux.send_bash_command` so the coding agent's `!` shortcut runs the command natively. Both `claude` and `codex` honor the leading-`!` shortcut. See [`reference/exec-routing.md`](exec-routing.md) for the full bash-via-Director fallback protocol.
+Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into the member's pane via `tmux.send_bash_command` so the coding agent's `!` shortcut runs the command natively. All three backends — `claude`, `codex`, and `opencode` — honor the leading-`!` shortcut. See [`reference/exec-routing.md`](exec-routing.md) for the full bash-via-Director fallback protocol.
 
 ```bash
 cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \
