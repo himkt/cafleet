@@ -3,14 +3,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
-from cafleet import broker, tmux
+from cafleet import broker
 from cafleet.db.models import Base
+from cafleet.multiplexer import tmux as multiplexer_tmux
 
 
 @pytest.fixture(autouse=True)
 def _silence_real_tmux_subprocess(monkeypatch):
-    """Stub tmux._run so tests never send-keys into a real pane."""
-    monkeypatch.setattr(tmux, "_run", lambda *args, **kwargs: "")
+    """Stub ``cafleet.multiplexer.tmux._run`` so tests never send-keys into a real pane."""
+    monkeypatch.setattr(multiplexer_tmux, "_run", lambda *args, **kwargs: "")
 
 
 @pytest.fixture

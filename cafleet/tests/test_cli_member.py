@@ -16,7 +16,7 @@ from click.testing import CliRunner
 
 from cafleet import broker, config
 from cafleet.cli import _resolve_prompt, cli
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
 @pytest.fixture
@@ -62,8 +62,14 @@ def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
         "database_url",
         f"sqlite+aiosqlite:///{db_file}",
     )
-    monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
-    monkeypatch.setattr("cafleet.tmux.director_context", lambda: _CLI_FAKE_DIRECTOR_CTX)
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
+        lambda self: _CLI_FAKE_DIRECTOR_CTX,
+    )
 
     runner = CliRunner()
     init = runner.invoke(cli, ["db", "init"])
@@ -78,19 +84,30 @@ def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
 def split_window_recorder(monkeypatch):
     calls: list[dict] = []
 
-    def fake_split_window(**kwargs):
+    def fake_split_window(self, **kwargs):
         calls.append(kwargs)
         return "%42"
 
-    monkeypatch.setattr("cafleet.tmux.split_window", fake_split_window)
-    monkeypatch.setattr("cafleet.tmux.select_layout", lambda **_: None)
-    monkeypatch.setattr("cafleet.tmux.send_exit", lambda **_: None, raising=False)
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.split_window", fake_split_window
+    )
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.select_layout",
+        lambda self, **_: None,
+    )
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.send_exit",
+        lambda self, **_: None,
+        raising=False,
+    )
     return calls
 
 
 @pytest.fixture
 def stub_coding_agent_binaries(monkeypatch):
-    monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: "/usr/bin/stub")
+    monkeypatch.setattr(
+        "cafleet.coding_agent.base.shutil.which", lambda _: "/usr/bin/stub"
+    )
 
 
 def _invoke_member_create(
@@ -470,7 +487,7 @@ def test_member_create__binary_missing_exits_with_backend_specific_message(
     monkeypatch,
     coding_agent,
 ):
-    monkeypatch.setattr("cafleet.cli.shutil.which", lambda _: None)
+    monkeypatch.setattr("cafleet.coding_agent.base.shutil.which", lambda _: None)
     session_id, director_id, runner = bootstrapped_session
     result = _invoke_member_create(
         runner,

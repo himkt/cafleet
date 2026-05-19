@@ -16,7 +16,7 @@ from cafleet.db.models import (
 from cafleet.db.models import (
     Session as SessionModel,
 )
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
 @pytest.fixture(autouse=True)
@@ -272,7 +272,10 @@ def test_send_message__notification_invokes_inline_preview_with_director_pane(
     director_context, monkeypatch
 ):
     mock_preview = Mock(return_value=True)
-    monkeypatch.setattr("cafleet.tmux.send_inline_preview", mock_preview)
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.send_inline_preview",
+        lambda self, **kwargs: mock_preview(**kwargs),
+    )
     result = broker.create_session(
         label="notify",
         director_context=director_context,

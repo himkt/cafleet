@@ -1,8 +1,12 @@
-"""Tests for ``cafleet.tmux`` (all subprocesses mocked)."""
+"""Tests for ``cafleet.multiplexer.tmux.TmuxMultiplexer`` (all subprocesses mocked)."""
 
 import pytest
 
-from cafleet import tmux
+from cafleet.multiplexer import tmux as multiplexer_tmux
+from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
+
+# Stateless class — one shared instance for all tests is safe.
+_tmux = TmuxMultiplexer()
 
 
 @pytest.fixture
@@ -13,7 +17,7 @@ def run_recorder(monkeypatch):
         captured.append(list(args))
         return ""
 
-    monkeypatch.setattr(tmux, "_run", mock_run)
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     return captured
 
 
@@ -24,7 +28,7 @@ def run_recorder(monkeypatch):
         ("/usr/bin/tmux", False, "must be run inside a tmux session"),
     ],
 )
-def test_ensure_tmux_available__detects_binary_and_session_env(
+def test_ensure_available__detects_binary_and_session_env(
     monkeypatch, which_return, tmux_env_set, expected_match
 ):
     monkeypatch.setattr("shutil.which", lambda _: which_return)
@@ -32,11 +36,11 @@ def test_ensure_tmux_available__detects_binary_and_session_env(
         monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
     else:
         monkeypatch.delenv("TMUX", raising=False)
-    with pytest.raises(tmux.TmuxError, match=expected_match):
-        tmux.ensure_tmux_available()
+    with pytest.raises(TmuxError, match=expected_match):
+        _tmux.ensure_available()
 
 
-def test_director_context__parses_display_message_and_requires_tmux_pane(monkeypatch):
+def test_context_discovery__parses_display_message_and_requires_tmux_pane(monkeypatch):
     # Happy path: argv matches and the parsed context fields are extracted.
     monkeypatch.setenv("TMUX_PANE", "%0")
 
@@ -51,24 +55,26 @@ def test_director_context__parses_display_message_and_requires_tmux_pane(monkeyp
         ]
         return "main|@3|%0\n"
 
-    monkeypatch.setattr(tmux, "_run", mock_run)
-    ctx = tmux.director_context()
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
+    ctx = _tmux.context_discovery()
     assert ctx.session == "main"
     assert ctx.window_id == "@3"
     assert ctx.pane_id == "%0"
 
     # Missing TMUX_PANE → TmuxError.
     monkeypatch.delenv("TMUX_PANE", raising=False)
-    with pytest.raises(tmux.TmuxError, match="TMUX_PANE is not set"):
-        tmux.director_context()
+    with pytest.raises(TmuxError, match="TMUX_PANE is not set"):
+        _tmux.context_discovery()
 
 
 def test_split_window__argv_construction(monkeypatch, run_recorder):
     # 1. Returns captured pane id and includes -P/-F/-d/-e flags.
     monkeypatch.setattr(
-        tmux, "_run", lambda args, **_kw: run_recorder.append(list(args)) or "%7\n"
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: run_recorder.append(list(args)) or "%7\n",
     )
-    pane_id = tmux.split_window(
+    pane_id = _tmux.split_window(
         target_window_id="@3",
         env={"CAFLEET_DATABASE_URL": "sqlite+aiosqlite:////tmp/registry.db"},
         command=["claude", "Hello world"],
@@ -100,9 +106,11 @@ def test_split_window__argv_construction(monkeypatch, run_recorder):
     # 3. Command is appended directly after env flags.
     run_recorder.clear()
     monkeypatch.setattr(
-        tmux, "_run", lambda args, **_kw: run_recorder.append(list(args)) or "%8\n"
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: run_recorder.append(list(args)) or "%8\n",
     )
-    tmux.split_window(
+    _tmux.split_window(
         target_window_id="@5",
         env={},
         command=["my-binary", "--flag", "value", "prompt text"],
@@ -123,13 +131,13 @@ def test_split_window__argv_construction(monkeypatch, run_recorder):
         ("success", None, False, None),
         (
             "failure_raises",
-            tmux.TmuxError("tmux command failed: server exited unexpectedly"),
+            TmuxError("tmux command failed: server exited unexpectedly"),
             False,
             "server exited unexpectedly",
         ),
         (
             "ignore_missing_swallows_pane_gone",
-            tmux.TmuxError(
+            TmuxError(
                 "tmux command failed: tmux send-keys -t %99 /exit Enter\n"
                 "stderr: can't find pane: %99"
             ),
@@ -138,7 +146,7 @@ def test_split_window__argv_construction(monkeypatch, run_recorder):
         ),
         (
             "ignore_missing_does_not_swallow_other_errors",
-            tmux.TmuxError("tmux command failed: server crashed"),
+            TmuxError("tmux command failed: server crashed"),
             True,
             "server crashed",
         ),
@@ -152,12 +160,12 @@ def test_send_exit__success_and_ignore_missing_semantics(
             raise mock_error
         return ""
 
-    monkeypatch.setattr(tmux, "_run", mock_run)
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     if expect_raise_match is None:
-        tmux.send_exit(target_pane_id="%7", ignore_missing=ignore_missing)
+        _tmux.send_exit(target_pane_id="%7", ignore_missing=ignore_missing)
     else:
-        with pytest.raises(tmux.TmuxError, match=expect_raise_match):
-            tmux.send_exit(target_pane_id="%7", ignore_missing=ignore_missing)
+        with pytest.raises(TmuxError, match=expect_raise_match):
+            _tmux.send_exit(target_pane_id="%7", ignore_missing=ignore_missing)
 
 
 @pytest.mark.parametrize(
@@ -167,7 +175,7 @@ def test_send_exit__success_and_ignore_missing_semantics(
         (
             "missing_pane_raises",
             80,
-            tmux.TmuxError(
+            TmuxError(
                 "tmux command failed: tmux capture-pane -p -t %99 -S -80\n"
                 "stderr: can't find pane: %99"
             ),
@@ -189,12 +197,12 @@ def test_capture_pane__argv_and_validation(
             raise mock_error
         return "line 1\nline 2\n"
 
-    monkeypatch.setattr(tmux, "_run", mock_run)
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     if expect_raise_match is not None:
-        with pytest.raises(tmux.TmuxError, match=expect_raise_match):
-            tmux.capture_pane(target_pane_id="%7", lines=lines)
+        with pytest.raises(TmuxError, match=expect_raise_match):
+            _tmux.capture_pane(target_pane_id="%7", lines=lines)
     else:
-        result = tmux.capture_pane(target_pane_id="%7", lines=lines)
+        result = _tmux.capture_pane(target_pane_id="%7", lines=lines)
         assert result == "line 1\nline 2\n"
         assert captured[0] == ["tmux", "capture-pane", "-p", *expect_argv_suffix]
 
@@ -206,7 +214,7 @@ def test_capture_pane__argv_and_validation(
         (
             "pane_not_found_returns_false",
             "/usr/bin/tmux",
-            tmux.TmuxError(
+            TmuxError(
                 "tmux command failed: tmux send-keys -t %99\n"
                 "stderr: can't find pane: %99"
             ),
@@ -217,7 +225,7 @@ def test_capture_pane__argv_and_validation(
         (
             "never_raises_on_tmux_error",
             "/usr/bin/tmux",
-            tmux.TmuxError("tmux command failed: server exited unexpectedly"),
+            TmuxError("tmux command failed: server exited unexpectedly"),
             False,
             True,
         ),
@@ -240,8 +248,8 @@ def test_send_poll_trigger__return_branches_and_argv(
             raise mock_error
         return ""
 
-    monkeypatch.setattr(tmux, "_run", mock_run)
-    result = tmux.send_poll_trigger(
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
+    result = _tmux.send_poll_trigger(
         target_pane_id="%7",
         session_id="sess-001",
         agent_id="agent-001",
@@ -271,7 +279,7 @@ def test_send_poll_trigger__return_branches_and_argv(
         (
             "propagates_unrelated_error",
             None,
-            tmux.TmuxError(
+            TmuxError(
                 "tmux command failed: tmux list-panes -a -F #{pane_id}\n"
                 "stderr: no server running on /tmp/tmux-1000/default"
             ),
@@ -296,12 +304,12 @@ def test_pane_exists__return_branches_and_argv(
             raise mock_error
         return list_panes_return
 
-    monkeypatch.setattr(tmux, "_run", mock_run)
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     if raise_match is not None:
-        with pytest.raises(tmux.TmuxError, match=raise_match):
-            tmux.pane_exists(target_pane_id="%7")
+        with pytest.raises(TmuxError, match=raise_match):
+            _tmux.pane_exists(target_pane_id="%7")
     else:
-        assert tmux.pane_exists(target_pane_id="%7") is expected_result
+        assert _tmux.pane_exists(target_pane_id="%7") is expected_result
         assert captured[0] == ["tmux", "list-panes", "-a", "-F", "#{pane_id}"]
 
 
@@ -311,7 +319,7 @@ def test_pane_exists__return_branches_and_argv(
         ("success_argv", None, False, None),
         (
             "ignore_missing_swallows_pane_gone",
-            tmux.TmuxError(
+            TmuxError(
                 "tmux command failed: tmux kill-pane -t %99\n"
                 "stderr: can't find pane: %99"
             ),
@@ -320,7 +328,7 @@ def test_pane_exists__return_branches_and_argv(
         ),
         (
             "ignore_missing_does_not_swallow_other_errors",
-            tmux.TmuxError(
+            TmuxError(
                 "tmux command failed: tmux kill-pane -t %7\n"
                 "stderr: server exited unexpectedly"
             ),
@@ -329,7 +337,7 @@ def test_pane_exists__return_branches_and_argv(
         ),
         (
             "default_raises_even_for_pane_gone",
-            tmux.TmuxError(
+            TmuxError(
                 "tmux command failed: tmux kill-pane -t %99\n"
                 "stderr: can't find pane: %99"
             ),
@@ -349,12 +357,12 @@ def test_kill_pane__argv_and_ignore_missing_semantics(
             raise mock_error
         return ""
 
-    monkeypatch.setattr(tmux, "_run", mock_run)
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     if expect_raise_match is not None:
-        with pytest.raises(tmux.TmuxError, match=expect_raise_match):
-            tmux.kill_pane(target_pane_id="%7", ignore_missing=ignore_missing)
+        with pytest.raises(TmuxError, match=expect_raise_match):
+            _tmux.kill_pane(target_pane_id="%7", ignore_missing=ignore_missing)
     else:
-        result = tmux.kill_pane(target_pane_id="%7", ignore_missing=ignore_missing)
+        result = _tmux.kill_pane(target_pane_id="%7", ignore_missing=ignore_missing)
         assert result is None
         if scenario == "success_argv":
             assert captured[0] == ["tmux", "kill-pane", "-t", "%7"]
@@ -394,31 +402,33 @@ def test_wait_for_pane_gone__polling_branches(
 
     if pane_exists_seq == "always_true":
 
-        def fake_pane_exists(*, target_pane_id):
+        def fake_pane_exists(self, *, target_pane_id):
             poll_calls.append(target_pane_id)
             return True
     elif pane_exists_seq == "raise_on_second":
 
-        def fake_pane_exists(*, target_pane_id):
+        def fake_pane_exists(self, *, target_pane_id):
             call_count["n"] += 1
             if call_count["n"] >= 2:
-                raise tmux.TmuxError("tmux command failed: server exited unexpectedly")
+                raise TmuxError("tmux command failed: server exited unexpectedly")
             return True
     else:
         results = iter(pane_exists_seq)
 
-        def fake_pane_exists(*, target_pane_id):
+        def fake_pane_exists(self, *, target_pane_id):
             poll_calls.append(target_pane_id)
             return next(results)
 
-    monkeypatch.setattr(tmux, "pane_exists", fake_pane_exists)
+    monkeypatch.setattr(TmuxMultiplexer, "pane_exists", fake_pane_exists)
 
     if scenario == "propagates_tmux_error_from_pane_exists":
-        with pytest.raises(tmux.TmuxError, match="server exited unexpectedly"):
-            tmux.wait_for_pane_gone(target_pane_id="%7", timeout=2.0, interval=0.5)
+        with pytest.raises(TmuxError, match="server exited unexpectedly"):
+            _tmux.wait_for_pane_gone(target_pane_id="%7", timeout=2.0, interval=0.5)
         assert call_count["n"] == 2
     else:
-        result = tmux.wait_for_pane_gone(target_pane_id="%7", timeout=2.0, interval=0.5)
+        result = _tmux.wait_for_pane_gone(
+            target_pane_id="%7", timeout=2.0, interval=0.5
+        )
         assert result is expected_result
         assert len(poll_calls) == expected_poll_count
 
@@ -452,13 +462,13 @@ def test_send_bash_command__argv_and_validation(
         captured.append(list(args))
         return ""
 
-    monkeypatch.setattr(tmux, "_run", mock_run)
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     if expect_raise_match is not None:
-        with pytest.raises(tmux.TmuxError, match=expect_raise_match):
-            tmux.send_bash_command(target_pane_id="%5", command=command)
+        with pytest.raises(TmuxError, match=expect_raise_match):
+            _tmux.send_bash_command(target_pane_id="%5", command=command)
         assert captured == []
     else:
-        tmux.send_bash_command(target_pane_id="%5", command=command)
+        _tmux.send_bash_command(target_pane_id="%5", command=command)
         assert len(captured) == 2
         assert captured[0] == [
             "tmux",

@@ -20,7 +20,7 @@ from click.testing import CliRunner
 
 from cafleet import broker, config
 from cafleet.cli import cli
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
@@ -39,8 +39,14 @@ def bootstrapped_team(tmp_path, monkeypatch, _reset_engine_singletons):
         "database_url",
         f"sqlite+aiosqlite:///{db_file}",
     )
-    monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
-    monkeypatch.setattr("cafleet.tmux.director_context", lambda: _FAKE_DIRECTOR_CTX)
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
+        lambda self: _FAKE_DIRECTOR_CTX,
+    )
 
     runner = CliRunner()
     init = runner.invoke(cli, ["db", "init"])

@@ -1,8 +1,11 @@
-"""``tmux.send_inline_preview`` keystroke helper."""
+"""``TmuxMultiplexer.send_inline_preview`` keystroke helper."""
 
 import pytest
 
-from cafleet import tmux
+from cafleet.multiplexer import tmux as multiplexer_tmux
+from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
+
+_tmux = TmuxMultiplexer()
 
 ENVELOPE_PREFIX = "[cafleet msg "
 
@@ -15,7 +18,7 @@ def _capture_run(monkeypatch) -> list[list[str]]:
         captured.append(list(args))
         return ""
 
-    monkeypatch.setattr(tmux, "_run", mock_run)
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     return captured
 
 
@@ -36,7 +39,7 @@ def test_send_inline_preview__happy_path_envelope_body_and_submit(monkeypatch):
 
     body = "Did the API schema change?"
     ts = "2026-05-05T12:00:00.123456+00:00"
-    result = tmux.send_inline_preview(
+    result = _tmux.send_inline_preview(
         target_pane_id="%9",
         task_id_8="abcdef01",
         sender_8="zyxwvuts",
@@ -75,7 +78,7 @@ def test_send_inline_preview__happy_path_envelope_body_and_submit(monkeypatch):
         (
             "pane_not_found",
             "/usr/bin/tmux",
-            tmux.TmuxError(
+            TmuxError(
                 "tmux command failed: tmux send-keys -t %99\n"
                 "stderr: can't find pane: %99"
             ),
@@ -85,7 +88,7 @@ def test_send_inline_preview__happy_path_envelope_body_and_submit(monkeypatch):
         (
             "server_error_never_raises",
             "/usr/bin/tmux",
-            tmux.TmuxError("tmux command failed: server exited unexpectedly"),
+            TmuxError("tmux command failed: server exited unexpectedly"),
             True,
         ),
     ],
@@ -102,8 +105,8 @@ def test_send_inline_preview__failure_modes_return_false(
             raise mock_error
         return ""
 
-    monkeypatch.setattr(tmux, "_run", mock_run)
-    result = tmux.send_inline_preview(
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
+    result = _tmux.send_inline_preview(
         target_pane_id="%7",
         task_id_8="abcdef01",
         sender_8="zyxwvuts",
@@ -118,11 +121,11 @@ def test_send_inline_preview__failure_modes_return_false(
 def test_send_poll_trigger__preserved_post_surface_15(monkeypatch):
     """`cafleet member ping` still depends on ``send_poll_trigger`` — Surface 15
     MUST NOT delete or regress its observable keystroke contract."""
-    assert hasattr(tmux, "send_poll_trigger")
-    assert callable(tmux.send_poll_trigger)
+    assert hasattr(TmuxMultiplexer, "send_poll_trigger")
+    assert callable(TmuxMultiplexer.send_poll_trigger)
 
     captured = _capture_run(monkeypatch)
-    ok = tmux.send_poll_trigger(
+    ok = _tmux.send_poll_trigger(
         target_pane_id="%5",
         session_id="550e8400-e29b-41d4-a716-446655440000",
         agent_id="7ba91234-5678-90ab-cdef-112233445566",

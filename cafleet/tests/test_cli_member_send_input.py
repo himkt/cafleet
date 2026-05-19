@@ -6,8 +6,9 @@ import uuid
 import pytest
 from click.testing import CliRunner
 
-from cafleet import broker, tmux
+from cafleet import broker
 from cafleet.cli import cli
+from cafleet.multiplexer.tmux import TmuxMultiplexer
 from tests._member_cli_helpers import (
     DIRECTOR_ID,
     MEMBER_ID,
@@ -26,7 +27,7 @@ def session_id():
 
 @pytest.fixture(autouse=True)
 def _stub_tmux_available(monkeypatch):
-    monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
 
 
 @pytest.fixture
@@ -43,7 +44,10 @@ def happy_path_agent(monkeypatch):
 def choice_recorder(monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(
-        tmux, "send_choice_key", lambda **kw: calls.append(kw), raising=False
+        TmuxMultiplexer,
+        "send_choice_key",
+        lambda self, **kw: calls.append(kw),
+        raising=False,
     )
     return calls
 
@@ -52,9 +56,9 @@ def choice_recorder(monkeypatch):
 def freetext_recorder(monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(
-        tmux,
+        TmuxMultiplexer,
         "send_freetext_and_submit",
-        lambda **kw: calls.append(kw),
+        lambda self, **kw: calls.append(kw),
         raising=False,
     )
     return calls

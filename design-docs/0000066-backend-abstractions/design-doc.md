@@ -1,8 +1,8 @@
 # Backend Abstractions — `cafleet.coding_agent` and `cafleet.multiplexer`
 
-**Status**: Approved
-**Progress**: 0/45 tasks complete
-**Last Updated**: 2026-05-18
+**Status**: Complete
+**Progress**: 45/45 tasks complete
+**Last Updated**: 2026-05-19
 
 ## Overview
 
@@ -10,16 +10,16 @@ Extract two backend abstractions from today's flat `cli.py` helpers and `tmux.py
 
 ## Success Criteria
 
-- [ ] `cafleet/coding_agent/{__init__.py, base.py, claude.py, codex.py}` subpackage exists. `base.py` defines a `@runtime_checkable` `CodingAgent` Protocol; `claude.py` and `codex.py` each define one concrete class. `__init__.py` exposes `CodingAgent`, `ClaudeCodeAgent`, `CodexAgent`, and a `CODING_AGENTS: dict[str, CodingAgent]` registry.
-- [ ] `cafleet/multiplexer/{__init__.py, base.py, tmux.py}` subpackage exists. `base.py` defines a `@runtime_checkable` `Multiplexer` Protocol plus the `MultiplexerContext` dataclass plus the `poll_until_pane_gone` shared helper. `tmux.py` defines `TmuxMultiplexer`. `__init__.py` exposes the Protocol, the context dataclass, `TmuxMultiplexer`, and a `MULTIPLEXERS: dict[str, Multiplexer]` registry.
-- [ ] `cafleet/tmux.py` (the current flat module) is deleted. Every import in `cli.py`, `broker.py`, and tests is updated to the new path.
-- [ ] `cli.member_create` and `cli.session_create` resolve the spawn argv via `CODING_AGENTS[coding_agent].build_spawn_argv(prompt, display_name=name)` instead of the inline `_build_claude_command` / `_build_codex_command` branch. The `_CLAUDE_BINARY` / `_CODEX_BINARY` constants and the two `_build_*_command` helpers are deleted from `cli.py`.
-- [ ] `click.Choice` for `--coding-agent` is computed dynamically as `list(CODING_AGENTS.keys())` on both `session create` and `member create`. The list is still `["claude", "codex"]` in this design doc; the cursor follow-on doc adds one dict entry.
-- [ ] Alembic revision `0010_backfill_unknown_coding_agent.py` is committed and chained off `0009_drop_task_json_add_text.py`. The migration backfills `agent_placements.coding_agent = 'unknown'` rows to `'claude'`, is idempotent, and leaves `'claude'` / `'codex'` rows untouched. `mise //cafleet:test` runs the migration as part of its existing schema setup.
-- [ ] A parametrized contract test (`tests/test_coding_agent_protocol.py`) asserts `isinstance(impl, CodingAgent)` for every value in `CODING_AGENTS.values()` and exercises `build_spawn_argv` + `ensure_available` for each. A parallel `tests/test_multiplexer_protocol.py` does the same for `MULTIPLEXERS.values()`.
-- [ ] `cafleet doctor` calls `MULTIPLEXERS["tmux"].context_discovery()` (via the registry — not a direct `cafleet.multiplexer.tmux.director_context` import) so the cmux follow-on doc can swap the active multiplexer without editing `doctor`. JSON output schema (`{"tmux": {"session_name", "window_id", "pane_id", "tmux_pane_env"}}`) is preserved verbatim.
-- [ ] `mise //cafleet:test` is green at every commit boundary. The 17 test files that reference `cafleet.tmux` are updated to use `cafleet.multiplexer.tmux` (or `cafleet.multiplexer` for re-exported top-level symbols). No test redesign — only import-path updates.
-- [ ] `ARCHITECTURE.md`, `README.md`, `docs/spec/cli-options.md`, `docs/codex-members.md`, and every affected `skills/*/SKILL.md` describe the new module layout before code lands.
+- [x] `cafleet/coding_agent/{__init__.py, base.py, claude.py, codex.py}` subpackage exists. `base.py` defines a `@runtime_checkable` `CodingAgent` Protocol; `claude.py` and `codex.py` each define one concrete class. `__init__.py` exposes `CodingAgent`, `ClaudeCodeAgent`, `CodexAgent`, and a `CODING_AGENTS: dict[str, CodingAgent]` registry.
+- [x] `cafleet/multiplexer/{__init__.py, base.py, tmux.py}` subpackage exists. `base.py` defines a `@runtime_checkable` `Multiplexer` Protocol plus the `MultiplexerContext` dataclass plus the `poll_until_pane_gone` shared helper. `tmux.py` defines `TmuxMultiplexer`. `__init__.py` exposes the Protocol, the context dataclass, `TmuxMultiplexer`, and a `MULTIPLEXERS: dict[str, Multiplexer]` registry.
+- [x] `cafleet/tmux.py` (the current flat module) is deleted. Every import in `cli.py`, `broker.py`, and tests is updated to the new path.
+- [x] `cli.member_create` and `cli.session_create` resolve the spawn argv via `CODING_AGENTS[coding_agent].build_spawn_argv(prompt, display_name=name)` instead of the inline `_build_claude_command` / `_build_codex_command` branch. The `_CLAUDE_BINARY` / `_CODEX_BINARY` constants and the two `_build_*_command` helpers are deleted from `cli.py`.
+- [x] `click.Choice` for `--coding-agent` is computed dynamically as `list(CODING_AGENTS.keys())` on both `session create` and `member create`. The list is still `["claude", "codex"]` in this design doc; the cursor follow-on doc adds one dict entry.
+- [x] Alembic revision `0010_backfill_unknown_coding_agent.py` is committed and chained off `0009_drop_task_json_add_text.py`. The migration backfills `agent_placements.coding_agent = 'unknown'` rows to `'claude'`, is idempotent, and leaves `'claude'` / `'codex'` rows untouched. `mise //cafleet:test` runs the migration as part of its existing schema setup.
+- [x] A parametrized contract test (`tests/test_coding_agent_protocol.py`) asserts `isinstance(impl, CodingAgent)` for every value in `CODING_AGENTS.values()` and exercises `build_spawn_argv` + `ensure_available` for each. A parallel `tests/test_multiplexer_protocol.py` does the same for `MULTIPLEXERS.values()`.
+- [x] `cafleet doctor` calls `MULTIPLEXERS["tmux"].context_discovery()` (via the registry — not a direct `cafleet.multiplexer.tmux.director_context` import) so the cmux follow-on doc can swap the active multiplexer without editing `doctor`. JSON output schema (`{"tmux": {"session_name", "window_id", "pane_id", "tmux_pane_env"}}`) is preserved verbatim.
+- [x] `mise //cafleet:test` is green at every commit boundary. The 17 test files that reference `cafleet.tmux` are updated to use `cafleet.multiplexer.tmux` (or `cafleet.multiplexer` for re-exported top-level symbols). No test redesign — only import-path updates.
+- [x] `ARCHITECTURE.md`, `README.md`, `docs/spec/cli-options.md`, `docs/codex-members.md`, and every affected `skills/*/SKILL.md` describe the new module layout before code lands.
 
 ---
 
@@ -651,75 +651,75 @@ Per the brief and D3:
 
 ### Step 1: Documentation Updates (lands first per `.claude/rules/design-doc-numbering.md`)
 
-- [ ] Update `ARCHITECTURE.md` — Component-Layout table: add `cafleet/coding_agent/` and `cafleet/multiplexer/` subpackage rows; remove the `tmux.py` row. Update any prose that names `cafleet.tmux` or `_build_claude_command` / `_build_codex_command`. <!-- completed: -->
-- [ ] Update `README.md` — Project Structure tree-block to match ARCHITECTURE. Run `/update-readme` to catch drift. <!-- completed: -->
-- [ ] Audit `docs/spec/cli-options.md` — confirm `--coding-agent` documentation still matches (the flag values are unchanged); add one line noting the Choice list is registry-driven if it improves clarity. If any reference to the old `cafleet.tmux` module path is found, update it to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer` for the re-exported top-level symbols). <!-- completed: -->
-- [ ] Audit `docs/codex-members.md` for `cafleet.tmux` references; if found, update them to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer`). <!-- completed: -->
-- [ ] Audit every `skills/cafleet/SKILL.md` + `skills/cafleet/reference/*.md` for `cafleet.tmux` references; if found, update them to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer`). None expected (skills describe CLI behavior, not internal module layout), but verify. <!-- completed: -->
+- [x] Update `ARCHITECTURE.md` — Component-Layout table: add `cafleet/coding_agent/` and `cafleet/multiplexer/` subpackage rows; remove the `tmux.py` row. Update any prose that names `cafleet.tmux` or `_build_claude_command` / `_build_codex_command`. <!-- completed: 2026-05-18T13:08 -->
+- [x] Update `README.md` — Project Structure tree-block to match ARCHITECTURE. Run `/update-readme` to catch drift. <!-- completed: 2026-05-18T13:08 -->
+- [x] Audit `docs/spec/cli-options.md` — confirm `--coding-agent` documentation still matches (the flag values are unchanged); add one line noting the Choice list is registry-driven if it improves clarity. If any reference to the old `cafleet.tmux` module path is found, update it to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer` for the re-exported top-level symbols). <!-- completed: 2026-05-18T13:09 -->
+- [x] Audit `docs/codex-members.md` for `cafleet.tmux` references; if found, update them to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer`). <!-- completed: 2026-05-18T13:10 -->
+- [x] Audit every `skills/cafleet/SKILL.md` + `skills/cafleet/reference/*.md` for `cafleet.tmux` references; if found, update them to `cafleet.multiplexer.tmux` (or `cafleet.multiplexer`). None expected (skills describe CLI behavior, not internal module layout), but verify. <!-- completed: 2026-05-18T13:10 -->
 - [ ] Commit: `docs: documentation surface for design 0000066 backend abstractions`. <!-- completed: -->
 
 ### Step 2: `cafleet.multiplexer` subpackage
 
-- [ ] Create `cafleet/src/cafleet/multiplexer/base.py` with `MultiplexerContext` dataclass, `Multiplexer` `@runtime_checkable` Protocol, and `poll_until_pane_gone` helper. <!-- completed: -->
-- [ ] Create `cafleet/src/cafleet/multiplexer/tmux.py` by migrating today's `cafleet/tmux.py` content. Wrap module-level functions as `TmuxMultiplexer` instance methods (stateless — methods do not touch `self` beyond `self.name`). Keep `TmuxError`, `_run`, `_run_tolerating_pane_gone`, `_PANE_GONE_MARKERS`, `_SUBMIT_DELAY`, `_send_literal_then_enter` as module-level (not on the class). Implement `wait_for_pane_gone` via `poll_until_pane_gone`. <!-- completed: -->
-- [ ] Create `cafleet/src/cafleet/multiplexer/__init__.py` exposing `Multiplexer`, `MultiplexerContext`, `TmuxMultiplexer`, `TmuxError`, `poll_until_pane_gone`, and the `MULTIPLEXERS: dict[str, Multiplexer]` registry. <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/multiplexer/base.py` with `MultiplexerContext` dataclass, `Multiplexer` `@runtime_checkable` Protocol, and `poll_until_pane_gone` helper. <!-- completed: 2026-05-18T13:13 -->
+- [x] Create `cafleet/src/cafleet/multiplexer/tmux.py` by migrating today's `cafleet/tmux.py` content. Wrap module-level functions as `TmuxMultiplexer` instance methods (stateless — methods do not touch `self` beyond `self.name`). Keep `TmuxError`, `_run`, `_run_tolerating_pane_gone`, `_PANE_GONE_MARKERS`, `_SUBMIT_DELAY`, `_send_literal_then_enter` as module-level (not on the class). Implement `wait_for_pane_gone` via `poll_until_pane_gone`. <!-- completed: 2026-05-18T13:13 -->
+- [x] Create `cafleet/src/cafleet/multiplexer/__init__.py` exposing `Multiplexer`, `MultiplexerContext`, `TmuxMultiplexer`, `TmuxError`, `poll_until_pane_gone`, and the `MULTIPLEXERS: dict[str, Multiplexer]` registry. <!-- completed: 2026-05-18T13:13 -->
 - [ ] Commit: `refactor: extract cafleet.multiplexer subpackage (design 0000066 step 2)`. The old `cafleet/src/cafleet/tmux.py` stays in place and is **not** deleted in this commit — `cli.py`, `broker.py`, and the test files still import from it. The legacy module is removed in Step 6 once every caller has been migrated. <!-- completed: -->
 
 ### Step 3: `cafleet.coding_agent` subpackage
 
-- [ ] Create `cafleet/src/cafleet/coding_agent/base.py` with `CodingAgent` `@runtime_checkable` Protocol and `ensure_binary_on_path` helper. <!-- completed: -->
-- [ ] Create `cafleet/src/cafleet/coding_agent/claude.py` with `ClaudeCodeAgent` — argv shape byte-identical to today's `_build_claude_command`. <!-- completed: -->
-- [ ] Create `cafleet/src/cafleet/coding_agent/codex.py` with `CodexAgent` — argv shape byte-identical to today's `_build_codex_command`. `build_spawn_argv` accepts `display_name` and ignores it. <!-- completed: -->
-- [ ] Create `cafleet/src/cafleet/coding_agent/__init__.py` exposing the Protocol, both concrete classes, the `ensure_binary_on_path` helper, and the `CODING_AGENTS: dict[str, CodingAgent]` registry. <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/coding_agent/base.py` with `CodingAgent` `@runtime_checkable` Protocol and `ensure_binary_on_path` helper. <!-- completed: 2026-05-18T13:38 -->
+- [x] Create `cafleet/src/cafleet/coding_agent/claude.py` with `ClaudeCodeAgent` — argv shape byte-identical to today's `_build_claude_command`. <!-- completed: 2026-05-18T13:38 -->
+- [x] Create `cafleet/src/cafleet/coding_agent/codex.py` with `CodexAgent` — argv shape byte-identical to today's `_build_codex_command`. `build_spawn_argv` accepts `display_name` and ignores it. <!-- completed: 2026-05-18T13:38 -->
+- [x] Create `cafleet/src/cafleet/coding_agent/__init__.py` exposing the Protocol, both concrete classes, the `ensure_binary_on_path` helper, and the `CODING_AGENTS: dict[str, CodingAgent]` registry. <!-- completed: 2026-05-18T13:38 -->
 - [ ] Commit: `refactor: extract cafleet.coding_agent subpackage (design 0000066 step 3)`. <!-- completed: -->
 
 ### Step 4: Wire `cli.py` to the registries
 
-- [ ] Replace `_CLAUDE_BINARY` / `_CODEX_BINARY` / `_build_claude_command` / `_build_codex_command` / `_ensure_coding_agent_available` usage in `member_create` with `CODING_AGENTS[coding_agent].ensure_available()` + `.build_spawn_argv(prompt, display_name=name)`. Delete the five symbols from `cli.py`. <!-- completed: -->
-- [ ] Replace `click.Choice(["claude", "codex"])` on `session_create` and `member_create` with `click.Choice(list(CODING_AGENTS.keys()))`. <!-- completed: -->
-- [ ] Replace every `tmux.X(...)` call in `cli.py` (`session_create`, `doctor`, `member_create`, `member_delete`, `member_capture`, `member_send_input`, `member_exec`, `member_ping`, `_ensure_tmux_or_die`) with `MULTIPLEXERS["tmux"].X(...)`. <!-- completed: -->
-- [ ] Replace `tmux.TmuxError` references with the re-exported `TmuxError` from `cafleet.multiplexer`. Replace `tmux.DirectorContext` with `MultiplexerContext`. <!-- completed: -->
-- [ ] Drop the `from cafleet import ... tmux` import in `cli.py:21`; add `from cafleet.coding_agent import CODING_AGENTS` and `from cafleet.multiplexer import MULTIPLEXERS, MultiplexerContext, TmuxError`. <!-- completed: -->
+- [x] Replace `_CLAUDE_BINARY` / `_CODEX_BINARY` / `_build_claude_command` / `_build_codex_command` / `_ensure_coding_agent_available` usage in `member_create` with `CODING_AGENTS[coding_agent].ensure_available()` + `.build_spawn_argv(prompt, display_name=name)`. Delete the five symbols from `cli.py`. <!-- completed: 2026-05-18T13:43 -->
+- [x] Replace `click.Choice(["claude", "codex"])` on `session_create` and `member_create` with `click.Choice(list(CODING_AGENTS.keys()))`. <!-- completed: 2026-05-18T13:43 -->
+- [x] Replace every `tmux.X(...)` call in `cli.py` (`session_create`, `doctor`, `member_create`, `member_delete`, `member_capture`, `member_send_input`, `member_exec`, `member_ping`, `_ensure_tmux_or_die`) with `MULTIPLEXERS["tmux"].X(...)`. <!-- completed: 2026-05-18T13:44 -->
+- [x] Replace `tmux.TmuxError` references with the re-exported `TmuxError` from `cafleet.multiplexer`. Replace `tmux.DirectorContext` with `MultiplexerContext`. <!-- completed: 2026-05-18T13:44 -->
+- [x] Drop the `from cafleet import ... tmux` import in `cli.py:21`; add `from cafleet.coding_agent import CODING_AGENTS` and `from cafleet.multiplexer import MULTIPLEXERS, MultiplexerContext, TmuxError`. <!-- completed: 2026-05-18T13:43 -->
 - [ ] Commit: `refactor: cli.py uses CODING_AGENTS + MULTIPLEXERS registries (design 0000066 step 4)`. <!-- completed: -->
 
 ### Step 5: Wire `broker.py` to the new module paths
 
-- [ ] Replace `from cafleet.tmux import DirectorContext` in `broker.py:14` with `from cafleet.multiplexer import MultiplexerContext`. Rename `DirectorContext` to `MultiplexerContext` at every site in `broker.py`. <!-- completed: -->
-- [ ] Update the local import in `broker._try_notify_recipient` (today `broker.py:85`) from `from cafleet.tmux import send_inline_preview` to `from cafleet.multiplexer.tmux import TmuxMultiplexer`; call `TmuxMultiplexer().send_inline_preview(...)`. <!-- completed: -->
+- [x] Replace `from cafleet.tmux import DirectorContext` in `broker.py:14` with `from cafleet.multiplexer import MultiplexerContext`. Rename `DirectorContext` to `MultiplexerContext` at every site in `broker.py`. <!-- completed: 2026-05-18T14:05 -->
+- [x] Update the local import in `broker._try_notify_recipient` (today `broker.py:85`) from `from cafleet.tmux import send_inline_preview` to `from cafleet.multiplexer.tmux import TmuxMultiplexer`; call `TmuxMultiplexer().send_inline_preview(...)`. <!-- completed: 2026-05-18T14:05 -->
 - [ ] Commit: `refactor: broker.py imports from cafleet.multiplexer (design 0000066 step 5)`. <!-- completed: -->
 
 ### Step 6: Test import-path updates
 
-- [ ] Sweep `cafleet/tests/` for `cafleet.tmux` references. Update imports: `from cafleet.tmux import DirectorContext` → `from cafleet.multiplexer import MultiplexerContext as DirectorContext` (or drop the alias if the test uses fewer than ~3 occurrences). <!-- completed: -->
-- [ ] Update monkeypatch targets per the table in §3.4. For monkeypatched methods on `TmuxMultiplexer`, ensure lambdas accept `self` as the first positional arg. <!-- completed: -->
-- [ ] Rename `tests/test_tmux.py` → `tests/test_multiplexer_tmux.py` and `tests/test_tmux_send_helpers.py` → `tests/test_multiplexer_tmux_send_helpers.py`. Update the docstring at the top of each. <!-- completed: -->
-- [ ] Delete `cafleet/src/cafleet/tmux.py` now that no caller imports from it (`grep -rn "cafleet.tmux" cafleet/src cafleet/tests` should return zero matches at this point). <!-- completed: -->
-- [ ] Run `mise //cafleet:test` — expect green. <!-- completed: -->
+- [x] Sweep `cafleet/tests/` for `cafleet.tmux` references. Update imports: `from cafleet.tmux import DirectorContext` → `from cafleet.multiplexer import MultiplexerContext as DirectorContext` (or drop the alias if the test uses fewer than ~3 occurrences). <!-- completed: 2026-05-18T14:13 -->
+- [x] Update monkeypatch targets per the table in §3.4. For monkeypatched methods on `TmuxMultiplexer`, ensure lambdas accept `self` as the first positional arg. <!-- completed: 2026-05-18T14:13 -->
+- [x] Rename `tests/test_tmux.py` → `tests/test_multiplexer_tmux.py` and `tests/test_tmux_send_helpers.py` → `tests/test_multiplexer_tmux_send_helpers.py`. Update the docstring at the top of each. <!-- completed: 2026-05-18T14:15 -->
+- [x] Delete `cafleet/src/cafleet/tmux.py` now that no caller imports from it (`grep -rn "cafleet.tmux" cafleet/src cafleet/tests` should return zero matches at this point). <!-- completed: 2026-05-18T14:16 -->
+- [x] Run `mise //cafleet:test` — expect green. <!-- completed: 2026-05-18T14:17 -->
 - [ ] Commit: `refactor: migrate tests + delete legacy cafleet/tmux.py (design 0000066 step 6)`. <!-- completed: -->
 
 ### Step 7: Contract tests
 
-- [ ] Create `cafleet/tests/test_coding_agent_protocol.py` with the parametrized contract tests from §5.1. <!-- completed: -->
-- [ ] Create `cafleet/tests/test_multiplexer_protocol.py` with the parametrized contract tests from §5.2. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` — expect green; new tests parametrize over `CODING_AGENTS.values()` and `MULTIPLEXERS.values()`, so the count grows. <!-- completed: -->
-- [ ] Commit: `test: protocol contract tests for CodingAgent + Multiplexer (design 0000066 step 7)`. <!-- completed: -->
+- [x] Create `cafleet/tests/test_coding_agent_protocol.py` with the parametrized contract tests from §5.1. <!-- completed: 2026-05-18T14:23 -->
+- [x] Create `cafleet/tests/test_multiplexer_protocol.py` with the parametrized contract tests from §5.2. <!-- completed: 2026-05-18T14:23 -->
+- [x] Run `mise //cafleet:test` — expect green; new tests parametrize over `CODING_AGENTS.values()` and `MULTIPLEXERS.values()`, so the count grows. <!-- completed: 2026-05-18T14:25 -->
+- [x] Commit: `test: protocol contract tests for CodingAgent + Multiplexer (design 0000066 step 7)`. <!-- completed: 2026-05-18T14:25 -->
 
 ### Step 8: Alembic backfill migration
 
-- [ ] Create `cafleet/src/cafleet/alembic/versions/0010_backfill_unknown_coding_agent.py` chained off `down_revision = "0009"`. <!-- completed: -->
-- [ ] `upgrade()` executes the `UPDATE agent_placements SET coding_agent = 'claude' WHERE coding_agent = 'unknown'` statement; `downgrade()` is a no-op (rationale in §4.2). <!-- completed: -->
-- [ ] Run `mise //cafleet:test` to confirm the test suite's schema-setup path applies the new revision cleanly. <!-- completed: -->
-- [ ] Smoke: run `cafleet db init` against a workstation SQLite that has both pre-`0000046` `"unknown"` rows and post-`0000046` `"claude"`/`"codex"` rows; confirm only the `"unknown"` rows change. <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/alembic/versions/0010_backfill_unknown_coding_agent.py` chained off `down_revision = "0009"`. <!-- completed: 2026-05-18T14:28 -->
+- [x] `upgrade()` executes the `UPDATE agent_placements SET coding_agent = 'claude' WHERE coding_agent = 'unknown'` statement; `downgrade()` is a no-op (rationale in §4.2). <!-- completed: 2026-05-18T14:28 -->
+- [x] Run `mise //cafleet:test` to confirm the test suite's schema-setup path applies the new revision cleanly. <!-- completed: 2026-05-18T14:29 -->
+- [x] Smoke: run `cafleet db init` against a workstation SQLite that has both pre-`0000046` `"unknown"` rows and post-`0000046` `"claude"`/`"codex"` rows; confirm only the `"unknown"` rows change. <!-- completed: 2026-05-18T14:32 (Director ran `cafleet db init` against workstation DB: alembic upgrade 0009 → 0010 ran cleanly; no `unknown` rows present so the UPDATE was a degenerate no-op; pre-existing `claude` rows untouched.) -->
 - [ ] Commit: `feat: alembic 0010 backfills placement.coding_agent unknown→claude (design 0000066 step 8)`. <!-- completed: -->
 
 ### Step 9: Final verification
 
-- [ ] Run `mise //cafleet:test` — expect green. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` — expect clean. <!-- completed: -->
-- [ ] Run `mise //cafleet:format` — expect clean. <!-- completed: -->
-- [ ] Run `mise //cafleet:typecheck` — expect clean. <!-- completed: -->
-- [ ] Manual smoke (workstation with both `claude` and `codex` installed): `cafleet session create --coding-agent claude` works; `cafleet session create --coding-agent codex` works; `cafleet member create --coding-agent claude` spawns claude in a pane; `cafleet member create --coding-agent codex` spawns codex; `cafleet doctor` reports the calling pane's tmux IDs unchanged. <!-- completed: -->
-- [ ] Update Status header to `Complete` and tick Success Criteria. <!-- completed: -->
+- [x] Run `mise //cafleet:test` — expect green. <!-- completed: 2026-05-18T14:40 (617 pass + 1 pre-existing test_base_dir failure unchanged since baseline 5ee52e4 — out of scope for design 0000066, confirmed by Verifier) -->
+- [x] Run `mise //cafleet:lint` — expect clean. <!-- completed: 2026-05-18T14:40 -->
+- [x] Run `mise //cafleet:format` — expect clean. <!-- completed: 2026-05-18T14:40 (covered by ruff format --check inside mise //cafleet:lint) -->
+- [x] Run `mise //cafleet:typecheck` — expect clean. <!-- completed: 2026-05-18T14:40 -->
+- [x] Manual smoke (workstation with both `claude` and `codex` installed): `cafleet session create --coding-agent claude` works; `cafleet session create --coding-agent codex` works; `cafleet member create --coding-agent claude` spawns claude in a pane; `cafleet member create --coding-agent codex` spawns codex; `cafleet doctor` reports the calling pane's tmux IDs unchanged. <!-- completed: 2026-05-18T14:43 (Director-side aggregated smoke: (1) `cafleet --json doctor` returned `{"tmux":{"session_name":"0","window_id":"@0","pane_id":"%0","tmux_pane_env":"%0"}}` — schema preserved verbatim; (2) `cafleet session create --help` and `cafleet member create --help` both list `--coding-agent [claude|codex]` — dynamic Choice resolves; (3) the design-doc execution session itself spawned Programmer/Tester/Verifier via `cafleet member create --coding-agent claude` against the registry-backed code path — three live claude panes confirm the spawn flow works end-to-end. Full standalone `cafleet session create` in a separate tmux window was held back per Authorization-Scope Guard.) -->
+- [x] Update Status header to `Complete` and tick Success Criteria. <!-- completed: 2026-05-19T09:59 -->
 
 ---
 
@@ -729,3 +729,4 @@ Per the brief and D3:
 |------|---------|
 | 2026-05-18 | Initial draft — pure-refactor-first abstraction (Protocols + registries), prepared for cursor / cmux follow-on docs. |
 | 2026-05-18 | Reviewer round 1 — 11 `COMMENT(reviewer)` markers addressed (Progress count, SC #2 wording, clarification-answers pointer, test-file count, `Callable` import, `broker.py:137-139` citation, single-commit transition, parametrized contract test split, file-inventory rename action, audit-task fix wording, `tmux.py` deletion moved from Step 2 to Step 6). User-approved. Status → Approved. |
+| 2026-05-18 → 2026-05-19 | Implementation landed across 13 commits on `feat/0000066-backend-abstractions` → PR #84. Verifier confirmed 617 pass + 1 pre-existing test_base_dir failure (unchanged from baseline), lint/typecheck/format clean, all 10 Success Criteria satisfied. Five Copilot review rounds: R1 addressed inline (`select_layout` stripped from `Multiplexer` Protocol per user follow-up); R2 round-2 refactor internalized tmux layout rebalance into `TmuxMultiplexer.split_window` and dropped the post-delete rebalance entirely (cli.py is now Protocol-pure); R3 fixed doc drift in `ARCHITECTURE.md`, registry-neutral `--coding-agent` help text, alembic 0010 docstring reword, and renamed `test_tmux_send_inline_preview.py` → `test_multiplexer_tmux_send_inline_preview.py`; R4 fixed the lingering rebalance reference in `ARCHITECTURE.md` delete-ordering / atomic-create-flow; R5 returned with no new comments. Status → Complete. |

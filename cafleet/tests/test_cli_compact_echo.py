@@ -5,8 +5,9 @@ import uuid
 import pytest
 from click.testing import CliRunner
 
-from cafleet import broker, tmux
+from cafleet import broker
 from cafleet.cli import cli
+from cafleet.multiplexer.tmux import TmuxMultiplexer
 
 DIRECTOR_ID = "11111111-1111-1111-1111-111111111111"
 MEMBER_ID = "22222222-2222-2222-2222-222222222222"
@@ -89,8 +90,10 @@ def _ping_setup(monkeypatch):
         "placement": placement,
     }
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_k: agent)
-    monkeypatch.setattr(tmux, "ensure_tmux_available", lambda: None)
-    monkeypatch.setattr(tmux, "send_poll_trigger", lambda **_k: True, raising=False)
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
+    monkeypatch.setattr(
+        TmuxMultiplexer, "send_poll_trigger", lambda self, **_k: True, raising=False
+    )
 
 
 def _setup_command(monkeypatch, command, session_id, agent_id):

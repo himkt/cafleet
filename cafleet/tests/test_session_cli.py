@@ -9,7 +9,7 @@ from click.testing import CliRunner
 
 from cafleet import config
 from cafleet.cli import cli
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
 @pytest.fixture(autouse=True)
@@ -20,8 +20,14 @@ def _autouse_reset_engine(_reset_engine_singletons):
 @pytest.fixture(autouse=True)
 def _mock_tmux_for_session_create(monkeypatch):
     ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
-    monkeypatch.setattr("cafleet.tmux.ensure_tmux_available", lambda: None)
-    monkeypatch.setattr("cafleet.tmux.director_context", lambda: ctx)
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
+        lambda self: ctx,
+    )
 
 
 def _init_db(runner: CliRunner) -> None:

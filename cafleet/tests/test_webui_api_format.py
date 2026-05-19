@@ -3,7 +3,7 @@
 import pytest
 
 from cafleet import broker, webui_api
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.webui_api import _format_messages
 
 

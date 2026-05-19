@@ -5,7 +5,6 @@ import functools
 import importlib.resources
 import json
 import os
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import NoReturn
@@ -18,11 +17,11 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.url import make_url
 
-from cafleet import base_dir, broker, output, tmux
+from cafleet import base_dir, broker, output
+from cafleet.coding_agent import CODING_AGENTS
 from cafleet.config import settings
+from cafleet.multiplexer import MULTIPLEXERS, TmuxError
 
-_CLAUDE_BINARY = "claude"
-_CODEX_BINARY = "codex"
 _MEMBER_PROMPT_TEMPLATE = (
     "Member of cafleet session {session_id} "
     "(agent={agent_id}, director={director_agent_id}).\n"
@@ -31,37 +30,10 @@ _MEMBER_PROMPT_TEMPLATE = (
 )
 
 
-def _build_claude_command(prompt: str, *, display_name: str) -> list[str]:
-    return [
-        _CLAUDE_BINARY,
-        "--permission-mode",
-        "dontAsk",
-        "--name",
-        display_name,
-        prompt,
-    ]
-
-
-def _build_codex_command(prompt: str) -> list[str]:
-    return [
-        _CODEX_BINARY,
-        "--ask-for-approval",
-        "never",
-        "--sandbox",
-        "workspace-write",
-        prompt,
-    ]
-
-
-def _ensure_coding_agent_available(binary_name: str) -> None:
-    if shutil.which(binary_name) is None:
-        raise RuntimeError(f"binary {binary_name} not found on PATH")
-
-
 def _ensure_tmux_or_die() -> None:
     try:
-        tmux.ensure_tmux_available()
-    except tmux.TmuxError as exc:
+        MULTIPLEXERS["tmux"].ensure_available()
+    except TmuxError as exc:
         raise click.ClickException(str(exc)) from exc
 
 
@@ -285,10 +257,10 @@ def session() -> None:
 @click.option(
     "--coding-agent",
     "coding_agent",
-    type=click.Choice(["claude", "codex"]),
+    type=click.Choice(list(CODING_AGENTS.keys())),
     default="claude",
     show_default=True,
-    help="Coding agent (claude or codex).",
+    help="Coding-agent binary to spawn / declare for the placement.",
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @_full_flag
@@ -302,9 +274,9 @@ def session_create(
 ) -> None:
     """Create a new session (must be run inside a tmux session)."""
     try:
-        tmux.ensure_tmux_available()
-        director_ctx = tmux.director_context()
-    except tmux.TmuxError as exc:
+        MULTIPLEXERS["tmux"].ensure_available()
+        director_ctx = MULTIPLEXERS["tmux"].context_discovery()
+    except TmuxError as exc:
         raise click.ClickException(
             "cafleet session create must be run inside a tmux session"
         ) from exc
@@ -406,8 +378,8 @@ def doctor(ctx) -> None:
     _ensure_tmux_or_die()
 
     try:
-        director_ctx = tmux.director_context()
-    except tmux.TmuxError as exc:
+        director_ctx = MULTIPLEXERS["tmux"].context_discovery()
+    except TmuxError as exc:
         raise click.ClickException(str(exc)) from exc
 
     tmux_pane_env = os.environ["TMUX_PANE"]
@@ -918,10 +890,10 @@ def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> No
 @click.option(
     "--coding-agent",
     "coding_agent",
-    type=click.Choice(["claude", "codex"]),
+    type=click.Choice(list(CODING_AGENTS.keys())),
     default="claude",
     show_default=True,
-    help="Coding agent (claude or codex).",
+    help="Coding-agent binary to spawn / declare for the placement.",
 )
 @click.option(
     "--prompt-file",
@@ -944,13 +916,13 @@ def member_create(
     _require_session_id(ctx)
     session_id = ctx.obj["session_id"]
 
-    binary_name = _CLAUDE_BINARY if coding_agent == "claude" else _CODEX_BINARY
+    agent = CODING_AGENTS[coding_agent]
 
     try:
-        tmux.ensure_tmux_available()
-        _ensure_coding_agent_available(binary_name)
-        director_ctx = tmux.director_context()
-    except (tmux.TmuxError, RuntimeError) as exc:
+        MULTIPLEXERS["tmux"].ensure_available()
+        agent.ensure_available()
+        director_ctx = MULTIPLEXERS["tmux"].context_discovery()
+    except (TmuxError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     try:
@@ -982,20 +954,17 @@ def member_create(
         _deregister_with_warning(new_agent_id, session_id=session_id)
         raise
 
-    if coding_agent == "claude":
-        spawn_command = _build_claude_command(prompt, display_name=name)
-    else:
-        spawn_command = _build_codex_command(prompt)
+    spawn_command = agent.build_spawn_argv(prompt, display_name=name)
 
     try:
         db_url = os.environ.get("CAFLEET_DATABASE_URL")
         fwd_env = {"CAFLEET_DATABASE_URL": db_url} if db_url else {}
-        pane_id = tmux.split_window(
+        pane_id = MULTIPLEXERS["tmux"].split_window(
             target_window_id=director_ctx.window_id,
             env=fwd_env,
             command=spawn_command,
         )
-    except tmux.TmuxError as exc:
+    except TmuxError as exc:
         _rollback_register(
             new_agent_id,
             session_id=session_id,
@@ -1007,26 +976,21 @@ def member_create(
     except Exception as exc:
         # Pane is alive but the registration row is dangling; /exit the pane
         # and roll back the agent so the caller can retry cleanly.
-        with contextlib.suppress(tmux.TmuxError):
-            tmux.send_exit(target_pane_id=pane_id, ignore_missing=True)
+        with contextlib.suppress(TmuxError):
+            MULTIPLEXERS["tmux"].send_exit(target_pane_id=pane_id, ignore_missing=True)
         _rollback_register(
             new_agent_id,
             session_id=session_id,
             reason=f"placement update failed: {exc}",
         )
     if placement_view is None:
-        with contextlib.suppress(tmux.TmuxError):
-            tmux.send_exit(target_pane_id=pane_id, ignore_missing=True)
+        with contextlib.suppress(TmuxError):
+            MULTIPLEXERS["tmux"].send_exit(target_pane_id=pane_id, ignore_missing=True)
         _rollback_register(
             new_agent_id,
             session_id=session_id,
             reason="placement row vanished before pane-id patch",
         )
-
-    try:
-        tmux.select_layout(target_window_id=director_ctx.window_id)
-    except tmux.TmuxError as exc:
-        click.echo(f"Warning: select-layout failed: {exc}", err=True)
 
     result["placement"] = placement_view
     if ctx.obj["json_output"]:
@@ -1076,8 +1040,8 @@ def member_delete(ctx, agent_id, member_id, force):
 
     if force:
         try:
-            tmux.kill_pane(target_pane_id=pane_id, ignore_missing=True)
-        except tmux.TmuxError as exc:
+            MULTIPLEXERS["tmux"].kill_pane(target_pane_id=pane_id, ignore_missing=True)
+        except TmuxError as exc:
             raise click.ClickException(
                 f"kill_pane failed for pane {pane_id}: {exc}. "
                 f"The tmux server may be unreachable. Verify with 'cafleet doctor', "
@@ -1087,10 +1051,6 @@ def member_delete(ctx, agent_id, member_id, force):
             broker.deregister_agent(member_id)
         except Exception as exc:
             raise click.ClickException(f"deregister failed: {exc}") from exc
-        try:
-            tmux.select_layout(target_window_id=placement["tmux_window_id"])
-        except tmux.TmuxError as exc:
-            click.echo(f"Warning: select-layout failed: {exc}", err=True)
         pane_status = f"{pane_id} (killed)"
         _emit_member_delete_output(
             ctx, member_id, pane_status, header="Member deleted (--force)."
@@ -1098,8 +1058,8 @@ def member_delete(ctx, agent_id, member_id, force):
         return
 
     try:
-        tmux.send_exit(target_pane_id=pane_id, ignore_missing=True)
-    except tmux.TmuxError as exc:
+        MULTIPLEXERS["tmux"].send_exit(target_pane_id=pane_id, ignore_missing=True)
+    except TmuxError as exc:
         raise click.ClickException(
             f"send_exit failed for pane {pane_id}: {exc}. "
             f"The tmux server may be unreachable. Verify with 'cafleet doctor', "
@@ -1108,10 +1068,10 @@ def member_delete(ctx, agent_id, member_id, force):
         ) from exc
 
     try:
-        gone = tmux.wait_for_pane_gone(
+        gone = MULTIPLEXERS["tmux"].wait_for_pane_gone(
             target_pane_id=pane_id, timeout=15.0, interval=0.5
         )
-    except tmux.TmuxError as exc:
+    except TmuxError as exc:
         raise click.ClickException(
             f"tmux call failed while waiting for pane {pane_id} to close: {exc}"
         ) from exc
@@ -1121,10 +1081,6 @@ def member_delete(ctx, agent_id, member_id, force):
             broker.deregister_agent(member_id)
         except Exception as exc:
             raise click.ClickException(f"deregister failed: {exc}") from exc
-        try:
-            tmux.select_layout(target_window_id=placement["tmux_window_id"])
-        except tmux.TmuxError as exc:
-            click.echo(f"Warning: select-layout failed: {exc}", err=True)
         pane_status = f"{pane_id} (closed)"
         _emit_member_delete_output(
             ctx, member_id, pane_status, header="Member deleted."
@@ -1132,8 +1088,8 @@ def member_delete(ctx, agent_id, member_id, force):
         return
 
     try:
-        tail = tmux.capture_pane(target_pane_id=pane_id, lines=80)
-    except tmux.TmuxError as exc:
+        tail = MULTIPLEXERS["tmux"].capture_pane(target_pane_id=pane_id, lines=80)
+    except TmuxError as exc:
         click.echo(
             f"Warning: capture_pane failed during timeout handling: {exc}. "
             f"The timeout error and recovery hint still print.",
@@ -1249,8 +1205,8 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
     pane_id = _require_member_pane(placement, member_id, "capture")
 
     try:
-        content = tmux.capture_pane(target_pane_id=pane_id, lines=lines)
-    except tmux.TmuxError as exc:
+        content = MULTIPLEXERS["tmux"].capture_pane(target_pane_id=pane_id, lines=lines)
+    except TmuxError as exc:
         raise click.ClickException(f"capture failed: {exc}") from exc
 
     if not ansi:
@@ -1322,12 +1278,14 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
 
     try:
         if choice is not None:
-            tmux.send_choice_key(target_pane_id=pane_id, digit=choice)
+            MULTIPLEXERS["tmux"].send_choice_key(target_pane_id=pane_id, digit=choice)
             action, value = "choice", str(choice)
         else:
-            tmux.send_freetext_and_submit(target_pane_id=pane_id, text=freetext)
+            MULTIPLEXERS["tmux"].send_freetext_and_submit(
+                target_pane_id=pane_id, text=freetext
+            )
             action, value = "freetext", freetext
-    except tmux.TmuxError as exc:
+    except TmuxError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
 
     if ctx.obj["json_output"]:
@@ -1373,8 +1331,8 @@ def member_exec(ctx, agent_id, member_id, command):
     pane_id = _require_member_pane(placement, member_id, "send")
 
     try:
-        tmux.send_bash_command(target_pane_id=pane_id, command=command)
-    except tmux.TmuxError as exc:
+        MULTIPLEXERS["tmux"].send_bash_command(target_pane_id=pane_id, command=command)
+    except TmuxError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
 
     if ctx.obj["json_output"]:
@@ -1414,12 +1372,12 @@ def member_ping(ctx, agent_id, member_id, quiet):
     pane_id = _require_member_pane(placement, member_id, "send")
 
     try:
-        ok = tmux.send_poll_trigger(
+        ok = MULTIPLEXERS["tmux"].send_poll_trigger(
             target_pane_id=pane_id,
             session_id=session_id,
             agent_id=member_id,
         )
-    except tmux.TmuxError as exc:
+    except TmuxError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
     if not ok:
         raise click.ClickException(

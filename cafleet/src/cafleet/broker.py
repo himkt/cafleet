@@ -11,7 +11,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from cafleet.config import settings
 from cafleet.db.engine import get_sync_sessionmaker
 from cafleet.db.models import Agent, AgentPlacement, Session, Task
-from cafleet.tmux import DirectorContext
+from cafleet.multiplexer import MultiplexerContext
 
 _DIRECTOR_NAME = "Director"
 _DIRECTOR_DESCRIPTION = "Root Director for this session"
@@ -80,9 +80,10 @@ def _try_notify_recipient(
     ).scalar_one_or_none()
     if pane_id is None:
         return False
-    # Local import so tests that monkeypatch ``cafleet.tmux.send_inline_preview``
+    # Local import so tests that monkeypatch
+    # ``cafleet.multiplexer.tmux.TmuxMultiplexer.send_inline_preview``
     # get picked up on every call rather than bound once at broker import.
-    from cafleet.tmux import send_inline_preview
+    from cafleet.multiplexer.tmux import TmuxMultiplexer
 
     # Truncate before keystroking so a multi-KB body cannot dump itself into
     # the recipient's pane. Mirrors output.truncate_text's contract: same
@@ -92,7 +93,7 @@ def _try_notify_recipient(
     if len(preview_text) > settings.max_text_len:
         preview_text = preview_text[: settings.max_text_len] + "…"
 
-    return send_inline_preview(
+    return TmuxMultiplexer().send_inline_preview(
         target_pane_id=pane_id,
         task_id_8=task_dict["task_id"][:8],
         sender_8=sender_id[:8],
@@ -104,7 +105,7 @@ def _try_notify_recipient(
 def create_session(
     label: str | None = None,
     *,
-    director_context: DirectorContext,
+    director_context: MultiplexerContext,
     coding_agent: str,
 ) -> dict:
     """Atomically bootstrap a session with its root Director and Administrator.
