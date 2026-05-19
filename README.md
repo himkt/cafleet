@@ -16,7 +16,7 @@ Run the following commands on your terminal:
 
 ```
 /plugin marketplace add himkt/cafleet
-/plugin install cafleet@himkt-cafleet
+/plugin install cafleet@cafleet
 ```
 
 > [!IMPORTANT]
