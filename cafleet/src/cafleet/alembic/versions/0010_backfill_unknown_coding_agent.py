@@ -4,12 +4,12 @@ Revision ID: 0010
 Revises: 0009
 Create Date: 2026-05-18
 
-Legacy root-Director rows in ``agent_placements`` carry
-``coding_agent = "unknown"``. ``CODING_AGENTS["unknown"]`` raises
-``KeyError``, so the column value must be a valid registry key. Backfill
-those rows to ``'claude'`` — the only coding-agent backend available when
-those rows were originally inserted. Rows already at ``'claude'`` /
-``'codex'`` are untouched; the migration is idempotent.
+Legacy ``agent_placements`` rows carry ``coding_agent = "unknown"`` from
+older session bootstraps that predate the ``CODING_AGENTS`` registry.
+Normalize those rows to ``'claude'`` — the only coding-agent backend
+available when they were originally inserted — so future registry-based
+lookups on ``placement.coding_agent`` have a valid key. Rows already at
+``'claude'`` / ``'codex'`` are untouched; the migration is idempotent.
 """
 
 from collections.abc import Sequence
