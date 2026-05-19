@@ -21,7 +21,6 @@ from cafleet import base_dir, broker, output
 from cafleet.coding_agent import CODING_AGENTS
 from cafleet.config import settings
 from cafleet.multiplexer import MULTIPLEXERS, TmuxError
-from cafleet.multiplexer.tmux import TmuxMultiplexer
 
 _MEMBER_PROMPT_TEMPLATE = (
     "Member of cafleet session {session_id} "
@@ -993,11 +992,6 @@ def member_create(
             reason="placement row vanished before pane-id patch",
         )
 
-    try:
-        TmuxMultiplexer().select_layout(target_window_id=director_ctx.window_id)
-    except TmuxError as exc:
-        click.echo(f"Warning: select-layout failed: {exc}", err=True)
-
     result["placement"] = placement_view
     if ctx.obj["json_output"]:
         click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
@@ -1057,12 +1051,6 @@ def member_delete(ctx, agent_id, member_id, force):
             broker.deregister_agent(member_id)
         except Exception as exc:
             raise click.ClickException(f"deregister failed: {exc}") from exc
-        try:
-            TmuxMultiplexer().select_layout(
-                target_window_id=placement["tmux_window_id"]
-            )
-        except TmuxError as exc:
-            click.echo(f"Warning: select-layout failed: {exc}", err=True)
         pane_status = f"{pane_id} (killed)"
         _emit_member_delete_output(
             ctx, member_id, pane_status, header="Member deleted (--force)."
@@ -1093,12 +1081,6 @@ def member_delete(ctx, agent_id, member_id, force):
             broker.deregister_agent(member_id)
         except Exception as exc:
             raise click.ClickException(f"deregister failed: {exc}") from exc
-        try:
-            TmuxMultiplexer().select_layout(
-                target_window_id=placement["tmux_window_id"]
-            )
-        except TmuxError as exc:
-            click.echo(f"Warning: select-layout failed: {exc}", err=True)
         pane_status = f"{pane_id} (closed)"
         _emit_member_delete_output(
             ctx, member_id, pane_status, header="Member deleted."

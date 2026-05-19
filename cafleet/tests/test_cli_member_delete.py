@@ -176,14 +176,13 @@ def _invoke_json(runner, session_id, *extra_args):
     )
 
 
-def test_happy_path__call_ordering_send_exit_then_wait_then_deregister_then_layout(
+def test_happy_path__call_ordering_send_exit_then_wait_then_deregister(
     runner,
     session_id,
     monkeypatch,
     call_log,
     deregister_recorder,
     send_exit_recorder,
-    select_layout_recorder,
     wait_for_pane_gone_recorder,
 ):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
@@ -197,7 +196,6 @@ def test_happy_path__call_ordering_send_exit_then_wait_then_deregister_then_layo
         "send_exit",
         "wait_for_pane_gone",
         "deregister_agent",
-        "select_layout",
     ]
 
     assert send_exit_recorder == [{"target_pane_id": PANE_ID, "ignore_missing": True}]
@@ -235,7 +233,6 @@ def test_pane_already_gone__pane_already_gone_first_poll_yields_happy_path(
     call_log,
     deregister_recorder,
     send_exit_recorder,
-    select_layout_recorder,
     wait_for_pane_gone_recorder,
     capture_pane_recorder,
 ):
@@ -253,7 +250,6 @@ def test_pane_already_gone__pane_already_gone_first_poll_yields_happy_path(
         "send_exit",
         "wait_for_pane_gone",
         "deregister_agent",
-        "select_layout",
     ]
 
     assert deregister_recorder == [MEMBER_ID]
@@ -359,7 +355,6 @@ def test_force__force_kills_pane_then_deregisters(
     call_log,
     deregister_recorder,
     send_exit_recorder,
-    select_layout_recorder,
     kill_pane_recorder,
     wait_for_pane_gone_recorder,
 ):
@@ -378,7 +373,6 @@ def test_force__force_kills_pane_then_deregisters(
     assert names == [
         "kill_pane",
         "deregister_agent",
-        "select_layout",
     ]
 
     out = result.output

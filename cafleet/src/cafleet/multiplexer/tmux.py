@@ -1,3 +1,4 @@
+import contextlib
 import os
 import shutil
 import subprocess
@@ -120,7 +121,13 @@ class TmuxMultiplexer:
         for k, v in env.items():
             args += ["-e", f"{k}={v}"]
         args += command
-        return _run(args).strip()
+        pane_id = _run(args).strip()
+        # Rebalance the window layout post-split. Wrapped in suppress(TmuxError)
+        # so a layout failure does not break the spawn — the new pane is already
+        # live and tmux auto-fits remaining panes if the explicit rebalance fails.
+        with contextlib.suppress(TmuxError):
+            self.select_layout(target_window_id=target_window_id)
+        return pane_id
 
     def select_layout(
         self, *, target_window_id: str, layout: str = "main-vertical"
