@@ -1,7 +1,7 @@
 # opencode as a Third Coding-Agent Backend
 
 **Status**: Approved
-**Progress**: 18/35 tasks complete
+**Progress**: 24/35 tasks complete
 **Last Updated**: 2026-05-19
 
 ## Overview
@@ -485,18 +485,18 @@ Manually drive `opencode --agent cafleet --prompt "<test-prompt>"` inside a tmux
 
 ### Step 2: Source code — `OpencodeAgentDefinition` dataclass + `CAFLEET_AGENT` preset
 
-- [ ] Create `cafleet/src/cafleet/coding_agent/opencode_preset.py` with `PermissionRuleset` + `OpencodeAgentDefinition` frozen dataclasses per § 3.1, the `to_markdown()` method per § 3.1 (JSON-as-YAML rendering), the `CAFLEET_AGENT` constant per § 3.2, and the `materialize_cafleet_agent(definition)` helper per § 4.2 <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/coding_agent/opencode_preset.py` with `PermissionRuleset` + `OpencodeAgentDefinition` frozen dataclasses per § 3.1, the `to_markdown()` method per § 3.1 (JSON-as-YAML rendering), the `CAFLEET_AGENT` constant per § 3.2, and the `materialize_cafleet_agent(definition)` helper per § 4.2 <!-- completed: 2026-05-19T14:15 -->
 
 ### Step 3: Source code — `OpencodeAgent` + registry
 
-- [ ] Update the `CodingAgent.ensure_available` docstring at `cafleet/src/cafleet/coding_agent/base.py:19-21` from the narrow PATH-only contract (`"""Raise RuntimeError if ``binary_name`` is not on PATH."""`) to a broader spawn-precondition contract (e.g. `"""Raise if any spawn precondition is unmet (binary missing, required config file unwritable, etc.). Impls MAY materialize required config files here as a side effect — see ``OpencodeAgent.ensure_available`` for the canonical example."""`). This lands BEFORE the OpencodeAgent impl so the Protocol contract and the impl agree at every commit boundary <!-- completed: -->
-- [ ] Create `cafleet/src/cafleet/coding_agent/opencode.py` with the `OpencodeAgent` class from § 1 (imports `CAFLEET_AGENT` + `materialize_cafleet_agent` from `opencode_preset`; `ensure_available` calls both `ensure_binary_on_path` and `materialize_cafleet_agent(CAFLEET_AGENT)`) <!-- completed: -->
-- [ ] Update `cafleet/src/cafleet/coding_agent/__init__.py` per § 2: import `OpencodeAgent`, add `"opencode": OpencodeAgent()` to `CODING_AGENTS`, add `"OpencodeAgent"` to `__all__` <!-- completed: -->
+- [x] Update the `CodingAgent.ensure_available` docstring at `cafleet/src/cafleet/coding_agent/base.py:19-21` from the narrow PATH-only contract (`"""Raise RuntimeError if ``binary_name`` is not on PATH."""`) to a broader spawn-precondition contract (e.g. `"""Raise if any spawn precondition is unmet (binary missing, required config file unwritable, etc.). Impls MAY materialize required config files here as a side effect — see ``OpencodeAgent.ensure_available`` for the canonical example."""`). This lands BEFORE the OpencodeAgent impl so the Protocol contract and the impl agree at every commit boundary <!-- completed: 2026-05-19T14:15 -->
+- [x] Create `cafleet/src/cafleet/coding_agent/opencode.py` with the `OpencodeAgent` class from § 1 (imports `CAFLEET_AGENT` + `materialize_cafleet_agent` from `opencode_preset`; `ensure_available` calls both `ensure_binary_on_path` and `materialize_cafleet_agent(CAFLEET_AGENT)`) <!-- completed: 2026-05-19T14:15 -->
+- [x] Update `cafleet/src/cafleet/coding_agent/__init__.py` per § 2: import `OpencodeAgent`, add `"opencode": OpencodeAgent()` to `CODING_AGENTS`, add `"OpencodeAgent"` to `__all__` <!-- completed: 2026-05-19T14:15 -->
 
 ### Step 4: Source code — `cli.py` integration (no changes required)
 
-- [ ] Verify no `cli.member_create` change is required per § 4.4 — `agent.ensure_available()` at `cli.py:923` already covers the materialization side effect; the existing `fwd_env` continues to carry only `CAFLEET_DATABASE_URL` <!-- completed: -->
-- [ ] Verify no `cli.session_create` change is required per § 4.4 — `--coding-agent opencode` on `session create` is metadata only; manual operator-side `opencode --agent cafleet --prompt <prompt>` invocations are addressed in `docs/opencode-members.md` <!-- completed: -->
+- [x] Verify no `cli.member_create` change is required per § 4.4 — `agent.ensure_available()` at `cli.py:923` already covers the materialization side effect; the existing `fwd_env` continues to carry only `CAFLEET_DATABASE_URL` <!-- completed: 2026-05-19T14:15 -->
+- [x] Verify no `cli.session_create` change is required per § 4.4 — `--coding-agent opencode` on `session create` is metadata only; manual operator-side `opencode --agent cafleet --prompt <prompt>` invocations are addressed in `docs/opencode-members.md` <!-- completed: 2026-05-19T14:15 -->
 
 ### Step 5: Tests
 
