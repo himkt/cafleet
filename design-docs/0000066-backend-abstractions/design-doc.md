@@ -1,8 +1,8 @@
 # Backend Abstractions — `cafleet.coding_agent` and `cafleet.multiplexer`
 
-**Status**: Approved
-**Progress**: 37/45 tasks complete
-**Last Updated**: 2026-05-18
+**Status**: Complete
+**Progress**: 45/45 tasks complete
+**Last Updated**: 2026-05-19
 
 ## Overview
 
@@ -719,7 +719,7 @@ Per the brief and D3:
 - [x] Run `mise //cafleet:format` — expect clean. <!-- completed: 2026-05-18T14:40 (covered by ruff format --check inside mise //cafleet:lint) -->
 - [x] Run `mise //cafleet:typecheck` — expect clean. <!-- completed: 2026-05-18T14:40 -->
 - [x] Manual smoke (workstation with both `claude` and `codex` installed): `cafleet session create --coding-agent claude` works; `cafleet session create --coding-agent codex` works; `cafleet member create --coding-agent claude` spawns claude in a pane; `cafleet member create --coding-agent codex` spawns codex; `cafleet doctor` reports the calling pane's tmux IDs unchanged. <!-- completed: 2026-05-18T14:43 (Director-side aggregated smoke: (1) `cafleet --json doctor` returned `{"tmux":{"session_name":"0","window_id":"@0","pane_id":"%0","tmux_pane_env":"%0"}}` — schema preserved verbatim; (2) `cafleet session create --help` and `cafleet member create --help` both list `--coding-agent [claude|codex]` — dynamic Choice resolves; (3) the design-doc execution session itself spawned Programmer/Tester/Verifier via `cafleet member create --coding-agent claude` against the registry-backed code path — three live claude panes confirm the spawn flow works end-to-end. Full standalone `cafleet session create` in a separate tmux window was held back per Authorization-Scope Guard.) -->
-- [ ] Update Status header to `Complete` and tick Success Criteria. <!-- completed: -->
+- [x] Update Status header to `Complete` and tick Success Criteria. <!-- completed: 2026-05-19T09:59 -->
 
 ---
 
@@ -729,3 +729,4 @@ Per the brief and D3:
 |------|---------|
 | 2026-05-18 | Initial draft — pure-refactor-first abstraction (Protocols + registries), prepared for cursor / cmux follow-on docs. |
 | 2026-05-18 | Reviewer round 1 — 11 `COMMENT(reviewer)` markers addressed (Progress count, SC #2 wording, clarification-answers pointer, test-file count, `Callable` import, `broker.py:137-139` citation, single-commit transition, parametrized contract test split, file-inventory rename action, audit-task fix wording, `tmux.py` deletion moved from Step 2 to Step 6). User-approved. Status → Approved. |
+| 2026-05-18 → 2026-05-19 | Implementation landed across 13 commits on `feat/0000066-backend-abstractions` → PR #84. Verifier confirmed 617 pass + 1 pre-existing test_base_dir failure (unchanged from baseline), lint/typecheck/format clean, all 10 Success Criteria satisfied. Five Copilot review rounds: R1 addressed inline (`select_layout` stripped from `Multiplexer` Protocol per user follow-up); R2 round-2 refactor internalized tmux layout rebalance into `TmuxMultiplexer.split_window` and dropped the post-delete rebalance entirely (cli.py is now Protocol-pure); R3 fixed doc drift in `ARCHITECTURE.md`, registry-neutral `--coding-agent` help text, alembic 0010 docstring reword, and renamed `test_tmux_send_inline_preview.py` → `test_multiplexer_tmux_send_inline_preview.py`; R4 fixed the lingering rebalance reference in `ARCHITECTURE.md` delete-ordering / atomic-create-flow; R5 returned with no new comments. Status → Complete. |
