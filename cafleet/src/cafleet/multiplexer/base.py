@@ -34,10 +34,6 @@ class Multiplexer(Protocol):
         command: list[str],
     ) -> str: ...
 
-    def select_layout(
-        self, *, target_window_id: str, layout: str = "main-vertical"
-    ) -> None: ...
-
     def kill_pane(
         self, *, target_pane_id: str, ignore_missing: bool = False
     ) -> None: ...

@@ -21,6 +21,7 @@ from cafleet import base_dir, broker, output
 from cafleet.coding_agent import CODING_AGENTS
 from cafleet.config import settings
 from cafleet.multiplexer import MULTIPLEXERS, TmuxError
+from cafleet.multiplexer.tmux import TmuxMultiplexer
 
 _MEMBER_PROMPT_TEMPLATE = (
     "Member of cafleet session {session_id} "
@@ -993,7 +994,7 @@ def member_create(
         )
 
     try:
-        MULTIPLEXERS["tmux"].select_layout(target_window_id=director_ctx.window_id)
+        TmuxMultiplexer().select_layout(target_window_id=director_ctx.window_id)
     except TmuxError as exc:
         click.echo(f"Warning: select-layout failed: {exc}", err=True)
 
@@ -1057,7 +1058,7 @@ def member_delete(ctx, agent_id, member_id, force):
         except Exception as exc:
             raise click.ClickException(f"deregister failed: {exc}") from exc
         try:
-            MULTIPLEXERS["tmux"].select_layout(
+            TmuxMultiplexer().select_layout(
                 target_window_id=placement["tmux_window_id"]
             )
         except TmuxError as exc:
@@ -1093,7 +1094,7 @@ def member_delete(ctx, agent_id, member_id, force):
         except Exception as exc:
             raise click.ClickException(f"deregister failed: {exc}") from exc
         try:
-            MULTIPLEXERS["tmux"].select_layout(
+            TmuxMultiplexer().select_layout(
                 target_window_id=placement["tmux_window_id"]
             )
         except TmuxError as exc:
