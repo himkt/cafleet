@@ -96,7 +96,12 @@ CAFLEET_AGENT = OpencodeAgentDefinition(
 
 def materialize_cafleet_agent(definition: OpencodeAgentDefinition) -> None:
     target = Path("~/.opencode/agents/cafleet.md").expanduser()
-    if target.exists():
+    if target.is_file():
         return
+    if target.exists():
+        raise RuntimeError(
+            f"cannot materialize CAFleet opencode agent preset: "
+            f"{target} exists but is not a regular file"
+        )
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(definition.to_markdown(), encoding="utf-8")

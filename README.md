@@ -2,7 +2,7 @@
 
 https://github.com/user-attachments/assets/a66620cb-4a81-4525-95f2-1f1f22765288
 
-Agent Teams reinvented for collaborative coding supporting Claude Code and Codex, with full code transparency.
+Agent Teams reinvented for collaborative coding across multiple coding-agent backends, with full code transparency.
 
 ## Install
 
