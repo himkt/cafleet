@@ -356,13 +356,18 @@ def test_materialize_does_not_modify_mtime_on_existing_file(tmp_path, monkeypatc
 
 def test_materialize_propagates_oserror_when_home_unwritable(tmp_path, monkeypatch):
     """Per §4.3: when the parent dir cannot be created (or write fails),
-    the exception propagates. ``cli.member_create`` wraps it via the
-    existing ``RuntimeError`` path. The test simulates the failure by
-    pointing HOME at a path that exists as a regular file (so
-    ``mkdir(parents=True)`` fails)."""
+    ``materialize_cafleet_agent`` wraps the underlying ``OSError`` as a
+    ``RuntimeError`` (chained via ``raise ... from exc``) so the spawn
+    aborts cleanly with a single exception type for ``cli.member_create``
+    to surface. The test simulates the failure by pointing HOME at a path
+    that exists as a regular file (so ``mkdir(parents=True)`` fails)."""
     not_a_dir = tmp_path / "home-but-its-a-file"
     not_a_dir.write_text("not a directory", encoding="utf-8")
     monkeypatch.setenv("HOME", str(not_a_dir))
 
-    with pytest.raises((OSError, NotADirectoryError, FileExistsError)):
+    with pytest.raises(RuntimeError) as excinfo:
         materialize_cafleet_agent(CAFLEET_AGENT)
+
+    # The original OSError is chained via ``raise ... from exc`` so
+    # operators / cli.member_create can inspect the underlying cause.
+    assert isinstance(excinfo.value.__cause__, OSError)

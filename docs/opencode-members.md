@@ -67,13 +67,13 @@ This trade-off favors respecting user customization over auto-applying upstream 
 
 ## Required opencode CLI version
 
-cafleet has been validated against the version of `opencode` available at the time Step 0 empirical verification was completed (2026-05-19). The bare-`opencode` TUI entry, the `--agent` flag, the `--prompt` flag, and the leading-`!` shell shortcut were all verified against the installed binary.
+cafleet has been validated against `opencode 1.15.5` (the version installed at the time Step 0 empirical verification was completed on 2026-05-19); `1.15.5` is also the minimum supported version. The bare-`opencode` TUI entry, the `--agent` flag, the `--prompt` flag, and the leading-`!` shell shortcut were all verified against this binary.
 
 If `opencode --version` reports an older version that lacks any of these affordances, upgrade per the upstream install instructions at <https://opencode.ai/docs/>.
 
 If the `opencode` binary is not on `PATH`, `cafleet member create --coding-agent opencode` exits 1 with `Error: binary opencode not found on PATH`. Install `opencode`, confirm with `opencode --version`, and retry.
 
-If `~/.opencode/agents/cafleet.md` cannot be written (e.g. `$HOME` is read-only, `~/.opencode/` is owned by another user, or the disk is full), `cafleet member create --coding-agent opencode` propagates an `OSError` / `PermissionError` via the existing spawn-failure path and aborts cleanly with no orphaned placement. Resolve the filesystem condition and retry.
+If `~/.opencode/agents/cafleet.md` cannot be written (e.g. `$HOME` is read-only, `~/.opencode/` is owned by another user, or the disk is full), `materialize_cafleet_agent` wraps the underlying `OSError` / `PermissionError` as a `RuntimeError` (chained from the original) so `cafleet member create --coding-agent opencode` surfaces it via the existing spawn-failure path and aborts cleanly with no orphaned placement. Resolve the filesystem condition and retry.
 
 ## cafleet usage from inside an opencode pane
 

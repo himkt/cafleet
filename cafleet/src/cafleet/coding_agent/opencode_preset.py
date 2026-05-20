@@ -103,5 +103,10 @@ def materialize_cafleet_agent(definition: OpencodeAgentDefinition) -> None:
             f"cannot materialize CAFleet opencode agent preset: "
             f"{target} exists but is not a regular file"
         )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(definition.to_markdown(), encoding="utf-8")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(definition.to_markdown(), encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot materialize CAFleet opencode agent preset at {target}: {exc}"
+        ) from exc
