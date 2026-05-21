@@ -9,6 +9,7 @@ skip-if-exists semantics of the materialization helper.
 """
 
 import json
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -25,9 +26,13 @@ from cafleet.coding_agent.opencode_preset import (
 
 
 def test_permission_ruleset_is_frozen():
-    """PermissionRuleset is a frozen dataclass — immutable per §3.1."""
+    """PermissionRuleset is a frozen dataclass — immutable per §3.1.
+
+    Asserts the specific ``dataclasses.FrozenInstanceError`` rather than a
+    broad ``(AttributeError, Exception)`` catch, so an unrelated AttributeError
+    (e.g. typo in a field name) does NOT silently satisfy the test."""
     ruleset = PermissionRuleset()
-    with pytest.raises((AttributeError, Exception)):
+    with pytest.raises(FrozenInstanceError):
         ruleset.webfetch = "allow"  # type: ignore[misc]
 
 
