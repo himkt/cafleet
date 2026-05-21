@@ -127,7 +127,7 @@ The `cafleet session` subgroup manages sessions. These commands write directly t
 | Flag | Required | Notes |
 |---|---|---|
 | `--label` | no | Free-form text label for the session |
-| `--coding-agent` | no | One of `claude` (default) or `codex`. Operator-declared metadata only — `session create` does not spawn the root Director's coding-agent process and cannot auto-detect the binary running in the calling pane. The value is recorded as `placement.coding_agent` for the root Director. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex"]`) so adding a future backend is one entry in `cafleet.coding_agent.CODING_AGENTS`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically via `show_default=True`.) |
+| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. Operator-declared metadata only — `session create` does not spawn the root Director's coding-agent process and cannot auto-detect the binary running in the calling pane. The value is recorded as `placement.coding_agent` for the root Director. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex", "opencode"]`) so adding a future backend is one entry in `cafleet.coding_agent.CODING_AGENTS`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically via `show_default=True`.) |
 | `--json` | no | Output as JSON |
 
 There are no `--name` / `--description` flags. The root Director's name and description are hardcoded (`name="Director"`, `description="Root Director for this session"`).
@@ -335,11 +335,11 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | Flag | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID |
-| `--name` | yes | Display name of the new member. Forwarded to the spawned `claude` process as `claude --name <member-name> <prompt>` so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. The codex backend has no `--name` analog — codex panes display the codex default title and operators discover them via `cafleet member list` instead. |
+| `--name` | yes | Display name of the new member. Forwarded to the spawned `claude` process as `claude --name <member-name> <prompt>` so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. Neither codex nor opencode has a `--name` analog — operators discover those panes via `cafleet member list`. |
 | `--description` | yes | One-sentence purpose |
-| `--coding-agent` | no | One of `claude` (default) or `codex`. The flag both selects the `cafleet.coding_agent.CODING_AGENTS` registry entry whose `build_spawn_argv` produces the spawn argv AND is recorded as `placement.coding_agent`. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex"]`) so adding a future backend is one entry in `CODING_AGENTS`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically via `show_default=True`.) Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
+| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. The flag both selects the `cafleet.coding_agent.CODING_AGENTS` registry entry whose `build_spawn_argv` produces the spawn argv AND is recorded as `placement.coding_agent`. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex", "opencode"]`) so adding a future backend is one entry in `CODING_AGENTS`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically via `show_default=True`.) Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. For the `opencode` backend, `OpencodeAgent.ensure_available()` also materializes `~/.opencode/agents/cafleet.md` from the in-source `CAFLEET_AGENT` preset on first spawn (skip-if-exists semantics) — see [`docs/opencode-members.md`](../opencode-members.md) for operational detail. |
 | `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are used as the spawn prompt. Mutually exclusive with the positional prompt argument. The file is read verbatim (no stripping) and passes through the same `str.format()` substitution (`session_id` / `agent_id` / `director_agent_id`) as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. |
-| *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. Both backends receive the same prompt; the prompt template is backend-neutral. Mutually exclusive with `--prompt-file`. |
+| *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. All three backends receive the same prompt; the prompt template is backend-neutral. Mutually exclusive with `--prompt-file`. |
 
 #### Spawn command per backend
 
@@ -347,8 +347,9 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 |---|---|
 | `claude` | `claude --permission-mode dontAsk --name <member-name> <prompt>` |
 | `codex`  | `codex --ask-for-approval never --sandbox workspace-write <prompt>` |
+| `opencode` | `opencode --agent cafleet --prompt <prompt>` |
 
-The `claude` spawn carries `--permission-mode dontAsk`; the `codex` spawn carries `--ask-for-approval never --sandbox workspace-write`. In both modes the member's Bash tool is enabled and routine permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no Director routing required by default. The bash-via-Director protocol fires as a fallback when the harness deny-list rejects a Bash invocation (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director). Operational details for codex members live in [`docs/codex-members.md`](../codex-members.md).
+The `claude` spawn carries `--permission-mode dontAsk`; the `codex` spawn carries `--ask-for-approval never --sandbox workspace-write`; the `opencode` spawn carries `--agent cafleet` which binds the in-source `CAFLEET_AGENT` permission ruleset (catch-all-allow + specific-deny — every permission check resolves to `allow` or `deny`, never `ask`). In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no Director routing required by default. The bash-via-Director protocol fires as a fallback when the harness deny-list rejects a Bash invocation (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director). Operational details for codex members live in [`docs/codex-members.md`](../codex-members.md); the opencode equivalent (including the `CAFLEET_AGENT` preset materialization and refresh recipe) lives in [`docs/opencode-members.md`](../opencode-members.md).
 
 #### Spawn-prompt input modes
 
@@ -528,7 +529,7 @@ The canonical Director-side workflow is three-beat and AskUserQuestion-delegated
 
 ### `member exec`
 
-Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane so the coding agent's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). Both `claude` and `codex` honor the leading-`!` shortcut on their input line, so `member exec` works against either backend without modification. The fallback path for the bash-via-Director protocol — see [Routing Bash via the Director](../../skills/cafleet/SKILL.md#routing-bash-via-the-director).
+Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane so the coding agent's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). All three backends (`claude`, `codex`, and `opencode`) honor the leading-`!` shortcut on their input line, so `member exec` works against any backend without modification. The fallback path for the bash-via-Director protocol — see [Routing Bash via the Director](../../skills/cafleet/SKILL.md#routing-bash-via-the-director).
 
 ```bash
 cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \

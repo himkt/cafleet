@@ -3,14 +3,29 @@
 The parametrized Protocol-shape assertions guard against signature drift —
 adding a method to ``CodingAgent`` that an impl forgets surfaces here. The
 per-impl byte-exact argv assertions pin the spawn argv emitted by
-``ClaudeCodeAgent.build_spawn_argv`` and ``CodexAgent.build_spawn_argv`` to
-the exact token list (and ordering) that the multiplexer's ``split_window``
-expects when launching the coding-agent process.
+``ClaudeCodeAgent.build_spawn_argv``, ``CodexAgent.build_spawn_argv``, and
+``OpencodeAgent.build_spawn_argv`` to the exact token list (and ordering)
+that the multiplexer's ``split_window`` expects when launching the
+coding-agent process.
 """
 
 import pytest
 
 from cafleet.coding_agent import CODING_AGENTS, CodingAgent
+
+
+@pytest.fixture(autouse=True)
+def _redirect_home_for_opencode_materialize(tmp_path, monkeypatch):
+    """Redirect HOME → ``tmp_path`` for every test in this file.
+
+    ``OpencodeAgent.ensure_available()`` materializes the CAFleet agent
+    preset to ``~/.opencode/agents/cafleet.md`` as a spawn precondition
+    (per design 0000067 §4). When the protocol-contract parametrization
+    runs the ``ensure_available`` cases for OpencodeAgent, that write
+    would otherwise pollute the real user's ``$HOME``. Redirecting HOME
+    is a no-op for claude / codex (they do not touch ``$HOME``) and
+    contains the opencode side effect inside the per-test ``tmp_path``."""
+    monkeypatch.setenv("HOME", str(tmp_path))
 
 
 @pytest.mark.parametrize(("name", "impl"), list(CODING_AGENTS.items()))

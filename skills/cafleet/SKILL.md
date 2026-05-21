@@ -75,7 +75,7 @@ cafleet --session-id <session-id> --json --pretty message poll --agent-id <my-ag
 
 ## Coding-agent backends
 
-Two backends are supported: `claude` (default) and `codex`. The Director picks per member at create time via `--coding-agent {claude,codex}`. Both backends honor a leading-`!` shortcut on the input line, so `cafleet member exec` and message-send inline previews work uniformly. Operational details for codex members live in [`docs/codex-members.md`](../../docs/codex-members.md).
+Three backends are supported: `claude` (default), `codex`, and `opencode`. The Director picks per member at create time via `--coding-agent {claude,codex,opencode}`. All three backends honor a leading-`!` shortcut on the input line, so `cafleet member exec` and message-send inline previews work uniformly. Operational details for codex members live in [`docs/codex-members.md`](../../docs/codex-members.md); the opencode equivalent (including the `CAFLEET_AGENT` preset materialization at `~/.opencode/agents/cafleet.md` on first spawn and the refresh recipe) lives in [`docs/opencode-members.md`](../../docs/opencode-members.md).
 
 ## Self-registration recipe
 

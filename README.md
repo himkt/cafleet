@@ -2,11 +2,11 @@
 
 https://github.com/user-attachments/assets/a66620cb-4a81-4525-95f2-1f1f22765288
 
-Agent Teams reinvented for collaborative coding supporting Claude Code and Codex, with full code transparency.
+Agent Teams reinvented for collaborative coding across multiple coding-agent backends, with full code transparency.
 
 ## Install
 
-CAFleet works with two coding agents: `claude` (Claude Code) and `codex` (OpenAI Codex CLI). Install the plugin in whichever one you use — the broker CLI is shared.
+CAFleet works with three coding agents: `claude` (Claude Code), `codex` (OpenAI Codex CLI), and `opencode` ([opencode.ai](https://opencode.ai)). Install the plugin in whichever one you use — the broker CLI is shared.
 
 ### Install CAFleet skills
 
@@ -160,11 +160,11 @@ You can see the existing design docs on [`design-docs/`](design-docs/), which ar
 | Command group | One-line purpose |
 |---|---|
 | `cafleet db init` | Apply schema migrations (idempotent; rerun after upgrades) |
-| `cafleet session create [--coding-agent {claude,codex}]` | Create a session; declare the root Director's coding-agent backend (default `claude`) |
+| `cafleet session create [--coding-agent {claude,codex,opencode}]` | Create a session; declare the root Director's coding-agent backend (default `claude`) |
 | `cafleet session *` | List / show / delete sessions |
 | `cafleet agent *` | Register / deregister / list / show agents |
 | `cafleet message *` | Send / broadcast / poll / ack / cancel / show messages |
-| `cafleet member create [--coding-agent {claude,codex}]` | Spawn a member pane running `claude` (default) or `codex` |
+| `cafleet member create [--coding-agent {claude,codex,opencode}]` | Spawn a member pane running `claude` (default), `codex`, or `opencode` |
 | `cafleet member *` | Delete / list / capture / send-input / exec / ping member panes (Director only) |
 | `cafleet server` | Start the admin WebUI on `127.0.0.1:8000` |
 | `cafleet doctor` | Print the calling pane's tmux identifiers |

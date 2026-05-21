@@ -17,7 +17,10 @@ class CodingAgent(Protocol):
         ...
 
     def ensure_available(self) -> None:
-        """Raise RuntimeError if ``binary_name`` is not on PATH."""
+        """Raise if any spawn precondition is unmet (binary missing, required
+        config file unwritable, etc.). Impls MAY materialize required config
+        files here as a side effect — see ``OpencodeAgent.ensure_available``
+        for the canonical example."""
         ...
 
     def build_spawn_argv(self, prompt: str, *, display_name: str) -> list[str]:

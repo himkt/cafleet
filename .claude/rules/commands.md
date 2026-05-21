@@ -20,6 +20,12 @@
 - Use full-path notation: `mise //[package]:[task]`. Do NOT use short-form `mise <task>`.
 - Do NOT use `mise run <task>` — the `run` subcommand is unnecessary.
 - Run all tasks from the project root. No `cd` required.
+- **mise tasks forward positional args to the underlying command.** When you need to pass pytest args (test selectors, `-x`, `-v`, etc.), pass them directly to the mise task — do NOT fall back to `uv run python -m pytest` to "get more control". Examples:
+  - Run one test: `mise //cafleet:test tests/test_base_dir.py::test_my_case`
+  - Stop on first failure with verbose output: `mise //cafleet:test -xvs tests/test_my.py`
+  - Match a keyword: `mise //cafleet:test -k my_keyword`
+  - Package-relative paths only (`tests/...`, not `cafleet/tests/...`), because the mise task's working directory is `cafleet/`.
+  - **Defensive `--` separator** for args that might collide with a mise flag: `mise //cafleet:test -- --collect-only -q tests/` — design-docs/0000044 uses this form. The bare form (without `--`) works in practice for the common pytest flags above; reach for `--` when an arg starts with two dashes AND could plausibly be parsed by mise itself.
 
 ## NEVER bypass mise with the underlying tool
 

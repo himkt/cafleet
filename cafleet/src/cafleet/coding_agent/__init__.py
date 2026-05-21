@@ -1,10 +1,12 @@
 from cafleet.coding_agent.base import CodingAgent, ensure_binary_on_path
 from cafleet.coding_agent.claude import ClaudeCodeAgent
 from cafleet.coding_agent.codex import CodexAgent
+from cafleet.coding_agent.opencode import OpencodeAgent
 
 CODING_AGENTS: dict[str, CodingAgent] = {
     "claude": ClaudeCodeAgent(),
     "codex": CodexAgent(),
+    "opencode": OpencodeAgent(),
 }
 
 __all__ = [
@@ -12,5 +14,6 @@ __all__ = [
     "ClaudeCodeAgent",
     "CodexAgent",
     "CodingAgent",
+    "OpencodeAgent",
     "ensure_binary_on_path",
 ]

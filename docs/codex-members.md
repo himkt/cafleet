@@ -13,7 +13,7 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Codex-A --description "<one-sentence purpose>" --coding-agent codex
 ```
 
-The default is `--coding-agent claude`, so existing invocations are unchanged. A single Director may spawn `claude` and `codex` members in the same session — the broker, message lifecycle, and tmux primitives behave identically for both.
+The default is `--coding-agent claude`, so existing invocations are unchanged. A single Director may spawn `claude`, `codex`, and `opencode` members in the same session — the broker, message lifecycle, and tmux primitives behave identically for all three. See [`docs/opencode-members.md`](opencode-members.md) for opencode-specific operational detail.
 
 ## Spawn flags
 
@@ -70,7 +70,7 @@ Codex CLI honors a leading-`!` shell shortcut on its input line — typing `! <c
 
 ## Pane-title asymmetry
 
-`claude --name <member-name>` sets the tmux pane title via Claude Code's internal title-emit. **`codex` has no equivalent flag.** Codex panes display whatever default title `codex` emits (typically the binary name). This is intentional — pane discovery for both backends goes through `cafleet member list`:
+`claude --name <member-name>` sets the tmux pane title via Claude Code's internal title-emit. **Neither `codex` nor `opencode` has an equivalent flag.** Codex panes display whatever default title `codex` emits (typically the binary name). This is intentional — pane discovery for all three backends goes through `cafleet member list`:
 
 ```bash
 cafleet --session-id <session-id> member list --agent-id <director-agent-id>

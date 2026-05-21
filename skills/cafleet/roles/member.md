@@ -1,6 +1,6 @@
 # Member Role
 
-You are a **member** spawned by `cafleet member create`. Your harness runs in workspace-scoped auto-approval mode — Claude Code's `--permission-mode dontAsk` if your backend is `claude`, or codex's `--ask-for-approval never --sandbox workspace-write` if your backend is `codex`. Either way your Bash tool is **enabled** and routine permission prompts auto-resolve silently.
+You are a **member** spawned by `cafleet member create`. Your harness runs in workspace-scoped auto-approval mode — Claude Code's `--permission-mode dontAsk` if your backend is `claude`, codex's `--ask-for-approval never --sandbox workspace-write` if your backend is `codex`, or opencode's `--agent cafleet` binding (catch-all-allow + specific-deny permission ruleset) if your backend is `opencode`. In all three cases your Bash tool is **enabled** and routine permission prompts auto-resolve silently.
 
 This file is the role-specific anchor. Protocol details live in dedicated reference files; this page tells you which reference to read for which decision.
 
@@ -102,7 +102,7 @@ You do **not** invoke `cafleet member ping` or `cafleet member exec` — those a
 
 ## WHY THIS WORKS
 
-- **Your Bash tool is enabled** by your harness's workspace-scoped auto-approval flags (`--permission-mode dontAsk` for `claude`; `--ask-for-approval never --sandbox workspace-write` for `codex`). Every Bash invocation auto-approves.
+- **Your Bash tool is enabled** by your harness's workspace-scoped auto-approval flags (`--permission-mode dontAsk` for `claude`; `--ask-for-approval never --sandbox workspace-write` for `codex`; `--agent cafleet` binding for `opencode`, where the `CAFLEET_AGENT` permission ruleset resolves every check to `allow` or `deny`). Every Bash invocation auto-approves.
 - **Workspace-scoped auto-approval silently resolves permission prompts** — no operator interaction needed for normal cafleet calls or any other shell command.
 - **The bash-via-Director protocol is the fallback when the harness deny-list rejects a Bash invocation** (e.g. `git push`, `rm -rf`). It fires automatically in that case — not because the operator wants oversight, but because the harness will not run the command directly.
 - **Trust model:** workspace-scoped auto-approval assumes you (the spawned member) are trusted to the same level as the operator.
