@@ -96,13 +96,17 @@ CAFLEET_AGENT = OpencodeAgentDefinition(
 
 def materialize_cafleet_agent(definition: OpencodeAgentDefinition) -> None:
     target = Path("~/.opencode/agents/cafleet.md").expanduser()
+    # is_file() follows symlinks: a symlink-to-regular-file counts as a regular
+    # file here, which is intentional — dotfile-managed customizations are a
+    # legitimate skip-if-exists case. Only non-file paths fall through.
     if target.is_file():
         return
     if target.is_symlink() or target.exists():
         raise RuntimeError(
             f"cannot materialize CAFleet opencode agent preset: "
-            f"{target} already exists as a non-regular-file path "
-            f"(directory, broken symlink, etc.); refusing to overwrite"
+            f"{target} exists but is not a regular file or symlink to one "
+            f"(e.g. directory, broken symlink, symlink to a non-file); "
+            f"refusing to overwrite"
         )
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
