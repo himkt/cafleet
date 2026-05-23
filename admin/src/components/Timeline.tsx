@@ -8,7 +8,6 @@ import {
 import type { TimelineMessage, TimelineEntry, Agent } from "../types";
 import { fetchTimeline } from "../api";
 import { entrySortKey } from "../timeline";
-import { usePolling, POLL_INTERVAL_MS } from "../hooks/usePolling";
 import TimelineMessageComponent from "./TimelineMessage";
 
 interface TimelineProps {
@@ -62,25 +61,32 @@ export default function Timeline({ agents, refreshKey }: TimelineProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
+  // Timeline is driven entirely by Dashboard's `refreshKey` bump, which Dashboard's
+  // usePolling fires every POLL_INTERVAL_MS. Owning a second usePolling here would
+  // double the fetch rate without adding coverage. The local in-flight guard still
+  // matters because a refreshKey bump can land while a slow fetchTimeline() is
+  // pending.
   const loadTimeline = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setIsPolling(true);
     try {
       const data = await fetchTimeline();
       setEntries(groupMessages(data.messages));
     } catch {
-      /* swallow — preserve last-known entries; next tick re-attempts */
+      /* swallow — preserve last-known entries; next bump re-attempts */
     } finally {
       setLoading(false);
       setIsPolling(false);
+      inFlightRef.current = false;
     }
   }, []);
 
-  const trigger = usePolling(loadTimeline, POLL_INTERVAL_MS);
-
   useEffect(() => {
-    void trigger();
-  }, [refreshKey, trigger]);
+    void loadTimeline();
+  }, [refreshKey, loadTimeline]);
 
   useLayoutEffect(() => {
     const el = scrollerRef.current;
