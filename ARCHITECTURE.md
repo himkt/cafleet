@@ -9,7 +9,7 @@ CLI (click)  ──→  broker.py (sync SQLAlchemy)  ──→  SQLite
                                                       ↑
 Admin WebUI  ──→  server.py (minimal FastAPI)         │
                   └─ webui_api.py  ──→  broker.py  ───┘
-                  └─ static files (/ui/)
+                  └─ static files (/)
 
 ┌─────────────────────────────────────────────────────┐
 │  SQLite (single file)                               │
@@ -62,7 +62,7 @@ The post-bootstrap invariant is that every non-deleted `sessions` row has a non-
 | `alembic.ini` | `cafleet/src/cafleet/` | Alembic config (bundled into the wheel) |
 | `alembic/env.py` | `cafleet/src/cafleet/alembic/` | Alembic environment; swaps URL to sync `pysqlite` driver |
 | `alembic/versions/` | `cafleet/src/cafleet/alembic/versions/` | Migration scripts (`0001_initial_schema.py`, …) |
-| `webui_api.py` | `cafleet/src/cafleet/` | WebUI API router (`/ui/api/*`) — calls `broker` for all data access |
+| `webui_api.py` | `cafleet/src/cafleet/` | WebUI API router (`/api/*`) — calls `broker` for all data access |
 | `output.py` | `cafleet/src/cafleet/` | CLI output formatting (tables + JSON) |
 | `coding_agent/` | `cafleet/src/cafleet/coding_agent/` | Coding-agent backend subpackage: `CodingAgent` `@runtime_checkable` Protocol (`base.py`), `ClaudeCodeAgent` (`claude.py`), `CodexAgent` (`codex.py`), `OpencodeAgent` (`opencode.py`) with its `OpencodeAgentDefinition` dataclass + `CAFLEET_AGENT` preset (`opencode_preset.py`), and the `CODING_AGENTS: dict[str, CodingAgent]` registry exposed from `__init__.py`. `cli.member_create` resolves `CODING_AGENTS[coding_agent].build_spawn_argv(...)` instead of an inline `if/else` per backend, and `click.Choice` for `--coding-agent` is computed from `list(CODING_AGENTS.keys())`. |
 | `multiplexer/` | `cafleet/src/cafleet/multiplexer/` | Terminal multiplexer subpackage: `Multiplexer` `@runtime_checkable` Protocol + `MultiplexerContext` dataclass + `poll_until_pane_gone` shared helper (`base.py`), `TmuxMultiplexer` + `TmuxError` (`tmux.py`), and the `MULTIPLEXERS: dict[str, Multiplexer]` registry exposed from `__init__.py`. `TmuxMultiplexer` wraps every `tmux` subprocess interaction as instance methods: `ensure_available`, `context_discovery`, `split_window`, `select_layout`, `kill_pane`, `pane_exists`, `wait_for_pane_gone`, `send_exit`, `send_poll_trigger`, `send_inline_preview`, `send_choice_key`, `send_freetext_and_submit`, `send_bash_command`, `capture_pane`. |
@@ -279,7 +279,7 @@ Every `cafleet message *` subcommand that emits a user-supplied delivery body (`
 
 `cafleet message broadcast` is different — `broker.broadcast_message` returns a single envelope list containing a `broadcast_summary` task whose top-level `text` column is the broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. Truncating that summary would hide the recipient count, so `message_broadcast` is wired with `truncates_task_text=False`. The `--full` Click option is preserved on `message broadcast` for flag-surface consistency across all six subcommands but is a no-op there.
 
-The truncation applies to CLI emit sites only. FastAPI `/ui/api/*` responses are unchanged — the WebUI is human-facing and renders full bodies. `member capture` content, `agent.description`, `skills[].description`, and `agent_card_json` sub-fields are also untouched in this release.
+The truncation applies to CLI emit sites only. FastAPI `/api/*` responses are unchanged — the WebUI is human-facing and renders full bodies. `member capture` content, `agent.description`, `skills[].description`, and `agent_card_json` sub-fields are also untouched in this release.
 
 ## Key Design Decisions
 
@@ -317,13 +317,15 @@ The `cafleet server` bind address and port are configured via `--host` / `--port
 
 ## WebUI
 
-A browser-based dashboard served as a SPA at `/ui/`. No login is required. The first-load lands on a session picker at `/ui/#/sessions`; selecting a session navigates to a Discord-style unified timeline for that session — a sidebar listing every active (top) and deregistered (muted) agent in the session, a center timeline rendering unicast and broadcast messages ordered newest-at-bottom with auto-scroll, reactions-as-ACKs chips that reveal per-recipient ACK time on CSS hover, and a bottom input that parses `@<agent> text` for unicast and `@all text` for broadcast. The admin is NOT a CAFleet agent; a header dropdown (sender selector) picks which real in-session active agent is used as `from_agent_id` on every send, persisted per-session in `localStorage` under `cafleet.sender.<session_id>`.
+A browser-based dashboard served as a SPA at `/`. No login is required. The first-load lands on a session picker at `/#/sessions`; selecting a session navigates to a Discord-style unified timeline for that session — a sidebar listing every active (top) and deregistered (muted) agent in the session, a center timeline rendering unicast and broadcast messages ordered newest-at-bottom with auto-scroll, reactions-as-ACKs chips that reveal per-recipient ACK time on CSS hover, and a bottom input that parses `@<agent> text` for unicast and `@all text` for broadcast. The admin is NOT a CAFleet agent; a header dropdown (sender selector) picks which real in-session active agent is used as `from_agent_id` on every send, persisted per-session in `localStorage` under `cafleet.sender.<session_id>`.
+
+The three primary views (SessionPicker, Dashboard, Timeline) auto-refresh every 5 s with a subtle "Updating…" in-flight indicator; polling continues regardless of tab visibility and overlapping ticks are dropped. The session picker renders sessions newest-first by `created_at DESC, session_id ASC` as returned by `broker.list_sessions()` — no client-side re-sort.
 
 - **Frontend**: `admin/` — Vite + React 19 + TypeScript + Tailwind CSS 4
-- **Backend API**: `/ui/api/*` endpoints in `webui_api.py` — all endpoints call `broker` for data access (sync `def` handlers, FastAPI runs them in a thread pool)
+- **Backend API**: `/api/*` endpoints in `webui_api.py` — all endpoints call `broker` for data access (sync `def` handlers, FastAPI runs them in a thread pool)
 - **Server**: `server.py` is a minimal FastAPI app — just `webui_router` + static files. No protocol handler, no JSON-RPC, no executor. Only needed for the WebUI; CLI commands work without it.
 - **Session scoping**: Session-scoped endpoints require `X-Session-Id` header. No authentication.
-- **Static serving**: `StaticFiles` mount at `/ui` serves the SPA bundled inside the package at `cafleet/src/cafleet/webui/` (production build). `mise //admin:build` must be run before `cafleet server` / `mise //cafleet:dev` for `/ui/` to be populated; without it, `create_app()` emits a one-line `warning: admin WebUI is not built. /ui/ will return 404. Run 'mise //admin:build'.` to stderr at startup, the server starts cleanly, and `/ui/` 404s until the SPA is built. The warning fires from `create_app()` so every startup path (`cafleet server`, `mise //cafleet:dev`, and any `uv run uvicorn cafleet.server:app`) sees it identically.
+- **Static serving**: `StaticFiles` mount at `/` serves the SPA bundled inside the package at `cafleet/src/cafleet/webui/` (production build). `mise //admin:build` must be run before `cafleet server` / `mise //cafleet:dev` for `/` to be populated; without it, `create_app()` emits a one-line `warning: admin WebUI is not built. / will return 404. Run 'mise //admin:build'.` to stderr at startup, the server starts cleanly, and `/` 404s until the SPA is built. The warning fires from `create_app()` so every startup path (`cafleet server`, `mise //cafleet:dev`, and any `uv run uvicorn cafleet.server:app`) sees it identically.
 
 ## Package Structure
 
