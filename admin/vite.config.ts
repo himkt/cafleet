@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/ui/',
+  base: '/',
   plugins: [
     react(),
     babel({ presets: [reactCompilerPreset()] }),
@@ -17,7 +17,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/ui/api': {
+      '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },

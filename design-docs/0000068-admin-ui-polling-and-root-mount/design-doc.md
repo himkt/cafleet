@@ -1,7 +1,7 @@
 # Admin WebUI: auto-refresh, latest-first sessions, and root mount
 
 **Status**: Approved
-**Progress**: 7/20 tasks complete
+**Progress**: 12/20 tasks complete
 **Last Updated**: 2026-05-23
 
 
@@ -357,12 +357,13 @@ Documentation-first per `.claude/rules/design-doc-numbering.md`. Then Part A, Pa
 
 ### Step 2: Part A — `/ui → /` cut-over
 
-- [ ] In `cafleet/src/cafleet/server.py`: change `app.mount("/ui", ...)` to `app.mount("/", ...)`, update the missing-bundle warning to `/ will return 404`, update the module docstring, add the mount-order comment above the mount call, and replace `SPAStaticFiles.get_response` with the reserved-prefix re-raise variant from §Part A Backend. <!-- completed: -->
-- [ ] In `cafleet/src/cafleet/webui_api.py`: change `APIRouter(prefix="/ui/api")` to `APIRouter(prefix="/api")`, update the module docstring. <!-- completed: -->
-- [ ] In `admin/vite.config.ts`: `base: '/'` and proxy key `'/api'`. <!-- completed: -->
-- [ ] In `admin/src/api.ts`: fetch template `` `/api${path}` ``. <!-- completed: -->
-- [ ] In `cafleet/tests/test_server_cli.py:126`: update the assertion to match the new warning text. Run `mise //cafleet:test`. <!-- completed: -->
-- [ ] Run `mise //admin:build`, then `mise //cafleet:dev` (or `cafleet server`), and manually load `http://127.0.0.1:8000/` to confirm the SPA renders. Verify with `curl -sI` (or browser DevTools) that: `GET /ui/` returns 404, `GET /ui/foo` returns 404, `GET /api/sessions` returns JSON 200, and `GET /api/does-not-exist` returns JSON 404 (NOT HTML). <!-- completed: -->
+- [x] In `cafleet/src/cafleet/server.py`: change `app.mount("/ui", ...)` to `app.mount("/", ...)`, update the missing-bundle warning to `/ will return 404`, update the module docstring, add the mount-order comment above the mount call, and replace `SPAStaticFiles.get_response` with the reserved-prefix re-raise variant from §Part A Backend. <!-- completed: 2026-05-23T08:35 -->
+- [x] In `cafleet/src/cafleet/webui_api.py`: change `APIRouter(prefix="/ui/api")` to `APIRouter(prefix="/api")`, update the module docstring. <!-- completed: 2026-05-23T08:35 -->
+- [x] In `admin/vite.config.ts`: `base: '/'` and proxy key `'/api'`. <!-- completed: 2026-05-23T08:35 -->
+- [x] In `admin/src/api.ts`: fetch template `` `/api${path}` ``. <!-- completed: 2026-05-23T08:35 -->
+- [x] In `cafleet/tests/test_server_cli.py:126`: update the assertion to match the new warning text. Run `mise //cafleet:test`. <!-- completed: 2026-05-23T08:36 -->
+- [ ] Run `mise //admin:build`, then `mise //cafleet:dev` (or `cafleet server`), and manually load `http://127.0.0.1:8000/` to confirm the SPA renders. Verify with `curl -sI` (or browser DevTools) that: `GET /ui/` returns 404, `GET /ui/foo` returns 404, `GET /api/sessions` returns JSON 200, and `GET /api/does-not-exist` returns JSON 404 (NOT HTML). <!-- completed: --> <!-- NOTE(programmer): admin:build ran cleanly (root-relative asset paths confirmed); runtime SPA + curl/route smoke routed to Verifier via agent-browser. `mise //cafleet:dev` is running in the background on http://127.0.0.1:8000 for the Verifier to probe. -->
+
 
 ### Step 3: Part B — sessions sorted newest-first
 

@@ -1,4 +1,4 @@
-"""FastAPI endpoints backing the admin WebUI."""
+"""FastAPI endpoints backing the admin WebUI (``/api/*``)."""
 
 from typing import Any
 
@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from cafleet import broker
 
-webui_router = APIRouter(prefix="/ui/api")
+webui_router = APIRouter(prefix="/api")
 
 
 def get_webui_session(request: Request) -> str:
