@@ -27,11 +27,11 @@ export default function SessionPicker({ onSelect }: SessionPickerProps) {
     }
   }, []);
 
-  useEffect(() => {
-    void loadSessions();
-  }, [loadSessions]);
+  const trigger = usePolling(loadSessions, POLL_INTERVAL_MS);
 
-  usePolling(loadSessions, POLL_INTERVAL_MS);
+  useEffect(() => {
+    void trigger();
+  }, [trigger]);
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">

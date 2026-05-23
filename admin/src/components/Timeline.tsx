@@ -76,11 +76,11 @@ export default function Timeline({ agents, refreshKey }: TimelineProps) {
     }
   }, []);
 
-  useEffect(() => {
-    void loadTimeline();
-  }, [refreshKey, loadTimeline]);
+  const trigger = usePolling(loadTimeline, POLL_INTERVAL_MS);
 
-  usePolling(loadTimeline, POLL_INTERVAL_MS);
+  useEffect(() => {
+    void trigger();
+  }, [refreshKey, trigger]);
 
   useLayoutEffect(() => {
     const el = scrollerRef.current;

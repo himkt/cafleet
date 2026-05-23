@@ -34,7 +34,7 @@ export default function Dashboard({
     setRefreshKey((k) => k + 1);
   }, []);
 
-  usePolling(refreshAll, POLL_INTERVAL_MS);
+  const trigger = usePolling(refreshAll, POLL_INTERVAL_MS);
 
   const administrator =
     agents.find((a) => a.kind === "builtin-administrator") ?? null;
@@ -61,7 +61,9 @@ export default function Dashboard({
             <span className="text-xs text-gray-400 italic">Updating…</span>
           )}
           <button
-            onClick={refreshAll}
+            onClick={() => {
+              void trigger();
+            }}
             className="text-xs text-gray-500 hover:text-gray-700"
           >
             Refresh
@@ -105,7 +107,9 @@ export default function Dashboard({
           <MessageInput
             senderId={senderId}
             agents={agents}
-            onSent={refreshAll}
+            onSent={() => {
+              void trigger();
+            }}
           />
         </div>
       </div>
