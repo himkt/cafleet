@@ -123,7 +123,7 @@ def test_webui_dist_warning__matrix(
     if expect_warning:
         assert warning_prefix in captured.err
         assert "mise //admin:build" in captured.err
-        assert "/ui/" in captured.err
+        assert "warning: admin WebUI is not built. / will return 404." in captured.err
     else:
         assert warning_prefix not in captured.err
 
