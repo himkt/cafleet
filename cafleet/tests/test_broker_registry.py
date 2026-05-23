@@ -105,6 +105,28 @@ def test_list_sessions__bootstrap_only_count_is_two():
     assert rows[0]["agent_count"] == 2
 
 
+def test_list_sessions__newest_first_by_created_at_desc(monkeypatch):
+    # Force distinct, ascending timestamps so the assertion does not depend
+    # on microsecond clock resolution. Iterator yields one per create_session() call.
+    timestamps = iter(
+        [
+            "2026-05-23T00:00:01.000000+00:00",
+            "2026-05-23T00:00:02.000000+00:00",
+            "2026-05-23T00:00:03.000000+00:00",
+        ]
+    )
+    monkeypatch.setattr(broker, "_now_iso", lambda: next(timestamps))
+
+    _create_session(label="a")  # 00:00:01
+    _create_session(label="b")  # 00:00:02
+    _create_session(label="c")  # 00:00:03
+
+    rows = broker.list_sessions()
+    labels = [row["label"] for row in rows]
+
+    assert labels == ["c", "b", "a"]
+
+
 # --- get_session ---------------------------------------------------------
 
 
