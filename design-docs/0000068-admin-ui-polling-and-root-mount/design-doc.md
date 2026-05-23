@@ -1,6 +1,6 @@
 # Admin WebUI: auto-refresh, latest-first sessions, and root mount
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 20/20 tasks complete
 **Last Updated**: 2026-05-23
 
@@ -396,3 +396,4 @@ Documentation-first per `.claude/rules/design-doc-numbering.md`. Then Part A, Pa
 | Date | Changes |
 |------|---------|
 | 2026-05-23 | Initial draft. |
+| 2026-05-23 | Implementation complete via /cafleet:design-doc-execute. All 8 Success Criteria PASS per Phase D verification. Shipped as PR #87 with 3 rounds of Copilot review fixes: (1) shared guarded `trigger()` from `usePolling`, (2) added `test_server_routing.py` regression test for SPA mount + reserved-prefix behavior, (3) dropped Timeline's internal polling in favor of Dashboard's `refreshKey` bump. Round-4 Copilot suggestion (guard too strict on manual refresh during in-flight poll) explicitly declined by operator — trade-off acceptable at 5s cadence on 127.0.0.1. Status: Complete. |
