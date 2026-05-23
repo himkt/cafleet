@@ -1,7 +1,7 @@
 # Admin WebUI: auto-refresh, latest-first sessions, and root mount
 
 **Status**: Approved
-**Progress**: 14/20 tasks complete
+**Progress**: 18/20 tasks complete
 **Last Updated**: 2026-05-23
 
 
@@ -372,11 +372,12 @@ Documentation-first per `.claude/rules/design-doc-numbering.md`. Then Part A, Pa
 
 ### Step 4: Part C — polling hook and wiring
 
-- [ ] Create `admin/src/hooks/usePolling.ts` with `POLL_INTERVAL_MS = 5000` and the hook implementation specified in §Part C. <!-- completed: -->
-- [ ] Wire `SessionPicker.tsx`: extract `loadSessions`, keep the initial `useEffect`, add `usePolling(loadSessions, POLL_INTERVAL_MS)`, add `isPolling` indicator next to the "Select a Session" heading. <!-- completed: -->
-- [ ] Wire `Dashboard.tsx`: add `usePolling(refreshAll, POLL_INTERVAL_MS)`, track `isPolling` inside `refreshAll`, render the indicator immediately before the existing manual Refresh button (button stays). <!-- completed: -->
-- [ ] Wire `Timeline.tsx`: extract `loadTimeline`, add the `refreshKey`-driven `useEffect` and `usePolling(loadTimeline, POLL_INTERVAL_MS)` side by side, switch the auto-scroll effect to the `prevScrollHeightRef` follow-tail pattern with 80 px threshold from §Part C, render the floating indicator. <!-- completed: -->
-- [ ] Run `mise //admin:build` and `mise //admin:lint`, then load the SPA against a session with a few messages. Verify: the agent list refreshes when an external `cafleet agent register` happens; the timeline appends new messages when an external `cafleet message send` happens; the "Updating…" indicator appears briefly each ~5 s; the manual Refresh button still works; scrolling up in Timeline freezes follow-tail until the user scrolls back near the bottom; switching tabs (hiding the page) does NOT pause polling — verified by watching the server log. <!-- completed: -->
+- [x] Create `admin/src/hooks/usePolling.ts` with `POLL_INTERVAL_MS = 5000` and the hook implementation specified in §Part C. <!-- completed: 2026-05-23T08:47 -->
+- [x] Wire `SessionPicker.tsx`: extract `loadSessions`, keep the initial `useEffect`, add `usePolling(loadSessions, POLL_INTERVAL_MS)`, add `isPolling` indicator next to the "Select a Session" heading. <!-- completed: 2026-05-23T08:47 -->
+- [x] Wire `Dashboard.tsx`: add `usePolling(refreshAll, POLL_INTERVAL_MS)`, track `isPolling` inside `refreshAll`, render the indicator immediately before the existing manual Refresh button (button stays). <!-- completed: 2026-05-23T08:47 -->
+- [x] Wire `Timeline.tsx`: extract `loadTimeline`, add the `refreshKey`-driven `useEffect` and `usePolling(loadTimeline, POLL_INTERVAL_MS)` side by side, switch the auto-scroll effect to the `prevScrollHeightRef` follow-tail pattern with 80 px threshold from §Part C, render the floating indicator. <!-- completed: 2026-05-23T08:47 -->
+- [ ] Run `mise //admin:build` and `mise //admin:lint`, then load the SPA against a session with a few messages. Verify: the agent list refreshes when an external `cafleet agent register` happens; the timeline appends new messages when an external `cafleet message send` happens; the "Updating…" indicator appears briefly each ~5 s; the manual Refresh button still works; scrolling up in Timeline freezes follow-tail until the user scrolls back near the bottom; switching tabs (hiding the page) does NOT pause polling — verified by watching the server log. <!-- completed: --> <!-- NOTE(programmer): mise //admin:build (28 modules → webui/) and mise //admin:lint both passed cleanly. Runtime SPA verification (polling indicator, manual Refresh, follow-tail under user scroll, no-pause-on-hidden) routed to Verifier via agent-browser per the precedent set in Step 2.6. `mise //cafleet:dev` is still running in the background on http://127.0.0.1:8000. -->
+
 
 ---
 

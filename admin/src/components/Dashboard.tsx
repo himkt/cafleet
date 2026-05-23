@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import type { Agent } from "../types";
 import { getAgents } from "../api";
+import { usePolling, POLL_INTERVAL_MS } from "../hooks/usePolling";
 import Sidebar from "./Sidebar";
 import Timeline from "./Timeline";
 import MessageInput from "./MessageInput";
@@ -18,16 +19,22 @@ export default function Dashboard({
 }: DashboardProps) {
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [isPolling, setIsPolling] = useState(false);
 
   const refreshAll = useCallback(async () => {
+    setIsPolling(true);
     try {
       const data = await getAgents();
       setAgents(data.agents);
     } catch {
       /* preserve last-known agent list */
+    } finally {
+      setIsPolling(false);
     }
     setRefreshKey((k) => k + 1);
   }, []);
+
+  usePolling(refreshAll, POLL_INTERVAL_MS);
 
   const administrator =
     agents.find((a) => a.kind === "builtin-administrator") ?? null;
@@ -49,6 +56,9 @@ export default function Dashboard({
               Sending as{" "}
               <span className="font-medium text-gray-900">Administrator</span>
             </span>
+          )}
+          {isPolling && (
+            <span className="text-xs text-gray-400 italic">Updating…</span>
           )}
           <button
             onClick={refreshAll}
