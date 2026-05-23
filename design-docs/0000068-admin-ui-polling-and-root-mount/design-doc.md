@@ -1,7 +1,7 @@
 # Admin WebUI: auto-refresh, latest-first sessions, and root mount
 
 **Status**: Approved
-**Progress**: 12/20 tasks complete
+**Progress**: 14/20 tasks complete
 **Last Updated**: 2026-05-23
 
 
@@ -367,8 +367,8 @@ Documentation-first per `.claude/rules/design-doc-numbering.md`. Then Part A, Pa
 
 ### Step 3: Part B — sessions sorted newest-first
 
-- [ ] In `cafleet/src/cafleet/broker.py:224`: `.order_by(Session.created_at.desc(), Session.session_id.asc())`. <!-- completed: -->
-- [ ] In `cafleet/tests/test_broker_registry.py`: add `test_list_sessions__newest_first_by_created_at_desc` exactly as specified in §Part B. Run `mise //cafleet:test`. <!-- completed: -->
+- [x] In `cafleet/src/cafleet/broker.py:224`: `.order_by(Session.created_at.desc(), Session.session_id.asc())`. <!-- completed: 2026-05-23T08:42 -->
+- [x] In `cafleet/tests/test_broker_registry.py`: add `test_list_sessions__newest_first_by_created_at_desc` exactly as specified in §Part B. Run `mise //cafleet:test`. <!-- completed: 2026-05-23T08:42 -->
 
 ### Step 4: Part C — polling hook and wiring
 
