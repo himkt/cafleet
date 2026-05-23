@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { SessionListItem } from "../types";
 import { listSessions } from "../api";
+import { usePolling, POLL_INTERVAL_MS } from "../hooks/usePolling";
 
 interface SessionPickerProps {
   onSelect: (sessionId: string) => void;
@@ -10,15 +11,27 @@ export default function SessionPicker({ onSelect }: SessionPickerProps) {
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
+
+  const loadSessions = useCallback(async () => {
+    setIsPolling(true);
+    try {
+      const data = await listSessions();
+      setSessions(data);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load sessions");
+    } finally {
+      setLoading(false);
+      setIsPolling(false);
+    }
+  }, []);
+
+  const trigger = usePolling(loadSessions, POLL_INTERVAL_MS);
 
   useEffect(() => {
-    listSessions()
-      .then(setSessions)
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : "Failed to load sessions"),
-      )
-      .finally(() => setLoading(false));
-  }, []);
+    void trigger();
+  }, [trigger]);
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -36,10 +49,13 @@ export default function SessionPicker({ onSelect }: SessionPickerProps) {
         )}
 
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-200">
+          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between gap-3">
             <h2 className="text-sm font-medium text-gray-700">
               Select a Session
             </h2>
+            {isPolling && (
+              <span className="text-xs text-gray-400 italic">Updating…</span>
+            )}
           </div>
 
           {loading ? (

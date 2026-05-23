@@ -144,7 +144,7 @@ Callers rewritten in lockstep (no bridge period — single Alembic revision plus
 - `poll_tasks` (SELECTs typed columns; no `json.loads`).
 - `ack_task` and `cancel_task` (round-trip via `_read_task`/`_save_task`; no payload changes).
 
-WebUI consumers (`webui_api.py` + `admin/src/types.ts`) update their type definitions to the typed-column flat shape; the `/ui/api/*` JSON response shape changes correspondingly (no `metadata` / `artifacts` wrappers).
+WebUI consumers (`webui_api.py` + `admin/src/types.ts`) update their type definitions to the typed-column flat shape; the `/api/*` JSON response shape changes correspondingly (no `metadata` / `artifacts` wrappers).
 
 ### `agent_placements`
 

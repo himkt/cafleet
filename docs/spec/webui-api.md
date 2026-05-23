@@ -1,6 +1,6 @@
 # WebUI API Specification
 
-Base path: `/ui/api`
+Base path: `/api`
 
 ## Request Headers
 
@@ -14,9 +14,9 @@ No server-side session cookies. The SPA stores the active session_id client-side
 
 ## Endpoints
 
-### GET /ui/api/sessions — List Sessions
+### GET /api/sessions — List Sessions
 
-Returns all sessions with agent counts. No headers required.
+Returns all sessions with agent counts, ordered newest-first by `created_at DESC, session_id ASC`. No headers required.
 
 **Response** (200 OK):
 
@@ -31,7 +31,7 @@ Returns all sessions with agent counts. No headers required.
 ]
 ```
 
-### GET /ui/api/agents — List Agents
+### GET /api/agents — List Agents
 
 Returns agents belonging to the selected session. Every agent carries a `kind` discriminator so the frontend can locate the built-in Administrator without matching on its name.
 
@@ -71,7 +71,7 @@ Returns agents belonging to the selected session. Every agent carries a `kind` d
 
 The discriminator is derived at read time from the stored `agent_card_json` blob — there is no dedicated column. `broker.list_session_agents` reads it in SQL via `json_extract(agent_card_json, '$.cafleet.kind')`, while `broker.get_agent` (which already loads the full ORM row) computes it via the `_is_administrator` helper.
 
-### GET /ui/api/agents/{agent_id}/inbox — Inbox Messages
+### GET /api/agents/{agent_id}/inbox — Inbox Messages
 
 Returns messages received by the agent (`context_id = agent_id`), excluding `broadcast_summary` type tasks. Ordered newest first.
 
@@ -101,7 +101,7 @@ The `body` field is extracted from the task's first artifact's first text part. 
 
 **Status values**: `input_required` (Pending), `completed` (Acknowledged), `canceled` (Canceled).
 
-### GET /ui/api/agents/{agent_id}/sent — Sent Messages
+### GET /api/agents/{agent_id}/sent — Sent Messages
 
 Returns messages sent by the agent (single SQL query against `tasks` filtered by `from_agent_id` and ordered by `status_timestamp DESC`, served by `idx_tasks_from_agent_status_ts`), excluding `broadcast_summary` type tasks. Ordered newest first.
 
@@ -109,7 +109,7 @@ Returns messages sent by the agent (single SQL query against `tasks` filtered by
 
 Same response format as inbox.
 
-### GET /ui/api/timeline — Unified Session Timeline
+### GET /api/timeline — Unified Session Timeline
 
 Returns up to 200 most-recent non-`broadcast_summary` tasks for the selected session, newest first. Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_task_id` into a single broadcast entry client-side.
 
@@ -157,7 +157,7 @@ The client groups rows by `origin_task_id` (non-null rows sharing a value form o
 
 **ACK timestamps**: Per-recipient ACK time is read from the `status_timestamp` of a `completed` delivery row. Delivery tasks make exactly one state transition over their lifetime (`input_required → completed` on ACK), so for `status == "completed"` rows `status_timestamp` IS the ACK moment. If this invariant is ever broken by a future change, the timeline will silently show wrong ACK times until a dedicated `acknowledged_at` column is added. See `docs/spec/data-model.md` for the accompanying design-debt note.
 
-### POST /ui/api/messages/send — Send Message
+### POST /api/messages/send — Send Message
 
 Sends a message from a same-session active agent. Supports both unicast (`to_agent_id=<uuid>`) and broadcast (`to_agent_id="*"`).
 
@@ -193,7 +193,7 @@ X-Session-Id: <session_id>
 **Errors**:
 - 400: Missing fields, `from_agent` not in session, destination is deregistered
 - 404: Agent not found or cross-session
-- 409 (reserved for future deregister endpoint): for any future endpoint that attempts to deregister or otherwise modify the built-in Administrator, the broker's `AdministratorProtectedError` must be translated to `raise HTTPException(status_code=409, detail=...)`. This 409 is not currently reachable through `POST /ui/api/messages/send` and the WebUI router does not yet register an exception handler for `AdministratorProtectedError`; this entry documents the required mapping for the future endpoint.
+- 409 (reserved for future deregister endpoint): for any future endpoint that attempts to deregister or otherwise modify the built-in Administrator, the broker's `AdministratorProtectedError` must be translated to `raise HTTPException(status_code=409, detail=...)`. This 409 is not currently reachable through `POST /api/messages/send` and the WebUI router does not yet register an exception handler for `AdministratorProtectedError`; this entry documents the required mapping for the future endpoint.
 
 ## Error Format
 

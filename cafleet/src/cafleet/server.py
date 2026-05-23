@@ -1,4 +1,4 @@
-"""FastAPI app for the admin WebUI (``/ui/``) and its ``/ui/api/*`` endpoints."""
+"""FastAPI app for the admin WebUI (``/``) and its ``/api/*`` endpoints."""
 
 import sys
 from pathlib import Path
@@ -15,15 +15,27 @@ def default_webui_dist_dir() -> Path:
 
 
 class SPAStaticFiles(StaticFiles):
-    """StaticFiles subclass that falls back to index.html for SPA routing."""
+    """StaticFiles subclass that falls back to index.html for SPA routing.
+
+    Re-raises 404 for paths under the reserved ``ui/`` and ``api/`` prefixes
+    so they never silently resolve to ``index.html``:
+    - ``ui/...`` — removed surface; explicit 404 keeps the removal hard.
+    - ``api/...`` — backend surface; unknown API paths must return JSON 404,
+      not HTML, so client error paths (``resp.json()``) stay valid.
+    """
+
+    _RESERVED_PREFIXES = ("ui", "api")
 
     async def get_response(self, path, scope):
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as e:
-            if e.status_code == 404:
-                return await super().get_response("index.html", scope)
-            raise
+            if e.status_code != 404:
+                raise
+            first = path.split("/", 1)[0]
+            if first in self._RESERVED_PREFIXES:
+                raise
+            return await super().get_response("index.html", scope)
 
 
 def create_app(webui_dist_dir: str | None = None) -> FastAPI:
@@ -37,14 +49,15 @@ def create_app(webui_dist_dir: str | None = None) -> FastAPI:
 
     if emit_warning_if_missing and not dist_path.exists():
         print(
-            "warning: admin WebUI is not built. /ui/ will return 404. "
+            "warning: admin WebUI is not built. / will return 404. "
             "Run 'mise //admin:build'.",
             file=sys.stderr,
         )
 
     if dist_path.exists():
+        # include_router MUST precede this mount so API 404s are not swallowed by the SPA fallback.
         app.mount(
-            "/ui",
+            "/",
             SPAStaticFiles(directory=str(dist_path)),
             name="webui",
         )

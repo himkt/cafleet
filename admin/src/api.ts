@@ -26,7 +26,7 @@ async function request<T>(
     headers["Content-Type"] = "application/json";
   }
 
-  const resp = await fetch(`/ui/api${path}`, { ...options, headers });
+  const resp = await fetch(`/api${path}`, { ...options, headers });
 
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));

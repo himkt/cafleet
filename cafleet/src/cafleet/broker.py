@@ -221,7 +221,7 @@ def list_sessions() -> list[dict]:
         )
         .where(Session.deleted_at.is_(None))
         .group_by(Session.session_id)
-        .order_by(Session.created_at)
+        .order_by(Session.created_at.desc(), Session.session_id.asc())
     )
     sm = get_sync_sessionmaker()
     with sm() as session:

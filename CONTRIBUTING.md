@@ -30,7 +30,7 @@ mise //cafleet:format     # ruff format
 mise //cafleet:typecheck  # ty
 mise //cafleet:test       # pytest
 
-mise //admin:build        # build the WebUI (required before /ui/ is served)
+mise //admin:build        # build the WebUI (required before / is served)
 mise //admin:dev          # WebUI dev server (Vite)
 ```
 
