@@ -6,18 +6,47 @@ Agent Teams reinvented for collaborative coding across multiple coding-agent bac
 
 ## Install
 
-CAFleet works with three coding agents: `claude` (Claude Code), `codex` (OpenAI Codex CLI), and `opencode` ([opencode.ai](https://opencode.ai)). Install the plugin in whichever one you use — the broker CLI is shared.
+CAFleet works with three coding agents: `claude` (Claude Code), `codex` (OpenAI Codex CLI), and `opencode`.
+Install the plugin in whichever one you use — the broker CLI is shared.
 
-### Install CAFleet skills
+### CAFleet skills
 
-#### Claude Code
+Use your favorite tool to install skills (for example, GitHub CLI `gh skill`, vercel `skills`, or marketplace of each coding agent.
 
-Run the following commands on your terminal:
+#### GitHub CLI
+
+```
+gh skill install himkt/cafleet --agent claude-code
+gh skill install himkt/cafleet --agent codex
+gh skill install himkt/cafleet --agent opencode
+```
+
+#### Claude Code marketplace
 
 ```
 /plugin marketplace add himkt/cafleet
 /plugin install cafleet@cafleet
 ```
+
+#### Codex
+
+```
+codex plugin marketplace add himkt/cafleet
+```
+
+
+### CAFleet CLI (required for CAFleet to function)
+
+```bash
+uv tool install cafleet     # or: pip install cafleet
+cafleet db init             # apply schema migrations (idempotent; rerun after upgrades)
+```
+
+The default database is `~/.local/share/cafleet/registry.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
+
+## Recommended settings
+
+### Claude Code
 
 > [!IMPORTANT]
 >
@@ -46,33 +75,18 @@ Run the following commands on your terminal:
 >     "ask": [
 >       "Bash(cafleet * member exec *)"
 >     ]
->   },
->   "enabledPlugins": {
->     "cafleet@cafleet": true
->   },
->   "extraKnownMarketplaces": {
->     "cafleet": {
->       "source": {
->         "source": "github",
->         "path": "himkt/cafleet"
->       }
->     }
 >   }
 > }
 > ```
 >
 
-#### Codex
-
-Run the following command on your terminal
-
-```
-codex plugin marketplace add himkt/cafleet
-```
+### Codex
 
 > [!IMPORTANT]
 >
 > Make sure whether the skills are correctly installed. You can see available skills by running `/skills` on Codex prompt.
+> Also, codex members need the cafleet DB directory to be writable from inside the codex sandbox.
+> Add it to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads (e.g. `~/.codex/config.toml`):
 > 
 > Typically, the config entries like following would be written in `~/.codex/config.toml`:
 >
@@ -85,13 +99,7 @@ codex plugin marketplace add himkt/cafleet
 >
 > [plugins."cafleet@cafleet"]
 > enabled = true
-> ```
-> 
-
-> [!IMPORTANT]
-> Codex members need the cafleet DB directory to be writable from inside the codex sandbox. Add it to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads (e.g. `~/.codex/config.toml`):
 >
-> ```toml
 > [sandbox_workspace_write]
 > writable_roots = ["/home/<you>/.local/share/cafleet"]
 > ```
@@ -115,17 +123,6 @@ codex plugin marketplace add himkt/cafleet
 >     justification = "cafleet member exec runs arbitrary commands on a member; require approval",
 > )
 > ```
-
-For codex CLI version pin and operational specifics, see [docs/codex-members.md](docs/codex-members.md).
-
-### Install CAFleet CLI (required for CAFleet to function)
-
-```bash
-uv tool install cafleet     # or: pip install cafleet
-cafleet db init             # apply schema migrations (idempotent; rerun after upgrades)
-```
-
-The default database is `~/.local/share/cafleet/registry.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
 
 ## Simple example to use CAFleet
 
