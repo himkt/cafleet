@@ -788,7 +788,7 @@ def _read_prompt_file(path: str) -> str:
         raise click.UsageError(
             f"--prompt-file requires an absolute path (got '{path}'). "
             "Resolve relative paths against your BASE first — "
-            "see Skill(cafleet:base-dir)."
+            "see the `cafleet-base-dir` skill."
         )
     file_path = Path(path)
     try:

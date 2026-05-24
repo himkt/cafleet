@@ -1,7 +1,7 @@
 # CAFleet Skill Prefix and Tool-Agnostic Prompt References
 
 **Status**: Approved
-**Progress**: 23/33 tasks complete
+**Progress**: 26/33 tasks complete
 **Last Updated**: 2026-05-24
 
 ## Overview
@@ -198,9 +198,9 @@ Apply the *Reference transformation rules* table from the Specification to every
 
 ### Step 5: Source code and tests
 
-- [ ] Update `cafleet/src/cafleet/base_dir.py`: change the `BASE_MARKER` literal on line 32 from ``"[INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"`` to ``"[INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]"`` (literal backticks inside the string). <!-- completed: -->
-- [ ] Update `cafleet/src/cafleet/cli.py`: change the `--prompt-file` relative-path error message on line 791 from ``"see Skill(cafleet:base-dir)."`` to ``"see the `cafleet-base-dir` skill."``. <!-- completed: -->
-- [ ] Update `cafleet/tests/test_base_dir_spawn_flow.py`: change the `BASE_MARKER` constant on line 42 and the embedded literal on line 222 to match the new `base_dir.py` value verbatim. <!-- completed: -->
+- [x] Update `cafleet/src/cafleet/base_dir.py`: change the `BASE_MARKER` literal on line 32 from ``"[INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"`` to ``"[INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]"`` (literal backticks inside the string). <!-- completed: 2026-05-24T05:18 -->
+- [x] Update `cafleet/src/cafleet/cli.py`: change the `--prompt-file` relative-path error message on line 791 from ``"see Skill(cafleet:base-dir)."`` to ``"see the `cafleet-base-dir` skill."``. <!-- completed: 2026-05-24T05:18 -->
+- [x] Update `cafleet/tests/test_base_dir_spawn_flow.py`: change the `BASE_MARKER` constant on line 42 and the embedded literal on line 222 to match the new `base_dir.py` value verbatim. <!-- completed: 2026-05-24T05:18 -->
 
 ### Step 6: Verification
 
