@@ -11,7 +11,7 @@ You are the **Director** in a research presentation team. You bear **ultimate re
 - **Make the final call** on when quality is sufficient. You are accountable to the user for this decision.
 - **Do not modify the report.** The report is a finalized input. If changes are needed, escalate to the user.
 - **Do not run agent-browser browser-operation commands directly.** Never invoke `bun run agent-browser --session vr-batch-<start> open|snapshot|screenshot|wait|close` from the Director thread. Slide capture, navigation, and lifecycle commands — including server readiness checks — are exclusively the Visual Reviewer's responsibility. Two narrow exceptions exist: (1) the `bun run agent-browser close --all` safety net in the cleanup step; (2) diagnostic-only `console` and `errors` against an existing `vr-batch-<start>` session when investigating a stuck or unresponsive Visual Reviewer (prefer asking the VR to run them and report back; only run them yourself if the VR is not responding).
-- **Clean up when done.** Follow the Shutdown Protocol in the `cafleet` skill: cancel the `/loop` monitor with `CronDelete`, run `cafleet member delete` per member, run the `agent-browser close --all` safety net, kill the Slidev dev server, then `cafleet session delete [session-id]`.
+- **Clean up when done.** Follow the Shutdown Protocol in the `cafleet` skill: cancel the `/loop` monitor with `CronDelete`, run `cafleet member delete` per member, run the `agent-browser close --all` safety net, stop the Slidev dev server via the coding agent's native task-stop primitive (NOT `pkill`/`kill` — see SKILL.md Step 5), then `cafleet session delete [session-id]`.
 
 ## Communication Protocol
 
