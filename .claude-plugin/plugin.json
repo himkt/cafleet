@@ -10,16 +10,16 @@
   "keywords": ["messaging", "broker", "agents", "cli", "design-doc"],
   "skills": [
     "./skills/cafleet",
-    "./skills/agent-team-monitoring",
-    "./skills/agent-team-supervision",
-    "./skills/design-doc",
-    "./skills/design-doc-create",
-    "./skills/design-doc-execute",
-    "./skills/design-doc-interview",
-    "./skills/create-figure",
-    "./skills/my-slidev",
-    "./skills/research-presentation",
-    "./skills/research-report",
-    "./skills/base-dir"
+    "./skills/cafleet-agent-team-monitoring",
+    "./skills/cafleet-agent-team-supervision",
+    "./skills/cafleet-base-dir",
+    "./skills/cafleet-create-figure",
+    "./skills/cafleet-design-doc",
+    "./skills/cafleet-design-doc-create",
+    "./skills/cafleet-design-doc-execute",
+    "./skills/cafleet-design-doc-interview",
+    "./skills/cafleet-my-slidev",
+    "./skills/cafleet-research-presentation",
+    "./skills/cafleet-research-report"
   ]
 }

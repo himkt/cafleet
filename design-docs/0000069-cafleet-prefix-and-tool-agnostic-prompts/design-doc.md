@@ -1,7 +1,7 @@
 # CAFleet Skill Prefix and Tool-Agnostic Prompt References
 
 **Status**: Approved
-**Progress**: 5/33 tasks complete
+**Progress**: 8/33 tasks complete
 **Last Updated**: 2026-05-24
 
 ## Overview
@@ -164,9 +164,9 @@ The 12 `Skill(cafleet:<old>)` entries in `~/.claude/settings.json` `permissions.
 
 ### Step 2: Plugin manifests
 
-- [ ] Update `.claude-plugin/plugin.json`: rewrite the `skills` array to list `./skills/cafleet`, `./skills/cafleet-agent-team-monitoring`, `./skills/cafleet-agent-team-supervision`, `./skills/cafleet-base-dir`, `./skills/cafleet-create-figure`, `./skills/cafleet-design-doc`, `./skills/cafleet-design-doc-create`, `./skills/cafleet-design-doc-execute`, `./skills/cafleet-design-doc-interview`, `./skills/cafleet-my-slidev`, `./skills/cafleet-research-presentation`, `./skills/cafleet-research-report` (alphabetical). <!-- completed: -->
-- [ ] Confirm `.codex-plugin/plugin.json` requires no change (still `"skills": "./skills/"`). <!-- completed: -->
-- [ ] Confirm `.claude-plugin/marketplace.json` requires no change (plugin name stays `cafleet`). <!-- completed: -->
+- [x] Update `.claude-plugin/plugin.json`: rewrite the `skills` array to list `./skills/cafleet`, `./skills/cafleet-agent-team-monitoring`, `./skills/cafleet-agent-team-supervision`, `./skills/cafleet-base-dir`, `./skills/cafleet-create-figure`, `./skills/cafleet-design-doc`, `./skills/cafleet-design-doc-create`, `./skills/cafleet-design-doc-execute`, `./skills/cafleet-design-doc-interview`, `./skills/cafleet-my-slidev`, `./skills/cafleet-research-presentation`, `./skills/cafleet-research-report` (alphabetical). <!-- completed: 2026-05-24T04:26 -->
+- [x] Confirm `.codex-plugin/plugin.json` requires no change (still `"skills": "./skills/"`). <!-- completed: 2026-05-24T04:26 -->
+- [x] Confirm `.claude-plugin/marketplace.json` requires no change (plugin name stays `cafleet`). <!-- completed: 2026-05-24T04:26 -->
 
 ### Step 3: Skill directory renames + frontmatter
 
