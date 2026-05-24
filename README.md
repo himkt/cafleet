@@ -4,16 +4,16 @@ https://github.com/user-attachments/assets/a66620cb-4a81-4525-95f2-1f1f22765288
 
 Agent Teams reinvented for collaborative coding across multiple coding-agent backends, with full code transparency.
 
-## Install
+## 1. Install
 
 CAFleet works with three coding agents: `claude` (Claude Code), `codex` (OpenAI Codex CLI), and `opencode`.
 Install the plugin in whichever one you use — the broker CLI is shared.
 
-### CAFleet skills
+### 1.1. CAFleet skills
 
 Use your favorite tool to install skills (for example, GitHub CLI `gh skill`, vercel `skills`, or marketplace of each coding agent.
 
-#### GitHub CLI
+#### (a) GitHub CLI (recommended)
 
 ```
 gh skill install himkt/cafleet --agent claude-code
@@ -21,21 +21,21 @@ gh skill install himkt/cafleet --agent codex
 gh skill install himkt/cafleet --agent opencode
 ```
 
-#### Claude Code marketplace
+#### (b) Claude Code marketplace (if you prefer)
 
 ```
 /plugin marketplace add himkt/cafleet
 /plugin install cafleet@cafleet
 ```
 
-#### Codex
+#### (c) Codex (if you prefer)
 
 ```
 codex plugin marketplace add himkt/cafleet
 ```
 
 
-### CAFleet CLI (required for CAFleet to function)
+### 1.2. CAFleet CLI (required for CAFleet to function)
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
@@ -44,9 +44,9 @@ cafleet db init             # apply schema migrations (idempotent; rerun after u
 
 The default database is `~/.local/share/cafleet/registry.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
 
-## Recommended settings
+## 2. Recommended settings
 
-### Claude Code
+### 2.1. Claude Code
 
 > [!IMPORTANT]
 >
@@ -80,7 +80,7 @@ The default database is `~/.local/share/cafleet/registry.db`. Override with `CAF
 > ```
 >
 
-### Codex
+### 2.2. Codex
 
 > [!IMPORTANT]
 >
@@ -124,7 +124,9 @@ The default database is `~/.local/share/cafleet/registry.db`. Override with `CAF
 > )
 > ```
 
-## Simple example to use CAFleet
+## 3. Examples
+
+### 3.1. Simple example to use CAFleet
 
 Provide the following prompt to Claude Code or Codex to see how it works.
 
@@ -134,7 +136,7 @@ Please create a fresh team with two teammates using cafleet and let them ping-po
 After the demonstration, please shutdown the team.
 ```
 
-## Real world usage; Design-doc-driven development
+### 3.2. Real world usage; Design-doc-driven development
 
 CAFleet provides the builtin skills for Spec Driven Development (SDD). **We're using CAFleet to develop CAFleet!**
 
@@ -148,7 +150,7 @@ See your coding-agent's skill documentation for the literal invocation syntax (C
 
 You can see the existing design docs on [`design-docs/`](design-docs/), which are actually created by the skills.
 
-## CLI cheatsheet
+## 4. CLI cheatsheet
 
 | Command group | One-line purpose |
 |---|---|
@@ -165,10 +167,10 @@ You can see the existing design docs on [`design-docs/`](design-docs/), which ar
 
 > CLI reference (per-command sections for `session`, `member`, `doctor`, `server`; `agent` / `message` / `db init` covered via the option-source table and `cafleet <cmd> --help`): [docs/spec/cli-options.md](docs/spec/cli-options.md). Message envelope shape (compact rendered + `--full` typed-column) and message body truncation rules (`CAFLEET_MAX_TEXT_LEN`, `--full`, `--quiet`): [docs/spec/cli-options.md](docs/spec/cli-options.md) § Message Body Truncation and [docs/spec/message-envelope.md](docs/spec/message-envelope.md).
 
-## Architecture
+## 5. Architecture
 
 CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Sessions partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
-## Contributing
+## 6. Contributing
 
 Build, test, and project-structure instructions, plus the design-doc-driven contribution flow, live in [CONTRIBUTING.md](CONTRIBUTING.md).
