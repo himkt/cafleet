@@ -20,9 +20,7 @@ import pytest
 
 from cafleet.base_dir import _BASE_INSERT_MARKER
 from cafleet.cli import _read_prompt_file
-
 from tests.test_base_dir_spawn_flow import BASE_MARKER as SPAWN_FLOW_BASE_MARKER
-
 
 EXPECTED_BASE_MARKER = (
     "[INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]"
