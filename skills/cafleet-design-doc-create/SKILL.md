@@ -1,5 +1,5 @@
 ---
-name: design-doc-create
+name: cafleet-design-doc-create
 description: "Create a new design document using CAFleet-native orchestration (Director/Drafter/Reviewer team). Use when the user asks to create a design doc, design document, specification, or technical spec. Do NOT write the doc directly with Write or use EnterPlanMode — always invoke this skill."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch
 ---

@@ -1,5 +1,5 @@
 ---
-name: base-dir
+name: cafleet-base-dir
 description: >
   Resolve the base directory for output files. Loaded by consuming skills
   via Skill(cafleet:base-dir). Do NOT invoke directly.

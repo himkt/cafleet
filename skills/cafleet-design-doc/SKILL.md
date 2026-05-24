@@ -1,5 +1,5 @@
 ---
-name: design-doc
+name: cafleet-design-doc
 description: "Standardized design document format with template and guidelines. Load this skill ONLY to consult the template when editing an existing design doc, or transitively from /design-doc-create. To CREATE a new design doc, use /design-doc-create — this skill alone does not author docs. Teammates in agent teams must always load this skill using Skill(design-doc). Do NOT write design documents in a freeform format."
 allowed-tools: Read, Write, Edit, Glob, Grep
 ---

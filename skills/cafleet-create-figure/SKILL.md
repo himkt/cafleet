@@ -1,5 +1,5 @@
 ---
-name: create-figure
+name: cafleet-create-figure
 description: >
   Create data visualizations and charts using matplotlib. Triggered when user
   asks to create a chart, plot, graph, or visualize data. Also invokable via

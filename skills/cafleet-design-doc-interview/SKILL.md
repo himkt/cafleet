@@ -1,5 +1,5 @@
 ---
-name: design-doc-interview
+name: cafleet-design-doc-interview
 description: "Validate an existing design document through fine-grained multi-round Q&A using CAFleet-native orchestration. Spawns a short-lived Analyzer member that reads the document and returns a numbered question list; the Director then drives AskUserQuestion rounds and writes COMMENT(claude) annotations inline. Supports multi-session splitting via question.md progress tracking. Use after /design-doc-create and before /design-doc-execute. Takes document path as argument. Do NOT use this to create or execute design documents — use the dedicated skills instead."
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Bash
 ---

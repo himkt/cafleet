@@ -1,7 +1,7 @@
 # CAFleet Skill Prefix and Tool-Agnostic Prompt References
 
 **Status**: Approved
-**Progress**: 8/33 tasks complete
+**Progress**: 19/33 tasks complete
 **Last Updated**: 2026-05-24
 
 ## Overview
@@ -172,17 +172,17 @@ The 12 `Skill(cafleet:<old>)` entries in `~/.claude/settings.json` `permissions.
 
 Each substep uses `git mv` so directory history is preserved. After the move, edit the SKILL.md frontmatter in the new location to set an explicit `name:` field.
 
-- [ ] `git mv skills/agent-team-monitoring skills/cafleet-agent-team-monitoring` and set `name: cafleet-agent-team-monitoring` in the new SKILL.md frontmatter. <!-- completed: -->
-- [ ] `git mv skills/agent-team-supervision skills/cafleet-agent-team-supervision` and set `name: cafleet-agent-team-supervision`. <!-- completed: -->
-- [ ] `git mv skills/base-dir skills/cafleet-base-dir` and set `name: cafleet-base-dir`. <!-- completed: -->
-- [ ] `git mv skills/create-figure skills/cafleet-create-figure` and set `name: cafleet-create-figure`. <!-- completed: -->
-- [ ] `git mv skills/design-doc skills/cafleet-design-doc` and set `name: cafleet-design-doc`. <!-- completed: -->
-- [ ] `git mv skills/design-doc-create skills/cafleet-design-doc-create` and set `name: cafleet-design-doc-create`. <!-- completed: -->
-- [ ] `git mv skills/design-doc-execute skills/cafleet-design-doc-execute` and set `name: cafleet-design-doc-execute`. <!-- completed: -->
-- [ ] `git mv skills/design-doc-interview skills/cafleet-design-doc-interview` and set `name: cafleet-design-doc-interview`. <!-- completed: -->
-- [ ] `git mv skills/my-slidev skills/cafleet-my-slidev` and set `name: cafleet-my-slidev`. <!-- completed: -->
-- [ ] `git mv skills/research-presentation skills/cafleet-research-presentation` and set `name: cafleet-research-presentation`. <!-- completed: -->
-- [ ] `git mv skills/research-report skills/cafleet-research-report` and set `name: cafleet-research-report`. <!-- completed: -->
+- [x] `git mv skills/agent-team-monitoring skills/cafleet-agent-team-monitoring` and set `name: cafleet-agent-team-monitoring` in the new SKILL.md frontmatter. <!-- completed: 2026-05-24T04:33 -->
+- [x] `git mv skills/agent-team-supervision skills/cafleet-agent-team-supervision` and set `name: cafleet-agent-team-supervision`. <!-- completed: 2026-05-24T04:33 -->
+- [x] `git mv skills/base-dir skills/cafleet-base-dir` and set `name: cafleet-base-dir`. <!-- completed: 2026-05-24T04:33 -->
+- [x] `git mv skills/create-figure skills/cafleet-create-figure` and set `name: cafleet-create-figure`. <!-- completed: 2026-05-24T04:33 -->
+- [x] `git mv skills/design-doc skills/cafleet-design-doc` and set `name: cafleet-design-doc`. <!-- completed: 2026-05-24T04:33 -->
+- [x] `git mv skills/design-doc-create skills/cafleet-design-doc-create` and set `name: cafleet-design-doc-create`. <!-- completed: 2026-05-24T04:33 -->
+- [x] `git mv skills/design-doc-execute skills/cafleet-design-doc-execute` and set `name: cafleet-design-doc-execute`. <!-- completed: 2026-05-24T04:33 -->
+- [x] `git mv skills/design-doc-interview skills/cafleet-design-doc-interview` and set `name: cafleet-design-doc-interview`. <!-- completed: 2026-05-24T04:33 -->
+- [x] `git mv skills/my-slidev skills/cafleet-my-slidev` and set `name: cafleet-my-slidev`. <!-- completed: 2026-05-24T04:33 -->
+- [x] `git mv skills/research-presentation skills/cafleet-research-presentation` and set `name: cafleet-research-presentation`. <!-- completed: 2026-05-24T04:33 -->
+- [x] `git mv skills/research-report skills/cafleet-research-report` and set `name: cafleet-research-report`. <!-- completed: 2026-05-24T04:33 -->
 
 (The `cafleet` broker-CLI skill has no directory move and no frontmatter change.)
 

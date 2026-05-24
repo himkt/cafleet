@@ -1,5 +1,5 @@
 ---
-name: research-presentation
+name: cafleet-research-presentation
 description: Create a Slidev presentation and reading transcript from an existing research report folder. Reads report.md and researcher files for context, creates slides using /cafleet:my-slidev skill and a reading transcript. Takes folder path as argument (e.g., topic-name). Do NOT use for research — use /cafleet:research-report for that.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, TaskGet
 ---
