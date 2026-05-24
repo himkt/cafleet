@@ -366,8 +366,8 @@ Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Orde
    ```bash
    bun run agent-browser close --all
    ```
-5. **Stop the Slidev dev server** if still running. Use the coding agent's **native task-stop primitive** with the task / job ID you recorded in Step 3 — do NOT shell out to `pkill` or `kill`. `pkill -f slidev` matches too broadly (any other Slidev process on the host becomes collateral damage), and the harness-tracked background task keeps leaking stdout to the operator's pane until stopped through the harness, which `pkill` cannot do. Per-backend mechanism:
-   - **Claude Code**: call the Claude Code harness's built-in `TaskStop` tool with the task ID from Step 3.
+5. **Stop the Slidev dev server** if still running. Use the coding agent's **native task-stop primitive** with the task / job ID you recorded back in Step 3 *Visual Review & Fix* (Server Startup substep 2) — do NOT shell out to `pkill` or `kill`. `pkill -f slidev` matches too broadly (any other Slidev process on the host becomes collateral damage), and the harness-tracked background task keeps leaking stdout to the operator's pane until stopped through the harness, which `pkill` cannot do. Per-backend mechanism:
+   - **Claude Code**: call the Claude Code harness's built-in `TaskStop` tool with the task ID recorded in Step 3 *Visual Review & Fix* (Server Startup substep 2).
    - **codex / opencode**: use the backend's task-management primitive (see the host project's `.claude/rules/`).
 6. **Delete the session**: `cafleet session delete [session-id]` (positional, no `--session-id` flag). Soft-deletes the session and deregisters the root Director and Administrator atomically.
 7. **Confirm**: `cafleet session list` — the current session must not appear (soft-deleted sessions are hidden).
