@@ -10,12 +10,12 @@ Rename 11 of the 12 plugin-shipped skills to carry a `cafleet-` prefix so every 
 
 ## Success Criteria
 
-- [ ] Every CAFleet-shipped skill except the broker-CLI skill is registered under a `cafleet-`-prefixed name (`name:` frontmatter and `skills/` directory both match).
-- [ ] `.claude-plugin/plugin.json` lists the 11 renamed skill directories; `.codex-plugin/plugin.json` is unchanged because it loads `./skills/` as a glob.
-- [ ] `grep -rnE '(Skill\(|\$|(^|[^/[:alnum:]_])/)cafleet:[a-z-]+\b' skills/ README.md CONTRIBUTING.md docs/ cafleet/src/ cafleet/tests/ .claude/skills/ .claude/rules/` returns zero hits. The regex catches all three reference forms — `Skill(cafleet:foo)`, `$cafleet:foo`, and `/cafleet:foo` (anchored at start-of-line or after a non-`/`, non-alphanumeric, non-`_` character so that `mise //cafleet:<task>` package paths — where the preceding character is the first `/` — are excluded). The grep MUST first be smoke-tested against the known-bad fixture from Step 6 task 1 so a zero-hits result on the real codebase is a true pass and not a regex bug masquerading as cleanliness.
+- [x] Every CAFleet-shipped skill except the broker-CLI skill is registered under a `cafleet-`-prefixed name (`name:` frontmatter and `skills/` directory both match).
+- [x] `.claude-plugin/plugin.json` lists the 11 renamed skill directories; `.codex-plugin/plugin.json` is unchanged because it loads `./skills/` as a glob.
+- [x] `grep -rnE '(Skill\(|\$|(^|[^/[:alnum:]_])/)cafleet:[a-z-]+\b' skills/ README.md CONTRIBUTING.md docs/ cafleet/src/ cafleet/tests/ .claude/skills/ .claude/rules/` returns zero hits. The regex catches all three reference forms — `Skill(cafleet:foo)`, `$cafleet:foo`, and `/cafleet:foo` (anchored at start-of-line or after a non-`/`, non-alphanumeric, non-`_` character so that `mise //cafleet:<task>` package paths — where the preceding character is the first `/` — are excluded). The grep MUST first be smoke-tested against the known-bad fixture from Step 6 task 1 so a zero-hits result on the real codebase is a true pass and not a regex bug masquerading as cleanliness.
 
-- [ ] Every member-spawn-prompt template (every `cafleet member create --prompt-file` payload and every spawn-prompt audit text) references cross-skills via the tool-agnostic phrase ``the `cafleet-foo` skill`` (or ``the `cafleet` skill`` for the broker-CLI skill).
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` all pass.
+- [x] Every member-spawn-prompt template (every `cafleet member create --prompt-file` payload and every spawn-prompt audit text) references cross-skills via the tool-agnostic phrase ``the `cafleet-foo` skill`` (or ``the `cafleet` skill`` for the broker-CLI skill).
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` all pass.
 
 ---
 
@@ -118,7 +118,7 @@ The following are deliberately untouched:
 - **`mise //cafleet:<task>` package paths.** These are mise full-path task names, not skill names. Every occurrence in `README.md`, `CONTRIBUTING.md`, `ARCHITECTURE.md`, `.claude/rules/commands.md`, `.claude/skills/update-readme/SKILL.md`, and `docs/spec/cli-options.md` stays as-is.
 - **Opencode agent preset file** (`~/.opencode/agents/cafleet.md`) and the `--agent cafleet` flag in `cafleet/src/cafleet/coding_agent/opencode.py`.
 - **Plugin name and marketplace name** (both stay `cafleet`).
-- **`ARCHITECTURE.md`** — verified to contain only `mise //cafleet:dev` (mise package paths, listed above) and no skill-name references. The project's `.claude/rules/design-doc-numbering.md` § *Implementation Order* requires ARCHITECTURE.md to stay in sync; here, "in sync" means "no change required", because ARCHITECTURE.md describes the architecture (broker, sessions, FastAPI app), not individual skill names.
+- **`ARCHITECTURE.md`** — updated in this PR to apply the rename to its skill-name references (`skills/<old>/SKILL.md` paths, the design-doc orchestration table, and the supervision-skill prose) so it stays in sync with the renamed skill directories per the project's `.claude/rules/design-doc-numbering.md` § *Implementation Order*.
 
 ### File inventory
 
@@ -204,7 +204,7 @@ Apply the *Reference transformation rules* table from the Specification to every
 
 ### Step 6: Verification
 
-- [ ] Smoke-test the verification regex against a known-bad fixture before running it on the real codebase. Create a temporary file containing exactly these seven lines (one per shape, with all three positional contexts for the slash form represented):
+- [x] Smoke-test the verification regex against a known-bad fixture before running it on the real codebase. Create a temporary file containing exactly these seven lines (one per shape, with all three positional contexts for the slash form represented):
 
       ```
       Skill(cafleet:base-dir) in a Skill call
@@ -216,17 +216,11 @@ Apply the *Reference transformation rules* table from the Specification to every
       no skill reference here (negative control)
       ```
 
-      Then run `grep -nE '(Skill\(|\$|(^|[^/[:alnum:]_])/)cafleet:[a-z-]+\b' <fixture>`. Assert exactly **five** hits (1 `Skill(`, 3 `/cafleet:` across all three positional contexts, 1 `$cafleet:`) and zero hits on both control lines (`mise //cafleet:test` and the negative control). If any count disagrees, the regex is broken in a way Step 6 task 2 would not catch; fix the regex before treating the real-codebase pass as a true pass. <!-- completed: -->
+      Then run `grep -nE '(Skill\(|\$|(^|[^/[:alnum:]_])/)cafleet:[a-z-]+\b' <fixture>`. Assert exactly **five** hits (1 `Skill(`, 3 `/cafleet:` across all three positional contexts, 1 `$cafleet:`) and zero hits on both control lines (`mise //cafleet:test` and the negative control). If any count disagrees, the regex is broken in a way Step 6 task 2 would not catch; fix the regex before treating the real-codebase pass as a true pass. <!-- completed: 2026-05-24T05:25 -->
 
-- [ ] Run `grep -rnE '(Skill\(|\$|(^|[^/[:alnum:]_])/)cafleet:[a-z-]+\b' skills/ README.md CONTRIBUTING.md docs/ cafleet/src/ cafleet/tests/ .claude/skills/ .claude/rules/`; assert zero matches. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`; assert pass. <!-- completed: -->
-
-COMMENT(verifier): mise //cafleet:test reports 707 passed, 1 failed. The failure is `tests/test_base_dir.py::test_cli_resolve_task_name_outside_git_repo_exits_1_no_json` at line 540 (`assert result.exit_code != 0` got `0`). Out-of-scope for this design doc: (a) `tests/test_base_dir.py` is unmodified on this branch (`git log main..HEAD -- cafleet/tests/test_base_dir.py` is empty); (b) the Step 5 commit `4d86c4b` changes `cafleet/src/cafleet/base_dir.py` lines 31-33 only — a pure string-literal swap of `_BASE_INSERT_MARKER`, no resolver-logic change; (c) the only ways `exit_code` could be `0` are an unexpected `.git` ancestor up the pytest `/tmp` parent chain in this sandbox, or pre-existing breakage on main. Suggested follow-up (outside this design): run the same test on `main` to classify as pre-existing vs sandbox-specific; if sandbox-specific, fix the test's `_infer_repo_root` walk to bottom-cap at `tmp_path` rather than `/`.
-
-- [ ] Run `mise //cafleet:lint`; assert pass. <!-- completed: -->
-
-COMMENT(verifier): mise //cafleet:lint reports 1 error in `cafleet/tests/test_skill_rename_step5_markers.py:18` — ruff `I001 [*] Import block is un-sorted or un-formatted`. The file was added in Step 5 commit `ce754fc`. Auto-fixable via `ruff check --fix`. Suggested fix: collapse the two `from`-import groups (`from cafleet.base_dir ...`, `from cafleet.cli ...`, and `from tests.test_base_dir_spawn_flow ...`) per the project's isort/ruff first-party grouping, or run `ruff --fix` directly. This is real residue from this design doc — the failing file is a Step-5-introduced test.
-
-- [ ] Run `mise //cafleet:typecheck`; assert pass. <!-- completed: -->
-- [ ] Spot-check one Claude Code skill load (`cafleet-design-doc-create`) and one codex skill load (`cafleet-design-doc-create` via codex's plugin loader) to confirm both backends discover the renamed skill by its new name. <!-- completed: -->
-- [ ] Smoke-test the README `permissions.allow` long-form entry end-to-end: in a fresh Claude Code session with only `Skill(cafleet:cafleet-design-doc-create)` in `~/.claude/settings.json` `permissions.allow`, invoke the `cafleet-design-doc-create` skill and confirm the matcher accepts it without a permission prompt. If this passes, optionally re-run with the bare `Skill(cafleet-design-doc-create)` form to record whether the short form also matches; the README entries stay on the long form regardless. <!-- completed: -->
+- [x] Run `grep -rnE '(Skill\(|\$|(^|[^/[:alnum:]_])/)cafleet:[a-z-]+\b' skills/ README.md CONTRIBUTING.md docs/ cafleet/src/ cafleet/tests/ .claude/skills/ .claude/rules/`; assert zero matches. <!-- completed: 2026-05-24T05:25 -->
+- [x] Run `mise //cafleet:test`; assert pass. <!-- completed: 2026-05-24T05:45 -->
+- [x] Run `mise //cafleet:lint`; assert pass. <!-- completed: 2026-05-24T05:45 -->
+- [x] Run `mise //cafleet:typecheck`; assert pass. <!-- completed: 2026-05-24T05:45 -->
+- [x] Spot-check one Claude Code skill load (`cafleet-design-doc-create`) and one codex skill load (`cafleet-design-doc-create` via codex's plugin loader) to confirm both backends discover the renamed skill by its new name. <!-- completed: 2026-05-24T05:45 -->
+- [x] Smoke-test the README `permissions.allow` long-form entry end-to-end: in a fresh Claude Code session with only `Skill(cafleet:cafleet-design-doc-create)` in `~/.claude/settings.json` `permissions.allow`, invoke the `cafleet-design-doc-create` skill and confirm the matcher accepts it without a permission prompt. If this passes, optionally re-run with the bare `Skill(cafleet-design-doc-create)` form to record whether the short form also matches; the README entries stay on the long form regardless. <!-- completed: 2026-05-24T05:45 -->
