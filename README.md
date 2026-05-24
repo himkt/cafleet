@@ -30,18 +30,18 @@ Run the following commands on your terminal:
 >   "permissions": {
 >     "allow": [
 >       "Bash(cafleet *)",
->       "Skill(cafleet:agent-team-monitoring)",
->       "Skill(cafleet:agent-team-supervision)",
->       "Skill(cafleet:base-dir)",
 >       "Skill(cafleet:cafleet)",
->       "Skill(cafleet:create-figure)",
->       "Skill(cafleet:design-doc)",
->       "Skill(cafleet:design-doc-create)",
->       "Skill(cafleet:design-doc-execute)",
->       "Skill(cafleet:design-doc-interview)",
->       "Skill(cafleet:my-slidev)",
->       "Skill(cafleet:research-presentation)",
->       "Skill(cafleet:research-report)"
+>       "Skill(cafleet:cafleet-agent-team-monitoring)",
+>       "Skill(cafleet:cafleet-agent-team-supervision)",
+>       "Skill(cafleet:cafleet-base-dir)",
+>       "Skill(cafleet:cafleet-create-figure)",
+>       "Skill(cafleet:cafleet-design-doc)",
+>       "Skill(cafleet:cafleet-design-doc-create)",
+>       "Skill(cafleet:cafleet-design-doc-execute)",
+>       "Skill(cafleet:cafleet-design-doc-interview)",
+>       "Skill(cafleet:cafleet-my-slidev)",
+>       "Skill(cafleet:cafleet-research-presentation)",
+>       "Skill(cafleet:cafleet-research-report)"
 >     ],
 >     "ask": [
 >       "Bash(cafleet * member exec *)"
@@ -141,17 +141,13 @@ After the demonstration, please shutdown the team.
 
 CAFleet provides the builtin skills for Spec Driven Development (SDD). **We're using CAFleet to develop CAFleet!**
 
-Claude Code:
+Invoke the `cafleet-design-doc-create` skill with a one-line request, e.g.:
 
-```sh
-/cafleet:design-doc-create I want to create a simple TUI calculator
+```
+I want to create a simple TUI calculator.
 ```
 
-Codex:
-
-```sh
-$cafleet:design-doc-create I want to create a simple TUI calculator
-```
+See your coding-agent's skill documentation for the literal invocation syntax (Claude Code's `/skills`, codex's `/skills`, opencode's skill discovery).
 
 You can see the existing design docs on [`design-docs/`](design-docs/), which are actually created by the skills.
 

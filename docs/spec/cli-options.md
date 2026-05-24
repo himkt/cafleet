@@ -707,7 +707,7 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `member ping` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
 | `member ping` when `tmux send-keys` fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
 | `member create` with both `--prompt-file` and positional `prompt_argv` | `Error: --prompt-file and the positional prompt argument are mutually exclusive.` (exit 2; `click.UsageError`) |
-| `member create --prompt-file` with a relative path | `Error: --prompt-file requires an absolute path (got '<input>'). Resolve relative paths against your BASE first — see Skill(cafleet:base-dir).` (exit 2; `click.UsageError`) |
+| `member create --prompt-file` with a relative path | ``Error: --prompt-file requires an absolute path (got '<input>'). Resolve relative paths against your BASE first — see the `cafleet-base-dir` skill.`` (exit 2; `click.UsageError`) |
 | `member create --prompt-file` to a non-existent path or non-regular file (e.g. directory) | `Error: --prompt-file <path>: file does not exist or is not a regular file.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to an unreadable file | `Error: --prompt-file <path>: file is not readable.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to a file containing invalid UTF-8 | `Error: --prompt-file <path>: file is not valid UTF-8.` (exit 1; `click.ClickException`) |

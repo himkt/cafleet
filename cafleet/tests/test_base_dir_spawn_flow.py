@@ -32,14 +32,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = REPO_ROOT / "skills"
 
 CONSUMER_SKILLS = [
-    SKILLS_DIR / "research-report" / "SKILL.md",
-    SKILLS_DIR / "research-presentation" / "SKILL.md",
-    SKILLS_DIR / "design-doc-create" / "SKILL.md",
-    SKILLS_DIR / "design-doc-execute" / "SKILL.md",
-    SKILLS_DIR / "design-doc-interview" / "SKILL.md",
+    SKILLS_DIR / "cafleet-research-report" / "SKILL.md",
+    SKILLS_DIR / "cafleet-research-presentation" / "SKILL.md",
+    SKILLS_DIR / "cafleet-design-doc-create" / "SKILL.md",
+    SKILLS_DIR / "cafleet-design-doc-execute" / "SKILL.md",
+    SKILLS_DIR / "cafleet-design-doc-interview" / "SKILL.md",
 ]
 
-BASE_MARKER = "[INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"
+BASE_MARKER = (
+    "[INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]"
+)
 
 # Total number of spawn templates that gain a BASE line (design doc §Spec 2):
 #   research-report:        Manager, Scout, Researcher                 (3)
@@ -219,7 +221,7 @@ def test_task_scoped_spawn_audit_lands_in_task_folder_not_repo_root(tmp_path):
         "SESSION ID: {session_id}\n"
         "DIRECTOR AGENT ID: {director_agent_id}\n"
         "YOUR AGENT ID: {agent_id}\n"
-        "BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]\n"
+        "BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]\n"
         "ROLE: drafter\n"
         "...body of the spawn prompt...\n"
         "```\n"

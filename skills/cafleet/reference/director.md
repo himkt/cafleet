@@ -51,7 +51,7 @@ In all three modes the member's Bash tool is enabled and routine permission prom
 
 Whichever input mode is used, keep the prompt body itself focused: role-file path, skill-load list, session/agent/director IDs, the operational context (output dir, current date, user request), and "start now" cue. The member loads the role file via `Read` on its first turn; the role files live in the skill directory and are stable, so path-by-reference is safe.
 
-**Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved by `Skill(cafleet:base-dir)`) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--prompt-file` write at `<BASE>/prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
+**Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved by the `cafleet-base-dir` skill) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--prompt-file` write at `<BASE>/prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
 
 - `<role>` is the lowercased value of `--name` (e.g., `drafter`, `reviewer`, `programmer`, `tester`, `verifier`, `manager`, `analyzer`).
 - `<UTC-compact>` is `YYYYMMDDTHHMMSSZ` (Python: `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`).
@@ -59,7 +59,7 @@ Whichever input mode is used, keep the prompt body itself focused: role-file pat
 - Same-second collisions: skills MUST NOT overwrite an existing file. If the target path already exists, append `_2`, `_3`, … until the name is unique.
 - The pre-spawn file IS the audit artifact — there is no second post-spawn re-render write. The file path used for `--prompt-file` is the single source of truth for what was spawned, in perpetuity.
 
-**`${BASE} == <unset>` fallback**: when the Director's startup-time `${BASE}` resolution returned the `<unset>` sentinel (the absolute-path argument branch of `cafleet base-dir resolve`), the team skill MUST follow the guarded-skip protocol from `Skill(cafleet:base-dir)` § *No-bypass write protocol*:
+**`${BASE} == <unset>` fallback**: when the Director's startup-time `${BASE}` resolution returned the `<unset>` sentinel (the absolute-path argument branch of `cafleet base-dir resolve`), the team skill MUST follow the guarded-skip protocol from the `cafleet-base-dir` skill § *No-bypass write protocol*:
 
 1. Skip the `<BASE>/prompts/<role>-<ts>.md` write entirely (do NOT compute the path).
 2. Fall back to the inline positional `prompt_argv` form — the size limit above still applies, so the skill MUST keep the inline-form prompt under ~2 KB (path-by-reference for role docs, short identity block).

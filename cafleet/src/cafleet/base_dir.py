@@ -29,7 +29,7 @@ ANCHOR_VERSION = 1
 _TMP_CANDIDATE = Path("/tmp/claude-code")
 
 _BASE_INSERT_MARKER = (
-    "[INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]"
+    "[INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]"
 )
 _BASE_LINE_MARKER = f"BASE: {_BASE_INSERT_MARKER}"
 
