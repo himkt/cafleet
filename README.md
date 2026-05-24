@@ -48,10 +48,8 @@ The default database is `~/.local/share/cafleet/registry.db`. Override with `CAF
 
 ### 2.1. Claude Code
 
-> [!IMPORTANT]
+> [!TIP]
 >
-> Make sure whether the skills are correctly installed. You can see available skills by running `/skills` on Claude Code prompt.
-> 
 > Typically, the config entries like following would be written in `~/.claude/settings.json`:
 >
 > ```json
@@ -82,12 +80,8 @@ The default database is `~/.local/share/cafleet/registry.db`. Override with `CAF
 
 ### 2.2. Codex
 
-> [!IMPORTANT]
+> [!TIP]
 >
-> Make sure whether the skills are correctly installed. You can see available skills by running `/skills` on Codex prompt.
-> Also, codex members need the cafleet DB directory to be writable from inside the codex sandbox.
-> Add it to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads (e.g. `~/.codex/config.toml`):
-> 
 > Typically, the config entries like following would be written in `~/.codex/config.toml`:
 >
 > ```toml
@@ -103,12 +97,8 @@ The default database is `~/.local/share/cafleet/registry.db`. Override with `CAF
 > [sandbox_workspace_write]
 > writable_roots = ["/home/<you>/.local/share/cafleet"]
 > ```
->
-> Use the absolute path matching `CAFLEET_DATABASE_URL` or the default XDG location.
-
-> [!TIP]
 > 
-> Recommended Codex rules for `cafleet` commands — drop into your codex rules file (e.g. `~/.codex/rules/cafleet.rules`) to auto-approve the broker CLI while keeping `cafleet member exec` (which runs arbitrary shell on a member pane) gated behind a prompt:
+> Recommended Codex rules for `cafleet` commands — drop into your codex rules file (e.g. `~/.codex/rules/cafleet.rules`):
 > 
 > ```
 > prefix_rule(
