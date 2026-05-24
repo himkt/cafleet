@@ -39,7 +39,9 @@ CONSUMER_SKILLS = [
     SKILLS_DIR / "cafleet-design-doc-interview" / "SKILL.md",
 ]
 
-BASE_MARKER = "[INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]"
+BASE_MARKER = (
+    "[INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]"
+)
 
 # Total number of spawn templates that gain a BASE line (design doc §Spec 2):
 #   research-report:        Manager, Scout, Researcher                 (3)
