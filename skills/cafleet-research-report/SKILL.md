@@ -1,12 +1,12 @@
 ---
 name: cafleet-research-report
-description: Create a comprehensive research report with folder-based output. Researchers write findings to individual files, the Manager compiles report.md, and the Director reviews. Output goes to researches/[topic-slug]/. After report approval, offers to chain into /cafleet:research-presentation for slides and transcript. Members must always load skills using the Skill tool, not by reading skill files directly. Do NOT do a quick web search and summarize — invoke this skill for thorough, multi-source research.
+description: Create a comprehensive research report with folder-based output. Researchers write findings to individual files, the Manager compiles report.md, and the Director reviews. Output goes to researches/[topic-slug]/. After report approval, offers to chain into the cafleet-research-presentation skill for slides and transcript. Members must always load skills using the Skill tool, not by reading skill files directly. Do NOT do a quick web search and summarize — invoke this skill for thorough, multi-source research.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet
 ---
 
 # Research Report
 
-Generate comprehensive research reports using a multi-layer CAFleet-orchestrated team: Director → Manager → Scouts/Researchers. Every member carries serious accountability for the quality of the final deliverable, and the team iterates relentlessly until the report meets the highest standard. After the report is approved, the Director offers to chain into `/cafleet:research-presentation` for slides and transcript.
+Generate comprehensive research reports using a multi-layer CAFleet-orchestrated team: Director → Manager → Scouts/Researchers. Every member carries serious accountability for the quality of the final deliverable, and the team iterates relentlessly until the report meets the highest standard. After the report is approved, the Director offers to chain into the `cafleet-research-presentation` skill for slides and transcript.
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -21,7 +21,7 @@ Generate comprehensive research reports using a multi-layer CAFleet-orchestrated
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads `Skill(cafleet)` and `Skill(cafleet:agent-team-monitoring)` and embeds them into every member's spawn prompt.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill and the `cafleet-agent-team-monitoring` skill and embeds them into every member's spawn prompt.
 
 ## Output
 
@@ -46,7 +46,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays. Members cannot talk to each other directly either — Manager requests are always mediated by the Director (Manager → Director → Scout/Researcher, and Scout/Researcher → Director → Manager).
 
-> **Literal-UUID flag rule** — substitute the UUIDs printed by `cafleet session create` and `cafleet member create` directly into every `cafleet ...` call (the harness matches Bash invocations as literal command strings). Never store IDs in shell variables. `--session-id` is a global flag (placed BEFORE the subcommand); `--agent-id` is a per-subcommand option (placed AFTER the subcommand name). See `Skill(cafleet)` for the full convention.
+> **Literal-UUID flag rule** — substitute the UUIDs printed by `cafleet session create` and `cafleet member create` directly into every `cafleet ...` call (the harness matches Bash invocations as literal command strings). Never store IDs in shell variables. `--session-id` is a global flag (placed BEFORE the subcommand); `--agent-id` is a per-subcommand option (placed AFTER the subcommand name). See the `cafleet` skill for the full convention.
 
 ## Process
 
@@ -54,7 +54,7 @@ Members cannot talk to the user directly — the Director always relays. Members
 
 Before creating the team, resolve the task-scoped base directory for this run.
 
-1. Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract.
+1. Load the `cafleet-base-dir` skill for the no-bypass write protocol and `<unset>` sentinel contract.
 2. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
 
    ```bash
@@ -81,7 +81,7 @@ Capture `session_id` and `director.agent_id` from the response. Treat `session_i
 
 ### Step 1: Start Progress Monitor (Director — MANDATORY)
 
-Load `Skill(cafleet)` and `Skill(cafleet:agent-team-monitoring)`. Start a `/loop` monitor at a 1-minute interval BEFORE the first `cafleet member create` call so the first tick fires while the Manager is spawning. Use the agent-team-monitoring template with the literal `[session-id]` and `[director-agent-id]` UUIDs substituted in.
+Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill. Start a `/loop` monitor at a 1-minute interval BEFORE the first `cafleet member create` call so the first tick fires while the Manager is spawning. Use the agent-team-monitoring template with the literal `[session-id]` and `[director-agent-id]` UUIDs substituted in.
 
 The loop must check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -89,16 +89,16 @@ The loop must check `${OUTPUT_DIR}` for these expected deliverables:
 - `00-scout-*.md` — Scout landscape/discovery notes (one or more files may exist)
 - `NN-research-*.md` — Researcher findings files for delegated sub-topics (`NN` is the assigned number; one or more files may exist)
 
-Readiness/stall rules (apply per `Skill(cafleet:agent-team-monitoring)`):
+Readiness/stall rules (apply per the `cafleet-agent-team-monitoring` skill):
 
 - After Scouts/Researchers have been spawned and tasks have been assigned, expect at least one `00-scout-*.md` or `NN-research-*.md` file to appear within a couple of ticks.
 - Do not consider the workflow ready for Step 5 until `report.md` exists.
-- If a member owns an `in_progress` task but their deliverable file is missing past the expected milestone, run the 2-stage health-check from `Skill(cafleet:agent-team-monitoring)`: `cafleet message poll` → `cafleet member capture --lines 200` → directed `cafleet message send` nudge → user escalation.
+- If a member owns an `in_progress` task but their deliverable file is missing past the expected milestone, run the 2-stage health-check from the `cafleet-agent-team-monitoring` skill: `cafleet message poll` → `cafleet member capture --lines 200` → directed `cafleet message send` nudge → user escalation.
 - Keep the monitor running until Step 8.
 
 ### Step 2: Spawn Manager (Director)
 
-Load `Skill(cafleet)` and follow its spawn protocol.
+Load the `cafleet` skill and follow its spawn protocol.
 
 #### 2a. Shared task list
 
@@ -114,11 +114,11 @@ The Director references each role definition by its **absolute path** in the spa
 
 Substitute these absolute paths into the spawn prompts below.
 
-> **Why path-by-reference (and not inline-verbatim)**: cafleet `member create` passes the prompt to `tmux split-window` as a single positional argument. tmux fails with `command too long` once the shell-quoted prompt grows past a few KB, and cafleet rolls back the agent registration. A role file is typically large enough (5–15 KB) that inlining it exceeds the limit. The member loads the role file via `Read` on its first turn; the file lives in the skill directory and is stable, so this is safe. See `Skill(cafleet)` reference `director.md` § *Spawn prompt size limit* for the canonical write-up.
+> **Why path-by-reference (and not inline-verbatim)**: cafleet `member create` passes the prompt to `tmux split-window` as a single positional argument. tmux fails with `command too long` once the shell-quoted prompt grows past a few KB, and cafleet rolls back the agent registration. A role file is typically large enough (5–15 KB) that inlining it exceeds the limit. The member loads the role file via `Read` on its first turn; the file lives in the skill directory and is stable, so this is safe. See the `cafleet` skill's `reference/director.md` reference file § *Spawn prompt size limit* for the canonical write-up.
 >
 > **Template safety (str.format placeholders)**: cafleet `member create` runs `str.format()` over the entire spawn prompt (whether it arrived via `--prompt-file` or inline `prompt_argv`) with `session_id` / `agent_id` / `director_agent_id` as kwargs. Leave those three single-braced. Double any other literal `{` or `}` in the prompt body (a JSON example, a `${{VAR}}` reference) to `{{` / `}}`. With role content no longer inlined, the prompt body rarely needs `{` or `}` at all.
 >
-> **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see the per-role flow below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See `Skill(cafleet:base-dir)` § *No-bypass write protocol* and `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
+> **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see the per-role flow below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 2c. Spawn the Manager
 
@@ -130,12 +130,12 @@ You are the Manager in a research report team (CAFleet-native).
 ROLE DEFINITION: Open [INSERT abs path to roles/manager.md] with the Read tool BEFORE any other action. That file is your authoritative role definition — accountability, communication protocol, task discipline, file-aggregation rules, pre-compilation verification, revision loop, and shutdown. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
-- Skill(cafleet) — for the broker primitives, literal-UUID flag convention, and bash-via-Director routing
+- the `cafleet` skill — for the broker primitives, literal-UUID flag convention, and bash-via-Director routing
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
 
 CURRENT DATE: [INSERT today's date]
 USER REQUEST: [INSERT user's original request in full]
@@ -156,7 +156,7 @@ Your first compiled report will be reviewed critically by the Director. Aim for 
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
 1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
-2. **Write the rendered text** to `${BASE}/prompts/manager-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+2. **Write the rendered text** to `${BASE}/prompts/manager-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
@@ -180,12 +180,12 @@ You are a Scout Researcher in a research team (CAFleet-native).
 ROLE DEFINITION: Open [INSERT abs path to roles/scout.md] with the Read tool BEFORE any other action. That file is your authoritative role definition — landscape-mapping focus, communication protocol, output format, and shutdown. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
-- Skill(cafleet) — for the broker primitives and bash-via-Director routing
+- the `cafleet` skill — for the broker primitives and bash-via-Director routing
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
 
 CURRENT DATE: [INSERT today's date]
 YOUR ASSIGNMENT: [landscape scope and what areas to map]
@@ -201,7 +201,7 @@ Write findings to the output file, then send the Director a completion summary. 
 Spawn with the two-step (render to file, then `--prompt-file`) pattern. Use `scout` if only one Scout will be spawned this run; `scout-1`, `scout-2`, … for multiple — the `<role>` segment in the audit-file path matches the `--name` value (lowercased):
 
 1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
-2. **Write the rendered text** to `${BASE}/prompts/<scout-name>-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; `<scout-name>` matches the lowercased `--name` value, e.g., `scout-1`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+2. **Write the rendered text** to `${BASE}/prompts/<scout-name>-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; `<scout-name>` matches the lowercased `--name` value, e.g., `scout-1`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
@@ -248,12 +248,12 @@ You are a Research Specialist in a research team (CAFleet-native).
 ROLE DEFINITION: Open [INSERT abs path to roles/researcher.md] with the Read tool BEFORE any other action. That file is your authoritative role definition — accountability, Discovery Phase, fact verification protocol, output format, and shutdown. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
-- Skill(cafleet) — for the broker primitives and bash-via-Director routing
+- the `cafleet` skill — for the broker primitives and bash-via-Director routing
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
 
 CURRENT DATE: [INSERT today's date]
 YOUR NAME: researcher-NN
@@ -273,7 +273,7 @@ Write findings to the output file, then send the Director a completion summary. 
 Spawn with the two-step (render to file, then `--prompt-file`) pattern — the `<role>` segment in the audit-file path matches the `--name` value (lowercased), so each Researcher gets its own timestamped file:
 
 1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
-2. **Write the rendered text** to `${BASE}/prompts/researcher-<NN>-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+2. **Write the rendered text** to `${BASE}/prompts/researcher-<NN>-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
@@ -308,11 +308,11 @@ Present the approved report to the user via `AskUserQuestion` with: a summary of
 
 ### Step 7: Offer Presentation Chaining (Director)
 
-After user approval, offer to create a presentation via `AskUserQuestion` (adapt to user's language). If yes, proceed to Step 8, then invoke `/cafleet:research-presentation ${OUTPUT_DIR}`. If no, proceed directly to Step 8.
+After user approval, offer to create a presentation via `AskUserQuestion` (adapt to user's language). If yes, proceed to Step 8, then invoke the `cafleet-research-presentation` skill with `${OUTPUT_DIR}`. If no, proceed directly to Step 8.
 
 ### Step 8: Finalize & Clean Up (Director)
 
-Follow the Shutdown Protocol in `Skill(cafleet)` § *Shutdown Protocol*. Order matters — every step before `cafleet session delete` must complete first, otherwise crons fire against dead members or orphan `claude` processes linger.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet session delete` must complete first, otherwise crons fire against dead members or orphan `claude` processes linger.
 
 1. **Cancel the `/loop` monitor** with `CronDelete <job-id>`. The cron must stop firing BEFORE any member is deleted; a cron that keeps polling a tearing-down session spams `Error: session is deleted` and races with member-delete.
 2. **Delete every member** in dependency order — Researchers first, then any active Scout, then the Manager:
@@ -344,11 +344,11 @@ Do NOT use raw `tmux kill-pane` or `tmux send-keys` at any point — `cafleet me
 
 ### web-researcher
 
-This skill ships an embedded agent spec for parallel web research that returns structured summaries with sources. The spec is reproduced verbatim below so it is reachable from both Claude Code (`Skill(cafleet:research-report)` then dispatch via `Agent`) and codex (via plugin auto-discovery — see *Dispatching this agent (codex inline-follow)* and *Dispatching this agent (codex member-spawn)* below).
+This skill ships an embedded agent spec for parallel web research that returns structured summaries with sources. The spec is reproduced verbatim below so it is reachable from both Claude Code (load the `cafleet-research-report` skill then dispatch via `Agent`) and codex (via plugin auto-discovery — see *Dispatching this agent (codex inline-follow)* and *Dispatching this agent (codex member-spawn)* below).
 
     ---
     name: web-researcher
-    description: Use this agent to research topics on the web before specification development. Supports parallel research of multiple topics. Returns structured summaries with sources. Best used in combination with cafleet:design-doc-create skill - run web-researcher first to gather context, then pass results to cafleet:design-doc-create skill.
+    description: Use this agent to research topics on the web before specification development. Supports parallel research of multiple topics. Returns structured summaries with sources. Best used in combination with the cafleet-design-doc-create skill - run web-researcher first to gather context, then pass results to the cafleet-design-doc-create skill.
     model: sonnet
     color: blue
     ---

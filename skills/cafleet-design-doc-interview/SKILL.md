@@ -1,6 +1,6 @@
 ---
 name: cafleet-design-doc-interview
-description: "Validate an existing design document through fine-grained multi-round Q&A using CAFleet-native orchestration. Spawns a short-lived Analyzer member that reads the document and returns a numbered question list; the Director then drives AskUserQuestion rounds and writes COMMENT(claude) annotations inline. Supports multi-session splitting via question.md progress tracking. Use after /design-doc-create and before /design-doc-execute. Takes document path as argument. Do NOT use this to create or execute design documents — use the dedicated skills instead."
+description: "Validate an existing design document through fine-grained multi-round Q&A using CAFleet-native orchestration. Spawns a short-lived Analyzer member that reads the document and returns a numbered question list; the Director then drives AskUserQuestion rounds and writes COMMENT(claude) annotations inline. Supports multi-session splitting via question.md progress tracking. Use after the cafleet-design-doc-create skill and before the cafleet-design-doc-execute skill. Takes document path as argument. Do NOT use this to create or execute design documents — use the dedicated skills instead."
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Bash
 ---
 
@@ -15,15 +15,15 @@ Validate an existing design document through structured, fine-grained Q&A across
 
 ## Additional resources
 
-- For the document template, see: [../design-doc/template.md](../design-doc/template.md)
-- For section guidelines and quality standards, see: [../design-doc/guidelines.md](../design-doc/guidelines.md)
-- Output of `/design-doc-create` is the input to this skill; this skill's `COMMENT(claude)` markers are consumed by `/design-doc-create` resume mode.
+- For the document template, see: [../cafleet-design-doc/template.md](../cafleet-design-doc/template.md)
+- For section guidelines and quality standards, see: [../cafleet-design-doc/guidelines.md](../cafleet-design-doc/guidelines.md)
+- Output of the `cafleet-design-doc-create` skill is the input to this skill; this skill's `COMMENT(claude)` markers are consumed by the `cafleet-design-doc-create` skill's resume mode.
 
 ## Coordination Protocol
 
-This skill writes only `COMMENT(claude)` markers in the design document, and the Director-Analyzer cafleet messages are exempt from the verb + pointer + `COMMENT(role)` schema used by `/design-doc-create` and `/design-doc-execute`. The Analyzer's question list is a one-time payload deliverable (a numbered list, not iterative coordination), and the Director's user-facing relay goes through `AskUserQuestion`, not cafleet. Only the inline `COMMENT(claude)` annotation rules below are in scope.
+This skill writes only `COMMENT(claude)` markers in the design document, and the Director-Analyzer cafleet messages are exempt from the verb + pointer + `COMMENT(role)` schema used by the `cafleet-design-doc-create` and `cafleet-design-doc-execute` skills. The Analyzer's question list is a one-time payload deliverable (a numbered list, not iterative coordination), and the Director's user-facing relay goes through `AskUserQuestion`, not cafleet. Only the inline `COMMENT(claude)` annotation rules below are in scope.
 
-> **Maintainer source-of-truth.** The `COMMENT(role)` marker convention is mirrored from `skills/design-doc/coordination.md` (the canonical reference; updates to one require updates to the other). The convention is fully inlined below so this skill stands alone when packaged as an independent plugin — no cross-skill markdown link is added, by design (see `design-docs/0000050-design-doc-as-medium/design-doc.md` Step 7 for the plugin-install self-containment rationale).
+> **Maintainer source-of-truth.** The `COMMENT(role)` marker convention is mirrored from `skills/cafleet-design-doc/coordination.md` (the canonical reference; updates to one require updates to the other). The convention is fully inlined below so this skill stands alone when packaged as an independent plugin — no cross-skill markdown link is added, by design (see `design-docs/0000050-design-doc-as-medium/design-doc.md` Step 7 for the plugin-install self-containment rationale).
 
 ### COMMENT(claude) Marker
 
@@ -43,7 +43,7 @@ Rules:
 
 - One marker per logical discrepancy. Do not bundle unrelated issues.
 - Body must be actionable — state what is wrong AND what the correct behavior should be.
-- Markers persist in the document until resolved by `/design-doc-create` resume mode, which reads each `COMMENT(claude)` marker, applies the fix, and removes the marker as part of the fix.
+- Markers persist in the document until resolved by the `cafleet-design-doc-create` skill's resume mode, which reads each `COMMENT(claude)` marker, applies the fix, and removes the marker as part of the fix.
 
 ### Director-Analyzer Exemption
 
@@ -97,7 +97,7 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 | `Agent(subagent_type="Explore", prompt=...)` (Analyzer) | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "Analyzer" --description "..." -- "<prompt>"` |
 | `SendMessage(to="Analyzer")` | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <analyzer-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from Analyzer) | `cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `agent-team-supervision` `/loop` | Load `Skill(agent-team-monitoring)` (mechanism + `/loop`) and `Skill(agent-team-supervision)` (governance), then run `/loop` from agent-team-monitoring |
+| `cafleet-agent-team-supervision` `/loop` | Load the `cafleet-agent-team-monitoring` skill (mechanism + `/loop`) and the `cafleet-agent-team-supervision` skill (governance), then run `/loop` from the `cafleet-agent-team-monitoring` skill |
 | `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <analyzer-agent-id>`, then `cafleet session delete <session-id>` |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
@@ -105,9 +105,9 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 
 ### Step 0: Path Resolution & Doc Validation (Director)
 
-1. Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract. Then canonicalize `$ARGUMENTS` and resolve the task-scoped BASE:
+1. Load the `cafleet-base-dir` skill for the no-bypass write protocol and `<unset>` sentinel contract. Then canonicalize `$ARGUMENTS` and resolve the task-scoped BASE:
 
-   - **Relative input** — accept any of: `0000060-foo`, `0000060-foo/design-doc.md`, `design-docs/0000060-foo`, `design-docs/0000060-foo/design-doc.md`. Canonicalize to `design-docs/<slug>` by: (1) stripping the trailing `/design-doc.md` if present; (2) stripping the leading `design-docs/` if present; (3) prepending `design-docs/`. The resolver itself does NOT perform this stripping (per `Skill(cafleet:base-dir)` § *Consumer contract*) — the consuming skill canonicalizes first, then calls:
+   - **Relative input** — accept any of: `0000060-foo`, `0000060-foo/design-doc.md`, `design-docs/0000060-foo`, `design-docs/0000060-foo/design-doc.md`. Canonicalize to `design-docs/<slug>` by: (1) stripping the trailing `/design-doc.md` if present; (2) stripping the leading `design-docs/` if present; (3) prepending `design-docs/`. The resolver itself does NOT perform this stripping (per the `cafleet-base-dir` skill § *Consumer contract*) — the consuming skill canonicalizes first, then calls:
 
      ```bash
      cafleet base-dir resolve design-docs/<slug> --json
@@ -121,7 +121,7 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 
      The CLI accepts the absolute path if it lies strictly under the inferred repo root; otherwise the resolver returns the `unset` shape.
 
-   Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field, `dir_path = ${BASE}`, and `doc_path = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). On `status == "unset"` (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `dir_path` to the **canonicalized** absolute task-folder path and `doc_path = dir_path / "design-doc.md"` (unless `$ARGUMENTS` already names `design-doc.md`, in which case use it verbatim and derive `dir_path = dirname(doc_path)`), and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
+   Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field, `dir_path = ${BASE}`, and `doc_path = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). On `status == "unset"` (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `dir_path` to the **canonicalized** absolute task-folder path and `doc_path = dir_path / "design-doc.md"` (unless `$ARGUMENTS` already names `design-doc.md`, in which case use it verbatim and derive `dir_path = dirname(doc_path)`), and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet-base-dir` skill § *The `<unset>` sentinel*.
 2. Read the design document at `doc_path`. If missing or empty, report the error and stop.
 3. Run `cafleet doctor`. If it reports a problem, surface its message and stop.
 
@@ -151,13 +151,13 @@ Capture `session_id` and `director.agent_id` from the JSON response. Substitute 
 
 #### 2b. Start the monitoring `/loop`
 
-BEFORE spawning the Analyzer, load both `Skill(agent-team-monitoring)` and `Skill(agent-team-supervision)` (in that order) and use agent-team-monitoring's `/loop` Prompt Template to start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. **Record the cron job ID returned by `/loop` (and by any `CronCreate` it issues underneath) — Step 2f references this exact ID when tearing the loop down via `CronDelete`.** The loop stays active until the Analyzer is torn down at the end of this step.
+BEFORE spawning the Analyzer, load both the `cafleet-agent-team-monitoring` skill and the `cafleet-agent-team-supervision` skill (in that order) and use the `cafleet-agent-team-monitoring` skill's `/loop` Prompt Template to start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. **Record the cron job ID returned by `/loop` (and by any `CronCreate` it issues underneath) — Step 2f references this exact ID when tearing the loop down via `CronDelete`.** The loop stays active until the Analyzer is torn down at the end of this step.
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
 Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content — cafleet `member create` fails with `tmux command failed: command too long` once the shell-quoted prompt grows past a few KB. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up.
 
-> **Spawn-prompt audit file**: the spawn below writes the rendered prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See `Skill(cafleet:base-dir)` § *No-bypass write protocol* and `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
+> **Spawn-prompt audit file**: the spawn below writes the rendered prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 2d. Spawn the Analyzer
 
@@ -167,12 +167,12 @@ You are the Analyzer in a design document interview team (CAFleet-native).
 ROLE DEFINITION: Open [INSERT abs path to roles/analyzer.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
-- Skill(cafleet) — for communication with the Director
+- the `cafleet` skill — for communication with the Director
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
 DESIGN DOCUMENT: [INSERT doc_path]
 ALREADY-REVIEWED SECTIONS: [INSERT JSON array from interview-progress, or "none" on fresh start]
 
@@ -187,7 +187,7 @@ send it to the Director via cafleet message send, then idle pending shutdown.
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
 1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
-2. **Write the rendered text** to `${BASE}/prompts/analyzer-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+2. **Write the rendered text** to `${BASE}/prompts/analyzer-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
@@ -207,7 +207,7 @@ The reply must be a flat numbered list following the format specified in [roles/
 
 #### 2f. Tear down the Analyzer
 
-The Analyzer is stateless — keeping it alive through the Q&A rounds wastes a pane and a monitor. Run the canonical teardown per `Skill(cafleet)` § *Shutdown Protocol* immediately after the question list is received:
+The Analyzer is stateless — keeping it alive through the Q&A rounds wastes a pane and a monitor. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received:
 
 1. `CronDelete` the `/loop` monitor (cron ID recorded at Step 2b).
 2. `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <analyzer-agent-id>`. The call blocks until the pane is gone (15 s timeout); on exit 2, follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
@@ -289,9 +289,9 @@ Present a session summary to the user:
 
 | State | Suggested next step |
 |:--|:--|
-| Sections remain (with or without COMMENT markers) | Re-invoke `/design-doc-interview <doc-path>` for the next session |
-| All sections covered, COMMENT markers present in document | Run `/design-doc-create <doc-path>` to fix annotations (resume mode auto-detects markers and routes to the Drafter), then `/design-doc-execute` |
-| All sections covered, no COMMENT markers in document | Run `/design-doc-execute <doc-path>` to implement |
+| Sections remain (with or without COMMENT markers) | Re-invoke the `cafleet-design-doc-interview` skill with `<doc-path>` for the next session |
+| All sections covered, COMMENT markers present in document | Invoke the `cafleet-design-doc-create` skill with `<doc-path>` to fix annotations (resume mode auto-detects markers and routes to the Drafter), then the `cafleet-design-doc-execute` skill |
+| All sections covered, no COMMENT markers in document | Invoke the `cafleet-design-doc-execute` skill with `<doc-path>` to implement |
 
 ## COMMENT Annotation Format
 
@@ -314,7 +314,7 @@ Rules:
 - One COMMENT per discrepancy (do not combine unrelated issues)
 - Description must be actionable — state what is wrong AND what the correct behavior should be
 
-The format matches `/design-doc-create` resume-mode expectations exactly, so a follow-up `/design-doc-create <doc-path>` invocation auto-detects the markers and routes them to the Drafter.
+The format matches the `cafleet-design-doc-create` skill's resume-mode expectations exactly, so a follow-up invocation of the `cafleet-design-doc-create` skill with `<doc-path>` auto-detects the markers and routes them to the Drafter.
 
 ## `question.md` Format
 

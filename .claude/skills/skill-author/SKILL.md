@@ -7,7 +7,7 @@ description: >
   Director/Member team skill, design a multi-agent broker-coordinated skill,
   build a CAFleet-team-driven skill, or write a skill that uses
   `cafleet member create`. This skill is project-local to the cafleet repo and
-  is fully self-contained — no `Skill(cafleet:base-dir)` cross-reference is
+  is fully self-contained — no `cafleet-base-dir` skill cross-reference is
   required to follow the guide.
 ---
 
@@ -159,13 +159,13 @@ You are <role> in a <skill> team (CAFleet-native).
 ROLE DEFINITION: Open [INSERT abs path to roles/<role>.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
-- Skill(cafleet) — for the broker primitives, literal-UUID flag convention, and bash-via-Director routing
+- the `cafleet` skill — for the broker primitives, literal-UUID flag convention, and bash-via-Director routing
 - <other skills as needed>
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
 
 <role-specific assignment text — e.g. CURRENT DATE, USER REQUEST, OUTPUT PATH, YOUR TASK ID>
 
@@ -302,7 +302,7 @@ The recipient reads the cafleet body, navigates to the pointer, reads the standi
 
 ### 5.5 The role taxonomy
 
-The marker role identifier in `COMMENT(<role>)` is one of: `claude` (user-derived clarifications baked into the doc), `director`, `programmer`, `tester`, `reviewer`, `verifier`, `analyzer`, `drafter`. New roles for new skills SHOULD be added to this list; do not abbreviate. The `claude` role is reserved for `/design-doc-interview` user-derived clarifications and `/design-doc-execute` test-framework arbitration; do not use it for arbitrary "Claude said this" content.
+The marker role identifier in `COMMENT(<role>)` is one of: `claude` (user-derived clarifications baked into the doc), `director`, `programmer`, `tester`, `reviewer`, `verifier`, `analyzer`, `drafter`. New roles for new skills SHOULD be added to this list; do not abbreviate. The `claude` role is reserved for the `cafleet-design-doc-interview` skill's user-derived clarifications and the `cafleet-design-doc-execute` skill's test-framework arbitration; do not use it for arbitrary "Claude said this" content.
 
 ### 5.6 Anchorless status
 
@@ -375,7 +375,7 @@ You are the Summarizer in a summarize-pr team (CAFleet-native).
 ROLE DEFINITION: Open [INSERT abs path to roles/summarizer.md] with the Read tool BEFORE any other action. That file is your authoritative role definition.
 
 Load these skills at startup:
-- Skill(cafleet) — for the broker primitives and bash-via-Director routing
+- the `cafleet` skill — for the broker primitives and bash-via-Director routing
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}

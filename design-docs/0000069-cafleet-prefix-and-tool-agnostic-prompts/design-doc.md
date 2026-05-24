@@ -1,7 +1,7 @@
 # CAFleet Skill Prefix and Tool-Agnostic Prompt References
 
 **Status**: Approved
-**Progress**: 19/33 tasks complete
+**Progress**: 23/33 tasks complete
 **Last Updated**: 2026-05-24
 
 ## Overview
@@ -190,11 +190,11 @@ Each substep uses `git mv` so directory history is preserved. After the move, ed
 
 Apply the *Reference transformation rules* table from the Specification to every file under `skills/`. The substitutions are file-by-file; the implementer should use `grep -rnE 'cafleet:[a-z-]+' skills/` to confirm zero residue after the pass. The transformation is mechanical for the "in-skill cross-reference" and "spawn-prompt template literal" rows; the "pseudo-path reference" row (`Skill(cafleet:roles/member)` in `skills/cafleet-agent-team-supervision/SKILL.md` after the rename) requires the manual rewrite to a plain-English file pointer.
 
-- [ ] Rewrite every `Skill(cafleet:<X>)` cross-reference inside every file under `skills/` to ``the `cafleet-<X>` skill`` (or ``the `cafleet` skill`` when `<X>` is empty). Skip none. <!-- completed: -->
-- [ ] Rewrite every `/cafleet:<X>` slash reference inside every file under `skills/` to ``the `cafleet-<X>` skill``. Skip none. <!-- completed: -->
-- [ ] Discover every spawn-prompt template literal that embeds `Skill(cafleet:base-dir)` with `grep -rnE 'Skill\(cafleet:base-dir\)' skills/ .claude/skills/` and rewrite every match to ``the `cafleet-base-dir` skill``. The grep is the source of truth for which files this task touches — do not maintain a parallel enumeration. <!-- completed: -->
+- [x] Rewrite every `Skill(cafleet:<X>)` cross-reference inside every file under `skills/` to ``the `cafleet-<X>` skill`` (or ``the `cafleet` skill`` when `<X>` is empty). Skip none. <!-- completed: 2026-05-24T05:12 -->
+- [x] Rewrite every `/cafleet:<X>` slash reference inside every file under `skills/` to ``the `cafleet-<X>` skill``. Skip none. <!-- completed: 2026-05-24T05:12 -->
+- [x] Discover every spawn-prompt template literal that embeds `Skill(cafleet:base-dir)` with `grep -rnE 'Skill\(cafleet:base-dir\)' skills/ .claude/skills/` and rewrite every match to ``the `cafleet-base-dir` skill``. The grep is the source of truth for which files this task touches — do not maintain a parallel enumeration. <!-- completed: 2026-05-24T05:12 -->
 
-- [ ] Rewrite `Skill(cafleet:roles/member)` in the renamed `skills/cafleet-agent-team-supervision/SKILL.md` to a plain-English file pointer: ``the `cafleet` skill's `roles/member.md` reference file``. <!-- completed: -->
+- [x] Rewrite `Skill(cafleet:roles/member)` in the renamed `skills/cafleet-agent-team-supervision/SKILL.md` to a plain-English file pointer: ``the `cafleet` skill's `roles/member.md` reference file``. <!-- completed: 2026-05-24T05:12 -->
 
 ### Step 5: Source code and tests
 

@@ -5,8 +5,8 @@ You are the **Analyzer** in a design document interview team orchestrated via th
 ## Load at Startup
 
 Load these skills at startup:
-- Skill(cafleet:base-dir) — for the no-bypass write protocol and BASE-derived path conventions
-- Skill(cafleet) — for communication with the Director
+- the `cafleet-base-dir` skill — for the no-bypass write protocol and BASE-derived path conventions
+- the `cafleet` skill — for communication with the Director
 
 ## Your Accountability
 

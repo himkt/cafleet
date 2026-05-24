@@ -2,8 +2,8 @@
 name: cafleet-create-figure
 description: >
   Create data visualizations and charts using matplotlib. Triggered when user
-  asks to create a chart, plot, graph, or visualize data. Also invokable via
-  /cafleet:create-figure. Do NOT use plt.show() — always save to PNG files.
+  asks to create a chart, plot, graph, or visualize data. Do NOT use plt.show()
+  — always save to PNG files.
 ---
 
 # Create Figure
@@ -23,8 +23,8 @@ The skill writes a self-contained Python script that imports matplotlib. The run
 
 **Resolve `${BASE}` in this order:**
 
-1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., `/cafleet:research-presentation` passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
-2. **Otherwise**: Load `Skill(cafleet:base-dir)` and follow its procedure (no path argument; CWD-based inference applies). Use the resolved `${BASE}` verbatim. Figures, scripts, and data land under `${BASE}/figures/{src,output,data}` regardless of whether `${BASE}` is a git-repo root, `/tmp/claude-code`, or any other path. If you want figures kept out of a repo tree, pick `/tmp/claude-code` (or any non-repo path) at base-dir resolution time — `create-figure` does NOT second-guess base-dir's answer.
+1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., the `cafleet-research-presentation` skill passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
+2. **Otherwise**: Load the `cafleet-base-dir` skill and follow its procedure (no path argument; CWD-based inference applies). Use the resolved `${BASE}` verbatim. Figures, scripts, and data land under `${BASE}/figures/{src,output,data}` regardless of whether `${BASE}` is a git-repo root, `/tmp/claude-code`, or any other path. If you want figures kept out of a repo tree, pick `/tmp/claude-code` (or any non-repo path) at base-dir resolution time — the `cafleet-create-figure` skill does NOT second-guess base-dir's answer.
 
 **Derive the subdirectories** (each is a literal path string you will embed in the script):
 

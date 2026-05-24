@@ -17,8 +17,8 @@ Implement features based on a design document using up to four roles orchestrate
 
 ## Additional resources
 
-- For the document template, see: [../design-doc/template.md](../design-doc/template.md)
-- For section guidelines and quality standards, see: [../design-doc/guidelines.md](../design-doc/guidelines.md)
+- For the document template, see: [../cafleet-design-doc/template.md](../cafleet-design-doc/template.md)
+- For section guidelines and quality standards, see: [../cafleet-design-doc/guidelines.md](../cafleet-design-doc/guidelines.md)
 
 ## Coordination Protocol
 
@@ -63,11 +63,11 @@ Exactly 3 canonical forms. Use the tightest one that locates the target.
 | `<file>:<line>` | At that exact line in the file (immediately above or on `<line>` per the file's native comment syntax). |
 | `doc` | Doc-top — directly under the metadata block (`Status:` / `Progress:` / `Last Updated:`), before the first heading. |
 
-The ` > ` separator avoids the collision that would arise if `/` were used as a nesting separator (heading text in real-world design docs frequently contains `/`, e.g. `Step 2: Update /design-doc-create`). ` > ` is unambiguous, ASCII-safe, and shell-safe inside double-quoted `--text` arguments.
+The ` > ` separator avoids the collision that would arise if `/` were used as a nesting separator (heading text in real-world design docs frequently contains `/`, e.g. `Step 2: Update docs/spec/cli-options.md`). ` > ` is unambiguous, ASCII-safe, and shell-safe inside double-quoted `--text` arguments.
 
 ### Message Format
 
-Every `cafleet message send --text` body, when used to coordinate within a `/design-doc-execute` team, MUST match:
+Every `cafleet message send --text` body, when used to coordinate within a `cafleet-design-doc-execute` skill team, MUST match:
 
 ```
 <verb> (<pointer>)
@@ -127,7 +127,7 @@ Rules:
 
 | Class | Example | Lifecycle |
 |:--|:--|:--|
-| Issue | `COMMENT(programmer): test <test-name> expects X but design doc says Y; please arbitrate` | Persists in the doc until resolved. The resolver removes the marker as part of the fix. Per `skills/design-doc/guidelines.md` § *Completeness Check*, the doc cannot reach `Status: Complete` while any `COMMENT(` marker remains. |
+| Issue | `COMMENT(programmer): test <test-name> expects X but design doc says Y; please arbitrate` | Persists in the doc until resolved. The resolver removes the marker as part of the fix. Per `skills/cafleet-design-doc/guidelines.md` § *Completeness Check*, the doc cannot reach `Status: Complete` while any `COMMENT(` marker remains. |
 | Status | (none — never enters the doc) | Lives only in `cafleet message send` text. |
 
 This keeps the design doc clean: at any moment, the markers in the doc reflect *outstanding work*, never historical chatter.
@@ -158,7 +158,7 @@ If a member finds themselves needing to send anchorless status updates frequentl
 
 When the design doc moves to `Status: Complete` (Step 8):
 
-1. Issue markers (`COMMENT(role)` for `director`, `programmer`, `tester`, `verifier`, `claude`) MUST already be resolved per `skills/design-doc/guidelines.md` § *Completeness Check* — the existing rule "No `COMMENT(` markers remain" stays.
+1. Issue markers (`COMMENT(role)` for `director`, `programmer`, `tester`, `verifier`, `claude`) MUST already be resolved per `skills/cafleet-design-doc/guidelines.md` § *Completeness Check* — the existing rule "No `COMMENT(` markers remain" stays.
 2. Status markers do not exist in the design doc by construction (split), so there is nothing to strip.
 3. `COMMENT(copilot)` markers in source files are removed by the routed member as part of each fix commit; finalize-time validation only needs to confirm the design doc is marker-free.
 
@@ -170,7 +170,7 @@ Members no longer ship file lists in cafleet bodies. The Director recovers per-f
 
 ### Skill-specific overrides
 
-- **Verifier Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in `/design-doc-interview`). Phase 2 verification reports follow the schema.
+- **Verifier Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the `cafleet-design-doc-interview` skill). Phase 2 verification reports follow the schema.
 
 ## Architecture
 
@@ -203,7 +203,7 @@ User
 | `Agent(team_name=..., subagent_type=...)` | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
 | `SendMessage(to="Programmer")` | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from member) | `cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `agent-team-supervision` `/loop` | Load `Skill(agent-team-monitoring)` (mechanism + `/loop`) and `Skill(agent-team-supervision)` (governance), then run `/loop` from agent-team-monitoring |
+| `cafleet-agent-team-supervision` `/loop` | Load the `cafleet-agent-team-monitoring` skill (mechanism + `/loop`) and the `cafleet-agent-team-supervision` skill (governance), then run `/loop` from the `cafleet-agent-team-monitoring` skill |
 | `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` for each member, then `cafleet session delete <session-id>` (soft-deletes the session and sweeps the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `session delete` is the only supported teardown. |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
@@ -215,11 +215,11 @@ Before validation, resolve `$ARGUMENTS` into a concrete `design-doc.md` path.
 
 #### Phase 1: Base Directory Resolution
 
-Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` sentinel contract. Then resolve BASE based on whether `$ARGUMENTS` was supplied:
+Load the `cafleet-base-dir` skill for the no-bypass write protocol and `<unset>` sentinel contract. Then resolve BASE based on whether `$ARGUMENTS` was supplied:
 
 - **`$ARGUMENTS` present** (the typical execute-a-specific-doc flow): canonicalize `$ARGUMENTS` and call the task-scope resolver positionally. `$ARGUMENTS` is normally a slug name (`0000060-skill-task-scoped-base-dir`) or a path containing such a slug.
 
-  - **Relative input** — accept any of: `0000060-foo`, `0000060-foo/design-doc.md`, `design-docs/0000060-foo`, `design-docs/0000060-foo/design-doc.md`. Canonicalize to `design-docs/<slug>` by: (1) stripping the trailing `/design-doc.md` if present; (2) stripping the leading `design-docs/` if present; (3) prepending `design-docs/`. The resolver itself does NOT perform this stripping (per `Skill(cafleet:base-dir)` § *Consumer contract*) — the consuming skill canonicalizes first, then calls:
+  - **Relative input** — accept any of: `0000060-foo`, `0000060-foo/design-doc.md`, `design-docs/0000060-foo`, `design-docs/0000060-foo/design-doc.md`. Canonicalize to `design-docs/<slug>` by: (1) stripping the trailing `/design-doc.md` if present; (2) stripping the leading `design-docs/` if present; (3) prepending `design-docs/`. The resolver itself does NOT perform this stripping (per the `cafleet-base-dir` skill § *Consumer contract*) — the consuming skill canonicalizes first, then calls:
 
     ```bash
     cafleet base-dir resolve design-docs/<slug> --json
@@ -233,7 +233,7 @@ Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` se
 
     The CLI accepts the absolute path if it lies strictly under the inferred repo root; otherwise the resolver returns the `unset` shape.
 
-  Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field (the slug folder) and `${RESOLVED_ARGS} = ${BASE}/design-doc.md` (short-circuits at Tier 1 below). On `status == "unset"` (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `${RESOLVED_ARGS}` to the literal `$ARGUMENTS` path so Tier 1 / Tier 2 still run against the user-supplied path, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per `Skill(cafleet:base-dir)` § *The `<unset>` sentinel*.
+  Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field (the slug folder) and `${RESOLVED_ARGS} = ${BASE}/design-doc.md` (short-circuits at Tier 1 below). On `status == "unset"` (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `${RESOLVED_ARGS}` to the literal `$ARGUMENTS` path so Tier 1 / Tier 2 still run against the user-supplied path, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet-base-dir` skill § *The `<unset>` sentinel*.
 
 - **`$ARGUMENTS` absent** (the discover-all-approved-docs flow): the no-argument form scans `<repo-root>/design-docs/`, so the Director MUST invoke from the repo root. Verify with `git rev-parse --show-toplevel` and abort with a clear "invoke from the repo root" error if `cwd` differs. Then use the no-positional resolver:
 
@@ -241,7 +241,7 @@ Load `Skill(cafleet:base-dir)` for the no-bypass write protocol and `<unset>` se
   cafleet base-dir resolve --json
   ```
 
-  Branch on the returned `status` per `Skill(cafleet:base-dir)` Steps 1–2: on `status == "resolved"`, set `${BASE}` to the returned `base` field (which is the repo root because we just verified `cwd == repo root`); on `status == "needs-user-input"`, drive `AskUserQuestion` on the returned `candidates`, persist the answer via `cafleet base-dir record`, and re-resolve. Only after `${BASE}` is concrete, set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
+  Branch on the returned `status` per the `cafleet-base-dir` skill Steps 1–2: on `status == "resolved"`, set `${BASE}` to the returned `base` field (which is the repo root because we just verified `cwd == repo root`); on `status == "needs-user-input"`, drive `AskUserQuestion` on the returned `candidates`, persist the answer via `cafleet base-dir record`, and re-resolve. Only after `${BASE}` is concrete, set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
 
 #### Phase 2: Three-Tier Detection
 
@@ -343,7 +343,7 @@ Before registering with CAFleet:
 
 ### Step 3: Register & Spawn Members (Director)
 
-Load `Skill(cafleet)`, `Skill(agent-team-monitoring)`, and `Skill(agent-team-supervision)` (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it).
+Load the `cafleet` skill, the `cafleet-agent-team-monitoring` skill, and the `cafleet-agent-team-supervision` skill (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it).
 
 #### 3a. Establish a CAFleet session and capture the root Director's `agent_id`
 
@@ -372,7 +372,7 @@ If you already have a running session (e.g. an outer orchestration), reuse its `
 
 #### 3b. Start the monitoring `/loop`
 
-BEFORE spawning any member, use `Skill(agent-team-monitoring)`'s `/loop` Prompt Template and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. This is the **team-health loop** — it stays active through Steps 3–5 and, when Step 6 runs, is swapped (create-before-delete order in Step 7a) for the augmented team-health + PR-review loop. Whichever loop is active gets `CronDelete`d in Step 8's cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from `Skill(agent-team-supervision)`, which loads agent-team-monitoring as a hard prerequisite.
+BEFORE spawning any member, use the `cafleet-agent-team-monitoring` skill's `/loop` Prompt Template and start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. This is the **team-health loop** — it stays active through Steps 3–5 and, when Step 6 runs, is swapped (create-before-delete order in Step 7a) for the augmented team-health + PR-review loop. Whichever loop is active gets `CronDelete`d in Step 8's cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -388,9 +388,9 @@ Based on the design document steps (see [roles/director.md](roles/director.md) f
 
 Resolve the absolute path of each role file you will reference by path-by-reference in spawn prompts (the member opens the file via `Read` on its first turn — do NOT inline the content):
 
-- `skills/design-doc-execute/roles/programmer.md`
-- `skills/design-doc-execute/roles/tester.md` (if Tester needed)
-- `skills/design-doc-execute/roles/verifier.md` (if Verifier needed)
+- `skills/cafleet-design-doc-execute/roles/programmer.md`
+- `skills/cafleet-design-doc-execute/roles/tester.md` (if Tester needed)
+- `skills/cafleet-design-doc-execute/roles/verifier.md` (if Verifier needed)
 
 #### 3e. Spawn each member via `cafleet member create`
 
@@ -398,7 +398,7 @@ The spawn prompts below use `{session_id}` / `{agent_id}` / `{director_agent_id}
 
 > **Path-by-reference for role docs**: Each spawn prompt below references its role file by **absolute path**. The spawned member opens its role doc with `Read` on its first turn. Do NOT inline the role content — cafleet `member create` hits a `tmux command failed: command too long` error once the shell-quoted prompt grows past a few KB, and rolls back the registration. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up. Resolve the absolute path for each of `roles/programmer.md`, `roles/tester.md`, and `roles/verifier.md` (from this skill's `roles/` directory) and substitute into the `[INSERT abs path to …]` markers below.
 >
-> **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see the per-role flow below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See `Skill(cafleet:base-dir)` § *No-bypass write protocol* and `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
+> **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see the per-role flow below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 **Programmer spawn prompt:**
 
@@ -408,13 +408,13 @@ You are the Programmer in a design document execution team (CAFleet-native).
 ROLE DEFINITION: Open [INSERT abs path to roles/programmer.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
-- Skill(cafleet) — for communication with the Director
-- Skill(design-doc) — for template and guidelines
+- the `cafleet` skill — for communication with the Director
+- the `cafleet-design-doc` skill — for template and guidelines
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
@@ -431,7 +431,7 @@ Start by reading the design document. Then wait for the Director to assign your 
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
 1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
-2. **Write the rendered text** to `${BASE}/prompts/programmer-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+2. **Write the rendered text** to `${BASE}/prompts/programmer-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
@@ -451,13 +451,13 @@ You are the Tester in a design document execution team (CAFleet-native).
 ROLE DEFINITION: Open [INSERT abs path to roles/tester.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
-- Skill(cafleet) — for communication with the Director
-- Skill(design-doc) — for template and guidelines
+- the `cafleet` skill — for communication with the Director
+- the `cafleet-design-doc` skill — for template and guidelines
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
@@ -475,7 +475,7 @@ Start by reading the design document. Then wait for the Director to assign your 
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
 1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
-2. **Write the rendered text** to `${BASE}/prompts/tester-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+2. **Write the rendered text** to `${BASE}/prompts/tester-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
@@ -489,7 +489,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
 **Verifier spawn prompt (if needed):**
 
-> **Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in `/design-doc-interview`). Phase 2 verification reports follow the verb + pointer + `COMMENT(verifier)` schema documented in [the Coordination Protocol section above](#coordination-protocol).
+> **Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the `cafleet-design-doc-interview` skill). Phase 2 verification reports follow the verb + pointer + `COMMENT(verifier)` schema documented in [the Coordination Protocol section above](#coordination-protocol).
 
 ```
 You are the Verifier in a design document execution team (CAFleet-native).
@@ -497,13 +497,13 @@ You are the Verifier in a design document execution team (CAFleet-native).
 ROLE DEFINITION: Open [INSERT abs path to roles/verifier.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
-- Skill(cafleet) — for communication with the Director
-- Skill(design-doc) — for template and guidelines
+- the `cafleet` skill — for communication with the Director
+- the `cafleet-design-doc` skill — for template and guidelines
 
 SESSION ID: {session_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via Skill(cafleet:base-dir)]
+BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
@@ -521,7 +521,7 @@ Then wait for the Director to assign your first verification task.
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
 1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
-2. **Write the rendered text** to `${BASE}/prompts/verifier-<UTC-compact>.md` (`${BASE}` resolved by `Skill(cafleet:base-dir)` in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in `Skill(cafleet)` reference `director.md` § *Member Create — Scratch and audit files*.
+2. **Write the rendered text** to `${BASE}/prompts/verifier-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
@@ -682,11 +682,11 @@ After Step 5 Approve, the Director pushes the feature branch, opens a PR, and re
 
 ### Step 7: Copilot Review Loop (Director)
 
-Once the PR exists and Copilot has been invited, the Director runs a cron-driven review loop. The `agent-team-monitoring` team-health `/loop` is replaced by an **augmented** loop that keeps the team-health checks AND adds PR review polling.
+Once the PR exists and Copilot has been invited, the Director runs a cron-driven review loop. The `cafleet-agent-team-monitoring` team-health `/loop` is replaced by an **augmented** loop that keeps the team-health checks AND adds PR review polling.
 
 #### PR Review Loop State
 
-The Director holds three **PR-review-specific** in-context variables across loop firings (separate from the team-health `--since` timestamp tracked by `Skill(agent-team-monitoring)` for `cafleet message poll`). They are NOT persisted to disk — the Director carries them in its own working memory.
+The Director holds three **PR-review-specific** in-context variables across loop firings (separate from the team-health `--since` timestamp tracked by the `cafleet-agent-team-monitoring` skill for `cafleet message poll`). They are NOT persisted to disk — the Director carries them in its own working memory.
 
 | Variable | Meaning | Update rule |
 |:--|:--|:--|
@@ -709,7 +709,7 @@ On exit from Step 7 (any exit condition), keep the augmented loop running — St
 
 On each 1-minute wake-up, the Director runs — in order:
 
-1. **Team health** (unchanged from `agent-team-monitoring`): `member list` → `poll` → `member capture` fallback → nudge stalled members.
+1. **Team health** (unchanged from the `cafleet-agent-team-monitoring` skill): `member list` → `poll` → `member capture` fallback → nudge stalled members.
 2. **Fetch new PR reviews**: `gh pr view <pr-number> --json reviews` (GraphQL-shaped; fields are `author.login`, `state`, `submittedAt`, `body`) AND `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST-shaped; fields are `user.login`, `body`, `path`, `line`, `created_at`).
 3. **Filter Copilot-authored entries**: keep items where the login field (`author.login` for `gh pr view` reviews, `user.login` for `gh api` inline comments) matches the regex `^copilot` (case-insensitive). Copilot reviews currently post under a login that begins with `copilot` — the exact slug varies by account plan, so a prefix match is the safe filter.
 4. **New-since-push filter**: keep items whose timestamp (`submittedAt` for reviews, `created_at` for inline comments) is strictly later than `last_push_ts`.
@@ -829,7 +829,7 @@ Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped (gh no
    - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 6 fully succeeded" path and the "Step 6 partial-fail (push OK, PR create failed)" path.
    - Non-zero exit: skip the push. The docs commit stays local.
    - The Director does NOT re-request Copilot review on this final docs commit.
-5. Run the canonical teardown per `Skill(cafleet)` § *Shutdown Protocol*:
+5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*:
    1. `CronDelete` the currently active `/loop` monitor — team-health (cron ID from Step 3b) if Step 6 was skipped, augmented (cron ID from Step 7a) otherwise.
    2. `cafleet member delete` for each spawned member (Programmer, Tester if spawned, Verifier if spawned). Each call blocks until the pane is gone; on exit 2 follow the `member capture` + `send-input` recovery, or rerun with `--force`.
    3. `cafleet member list` — the team's roster MUST be empty before continuing.

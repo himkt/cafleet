@@ -2,12 +2,12 @@
 name: cafleet-base-dir
 description: >
   Resolve the base directory for output files. Loaded by consuming skills
-  via Skill(cafleet:base-dir). Do NOT invoke directly.
+  via the `cafleet-base-dir` skill. Do NOT invoke directly.
 ---
 
 # Base Directory Resolution
 
-`Skill(cafleet:base-dir)` is the single authoritative resolver for every CAFleet scratch / audit / figure path. The resolution outcome (`${BASE}`) is the only legitimate root for those writes. Consuming skills MUST NOT compute `${BASE}` independently and MUST NOT fall back to `/tmp` when resolution returns the `<unset>` sentinel.
+The `cafleet-base-dir` skill is the single authoritative resolver for every CAFleet scratch / audit / figure path. The resolution outcome (`${BASE}`) is the only legitimate root for those writes. Consuming skills MUST NOT compute `${BASE}` independently and MUST NOT fall back to `/tmp` when resolution returns the `<unset>` sentinel.
 
 `/tmp/claude-code` remains a perfectly valid resolved `${BASE}` when this skill explicitly selects it via the `AskUserQuestion` branch — only **bypassing** base-dir to write to `/tmp` without its consent is forbidden.
 
@@ -47,8 +47,8 @@ The CLI checks whether the absolute path is strictly under the inferred repo roo
 
 | Consumer | Canonical relpath form | Canonicalization steps |
 |:--|:--|:--|
-| `/cafleet:design-doc-create` / `/cafleet:design-doc-execute` / `/cafleet:design-doc-interview` | `design-docs/<slug>` | (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`. **Absolute paths**: apply the same `/design-doc.md` strip (the resolver does not fold child filenames; a child file path becomes a directory named after the file). |
-| `/cafleet:research-report` / `/cafleet:research-presentation` | `researches/<topic-slug>` | (1) strip trailing `/report.md` (or other known per-topic filenames) if present; (2) strip leading `researches/` if present; (3) prepend `researches/`. **Absolute paths**: apply the same `/report.md` strip (the resolver does not fold child filenames; a child file path becomes a directory named after the file). |
+| The `cafleet-design-doc-create` / `cafleet-design-doc-execute` / `cafleet-design-doc-interview` skills | `design-docs/<slug>` | (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`. **Absolute paths**: apply the same `/design-doc.md` strip (the resolver does not fold child filenames; a child file path becomes a directory named after the file). |
+| The `cafleet-research-report` / `cafleet-research-presentation` skills | `researches/<topic-slug>` | (1) strip trailing `/report.md` (or other known per-topic filenames) if present; (2) strip leading `researches/` if present; (3) prepend `researches/`. **Absolute paths**: apply the same `/report.md` strip (the resolver does not fold child filenames; a child file path becomes a directory named after the file). |
 
 The stripping logic is skill-specific because each skill knows the file conventions inside its own bucket. The resolver stays bucket-agnostic. Skipping canonicalization causes the resolver to create a directory literally named `design-doc.md` (or `report.md`, etc.) and anchor the wrong BASE.
 
@@ -180,7 +180,7 @@ Every CAFleet member, every consumer skill, and every Director MUST follow this 
 
 ## The `<unset>` sentinel
 
-`Skill(cafleet:base-dir)` is the only place that may return `BASE=<unset>`. The sentinel is the literal string `"<unset>"` (case-sensitive). Any consumer skill that has `${BASE}` set to `<unset>` MUST:
+The `cafleet-base-dir` skill is the only place that may return `BASE=<unset>`. The sentinel is the literal string `"<unset>"` (case-sensitive). Any consumer skill that has `${BASE}` set to `<unset>` MUST:
 
 1. **Guard audit-file writes.** Audit-file writes that derive their path from `${BASE}` are guarded by an explicit `${BASE} != <unset>` check at the call site. The guard is mandatory; reaching `Path(BASE) / …` without the guard is the failure mode item 3 catches. A guarded skip is the intended path when `${BASE}` is `<unset>` — no silent no-op, no fallback to `/tmp`, just an explicit skip whose condition is visible in the source.
 2. **Omit `BASE:` from spawn prompts.** The Director MUST NOT spawn members with `BASE: <unset>` in the spawn prompt — the line is omitted entirely so the member's existence-check naturally treats audit-file features as disabled. The literal string `BASE: <unset>` is never written into any spawn prompt.

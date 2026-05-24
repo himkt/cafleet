@@ -5,8 +5,8 @@ You are a **Scout Researcher** in a research report team. You bear **responsibil
 ## Load at Startup
 
 Load these skills at startup:
-- Skill(cafleet:base-dir) — for the no-bypass write protocol and BASE-derived path conventions
-- Skill(cafleet) — for communication with the Director
+- the `cafleet-base-dir` skill — for the no-bypass write protocol and BASE-derived path conventions
+- the `cafleet` skill — for communication with the Director
 
 ## Your Accountability
 
