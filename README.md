@@ -98,7 +98,7 @@ The default database is `~/.local/share/cafleet/registry.db`. Override with `CAF
 > writable_roots = ["/home/<you>/.local/share/cafleet"]
 > ```
 > 
-> Recommended Codex rules for `cafleet` commands — drop into your codex rules file (e.g. `~/.codex/rules/cafleet.rules`):
+> Recommended Codex rules for `cafleet` commands on `~/.codex/rules/cafleet.rules`:
 > 
 > ```
 > prefix_rule(
@@ -110,7 +110,7 @@ The default database is `~/.local/share/cafleet/registry.db`. Override with `CAF
 > prefix_rule(
 >     pattern = ["cafleet", "member", "exec"],
 >     decision = "prompt",
->     justification = "cafleet member exec runs arbitrary commands on a member; require approval",
+>     justification = "cafleet member exec runs arbitrary commands on a member",
 > )
 > ```
 
@@ -122,7 +122,7 @@ Provide the following prompt to Claude Code or Codex to see how it works.
 
 ```
 I want to see how cafleet works.
-Please create a fresh team with two teammates using cafleet and let them ping-pong each other.
+Please create a new team with two members using cafleet and let them ping-pong each other.
 After the demonstration, please shutdown the team.
 ```
 
