@@ -121,10 +121,10 @@ The Director owns the Slidev dev server lifecycle. The Visual Reviewer does not 
 | Aspect | Detail |
 |--------|--------|
 | Start command | Project-specific Slidev launcher from your host project's `.claude/rules/`. The underlying invocation is `bun run slidev --open false <slide>` PTY-wrapped via `script -qfc 'bun run slidev --open false <slide>' /dev/null` so Slidev does not exit on detecting a non-TTY. |
-| Execution | Bash tool with `run_in_background: true` |
+| Execution | Started as a backgrounded process via the coding agent's native primitive (Claude Code: Bash tool with `run_in_background: true`; codex / opencode: see host project `.claude/rules/`). Record the returned task ID for shutdown. |
 | Default URL | `http://localhost:3030` |
 | Readiness check | Visual Reviewer confirms via `bun run agent-browser --session vr-batch-<start> open <server_url>/1` followed by a `bun run agent-browser --session vr-batch-<start> snapshot` retry loop (sleep 3 seconds between retries via `sleep 3`, up to 3 attempts). `agent-browser wait` (`wait --load networkidle`, `wait N`) is discouraged — it is unreliable across renderers and slow CI environments. Use sleep + open-retry instead. Host projects may additionally block the `wait` form via their permissions rules; refer to your host project's `.claude/rules/` for any project-specific constraint. |
-| Shutdown | Kill the background Bash task after all visual review rounds complete |
+| Shutdown | Stop via the coding agent's native task-stop primitive (Claude Code: `TaskStop` with the recorded task ID; codex / opencode: see host project `.claude/rules/`) after all visual review rounds complete. Do NOT shell out to `pkill` or `kill`. |
 
 **Fallback chain:**
 
@@ -151,6 +151,6 @@ Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*:
    Each call sends `/exit` and waits up to 15 s for the pane's `claude` process to exit.
 3. Verify the roster is empty: `cafleet --session-id [session-id] member list --agent-id [director-agent-id]` must return zero members.
 4. Run the agent-browser safety net: `bun run agent-browser close --all`.
-5. Kill the Slidev dev server (stop the background Bash task).
+5. Stop the Slidev dev server via the coding agent's native task-stop primitive with the recorded task ID (Claude Code: `TaskStop`; codex / opencode: host project `.claude/rules/`). Do NOT use `pkill`/`kill`.
 6. Delete the session: `cafleet session delete [session-id]` (positional, no `--session-id` flag).
 7. Confirm: `cafleet session list` — the current session must not appear.

@@ -1,7 +1,7 @@
 ---
 name: cafleet-research-presentation
 description: Create a Slidev presentation and reading transcript from an existing research report folder. Reads report.md and researcher files for context, creates slides using the cafleet-my-slidev skill and a reading transcript. Takes folder path as argument (e.g., topic-name). Do NOT use for research — use the cafleet-research-report skill for that.
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, TaskGet
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, TaskGet, TaskStop
 ---
 
 # Research Presentation
@@ -241,7 +241,7 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 **Calling-pane working directory: a directory that contains the Slidev `package.json` (typically the host project root).** Bun resolves `node_modules/` and `package.json` from the calling directory directly — no `--cwd` plumbing or sidecar directory. Project-specific task wrappers (e.g., `mise` tasks) that capture invariants like `--frozen-lockfile` belong in the host project's `.claude/rules/`, not in this skill body.
 
 1. Install bun dependencies — refer to your host project's `.claude/rules/` for the canonical command (it typically wraps `bun install --frozen-lockfile`).
-2. Start the Slidev dev server **as a backgrounded process** — refer to your host project's `.claude/rules/` for the canonical launcher. The underlying invocation is `bun run slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY. **Record the task ID** your coding agent returns when it backgrounds the process — Step 5 *Finalize & Clean Up* (below) needs it to stop the server cleanly without falling back on `pkill`. Per-backend hint for backgrounding:
+2. Start the Slidev dev server **as a backgrounded process** — refer to your host project's `.claude/rules/` for the canonical launcher. The underlying invocation is `bun run slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY. **Record the task ID** your coding agent returns when it backgrounds the process — the overall Step 5 of this skill (*Finalize & Clean Up*, further down the page) needs it to stop the server cleanly without falling back on `pkill`. Per-backend hint for backgrounding:
    - **Claude Code**: pass `run_in_background: true` to the Bash tool; the returned task ID feeds the Claude Code harness's built-in `TaskStop` tool at teardown.
    - **codex / opencode**: use the backend's equivalent background-task primitive (see the host project's `.claude/rules/`).
 3. Set `<server_url>` to the Slidev dev server URL (default: `http://localhost:3030`). Use this value when spawning Visual Reviewers.
