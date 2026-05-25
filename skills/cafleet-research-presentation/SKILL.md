@@ -1,7 +1,7 @@
 ---
 name: cafleet-research-presentation
 description: Create a Slidev presentation and reading transcript from an existing research report folder. Reads report.md and researcher files for context, creates slides using the cafleet-my-slidev skill and a reading transcript. Takes folder path as argument (e.g., topic-name). Do NOT use for research — use the cafleet-research-report skill for that.
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, TaskGet
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, TaskGet, TaskStop
 ---
 
 # Research Presentation
@@ -241,10 +241,12 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 **Calling-pane working directory: a directory that contains the Slidev `package.json` (typically the host project root).** Bun resolves `node_modules/` and `package.json` from the calling directory directly — no `--cwd` plumbing or sidecar directory. Project-specific task wrappers (e.g., `mise` tasks) that capture invariants like `--frozen-lockfile` belong in the host project's `.claude/rules/`, not in this skill body.
 
 1. Install bun dependencies — refer to your host project's `.claude/rules/` for the canonical command (it typically wraps `bun install --frozen-lockfile`).
-2. Start the Slidev dev server (`run_in_background: true`) — refer to your host project's `.claude/rules/` for the canonical launcher. The underlying invocation is `bun run slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY.
+2. Start the Slidev dev server **as a backgrounded process** — refer to your host project's `.claude/rules/` for the canonical launcher. The underlying invocation is `bun run slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY. **Record the task ID** your coding agent returns when it backgrounds the process — the overall Step 5 of this skill (*Finalize & Clean Up*, further down the page) needs it to stop the server cleanly without falling back on `pkill`. Per-backend hint for backgrounding:
+   - **Claude Code**: pass `run_in_background: true` to the Bash tool; the returned task ID feeds the Claude Code harness's built-in `TaskStop` tool at teardown.
+   - **codex / opencode**: use the backend's equivalent background-task primitive (see the host project's `.claude/rules/`).
 3. Set `<server_url>` to the Slidev dev server URL (default: `http://localhost:3030`). Use this value when spawning Visual Reviewers.
 4. Create the persistent screenshots directory: write `<folder>/screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per `cafleet-research-presentation` skill invocation; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
-5. The Director MUST NOT run `bun run agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` (or the equivalent `bun run agent-browser ...`) directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.
+5. The Director MUST NOT run `bun run agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` (or the equivalent `bun run agent-browser ...`) directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5 *Finalize & Clean Up*). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.
 
 **Batched Review Loop** (batch_size=10, fresh Visual Reviewer per batch to avoid context overflow):
 
@@ -364,7 +366,9 @@ Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Orde
    ```bash
    bun run agent-browser close --all
    ```
-5. **Kill the Slidev dev server** if still running (stop the background Bash task started at Step 3).
+5. **Stop the Slidev dev server** if still running. Use the coding agent's **native task-stop primitive** with the task ID you recorded back in Step 3 *Visual Review & Fix* (Server Startup substep 2) — do NOT shell out to `pkill` or `kill`. `pkill -f slidev` matches too broadly (any other Slidev process on the host becomes collateral damage), and the harness-tracked background task keeps leaking stdout to the operator's pane until stopped through the harness, which `pkill` cannot do. Per-backend mechanism:
+   - **Claude Code**: call the Claude Code harness's built-in `TaskStop` tool with the task ID recorded in Step 3 *Visual Review & Fix* (Server Startup substep 2).
+   - **codex / opencode**: use the backend's task-management primitive (see the host project's `.claude/rules/`).
 6. **Delete the session**: `cafleet session delete [session-id]` (positional, no `--session-id` flag). Soft-deletes the session and deregisters the root Director and Administrator atomically.
 7. **Confirm**: `cafleet session list` — the current session must not appear (soft-deleted sessions are hidden).
 
