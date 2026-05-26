@@ -20,7 +20,7 @@ Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the ru
 
 Session deletion is a **soft-delete**: `broker.delete_session` sets `deleted_at=now`, then deregisters every active agent in the session (including the root Director) and physically deletes their `agent_placements` rows in the same transaction. Tasks are preserved. Re-running `session delete` on an already-soft-deleted session is a no-op that reports `Deregistered 0 agents.` because the initial `UPDATE` guard `WHERE deleted_at IS NULL` short-circuits the cascade.
 
-`broker.get_session` always returns the row (regardless of `deleted_at`) and exposes the field so callers can decide; `broker.list_sessions` filters `WHERE deleted_at IS NULL`, so `cafleet session list` hides soft-deleted sessions (no `--all` flag in v1). `broker.register_agent` inspects `get_session(...)["deleted_at"]` and rejects a soft-deleted session with `Error: session X is deleted` (distinct from the `Session 'X' not found.` path).
+`broker.get_session` always returns the row (regardless of `deleted_at`) and exposes the field so callers can decide; `broker.list_sessions` filters `WHERE deleted_at IS NULL`, so `cafleet session list` hides soft-deleted sessions (no `--all` flag in v1). `broker.register_agent` inspects `get_session(...).deleted_at` and rejects a soft-deleted session with `Error: session X is deleted` (distinct from the `Session 'X' not found.` path).
 
 #### Root Director bootstrap
 

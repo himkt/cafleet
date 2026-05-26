@@ -1,7 +1,7 @@
 # Zensical Documentation Site
 
 **Status**: Approved
-**Progress**: 40/47 tasks complete
+**Progress**: 42/47 tasks complete
 **Last Updated**: 2026-05-26
 
 ## Overview
@@ -400,12 +400,12 @@ The following are explicitly NOT covered by this design doc and remain for futur
 
 ### Step 9: Validate
 
-- [ ] Run `mise //:docs-build` locally; exit code 0 with no broken-link warnings, no missing-handler warnings, no Mermaid-rendering errors. <!-- completed: -->
+- [x] Run `mise //:docs-build` locally; exit code 0 with no broken-link warnings, no missing-handler warnings, no Mermaid-rendering errors. <!-- completed: 2026-05-26T11:35 -->
 - [ ] Open the built `site/index.html` in a browser, click through every nav entry, confirm all six Mermaid diagrams render and every API page populates from mkdocstrings. <!-- completed: -->
 - [ ] Push the branch as a pull request against `main` and confirm the GitHub Actions `Documentation` workflow's PR-build run succeeds (this is the validation enabled by the Step 8 `pull_request:` trigger; the deploy steps are skipped on PR runs via the `if: github.event_name == 'push'` gate). <!-- completed: -->
 - [ ] After merging to `main`, confirm the same workflow's push-triggered run succeeds end-to-end, including `upload-pages-artifact` and `deploy-pages`. <!-- completed: -->
 - [ ] Verify the published site at `https://himkt.github.io/cafleet/` matches the local build. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` once more to confirm the docstring backfill from Step 2 still passes after every edit. <!-- completed: -->
+- [x] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` once more to confirm the docstring backfill from Step 2 still passes after every edit. <!-- completed: 2026-05-26T11:35 -->
 
 ---
 
