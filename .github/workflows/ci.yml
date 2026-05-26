@@ -16,6 +16,7 @@ jobs:
           experimental: true
       - run: mise //cafleet:lint
       - run: mise //cafleet:typecheck
+      - run: mise //:docs-build
 
   test:
     runs-on: ubuntu-latest

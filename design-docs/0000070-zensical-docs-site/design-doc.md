@@ -1,7 +1,7 @@
 # Zensical Documentation Site
 
 **Status**: Approved
-**Progress**: 37/47 tasks complete
+**Progress**: 40/47 tasks complete
 **Last Updated**: 2026-05-26
 
 ## Overview
@@ -391,12 +391,12 @@ The following are explicitly NOT covered by this design doc and remain for futur
 ### Step 8: Build pipeline and CI
 
 - [x] Add the `[tasks."docs-build"]` block from § *Build pipeline* to `mise.toml`. <!-- completed: 2026-05-26T11:15 -->
-- [ ] Add `/site/` to the repo-root `.gitignore` (leading slash so the pattern matches the repo-root build artifact only, not a future `cafleet/site/` or similar). Without this entry, every contributor running `mise //:docs-build` sees the entire built site as untracked changes and risks staging it. <!-- completed: -->
-- [ ] Restructure `.github/workflows/docs.yml` into the two-job pipeline documented in § *Build pipeline*: a `build` job (runs on push + PR, no `environment:` declaration, performs `actions/checkout@v6` + `actions/setup-python@v6` with `python-version: 3.12` + `astral-sh/setup-uv@v3` + `uv sync --group dev` + `uv run zensical build --clean` + `actions/upload-pages-artifact@v5`) and a `deploy` job (gated by `if: github.event_name == 'push'`, `needs: build`, declares `environment: github-pages`, performs `actions/configure-pages@v6` + `actions/deploy-pages@v5`). Also extend the `on:` trigger to include `pull_request: branches: [main]` for pre-merge build validation. The two-job split is required (not optional) because `environment: github-pages` is a job-level binding — a single-job + step-level `if:` would still bind every PR run to the Pages environment, which is rejected under branch-protection rules and misleading otherwise. <!-- completed: -->
+- [x] Add `/site/` to the repo-root `.gitignore` (leading slash so the pattern matches the repo-root build artifact only, not a future `cafleet/site/` or similar). Without this entry, every contributor running `mise //:docs-build` sees the entire built site as untracked changes and risks staging it. <!-- completed: 2026-05-26T11:25 -->
+- [x] Restructure `.github/workflows/docs.yml` into the two-job pipeline documented in § *Build pipeline*: a `build` job (runs on push + PR, no `environment:` declaration, performs `actions/checkout@v6` + `actions/setup-python@v6` with `python-version: 3.12` + `astral-sh/setup-uv@v3` + `uv sync --group dev` + `uv run zensical build --clean` + `actions/upload-pages-artifact@v5`) and a `deploy` job (gated by `if: github.event_name == 'push'`, `needs: build`, declares `environment: github-pages`, performs `actions/configure-pages@v6` + `actions/deploy-pages@v5`). Also extend the `on:` trigger to include `pull_request: branches: [main]` for pre-merge build validation. The two-job split is required (not optional) because `environment: github-pages` is a job-level binding — a single-job + step-level `if:` would still bind every PR run to the Pages environment, which is rejected under branch-protection rules and misleading otherwise. <!-- completed: 2026-05-26T11:25 -->
 
 - [ ] Verify GitHub Pages is enabled on the `himkt/cafleet` repository (Settings → Pages → Source: "GitHub Actions") BEFORE the first push-triggered deploy run in Step 9. `actions/deploy-pages@v5` requires this setting; if Pages is disabled or set to "Deploy from a branch", the first push to `main` after merging this design fails the `deploy-pages` step. Capture as a one-time pre-merge check; no code change needed in the repo if Pages is already enabled. <!-- completed: -->
 
-- [ ] Add `mise //:docs-build` to whatever lint/CI orchestration the project uses (verify by inspecting `mise.toml` for any lint-aggregate task or the CI workflow that runs lint/typecheck). <!-- completed: -->
+- [x] Add `mise //:docs-build` to whatever lint/CI orchestration the project uses (verify by inspecting `mise.toml` for any lint-aggregate task or the CI workflow that runs lint/typecheck). <!-- completed: 2026-05-26T11:26 -->
 
 ### Step 9: Validate
 
