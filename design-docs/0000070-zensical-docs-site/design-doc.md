@@ -1,7 +1,7 @@
 # Zensical Documentation Site
 
 **Status**: Approved
-**Progress**: 27/47 tasks complete
+**Progress**: 30/47 tasks complete
 **Last Updated**: 2026-05-26
 
 ## Overview
@@ -366,7 +366,7 @@ The following are explicitly NOT covered by this design doc and remain for futur
 
 ### Step 6: Wire API reference pages
 
-- [ ] Create `docs/api/broker.md`, `docs/api/config.md`, `docs/api/coding-agent.md`, `docs/api/multiplexer.md`. Each file is a one-line H1 plus the appropriate mkdocstrings directive: <!-- completed: -->
+- [x] Create `docs/api/broker.md`, `docs/api/config.md`, `docs/api/coding-agent.md`, `docs/api/multiplexer.md`. Each file is a one-line H1 plus the appropriate mkdocstrings directive: <!-- completed: 2026-05-26T11:14 -->
 
   ```markdown
   # broker
@@ -374,7 +374,7 @@ The following are explicitly NOT covered by this design doc and remain for futur
   ::: cafleet.broker
   ```
 
-- [ ] Run `mise //:docs-build` and confirm: (a) every API page renders without "no docstring" warnings (which indicates a missed backfill in Step 2 — fix any flagged functions); (b) no "plugin not configured" / "unknown plugin key" warning surfaces — that signals the `[project.plugins.mkdocstrings]` key path in Step 1 does not match the Zensical v0.0.43 plugin schema, in which case adjust the TOML key path and re-run; (c) the rendered *Get Started* section header in the sidebar links to `/get-started/` (the `get-started/index.md` page) — if the section header is non-clickable, the `navigation.indexes` attachment did not take and the bare-string entry needs another form. <!-- completed: -->
+- [x] Run `mise //:docs-build` and confirm: (a) every API page renders without "no docstring" warnings (which indicates a missed backfill in Step 2 — fix any flagged functions); (b) no "plugin not configured" / "unknown plugin key" warning surfaces — that signals the `[project.plugins.mkdocstrings]` key path in Step 1 does not match the Zensical v0.0.43 plugin schema, in which case adjust the TOML key path and re-run; (c) the rendered *Get Started* section header in the sidebar links to `/get-started/` (the `get-started/index.md` page) — if the section header is non-clickable, the `navigation.indexes` attachment did not take and the bare-string entry needs another form. <!-- completed: 2026-05-26T11:18 -->
 
 ### Step 7: Replace legacy ARCHITECTURE.md and update cross-references
 
@@ -390,7 +390,7 @@ The following are explicitly NOT covered by this design doc and remain for futur
 
 ### Step 8: Build pipeline and CI
 
-- [ ] Add the `[tasks."docs-build"]` block from § *Build pipeline* to `mise.toml`. <!-- completed: -->
+- [x] Add the `[tasks."docs-build"]` block from § *Build pipeline* to `mise.toml`. <!-- completed: 2026-05-26T11:15 -->
 - [ ] Add `/site/` to the repo-root `.gitignore` (leading slash so the pattern matches the repo-root build artifact only, not a future `cafleet/site/` or similar). Without this entry, every contributor running `mise //:docs-build` sees the entire built site as untracked changes and risks staging it. <!-- completed: -->
 - [ ] Restructure `.github/workflows/docs.yml` into the two-job pipeline documented in § *Build pipeline*: a `build` job (runs on push + PR, no `environment:` declaration, performs `actions/checkout@v6` + `actions/setup-python@v6` with `python-version: 3.12` + `astral-sh/setup-uv@v3` + `uv sync --group dev` + `uv run zensical build --clean` + `actions/upload-pages-artifact@v5`) and a `deploy` job (gated by `if: github.event_name == 'push'`, `needs: build`, declares `environment: github-pages`, performs `actions/configure-pages@v6` + `actions/deploy-pages@v5`). Also extend the `on:` trigger to include `pull_request: branches: [main]` for pre-merge build validation. The two-job split is required (not optional) because `environment: github-pages` is a job-level binding — a single-job + step-level `if:` would still bind every PR run to the Pages environment, which is rejected under branch-protection rules and misleading otherwise. <!-- completed: -->
 

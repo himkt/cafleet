@@ -57,7 +57,7 @@ is involved for CLI commands.
 
 | CLI command | `broker` function |
 |---|---|
-| `agent register` | `broker.register_agent()` → INSERT agents [+ agent_placements] |
+| `agent register` | `broker.register_agent()` → INSERT agents (+ agent_placements) |
 | `message send` | `broker.send_message()` → validate dest + INSERT tasks |
 | `message broadcast` | `broker.broadcast_message()` → list agents + INSERT tasks per recipient + summary |
 | `message poll` | `broker.poll_tasks()` → SELECT tasks WHERE context_id |

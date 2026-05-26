@@ -1,0 +1,3 @@
+# multiplexer
+
+::: cafleet.multiplexer.base
