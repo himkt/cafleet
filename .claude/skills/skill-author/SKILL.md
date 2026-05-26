@@ -288,7 +288,7 @@ Three pointer shapes:
 | Pointer | When |
 |:--|:--|
 | `paragraph-<HeadingPath>` | A specific section of the document — e.g. `paragraph-Implementation > Step 5`, `paragraph-Specification > 3. Anchor schema`. Use the literal heading text from the document with `>` separators. |
-| `<file>:<line>` | A specific file location — e.g. `cafleet/src/cafleet/base_dir.py:142`, `ARCHITECTURE.md:178`. |
+| `<file>:<line>` | A specific file location — e.g. `cafleet/src/cafleet/base_dir.py:142`, `docs/concepts/overview.md:178`. |
 | `doc` | The whole document; used for top-level milestones (`complete (doc)`, `approved (doc)`) and document-wide blocks (`blocked (doc) — test framework ambiguous`). |
 
 ### 5.4 The pointer-marker pairing rule
