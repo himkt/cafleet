@@ -10,13 +10,13 @@ Replace the monolithic `ARCHITECTURE.md` plus scattered `docs/` Markdown with a 
 
 ## Success Criteria
 
-- [ ] `mise //:docs-build` (equivalent to `uv run zensical build --clean`) exits 0 with no broken links and no missing-handler warnings.
-- [ ] The published site contains four top-level sections — *Get Started*, *Concepts*, *Specification*, *API Reference* — wired via explicit `nav` in `zensical.toml`.
-- [ ] Every section of the legacy `ARCHITECTURE.md` is reachable as a focused Zensical page under *Concepts*; six Mermaid diagrams render in the built site.
-- [ ] mkdocstrings renders complete API reference pages for `cafleet.broker`, `cafleet.config`, `cafleet.coding_agent.base`, and `cafleet.multiplexer.base` with no empty docstring entries.
-- [ ] The repo-root `ARCHITECTURE.md` is reduced to a 3-line redirect stub pointing at the published site and the `docs/` source path; every intra-repo link that previously pointed at it (README, skills, rules, design docs) either points at the stub or is updated to point at the new Zensical page.
-- [ ] The repo-root `CONTRIBUTING.md` is reduced to a 3-line redirect stub pointing at the published *Contributing* page; the file is kept (not deleted) because GitHub special-cases `/CONTRIBUTING.md` as the contributor-link target on the PR-author affordance.
-- [ ] The GitHub Actions `Documentation` workflow uses `uv sync --group dev` + `uv run zensical build --clean` so the published build matches the version locked in `uv.lock`.
+- [x] `mise //:docs-build` (equivalent to `uv run zensical build --clean`) exits 0 with no broken links and no missing-handler warnings.
+- [x] The published site contains four top-level sections — *Get Started*, *Concepts*, *Specification*, *API Reference* — wired via explicit `nav` in `zensical.toml`.
+- [x] Every section of the legacy `ARCHITECTURE.md` is reachable as a focused Zensical page under *Concepts*; six Mermaid diagrams render in the built site.
+- [x] mkdocstrings renders complete API reference pages for `cafleet.broker`, `cafleet.config`, `cafleet.coding_agent.base`, and `cafleet.multiplexer.base` with no empty docstring entries.
+- [x] The repo-root `ARCHITECTURE.md` is reduced to a 3-line redirect stub pointing at the published site and the `docs/` source path; every intra-repo link that previously pointed at it (README, skills, rules, design docs) either points at the stub or is updated to point at the new Zensical page.
+- [x] The repo-root `CONTRIBUTING.md` is reduced to a 3-line redirect stub pointing at the published *Contributing* page; the file is kept (not deleted) because GitHub special-cases `/CONTRIBUTING.md` as the contributor-link target on the PR-author affordance.
+- [x] The GitHub Actions `Documentation` workflow uses `uv sync --group dev` + `uv run zensical build --clean` so the published build matches the version locked in `uv.lock`.
 
 ---
 

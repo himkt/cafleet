@@ -61,7 +61,7 @@ erDiagram
         TEXT text
     }
     agent_placements {
-        TEXT agent_id PK_FK
+        TEXT agent_id PK,FK
         TEXT director_agent_id FK
         TEXT tmux_session
         TEXT tmux_window_id
@@ -72,7 +72,7 @@ erDiagram
     sessions ||--o{ agents : "session_id"
     agents ||--o| agent_placements : "agent_id CASCADE"
     agents ||--o{ tasks : "from_agent_id"
-    agents ||--o{ tasks : "to_agent_id / context_id"
+    agents ||--o{ tasks : "to_agent_id and context_id"
     agents ||--o{ agent_placements : "director_agent_id RESTRICT"
     tasks ||--o| tasks : "origin_task_id"
 ```
