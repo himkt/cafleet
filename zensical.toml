@@ -49,7 +49,6 @@ nav = [
         { "Configure" = "get-started/configure.md" },
         { "Quickstart" = "get-started/quickstart.md" },
         { "Contributing" = "get-started/contributing.md" },
-        { "Authoring" = "get-started/authoring.md" },
     ] },
     { "Concepts" = [
         { "Overview" = "concepts/overview.md" },

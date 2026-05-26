@@ -17,5 +17,3 @@ your machine.
   spawns two members, and sends a message between them.
 - [Contributing](contributing.md) — project layout, local development loop, and
   the design-doc-driven contribution flow.
-- [Authoring](authoring.md) — Markdown extensions, admonitions, Mermaid
-  diagrams, and code-block features available on this documentation site.

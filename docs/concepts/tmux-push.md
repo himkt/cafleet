@@ -12,26 +12,22 @@ a message.
 ## Send + push notification
 
 ```mermaid
+%%{init: {'theme': 'default', 'sequence': {'actorFontSize': 18, 'messageFontSize': 16, 'noteFontSize': 16, 'wrap': true, 'width': 180}}}%%
 sequenceDiagram
     autonumber
-    participant Sender as Sender agent
-    participant Send as broker.send_message
-    participant DB as SQLite tasks
-    participant Notify as broker._try_notify_recipient
-    participant Mux as TmuxMultiplexer.send_inline_preview
-    participant Pane as Recipient pane
-    participant Recv as Recipient agent
+    participant Sender
+    participant Broker
+    participant DB as SQLite
+    participant Pane
+    participant Recipient
 
-    Sender->>Send: cafleet message send --to <r> --text <body>
-    Send->>DB: INSERT INTO tasks (type='unicast', status='input_required')
-    Send->>Notify: _try_notify_recipient(recipient_id, sender_id, task_dict)
-    Notify->>DB: SELECT placement.tmux_pane_id WHERE agent_id=<r>
-    DB-->>Notify: pane_id
-    Notify->>Mux: send_inline_preview(pane_id, task_id_8, sender_8, ts, text)
-    Mux->>Pane: keystroke "[cafleet msg <id8> from <s8> <ts>]\n<text>"
-    Pane-->>Recv: text appears as fresh user-turn input
-    Recv->>Recv: process inline preview
-    Recv->>DB: cafleet message ack --task-id <id> → UPDATE status='completed'
+    Sender->>Broker: cafleet message send --to <r> --text <body>
+    Broker->>DB: INSERT tasks (status=input_required)
+    Broker->>DB: SELECT placement.tmux_pane_id
+    DB-->>Broker: pane_id
+    Broker->>Pane: keystroke inline preview
+    Pane-->>Recipient: text appears as user-turn input
+    Recipient->>DB: message ack → status=completed
 ```
 
 After `broker` saves a delivery task, it looks up the recipient's

@@ -95,6 +95,4 @@ mise //:docs-build
 ```
 
 That task is a thin wrapper around `uv run zensical build --clean` and is the
-same command the GitHub Actions workflow runs. See
-[Authoring](authoring.md) for the Markdown features you can use when writing
-new pages.
+same command the GitHub Actions workflow runs.
