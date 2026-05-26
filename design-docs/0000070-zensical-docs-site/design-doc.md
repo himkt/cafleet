@@ -1,7 +1,7 @@
 # Zensical Documentation Site
 
 **Status**: Approved
-**Progress**: 24/47 tasks complete
+**Progress**: 27/47 tasks complete
 **Last Updated**: 2026-05-26
 
 ## Overview
@@ -360,9 +360,9 @@ The following are explicitly NOT covered by this design doc and remain for futur
 
 ### Step 5: Move per-backend member docs
 
-- [ ] `git mv docs/codex-members.md docs/reference/coding-agents/codex.md` and update the page's intra-doc cross-link (`[ARCHITECTURE.md](../ARCHITECTURE.md)`) to point at `../../concepts/coding-agents.md`. <!-- completed: -->
-- [ ] `git mv docs/opencode-members.md docs/reference/coding-agents/opencode.md` and apply the same cross-link rewrite. <!-- completed: -->
-- [ ] `docs/spec/*.md` files stay at their current paths; no moves needed. Verify each spec page's intra-doc cross-links to `ARCHITECTURE.md` or `codex-members.md` are rewritten to the new Concepts pages or to `reference/coding-agents/`. <!-- completed: -->
+- [x] `git mv docs/codex-members.md docs/reference/coding-agents/codex.md` and update the page's intra-doc cross-link (`[ARCHITECTURE.md](../ARCHITECTURE.md)`) to point at `../../concepts/coding-agents.md`. <!-- completed: 2026-05-26T11:10 -->
+- [x] `git mv docs/opencode-members.md docs/reference/coding-agents/opencode.md` and apply the same cross-link rewrite. <!-- completed: 2026-05-26T11:10 -->
+- [x] `docs/spec/*.md` files stay at their current paths; no moves needed. Verify each spec page's intra-doc cross-links to `ARCHITECTURE.md` or `codex-members.md` are rewritten to the new Concepts pages or to `reference/coding-agents/`. <!-- completed: 2026-05-26T11:10 -->
 
 ### Step 6: Wire API reference pages
 
