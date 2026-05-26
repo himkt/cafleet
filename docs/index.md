@@ -29,3 +29,10 @@ CAFleet works with three coding-agent backends — `claude` (Claude Code), `code
 coexist in the same session.
 
 [Get started :material-arrow-right:](get-started/){ .md-button .md-button--primary }
+
+## Browse the docs
+
+- [Get Started](get-started/) — install, configure, and quickstart walkthroughs.
+- [Concepts](concepts/overview.md) — architecture overview, session isolation, storage, member lifecycle, coding agents, bash routing, tmux push notifications, token reduction.
+- [Specification](spec/data-model.md) — data model, message envelope, CLI options, WebUI API, plus per-backend operational pages.
+- [API Reference](api/broker.md) — Python API documentation generated from source for `cafleet.broker`, `cafleet.config`, `cafleet.coding_agent.base`, and `cafleet.multiplexer.base`.
