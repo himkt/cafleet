@@ -1,7 +1,7 @@
 # Zensical Documentation Site
 
 **Status**: Approved
-**Progress**: 0/47 tasks complete
+**Progress**: 4/47 tasks complete
 **Last Updated**: 2026-05-26
 
 ## Overview
@@ -322,10 +322,10 @@ The following are explicitly NOT covered by this design doc and remain for futur
 
 ### Step 1: Dependencies and project config
 
-- [ ] Confirm `pyproject.toml` `[dependency-groups].dev` lists both `zensical>=0.0.43` and `mkdocstrings-python` (the user already ran `uv add --dev` for both — verify `uv.lock` reflects them; re-run `uv sync` if not). <!-- completed: -->
-- [ ] Update `zensical.toml` `[project]` block: set `site_name = "CAFleet"`, `site_description = "Message broker and agent registry for coding agents."`, `site_author = "himkt"`, uncomment and set `site_url = "https://himkt.github.io/cafleet/"`, rewrite `copyright` to `"Copyright © 2026 himkt"`. <!-- completed: -->
-- [ ] Add the explicit `nav = [...]` block from § *zensical.toml changes* above. <!-- completed: -->
-- [ ] Add the `[project.plugins.mkdocstrings]` and `[project.plugins.mkdocstrings.handlers.python]` blocks from § *mkdocstrings configuration*. Do NOT run a build at this point — the nav block references `concepts/*`, `spec/*`, `reference/*`, `api/*` files that Steps 3-6 create, so `zensical build` would fail with ~16 missing-file errors and drown the diagnostic signal we care about. Plugin-key-path verification happens in Step 6 after every referenced file exists. <!-- completed: -->
+- [x] Confirm `pyproject.toml` `[dependency-groups].dev` lists both `zensical>=0.0.43` and `mkdocstrings-python` (the user already ran `uv add --dev` for both — verify `uv.lock` reflects them; re-run `uv sync` if not). <!-- completed: 2026-05-26T10:46 -->
+- [x] Update `zensical.toml` `[project]` block: set `site_name = "CAFleet"`, `site_description = "Message broker and agent registry for coding agents."`, `site_author = "himkt"`, uncomment and set `site_url = "https://himkt.github.io/cafleet/"`, rewrite `copyright` to `"Copyright © 2026 himkt"`. <!-- completed: 2026-05-26T10:46 -->
+- [x] Add the explicit `nav = [...]` block from § *zensical.toml changes* above. <!-- completed: 2026-05-26T10:46 -->
+- [x] Add the `[project.plugins.mkdocstrings]` and `[project.plugins.mkdocstrings.handlers.python]` blocks from § *mkdocstrings configuration*. Do NOT run a build at this point — the nav block references `concepts/*`, `spec/*`, `reference/*`, `api/*` files that Steps 3-6 create, so `zensical build` would fail with ~16 missing-file errors and drown the diagnostic signal we care about. Plugin-key-path verification happens in Step 6 after every referenced file exists. <!-- completed: 2026-05-26T10:46 -->
 
 
 ### Step 2: Backfill Google-style docstrings (BEFORE wiring mkdocstrings pages)
