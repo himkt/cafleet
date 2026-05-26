@@ -1,7 +1,7 @@
 # Zensical Documentation Site
 
 **Status**: Approved
-**Progress**: 4/47 tasks complete
+**Progress**: 9/47 tasks complete
 **Last Updated**: 2026-05-26
 
 ## Overview
@@ -330,11 +330,11 @@ The following are explicitly NOT covered by this design doc and remain for futur
 
 ### Step 2: Backfill Google-style docstrings (BEFORE wiring mkdocstrings pages)
 
-- [ ] `cafleet.broker` — backfill Google-style docstrings on every public function (no leading underscore). The function list as of design time: `create_session`, `list_sessions`, `get_session`, `delete_session`, `register_agent`, `get_agent`, `list_agents`, `deregister_agent`, `update_placement_pane_id`, `list_members`, `list_members_with_activity`, `verify_agent_session`, `send_message`, `broadcast_message`, `poll_tasks`, `ack_task`, `cancel_task`, `list_session_agents`, `list_inbox`, `list_sent`, `list_timeline`, `get_agent_names`, `get_task`. Existing one-line docstrings are extended with `Args:` / `Returns:` / `Raises:` blocks where the signature has more than one parameter or a non-trivial error contract. <!-- completed: -->
-- [ ] `cafleet.config` — add module docstring and Google-style class docstring on `Settings` documenting each field (`database_url`, `broker_host`, `broker_port`, `max_text_len`) including the `validation_alias` env var name and the default. Add a one-line docstring on `_default_database_url` (the only function in the module). <!-- completed: -->
-- [ ] `cafleet.coding_agent.base` — already has Google-style docstrings on the Protocol; verify completeness, add a module docstring describing the Protocol's role as the registry contract. <!-- completed: -->
-- [ ] `cafleet.multiplexer.base` — confirm Protocol / dataclass / helper docstrings are Google-style and document every public method (`ensure_available`, `context_discovery`, `split_window`, `select_layout`, `kill_pane`, `pane_exists`, `wait_for_pane_gone`, `send_exit`, `send_poll_trigger`, `send_inline_preview`, `send_choice_key`, `send_freetext_and_submit`, `send_bash_command`, `capture_pane`). Document `MultiplexerContext` fields. Add module docstring if missing. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` to confirm the docstring backfill introduces no static-analysis regressions. <!-- completed: -->
+- [x] `cafleet.broker` — backfill Google-style docstrings on every public function (no leading underscore). The function list as of design time: `create_session`, `list_sessions`, `get_session`, `delete_session`, `register_agent`, `get_agent`, `list_agents`, `deregister_agent`, `update_placement_pane_id`, `list_members`, `list_members_with_activity`, `verify_agent_session`, `send_message`, `broadcast_message`, `poll_tasks`, `ack_task`, `cancel_task`, `list_session_agents`, `list_inbox`, `list_sent`, `list_timeline`, `get_agent_names`, `get_task`. Existing one-line docstrings are extended with `Args:` / `Returns:` / `Raises:` blocks where the signature has more than one parameter or a non-trivial error contract. <!-- completed: 2026-05-26T10:55 -->
+- [x] `cafleet.config` — add module docstring and Google-style class docstring on `Settings` documenting each field (`database_url`, `broker_host`, `broker_port`, `max_text_len`) including the `validation_alias` env var name and the default. Add a one-line docstring on `_default_database_url` (the only function in the module). <!-- completed: 2026-05-26T10:55 -->
+- [x] `cafleet.coding_agent.base` — already has Google-style docstrings on the Protocol; verify completeness, add a module docstring describing the Protocol's role as the registry contract. <!-- completed: 2026-05-26T10:55 -->
+- [x] `cafleet.multiplexer.base` — confirm Protocol / dataclass / helper docstrings are Google-style and document every public method (`ensure_available`, `context_discovery`, `split_window`, `kill_pane`, `pane_exists`, `wait_for_pane_gone`, `send_exit`, `send_poll_trigger`, `send_inline_preview`, `send_choice_key`, `send_freetext_and_submit`, `send_bash_command`, `capture_pane`). Document `MultiplexerContext` fields. Add module docstring if missing. <!-- completed: 2026-05-26T10:55 -->
+- [x] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` to confirm the docstring backfill introduces no static-analysis regressions. <!-- completed: 2026-05-26T10:55 -->
 
 ### Step 3: Reset the docs/ scaffolding
 

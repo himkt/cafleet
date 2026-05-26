@@ -114,9 +114,19 @@ def create_session(
     back-filled once the Director's agent row exists, so the column is
     DB-nullable even though the post-bootstrap invariant is NOT NULL.
 
-    ``coding_agent`` is operator-declared metadata that lands in the root
-    Director's ``placement.coding_agent`` column. The CLI is the only caller
-    and always supplies it (default ``'claude'`` lives at the Click layer).
+    Args:
+        label: Optional human-readable label for the session.
+        director_context: Resolved tmux pane identity for the root Director,
+            obtained via ``Multiplexer.context_discovery``.
+        coding_agent: Operator-declared metadata that lands in the root
+            Director's ``placement.coding_agent`` column. The CLI is the only
+            caller and always supplies it (default ``'claude'`` lives at the
+            Click layer).
+
+    Returns:
+        A dict carrying ``session_id``, ``label``, ``created_at``,
+        ``administrator_agent_id``, and a ``director`` sub-dict with the
+        Director's identity and placement metadata.
     """
     session_id = str(uuid.uuid4())
     created_at = _now_iso()
@@ -243,6 +253,13 @@ def get_session(session_id: str) -> dict | None:
     The returned dict exposes ``deleted_at`` so callers can distinguish a
     missing session from a soft-deleted one — ``register_agent`` relies on
     this to reject soft-deleted sessions with a different error message.
+
+    Args:
+        session_id: Session UUID to look up.
+
+    Returns:
+        Dict with ``session_id``, ``label``, ``created_at``, ``deleted_at``,
+        and ``director_agent_id``, or ``None`` if no row exists.
     """
     sm = get_sync_sessionmaker()
     with sm() as session:
@@ -267,6 +284,16 @@ def delete_session(session_id: str) -> dict:
     Tasks are left untouched so audit history survives. Idempotent: re-running
     against an already-deleted row short-circuits on the ``deleted_at IS NULL``
     guard and returns ``deregistered_count=0``.
+
+    Args:
+        session_id: Session UUID to soft-delete.
+
+    Returns:
+        Dict with ``deregistered_count`` — the number of agents flipped from
+        ``active`` to ``deregistered`` by this call.
+
+    Raises:
+        click.ClickException: If the session does not exist.
     """
     now = _now_iso()
     sm = get_sync_sessionmaker()
@@ -322,6 +349,26 @@ def register_agent(
     "not found" case so callers can surface the right recovery hint. When
     ``placement`` is supplied, the named Director must be active in the
     same session and must not be the Administrator.
+
+    Args:
+        session_id: Session UUID the new agent belongs to.
+        name: Short human-identifiable label.
+        description: One-sentence purpose statement.
+        skills: Optional list of skill dicts persisted into the agent's
+            ``agent_card_json`` blob.
+        placement: Optional dict carrying ``director_agent_id``,
+            ``tmux_session``, ``tmux_window_id``, ``tmux_pane_id``, and
+            ``coding_agent``. When present, an ``AgentPlacement`` row is
+            created alongside the agent.
+
+    Returns:
+        Dict with ``agent_id``, ``name``, and ``registered_at``.
+
+    Raises:
+        click.UsageError: If the session does not exist, is soft-deleted, or
+            the named Director is not active in the same session.
+        click.ClickException: If the named Director is the built-in
+            Administrator.
     """
     sess = get_session(session_id)
     if sess is None:
@@ -388,7 +435,18 @@ def register_agent(
 
 
 def get_agent(agent_id: str, session_id: str) -> dict | None:
-    """Return the active agent's detail (with placement) or None."""
+    """Return the active agent's detail (with placement) or None.
+
+    Args:
+        agent_id: Agent UUID to look up.
+        session_id: Session UUID the agent must belong to.
+
+    Returns:
+        Dict with ``agent_id``, ``name``, ``description``, ``status``,
+        ``registered_at``, ``kind`` (``"user"`` or the Administrator kind),
+        and ``placement`` (the placement sub-dict or ``None``). Returns
+        ``None`` if no active agent matches.
+    """
     sm = get_sync_sessionmaker()
     with sm() as session:
         agent = session.execute(
@@ -451,10 +509,17 @@ def list_agents(session_id: str) -> list[dict]:
 def deregister_agent(agent_id: str) -> bool:
     """Soft-delete the agent and drop its placement.
 
-    Returns True if a row was flipped from ``active`` to ``deregistered``.
-    Raises ``click.ClickException`` for the built-in Administrator and
-    ``click.UsageError`` for the root Director of any session, which must
-    be torn down via ``cafleet session delete``.
+    Args:
+        agent_id: Agent UUID to deregister.
+
+    Returns:
+        ``True`` if a row was flipped from ``active`` to ``deregistered``;
+        ``False`` if no matching active agent existed.
+
+    Raises:
+        click.UsageError: If ``agent_id`` is the root Director of any
+            session — torn down via ``cafleet session delete`` instead.
+        click.ClickException: If ``agent_id`` is the built-in Administrator.
     """
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
@@ -492,6 +557,20 @@ def deregister_agent(agent_id: str) -> bool:
 
 
 def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
+    """Patch the agent's placement with a freshly resolved tmux pane id.
+
+    Called after ``split_window`` returns the spawned pane's id so the
+    placement row reflects the live pane rather than the placeholder used
+    during the initial INSERT.
+
+    Args:
+        agent_id: Agent UUID whose placement should be updated.
+        pane_id: New ``tmux_pane_id`` value.
+
+    Returns:
+        The refreshed placement dict, or ``None`` if no placement row was
+        affected.
+    """
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
         updated = session.execute(
@@ -533,7 +612,17 @@ def _base_members_select(session_id: str, director_agent_id: str):
 
 
 def list_members(session_id: str, director_agent_id: str) -> list[dict]:
-    """Return active members belonging to the given director, with placements."""
+    """Return active members belonging to the given director, with placements.
+
+    Args:
+        session_id: Session UUID to scope the query to.
+        director_agent_id: Director UUID; only members whose
+            ``placement.director_agent_id`` matches are returned.
+
+    Returns:
+        List of dicts each carrying ``agent_id``, ``name``, ``description``,
+        ``status``, ``registered_at``, and ``placement``.
+    """
     stmt = _base_members_select(session_id, director_agent_id)
     sm = get_sync_sessionmaker()
     with sm() as session:
@@ -560,8 +649,16 @@ def list_members_with_activity(session_id: str, director_agent_id: str) -> list[
     land in the broadcaster's own context with ``status_state='completed'``
     and would otherwise pollute every proxy for the broadcaster.
 
-    ``idle`` is the integer-second delta between ``now`` and the most recent
-    of ``last_sent`` / ``last_recv``; ``None`` when both are ``None``.
+    Args:
+        session_id: Session UUID to scope the query to.
+        director_agent_id: Director UUID whose members will be enumerated.
+
+    Returns:
+        List of dicts as in :func:`list_members`, additionally carrying
+        ``last_sent``, ``last_recv``, ``last_ack`` (ISO timestamps or
+        ``None``), and ``idle`` — the integer-second delta between ``now``
+        and the most recent of ``last_sent`` / ``last_recv``, or ``None``
+        when both are ``None``.
     """
     last_sent_sq = (
         select(func.max(Task.status_timestamp))
@@ -630,7 +727,16 @@ def _idle_seconds(
 
 
 def verify_agent_session(agent_id: str, session_id: str) -> bool:
-    """Return True iff the agent belongs to the session (any status)."""
+    """Return True iff the agent belongs to the session (any status).
+
+    Args:
+        agent_id: Agent UUID to verify.
+        session_id: Session UUID to check membership against.
+
+    Returns:
+        ``True`` if a matching row exists; ``False`` otherwise. Status is
+        ignored — deregistered agents still pass.
+    """
     sm = get_sync_sessionmaker()
     with sm() as session:
         return session.execute(
@@ -707,7 +813,30 @@ def _unicast_task_dict(
 
 
 def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
-    """Create a unicast task addressed to ``to`` and best-effort notify it."""
+    """Create a unicast task addressed to ``to`` and best-effort notify it.
+
+    Persists a new ``Task`` row with ``type='unicast'`` and
+    ``status_state='input_required'``, then calls
+    ``_try_notify_recipient`` to keystroke an inline preview into the
+    recipient's tmux pane. Notification failure does not roll back the
+    insert — the message remains available via :func:`poll_tasks`.
+
+    Args:
+        session_id: Session UUID; sender and recipient must both belong to it.
+        agent_id: Sender's agent UUID.
+        to: Recipient's agent UUID.
+        text: Message body. Truncation is render-side; the persisted row
+            holds the full string.
+
+    Returns:
+        Dict with ``task`` (the persisted task dict) and ``notification_sent``
+        (boolean indicating whether the inline-preview keystroke landed).
+
+    Raises:
+        ValueError: If ``to`` is not a valid UUID, the sender is not active
+            in ``session_id``, or the recipient is missing or lives in a
+            different session.
+    """
     try:
         uuid.UUID(to)
     except ValueError as exc:
@@ -752,7 +881,22 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
     """Fan out one delivery task per active non-admin peer plus a sender summary.
 
     Administrators are excluded at the SQL layer via ``json_extract`` so the
-    card blob stays in the database; they are write-only identities.
+    card blob stays in the database; they are write-only identities. Every
+    delivery row shares the same ``origin_task_id`` (the summary's task id)
+    so receivers can thread back to the original broadcast.
+
+    Args:
+        session_id: Session UUID to scope the broadcast to.
+        agent_id: Broadcaster's agent UUID.
+        text: Message body delivered to every recipient.
+
+    Returns:
+        Single-element list containing a dict with ``task`` (the summary row
+        owned by the broadcaster) and ``notifications_sent_count`` — the
+        number of inline-preview keystrokes that landed successfully.
+
+    Raises:
+        ValueError: If the sender is not active in ``session_id``.
     """
     summary_task_id = str(uuid.uuid4())
 
@@ -826,7 +970,23 @@ def poll_tasks(
     page_size: int | None = None,
     status: str | None = None,
 ) -> list[dict]:
-    """Return tasks addressed to ``agent_id`` in DESC timestamp order."""
+    """Return tasks addressed to ``agent_id`` in DESC timestamp order.
+
+    ``broadcast_summary`` rows are filtered out — those belong to the
+    broadcaster's own context and are not deliveries.
+
+    Args:
+        agent_id: Recipient agent UUID; matches ``Task.context_id``.
+        since: Optional ISO-8601 timestamp; only tasks strictly newer than
+            this value are returned (lexicographic comparison on the
+            microsecond-precision ``+00:00`` form).
+        page_size: Optional row cap applied after ordering.
+        status: Optional ``status_state`` filter (e.g. ``"input_required"``).
+
+    Returns:
+        List of flat task dicts (one per row) carrying every column from the
+        ``tasks`` table.
+    """
     return _list_tasks_where(
         Task.context_id == agent_id,
         since=since,
@@ -867,7 +1027,20 @@ def _transition_task_state(
 
 
 def ack_task(agent_id: str, task_id: str) -> dict:
-    """Transition a task from ``input_required`` to ``completed`` for the recipient."""
+    """Transition a task from ``input_required`` to ``completed`` for the recipient.
+
+    Args:
+        agent_id: Recipient agent UUID; must match ``Task.context_id``.
+        task_id: Task UUID to ack.
+
+    Returns:
+        Dict with ``task`` — the updated task dict.
+
+    Raises:
+        ValueError: If the task does not exist or is not in
+            ``input_required`` state.
+        PermissionError: If ``agent_id`` is not the recipient.
+    """
     return _transition_task_state(
         agent_id,
         task_id,
@@ -879,7 +1052,20 @@ def ack_task(agent_id: str, task_id: str) -> dict:
 
 
 def cancel_task(agent_id: str, task_id: str) -> dict:
-    """Transition a task from ``input_required`` to ``canceled`` for the sender."""
+    """Transition a task from ``input_required`` to ``canceled`` for the sender.
+
+    Args:
+        agent_id: Sender agent UUID; must match ``Task.from_agent_id``.
+        task_id: Task UUID to cancel.
+
+    Returns:
+        Dict with ``task`` — the updated task dict.
+
+    Raises:
+        ValueError: If the task does not exist or is not in
+            ``input_required`` state.
+        PermissionError: If ``agent_id`` is not the sender.
+    """
     return _transition_task_state(
         agent_id,
         task_id,
@@ -973,7 +1159,19 @@ def list_sent(agent_id: str) -> list[dict]:
 
 
 def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
-    """Return the session's recent tasks (flat typed-column dicts) in DESC timestamp order."""
+    """Return the session's recent tasks in DESC ``status_timestamp`` order.
+
+    ``broadcast_summary`` rows are filtered out so the timeline shows only
+    delivery rows. Membership is tested via ``from_agent_id`` joined to
+    ``agents.session_id``.
+
+    Args:
+        session_id: Session UUID to scope the query to.
+        limit: Maximum number of rows to return (default 200).
+
+    Returns:
+        List of flat task dicts in DESC ``status_timestamp`` order.
+    """
     stmt = (
         select(*(getattr(Task, col) for col in _TASK_COLUMNS))
         .join(Agent, Task.from_agent_id == Agent.agent_id)
@@ -1003,7 +1201,19 @@ def get_agent_names(agent_ids: list[str]) -> dict[str, str]:
 
 
 def get_task(session_id: str, task_id: str) -> dict:
-    """Return the task iff at least one of its endpoints lives in the session."""
+    """Return the task iff at least one of its endpoints lives in the session.
+
+    Args:
+        session_id: Session UUID used to gate visibility.
+        task_id: Task UUID to fetch.
+
+    Returns:
+        Dict with ``task`` — the flat typed-column task dict.
+
+    Raises:
+        ValueError: If the task does not exist or neither endpoint belongs
+            to ``session_id``.
+    """
     sm = get_sync_sessionmaker()
     with sm() as session:
         task_dict = _read_task(session, task_id)
