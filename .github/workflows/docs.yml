@@ -7,13 +7,11 @@ on:
   pull_request:
     branches:
       - main
-permissions:
-  contents: read
-  pages: write
-  id-token: write
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
@@ -27,6 +25,9 @@ jobs:
     if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
