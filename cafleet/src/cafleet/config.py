@@ -38,9 +38,11 @@ class Settings(BaseSettings):
         broker_port: Bind port for ``cafleet server``. Sourced from
             ``CAFLEET_BROKER_PORT``; defaults to ``8000``.
         max_text_len: Codepoint truncation limit applied when rendering
-            message bodies (CLI echo, inline preview, WebUI). Sourced from
-            ``CAFLEET_MAX_TEXT_LEN``; defaults to ``200``. The persisted
-            ``Task.text`` column is never truncated.
+            message bodies (CLI echo and broker inline-preview keystroke).
+            Sourced from ``CAFLEET_MAX_TEXT_LEN``; defaults to ``200``. The
+            persisted ``Task.text`` column is never truncated, and the
+            WebUI API returns raw broker dicts that do not apply this
+            limit.
     """
 
     database_url: str = Field(

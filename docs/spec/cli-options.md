@@ -26,7 +26,7 @@ Placed **before** the subcommand:
 | `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
-### `--full` semantics (cross-subcommand escape hatch)
+### `--full` semantics (cross-subcommand escape hatch) {#full-semantics}
 
 `--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch. A single flag covers four overloaded surfaces — deliberately one flag rather than `--full-envelope` / `--full-recipients` / `--full-card` / `--full-body` variants:
 
@@ -106,7 +106,7 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--full` | no | Per-subcommand option (placed after the subcommand name, like `--agent-id` and `--task-id`). Disables truncation; emits the full message body and the full typed-column envelope. Composes orthogonally with `--json`. See [`--full` semantics](#-full-semantics-cross-subcommand-escape-hatch) for the cross-subcommand summary. |
+| `--full` | no | Per-subcommand option (placed after the subcommand name, like `--agent-id` and `--task-id`). Disables truncation; emits the full message body and the full typed-column envelope. Composes orthogonally with `--json`. See [`--full` semantics](#full-semantics) for the cross-subcommand summary. |
 | `--quiet` | no | On `message send`, `message ack`, and `member ping`: emit only the new task id (8-char prefix) on stdout, nothing else. Mutually exclusive with `--full`; the two are not expected to be combined. |
 
 Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split.

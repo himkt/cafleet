@@ -115,7 +115,7 @@ A poll result with one unicast delivery (id `abc12345…`, from `xy23ef67…`, b
 ]
 ```
 
-A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id8>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary task plus the wrapper-level `notifications_sent_count` field — there is no per-recipient envelope list, and `--full` is a no-op for `message broadcast` (see [`--full` semantics](cli-options.md#-full-semantics-cross-subcommand-escape-hatch) for the cross-subcommand summary).
+A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id8>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary task plus the wrapper-level `notifications_sent_count` field — there is no per-recipient envelope list, and `--full` is a no-op for `message broadcast` (see [`--full` semantics](cli-options.md#full-semantics) for the cross-subcommand summary).
 
 ### Text mode
 
@@ -136,7 +136,7 @@ The flags that govern envelope rendering are documented in [cli-options.md](cli-
 
 - [`--json`](cli-options.md#global-options) — emit JSON output (compact by default).
 - [`--pretty`](cli-options.md#global-options) — switch JSON output from compact to indented.
-- [`--full`](cli-options.md#-full-semantics-cross-subcommand-escape-hatch) — return the full typed-column envelope and untruncated body.
+- [`--full`](cli-options.md#full-semantics) — return the full typed-column envelope and untruncated body.
 - [`--quiet`](cli-options.md#message-body-truncation) — on `message send` / `message ack` / `member ping`, emit only the new task id (8-char prefix).
 
 `CAFLEET_MAX_TEXT_LEN` (default `200`) controls body truncation in the rendered envelope; it is documented under [Message Body Truncation](cli-options.md#message-body-truncation).
