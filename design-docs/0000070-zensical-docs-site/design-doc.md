@@ -1,7 +1,7 @@
 # Zensical Documentation Site
 
 **Status**: Approved
-**Progress**: 9/47 tasks complete
+**Progress**: 14/47 tasks complete
 **Last Updated**: 2026-05-26
 
 ## Overview
@@ -338,11 +338,11 @@ The following are explicitly NOT covered by this design doc and remain for futur
 
 ### Step 3: Reset the docs/ scaffolding
 
-- [ ] Replace `docs/index.md` with the site landing page (paraphrased from `README.md` intro paragraph — lines 1-6, above `## 1. Install`: project pitch + component-overview Mermaid diagram + a prominent "Get started" call-to-action linking to `get-started/`). Keep the front-matter `icon: lucide/rocket`. This page is NOT in the nav block — it is served at `/` and reached via the home link in the header. <!-- completed: -->
-- [ ] Create `docs/get-started/index.md` as the Get Started section index — a one-paragraph intro and a list of the five sub-pages with a one-line each. This file is the section landing per the `navigation.indexes` convention. <!-- completed: -->
-- [ ] Delete the scaffolding `docs/markdown.md` placeholder and create `docs/get-started/authoring.md` in its place as the contributor authoring guide (admonition syntax, Mermaid syntax, code-block features, code-annotations, footnotes — anchor each section to the Zensical upstream doc URL). <!-- completed: -->
-- [ ] Create `docs/get-started/install.md`, `docs/get-started/configure.md`, `docs/get-started/quickstart.md` from `README.md` §1 / §2 / §3–§4. <!-- completed: -->
-- [ ] Create `docs/get-started/contributing.md` by porting `/CONTRIBUTING.md` verbatim into Zensical (preserve every table, code block, and intra-doc link). Rewrite the existing `[design-docs/](design-docs/)` link to point at the in-repo path resolvable from the Zensical source (`../../design-docs/`) and verify the build does not flag the path. <!-- completed: -->
+- [x] Replace `docs/index.md` with the site landing page (paraphrased from `README.md` intro paragraph — lines 1-6, above `## 1. Install`: project pitch + component-overview Mermaid diagram + a prominent "Get started" call-to-action linking to `get-started/`). Keep the front-matter `icon: lucide/rocket`. This page is NOT in the nav block — it is served at `/` and reached via the home link in the header. <!-- completed: 2026-05-26T11:00 -->
+- [x] Create `docs/get-started/index.md` as the Get Started section index — a one-paragraph intro and a list of the five sub-pages with a one-line each. This file is the section landing per the `navigation.indexes` convention. <!-- completed: 2026-05-26T11:00 -->
+- [x] Delete the scaffolding `docs/markdown.md` placeholder and create `docs/get-started/authoring.md` in its place as the contributor authoring guide (admonition syntax, Mermaid syntax, code-block features, code-annotations, footnotes — anchor each section to the Zensical upstream doc URL). <!-- completed: 2026-05-26T11:00 -->
+- [x] Create `docs/get-started/install.md`, `docs/get-started/configure.md`, `docs/get-started/quickstart.md` from `README.md` §1 / §2 / §3–§4. <!-- completed: 2026-05-26T11:00 -->
+- [x] Create `docs/get-started/contributing.md` by porting `/CONTRIBUTING.md` verbatim into Zensical (preserve every table, code block, and intra-doc link). Rewrite the existing `[design-docs/](design-docs/)` link to point at the in-repo path resolvable from the Zensical source (`../../design-docs/`) and verify the build does not flag the path. <!-- completed: 2026-05-26T11:00 -->
 
 ### Step 4: Port ARCHITECTURE.md into Concepts pages
 
