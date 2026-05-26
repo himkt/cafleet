@@ -43,7 +43,9 @@ class Multiplexer(Protocol):
         is not a live multiplexer session.
 
         Raises:
-            RuntimeError: If the precondition fails.
+            Exception: A backend-specific exception when the precondition
+                fails (e.g. :class:`TmuxError` from
+                :class:`~cafleet.multiplexer.tmux.TmuxMultiplexer`).
         """
         ...
 
