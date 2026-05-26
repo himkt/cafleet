@@ -1,7 +1,7 @@
 # Zensical Documentation Site
 
 **Status**: Approved
-**Progress**: 14/47 tasks complete
+**Progress**: 24/47 tasks complete
 **Last Updated**: 2026-05-26
 
 ## Overview
@@ -346,17 +346,17 @@ The following are explicitly NOT covered by this design doc and remain for futur
 
 ### Step 4: Port ARCHITECTURE.md into Concepts pages
 
-- [ ] `docs/concepts/overview.md` — port `ARCHITECTURE.md` § *Architecture Diagram*, § *Component Layout*, § *Operation Mapping*, § *Package Structure*, § *Plugin Packaging*, § *Design Document Orchestration Skills*, and the *CLI Option Sources* sub-section of § *Key Design Decisions* (placed next to *Operation Mapping* so the "session-id / agent-id are literal flags, not env vars" rationale lives with the per-CLI-command surface). Include Mermaid diagram #1 (component overview). <!-- completed: -->
-- [ ] `docs/concepts/overview.md` — additionally port `ARCHITECTURE.md` § *WebUI* into the same page (sender-selector, auto-refresh cadence, session-scoped endpoint contract, the `X-Session-Id` header convention). Keep this as a separate sub-section heading inside `overview.md` so the WebUI narrative is locatable from the page TOC. <!-- completed: -->
-- [ ] `docs/concepts/session-isolation.md` — port `ARCHITECTURE.md` § *Session Isolation* (every sub-bullet: Registration, Isolation rules, Session bootstrap transactional, Session soft-delete, Soft-delete visibility, Root Director protection, Built-in Administrator agent). Include Mermaid diagram #2 (session-create sequence). <!-- completed: -->
-- [ ] `docs/concepts/storage.md` — port `ARCHITECTURE.md` § *Storage Layer* (every sub-section: Backend, Predominantly relational model, Session ownership, Schema management, No physical cleanup) plus § *Key Design Decisions* / *contextId Convention* and / *Task Lifecycle Mapping*. Include Mermaid diagram #3 (ER diagram — verify the rendered diagram includes the `agent_placements.director_agent_id` parent-child edge per the diagram-table description, not just the `tasks.origin_task_id` self-reference). <!-- completed: -->
-- [ ] `docs/concepts/member-lifecycle.md` — port `ARCHITECTURE.md` § *Member Lifecycle*. Include Mermaid diagram #4 (state diagram). <!-- completed: -->
-- [ ] `docs/concepts/coding-agents.md` — port `ARCHITECTURE.md` § *Coding Agents*. Cross-link to the per-backend operational pages using the relative-path form per § *Cross-link form*: `../reference/coding-agents/codex.md` and `../reference/coding-agents/opencode.md` (these target paths match the IA table, the nav block, and the Step 5 `git mv` targets). Include Mermaid diagram #6 (backend resolution flow). <!-- completed: -->
+- [x] `docs/concepts/overview.md` — port `ARCHITECTURE.md` § *Architecture Diagram*, § *Component Layout*, § *Operation Mapping*, § *Package Structure*, § *Plugin Packaging*, § *Design Document Orchestration Skills*, and the *CLI Option Sources* sub-section of § *Key Design Decisions* (placed next to *Operation Mapping* so the "session-id / agent-id are literal flags, not env vars" rationale lives with the per-CLI-command surface). Include Mermaid diagram #1 (component overview). <!-- completed: 2026-05-26T11:08 -->
+- [x] `docs/concepts/overview.md` — additionally port `ARCHITECTURE.md` § *WebUI* into the same page (sender-selector, auto-refresh cadence, session-scoped endpoint contract, the `X-Session-Id` header convention). Keep this as a separate sub-section heading inside `overview.md` so the WebUI narrative is locatable from the page TOC. <!-- completed: 2026-05-26T11:08 -->
+- [x] `docs/concepts/session-isolation.md` — port `ARCHITECTURE.md` § *Session Isolation* (every sub-bullet: Registration, Isolation rules, Session bootstrap transactional, Session soft-delete, Soft-delete visibility, Root Director protection, Built-in Administrator agent). Include Mermaid diagram #2 (session-create sequence). <!-- completed: 2026-05-26T11:08 -->
+- [x] `docs/concepts/storage.md` — port `ARCHITECTURE.md` § *Storage Layer* (every sub-section: Backend, Predominantly relational model, Session ownership, Schema management, No physical cleanup) plus § *Key Design Decisions* / *contextId Convention* and / *Task Lifecycle Mapping*. Include Mermaid diagram #3 (ER diagram — verify the rendered diagram includes the `agent_placements.director_agent_id` parent-child edge per the diagram-table description, not just the `tasks.origin_task_id` self-reference). <!-- completed: 2026-05-26T11:08 -->
+- [x] `docs/concepts/member-lifecycle.md` — port `ARCHITECTURE.md` § *Member Lifecycle*. Include Mermaid diagram #4 (state diagram). <!-- completed: 2026-05-26T11:08 -->
+- [x] `docs/concepts/coding-agents.md` — port `ARCHITECTURE.md` § *Coding Agents*. Cross-link to the per-backend operational pages using the relative-path form per § *Cross-link form*: `../reference/coding-agents/codex.md` and `../reference/coding-agents/opencode.md` (these target paths match the IA table, the nav block, and the Step 5 `git mv` targets). Include Mermaid diagram #6 (backend resolution flow). <!-- completed: 2026-05-26T11:08 -->
 
-- [ ] `docs/concepts/bash-routing.md` — port `ARCHITECTURE.md` § *Bash Routing via Director*. <!-- completed: -->
-- [ ] `docs/concepts/tmux-push.md` — port `ARCHITECTURE.md` § *tmux Push Notifications* plus § *CLI Message Body Truncation*. Include Mermaid diagram #5 (message-send + push-notification sequence). <!-- completed: -->
-- [ ] `docs/concepts/token-reduction.md` — port `ARCHITECTURE.md` § *Token Reduction*. Convert the Surface-N table to a Zensical-rendered Markdown table with the same columns. <!-- completed: -->
-- [ ] Verify every internal cross-link inside the new Concepts pages resolves and conforms to § *Cross-link form* (relative path rooted at the current page's directory; no `[`...`](../ARCHITECTURE.md#...)` style links should remain — rewrite to `<sibling>.md#<anchor>` for same-section targets or `../<section>/<page>.md#<anchor>` for cross-section targets). Root-relative and absolute-site-URL forms inside Zensical sources are not allowed. <!-- completed: -->
+- [x] `docs/concepts/bash-routing.md` — port `ARCHITECTURE.md` § *Bash Routing via Director*. <!-- completed: 2026-05-26T11:08 -->
+- [x] `docs/concepts/tmux-push.md` — port `ARCHITECTURE.md` § *tmux Push Notifications* plus § *CLI Message Body Truncation*. Include Mermaid diagram #5 (message-send + push-notification sequence). <!-- completed: 2026-05-26T11:08 -->
+- [x] `docs/concepts/token-reduction.md` — port `ARCHITECTURE.md` § *Token Reduction*. Convert the Surface-N table to a Zensical-rendered Markdown table with the same columns. <!-- completed: 2026-05-26T11:08 -->
+- [x] Verify every internal cross-link inside the new Concepts pages resolves and conforms to § *Cross-link form* (relative path rooted at the current page's directory; no `[`...`](../ARCHITECTURE.md#...)` style links should remain — rewrite to `<sibling>.md#<anchor>` for same-section targets or `../<section>/<page>.md#<anchor>` for cross-section targets). Root-relative and absolute-site-URL forms inside Zensical sources are not allowed. <!-- completed: 2026-05-26T11:08 -->
 
 ### Step 5: Move per-backend member docs
 
