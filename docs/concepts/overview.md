@@ -15,6 +15,7 @@ one another.
 ## Architecture diagram
 
 ```mermaid
+%%{init: {'theme': 'default', 'themeVariables': {'fontSize': '16px'}}}%%
 flowchart LR
     CLI["CLI (click)"] --> Broker["broker.py<br/>(sync SQLAlchemy)"]
     WebUI["Admin WebUI"] --> Server["server.py<br/>(FastAPI)"]

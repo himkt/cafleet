@@ -30,6 +30,7 @@ by content). Tasks were document-blob-shaped pre-Surface-14; the `task_json`
 blob was dropped and every Task field now lives in a typed column.
 
 ```mermaid
+%%{init: {'theme': 'default', 'themeVariables': {'fontSize': '15px'}}}%%
 erDiagram
     sessions {
         TEXT session_id PK

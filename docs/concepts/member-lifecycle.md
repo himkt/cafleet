@@ -17,6 +17,7 @@ specific tmux pane, window, and session. The Director itself is NOT a member
 ## Lifecycle state diagram
 
 ```mermaid
+%%{init: {'theme': 'default', 'themeVariables': {'fontSize': '15px'}}}%%
 stateDiagram-v2
     [*] --> Pending: cafleet member create
     Pending --> Spawning: broker.register_agent (placement.tmux_pane_id=NULL)

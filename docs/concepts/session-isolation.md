@@ -31,24 +31,25 @@ caller's tmux context (`session`, `window_id`, `pane_id`) via
 then executes a single transaction with five ordered operations:
 
 ```mermaid
+%%{init: {'theme': 'default', 'sequence': {'actorFontSize': 18, 'messageFontSize': 16, 'noteFontSize': 16, 'wrap': true, 'width': 180}}}%%
 sequenceDiagram
     autonumber
-    participant CLI as cafleet session create
-    participant Mux as MULTIPLEXERS["tmux"]
-    participant Broker as broker.create_session
+    participant CLI as session create
+    participant Mux as tmux
+    participant Broker
     participant DB as SQLite
 
     CLI->>Mux: context_discovery()
-    Mux-->>CLI: (session, window_id, pane_id)
-    CLI->>Broker: create_session(label, director_context, coding_agent)
+    Mux-->>CLI: (session, window, pane)
+    CLI->>Broker: create_session(label, context, coding_agent)
     Broker->>DB: BEGIN
-    Broker->>DB: 1. INSERT sessions (deleted_at=NULL, director_agent_id=NULL)
-    Broker->>DB: 2. INSERT agents (root Director, status='active')
-    Broker->>DB: 3. INSERT agent_placements (director_agent_id=NULL, coding_agent)
-    Broker->>DB: 4. UPDATE sessions.director_agent_id = director_agent_id
-    Broker->>DB: 5. INSERT agents (built-in Administrator)
+    Broker->>DB: 1. INSERT sessions (director_agent_id=NULL)
+    Broker->>DB: 2. INSERT agents (root Director)
+    Broker->>DB: 3. INSERT agent_placements
+    Broker->>DB: 4. UPDATE sessions.director_agent_id
+    Broker->>DB: 5. INSERT agents (Administrator)
     Broker->>DB: COMMIT
-    Broker-->>CLI: { session_id, director, administrator_agent_id }
+    Broker-->>CLI: { session_id, director, administrator_id }
 ```
 
 Any failure in the transaction rolls the whole thing back — no partial

@@ -13,6 +13,7 @@ invocations behave unchanged.
 ## Backend resolution
 
 ```mermaid
+%%{init: {'theme': 'default', 'themeVariables': {'fontSize': '15px'}}}%%
 flowchart TD
     Member["cli.member_create<br/>--coding-agent X"]
     Member --> Registry["CODING_AGENTS[X]<br/>(coding_agent/__init__.py)"]
