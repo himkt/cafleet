@@ -2,7 +2,12 @@
 
 **Status**: Complete
 **Progress**: 44/47 tasks complete (3 remaining are post-merge / external Pages-config checks)
-**Last Updated**: 2026-05-26
+**Last Updated**: 2026-05-27
+
+## Post-completion follow-ups
+
+- `docs/get-started/authoring.md` was created (Step 3) and then removed during the Copilot-review pass per operator decision ("really needed this page??"). The nav entry, IA-table row, and Step 3 task below describe the original plan; the page is no longer in the tree and not wired into `zensical.toml` nav.
+- `/ARCHITECTURE.md` was created as the 3-line redirect stub (Step 7) and then removed per operator decision after PR open. The Success Criteria item describes the original plan; the file is no longer in the tree. All cross-references already pointed at the new Concepts pages (rewritten in Step 7), so the deletion has no broken-link impact.
 
 ## Overview
 

@@ -197,8 +197,11 @@ class Multiplexer(Protocol):
         ...
 
     def send_bash_command(self, *, target_pane_id: str, command: str) -> None:
-        """Keystroke ``! <command>`` + Enter into the pane (Claude Code shell
-        shortcut).
+        """Keystroke ``! <command>`` + Enter into the pane.
+
+        Uses the leading-``!`` shell-shortcut convention honored by every
+        supported coding-agent backend (``claude``, ``codex``, ``opencode``),
+        so a single keystroke path serves all backends.
 
         Args:
             target_pane_id: Recipient pane id.
