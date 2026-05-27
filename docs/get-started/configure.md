@@ -69,11 +69,20 @@ The recommended Codex rules for `cafleet` commands live at
 `~/.codex/rules/cafleet.rules`:
 
 ```text
-prefix_rule(
-    pattern = ["cafleet"],
-    decision = "allow",
-    justification = "All cafleet subcommands are allowed by default",
-)
+prefix_rule(pattern = ["cafleet", "--version"],  decision = "allow")
+prefix_rule(pattern = ["cafleet", "doctor"],     decision = "allow")
+prefix_rule(pattern = ["cafleet", "server"],     decision = "allow")
+prefix_rule(pattern = ["cafleet", "db"],         decision = "allow")
+prefix_rule(pattern = ["cafleet", "session"],    decision = "allow")
+prefix_rule(pattern = ["cafleet", "base-dir"],   decision = "allow")
+prefix_rule(pattern = ["cafleet", "agent"],      decision = "allow")
+prefix_rule(pattern = ["cafleet", "message"],    decision = "allow")
+prefix_rule(pattern = ["cafleet", "member", "create"],     decision = "allow")
+prefix_rule(pattern = ["cafleet", "member", "delete"],     decision = "allow")
+prefix_rule(pattern = ["cafleet", "member", "list"],       decision = "allow")
+prefix_rule(pattern = ["cafleet", "member", "capture"],    decision = "allow")
+prefix_rule(pattern = ["cafleet", "member", "send-input"], decision = "allow")
+prefix_rule(pattern = ["cafleet", "member", "ping"],       decision = "allow")
 
 prefix_rule(
     pattern = ["cafleet", "member", "exec"],
@@ -82,8 +91,25 @@ prefix_rule(
 )
 ```
 
-This mirrors the Claude Code split: everything `cafleet *` is auto-allowed
-except `cafleet member exec`, which is gated on a per-call prompt.
+Unlike Claude Code's `Bash(cafleet *)` glob — where `*` matches any token
+sequence — Codex's `prefix_rule` is a positional prefix matcher, so a broad
+`["cafleet"]` allow would also cover `cafleet member exec`. Enumerating the
+safe subgroups explicitly keeps the `member exec` prompt rule effective.
+
+The `cafleet --session-id <uuid> <subgroup> …` invocations also need to be
+allowed; since `--session-id` and its UUID sit between `cafleet` and the
+subgroup name, add a per-session allow for the specific UUIDs you use:
+
+```text
+prefix_rule(pattern = ["cafleet", "--session-id", "<your-session-uuid>"], decision = "allow")
+prefix_rule(pattern = ["cafleet", "--session-id", "<your-session-uuid>", "member", "exec"],
+            decision = "prompt",
+            justification = "cafleet member exec runs arbitrary commands on a member")
+```
+
+Repeat the pair for every session UUID you operate. The per-session prompt
+rule is more specific than the per-session allow, so `member exec` keeps
+prompting even with the broader allow in place.
 
 ## Building docs locally
 
