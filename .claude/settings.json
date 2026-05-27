@@ -21,6 +21,7 @@
       "Bash(mise //admin*)",
       "Bash(mise //cafleet*)",
       "Bash(mise //:bun-install)",
+      "Bash(mise //:docs-build)",
       "Bash(mise //:uv-sync)",
       "Bash(mise //:slidev *)",
       "Bash(mise tasks)",

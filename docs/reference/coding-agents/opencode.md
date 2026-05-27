@@ -2,7 +2,7 @@
 
 Operational doc for cafleet member panes that run the [opencode](https://opencode.ai) TUI (`opencode`) instead of Claude Code (`claude`) or the OpenAI Codex CLI (`codex`). cafleet supports all three binaries side-by-side; this file covers the opencode-specific surface.
 
-For the three-backend overview and selection rules, see [ARCHITECTURE.md](../ARCHITECTURE.md) § Coding Agents.
+For the multi-backend overview and selection rules, see the [Coding agents](../../concepts/coding-agents.md) Concepts page.
 
 ## Overview
 
@@ -88,7 +88,7 @@ cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id
 
 Substitute the literal UUIDs handed to you in your spawn prompt. There is no env-var fallback.
 
-For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see [skills/cafleet/SKILL.md](../skills/cafleet/SKILL.md).
+For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see `skills/cafleet/SKILL.md`.
 
 ## The `!` shell-shortcut convention
 

@@ -2,7 +2,7 @@
 
 Operational doc for cafleet member panes that run the OpenAI Codex CLI (`codex`) instead of Claude Code (`claude`). cafleet supports both binaries side-by-side; this file covers the codex-specific surface.
 
-For the dual-backend overview and selection rules, see [ARCHITECTURE.md](../ARCHITECTURE.md) § Coding Agents.
+For the multi-backend overview and selection rules, see the [Coding agents](../../concepts/coding-agents.md) Concepts page.
 
 ## Overview
 
@@ -13,7 +13,7 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Codex-A --description "<one-sentence purpose>" --coding-agent codex
 ```
 
-The default is `--coding-agent claude`, so existing invocations are unchanged. A single Director may spawn `claude`, `codex`, and `opencode` members in the same session — the broker, message lifecycle, and tmux primitives behave identically for all three. See [`docs/opencode-members.md`](opencode-members.md) for opencode-specific operational detail.
+The default is `--coding-agent claude`, so existing invocations are unchanged. A single Director may spawn `claude`, `codex`, and `opencode` members in the same session — the broker, message lifecycle, and tmux primitives behave identically for all three. See [Opencode members](opencode.md) for opencode-specific operational detail.
 
 ## Spawn flags
 
@@ -59,7 +59,7 @@ cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id
 
 Substitute the literal UUIDs handed to you in your spawn prompt. There is no env-var fallback.
 
-For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see [skills/cafleet/SKILL.md](../skills/cafleet/SKILL.md).
+For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see `skills/cafleet/SKILL.md`.
 
 ## The `!` shell-shortcut convention
 

@@ -26,7 +26,7 @@ Placed **before** the subcommand:
 | `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
-### `--full` semantics (cross-subcommand escape hatch)
+### `--full` semantics (cross-subcommand escape hatch) {#full-semantics}
 
 `--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch. A single flag covers four overloaded surfaces — deliberately one flag rather than `--full-envelope` / `--full-recipients` / `--full-card` / `--full-body` variants:
 
@@ -106,7 +106,7 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--full` | no | Per-subcommand option (placed after the subcommand name, like `--agent-id` and `--task-id`). Disables truncation; emits the full message body and the full typed-column envelope. Composes orthogonally with `--json`. See [`--full` semantics](#full-semantics-cross-subcommand-escape-hatch) for the cross-subcommand summary. |
+| `--full` | no | Per-subcommand option (placed after the subcommand name, like `--agent-id` and `--task-id`). Disables truncation; emits the full message body and the full typed-column envelope. Composes orthogonally with `--json`. See [`--full` semantics](#full-semantics) for the cross-subcommand summary. |
 | `--quiet` | no | On `message send`, `message ack`, and `member ping`: emit only the new task id (8-char prefix) on stdout, nothing else. Mutually exclusive with `--full`; the two are not expected to be combined. |
 
 Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split.
@@ -246,8 +246,8 @@ Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE
 
 Environment requirements:
 
-- `TMUX` env var must be set — the command rejects otherwise with `Error: cafleet member commands must be run inside a tmux session` (reused verbatim from `MULTIPLEXERS["tmux"].ensure_available()`).
-- `TMUX_PANE` env var must be set — already required by `MULTIPLEXERS["tmux"].context_discovery()`.
+- `TMUX` env var must be set — the command rejects otherwise with `Error: cafleet member commands must be run inside a tmux session` (reused verbatim from `MULTIPLEXERS.tmux.ensure_available()`).
+- `TMUX_PANE` env var must be set — already required by `MULTIPLEXERS.tmux.context_discovery()`.
 
 Text output:
 
@@ -337,7 +337,7 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `--agent-id` | yes | Director's agent ID |
 | `--name` | yes | Display name of the new member. Forwarded to the spawned `claude` process as `claude --name <member-name> <prompt>` so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. Neither codex nor opencode has a `--name` analog — operators discover those panes via `cafleet member list`. |
 | `--description` | yes | One-sentence purpose |
-| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. The flag both selects the `cafleet.coding_agent.CODING_AGENTS` registry entry whose `build_spawn_argv` produces the spawn argv AND is recorded as `placement.coding_agent`. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex", "opencode"]`) so adding a future backend is one entry in `CODING_AGENTS`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically via `show_default=True`.) Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. For the `opencode` backend, `OpencodeAgent.ensure_available()` also materializes `~/.opencode/agents/cafleet.md` from the in-source `CAFLEET_AGENT` preset on first spawn (skip-if-exists semantics) — see [`docs/opencode-members.md`](../opencode-members.md) for operational detail. |
+| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. The flag both selects the `cafleet.coding_agent.CODING_AGENTS` registry entry whose `build_spawn_argv` produces the spawn argv AND is recorded as `placement.coding_agent`. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex", "opencode"]`) so adding a future backend is one entry in `CODING_AGENTS`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically via `show_default=True`.) Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. For the `opencode` backend, `OpencodeAgent.ensure_available()` also materializes `~/.opencode/agents/cafleet.md` from the in-source `CAFLEET_AGENT` preset on first spawn (skip-if-exists semantics) — see [Opencode members](../reference/coding-agents/opencode.md) for operational detail. |
 | `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are used as the spawn prompt. Mutually exclusive with the positional prompt argument. The file is read verbatim (no stripping) and passes through the same `str.format()` substitution (`session_id` / `agent_id` / `director_agent_id`) as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. |
 | *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. All three backends receive the same prompt; the prompt template is backend-neutral. Mutually exclusive with `--prompt-file`. |
 
@@ -349,7 +349,7 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `codex`  | `codex --ask-for-approval never --sandbox workspace-write <prompt>` |
 | `opencode` | `opencode --agent cafleet --prompt <prompt>` |
 
-The `claude` spawn carries `--permission-mode dontAsk`; the `codex` spawn carries `--ask-for-approval never --sandbox workspace-write`; the `opencode` spawn carries `--agent cafleet` which binds the in-source `CAFLEET_AGENT` permission ruleset (catch-all-allow + specific-deny — every permission check resolves to `allow` or `deny`, never `ask`). In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no Director routing required by default. The bash-via-Director protocol fires as a fallback when the harness deny-list rejects a Bash invocation (see [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) § Routing Bash via the Director). Operational details for codex members live in [`docs/codex-members.md`](../codex-members.md); the opencode equivalent (including the `CAFLEET_AGENT` preset materialization and refresh recipe) lives in [`docs/opencode-members.md`](../opencode-members.md).
+The `claude` spawn carries `--permission-mode dontAsk`; the `codex` spawn carries `--ask-for-approval never --sandbox workspace-write`; the `opencode` spawn carries `--agent cafleet` which binds the in-source `CAFLEET_AGENT` permission ruleset (catch-all-allow + specific-deny — every permission check resolves to `allow` or `deny`, never `ask`). In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no Director routing required by default. The bash-via-Director protocol fires as a fallback when the harness deny-list rejects a Bash invocation (see [Bash routing](../concepts/bash-routing.md)). Operational details for codex members live in [Codex members](../reference/coding-agents/codex.md); the opencode equivalent (including the `CAFLEET_AGENT` preset materialization and refresh recipe) lives in [Opencode members](../reference/coding-agents/opencode.md).
 
 #### Spawn-prompt input modes
 
@@ -395,7 +395,7 @@ Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet
 | Exit | When |
 |---|---|
 | `0` | Success — default path pane-gone confirmed, `--force` pane killed, or pending-placement deregister. |
-| `1` | Any non-timeout failure: auth rejection, missing session, unknown member-id, `broker.deregister_agent` failure, `send_exit` tmux failure (pre-poll), `MULTIPLEXERS["tmux"].wait_for_pane_gone` raising TmuxError (server crash mid-poll). |
+| `1` | Any non-timeout failure: auth rejection, missing session, unknown member-id, `broker.deregister_agent` failure, `send_exit` tmux failure (pre-poll), `MULTIPLEXERS.tmux.wait_for_pane_gone` raising TmuxError (server crash mid-poll). |
 | `2` | Default-path timeout — `/exit` was sent, the pane did not disappear within 15.0 s, buffer tail has been printed on stderr. |
 
 ### `member list`
@@ -467,16 +467,16 @@ Three separate tmux invocations for `--freetext` because tmux's `-l` (literal) f
 | `--freetext "   "` (whitespace-only) | Allowed — `lstrip()` empties the string before the `startswith("!")` check, so the bang-prefix guard does not fire. |
 | `--freetext` whose first non-whitespace character is `!` | Exit 2 with `Error: --freetext may not start with '!' — that triggers the coding agent's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` |
 | `--freetext` containing `\n` or `\r` | Exit 2 with `Error: free text may not contain newlines.` (single-action contract — one prompt submission per call) |
-| Any input with tmux unavailable | Exit 1 via `MULTIPLEXERS["tmux"].ensure_available()` (same surface as `member capture`) |
+| Any input with tmux unavailable | Exit 1 via `MULTIPLEXERS.tmux.ensure_available()` (same surface as `member capture`) |
 
 #### Authorization boundary
 
 Mirrors `cafleet member capture` step-for-step:
 
 1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
-2. If `target["placement"]` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
-3. If `placement["director_agent_id"] != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
-4. If `placement["tmux_pane_id"]` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
+2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
+3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
+4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
 
 Cross-Director write attempts are rejected before any tmux call is made. The error message shapes are reused verbatim from `member capture` so operator muscle memory transfers.
 
@@ -525,11 +525,11 @@ Capture parsing is intentionally left manual because prompt layouts differ acros
 
 #### Director-side usage pattern
 
-The canonical Director-side workflow is three-beat and AskUserQuestion-delegated: (1) `cafleet member capture` to inspect the pane, (2) the Director's own `AskUserQuestion` tool call — with shape-matched options per the pane-shapes table — to put the decision in front of the user, (3) the Director invokes the resolved `cafleet member send-input` via its Bash tool, where Claude Code's native per-call permission prompt is the user-consent surface (never a fenced `bash` block for the user to paste). The canonical three-beat workflow, pane-shapes table (choice-routing / open-ended / other shapes), AskUserQuestion constraints (1–4 questions, 2–4 options, built-in "Other"), and "MUST NOT do" rules live in [`skills/cafleet/SKILL.md`](../../skills/cafleet/SKILL.md) under "Answer a member's AskUserQuestion prompt" — that is canonical, and this CLI spec does not duplicate the table.
+The canonical Director-side workflow is three-beat and AskUserQuestion-delegated: (1) `cafleet member capture` to inspect the pane, (2) the Director's own `AskUserQuestion` tool call — with shape-matched options per the pane-shapes table — to put the decision in front of the user, (3) the Director invokes the resolved `cafleet member send-input` via its Bash tool, where Claude Code's native per-call permission prompt is the user-consent surface (never a fenced `bash` block for the user to paste). The canonical three-beat workflow, pane-shapes table (choice-routing / open-ended / other shapes), AskUserQuestion constraints (1–4 questions, 2–4 options, built-in "Other"), and "MUST NOT do" rules live in `skills/cafleet/SKILL.md` under "Answer a member's AskUserQuestion prompt" — that is canonical, and this CLI spec does not duplicate the table.
 
 ### `member exec`
 
-Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane so the coding agent's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). All three backends (`claude`, `codex`, and `opencode`) honor the leading-`!` shortcut on their input line, so `member exec` works against any backend without modification. The fallback path for the bash-via-Director protocol — see [Routing Bash via the Director](../../skills/cafleet/SKILL.md#routing-bash-via-the-director).
+Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane so the coding agent's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). All three backends (`claude`, `codex`, and `opencode`) honor the leading-`!` shortcut on their input line, so `member exec` works against any backend without modification. The fallback path for the bash-via-Director protocol — see [Bash routing](../concepts/bash-routing.md).
 
 ```bash
 cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \
@@ -540,7 +540,7 @@ cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | Target member's agent ID |
-| *(positional `COMMAND`)* | yes | Single shell command. Leading and trailing whitespace are stripped before dispatch to `MULTIPLEXERS["tmux"].send_bash_command` (the JSON `command` field and the text echo both reflect the trimmed form). Otherwise pipes, `&&`, `;`, `$(...)`, and backticks are not special-cased — the command is forwarded opaquely. |
+| *(positional `COMMAND`)* | yes | Single shell command. Leading and trailing whitespace are stripped before dispatch to `MULTIPLEXERS.tmux.send_bash_command` (the JSON `command` field and the text echo both reflect the trimmed form). Otherwise pipes, `&&`, `;`, `$(...)`, and backticks are not special-cased — the command is forwarded opaquely. |
 
 #### Key sequence sent to the pane
 
@@ -548,7 +548,7 @@ cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \
 |---|---|
 | `member exec "X"` | `tmux send-keys -t <pane> -l "! X"` → `tmux send-keys -t <pane> Enter` |
 
-Two separate tmux invocations because tmux's `-l` (literal) flag is per-invocation: every key in a single `send-keys` call is either literal or key-name interpreted, never a mix. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the command (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are delivered as plain characters. Because the CLI uses `subprocess.run([...], shell=False)`, no shell ever evaluates the command before tmux types it.
+Two separate tmux invocations because tmux's `-l` (literal) flag is per-invocation: every key in a single `send-keys` call is either literal or key-name interpreted, never a mix. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names embedded in the command (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are delivered as plain characters. Because the CLI uses `subprocess.run(argv, shell=False)`, no shell ever evaluates the command before tmux types it.
 
 #### Validation rules
 
@@ -557,17 +557,17 @@ Two separate tmux invocations because tmux's `-l` (literal) flag is per-invocati
 | Missing positional `COMMAND` | Click built-in `Error: Missing argument 'COMMAND'.` (exit 2). |
 | `command` empty after `.strip()` (`""` or whitespace-only) | `Error: command may not be empty.` (exit 2; `click.UsageError`). |
 | `command` containing `\n` or `\r` | `Error: command may not contain newlines.` (exit 2; `click.UsageError`). |
-| Outside a tmux session (`TMUX` env var unset) | Exit 1 with `Error: cafleet member commands must be run inside a tmux session` (raised from `MULTIPLEXERS["tmux"].ensure_available()` and wrapped as a `ClickException`). |
-| `tmux` binary not on `PATH` | Exit 1 with the corresponding "binary not found" error from `MULTIPLEXERS["tmux"].ensure_available()`, wrapped as a `ClickException`. |
+| Outside a tmux session (`TMUX` env var unset) | Exit 1 with `Error: cafleet member commands must be run inside a tmux session` (raised from `MULTIPLEXERS.tmux.ensure_available()` and wrapped as a `ClickException`). |
+| `tmux` binary not on `PATH` | Exit 1 with the corresponding "binary not found" error from `MULTIPLEXERS.tmux.ensure_available()`, wrapped as a `ClickException`. |
 
 #### Authorization boundary
 
 Mirrors `cafleet member send-input` step-for-step:
 
 1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
-2. If `target["placement"]` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
-3. If `placement["director_agent_id"] != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
-4. If `placement["tmux_pane_id"]` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
+2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
+3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
+4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
 
 Cross-Director write attempts are rejected before any tmux call is made. Wording reuses the existing `_load_authorized_member` strings verbatim.
 
@@ -599,7 +599,7 @@ Three keys: `member_agent_id`, `pane_id`, `command`. No `action` field — the s
 | Missing positional `COMMAND` | `2` | Click built-in |
 | `command` empty / whitespace-only | `2` | `click.UsageError` raised by handler |
 | `command` contains `\n` or `\r` | `2` | `click.UsageError` raised by handler |
-| `tmux` unavailable / `TMUX` env var missing | `1` | `MULTIPLEXERS["tmux"].ensure_available()` → wrapped `ClickException` |
+| `tmux` unavailable / `TMUX` env var missing | `1` | `MULTIPLEXERS.tmux.ensure_available()` → wrapped `ClickException` |
 | Agent not found | `1` | `_load_authorized_member` → wrapped `ClickException` |
 | Missing placement row | `1` | `_load_authorized_member` (existing wording) |
 | Cross-Director (placement.director_agent_id mismatch) | `1` | `_load_authorized_member` (existing wording) |
@@ -624,7 +624,7 @@ cafleet --session-id <session-id> member ping --agent-id <director-agent-id> \
 
 | Invocation | tmux calls issued in order |
 |---|---|
-| `member ping` | `MULTIPLEXERS["tmux"].send_poll_trigger(target_pane_id=<pane>, session_id=<sid>, agent_id=<member_id>)` — types `cafleet --session-id <sid> message poll --agent-id <member_id>` + `Enter` into the pane (same helper as the broker auto-fire). |
+| `member ping` | `MULTIPLEXERS.tmux.send_poll_trigger(target_pane_id=<pane>, session_id=<sid>, agent_id=<member_id>)` — types `cafleet --session-id <sid> message poll --agent-id <member_id>` + `Enter` into the pane (same helper as the broker auto-fire). |
 
 #### Validation rules
 
@@ -632,8 +632,8 @@ cafleet --session-id <session-id> member ping --agent-id <director-agent-id> \
 |---|---|
 | Missing `--agent-id` | Click built-in `Error: Missing option '--agent-id'.` (exit 2). |
 | Missing `--member-id` | Click built-in `Error: Missing option '--member-id'.` (exit 2). |
-| Outside a tmux session (`TMUX` env var unset) | Exit 1 with `Error: cafleet member commands must be run inside a tmux session` (raised from `MULTIPLEXERS["tmux"].ensure_available()` and wrapped as a `ClickException`). |
-| `tmux` binary not on `PATH` | Exit 1 with the corresponding "binary not found" error from `MULTIPLEXERS["tmux"].ensure_available()`, wrapped as a `ClickException`. |
+| Outside a tmux session (`TMUX` env var unset) | Exit 1 with `Error: cafleet member commands must be run inside a tmux session` (raised from `MULTIPLEXERS.tmux.ensure_available()` and wrapped as a `ClickException`). |
+| `tmux` binary not on `PATH` | Exit 1 with the corresponding "binary not found" error from `MULTIPLEXERS.tmux.ensure_available()`, wrapped as a `ClickException`. |
 
 The subcommand has no positional argument and no other flags. There is no operator-controlled keystroke body to validate.
 
@@ -642,9 +642,9 @@ The subcommand has no positional argument and no other flags. There is no operat
 Mirrors `cafleet member exec` step-for-step:
 
 1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
-2. If `target["placement"]` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
-3. If `placement["director_agent_id"] != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
-4. If `placement["tmux_pane_id"]` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
+2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
+3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
+4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
 
 Cross-Director write attempts are rejected before any tmux call is made. Wording reuses the existing `_load_authorized_member` strings verbatim.
 
@@ -673,7 +673,7 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 |---|---|---|
 | Dispatch success | `0` | normal return |
 | Missing `--agent-id` or `--member-id` | `2` | Click built-in `Missing option` |
-| `tmux` unavailable / `TMUX` env var missing | `1` | `MULTIPLEXERS["tmux"].ensure_available()` → wrapped `ClickException` |
+| `tmux` unavailable / `TMUX` env var missing | `1` | `MULTIPLEXERS.tmux.ensure_available()` → wrapped `ClickException` |
 | Agent not found | `1` | `_load_authorized_member` → wrapped `ClickException` |
 | Missing placement row | `1` | `_load_authorized_member` (existing wording) |
 | Cross-Director (placement.director_agent_id mismatch) | `1` | `_load_authorized_member` (existing wording) |

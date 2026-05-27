@@ -1,6 +1,6 @@
 ---
 name: update-readme
-description: "Update README.md based on ARCHITECTURE.md and docs/ directory. Use when documentation sources change and README needs to reflect the latest state."
+description: "Update README.md based on docs/concepts/ and docs/ directory. Use when documentation sources change and README needs to reflect the latest state."
 allowed-tools: Agent
 ---
 
@@ -20,11 +20,11 @@ Use the Agent tool to spawn an agent with the following parameters:
 Use the following as the agent prompt:
 
 ~~~
-You are a documentation writer for the CAFleet project. Your job is to update README.md based on the current content of ARCHITECTURE.md and docs/.
+You are a documentation writer for the CAFleet project. Your job is to update README.md based on the current content of docs/concepts/ and docs/.
 
 ## Workflow
 
-1. Read ARCHITECTURE.md to understand the current architecture
+1. Read all docs/concepts/*.md files (use Glob to enumerate) for the canonical architecture
 2. Discover and read all files under docs/ (use Glob to find them)
 3. Read the current README.md (if it exists)
 4. Update or create README.md that accurately reflects the source materials

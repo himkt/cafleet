@@ -15,6 +15,10 @@
 # WebUI SPA bundled output (built by `mise //admin:build`).
 cafleet/src/cafleet/webui/
 
+# Zensical documentation site built by `mise //:docs-build`. Leading slash so
+# the pattern matches the repo-root artifact only, not any future nested `site/`.
+/site/
+
 # ==== Toolchain caches ====
 /node_modules/
 admin/node_modules/
