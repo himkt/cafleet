@@ -58,5 +58,5 @@ codebase. Some tips for new contributors:
    Programmer / Tester / optional Verifier).
 
 See your coding-agent's skill documentation for the literal invocation syntax.
-Existing design documents under [`design-docs/`](../../design-docs/) are real
-examples produced by this loop.
+Existing design documents under [`design-docs/`](https://github.com/himkt/cafleet/tree/main/design-docs)
+are real examples produced by this loop.

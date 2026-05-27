@@ -115,9 +115,12 @@ newest-at-bottom with auto-scroll, reactions-as-ACKs chips that reveal
 per-recipient ACK time on CSS hover, and a bottom input that parses
 `@<agent> text` for unicast and `@all text` for broadcast.
 
-The admin is NOT a CAFleet agent; a header dropdown (sender selector) picks
-which real in-session active agent is used as `from_agent_id` on every send,
-persisted per-session in `localStorage` under `cafleet.sender.<session_id>`.
+The admin is NOT a CAFleet agent; the built-in `Administrator` agent
+auto-seeded at `session create` time is used as `from_agent_id` on every
+send. The dashboard renders a read-only "Sending as Administrator" label
+(see `admin/src/components/Dashboard.tsx`). When the Administrator row is
+missing or deregistered, send is disabled and the header surfaces a
+diagnostic message pointing at `cafleet db init`.
 
 The three primary views (SessionPicker, Dashboard, Timeline) auto-refresh
 every 5 s with a subtle "Updating…" in-flight indicator; polling continues
