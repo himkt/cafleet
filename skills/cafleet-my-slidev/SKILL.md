@@ -248,7 +248,7 @@ This is the post-promotion equivalent of the named `Agent(subagent_type="slide-c
 
 #### Dispatching this agent (codex inline-follow)
 
-On codex, the simplest dispatch path is **inline-follow**: the codex agent reads the embedded `## Spawnable Agents > slide-creator` block in this SKILL.md (codex reads SKILL.md directly — see `cafleet/docs/codex-members.md`) and follows the spec's instructions in its own turn, treating the spec body as additional instructions for the current task. No new agent is spawned; the calling agent absorbs the spec's role for one turn.
+On codex, the simplest dispatch path is **inline-follow**: the codex agent reads the embedded `## Spawnable Agents > slide-creator` block in this SKILL.md (codex reads SKILL.md directly — see `cafleet/docs/reference/coding-agents/codex.md`) and follows the spec's instructions in its own turn, treating the spec body as additional instructions for the current task. No new agent is spawned; the calling agent absorbs the spec's role for one turn.
 
 Use this when:
 - A codex session needs to generate slides ad-hoc as part of a larger task.

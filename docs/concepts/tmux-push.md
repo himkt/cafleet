@@ -5,9 +5,14 @@ icon: lucide/bell
 # tmux push notifications
 
 CAFleet uses a pull-based delivery model by default: recipients discover
-messages via `cafleet message poll`. To reduce latency, the broker can also
-push a poll trigger into a recipient's tmux pane immediately after persisting
-a message.
+messages via `cafleet message poll`. To reduce latency, the broker keystrokes
+a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the
+recipient's tmux pane via `send_inline_preview` immediately after persisting
+a message, so the recipient's coding-agent process consumes the preview as a
+fresh user-turn input without invoking `cafleet message poll`. The
+`send_poll_trigger` keystroke (which DOES inject a literal `cafleet message
+poll` command) is reserved for the Director-issued `cafleet member ping`
+manual nudge — not the broker's auto-fire path.
 
 ## Send + push notification
 
