@@ -48,8 +48,10 @@ class CodingAgent(Protocol):
             prompt: The initial prompt text the backend should be launched
                 with (e.g. the member's role-defining spawn prompt).
             display_name: Pane title. Honored by backends that support a
-                pane-title flag (claude) and silently ignored by those that
-                do not (codex).
+                pane-title flag (currently only ``claude`` via ``--name``)
+                and silently ignored by every other backend (``codex``,
+                ``opencode``) because neither has a pane-title-equivalent
+                flag.
 
         Returns:
             argv list ready to hand to ``Multiplexer.split_window``.
