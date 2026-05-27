@@ -111,6 +111,24 @@ Repeat the pair for every session UUID you operate. The per-session prompt
 rule is more specific than the per-session allow, so `member exec` keeps
 prompting even with the broader allow in place.
 
+## Opencode
+
+!!! tip "Where this lives"
+
+    Opencode's `cafleet` agent definition lives at `~/.opencode/agents/cafleet.md`.
+
+No manual configuration is required. On the first `cafleet member create
+--coding-agent opencode` call, `OpencodeAgent.ensure_available()` materializes
+the `CAFLEET_AGENT` preset to `~/.opencode/agents/cafleet.md` (skip-if-exists)
+— the preset embeds the catch-all-allow + specific-deny ruleset that mirrors
+Claude Code's `dontAsk` safety floor. To refresh the preset after a CAFleet
+release (e.g. after `pip install -U cafleet`), delete the existing file and
+re-run `cafleet member create --coding-agent opencode` so the next spawn
+materializes the current bundled preset. See
+[Opencode members](../reference/coding-agents/opencode.md) for the full
+materialization protocol, refresh recipe, and the operator MUST-NOT rule on
+MCP servers (MCP-contributed tools bypass the deny-list).
+
 ## Building docs locally
 
 Once the CLI is installed and the plugin enabled, you can build the
