@@ -114,9 +114,9 @@ def test_message_send__to_resolved_before_send_message(
     assert send_calls == [(session_id, ACTING_AGENT, TARGET_FULL, "hi")]
 
 
-@pytest.mark.parametrize("msg", [AMBIGUOUS_MSG, NO_AGENT_MSG])
+@pytest.mark.parametrize(("ref", "msg"), [("aa", AMBIGUOUS_MSG), ("zz", NO_AGENT_MSG)])
 def test_message_send__to_resolver_error_exits_one(
-    runner, session_id, monkeypatch, msg
+    runner, session_id, monkeypatch, ref, msg
 ):
     _raise_resolver(monkeypatch, "resolve_agent_ref", ValueError(msg))
     send_calls: list[tuple] = []
@@ -132,7 +132,7 @@ def test_message_send__to_resolver_error_exits_one(
             "--agent-id",
             ACTING_AGENT,
             "--to",
-            "aa",
+            ref,
             "--text",
             "hi",
         ],
@@ -183,8 +183,10 @@ def test_agent_show__id_resolved_before_get_agent(
     assert get_calls == [(TARGET_FULL, session_id)]
 
 
-@pytest.mark.parametrize("msg", [AMBIGUOUS_MSG, NO_AGENT_MSG])
-def test_agent_show__id_resolver_error_exits_one(runner, session_id, monkeypatch, msg):
+@pytest.mark.parametrize(("ref", "msg"), [("aa", AMBIGUOUS_MSG), ("zz", NO_AGENT_MSG)])
+def test_agent_show__id_resolver_error_exits_one(
+    runner, session_id, monkeypatch, ref, msg
+):
     monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
     _raise_resolver(monkeypatch, "resolve_agent_ref", ValueError(msg))
     get_calls: list[tuple] = []
@@ -200,7 +202,7 @@ def test_agent_show__id_resolver_error_exits_one(runner, session_id, monkeypatch
             "--agent-id",
             ACTING_AGENT,
             "--id",
-            "aa",
+            ref,
         ],
     )
     assert result.exit_code == 1, result.output
@@ -277,9 +279,9 @@ def test_message_ack__task_id_resolved_before_ack_task(
     assert ack_calls == [(ACTING_AGENT, TASK_FULL)]
 
 
-@pytest.mark.parametrize("msg", [AMBIGUOUS_MSG, NO_TASK_MSG])
+@pytest.mark.parametrize(("ref", "msg"), [("aa", AMBIGUOUS_MSG), ("zz", NO_TASK_MSG)])
 def test_message_ack__task_id_resolver_error_exits_one(
-    runner, session_id, monkeypatch, msg
+    runner, session_id, monkeypatch, ref, msg
 ):
     monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
     _raise_resolver(monkeypatch, "resolve_task_ref", ValueError(msg))
@@ -296,7 +298,7 @@ def test_message_ack__task_id_resolver_error_exits_one(
             "--agent-id",
             ACTING_AGENT,
             "--task-id",
-            "zz",
+            ref,
         ],
     )
     assert result.exit_code == 1, result.output
@@ -383,10 +385,10 @@ def test_member_delete__member_id_full_uuid_still_accepted(
     assert resolve_calls == [(session_id, MEMBER_ID)]
 
 
-@pytest.mark.parametrize("msg", [AMBIGUOUS_MSG, NO_AGENT_MSG])
+@pytest.mark.parametrize(("ref", "msg"), [("aa", AMBIGUOUS_MSG), ("zz", NO_AGENT_MSG)])
 @pytest.mark.usefixtures("_stub_member_tmux")
 def test_member_delete__member_id_resolver_error_exits_one(
-    runner, session_id, monkeypatch, msg
+    runner, session_id, monkeypatch, ref, msg
 ):
     _raise_resolver(monkeypatch, "resolve_agent_ref", ValueError(msg))
     get_calls: list[tuple] = []
@@ -402,7 +404,7 @@ def test_member_delete__member_id_resolver_error_exits_one(
             "--agent-id",
             DIRECTOR_ID,
             "--member-id",
-            "aa",
+            ref,
         ],
     )
     assert result.exit_code == 1, result.output

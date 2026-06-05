@@ -199,7 +199,7 @@ cafleet --session-id <session-id> agent list --agent-id <my-agent-id>
 cafleet --session-id <session-id> agent show --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
-Default output is one row per agent (`<id8> <name> <status>`); `description` is truncated to 60 codepoints. Pass `--full` for the four-line per-agent block including the full `agent_card_json` blob — see [`reference/output-flags.md`](reference/output-flags.md).
+Default output is one row per agent (`<id8> <name> <status>`); `description` is truncated to 60 codepoints. Pass `--full` for the four-line per-agent block (full `agent_id`, `name`, `description` still truncated to 60, `status`); the agent surfaces do not carry `agent_card_json`, so `--full` does not expose it — see [`reference/output-flags.md`](reference/output-flags.md).
 
 ## Doctor
 

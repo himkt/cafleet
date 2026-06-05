@@ -1338,7 +1338,7 @@ def member_exec(ctx, agent_id, member_id, command):
         placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
     member_id = target["agent_id"]
-    pane_id = _require_member_pane(placement, member_id, "send")
+    pane_id = _require_member_pane(placement, member_id, "exec")
 
     try:
         MULTIPLEXERS["tmux"].send_bash_command(target_pane_id=pane_id, command=command)
@@ -1379,7 +1379,7 @@ def member_ping(ctx, agent_id, member_id, quiet):
         placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
     member_id = target["agent_id"]
-    pane_id = _require_member_pane(placement, member_id, "send")
+    pane_id = _require_member_pane(placement, member_id, "ping")
 
     try:
         ok = MULTIPLEXERS["tmux"].send_poll_trigger(

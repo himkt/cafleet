@@ -33,7 +33,7 @@ Placed **before** the subcommand:
 |---|---|---|
 | `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix (see [Message Body Truncation](#message-body-truncation)). Compact rendered envelope: `id` (8-char prefix), `from` (8-char prefix), `ts`, `text`, plus `kind`/`origin` only when present. | Untruncated `text` AND the full typed-column envelope (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text`). |
 | `message broadcast` | One-line summary (`broadcast id=<id8> recipients=<count>`). The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper — there are no per-recipient envelopes or `recipient_ids` list in the response. | No effect. `--full` is preserved for surface consistency with the five `message {send,poll,ack,cancel,show}` subcommands but is a no-op on broadcast. |
-| `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints; `agent_card_json` projected to the minimum-required fields. | Four-line per-agent block including untruncated `description` and the full `agent_card_json` blob. |
+| `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status` (plus `coding_agent` when a placement is present). | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never load it. |
 | `member capture` | Default `--lines 30` (down from 80); ANSI escape sequences stripped in post-process unless `--ansi` is supplied. | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
 
 ### Subcommands that require `--session-id`
@@ -578,7 +578,7 @@ Mirrors `cafleet member send-input` step-for-step:
 1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
-4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
+4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to exec.`.
 
 Cross-Director write attempts are rejected before any tmux call is made. Wording reuses the existing `_load_authorized_member` strings verbatim.
 
@@ -655,7 +655,7 @@ Mirrors `cafleet member exec` step-for-step:
 1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
-4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
+4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to ping.`.
 
 Cross-Director write attempts are rejected before any tmux call is made. Wording reuses the existing `_load_authorized_member` strings verbatim.
 
@@ -712,9 +712,9 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `member exec` with missing positional `COMMAND` | Click built-in `Error: Missing argument 'COMMAND'.` (exit 2) |
 | `member exec ""` (empty / whitespace-only) | `Error: command may not be empty.` (exit 2) |
 | `member exec` with `\n` or `\r` | `Error: command may not contain newlines.` (exit 2) |
-| `member exec` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
+| `member exec` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to exec.` (exit 1) |
 | `member exec` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
-| `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
+| `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to ping.` (exit 1) |
 | `member ping` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
 | `member ping` when `tmux send-keys` fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
 | `member create` with both `--prompt-file` and positional `prompt_argv` | `Error: --prompt-file and the positional prompt argument are mutually exclusive.` (exit 2; `click.UsageError`) |
