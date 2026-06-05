@@ -16,7 +16,7 @@ Three independent CLI ID/UX fixes shipped as one coherent change: (a)+(c) let th
 - [x] An ambiguous prefix and a no-match prefix each exit `1` with a distinct, actionable message.
 - [x] Prefix resolution is scoped to the supplied `--session-id` (agents active in the session; tasks with an endpoint in the session), so a prefix in another session is invisible.
 - [x] `cafleet --json session list` and the text `session list` both expose `director_agent_id` (full UUID).
-- [x] `--pretty` no longer exists anywhere in source, docs, skills, or tests; JSON output is compact-only; the repo reads as if `--pretty` never existed (no deprecation notice).
+- [x] `--pretty` is removed from source, docs, and skills; JSON output is compact-only; the repo reads as if `--pretty` never existed (no deprecation notice). The only remaining mention is a regression guard that invokes `--pretty` to assert Click rejects it with "No such option".
 - [x] `mise //cafleet:format`, `lint`, `typecheck`, and `test` are all green.
 
 ---

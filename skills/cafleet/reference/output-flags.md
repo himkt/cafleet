@@ -1,6 +1,6 @@
 # Output flags — `--full` / `--json` / `--quiet`
 
-`--full` / `--json` are the opt-back-ins for cafleet's compact default output. Each flag is documented below.
+`--full`, `--json`, and `--quiet` are cafleet's output-control flags over its compact default output: `--full` and `--json` opt back into untruncated / structured output, while `--quiet` trims output to the bare id. Each flag is documented below.
 
 ## `--full` (cross-subcommand escape hatch)
 
