@@ -541,6 +541,7 @@ def agent_register(ctx, name, description, skills):
 @_quiet_flag
 @click.pass_context
 @_client_command(
+    requires_agent_session=True,
     text_formatter=lambda r, *, full, quiet: (
         r["task"]["task_id"][:8]
         if quiet

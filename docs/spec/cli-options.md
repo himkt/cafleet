@@ -100,7 +100,7 @@ Resolution rules:
 - **Session-scoped.** Resolution only sees rows visible to the supplied `--session-id`: agents active in the session, tasks with an endpoint agent in the session. A prefix that is unique in another session is invisible here. Task lookup for `ack` / `cancel` / `show` is therefore tightened to session-visible tasks.
 - **Ambiguous or no-match → exit 1.** A prefix matching more than one row, and a prefix (or full UUID) matching zero rows, each exit `1` with a distinct message (see [Error Messages](#error-messages)).
 
-The acting `--agent-id` is **not** prefix-resolved — an agent always knows its own full UUID (returned at `register`, baked into the spawn prompt), so it is never re-typed from an 8-char display. Passing a prefix there is rejected by the existing acting-agent validation, not by prefix resolution (on `requires_agent_session` commands the `verify_agent_session` gate yields `Error: agent <prefix> is not a member of session <sid>.`; on `message send` the broker yields `Error: Sender agent not found or not active in session: <prefix>`).
+The acting `--agent-id` is **not** prefix-resolved — an agent always knows its own full UUID (returned at `register`, baked into the spawn prompt), so it is never re-typed from an 8-char display. Passing a prefix there is rejected by the existing acting-agent validation, not by prefix resolution: on every `requires_agent_session` command (including `message send`) the `verify_agent_session` gate runs before the handler resolves its target and yields `Error: agent <prefix> is not a member of session <sid>.`.
 
 ## Message Body Truncation
 
@@ -702,7 +702,7 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `agent register` into a soft-deleted session | `Error: session X is deleted` (exit 1) |
 | `agent deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` (exit 1) |
 | `agent deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
-| `agent list` / `agent show` / `agent deregister` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--session-id` | `Error: agent <id> is not a member of session <sid>.` (exit 1) — gate is `broker.verify_agent_session` and runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different session" apart and treats both as not-a-member). |
+| `agent list` / `agent show` / `agent deregister` / `message send` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--session-id` | `Error: agent <id> is not a member of session <sid>.` (exit 1) — gate is `broker.verify_agent_session` and runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different session" apart and treats both as not-a-member). |
 | `member send-input` with zero or both of `--choice` / `--freetext` | `Error: --choice and --freetext are mutually exclusive; supply exactly one.` (exit 2) |
 | `member send-input --choice` outside `1..3` | Click `IntRange(1, 3)` built-in (exit 2) |
 | `member send-input --freetext` whose first non-whitespace character is `!` | `Error: --freetext may not start with '!' — that triggers the coding agent's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` (exit 2) |

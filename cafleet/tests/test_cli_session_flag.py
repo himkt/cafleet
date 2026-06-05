@@ -128,6 +128,7 @@ def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(
         }
 
     monkeypatch.setattr(broker, "send_message", fake_send_message)
+    monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
 
     sid = str(uuid.uuid4())
     aid = str(uuid.uuid4())

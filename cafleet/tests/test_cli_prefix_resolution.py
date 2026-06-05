@@ -84,6 +84,7 @@ def _raise_resolver(monkeypatch, attr: str, exc: Exception) -> None:
 def test_message_send__to_resolved_before_send_message(
     runner, session_id, monkeypatch, to_ref
 ):
+    monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
     resolve_calls = _record_resolver(monkeypatch, "resolve_agent_ref", TARGET_FULL)
     send_calls: list[tuple] = []
 
@@ -118,6 +119,7 @@ def test_message_send__to_resolved_before_send_message(
 def test_message_send__to_resolver_error_exits_one(
     runner, session_id, monkeypatch, ref, msg
 ):
+    monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
     _raise_resolver(monkeypatch, "resolve_agent_ref", ValueError(msg))
     send_calls: list[tuple] = []
     monkeypatch.setattr(broker, "send_message", lambda *a, **k: send_calls.append(a))
@@ -139,6 +141,43 @@ def test_message_send__to_resolver_error_exits_one(
     )
     assert result.exit_code == 1, result.output
     assert msg in result.output
+    assert send_calls == []
+
+
+def test_message_send__prefix_on_acting_agent_id_is_rejected(
+    runner, session_id, monkeypatch
+):
+    # message send is requires_agent_session-wrapped: verify_agent_session runs
+    # in _client_command before --to resolves. A prefix acting id is not a
+    # member, so it is rejected before the handler body — and never resolved.
+    monkeypatch.setattr(
+        broker, "verify_agent_session", lambda aid, sid: aid == ACTING_AGENT
+    )
+    resolve_calls = _record_resolver(monkeypatch, "resolve_agent_ref", TARGET_FULL)
+    send_calls: list[tuple] = []
+    monkeypatch.setattr(broker, "send_message", lambda *a, **k: send_calls.append(a))
+
+    acting_prefix = "aaaaaaaa"
+    result = runner.invoke(
+        cli,
+        [
+            "--session-id",
+            session_id,
+            "message",
+            "send",
+            "--agent-id",
+            acting_prefix,
+            "--to",
+            TARGET_FULL,
+            "--text",
+            "hi",
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    assert "is not a member of session" in result.output
+    assert acting_prefix in result.output
+    assert session_id in result.output
+    assert resolve_calls == []
     assert send_calls == []
 
 

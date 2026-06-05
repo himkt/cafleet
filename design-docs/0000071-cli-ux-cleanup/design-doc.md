@@ -12,7 +12,7 @@ Three independent CLI ID/UX fixes shipped as one coherent change: (a)+(c) let th
 
 - [x] A unique prefix of an agent ID is accepted for `--to` (message send), `--id` (agent show), and `--member-id` (member delete/capture/send-input/exec/ping); a unique prefix of a task ID is accepted for `--task-id` (message ack/cancel/show).
 - [x] A full UUID continues to be accepted on every one of those inputs (no regression).
-- [x] The acting `--agent-id` is **not** prefix-resolved; passing a prefix is rejected by the existing acting-agent validation (a `requires_agent_session` command yields the "not a member of session" error; `message send` yields the "Sender agent not found or not active" error).
+- [x] The acting `--agent-id` is **not** prefix-resolved; passing a prefix is rejected by the existing acting-agent validation. The `requires_agent_session`-wrapped commands — now including `message send` — run the `verify_agent_session` gate before any target resolution, so a prefix in `--agent-id` yields the "not a member of session" error.
 - [x] An ambiguous prefix and a no-match prefix each exit `1` with a distinct, actionable message.
 - [x] Prefix resolution is scoped to the supplied `--session-id` (agents active in the session; tasks with an endpoint in the session), so a prefix in another session is invisible.
 - [x] `cafleet --json session list` and the text `session list` both expose `director_agent_id` (full UUID).
@@ -107,7 +107,7 @@ Exit-code wiring:
 Behavioral consequences (intended):
 - `send_message`'s `uuid.UUID(to)` gate now always passes (the handler hands it a resolved full id); the gate stays as cheap defense-in-depth for direct callers. No broker signature changes.
 - `ack_task` / `cancel_task` keep their global `_read_task`, but the `task_id` they receive was resolved within session visibility, so cross-session task IDs are rejected at resolution time — satisfying the "tighten to session-visible tasks" decision without changing those signatures.
-- The acting `--agent-id` is never prefix-resolved, so a prefix there is rejected by the existing acting-agent validation — but the exact message differs by command. On the `requires_agent_session=True` commands (`agent show`, `message ack` / `cancel` / `show`), `_client_command` runs `verify_agent_session` before the handler and yields `Error: agent <prefix> is not a member of session <sid>.`. On `message send` (not `requires_agent_session`-wrapped, cli.py:552-560), validation happens inside `broker.send_message` via `_agent_is_active_in_session` (broker.py:847), yielding `Error: Sender agent not found or not active in session: <prefix>`. Criterion #3 (acting id never prefix-resolved) holds in both cases; only the error string differs.
+- The acting `--agent-id` is never prefix-resolved, so a prefix there is rejected by the existing acting-agent validation. All `requires_agent_session=True` commands — `agent show`, `message ack` / `cancel` / `show`, and `message send` — run `verify_agent_session` in `_client_command` **before** the handler resolves its target id, yielding `Error: agent <prefix> is not a member of session <sid>.`. Gating the sender check ahead of `--to` resolution on `message send` ensures an unauthorized caller cannot enumerate agent-id prefixes through the resolver's ambiguous / no-match errors.
 
 #### Error messages (final wording)
 
