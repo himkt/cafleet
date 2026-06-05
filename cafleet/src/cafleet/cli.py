@@ -111,7 +111,6 @@ def _client_command(
                         )
                 result = func(ctx, *args, **kwargs)
                 full = kwargs.get("full", False)
-                pretty = ctx.obj["pretty"]
                 if truncates_task_text:
                     output.truncate_task_text(result, full=full)
                     rendered = output.render_tasks_in_result(result, full=full)
@@ -120,7 +119,7 @@ def _client_command(
                 else:
                     rendered = result
                 if ctx.obj["json_output"]:
-                    click.echo(output.format_json(rendered, pretty=pretty))
+                    click.echo(output.format_json(rendered))
                 elif text_formatter is not None:
                     if truncates_task_text:
                         extra = {"quiet": kwargs["quiet"]} if "quiet" in kwargs else {}
@@ -130,7 +129,7 @@ def _client_command(
                     else:
                         click.echo(text_formatter(result))
                 else:
-                    click.echo(output.format_json(rendered, pretty=pretty))
+                    click.echo(output.format_json(rendered))
             except click.ClickException:
                 raise
             except Exception as exc:
@@ -152,25 +151,17 @@ def _sync_db_url() -> str:
     "--json", "json_output", is_flag=True, default=False, help="Output in JSON format"
 )
 @click.option(
-    "--pretty",
-    "pretty",
-    is_flag=True,
-    default=False,
-    help="Switch JSON output from compact (default) to indent=2.",
-)
-@click.option(
     "--session-id",
     "session_id",
     default=None,
     help="Session ID (UUID); required for client subcommands.",
 )
 @click.pass_context
-def cli(ctx, json_output, pretty, session_id):
+def cli(ctx, json_output, session_id):
     """CAFleet — CLI for the message broker and agent registry."""
     ctx.ensure_object(dict)
     ctx.obj["session_id"] = session_id
     ctx.obj["json_output"] = json_output
-    ctx.obj["pretty"] = pretty
 
 
 @cli.group()
@@ -288,7 +279,7 @@ def session_create(
     )
 
     if as_json or ctx.obj["json_output"]:
-        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(result))
     else:
         click.echo(output.format_session_create(result, full=full))
 
@@ -301,7 +292,7 @@ def session_list(ctx: click.Context, as_json: bool) -> None:
     rows = broker.list_sessions()
 
     if as_json or ctx.obj["json_output"]:
-        click.echo(output.format_json(rows, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(rows))
     else:
         if not rows:
             click.echo("No sessions found.")
@@ -328,7 +319,7 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
         raise click.ClickException(f"session '{session_id}' not found.")
 
     if as_json or ctx.obj["json_output"]:
-        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(result))
     else:
         lines = [
             f"session_id: {result['session_id']}",
@@ -398,7 +389,6 @@ def doctor(ctx) -> None:
                         "tmux_pane_env": tmux_pane_env,
                     }
                 },
-                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -454,7 +444,7 @@ def base_dir_resolve(ctx: click.Context, task_name: str | None, as_json: bool) -
         raise click.ClickException(str(exc)) from exc
 
     if as_json or ctx.obj["json_output"]:
-        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(result))
         return
 
     click.echo(f"status: {result['status']}")
@@ -498,9 +488,7 @@ def base_dir_record(ctx: click.Context, base_arg: str, source_arg: str) -> None:
         raise click.ClickException(str(exc)) from exc
 
     if ctx.obj["json_output"]:
-        click.echo(
-            output.format_json({"anchor": str(anchor)}, pretty=ctx.obj["pretty"])
-        )
+        click.echo(output.format_json({"anchor": str(anchor)}))
     else:
         click.echo(f"anchor: {anchor}")
 
@@ -1016,7 +1004,7 @@ def member_create(
 
     result["placement"] = placement_view
     if ctx.obj["json_output"]:
-        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(result))
     else:
         click.echo(output.format_member(result, full=full))
 
@@ -1138,7 +1126,6 @@ def member_delete(ctx, agent_id, member_id, force):
         click.echo(
             output.format_json(
                 {"agent_id": member_id, "pane_status": pane_status},
-                pretty=ctx.obj["pretty"],
             )
         )
     ctx.exit(2)
@@ -1155,7 +1142,6 @@ def _emit_member_delete_output(
         click.echo(
             output.format_json(
                 {"agent_id": member_id, "pane_status": pane_status},
-                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1188,7 +1174,7 @@ def member_list(ctx, agent_id, activity):
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
     if ctx.obj["json_output"]:
-        click.echo(output.format_json(rows, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(rows))
     elif activity:
         click.echo(output.format_member_list_activity(rows))
     else:
@@ -1245,7 +1231,6 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
                     "lines": lines,
                     "content": content,
                 },
-                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1322,7 +1307,6 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
                     "action": action,
                     "value": value,
                 },
-                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1369,7 +1353,6 @@ def member_exec(ctx, agent_id, member_id, command):
                     "pane_id": pane_id,
                     "command": command,
                 },
-                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1419,7 +1402,6 @@ def member_ping(ctx, agent_id, member_id, quiet):
                     "member_agent_id": member_id,
                     "pane_id": pane_id,
                 },
-                pretty=ctx.obj["pretty"],
             )
         )
     elif quiet:

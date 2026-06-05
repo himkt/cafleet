@@ -24,15 +24,12 @@ def strip_ansi(text: str) -> str:
     return "\n".join(line.rsplit("\r", 1)[-1] for line in cleaned.split("\n"))
 
 
-def format_json(data: Any, *, pretty: bool = False) -> str:
-    """Render ``data`` as JSON.
+def format_json(data: Any) -> str:
+    """Render ``data`` as compact JSON.
 
-    Default is compact (no whitespace separators) so per-poll envelopes stay
-    short for agent consumers. Pass ``pretty=True`` for ``indent=2`` output
-    when a human is reading the result.
+    Compact (no whitespace separators) so per-poll envelopes stay short for
+    agent consumers.
     """
-    if pretty:
-        return json.dumps(data, indent=2)
     return json.dumps(data, separators=(",", ":"))
 
 

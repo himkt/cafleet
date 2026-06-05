@@ -1,8 +1,8 @@
 # CLI ID/UX Cleanup: Prefix Resolution, Session-List Director, Drop `--pretty`
 
 **Status**: Approved
-**Progress**: 22/34 tasks complete
-**Last Updated**: 2026-06-05T12:53
+**Progress**: 29/34 tasks complete
+**Last Updated**: 2026-06-05T13:12
 
 ## Overview
 
@@ -202,13 +202,13 @@ Not in the commit surface:
 
 ### Step 4: Workstream C — remove `--pretty`
 
-- [ ] `cli.py`: remove the `--pretty` option, the `pretty` param, `ctx.obj["pretty"]`, and every `pretty=ctx.obj["pretty"]` argument. <!-- completed: -->
-- [ ] `output.py`: make `format_json` compact-only (drop the `pretty` param, the `indent=2` branch, and the docstring mention). <!-- completed: -->
-- [ ] Delete `cafleet/tests/test_cli_pretty_flag.py`. <!-- completed: -->
-- [ ] `cafleet/tests/test_cli_client_command.py`: remove the harness `--pretty` option / param / `ctx.obj` plumbing. <!-- completed: -->
-- [ ] `cafleet/tests/test_output_render_task.py`: drop `pretty=` kwargs; delete the pretty-indent test; rewrite the budget test against a compact-full baseline (recompute threshold, rename); update the module docstring. <!-- completed: -->
-- [ ] `cafleet/tests/token_budget/test_envelope_size.py`: drop `pretty=` kwargs; rewrite the slim-vs-full budget test against a compact-full baseline (recompute threshold, rename); update the module docstring. <!-- completed: -->
-- [ ] Add a single regression guard: `cafleet --pretty ...` exits 2 with Click's `No such option: --pretty` (tests the absence). <!-- completed: -->
+- [x] `cli.py`: remove the `--pretty` option, the `pretty` param, `ctx.obj["pretty"]`, and every `pretty=ctx.obj["pretty"]` argument. <!-- completed: 2026-06-05T13:12 -->
+- [x] `output.py`: make `format_json` compact-only (drop the `pretty` param, the `indent=2` branch, and the docstring mention). <!-- completed: 2026-06-05T13:12 -->
+- [x] Delete `cafleet/tests/test_cli_pretty_flag.py`. <!-- completed: 2026-06-05T13:12 -->
+- [x] `cafleet/tests/test_cli_client_command.py`: remove the harness `--pretty` option / param / `ctx.obj` plumbing. <!-- completed: 2026-06-05T13:12 -->
+- [x] `cafleet/tests/test_output_render_task.py`: drop `pretty=` kwargs; delete the pretty-indent test; rewrite the budget test against a compact-full baseline (recompute threshold, rename); update the module docstring. <!-- completed: 2026-06-05T13:12 -->
+- [x] `cafleet/tests/token_budget/test_envelope_size.py`: drop `pretty=` kwargs; rewrite the slim-vs-full budget test against a compact-full baseline (recompute threshold, rename); update the module docstring. <!-- completed: 2026-06-05T13:12 -->
+- [x] Add a single regression guard: `cafleet --pretty ...` exits 2 with Click's `No such option: --pretty` (tests the absence). <!-- completed: 2026-06-05T13:12 -->
 
 ### Step 5: Verification
 
