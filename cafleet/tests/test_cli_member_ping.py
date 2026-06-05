@@ -31,6 +31,12 @@ def _stub_tmux_available(monkeypatch):
     monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
 
 
+@pytest.fixture(autouse=True)
+def _stub_id_resolvers(monkeypatch):
+    monkeypatch.setattr(broker, "resolve_agent_ref", lambda session_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_task_ref", lambda session_id, ref: ref)
+
+
 @pytest.fixture
 def runner():
     return CliRunner()

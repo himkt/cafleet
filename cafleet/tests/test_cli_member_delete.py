@@ -38,6 +38,12 @@ def call_log() -> list[tuple]:
 
 
 @pytest.fixture(autouse=True)
+def _stub_id_resolvers(monkeypatch):
+    monkeypatch.setattr(broker, "resolve_agent_ref", lambda session_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_task_ref", lambda session_id, ref: ref)
+
+
+@pytest.fixture(autouse=True)
 def _stub_tmux_entrypoints(monkeypatch):
     monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
     monkeypatch.setattr(

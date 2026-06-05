@@ -115,12 +115,12 @@ def test_message_send__to_resolved_before_send_message(
 
 
 @pytest.mark.parametrize("msg", [AMBIGUOUS_MSG, NO_AGENT_MSG])
-def test_message_send__to_resolver_error_exits_one(runner, session_id, monkeypatch, msg):
+def test_message_send__to_resolver_error_exits_one(
+    runner, session_id, monkeypatch, msg
+):
     _raise_resolver(monkeypatch, "resolve_agent_ref", ValueError(msg))
     send_calls: list[tuple] = []
-    monkeypatch.setattr(
-        broker, "send_message", lambda *a, **k: send_calls.append(a)
-    )
+    monkeypatch.setattr(broker, "send_message", lambda *a, **k: send_calls.append(a))
 
     result = runner.invoke(
         cli,
@@ -319,8 +319,9 @@ def _stub_member_tmux(monkeypatch):
     )
 
 
+@pytest.mark.usefixtures("_stub_member_tmux")
 def test_member_delete__member_id_resolved_and_full_id_used_downstream(
-    runner, session_id, monkeypatch, _stub_member_tmux
+    runner, session_id, monkeypatch
 ):
     resolve_calls = _record_resolver(monkeypatch, "resolve_agent_ref", MEMBER_ID)
     get_calls: list[tuple] = []
@@ -357,8 +358,9 @@ def test_member_delete__member_id_resolved_and_full_id_used_downstream(
     assert deregister_calls == [MEMBER_ID]
 
 
+@pytest.mark.usefixtures("_stub_member_tmux")
 def test_member_delete__member_id_full_uuid_still_accepted(
-    runner, session_id, monkeypatch, _stub_member_tmux
+    runner, session_id, monkeypatch
 ):
     resolve_calls = _record_resolver(monkeypatch, "resolve_agent_ref", MEMBER_ID)
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_k: _agent())
@@ -382,8 +384,9 @@ def test_member_delete__member_id_full_uuid_still_accepted(
 
 
 @pytest.mark.parametrize("msg", [AMBIGUOUS_MSG, NO_AGENT_MSG])
+@pytest.mark.usefixtures("_stub_member_tmux")
 def test_member_delete__member_id_resolver_error_exits_one(
-    runner, session_id, monkeypatch, _stub_member_tmux, msg
+    runner, session_id, monkeypatch, msg
 ):
     _raise_resolver(monkeypatch, "resolve_agent_ref", ValueError(msg))
     get_calls: list[tuple] = []

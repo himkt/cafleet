@@ -559,8 +559,10 @@ def agent_register(ctx, name, description, skills):
 )
 def message_send(ctx, agent_id, to, text, full, quiet):
     """Send a unicast message to another agent."""
+    session_id = ctx.obj["session_id"]
+    to = broker.resolve_agent_ref(session_id, to)
     return broker.send_message(
-        ctx.obj["session_id"],
+        session_id,
         agent_id,
         to,
         text,
@@ -629,6 +631,7 @@ def message_poll(ctx, agent_id, since, page_size, full):
 )
 def message_ack(ctx, agent_id, task_id, full, quiet):
     """Acknowledge receipt of a message."""
+    task_id = broker.resolve_task_ref(ctx.obj["session_id"], task_id)
     return broker.ack_task(agent_id, task_id)
 
 
@@ -646,6 +649,7 @@ def message_ack(ctx, agent_id, task_id, full, quiet):
 )
 def message_cancel(ctx, agent_id, task_id, full):
     """Cancel (retract) a sent message."""
+    task_id = broker.resolve_task_ref(ctx.obj["session_id"], task_id)
     return broker.cancel_task(agent_id, task_id)
 
 
@@ -661,7 +665,9 @@ def message_cancel(ctx, agent_id, task_id, full):
 )
 def message_show(ctx, agent_id, task_id, full):
     """Get details of a specific task."""
-    return broker.get_task(ctx.obj["session_id"], task_id)
+    session_id = ctx.obj["session_id"]
+    task_id = broker.resolve_task_ref(session_id, task_id)
+    return broker.get_task(session_id, task_id)
 
 
 @agent.command("list")
@@ -692,7 +698,9 @@ def agent_list(ctx, agent_id, full):
 )
 def agent_show(ctx, agent_id, target_agent_id, full):
     """Show detail for a specific agent."""
-    result = broker.get_agent(target_agent_id, ctx.obj["session_id"])
+    session_id = ctx.obj["session_id"]
+    target_agent_id = broker.resolve_agent_ref(session_id, target_agent_id)
+    result = broker.get_agent(target_agent_id, session_id)
     if result is None:
         raise click.ClickException(f"Agent {target_agent_id} not found")
     return result
@@ -750,7 +758,18 @@ def _load_authorized_member(
     (``cafleet agent deregister`` from delete; ``cafleet member create`` from
     capture / send-input). Pane-id presence is NOT checked here — delete
     tolerates a pending placement while the others reject it.
+
+    ``member_id`` may be a full UUID or a unique prefix; it is resolved to the
+    full id first so every downstream operation runs against the real id, not
+    the pasted prefix. Callers MUST use ``target["agent_id"]`` (the resolved
+    id), since reassigning this local param does not propagate to the caller.
+    The resolver's ``ValueError`` surfaces raw (ambiguous / no-match), not via
+    the generic "failed to fetch member" wrapper.
     """
+    try:
+        member_id = broker.resolve_agent_ref(session_id, member_id)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     try:
         target = broker.get_agent(member_id, session_id)
     except Exception as exc:
@@ -1017,7 +1036,7 @@ def member_delete(ctx, agent_id, member_id, force):
 
     _ensure_tmux_or_die()
 
-    _target, placement = _load_authorized_member(
+    target, placement = _load_authorized_member(
         session_id,
         agent_id,
         member_id,
@@ -1025,6 +1044,7 @@ def member_delete(ctx, agent_id, member_id, force):
             f"agent {member_id} has no placement; use `cafleet agent deregister` instead"
         ),
     )
+    member_id = target["agent_id"]
     pane_id = placement["tmux_pane_id"]
 
     if pane_id is None:
@@ -1196,12 +1216,13 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
 
     _ensure_tmux_or_die()
 
-    _target, placement = _load_authorized_member(
+    target, placement = _load_authorized_member(
         session_id,
         agent_id,
         member_id,
         placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
+    member_id = target["agent_id"]
     pane_id = _require_member_pane(placement, member_id, "capture")
 
     try:
@@ -1274,6 +1295,7 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
         member_id,
         placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
+    member_id = target["agent_id"]
     pane_id = _require_member_pane(placement, member_id, "send")
 
     try:
@@ -1328,6 +1350,7 @@ def member_exec(ctx, agent_id, member_id, command):
         member_id,
         placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
+    member_id = target["agent_id"]
     pane_id = _require_member_pane(placement, member_id, "send")
 
     try:
@@ -1369,6 +1392,7 @@ def member_ping(ctx, agent_id, member_id, quiet):
         member_id,
         placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
+    member_id = target["agent_id"]
     pane_id = _require_member_pane(placement, member_id, "send")
 
     try:

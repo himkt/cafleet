@@ -1236,3 +1236,85 @@ def get_task(session_id: str, task_id: str) -> dict:
             raise ValueError(f"Task {task_id} not found")
 
     return {"task": task_dict}
+
+
+def _resolve_id_prefix(session, *, id_column, base_where, ref: str, entity: str) -> str:
+    """Resolve ``ref`` (a full UUID or unique prefix) to a full id.
+
+    Exact-match short-circuits before any prefix scan, so a full UUID returns
+    immediately and is never reported ambiguous (an 8-char prefix cannot equal
+    a 36-char id, so it falls through to the scan). The prefix scan uses
+    ``startswith(..., autoescape=True)`` so ``%`` / ``_`` in ``ref`` match
+    literally rather than as LIKE wildcards, and is bounded to two rows.
+
+    Raises:
+        ValueError: zero matches (no-match) or more than one match (ambiguous),
+            each with a distinct message.
+    """
+    exact = session.execute(
+        select(id_column).where(id_column == ref, *base_where)
+    ).first()
+    if exact is not None:
+        return ref
+
+    matches = session.execute(
+        select(id_column)
+        .where(id_column.startswith(ref, autoescape=True), *base_where)
+        .limit(2)
+    ).all()
+    if not matches:
+        raise ValueError(f"no {entity} matches id '{ref}' in this session.")
+    if len(matches) > 1:
+        raise ValueError(
+            f"id prefix '{ref}' is ambiguous; supply more characters or the full UUID."
+        )
+    return matches[0][0]
+
+
+def resolve_agent_ref(session_id: str, ref: str) -> str:
+    """Full agent UUID or unique prefix -> full agent_id.
+
+    Scoped to ACTIVE agents in ``session_id`` (mirrors ``get_agent``).
+
+    Raises:
+        ValueError: ambiguous prefix, or no active agent in the session
+            matches ``ref``.
+    """
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        return _resolve_id_prefix(
+            session,
+            id_column=Agent.agent_id,
+            base_where=(Agent.session_id == session_id, Agent.status == "active"),
+            ref=ref,
+            entity="agent",
+        )
+
+
+def resolve_task_ref(session_id: str, ref: str) -> str:
+    """Full task UUID or unique prefix -> full task_id.
+
+    Scoped to tasks with at least one endpoint agent in ``session_id``
+    (mirrors ``get_task`` visibility).
+
+    Raises:
+        ValueError: ambiguous prefix, or no session-visible task matches
+            ``ref``.
+    """
+    sm = get_sync_sessionmaker()
+    with sm() as session:
+        return _resolve_id_prefix(
+            session,
+            id_column=Task.task_id,
+            base_where=(
+                exists().where(
+                    Agent.session_id == session_id,
+                    or_(
+                        Agent.agent_id == Task.from_agent_id,
+                        Agent.agent_id == Task.to_agent_id,
+                    ),
+                ),
+            ),
+            ref=ref,
+            entity="task",
+        )

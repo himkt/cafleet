@@ -44,6 +44,12 @@ def _stub_verify(monkeypatch):
     monkeypatch.setattr(broker, "verify_agent_session", lambda *_a, **_k: True)
 
 
+@pytest.fixture(autouse=True)
+def _stub_id_resolvers(monkeypatch):
+    monkeypatch.setattr(broker, "resolve_agent_ref", lambda session_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_task_ref", lambda session_id, ref: ref)
+
+
 def _task_payload(task_id, *, sender, recipient, text, type_="unicast"):
     return {
         "task_id": task_id,

@@ -1,8 +1,8 @@
 # CLI ID/UX Cleanup: Prefix Resolution, Session-List Director, Drop `--pretty`
 
 **Status**: Approved
-**Progress**: 10/34 tasks complete
-**Last Updated**: 2026-06-05
+**Progress**: 19/34 tasks complete
+**Last Updated**: 2026-06-05T12:44
 
 ## Overview
 
@@ -184,15 +184,15 @@ Not in the commit surface:
 
 ### Step 2: Workstream A — ID prefix resolution
 
-- [ ] `broker.py`: add `_resolve_id_prefix(session, *, id_column, base_where, ref, entity)` with exact short-circuit + bounded prefix scan + distinct `ValueError`s (no new imports — `and_`, `or_`, `exists`, `select` already imported). <!-- completed: -->
-- [ ] `broker.py`: add `resolve_agent_ref(session_id, ref)` (active agents in session). <!-- completed: -->
-- [ ] `broker.py`: add `resolve_task_ref(session_id, ref)` (tasks with an endpoint in session). <!-- completed: -->
-- [ ] `cli.py` `message_send`: resolve `--to` via `broker.resolve_agent_ref` before `broker.send_message`. <!-- completed: -->
-- [ ] `cli.py` `agent_show`: resolve `--id` via `broker.resolve_agent_ref` before `broker.get_agent`. <!-- completed: -->
-- [ ] `cli.py` `_load_authorized_member`: resolve `--member-id` via `broker.resolve_agent_ref` at the top, wrapping `ValueError` → `ClickException` (covers all five member subcommands). <!-- completed: -->
-- [ ] `cli.py` `message_ack` / `message_cancel` / `message_show`: resolve `--task-id` via `broker.resolve_task_ref` before the broker call. <!-- completed: -->
-- [ ] Broker tests: exact full-UUID returns unchanged; unique prefix resolves; ambiguous prefix → `ValueError`; no-match → `ValueError`; a row in another session is invisible; a `%`/`_` ref is matched literally (autoescape). <!-- completed: -->
-- [ ] CLI tests: prefix accepted on `--to` / `--id` / `--member-id` / `--task-id`; full UUID still accepted on each; ambiguous → exit 1 with the ambiguous message; no-match → exit 1 with the no-match message; a prefix on the acting `--agent-id` is rejected — assert against a `requires_agent_session` command (e.g. `agent show`) for the exact `not a member of session` wording, so the test is independent of `message send`'s different "Sender agent not found" string. <!-- completed: -->
+- [x] `broker.py`: add `_resolve_id_prefix(session, *, id_column, base_where, ref, entity)` with exact short-circuit + bounded prefix scan + distinct `ValueError`s (no new imports — `and_`, `or_`, `exists`, `select` already imported). <!-- completed: 2026-06-05T12:44 -->
+- [x] `broker.py`: add `resolve_agent_ref(session_id, ref)` (active agents in session). <!-- completed: 2026-06-05T12:44 -->
+- [x] `broker.py`: add `resolve_task_ref(session_id, ref)` (tasks with an endpoint in session). <!-- completed: 2026-06-05T12:44 -->
+- [x] `cli.py` `message_send`: resolve `--to` via `broker.resolve_agent_ref` before `broker.send_message`. <!-- completed: 2026-06-05T12:44 -->
+- [x] `cli.py` `agent_show`: resolve `--id` via `broker.resolve_agent_ref` before `broker.get_agent`. <!-- completed: 2026-06-05T12:44 -->
+- [x] `cli.py` `_load_authorized_member`: resolve `--member-id` via `broker.resolve_agent_ref` at the top, and have all five member handlers use the **resolved** id (`target["agent_id"]`) for downstream operations (`deregister_agent`, tmux dispatch, output) — reassigning the helper's local param does NOT propagate to the caller, so a pasted prefix would otherwise still reach `broker.deregister_agent(member_id)` (cli.py:1081) and "succeed" without deregistering. Wrap the resolver `ValueError` → `ClickException` so its **raw** message surfaces (`Error: id prefix … is ambiguous` / `no agent matches id …`), NOT the generic get_agent "failed to fetch member" wrapper. Covers all five member subcommands. <!-- completed: 2026-06-05T12:44 -->
+- [x] `cli.py` `message_ack` / `message_cancel` / `message_show`: resolve `--task-id` via `broker.resolve_task_ref` before the broker call. <!-- completed: 2026-06-05T12:44 -->
+- [x] Broker tests: exact full-UUID returns unchanged; unique prefix resolves; ambiguous prefix → `ValueError`; no-match → `ValueError`; a row in another session is invisible; a `%`/`_` ref is matched literally (autoescape). <!-- completed: 2026-06-05T12:44 -->
+- [x] CLI tests: prefix accepted on `--to` / `--id` / `--member-id` / `--task-id`; full UUID still accepted on each; ambiguous → exit 1 with the ambiguous message; no-match → exit 1 with the no-match message; a prefix on the acting `--agent-id` is rejected — assert against a `requires_agent_session` command (e.g. `agent show`) for the exact `not a member of session` wording, so the test is independent of `message send`'s different "Sender agent not found" string. <!-- completed: 2026-06-05T12:44 -->
 
 ### Step 3: Workstream B — `session list` director field
 
