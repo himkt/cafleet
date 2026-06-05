@@ -21,8 +21,7 @@ Placed **before** the subcommand:
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--json` | no | Emit JSON output. Default JSON encoding is compact (`json.dumps(..., separators=(",",":"))`); pair with `--pretty` for indented output. |
-| `--pretty` | no | Switch JSON output from the compact default to indented (`json.dumps(..., indent=2)`). No effect on text-mode output. Composes orthogonally with `--json`. |
+| `--json` | no | Emit JSON output. JSON encoding is compact (`json.dumps(..., separators=(",",":"))`). |
 | `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
@@ -82,6 +81,26 @@ Then pass the printed UUID as `--session-id <uuid>` on every client + member com
 ### Commands that do NOT require `--agent-id`
 
 - `agent register` — Register a new agent (returns an agent ID)
+
+## ID Prefix Resolution
+
+Human-facing and default JSON output truncate IDs to an 8-char prefix (task id, agent id, `session create` director/admin, member id). To make those displayed prefixes pasteable into the next command, the **target** ID inputs accept either a full UUID or any unique prefix of one:
+
+| Input | Subcommand(s) | Resolved against |
+|---|---|---|
+| `--to` | `message send` | active agents in the session |
+| `--id` | `agent show` | active agents in the session |
+| `--member-id` | `member delete` / `capture` / `send-input` / `exec` / `ping` | active agents in the session |
+| `--task-id` | `message ack` / `cancel` / `show` | tasks with at least one endpoint agent in the session |
+
+Resolution rules:
+
+- **Exact-match short-circuit.** A full UUID matches by exact equality before any prefix scan, so it always resolves to itself and is never reported ambiguous (an 8-char prefix cannot equal a 36-char id).
+- **Unique prefix wins.** Any prefix — no minimum length — that matches exactly one row resolves to that row's full id.
+- **Session-scoped.** Resolution only sees rows visible to the supplied `--session-id`: agents active in the session, tasks with an endpoint agent in the session. A prefix that is unique in another session is invisible here. Task lookup for `ack` / `cancel` / `show` is therefore tightened to session-visible tasks.
+- **Ambiguous or no-match → exit 1.** A prefix matching more than one row, and a prefix (or full UUID) matching zero rows, each exit `1` with a distinct message (see [Error Messages](#error-messages)).
+
+The acting `--agent-id` is **not** prefix-resolved — an agent always knows its own full UUID (returned at `register`, baked into the spawn prompt), so it is never re-typed from an 8-char display. Passing a prefix there is rejected by the existing acting-agent validation, not by prefix resolution (on `requires_agent_session` commands the `verify_agent_session` gate yields `Error: agent <prefix> is not a member of session <sid>.`; on `message send` the broker yields `Error: Sender agent not found or not active in session: <prefix>`).
 
 ## Message Body Truncation
 
@@ -189,7 +208,13 @@ Attempting `cafleet --session-id <session_id> agent deregister --agent-id <direc
 |---|---|---|
 | `--json` | no | Output as JSON |
 
-Lists all **non-soft-deleted** sessions with their label, created_at, and active agent count. There is no `--all` flag in this revision — soft-deleted sessions (`sessions.deleted_at IS NOT NULL`) are hidden.
+Lists all **non-soft-deleted** sessions with their `director_agent_id`, label, created_at, and active agent count. There is no `--all` flag in this revision — soft-deleted sessions (`sessions.deleted_at IS NOT NULL`) are hidden.
+
+Each row exposes the session's root `director_agent_id` so the Director's ID can be recovered from a list after `session create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (full UUID). Text output renders it as a `DIRECTOR` column placed immediately after `SESSION_ID`, showing the **full** director UUID (not an 8-char prefix) because the value is pasted into `--agent-id`, which stays full-only:
+
+```
+SESSION_ID                               DIRECTOR                                 LABEL                AGENTS   CREATED_AT
+```
 
 ### `session show`
 
@@ -712,4 +737,8 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `member create --prompt-file` to an unreadable file | `Error: --prompt-file <path>: file is not readable.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to a file containing invalid UTF-8 | `Error: --prompt-file <path>: file is not valid UTF-8.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to a zero-byte or whitespace-only file | `Error: --prompt-file <path>: file is empty.` (exit 1; `click.ClickException`) |
+| `--to` / `--id` / `--member-id` prefix matching >1 active agent in the session | `Error: id prefix '<ref>' is ambiguous; supply more characters or the full UUID.` (exit 1) |
+| `--to` / `--id` / `--member-id` prefix or full UUID matching 0 active agents in the session | `Error: no agent matches id '<ref>' in this session.` (exit 1) |
+| `--task-id` prefix matching >1 session-visible task | `Error: id prefix '<ref>' is ambiguous; supply more characters or the full UUID.` (exit 1) |
+| `--task-id` prefix or full UUID matching 0 session-visible tasks | `Error: no task matches id '<ref>' in this session.` (exit 1) |
 

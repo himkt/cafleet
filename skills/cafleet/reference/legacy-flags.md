@@ -1,6 +1,6 @@
-# Legacy flags — `--full` / `--pretty` / `--json` opt-back-ins
+# Legacy flags — `--full` / `--json` opt-back-ins
 
-`--full` / `--pretty` / `--json` are the opt-back-ins for cafleet's compact default output. Each flag is documented below.
+`--full` / `--json` are the opt-back-ins for cafleet's compact default output. Each flag is documented below.
 
 ## `--full` (cross-subcommand escape hatch)
 
@@ -13,24 +13,13 @@
 | `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints; `agent_card_json` projected to minimum-required fields. | Four-line per-agent block including untruncated `description` and the full `agent_card_json` blob. |
 | `member capture` | Default `--lines 30`; ANSI escapes stripped (`--no-ansi` is the default). | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
 
-## `--pretty` (global, indented JSON)
-
-```bash
-cafleet --json message poll --agent-id <m>             # default: compact JSON, no whitespace
-cafleet --json --pretty message poll --agent-id <m>    # indented JSON (json.dumps(..., indent=2))
-```
-
-Default JSON encoding is `json.dumps(data, separators=(",",":"))` — no whitespace. `--pretty` switches to indented (`json.dumps(data, indent=2)`). No effect on text-mode output; no effect when `--json` is not passed.
-
 ## `--json` (global, machine-parseable)
 
-`--json` switches CLI output from text to JSON. Combined with the new compact-by-default JSON encoding, `--json` is now cheap to pipe into `jq` from a Director loop without paying for indentation. Compose with `--pretty` when a human is reading the output.
+`--json` switches CLI output from text to JSON. JSON encoding is compact (`json.dumps(data, separators=(",",":"))` — no whitespace), so `--json` is cheap to pipe into `jq` from a Director loop without paying for indentation.
 
 ```bash
 cafleet --json message poll --agent-id <m>
-cafleet --json --pretty message poll --agent-id <m>
 cafleet --json message poll --agent-id <m> --full
-cafleet --json --pretty message poll --agent-id <m> --full
 ```
 
 ## `--quiet` (per-subcommand, message-id-only)

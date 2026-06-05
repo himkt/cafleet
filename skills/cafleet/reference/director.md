@@ -4,6 +4,8 @@ Reference page for the `cafleet member` subgroup — `member create`, `member de
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/exec-routing.md`.
 
+> **`--member-id` accepts a unique prefix.** On `member delete` / `capture` / `send-input` / `exec` / `ping`, `--member-id` resolves either a full UUID or any unique prefix of an active agent's UUID in the session — so the 8-char member IDs printed by `cafleet member list` can be pasted straight in. An ambiguous or no-match prefix exits 1. The Director's own acting `--agent-id` stays full-UUID-only. See [`docs/spec/cli-options.md`](../../../docs/spec/cli-options.md#id-prefix-resolution).
+
 ## Member Create
 
 Register a new member agent and spawn a coding-agent pane in the Director's own tmux window. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
@@ -233,4 +235,4 @@ The action is wholly determined by the subcommand name — there is no positiona
 - For broadcast send/ack semantics, see [`reference/broadcast.md`](broadcast.md).
 - For the bash-via-Director fallback protocol, see [`reference/exec-routing.md`](exec-routing.md).
 - For crash/disconnect/idle recovery flows including the Shutdown Protocol, see [`reference/recovery.md`](recovery.md).
-- For `--full` / `--pretty` / `--json` opt-back-in semantics, see [`reference/legacy-flags.md`](legacy-flags.md).
+- For `--full` / `--json` opt-back-in semantics, see [`reference/legacy-flags.md`](legacy-flags.md).

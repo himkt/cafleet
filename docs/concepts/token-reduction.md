@@ -15,7 +15,7 @@ below.
 
 | Surface | Change | Architectural touch-points |
 |---|---|---|
-| 1 | Compact rendered envelope (`output.render_task`) | New global `--pretty` flag; default JSON output is now compact (no whitespace). Default text-mode envelope drops from 6 lines per task to 2. |
+| 1 | Compact rendered envelope (`output.render_task`) | Default JSON output is compact (no whitespace). Default text-mode envelope drops from 6 lines per task to 2. The 8-char IDs in compact output are pasteable back into the next command via prefix resolution on `--to` / `--id` / `--member-id` / `--task-id`. |
 | 6 | Slim member spawn prompt | `_MEMBER_PROMPT_TEMPLATE` shrinks from ~150 to ~60 tokens (single sentence + identity + skill-load directive + poll command). The `{director_name}` placeholder is removed from `_resolve_prompt`. |
 | 7 | Skill-file split | `skills/cafleet/SKILL.md` core trimmed to ≤ 350 lines (identity + poll/send/ack + minimal codex/claude branch); director-only, broadcast, exec-routing, recovery, and legacy-flag content moves to `skills/cafleet/reference/*.md` files loaded on demand via Read. Codex and Claude Code agents both load the core SKILL the same way; reference files are pulled only when the workflow needs them. |
 | 8 | `cafleet member list --activity` | Aggregates `tasks.status_timestamp` per member into `last_sent` / `last_recv` / `last_ack` / `idle` columns; the `last_ack` proxy filters `Task.type != 'broadcast_summary'`. Existing indexes `idx_tasks_context_status_ts` and `idx_tasks_from_agent_status_ts` cover the join. |
