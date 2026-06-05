@@ -306,11 +306,14 @@ def session_list(ctx: click.Context, as_json: bool) -> None:
         if not rows:
             click.echo("No sessions found.")
             return
-        click.echo(f"{'SESSION_ID':<40} {'LABEL':<20} {'AGENTS':<8} {'CREATED_AT'}")
+        click.echo(
+            f"{'SESSION_ID':<40} {'DIRECTOR':<40} {'LABEL':<20} "
+            f"{'AGENTS':<8} {'CREATED_AT'}"
+        )
         for r in rows:
             click.echo(
-                f"{r['session_id']:<40} {r['label'] or '':<20} "
-                f"{r['agent_count']:<8} {r['created_at']}"
+                f"{r['session_id']:<40} {r['director_agent_id'] or '':<40} "
+                f"{r['label'] or '':<20} {r['agent_count']:<8} {r['created_at']}"
             )
 
 

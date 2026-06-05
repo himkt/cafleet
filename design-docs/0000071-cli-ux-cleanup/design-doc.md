@@ -1,8 +1,8 @@
 # CLI ID/UX Cleanup: Prefix Resolution, Session-List Director, Drop `--pretty`
 
 **Status**: Approved
-**Progress**: 19/34 tasks complete
-**Last Updated**: 2026-06-05T12:44
+**Progress**: 22/34 tasks complete
+**Last Updated**: 2026-06-05T12:53
 
 ## Overview
 
@@ -196,9 +196,9 @@ Not in the commit surface:
 
 ### Step 3: Workstream B — `session list` director field
 
-- [ ] `broker.list_sessions`: select `Session.director_agent_id` (+ `group_by`) and include it in the row dict. <!-- completed: -->
-- [ ] `cli.session_list`: add the full-UUID `DIRECTOR` column to the text header and rows. <!-- completed: -->
-- [ ] Tests: `--json session list` includes `director_agent_id`; text output shows the `DIRECTOR` column with the full director UUID. <!-- completed: -->
+- [x] `broker.list_sessions`: select `Session.director_agent_id` (+ `group_by`) and include it in the row dict. <!-- completed: 2026-06-05T12:53 -->
+- [x] `cli.session_list`: add the full-UUID `DIRECTOR` column to the text header and rows. <!-- completed: 2026-06-05T12:53 -->
+- [x] Tests: `--json session list` includes `director_agent_id`; text output shows the `DIRECTOR` column with the full director UUID. <!-- completed: 2026-06-05T12:53 -->
 
 ### Step 4: Workstream C — remove `--pretty`
 

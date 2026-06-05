@@ -217,6 +217,7 @@ def list_sessions() -> list[dict]:
     stmt = (
         select(
             Session.session_id,
+            Session.director_agent_id,
             Session.label,
             Session.created_at,
             func.count(Agent.agent_id).label("agent_count"),
@@ -230,7 +231,7 @@ def list_sessions() -> list[dict]:
             ),
         )
         .where(Session.deleted_at.is_(None))
-        .group_by(Session.session_id)
+        .group_by(Session.session_id, Session.director_agent_id)
         .order_by(Session.created_at.desc(), Session.session_id.asc())
     )
     sm = get_sync_sessionmaker()
@@ -239,6 +240,7 @@ def list_sessions() -> list[dict]:
     return [
         {
             "session_id": row.session_id,
+            "director_agent_id": row.director_agent_id,
             "label": row.label,
             "created_at": row.created_at,
             "agent_count": row.agent_count,
