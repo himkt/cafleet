@@ -28,9 +28,11 @@ def format_json(data: Any) -> str:
     """Render ``data`` as compact JSON.
 
     Compact (no whitespace separators) so per-poll envelopes stay short for
-    agent consumers.
+    agent consumers. ``ensure_ascii=False`` keeps non-ASCII (e.g. the ``…``
+    truncation suffix) as UTF-8 rather than ``\\uXXXX`` escapes, matching the
+    UTF-8 byte budgets.
     """
-    return json.dumps(data, separators=(",", ":"))
+    return json.dumps(data, separators=(",", ":"), ensure_ascii=False)
 
 
 def truncate_text(

@@ -2,10 +2,11 @@
 
 The compact rendered envelope (``output.format_json`` + projected
 ``output.render_task``) MUST stay materially smaller than the compact full
-(un-projected) envelope. The pass criterion below is a fixture-anchored
-**UTF-8 byte** budget rather than a derived percentage so the test detects
-ALL classes of regression — extra fields, longer keys, removed truncation,
-multi-byte content sneaking in, etc.
+(un-projected) envelope. This file applies two complementary criteria:
+fixture-anchored **UTF-8 byte** budgets (absolute caps on the rendered
+envelope) and a **ratio guard** (compact slim stays below a fraction of
+compact full). Together they detect ALL classes of regression — extra
+fields, longer keys, removed truncation, multi-byte content sneaking in, etc.
 
 Tokenizer choice: tests assert UTF-8 byte counts (cheap, deterministic).
 The on-wire cost is bytes, not Python codepoints — the Unicode ellipsis
