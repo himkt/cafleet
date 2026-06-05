@@ -1,8 +1,8 @@
 # CLI ID/UX Cleanup: Prefix Resolution, Session-List Director, Drop `--pretty`
 
 **Status**: Approved
-**Progress**: 29/34 tasks complete
-**Last Updated**: 2026-06-05T13:12
+**Progress**: 34/34 tasks complete
+**Last Updated**: 2026-06-05T13:19
 
 ## Overview
 
@@ -10,14 +10,14 @@ Three independent CLI ID/UX fixes shipped as one coherent change: (a)+(c) let th
 
 ## Success Criteria
 
-- [ ] A unique prefix of an agent ID is accepted for `--to` (message send), `--id` (agent show), and `--member-id` (member delete/capture/send-input/exec/ping); a unique prefix of a task ID is accepted for `--task-id` (message ack/cancel/show).
-- [ ] A full UUID continues to be accepted on every one of those inputs (no regression).
-- [ ] The acting `--agent-id` is **not** prefix-resolved; passing a prefix is rejected by the existing acting-agent validation (a `requires_agent_session` command yields the "not a member of session" error; `message send` yields the "Sender agent not found or not active" error).
-- [ ] An ambiguous prefix and a no-match prefix each exit `1` with a distinct, actionable message.
-- [ ] Prefix resolution is scoped to the supplied `--session-id` (agents active in the session; tasks with an endpoint in the session), so a prefix in another session is invisible.
-- [ ] `cafleet --json session list` and the text `session list` both expose `director_agent_id` (full UUID).
-- [ ] `--pretty` no longer exists anywhere in source, docs, skills, or tests; JSON output is compact-only; the repo reads as if `--pretty` never existed (no deprecation notice).
-- [ ] `mise //cafleet:format`, `lint`, `typecheck`, and `test` are all green.
+- [x] A unique prefix of an agent ID is accepted for `--to` (message send), `--id` (agent show), and `--member-id` (member delete/capture/send-input/exec/ping); a unique prefix of a task ID is accepted for `--task-id` (message ack/cancel/show).
+- [x] A full UUID continues to be accepted on every one of those inputs (no regression).
+- [x] The acting `--agent-id` is **not** prefix-resolved; passing a prefix is rejected by the existing acting-agent validation (a `requires_agent_session` command yields the "not a member of session" error; `message send` yields the "Sender agent not found or not active" error).
+- [x] An ambiguous prefix and a no-match prefix each exit `1` with a distinct, actionable message.
+- [x] Prefix resolution is scoped to the supplied `--session-id` (agents active in the session; tasks with an endpoint in the session), so a prefix in another session is invisible.
+- [x] `cafleet --json session list` and the text `session list` both expose `director_agent_id` (full UUID).
+- [x] `--pretty` no longer exists anywhere in source, docs, skills, or tests; JSON output is compact-only; the repo reads as if `--pretty` never existed (no deprecation notice).
+- [x] `mise //cafleet:format`, `lint`, `typecheck`, and `test` are all green.
 
 ---
 
@@ -212,11 +212,11 @@ Not in the commit surface:
 
 ### Step 5: Verification
 
-- [ ] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck` all clean. <!-- completed: -->
-- [ ] `mise //cafleet:test` green. <!-- completed: -->
-- [ ] Repo grep for `pretty` (excluding `design-docs/`, `node_modules/`, `site/`, `.git/`) returns zero matches in `cafleet/src`, `docs`, `skills`, and `cafleet/tests`. <!-- completed: -->
-- [ ] Manual smoke: `agent list` → paste an 8-char agent id into `message send --to <prefix>` (resolves); an ambiguous prefix exits 1; `session list` (text and `--json`) shows the director ID. <!-- completed: -->
-- [ ] Stage the design doc with the implementation commits (project git-workflow override: `design-docs/` is committed here). <!-- completed: -->
+- [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck` all clean. <!-- completed: 2026-06-05T13:19 -->
+- [x] `mise //cafleet:test` green. <!-- completed: 2026-06-05T13:19 -->
+- [x] Repo grep for `pretty` (excluding `design-docs/`, `node_modules/`, `site/`, `.git/`) returns zero matches in `cafleet/src`, `docs`, `skills`, and `cafleet/tests`. <!-- completed: 2026-06-05T13:19 -->
+- [x] Manual smoke: `agent list` → paste an 8-char agent id into `message send --to <prefix>` (resolves); an ambiguous prefix exits 1; `session list` (text and `--json`) shows the director ID. <!-- completed: 2026-06-05T13:19 — verified via in-process CliRunner suite (test_cli_prefix_resolution + test_session_list_director + test_cli_version), no separate real-binary run -->
+- [x] Stage the design doc with the implementation commits (project git-workflow override: `design-docs/` is committed here). <!-- completed: 2026-06-05T13:19 -->
 
 ---
 
