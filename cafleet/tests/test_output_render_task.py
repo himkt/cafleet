@@ -1,9 +1,9 @@
 """Compact rendered envelope.
 
 Tests for ``output.render_task`` compact projection, ``output.format_json``
-pretty/compact behaviour, and the 2-line ``output.format_task`` text
-rendering. The 5-task fixture budget assertion enforces that compact mode
-must be ≤ 30 % of the indented baseline.
+compact rendering, and the 2-line ``output.format_task`` text rendering. The
+5-task fixture budget assertion enforces that the compact slim envelope stays
+materially smaller than the compact full (untruncated) envelope.
 """
 
 import json
@@ -128,17 +128,6 @@ def test_format_json__compact_no_whitespace_and_round_trips():
     assert ", " not in out
     assert ": " not in out
     assert json.loads(out) == data
-    assert out == output.format_json(data, pretty=False)
-
-
-def test_format_json__pretty_indented_and_longer():
-    data = {"a": 1, "b": [2, 3], "c": {"d": "ok"}}
-    pretty_out = output.format_json(data, pretty=True)
-    compact_out = output.format_json(data)
-    assert "\n" in pretty_out
-    assert "  " in pretty_out
-    assert len(pretty_out) > len(compact_out)
-    assert json.loads(pretty_out) == data
 
 
 @pytest.mark.parametrize(
@@ -222,27 +211,25 @@ def five_task_fixture() -> list[dict]:
     ]
 
 
-def test_budget__compact_json_at_most_30_percent_of_pretty_baseline(five_task_fixture):
-    """Surface 1 reduction target: compact JSON ≤ 30 % of indented-JSON length."""
-    pretty_baseline = output.format_json(five_task_fixture, pretty=True)
-    compact_rendered = output.format_json(
-        [output.render_task(t, full=False) for t in five_task_fixture],
-        pretty=False,
+def test_budget__compact_slim_json_smaller_than_compact_full(five_task_fixture):
+    """Compact slim (projected ``render_task``) JSON stays materially smaller
+    than the compact full (untruncated typed-column) JSON for the same fixture."""
+    compact_full = output.format_json(five_task_fixture)
+    compact_slim = output.format_json(
+        [output.render_task(t, full=False) for t in five_task_fixture]
     )
-    pretty_len = len(pretty_baseline)
-    compact_len = len(compact_rendered)
-    ratio = compact_len / pretty_len
-    assert ratio <= 0.30, (
-        f"compact mode is {ratio:.0%} of pretty baseline "
-        f"(compact={compact_len} chars, pretty={pretty_len} chars); "
-        "Surface 1 target is ≤ 30 %."
+    full_len = len(compact_full)
+    slim_len = len(compact_slim)
+    ratio = slim_len / full_len
+    assert ratio <= 0.40, (
+        f"compact slim is {ratio:.0%} of compact full "
+        f"(slim={slim_len} chars, full={full_len} chars); budget ≤ 40%."
     )
 
 
 def test_budget__compact_json_no_whitespace_separators(five_task_fixture):
     compact = output.format_json(
-        [output.render_task(t, full=False) for t in five_task_fixture],
-        pretty=False,
+        [output.render_task(t, full=False) for t in five_task_fixture]
     )
     assert "\n" not in compact
     assert ", " not in compact
@@ -251,8 +238,7 @@ def test_budget__compact_json_no_whitespace_separators(five_task_fixture):
 
 def test_budget__compact_json_round_trips(five_task_fixture):
     compact = output.format_json(
-        [output.render_task(t, full=False) for t in five_task_fixture],
-        pretty=False,
+        [output.render_task(t, full=False) for t in five_task_fixture]
     )
     parsed = json.loads(compact)
     assert isinstance(parsed, list)
