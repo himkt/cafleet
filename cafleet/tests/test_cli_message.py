@@ -1,9 +1,8 @@
-"""Tests for ``cafleet message show`` (round-8 auth-check follow-up).
+"""Tests for ``cafleet message show``.
 
-``message show`` previously skipped the ``broker.verify_agent_session``
-membership check — any process holding the database file could fetch any
-task by ID without proving its caller belonged to the session. Round-8
-adds the same check that ``agent list`` / ``agent show`` already do.
+``message show`` is gated by ``broker.verify_agent_session`` (the same
+membership check ``agent list`` / ``agent show`` use): a caller must prove it
+belongs to the session before it can fetch a task by ID.
 """
 
 import uuid
@@ -140,10 +139,10 @@ def test_message_show_auth_check__accepts_valid_agent(
     assert task_id[:8] in (result.output or "")
 
 
-# --- message_poll_auth_check: round-9 consistency follow-up. ``message poll``
-# must gate its ``broker.poll_tasks`` call on ``broker.verify_agent_session`` so
-# a caller cannot drain another session's inbox by passing any ``--session-id``
-# they like. ---
+# --- message_poll_auth_check: ``message poll`` must gate its
+# ``broker.poll_tasks`` call on ``broker.verify_agent_session`` so a caller
+# cannot drain another session's inbox by passing any ``--session-id`` they
+# like. ---
 
 
 def test_message_poll_auth_check__rejects_unknown_agent(
@@ -219,8 +218,8 @@ def test_message_poll_auth_check__accepts_valid_agent(
     assert poll_calls[0][0] == agent_id
 
 
-# --- message_ack_auth_check: round-9 consistency follow-up. ``message ack``
-# must gate its ``broker.ack_task`` call on ``broker.verify_agent_session``. ---
+# --- message_ack_auth_check: ``message ack`` must gate its ``broker.ack_task``
+# call on ``broker.verify_agent_session``. ---
 
 
 def test_message_ack_auth_check__rejects_unknown_agent(
@@ -314,9 +313,8 @@ def test_message_ack_auth_check__accepts_valid_agent(
     assert ack_calls == [(agent_id, task_id)]
 
 
-# --- message_cancel_auth_check: round-9 consistency follow-up. ``message
-# cancel`` must gate its ``broker.cancel_task`` call on
-# ``broker.verify_agent_session``. ---
+# --- message_cancel_auth_check: ``message cancel`` must gate its
+# ``broker.cancel_task`` call on ``broker.verify_agent_session``. ---
 
 
 def test_message_cancel_auth_check__rejects_unknown_agent(

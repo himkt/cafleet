@@ -14,7 +14,7 @@ This file (the core) covers the identity / poll / send / ack / cancel / show lif
 - For broadcast send/ack and threading via `origin_task_id`, Read [`reference/broadcast.md`](reference/broadcast.md).
 - For the bash-via-Director fallback protocol (member-side reconsider-then-route, Director-side `member exec` dispatch, serialization, cross-Director boundary), Read [`reference/exec-routing.md`](reference/exec-routing.md).
 - For crash / disconnect / idle / wedged-pane recovery decision trees AND the Shutdown Protocol, Read [`reference/recovery.md`](reference/recovery.md).
-- For `--full` / `--json` / `--quiet` opt-back-in semantics and `CAFLEET_MAX_TEXT_LEN`, Read [`reference/legacy-flags.md`](reference/legacy-flags.md).
+- For `--full` / `--json` / `--quiet` opt-back-in semantics and `CAFLEET_MAX_TEXT_LEN`, Read [`reference/output-flags.md`](reference/output-flags.md).
 
 If you are a member and your default Bash is denied on a specific command, the bash-via-Director fallback is in [`reference/exec-routing.md`](reference/exec-routing.md). If you are a Director, Read [`reference/director.md`](reference/director.md) before spawning your first member.
 
@@ -47,7 +47,7 @@ The environment variables the CLI reads (all wired through `cafleet.config.Setti
 
 - `CAFLEET_DATABASE_URL` — SQLite database URL (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db`). Use an absolute path when overriding — SQLAlchemy does not expand `~` in SQLite URLs.
 - `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` — defaults for `cafleet server` (`127.0.0.1` / `8000`).
-- `CAFLEET_MAX_TEXT_LEN` — body truncation codepoint limit (default `200`); see [`reference/legacy-flags.md`](reference/legacy-flags.md).
+- `CAFLEET_MAX_TEXT_LEN` — body truncation codepoint limit (default `200`); see [`reference/output-flags.md`](reference/output-flags.md).
 
 ## Placeholder convention
 
@@ -118,7 +118,7 @@ cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
 |---|---|---|
 | `--to <agent-id>` | yes | Recipient agent UUID. |
 | `--text <body>` | yes | Message body. Truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the echoed response by default. |
-| `--full` | no | Disable body truncation; emit the full typed-column envelope. See [`reference/legacy-flags.md`](reference/legacy-flags.md). |
+| `--full` | no | Disable body truncation; emit the full typed-column envelope. See [`reference/output-flags.md`](reference/output-flags.md). |
 | `--quiet` | no | Emit only the new task id (8-char prefix). Useful in scripted loops. |
 
 After persisting the message, the broker keystrokes a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview`:
@@ -199,7 +199,7 @@ cafleet --session-id <session-id> agent list --agent-id <my-agent-id>
 cafleet --session-id <session-id> agent show --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
-Default output is one row per agent (`<id8> <name> <status>`); `description` is truncated to 60 codepoints. Pass `--full` for the four-line per-agent block including the full `agent_card_json` blob — see [`reference/legacy-flags.md`](reference/legacy-flags.md).
+Default output is one row per agent (`<id8> <name> <status>`); `description` is truncated to 60 codepoints. Pass `--full` for the four-line per-agent block including the full `agent_card_json` blob — see [`reference/output-flags.md`](reference/output-flags.md).
 
 ## Doctor
 

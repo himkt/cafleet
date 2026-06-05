@@ -95,11 +95,10 @@ def test_db_init_idempotent(tmp_path, monkeypatch):
     assert version_after_second == version_after_first
 
 
-def test_db_init_legacy_errors(tmp_path, monkeypatch):
-    """Verifies design-doc state #6: legacy DB (tables, no alembic_version).
-
-    No auto-stamp -- silently stamping would lie about revision and
-    could mask schema mismatches at runtime.
+def test_db_init_errors_on_unversioned_db(tmp_path, monkeypatch):
+    """A database with tables but no ``alembic_version`` is rejected, not
+    auto-stamped -- silently stamping would lie about the revision and could
+    mask schema mismatches at runtime.
     """
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(

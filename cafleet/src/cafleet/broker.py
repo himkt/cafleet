@@ -65,9 +65,9 @@ def _try_notify_recipient(
 ) -> bool:
     """Best-effort inline-preview keystroke for the recipient's pane.
 
-    Surface 15: replaces the legacy poll-command keystroke with a 2-line
-    preview of the message itself — the recipient's TUI processes the
-    keystrokes as a fresh user-turn input and the recipient acks via
+    Keystrokes a 2-line preview of the message itself into the recipient's
+    pane — the recipient's TUI processes the keystrokes as a fresh user-turn
+    input and the recipient acks via
     ``cafleet message ack --task-id <id>``. The queue remains the source
     of truth; failures are swallowed.
     """

@@ -1,10 +1,9 @@
-"""Tests for ``cafleet agent ...`` CLI commands (round-9 auth-check follow-up).
+"""Tests for ``cafleet agent ...`` CLI commands.
 
-``agent deregister`` previously relied on ``broker.deregister_agent(agent_id)``
-which is ``session_id``-blind: any caller passing any ``--session-id`` could
-deregister any agent in the database. Round-9 adds the same
-``broker.verify_agent_session`` gate that ``agent list`` / ``agent show`` /
-``message show`` already use.
+``agent deregister`` is gated by ``broker.verify_agent_session`` (the same
+membership check ``agent list`` / ``agent show`` / ``message show`` use): a
+caller must prove its ``--agent-id`` belongs to the supplied ``--session-id``,
+so it cannot deregister an agent outside its session.
 """
 
 import uuid

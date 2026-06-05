@@ -69,11 +69,10 @@ delay so all three backends (`claude`, `codex`, `opencode`) see the
 preview as a single user-turn message.
 
 If the recipient's TUI is in a non-input state, the keystroked preview
-lands wherever the cursor is (same failure mode as the legacy auto-fire
-poll). The fallback chain is `cafleet member list --agent-id <d>
+lands wherever the cursor is (the same failure mode any pane keystroke has). The fallback chain is `cafleet member list --agent-id <d>
 --activity` (Director observes the recipient's `last_recv` column went
 stale), then `cafleet member ping --agent-id <d> --member-id <r>` (manual
-re-poke that injects the legacy poll command + Enter so the recipient
+re-poke that injects the `cafleet message poll` command + Enter so the recipient
 catches up via a normal `message poll` round-trip).
 
 ## Design principles
@@ -93,9 +92,8 @@ catches up via a normal `message poll` round-trip).
 `notification_sent` boolean. Broadcast responses expose
 `notifications_sent_count` as a top-level wrapper field (returned alongside
 the `broadcast_summary` task), reflecting how many recipient panes were
-successfully triggered. Post-Surface-14 the `tasks` schema has no metadata
-blob — the count is NOT persisted on the summary row; it lives only in the
-broker return value.
+successfully triggered. The `tasks` schema has no metadata blob — the count
+is NOT persisted on the summary row; it lives only in the broker return value.
 
 **Manual entry-point**: `TmuxMultiplexer.send_poll_trigger` survives as the
 method for the **manual** poll-nudge path only — the sole caller is

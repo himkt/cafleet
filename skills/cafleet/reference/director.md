@@ -235,4 +235,4 @@ The action is wholly determined by the subcommand name — there is no positiona
 - For broadcast send/ack semantics, see [`reference/broadcast.md`](broadcast.md).
 - For the bash-via-Director fallback protocol, see [`reference/exec-routing.md`](exec-routing.md).
 - For crash/disconnect/idle recovery flows including the Shutdown Protocol, see [`reference/recovery.md`](recovery.md).
-- For `--full` / `--json` opt-back-in semantics, see [`reference/legacy-flags.md`](legacy-flags.md).
+- For `--full` / `--json` opt-back-in semantics, see [`reference/output-flags.md`](output-flags.md).

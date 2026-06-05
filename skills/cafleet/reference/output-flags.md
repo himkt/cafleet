@@ -1,4 +1,4 @@
-# Legacy flags — `--full` / `--json` opt-back-ins
+# Output flags — `--full` / `--json` / `--quiet`
 
 `--full` / `--json` are the opt-back-ins for cafleet's compact default output. Each flag is documented below.
 
@@ -15,7 +15,7 @@
 
 ## `--json` (global, machine-parseable)
 
-`--json` switches CLI output from text to JSON. JSON encoding is compact (`json.dumps(data, separators=(",",":"))` — no whitespace), so `--json` is cheap to pipe into `jq` from a Director loop without paying for indentation.
+`--json` switches CLI output from text to JSON. JSON encoding is compact (`json.dumps(data, separators=(",",":"), ensure_ascii=False)` — no whitespace, non-ASCII like the `…` suffix emitted as UTF-8), so `--json` is cheap to pipe into `jq` from a Director loop without paying for indentation.
 
 ```bash
 cafleet --json message poll --agent-id <m>

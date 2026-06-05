@@ -69,7 +69,7 @@ CLI JSON output is governed by the `--json` flag:
 
 | Mode | Output |
 |---|---|
-| `--json` | Compact JSON: `json.dumps(data, separators=(",",":"))` — no whitespace. |
+| `--json` | Compact JSON: `json.dumps(data, separators=(",",":"), ensure_ascii=False)` — no whitespace; non-ASCII (e.g. the `…` suffix) emitted as UTF-8. |
 | (text mode) | Two lines per task in the compact rendered shape; six lines per task in `--full`. |
 
 #### Examples

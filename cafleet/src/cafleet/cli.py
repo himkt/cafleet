@@ -81,7 +81,7 @@ def _client_command(
     - ``truncates_task_text=True`` → JSON output goes through
       ``render_tasks_in_result`` + ``truncate_task_text``; text formatter is
       called as ``text_formatter(result, full=, quiet=)``.
-    - ``renders_agent_card=True`` (Surface 18) → JSON output goes through
+    - ``renders_agent_card=True`` → JSON output goes through
       ``render_agents_in_result``; text formatter is called as
       ``text_formatter(result, full=)``.
     - Neither → JSON output is the raw broker result; text formatter is

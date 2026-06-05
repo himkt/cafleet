@@ -26,7 +26,7 @@ from cafleet.coding_agent.opencode_preset import (
 
 
 def test_permission_ruleset_is_frozen():
-    """PermissionRuleset is a frozen dataclass — immutable per §3.1.
+    """PermissionRuleset is a frozen dataclass — immutable.
 
     Asserts the specific ``dataclasses.FrozenInstanceError`` rather than a
     broad ``(AttributeError, Exception)`` catch, so an unrelated AttributeError

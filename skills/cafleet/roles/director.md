@@ -10,7 +10,7 @@ This file is the role-specific anchor. The actual protocols live in dedicated re
 2. **Before processing a member's denial-fallback request**, Read [`reference/exec-routing.md`](../reference/exec-routing.md). Covers how to recognize a member-originated bash request, the `cafleet member exec` dispatch shape, the required `cafleet member ping` follow-up, serialization (process one request at a time in poll order), and the cross-Director boundary.
 3. **Before tearing down a member or session**, Read [`reference/recovery.md`](../reference/recovery.md). Covers the 2-stage health check, stalled-member shape classification, recovery from a wedged `/exit`, and the full Shutdown Protocol (stop crons → delete members → verify → `session delete` → confirm).
 4. **Before broadcasting**, Read [`reference/broadcast.md`](../reference/broadcast.md). Covers fan-out semantics, the `broadcast_summary` envelope, and threading via `origin_task_id`.
-5. **For `--full` opt-back-in semantics**, Read [`reference/legacy-flags.md`](../reference/legacy-flags.md).
+5. **For `--full` opt-back-in semantics**, Read [`reference/output-flags.md`](../reference/output-flags.md).
 
 ## Placeholder convention
 

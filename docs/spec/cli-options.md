@@ -21,7 +21,7 @@ Placed **before** the subcommand:
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--json` | no | Emit JSON output. JSON encoding is compact (`json.dumps(..., separators=(",",":"))`). |
+| `--json` | no | Emit JSON output. JSON encoding is compact (`json.dumps(..., separators=(",",":"), ensure_ascii=False)` — non-ASCII like the `…` truncation suffix is emitted as UTF-8, not `\uXXXX`). |
 | `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
@@ -33,7 +33,7 @@ Placed **before** the subcommand:
 |---|---|---|
 | `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix (see [Message Body Truncation](#message-body-truncation)). Compact rendered envelope: `id` (8-char prefix), `from` (8-char prefix), `ts`, `text`, plus `kind`/`origin` only when present. | Untruncated `text` AND the full typed-column envelope (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text`). |
 | `message broadcast` | One-line summary (`broadcast id=<id8> recipients=<count>`). The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper — there are no per-recipient envelopes or `recipient_ids` list in the response. | No effect. `--full` is preserved for surface consistency with the five `message {send,poll,ack,cancel,show}` subcommands but is a no-op on broadcast. |
-| `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints; `agent_card_json` projected to the minimum-required fields. | Four-line per-agent block (the legacy view) including untruncated `description` and the full `agent_card_json` blob. |
+| `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints; `agent_card_json` projected to the minimum-required fields. | Four-line per-agent block including untruncated `description` and the full `agent_card_json` blob. |
 | `member capture` | Default `--lines 30` (down from 80); ANSI escape sequences stripped in post-process unless `--ansi` is supplied. | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
 
 ### Subcommands that require `--session-id`
@@ -112,7 +112,7 @@ The five subcommands that emit a user-supplied delivery body — `cafleet messag
 
 The suffix is the single Unicode codepoint `…` (U+2026 HORIZONTAL ELLIPSIS) — exactly one codepoint with no count and no companion `text_length` field.
 
-`cafleet message broadcast` is different — `broker.broadcast_message` returns a `broadcast_summary` task whose top-level `text` column is a broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. Post-Surface-14 the task envelope is a flat typed-column dict with no `metadata` / `artifacts` wrappers; see [message-envelope.md](./message-envelope.md) for the canonical schema. Truncating that summary would hide the recipient count, so `message_broadcast` runs with `truncates_task_text=False` and its summary always emits in full. The `--full` Click option is preserved on `message broadcast` for flag-surface consistency across all six subcommands but is a no-op there.
+`cafleet message broadcast` is different — `broker.broadcast_message` returns a `broadcast_summary` task whose top-level `text` column is a broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. Truncating that summary would hide the recipient count, so `message_broadcast` runs with `truncates_task_text=False` and its summary always emits in full. The `--full` Click option is preserved on `message broadcast` for flag-surface consistency across all six subcommands but is a no-op there. The task envelope is a flat typed-column dict with no `metadata` / `artifacts` wrappers; see [message-envelope.md](./message-envelope.md) for the canonical schema.
 
 The table describes the resulting `text` value AFTER truncation. Text mode omits the `text:` line entirely when the resulting value is empty, while `--json` always includes it.
 
@@ -208,7 +208,7 @@ Attempting `cafleet --session-id <session_id> agent deregister --agent-id <direc
 |---|---|---|
 | `--json` | no | Output as JSON |
 
-Lists all **non-soft-deleted** sessions with their `director_agent_id`, label, created_at, and active agent count. There is no `--all` flag in this revision — soft-deleted sessions (`sessions.deleted_at IS NOT NULL`) are hidden.
+Lists all **non-soft-deleted** sessions with their `director_agent_id`, label, created_at, and active agent count. Soft-deleted sessions (`sessions.deleted_at IS NOT NULL`) are hidden.
 
 Each row exposes the session's root `director_agent_id` so the Director's ID can be recovered from a list after `session create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (full UUID). Text output renders it as a `DIRECTOR` column placed immediately after `SESSION_ID`, showing the **full** director UUID (not an 8-char prefix) because the value is pasted into `--agent-id`, which stays full-only:
 
@@ -533,20 +533,6 @@ JSON (`cafleet --json ... member send-input ...`):
   "value": "<user text as-sent>"
 }
 ```
-
-#### Typical Director workflow
-
-> **Note**: Superseded by the canonical **Director-side usage pattern** subsection below. The canonical pattern requires the Director to delegate the decision to the user via `AskUserQuestion` FIRST and then invoke the resolved `cafleet member send-input` via its own Bash tool — AskUserQuestion is required, not optional. This older subsection is retained for historical context only; new readers should follow the canonical pattern.
-
-The CLI is deliberately one-shot — the surrounding choose-and-answer loop stays in the Director's control:
-
-1. `cafleet --session-id <s> member capture --agent-id <d> --member-id <m> --lines 120` — read the current prompt options off the pane.
-2. Ask the end user (for example via `AskUserQuestion`) with the observed labels.
-3. Based on the answer, either:
-   - Option 1 / 2 / 3 → `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --choice N`
-   - Free-text → `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --freetext "<user text>"`
-
-Capture parsing is intentionally left manual because prompt layouts differ across Claude Code versions. The CLI's job is to *send* restricted keystrokes safely; reading and presenting options belongs to the Director.
 
 #### Director-side usage pattern
 

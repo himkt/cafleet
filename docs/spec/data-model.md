@@ -2,7 +2,7 @@
 
 The `Task` payload is fully relational: every routing field plus the message body lives in its own typed column (see `cafleet/src/cafleet/broker.py`). The only JSON `TEXT` blob is `agents.agent_card_json`, which stores an `AgentCard`-shaped document; CAFleet does not maintain Pydantic models for either shape.
 
-The model is now **predominantly relational**: every queried field on `tasks` is a typed column, and the only opaque payload is the `agent_card_json` document on `agents`. The previous "relational + document hybrid" framing applied to the pre-Surface-14 schema and no longer reflects the on-disk layout.
+The model is **predominantly relational**: every queried field on `tasks` is a typed column, and the only opaque payload is the `agent_card_json` document on `agents`.
 
 Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver (see `cafleet/src/cafleet/db/engine.py`'s `get_sync_engine` / `get_sync_sessionmaker`). Operators apply migrations once via `cafleet db init` before starting the server.
 
@@ -102,7 +102,7 @@ A future `rename_agent` broker function MUST apply the same guard. `broker.broad
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; first-write only, preserved across UPSERT. |
 | `status_state` | `TEXT` | `NOT NULL` | TaskState enum value (e.g., `TASK_STATE_INPUT_REQUIRED`). |
 | `status_timestamp` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; updated on every state change. Used for `ORDER BY DESC`. |
-| `origin_task_id` | `TEXT` | nullable | Broadcast grouping link. `NULL` on unicast deliveries. On broadcast delivery rows, holds the summary task's `task_id`, shared across every delivery row in the same broadcast. On the broadcast summary row itself, holds its own `task_id` (self-reference) so the delivery rows and the summary row all share a single grouping value. Historical rows from before the migration are `NULL`. |
+| `origin_task_id` | `TEXT` | nullable | Broadcast grouping link. `NULL` on unicast deliveries. On broadcast delivery rows, holds the summary task's `task_id`, shared across every delivery row in the same broadcast. On the broadcast summary row itself, holds its own `task_id` (self-reference) so the delivery rows and the summary row all share a single grouping value. |
 | `text` | `TEXT` | `NOT NULL` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time. Added by Alembic revision `0009_drop_task_json_add_text`. |
 
 Indexes:
@@ -113,38 +113,6 @@ Indexes:
 | `idx_tasks_from_agent_status_ts` | `(from_agent_id, status_timestamp DESC)` | WebUI sender outbox: `WHERE from_agent_id = ? ORDER BY status_timestamp DESC`. |
 
 `status_state` and `status_timestamp` are promoted to columns so filtering and ordering execute on the database, not in Python after fetching every blob. The two task indexes serve the inbox listing query (`WHERE context_id = ? ORDER BY status_timestamp DESC`) and the WebUI sender outbox query (`WHERE from_agent_id = ? ORDER BY status_timestamp DESC`) directly from the index.
-
-#### `tasks.task_json` removal (Alembic `0009_drop_task_json_add_text`)
-
-`task_json` is not part of the schema; the columns above (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, plus `text`) are sufficient to reconstruct every shape the broker, CLI, and WebUI need.
-
-Migration shape — a **single Alembic revision** so no in-between binary version sees a column the other does not (see `cafleet/src/cafleet/alembic/versions/0009_drop_task_json_add_text.py` for the canonical implementation):
-
-1. **Pre-flight check** — assert every existing row has a non-NULL body at `json_extract(task_json, '$.artifacts[0].parts[0].text')`. The check is universal: broadcast-summary rows already carry a generated summary string at that JSON path (the broker wrote `"Broadcast sent to N recipients"` there pre-Surface-14), so they pass the check on real data without any special casing. Migration aborts with `RuntimeError` listing the offending `task_id`s if any row violates.
-2. `ALTER TABLE tasks ADD COLUMN text TEXT` (initially nullable so the backfill UPDATE can populate it before NOT NULL is enforced).
-3. Backfill: `UPDATE tasks SET text = json_extract(task_json, '$.artifacts[0].parts[0].text')` for **all** rows (including broadcast-summary, which inherits its existing summary string).
-4. `ALTER TABLE tasks ALTER COLUMN text SET NOT NULL` (or SQLite-compatible rebuild via `op.batch_alter_table`).
-5. `ALTER TABLE tasks DROP COLUMN task_json` (folded into the same `batch_alter_table` as step 4 so SQLite's table rebuild happens once).
-
-**Migration risk**: irreversible without backup. Operators MUST take a backup before running `cafleet db init` against a populated database:
-
-```bash
-cp ~/.local/share/cafleet/registry.db ~/.local/share/cafleet/registry.db.pre-typed-columns.bak
-cafleet db init
-```
-
-Restore is `cp registry.db.pre-typed-columns.bak registry.db` followed by re-running the older `cafleet` binary. There is no programmatic downgrade — the `task_json` blob is gone after upgrade and the typed columns do not preserve the historical `metadata.kind`, `artifactId`, or `contextId` constants the blob carried.
-
-Callers rewritten in lockstep (no bridge period — single Alembic revision plus a single broker-side commit):
-
-- `_save_task` (writes typed columns, no blob).
-- `_read_task` (reads typed columns, no blob).
-- `_unicast_task_dict` (returns the typed-column flat dict shape).
-- Broadcast-summary builder (writes `text="Broadcast sent to N recipients"` directly into the typed column at insert time, populates the other typed columns alongside).
-- `poll_tasks` (SELECTs typed columns; no `json.loads`).
-- `ack_task` and `cancel_task` (round-trip via `_read_task`/`_save_task`; no payload changes).
-
-WebUI consumers (`webui_api.py` + `admin/src/types.ts`) update their type definitions to the typed-column flat shape; the `/api/*` JSON response shape changes correspondingly (no `metadata` / `artifacts` wrappers).
 
 ### `agent_placements`
 

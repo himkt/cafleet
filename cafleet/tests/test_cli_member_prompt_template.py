@@ -21,7 +21,8 @@ _STANDARD_KWARGS = {
 
 
 def test_member_prompt_template__has_required_placeholders():
-    """Post-Surface-6: the slim spawn prompt drops ``{director_name}``."""
+    """The slim spawn prompt uses ``{session_id}`` / ``{agent_id}`` /
+    ``{director_agent_id}`` and does not include ``{director_name}``."""
     cli = _cli()
     template = cli._MEMBER_PROMPT_TEMPLATE
     assert "{session_id}" in template
@@ -31,12 +32,12 @@ def test_member_prompt_template__has_required_placeholders():
 
 
 def test_member_prompt_template__phrasing_is_short_and_backend_neutral():
-    """Post-Surface-6: the slim 2-line spawn prompt drops the codex/claude
-    branch from the template body. Codex orientation lives in the cafleet
-    skill core SKILL.md, not the spawn prompt itself."""
+    """The slim 2-line spawn prompt has no codex/claude branch in its body —
+    backend orientation lives in the cafleet skill core SKILL.md, not the
+    spawn prompt itself."""
     cli = _cli()
     template = cli._MEMBER_PROMPT_TEMPLATE
-    # Surface 6 budget: ≤ 70 tokens post-substitution. Loose proxy: keep
+    # Budget: ≤ 70 tokens post-substitution. Loose proxy: keep
     # the template under 200 codepoints (excluding placeholders).
     assert len(template) < 250, (
         f"template too long ({len(template)} codepoints): {template!r}"

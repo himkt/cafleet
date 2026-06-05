@@ -161,7 +161,7 @@ def test_format_task__compact_two_lines_with_expected_fields(line, needle):
     assert output.format_task({"task": task}, full=False) == rendered
 
 
-def test_format_task__full_legacy_layout_has_more_lines_and_field_labels():
+def test_format_task__full_layout_has_more_lines_and_field_labels():
     task = _typed_task(text="legacy body")
     compact = output.format_task(task, full=False)
     full = output.format_task(task, full=True)

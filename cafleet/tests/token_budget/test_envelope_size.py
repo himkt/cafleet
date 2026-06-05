@@ -125,7 +125,7 @@ def test_compact_slim_envelope_smaller_than_compact_full():
     )
 
 
-def test_full_envelope_keeps_legacy_keys():
+def test_full_envelope_keeps_all_typed_column_keys():
     """``render_task(task, full=True)`` MUST keep every typed-column key so
     operators using ``--full`` still get the verbose shape they reach for
     when debugging. This is a guardrail against an over-eager projection

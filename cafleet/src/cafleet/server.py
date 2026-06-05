@@ -19,8 +19,9 @@ class SPAStaticFiles(StaticFiles):
 
     Re-raises 404 for paths under the reserved ``ui/`` and ``api/`` prefixes
     so they never silently resolve to ``index.html``:
-    - ``ui/...`` — removed surface; explicit 404 keeps the removal hard.
-    - ``api/...`` — backend surface; unknown API paths must return JSON 404,
+    - ``ui/...`` — no UI is served under this prefix; the explicit 404 keeps
+      it from silently resolving to ``index.html``.
+    - ``api/...`` — backend prefix; unknown API paths must return JSON 404,
       not HTML, so client error paths (``resp.json()``) stay valid.
     """
 

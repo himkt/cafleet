@@ -40,7 +40,7 @@ Every broadcast generates `recipient_count + 1` rows in `tasks`:
 
 The grouping predicate on the wire is `origin_task_id IS NOT NULL`, which cleanly partitions the timeline into "standalone unicast entry" vs "part of a broadcast group". The summary task's `task_id` is pre-allocated **before** the per-recipient INSERT loop in `broker.broadcast_message` so every delivery row can carry the link from the start.
 
-The rendered envelope's compact form surfaces the threading link as `origin: <id8>` (8-char prefix of `origin_task_id`); the legacy `--full` view surfaces it as `origin_task_id` (full UUID). Recipients that want to thread their ACK with the original broadcast read `origin_task_id` and ack their delivery row's `task_id` as usual — there is no separate "ack the broadcast" call.
+The rendered envelope's compact form surfaces the threading link as `origin: <id8>` (8-char prefix of `origin_task_id`); the `--full` view surfaces it as `origin_task_id` (full UUID). Recipients that want to thread their ACK with the original broadcast read `origin_task_id` and ack their delivery row's `task_id` as usual — there is no separate "ack the broadcast" call.
 
 ## Acknowledging a broadcast delivery
 
@@ -54,4 +54,4 @@ The summary row is NOT acked by recipients — it is a sender-side artifact, add
 
 ## Flag-surface consistency
 
-`--full` is preserved on `message broadcast` for surface consistency with `message {send,poll,ack,cancel,show}`. On those five subcommands `--full` disables body truncation; on `message broadcast` it has no effect — the broker's return value is a single summary task plus `notifications_sent_count`, the summary's `text` is the broker-computed string and is emitted untruncated regardless, and there are no per-recipient envelopes or `recipient_ids` list in the response to gate. See `reference/legacy-flags.md` for the cross-subcommand `--full` semantics table.
+`--full` is preserved on `message broadcast` for surface consistency with `message {send,poll,ack,cancel,show}`. On those five subcommands `--full` disables body truncation; on `message broadcast` it has no effect — the broker's return value is a single summary task plus `notifications_sent_count`, the summary's `text` is the broker-computed string and is emitted untruncated regardless, and there are no per-recipient envelopes or `recipient_ids` list in the response to gate. See `reference/output-flags.md` for the cross-subcommand `--full` semantics table.

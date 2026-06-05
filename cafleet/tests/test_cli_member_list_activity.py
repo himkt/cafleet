@@ -81,7 +81,7 @@ def bootstrapped_team(tmp_path, monkeypatch, _reset_engine_singletons):
 
 
 def test_member_list_no_activity_flag__omits_activity_keys(bootstrapped_team):
-    """Default ``cafleet member list`` MUST keep the legacy JSON shape — no
+    """Default ``cafleet member list`` MUST keep the baseline JSON shape — no
     ``last_sent`` / ``last_recv`` / ``last_ack`` / ``idle`` keys. This guards
     against accidental wire-shape regressions for downstream JSON consumers."""
     sid, director_id, _members, runner = bootstrapped_team

@@ -166,7 +166,7 @@ The audit trail of every status hop lives in the cafleet message log (admin WebU
 
 ### Director Per-File Detail Recovery
 
-Members no longer ship file lists in cafleet bodies. The Director recovers per-file detail directly via git when a commit message needs it: `git status` for unstaged/staged file lists, `git diff --stat <base>..HEAD` for cumulative scope, `git log <base>..HEAD --name-only` for file-touch history, `git diff <base>..HEAD -- <pattern>` for content. This applies in Phase A (test commits), Phase B/C (impl commits), Phase 7d (Copilot fix commits), and Step 8 (finalize commit).
+Members do not ship file lists in cafleet bodies (the verb + pointer schema carries only a poke). The Director recovers per-file detail directly via git when a commit message needs it: `git status` for unstaged/staged file lists, `git diff --stat <base>..HEAD` for cumulative scope, `git log <base>..HEAD --name-only` for file-touch history, `git diff <base>..HEAD -- <pattern>` for content. This applies in Phase A (test commits), Phase B/C (impl commits), Phase 7d (Copilot fix commits), and Step 8 (finalize commit).
 
 ### Skill-specific overrides
 
@@ -255,7 +255,7 @@ Using `${RESOLVED_ARGS}`, apply a three-tier detection strategy, evaluated in or
 
 Tier evaluation is sequential and short-circuits.
 
-> **Tier 3 with task-scope BASE**: When Phase 1's present-argument branch fires, `${BASE}` is one slug folder and `${RESOLVED_ARGS}` is set to `${BASE}/design-doc.md` — Tier 1 short-circuits before Tier 3 is reached, so the task-scoped BASE never exercises the discovery flow. Tier 3 is preserved for the no-argument branch, where `${BASE}` is the repo root and the discovery flow scans every approved slug under `<repo>/design-docs/`. No follow-up edit is required (per design 0000060 § 6 *Tier 3 verification*).
+> **Tier 3 with task-scope BASE**: When Phase 1's present-argument branch fires, `${BASE}` is one slug folder and `${RESOLVED_ARGS}` is set to `${BASE}/design-doc.md` — Tier 1 short-circuits before Tier 3 is reached, so the task-scoped BASE never exercises the discovery flow. Tier 3 is preserved for the no-argument branch, where `${BASE}` is the repo root and the discovery flow scans every approved slug under `<repo>/design-docs/`.
 
 #### Discovery Flow (Tier 3)
 
@@ -750,7 +750,7 @@ For review-level comments (body text not attached to a specific line), route by 
    - Tester fixes: `git commit -m "fix: address Copilot test review - <short summary>"`
    - Director doc fixes: `git commit -m "docs: address Copilot review - <short summary>"`
 3. `git push` (no flags — the branch already tracks origin from Step 6).
-4. Update `last_push_ts` to the post-push wall-clock timestamp and reset `silence_ticks = 0` (any silence before the push is no longer relevant — the new push restarts the review window).
+4. Update `last_push_ts` to the post-push wall-clock timestamp and reset `silence_ticks = 0` (the new push restarts the review window).
 5. Re-request Copilot review: `gh pr edit <pr-number> --add-reviewer @copilot`. Re-adding the same reviewer triggers a fresh Copilot pass.
 6. Continue the loop.
 

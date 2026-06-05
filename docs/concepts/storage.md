@@ -24,10 +24,9 @@ INSERT or UPDATE), and multiple agents polling concurrently is read-only.
 
 ## Predominantly relational model
 
-Indexed and routing fields are typed columns. The only remaining JSON `TEXT`
-blob is `agents.agent_card_json` (an `AgentCard`-shaped document, not queried
-by content). Tasks were document-blob-shaped pre-Surface-14; the `task_json`
-blob was dropped and every Task field now lives in a typed column.
+Indexed and routing fields are typed columns. The only JSON `TEXT` blob is
+`agents.agent_card_json` (an `AgentCard`-shaped document, not queried by
+content). Every Task field lives in its own typed column.
 
 ```mermaid
 %%{init: {'theme': 'default', 'themeVariables': {'fontSize': '15px'}}}%%
@@ -85,14 +84,9 @@ erDiagram
 | `tasks` | `task_id` (PK), `context_id` (FK → `agents`), `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text` | — |
 | `agent_placements` | `agent_id` (PK, FK → `agents` CASCADE), `director_agent_id` (nullable, FK → `agents` RESTRICT), `tmux_session`, `tmux_window_id`, `tmux_pane_id` (nullable) | — |
 
-`tasks.text` is the message body as a typed column. The legacy `task_json`
-blob was dropped because the typed columns (plus `text`) were sufficient to
-reconstruct every shape the broker, CLI, and WebUI need; the redundant blob
-added cost on every poll without unique data. See
-[data model](../spec/data-model.md) §`tasks.task_json` removal for the
-single-Alembic-revision migration shape (pre-flight non-null check + backfill
-+ drop) and the operator backup procedure
-(`cp registry.db registry.db.pre-typed-columns.bak`).
+`tasks.text` is the message body as a typed column. The typed columns (plus
+`text`) reconstruct every shape the broker, CLI, and WebUI need; no opaque
+per-task blob is stored.
 
 The `agent_placements.director_agent_id` parent-child edge (nullable FK →
 `agents` RESTRICT) is used by `broker._try_notify_recipient` to resolve the
@@ -136,7 +130,7 @@ is idempotent across six DB states:
 | At head | No-op; print "already at head" |
 | Behind head | `command.upgrade(cfg, "head")`; print "upgraded from X to Y" |
 | Ahead of head | Error; refuse to downgrade automatically |
-| Legacy (tables exist, no `alembic_version`) | Error; instruct operator to run `alembic stamp head` manually |
+| Unversioned (tables exist, no `alembic_version`) | Error; instruct operator to run `alembic stamp head` manually |
 
 Without `db init`, the first request fails with `OperationalError: no such
 table: agents`. The development workflow uses `alembic revision
