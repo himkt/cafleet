@@ -23,12 +23,3 @@ below.
 | Persisted-shape simplification | Every `Task` field is a flat typed column; `Task.text` carries the message body and there is no opaque per-task JSON blob. Six broker callers (`_save_task`, `_read_task`, `_unicast_task_dict`, broadcast-summary builder, `poll_tasks`, `ack_task`/`cancel_task`) read and write typed columns directly. WebUI consumers use the typed-column flat shape. |
 | Inline message preview | `broker._try_notify_recipient` keystrokes a 2-line `[cafleet msg <id8> from <sender8> <ts>]` + body preview directly into the recipient's pane via `TmuxMultiplexer.send_inline_preview`. Documented in [tmux push notifications](tmux-push.md); `TmuxMultiplexer.send_poll_trigger` is the `member ping` re-poke primitive. |
 | Agent render slim | `output.render_agent` projects each broker agent dict to the minimum-required fields by default (`id`, `name`, `description` truncated, `status`, and `coding_agent` from placement); `--full` returns the agent dict unchanged. The agent surfaces (`broker.list_agents` / `get_agent`) never load `agent_card_json`, so it is not emitted in either mode. |
-
-The token-budget regression suite under `tests/token_budget/` checks
-character counts on representative outputs against checked-in baselines so
-future drift is caught at PR time.
-`tests/token_budget/scenarios/idle_3_member_baseline_stub.py` is the
-manually-runnable single-shot measurement stub for the per-tick cost of the
-Director monitoring commands (sleeps `SETTLE_SECONDS=30` and captures once).
-The char-anchored regression tests under `tests/token_budget/` are the
-canonical contract.

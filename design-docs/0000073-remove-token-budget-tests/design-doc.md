@@ -1,7 +1,7 @@
 # Remove token-budget testing
 
 **Status**: Approved
-**Progress**: 0/5 tasks complete
+**Progress**: 1/5 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -86,7 +86,7 @@ This is a clean removal: no replacement guard is added, and no restoration / mig
 
 ### Step 1: Update documentation
 
-- [ ] In `docs/concepts/token-reduction.md`, delete the trailing test-suite paragraph together with the blank line separating it from the table (lines 26–34: the "token-budget regression suite", the `idle_3_member_baseline_stub.py` description, and the "canonical contract" sentence). The file then ends at the techniques table's last row (line 25) with a single trailing newline. Keep the techniques table (lines 16–25) and the intro prose (lines 7–14) unchanged. <!-- completed: -->
+- [x] In `docs/concepts/token-reduction.md`, delete the trailing test-suite paragraph together with the blank line separating it from the table (lines 26–34: the "token-budget regression suite", the `idle_3_member_baseline_stub.py` description, and the "canonical contract" sentence). The file then ends at the techniques table's last row (line 25) with a single trailing newline. Keep the techniques table (lines 16–25) and the intro prose (lines 7–14) unchanged. <!-- completed: 2026-06-06T04:36 -->
 
 ### Step 2: Remove the package test suite
 
