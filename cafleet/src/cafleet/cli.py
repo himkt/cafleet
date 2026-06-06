@@ -23,10 +23,10 @@ from cafleet.config import settings
 from cafleet.multiplexer import MULTIPLEXERS, TmuxError
 
 _MEMBER_PROMPT_TEMPLATE = (
-    "Member of cafleet session {session_id} "
+    "Member of cafleet fleet {fleet_id} "
     "(agent={agent_id}, director={director_agent_id}).\n"
     "Load skill 'cafleet'. Bash auto-approves. Poll: "
-    "cafleet --session-id {session_id} message poll --agent-id {agent_id}"
+    "cafleet --fleet-id {fleet_id} message poll --agent-id {agent_id}"
 )
 
 
@@ -60,17 +60,17 @@ def _director_member_options(func):
     return click.option("--agent-id", required=True, help="Director's agent ID")(func)
 
 
-def _require_session_id(ctx: click.Context) -> None:
-    if not ctx.obj["session_id"]:
+def _require_fleet_id(ctx: click.Context) -> None:
+    if not ctx.obj["fleet_id"]:
         raise click.ClickException(
-            "--session-id <uuid> is required for this subcommand. "
-            "Create a session with 'cafleet session create' and pass its id."
+            "--fleet-id <uuid> is required for this subcommand. "
+            "Create a fleet with 'cafleet fleet create' and pass its id."
         )
 
 
 def _client_command(
     *,
-    requires_agent_session: bool = False,
+    requires_agent_fleet: bool = False,
     text_formatter: Callable[..., str] | None = None,
     truncates_task_text: bool = False,
     renders_agent_card: bool = False,
@@ -94,20 +94,20 @@ def _client_command(
     def decorator(func):
         @functools.wraps(func)
         def wrapper(ctx, *args, **kwargs):
-            _require_session_id(ctx)
-            session_id = ctx.obj["session_id"]
+            _require_fleet_id(ctx)
+            fleet_id = ctx.obj["fleet_id"]
             try:
-                if requires_agent_session:
+                if requires_agent_fleet:
                     agent_id = kwargs.get("agent_id")
                     if agent_id is None:
                         raise click.ClickException(
-                            "_client_command(requires_agent_session=True) but no "
+                            "_client_command(requires_agent_fleet=True) but no "
                             "'agent_id' kwarg was passed. Check the @click.option "
                             "declaration on this command."
                         )
-                    if not broker.verify_agent_session(agent_id, session_id):
+                    if not broker.verify_agent_fleet(agent_id, fleet_id):
                         raise click.ClickException(
-                            f"agent {agent_id} is not a member of session {session_id}."
+                            f"agent {agent_id} is not a member of fleet {fleet_id}."
                         )
                 result = func(ctx, *args, **kwargs)
                 full = kwargs.get("full", False)
@@ -151,16 +151,16 @@ def _sync_db_url() -> str:
     "--json", "json_output", is_flag=True, default=False, help="Output in JSON format"
 )
 @click.option(
-    "--session-id",
-    "session_id",
+    "--fleet-id",
+    "fleet_id",
     default=None,
-    help="Session ID (UUID); required for client subcommands.",
+    help="Fleet ID (UUID); required for client subcommands.",
 )
 @click.pass_context
-def cli(ctx, json_output, session_id):
+def cli(ctx, json_output, fleet_id):
     """CAFleet — CLI for the message broker and agent registry."""
     ctx.ensure_object(dict)
-    ctx.obj["session_id"] = session_id
+    ctx.obj["fleet_id"] = fleet_id
     ctx.obj["json_output"] = json_output
 
 
@@ -239,11 +239,11 @@ def init() -> None:
 
 
 @cli.group()
-def session() -> None:
-    """Session management commands."""
+def fleet() -> None:
+    """Fleet management commands."""
 
 
-@session.command("create")
+@fleet.command("create")
 @click.option("--label", default=None, help="Optional human-readable label.")
 @click.option(
     "--coding-agent",
@@ -256,23 +256,23 @@ def session() -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @_full_flag
 @click.pass_context
-def session_create(
+def fleet_create(
     ctx: click.Context,
     label: str | None,
     coding_agent: str,
     as_json: bool,
     full: bool,
 ) -> None:
-    """Create a new session (must be run inside a tmux session)."""
+    """Create a new fleet (must be run inside a tmux session)."""
     try:
         MULTIPLEXERS["tmux"].ensure_available()
         director_ctx = MULTIPLEXERS["tmux"].context_discovery()
     except TmuxError as exc:
         raise click.ClickException(
-            "cafleet session create must be run inside a tmux session"
+            "cafleet fleet create must be run inside a tmux session"
         ) from exc
 
-    result = broker.create_session(
+    result = broker.create_fleet(
         label=label,
         director_context=director_ctx,
         coding_agent=coding_agent,
@@ -284,45 +284,45 @@ def session_create(
         click.echo(output.format_session_create(result, full=full))
 
 
-@session.command("list")
+@fleet.command("list")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
-def session_list(ctx: click.Context, as_json: bool) -> None:
-    """List all sessions."""
-    rows = broker.list_sessions()
+def fleet_list(ctx: click.Context, as_json: bool) -> None:
+    """List all fleets."""
+    rows = broker.list_fleets()
 
     if as_json or ctx.obj["json_output"]:
         click.echo(output.format_json(rows))
     else:
         if not rows:
-            click.echo("No sessions found.")
+            click.echo("No fleets found.")
             return
         click.echo(
-            f"{'SESSION_ID':<40} {'DIRECTOR':<40} {'LABEL':<20} "
+            f"{'FLEET_ID':<40} {'DIRECTOR':<40} {'LABEL':<20} "
             f"{'AGENTS':<8} {'CREATED_AT'}"
         )
         for r in rows:
             click.echo(
-                f"{r['session_id']:<40} {r['director_agent_id'] or '':<40} "
+                f"{r['fleet_id']:<40} {r['director_agent_id'] or '':<40} "
                 f"{r['label'] or '':<20} {r['agent_count']:<8} {r['created_at']}"
             )
 
 
-@session.command("show")
-@click.argument("session_id")
+@fleet.command("show")
+@click.argument("fleet_id")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
-def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
-    """Show details of a single session."""
-    result = broker.get_session(session_id)
+def fleet_show(ctx: click.Context, fleet_id: str, as_json: bool) -> None:
+    """Show details of a single fleet."""
+    result = broker.get_fleet(fleet_id)
     if result is None:
-        raise click.ClickException(f"session '{session_id}' not found.")
+        raise click.ClickException(f"fleet '{fleet_id}' not found.")
 
     if as_json or ctx.obj["json_output"]:
         click.echo(output.format_json(result))
     else:
         lines = [
-            f"session_id: {result['session_id']}",
+            f"fleet_id: {result['fleet_id']}",
             f"label:      {result['label'] or ''}",
             f"created_at: {result['created_at']}",
         ]
@@ -331,13 +331,13 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
         click.echo("\n".join(lines))
 
 
-@session.command("delete")
-@click.argument("session_id")
-def session_delete(session_id: str) -> None:
-    """Soft-delete a session and deregister every active agent (idempotent)."""
-    result = broker.delete_session(session_id)
+@fleet.command("delete")
+@click.argument("fleet_id")
+def fleet_delete(fleet_id: str) -> None:
+    """Soft-delete a fleet and deregister every active agent (idempotent)."""
+    result = broker.delete_fleet(fleet_id)
     n = result["deregistered_count"]
-    click.echo(f"Deleted session {session_id}. Deregistered {n} agents.")
+    click.echo(f"Deleted fleet {fleet_id}. Deregistered {n} agents.")
 
 
 @cli.command("server")
@@ -424,7 +424,7 @@ def agent_register(ctx, name, description, skills):
         except json.JSONDecodeError as exc:
             raise click.ClickException(f"Invalid JSON in --skills: {exc}") from exc
     return broker.register_agent(
-        ctx.obj["session_id"],
+        ctx.obj["fleet_id"],
         name,
         description,
         skills=parsed_skills,
@@ -439,7 +439,7 @@ def agent_register(ctx, name, description, skills):
 @_quiet_flag
 @click.pass_context
 @_client_command(
-    requires_agent_session=True,
+    requires_agent_fleet=True,
     text_formatter=lambda r, *, full, quiet: (
         r["task"]["task_id"][:8]
         if quiet
@@ -449,10 +449,10 @@ def agent_register(ctx, name, description, skills):
 )
 def message_send(ctx, agent_id, to, text, full, quiet):
     """Send a unicast message to another agent."""
-    session_id = ctx.obj["session_id"]
-    to = broker.resolve_agent_ref(session_id, to)
+    fleet_id = ctx.obj["fleet_id"]
+    to = broker.resolve_agent_ref(fleet_id, to)
     return broker.send_message(
-        session_id,
+        fleet_id,
         agent_id,
         to,
         text,
@@ -476,7 +476,7 @@ def message_send(ctx, agent_id, to, text, full, quiet):
 def message_broadcast(ctx, agent_id, text, full):
     """Broadcast a message to all agents."""
     return broker.broadcast_message(
-        ctx.obj["session_id"],
+        ctx.obj["fleet_id"],
         agent_id,
         text,
     )
@@ -489,7 +489,7 @@ def message_broadcast(ctx, agent_id, text, full):
 @_full_flag_with_help("Disable body truncation.")
 @click.pass_context
 @_client_command(
-    requires_agent_session=True,
+    requires_agent_fleet=True,
     text_formatter=lambda r, *, full: output.format_indexed_list(
         r, lambda t: output.format_task(t, full=full), "No messages found."
     ),
@@ -511,7 +511,7 @@ def message_poll(ctx, agent_id, since, page_size, full):
 @_quiet_flag_with_help("Print only the task id.")
 @click.pass_context
 @_client_command(
-    requires_agent_session=True,
+    requires_agent_fleet=True,
     text_formatter=lambda r, *, full, quiet: (
         r["task"]["task_id"][:8]
         if quiet
@@ -521,7 +521,7 @@ def message_poll(ctx, agent_id, since, page_size, full):
 )
 def message_ack(ctx, agent_id, task_id, full, quiet):
     """Acknowledge receipt of a message."""
-    task_id = broker.resolve_task_ref(ctx.obj["session_id"], task_id)
+    task_id = broker.resolve_task_ref(ctx.obj["fleet_id"], task_id)
     return broker.ack_task(agent_id, task_id)
 
 
@@ -531,7 +531,7 @@ def message_ack(ctx, agent_id, task_id, full, quiet):
 @_full_flag_with_help("Disable body truncation.")
 @click.pass_context
 @_client_command(
-    requires_agent_session=True,
+    requires_agent_fleet=True,
     text_formatter=lambda r, *, full: (
         "Task canceled.\n" + output.format_task(r, full=full)
     ),
@@ -539,7 +539,7 @@ def message_ack(ctx, agent_id, task_id, full, quiet):
 )
 def message_cancel(ctx, agent_id, task_id, full):
     """Cancel (retract) a sent message."""
-    task_id = broker.resolve_task_ref(ctx.obj["session_id"], task_id)
+    task_id = broker.resolve_task_ref(ctx.obj["fleet_id"], task_id)
     return broker.cancel_task(agent_id, task_id)
 
 
@@ -549,15 +549,15 @@ def message_cancel(ctx, agent_id, task_id, full):
 @_full_flag_with_help("Disable body truncation.")
 @click.pass_context
 @_client_command(
-    requires_agent_session=True,
+    requires_agent_fleet=True,
     text_formatter=lambda r, *, full: output.format_task(r, full=full),
     truncates_task_text=True,
 )
 def message_show(ctx, agent_id, task_id, full):
     """Get details of a specific task."""
-    session_id = ctx.obj["session_id"]
-    task_id = broker.resolve_task_ref(session_id, task_id)
-    return broker.get_task(session_id, task_id)
+    fleet_id = ctx.obj["fleet_id"]
+    task_id = broker.resolve_task_ref(fleet_id, task_id)
+    return broker.get_task(fleet_id, task_id)
 
 
 @agent.command("list")
@@ -565,15 +565,15 @@ def message_show(ctx, agent_id, task_id, full):
 @_full_flag
 @click.pass_context
 @_client_command(
-    requires_agent_session=True,
+    requires_agent_fleet=True,
     text_formatter=lambda agents, *, full: output.format_indexed_list(
         agents, lambda a: output.format_agent(a, full=full), "No agents found."
     ),
     renders_agent_card=True,
 )
 def agent_list(ctx, agent_id, full):
-    """List registered agents in the session."""
-    return broker.list_agents(ctx.obj["session_id"])
+    """List registered agents in the fleet."""
+    return broker.list_agents(ctx.obj["fleet_id"])
 
 
 @agent.command("show")
@@ -582,15 +582,15 @@ def agent_list(ctx, agent_id, full):
 @_full_flag
 @click.pass_context
 @_client_command(
-    requires_agent_session=True,
+    requires_agent_fleet=True,
     text_formatter=output.format_agent,
     renders_agent_card=True,
 )
 def agent_show(ctx, agent_id, target_agent_id, full):
     """Show detail for a specific agent."""
-    session_id = ctx.obj["session_id"]
-    target_agent_id = broker.resolve_agent_ref(session_id, target_agent_id)
-    result = broker.get_agent(target_agent_id, session_id)
+    fleet_id = ctx.obj["fleet_id"]
+    target_agent_id = broker.resolve_agent_ref(fleet_id, target_agent_id)
+    result = broker.get_agent(target_agent_id, fleet_id)
     if result is None:
         raise click.ClickException(f"Agent {target_agent_id} not found")
     return result
@@ -600,7 +600,7 @@ def agent_show(ctx, agent_id, target_agent_id, full):
 @click.option("--agent-id", required=True, help="Agent ID")
 @click.pass_context
 @_client_command(
-    requires_agent_session=True,
+    requires_agent_fleet=True,
     text_formatter=lambda _: "Agent deregistered successfully.",
 )
 def agent_deregister(ctx, agent_id):
@@ -635,7 +635,7 @@ def _require_member_pane(placement: dict, member_id: str, action: str) -> str:
 
 
 def _load_authorized_member(
-    session_id: str,
+    fleet_id: str,
     director_agent_id: str,
     member_id: str,
     *,
@@ -660,11 +660,11 @@ def _load_authorized_member(
     the generic "failed to fetch member" wrapper.
     """
     try:
-        member_id = broker.resolve_agent_ref(session_id, member_id)
+        member_id = broker.resolve_agent_ref(fleet_id, member_id)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     try:
-        target = broker.get_agent(member_id, session_id)
+        target = broker.get_agent(member_id, fleet_id)
     except Exception as exc:
         raise click.ClickException(f"failed to fetch member: {exc}") from exc
     if target is None:
@@ -744,13 +744,13 @@ def _resolve_prompt(
     prompt_argv: tuple[str, ...],
     prompt_file: str | None = None,
 ) -> str:
-    """Substitute ``session_id`` / ``agent_id`` / ``director_agent_id`` into the spawn prompt.
+    """Substitute ``fleet_id`` / ``agent_id`` / ``director_agent_id`` into the spawn prompt.
 
     Runs ``str.format`` on the chosen template (file > positional > default)
     so custom prompts must double literal braces (``{{`` / ``}}``) to survive
     the substitution.
     """
-    session_id = ctx.obj["session_id"]
+    fleet_id = ctx.obj["fleet_id"]
     if prompt_file is not None:
         template = _read_prompt_file(prompt_file)
     elif prompt_argv:
@@ -759,14 +759,14 @@ def _resolve_prompt(
         template = _MEMBER_PROMPT_TEMPLATE
     try:
         return template.format(
-            session_id=session_id,
+            fleet_id=fleet_id,
             agent_id=new_agent_id,
             director_agent_id=director_agent_id,
         )
     except KeyError as exc:
         raise click.UsageError(
             f"Unknown placeholder {exc} in custom prompt. "
-            "Supported placeholders: {session_id}, {agent_id}, "
+            "Supported placeholders: {fleet_id}, {agent_id}, "
             "{director_agent_id}. "
             "Double literal braces ({{, }}) to keep them as text."
         ) from exc
@@ -777,23 +777,23 @@ def _resolve_prompt(
         ) from exc
 
 
-def _deregister_with_warning(new_agent_id: str, *, session_id: str) -> None:
+def _deregister_with_warning(new_agent_id: str, *, fleet_id: str) -> None:
     """Best-effort deregister; emit warning to stderr if it fails."""
     try:
         broker.deregister_agent(new_agent_id)
     except Exception as drop_exc:
         click.echo(
             f"WARNING: rollback deregister failed — agent {new_agent_id} is "
-            f"orphaned in the registry. Run `cafleet --session-id {session_id} "
+            f"orphaned in the registry. Run `cafleet --fleet-id {fleet_id} "
             f"agent deregister --agent-id {new_agent_id}` manually to clean up. "
             f"Cause: {drop_exc}",
             err=True,
         )
 
 
-def _rollback_register(new_agent_id: str, *, session_id: str, reason: str) -> NoReturn:
+def _rollback_register(new_agent_id: str, *, fleet_id: str, reason: str) -> NoReturn:
     """Best-effort deregister of a just-created agent, then raise ClickException."""
-    _deregister_with_warning(new_agent_id, session_id=session_id)
+    _deregister_with_warning(new_agent_id, fleet_id=fleet_id)
     raise click.ClickException(f"{reason}. Rolled back registration of {new_agent_id}.")
 
 
@@ -827,8 +827,8 @@ def member_create(
         raise click.UsageError(
             "--prompt-file and the positional prompt argument are mutually exclusive."
         )
-    _require_session_id(ctx)
-    session_id = ctx.obj["session_id"]
+    _require_fleet_id(ctx)
+    fleet_id = ctx.obj["fleet_id"]
 
     agent = CODING_AGENTS[coding_agent]
 
@@ -841,7 +841,7 @@ def member_create(
 
     try:
         result = broker.register_agent(
-            session_id,
+            fleet_id,
             name,
             description,
             placement={
@@ -865,7 +865,7 @@ def member_create(
         # registration of <id>." (with a stray ".." when the inner message
         # already ends in a period), and would also downgrade UsageError exit
         # code 2 → ClickException exit 1.
-        _deregister_with_warning(new_agent_id, session_id=session_id)
+        _deregister_with_warning(new_agent_id, fleet_id=fleet_id)
         raise
 
     spawn_command = agent.build_spawn_argv(prompt, display_name=name)
@@ -881,7 +881,7 @@ def member_create(
     except TmuxError as exc:
         _rollback_register(
             new_agent_id,
-            session_id=session_id,
+            fleet_id=fleet_id,
             reason=f"tmux split-window failed: {exc}",
         )
 
@@ -894,7 +894,7 @@ def member_create(
             MULTIPLEXERS["tmux"].send_exit(target_pane_id=pane_id, ignore_missing=True)
         _rollback_register(
             new_agent_id,
-            session_id=session_id,
+            fleet_id=fleet_id,
             reason=f"placement update failed: {exc}",
         )
     if placement_view is None:
@@ -902,7 +902,7 @@ def member_create(
             MULTIPLEXERS["tmux"].send_exit(target_pane_id=pane_id, ignore_missing=True)
         _rollback_register(
             new_agent_id,
-            session_id=session_id,
+            fleet_id=fleet_id,
             reason="placement row vanished before pane-id patch",
         )
 
@@ -926,13 +926,13 @@ def member_create(
 @click.pass_context
 def member_delete(ctx, agent_id, member_id, force):
     """Deregister a member agent and close its tmux pane."""
-    _require_session_id(ctx)
-    session_id = ctx.obj["session_id"]
+    _require_fleet_id(ctx)
+    fleet_id = ctx.obj["fleet_id"]
 
     _ensure_tmux_or_die()
 
     target, placement = _load_authorized_member(
-        session_id,
+        fleet_id,
         agent_id,
         member_id,
         placement_missing_template=(
@@ -1066,13 +1066,13 @@ def _emit_member_delete_output(
 @click.pass_context
 def member_list(ctx, agent_id, activity):
     """List member agents managed by this Director."""
-    _require_session_id(ctx)
-    session_id = ctx.obj["session_id"]
+    _require_fleet_id(ctx)
+    fleet_id = ctx.obj["fleet_id"]
     try:
         if activity:
-            rows = broker.list_members_with_activity(session_id, agent_id)
+            rows = broker.list_members_with_activity(fleet_id, agent_id)
         else:
-            rows = broker.list_members(session_id, agent_id)
+            rows = broker.list_members(fleet_id, agent_id)
     except click.ClickException:
         raise
     except Exception as exc:
@@ -1104,13 +1104,13 @@ def member_list(ctx, agent_id, activity):
 @click.pass_context
 def member_capture(ctx, agent_id, member_id, lines, ansi):
     """Capture the last N lines of a member pane's terminal buffer."""
-    _require_session_id(ctx)
-    session_id = ctx.obj["session_id"]
+    _require_fleet_id(ctx)
+    fleet_id = ctx.obj["fleet_id"]
 
     _ensure_tmux_or_die()
 
     target, placement = _load_authorized_member(
-        session_id,
+        fleet_id,
         agent_id,
         member_id,
     )
@@ -1160,8 +1160,8 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
 @click.pass_context
 def member_send_input(ctx, agent_id, member_id, choice, freetext):
     """Safely forward a restricted keystroke to a member pane."""
-    _require_session_id(ctx)
-    session_id = ctx.obj["session_id"]
+    _require_fleet_id(ctx)
+    fleet_id = ctx.obj["fleet_id"]
 
     if freetext is not None and freetext.lstrip().startswith("!"):
         raise click.UsageError(
@@ -1181,7 +1181,7 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
     _ensure_tmux_or_die()
 
     target, placement = _load_authorized_member(
-        session_id,
+        fleet_id,
         agent_id,
         member_id,
     )
@@ -1222,8 +1222,8 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
 @click.pass_context
 def member_exec(ctx, agent_id, member_id, command):
     """Dispatch a shell command via the coding agent's `!` shortcut."""
-    _require_session_id(ctx)
-    session_id = ctx.obj["session_id"]
+    _require_fleet_id(ctx)
+    fleet_id = ctx.obj["fleet_id"]
 
     if "\n" in command or "\r" in command:
         raise click.UsageError("command may not contain newlines.")
@@ -1234,7 +1234,7 @@ def member_exec(ctx, agent_id, member_id, command):
     _ensure_tmux_or_die()
 
     target, placement = _load_authorized_member(
-        session_id,
+        fleet_id,
         agent_id,
         member_id,
     )
@@ -1268,13 +1268,13 @@ def member_exec(ctx, agent_id, member_id, command):
 @click.pass_context
 def member_ping(ctx, agent_id, member_id, quiet):
     """Inject an inbox-poll keystroke into a member's pane (Director-only)."""
-    _require_session_id(ctx)
-    session_id = ctx.obj["session_id"]
+    _require_fleet_id(ctx)
+    fleet_id = ctx.obj["fleet_id"]
 
     _ensure_tmux_or_die()
 
     target, placement = _load_authorized_member(
-        session_id,
+        fleet_id,
         agent_id,
         member_id,
     )
@@ -1284,7 +1284,7 @@ def member_ping(ctx, agent_id, member_id, quiet):
     try:
         ok = MULTIPLEXERS["tmux"].send_poll_trigger(
             target_pane_id=pane_id,
-            session_id=session_id,
+            fleet_id=fleet_id,
             agent_id=member_id,
         )
     except TmuxError as exc:

@@ -1,7 +1,7 @@
 # 0000074 — base-dir skill self-containment + `session`→`fleet` Tier-C rename
 
 **Status**: Approved
-**Progress**: 23/41 tasks complete
+**Progress**: 27/41 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -224,10 +224,10 @@ Per the project documentation-first rule, these are updated **before** code. CAF
 
 ### Step 5: Item 3 — cli.py
 
-- [ ] Rename the `session` group→`fleet` + the four command callbacks + docstrings <!-- completed: -->
-- [ ] Rename `--session-id`→`--fleet-id`, `ctx.obj["session_id"]`→`fleet_id`, `_require_session_id`→`_require_fleet_id` + its error text <!-- completed: -->
-- [ ] Update `_MEMBER_PROMPT_TEMPLATE` and `_resolve_prompt` (`format` kwarg + placeholder error messages) to `fleet_id`/`{fleet_id}` <!-- completed: -->
-- [ ] Rename remaining CAFleet-session output/error strings; KEEP "must be run inside a tmux session" <!-- completed: -->
+- [x] Rename the `session` group→`fleet` + the four command callbacks + docstrings <!-- completed: 2026-06-06T14:43 -->
+- [x] Rename `--session-id`→`--fleet-id`, `ctx.obj["session_id"]`→`fleet_id`, `_require_session_id`→`_require_fleet_id` + its error text <!-- completed: 2026-06-06T14:43 -->
+- [x] Update `_MEMBER_PROMPT_TEMPLATE` and `_resolve_prompt` (`format` kwarg + placeholder error messages) to `fleet_id`/`{fleet_id}` <!-- completed: 2026-06-06T14:43 -->
+- [x] Rename remaining CAFleet-session output/error strings; KEEP "must be run inside a tmux session" <!-- completed: 2026-06-06T14:43 -->
 
 ### Step 6: Item 3 — output.py + WebUI + admin frontend
 
