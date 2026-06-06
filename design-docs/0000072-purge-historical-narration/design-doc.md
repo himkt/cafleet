@@ -1,7 +1,7 @@
 # 0000072 — Purge Historical-Trajectory Narration
 
 **Status**: Approved
-**Progress**: 12/24 tasks complete
+**Progress**: 16/24 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -172,10 +172,10 @@ This is a documentation/test-hygiene cleanup. It removes **no runtime behavior**
 
 ### Step 4: Tests — mixed cases (keep live coverage, drop sentinel)
 
-- [ ] T4 — `test_cli_session_flag.py`: reword the `CAFLEET_SESSION_ID was removed` docstring; keep the assertion <!-- completed: -->
-- [ ] T5 — `test_output_render_broadcast_summary.py`: delete the forbidden-keys loop + comment; keep the exact-key-set assertion <!-- completed: -->
-- [ ] T6 — `test_broker_typed_columns.py`: delete `FORBIDDEN_LEGACY_KEYS` + its check; keep the required-keys present-check (verify suite green) <!-- completed: -->
-- [ ] T7 — `test_cli_session_bootstrap.py`: simplify the `default_is_claude` docstring (drop the `'unknown'` reference) <!-- completed: -->
+- [x] T4 — `test_cli_session_flag.py`: reword the `CAFLEET_SESSION_ID was removed` docstring; keep the assertion <!-- completed: 2026-06-06T02:38 -->
+- [x] T5 — `test_output_render_broadcast_summary.py`: delete the forbidden-keys loop + comment; keep the exact-key-set assertion <!-- completed: 2026-06-06T02:38 -->
+- [x] T6 — `test_broker_typed_columns.py`: delete `FORBIDDEN_LEGACY_KEYS` + its check; keep the required-keys present-check (verify suite green) <!-- completed: 2026-06-06T02:38 --> <!-- applied optional exact-set hardening: `_assert_flat_typed_shape` now asserts `set(d.keys()) == REQUIRED_TASK_KEYS`; full suite (727) green -->
+- [x] T7 — `test_cli_session_bootstrap.py`: simplify the `default_is_claude` docstring (drop the `'unknown'` reference) <!-- completed: 2026-06-06T02:38 -->
 
 ### Step 5: Tests — design-doc-number citations (reword)
 

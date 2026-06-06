@@ -39,26 +39,11 @@ REQUIRED_TASK_KEYS = {
     "text",
 }
 
-FORBIDDEN_LEGACY_KEYS = {
-    "id",
-    "contextId",
-    "fromAgentId",
-    "toAgentId",
-    "originTaskId",
-    "metadata",
-    "artifacts",
-    "history",
-    "kind",
-    "parts",
-    "task_json",
-}
-
 
 def _assert_flat_typed_shape(d: dict, *, expect_type: str | None = None) -> None:
-    missing = REQUIRED_TASK_KEYS - d.keys()
-    assert not missing, f"missing required typed-column keys: {sorted(missing)}"
-    forbidden = FORBIDDEN_LEGACY_KEYS & d.keys()
-    assert not forbidden, f"forbidden legacy keys still present: {sorted(forbidden)}"
+    assert set(d.keys()) == REQUIRED_TASK_KEYS, (
+        f"unexpected typed-column key set: {sorted(d.keys())}"
+    )
     if expect_type is not None:
         assert d["type"] == expect_type
 

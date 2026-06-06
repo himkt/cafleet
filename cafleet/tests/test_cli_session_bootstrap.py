@@ -237,7 +237,7 @@ def test_session_create_coding_agent__claude_records_claude_in_placement(
 
 
 def test_session_create_coding_agent__default_is_claude(db_file, mock_tmux_ok):
-    """No flag → 'claude'. 'unknown' must not appear for newly-created sessions."""
+    """No ``--coding-agent`` flag defaults the placement to ``'claude'``."""
     runner = CliRunner()
     result = runner.invoke(cli, ["session", "create", "--json"])
     assert result.exit_code == 0, result.output
