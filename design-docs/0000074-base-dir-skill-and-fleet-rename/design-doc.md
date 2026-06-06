@@ -1,7 +1,7 @@
 # 0000074 — base-dir skill self-containment + `session`→`fleet` Tier-C rename
 
 **Status**: Approved
-**Progress**: 17/41 tasks complete
+**Progress**: 23/41 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -212,15 +212,15 @@ Per the project documentation-first rule, these are updated **before** code. CAF
 
 ### Step 3: Item 3 — data layer + migration
 
-- [ ] `db/models.py`: `Session`→`Fleet`, `__tablename__`→`fleets`, `session_id`→`fleet_id` (PK), `Agent.session_id`→`fleet_id`, FK string→`fleets.fleet_id`, index→`idx_agents_fleet_status` <!-- completed: -->
-- [ ] Add `cafleet/src/cafleet/alembic/versions/0011_rename_sessions_to_fleets.py` (`revision: str = "0011"`, `down_revision: str | None = "0010"`) with the upgrade/downgrade from §Migration design <!-- completed: -->
-- [ ] Do NOT edit revisions `0001`–`0010` (immutable replay history) <!-- completed: -->
+- [x] `db/models.py`: `Session`→`Fleet`, `__tablename__`→`fleets`, `session_id`→`fleet_id` (PK), `Agent.session_id`→`fleet_id`, FK string→`fleets.fleet_id`, index→`idx_agents_fleet_status` <!-- completed: 2026-06-06T14:31 -->
+- [x] Add `cafleet/src/cafleet/alembic/versions/0011_rename_sessions_to_fleets.py` (`revision: str = "0011"`, `down_revision: str | None = "0010"`) with the upgrade/downgrade from §Migration design <!-- completed: 2026-06-06T14:31 -->
+- [x] Do NOT edit revisions `0001`–`0010` (immutable replay history) <!-- completed: 2026-06-06T14:31 -->
 
 ### Step 4: Item 3 — broker.py
 
-- [ ] Update the models import (`Session`→`Fleet`); keep the `engine.py` `sqlalchemy.orm.Session` import untouched <!-- completed: -->
-- [ ] Rename the six public fns + `_agent_is_active_in_session`; rename all `session_id`→`fleet_id` params/keys/query refs; KEEP the `session` ORM local var <!-- completed: -->
-- [ ] Rename CAFleet-session error/description/docstrings (`_DIRECTOR_DESCRIPTION`, not-found, is-deleted, bootstrap) <!-- completed: -->
+- [x] Update the models import (`Session`→`Fleet`); keep the `engine.py` `sqlalchemy.orm.Session` import untouched <!-- completed: 2026-06-06T14:31 -->
+- [x] Rename the six public fns + `_agent_is_active_in_session`; rename all `session_id`→`fleet_id` params/keys/query refs; KEEP the `session` ORM local var <!-- completed: 2026-06-06T14:31 -->
+- [x] Rename CAFleet-session error/description/docstrings (`_DIRECTOR_DESCRIPTION`, not-found, is-deleted, bootstrap) <!-- completed: 2026-06-06T14:31 -->
 
 ### Step 5: Item 3 — cli.py
 

@@ -8,10 +8,10 @@ class Base(DeclarativeBase):
     pass
 
 
-class Session(Base):
-    __tablename__ = "sessions"
+class Fleet(Base):
+    __tablename__ = "fleets"
 
-    session_id: Mapped[str] = mapped_column(String, primary_key=True)
+    fleet_id: Mapped[str] = mapped_column(String, primary_key=True)
     label: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     deleted_at: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -26,9 +26,9 @@ class Agent(Base):
     __tablename__ = "agents"
 
     agent_id: Mapped[str] = mapped_column(String, primary_key=True)
-    session_id: Mapped[str] = mapped_column(
+    fleet_id: Mapped[str] = mapped_column(
         String,
-        ForeignKey("sessions.session_id", ondelete="RESTRICT"),
+        ForeignKey("fleets.fleet_id", ondelete="RESTRICT"),
         nullable=False,
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -38,7 +38,7 @@ class Agent(Base):
     deregistered_at: Mapped[str | None] = mapped_column(String, nullable=True)
     agent_card_json: Mapped[str] = mapped_column(String, nullable=False)
 
-    __table_args__ = (Index("idx_agents_session_status", "session_id", "status"),)
+    __table_args__ = (Index("idx_agents_fleet_status", "fleet_id", "status"),)
 
 
 class AgentPlacement(Base):

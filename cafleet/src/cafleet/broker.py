@@ -10,11 +10,11 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from cafleet.config import settings
 from cafleet.db.engine import get_sync_sessionmaker
-from cafleet.db.models import Agent, AgentPlacement, Session, Task
+from cafleet.db.models import Agent, AgentPlacement, Fleet, Task
 from cafleet.multiplexer import MultiplexerContext
 
 _DIRECTOR_NAME = "Director"
-_DIRECTOR_DESCRIPTION = "Root Director for this session"
+_DIRECTOR_DESCRIPTION = "Root Director for this fleet"
 
 ADMINISTRATOR_KIND = "builtin-administrator"
 
@@ -48,12 +48,12 @@ def _placement_dict(row) -> dict:
     }
 
 
-def _agent_is_active_in_session(session, agent_id: str, session_id: str) -> bool:
+def _agent_is_active_in_fleet(session, agent_id: str, fleet_id: str) -> bool:
     return session.execute(
         select(
             exists().where(
                 Agent.agent_id == agent_id,
-                Agent.session_id == session_id,
+                Agent.fleet_id == fleet_id,
                 Agent.status == "active",
             )
         )
@@ -102,20 +102,20 @@ def _try_notify_recipient(
     )
 
 
-def create_session(
+def create_fleet(
     label: str | None = None,
     *,
     director_context: MultiplexerContext,
     coding_agent: str,
 ) -> dict:
-    """Atomically bootstrap a session with its root Director and Administrator.
+    """Atomically bootstrap a fleet with its root Director and Administrator.
 
-    The session row is written first with ``director_agent_id=NULL`` and
+    The fleet row is written first with ``director_agent_id=NULL`` and
     back-filled once the Director's agent row exists, so the column is
     DB-nullable even though the post-bootstrap invariant is NOT NULL.
 
     Args:
-        label: Optional human-readable label for the session.
+        label: Optional human-readable label for the fleet.
         director_context: Resolved tmux pane identity for the root Director,
             obtained via ``Multiplexer.context_discovery``.
         coding_agent: Operator-declared metadata that lands in the root
@@ -124,17 +124,17 @@ def create_session(
             Click layer).
 
     Returns:
-        A dict carrying ``session_id``, ``label``, ``created_at``,
+        A dict carrying ``fleet_id``, ``label``, ``created_at``,
         ``administrator_agent_id``, and a ``director`` sub-dict with the
         Director's identity and placement metadata.
     """
-    session_id = str(uuid.uuid4())
+    fleet_id = str(uuid.uuid4())
     created_at = _now_iso()
     director_agent_id = str(uuid.uuid4())
     administrator_agent_id = str(uuid.uuid4())
     administrator_card = {
         "name": "Administrator",
-        "description": f"Built-in administrator agent for session {session_id[:8]}",
+        "description": f"Built-in administrator agent for fleet {fleet_id[:8]}",
         "skills": [],
         "cafleet": {"kind": ADMINISTRATOR_KIND},
     }
@@ -155,8 +155,8 @@ def create_session(
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
         session.add(
-            Session(
-                session_id=session_id,
+            Fleet(
+                fleet_id=fleet_id,
                 label=label,
                 created_at=created_at,
                 deleted_at=None,
@@ -167,7 +167,7 @@ def create_session(
         session.add(
             Agent(
                 agent_id=director_agent_id,
-                session_id=session_id,
+                fleet_id=fleet_id,
                 name=_DIRECTOR_NAME,
                 description=_DIRECTOR_DESCRIPTION,
                 status="active",
@@ -180,14 +180,14 @@ def create_session(
         session.add(AgentPlacement(agent_id=director_agent_id, **director_placement))
         session.flush()
         session.execute(
-            update(Session)
-            .where(Session.session_id == session_id)
+            update(Fleet)
+            .where(Fleet.fleet_id == fleet_id)
             .values(director_agent_id=director_agent_id)
         )
         session.add(
             Agent(
                 agent_id=administrator_agent_id,
-                session_id=session_id,
+                fleet_id=fleet_id,
                 name=administrator_card["name"],
                 description=administrator_card["description"],
                 status="active",
@@ -198,7 +198,7 @@ def create_session(
         )
 
     return {
-        "session_id": session_id,
+        "fleet_id": fleet_id,
         "label": label,
         "created_at": created_at,
         "administrator_agent_id": administrator_agent_id,
@@ -212,39 +212,39 @@ def create_session(
     }
 
 
-def list_sessions() -> list[dict]:
-    """Return non-soft-deleted sessions with their active agent counts."""
+def list_fleets() -> list[dict]:
+    """Return non-soft-deleted fleets with their active agent counts."""
     stmt = (
         select(
-            Session.session_id,
-            Session.director_agent_id,
-            Session.label,
-            Session.created_at,
+            Fleet.fleet_id,
+            Fleet.director_agent_id,
+            Fleet.label,
+            Fleet.created_at,
             func.count(Agent.agent_id).label("agent_count"),
         )
-        .select_from(Session)
+        .select_from(Fleet)
         .outerjoin(
             Agent,
             and_(
-                Agent.session_id == Session.session_id,
+                Agent.fleet_id == Fleet.fleet_id,
                 Agent.status == "active",
             ),
         )
-        .where(Session.deleted_at.is_(None))
+        .where(Fleet.deleted_at.is_(None))
         .group_by(
-            Session.session_id,
-            Session.director_agent_id,
-            Session.label,
-            Session.created_at,
+            Fleet.fleet_id,
+            Fleet.director_agent_id,
+            Fleet.label,
+            Fleet.created_at,
         )
-        .order_by(Session.created_at.desc(), Session.session_id.asc())
+        .order_by(Fleet.created_at.desc(), Fleet.fleet_id.asc())
     )
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(stmt).all()
     return [
         {
-            "session_id": row.session_id,
+            "fleet_id": row.fleet_id,
             "director_agent_id": row.director_agent_id,
             "label": row.label,
             "created_at": row.created_at,
@@ -254,30 +254,30 @@ def list_sessions() -> list[dict]:
     ]
 
 
-def get_session(session_id: str) -> dict | None:
-    """Return the session row (including soft-deleted) or None.
+def get_fleet(fleet_id: str) -> dict | None:
+    """Return the fleet row (including soft-deleted) or None.
 
     The returned dict exposes ``deleted_at`` so callers can distinguish a
-    missing session from a soft-deleted one — ``register_agent`` relies on
-    this to reject soft-deleted sessions with a different error message.
+    missing fleet from a soft-deleted one — ``register_agent`` relies on
+    this to reject soft-deleted fleets with a different error message.
 
     Args:
-        session_id: Session UUID to look up.
+        fleet_id: Fleet UUID to look up.
 
     Returns:
-        Dict with ``session_id``, ``label``, ``created_at``, ``deleted_at``,
+        Dict with ``fleet_id``, ``label``, ``created_at``, ``deleted_at``,
         and ``director_agent_id``, or ``None`` if no row exists.
     """
     sm = get_sync_sessionmaker()
     with sm() as session:
         result = session.execute(
-            select(Session).where(Session.session_id == session_id)
+            select(Fleet).where(Fleet.fleet_id == fleet_id)
         )
         row = result.scalar_one_or_none()
     if row is None:
         return None
     return {
-        "session_id": row.session_id,
+        "fleet_id": row.fleet_id,
         "label": row.label,
         "created_at": row.created_at,
         "deleted_at": row.deleted_at,
@@ -285,42 +285,42 @@ def get_session(session_id: str) -> dict | None:
     }
 
 
-def delete_session(session_id: str) -> dict:
-    """Soft-delete a session and deregister its agents, in one transaction.
+def delete_fleet(fleet_id: str) -> dict:
+    """Soft-delete a fleet and deregister its agents, in one transaction.
 
     Tasks are left untouched so audit history survives. Idempotent: re-running
     against an already-deleted row short-circuits on the ``deleted_at IS NULL``
     guard and returns ``deregistered_count=0``.
 
     Args:
-        session_id: Session UUID to soft-delete.
+        fleet_id: Fleet UUID to soft-delete.
 
     Returns:
         Dict with ``deregistered_count`` — the number of agents flipped from
         ``active`` to ``deregistered`` by this call.
 
     Raises:
-        click.ClickException: If the session does not exist.
+        click.ClickException: If the fleet does not exist.
     """
     now = _now_iso()
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        session_exists = session.execute(
-            select(exists().where(Session.session_id == session_id))
+        fleet_exists = session.execute(
+            select(exists().where(Fleet.fleet_id == fleet_id))
         ).scalar_one()
-        if not session_exists:
-            # ClickException exits 1 (matching ``session show``); UsageError
+        if not fleet_exists:
+            # ClickException exits 1 (matching ``fleet show``); UsageError
             # would print a Usage: banner + exit 2, wrong for a runtime miss.
-            raise click.ClickException(f"session '{session_id}' not found.")
+            raise click.ClickException(f"fleet '{fleet_id}' not found.")
 
         soft_deleted = session.execute(
-            update(Session)
+            update(Fleet)
             .where(
-                Session.session_id == session_id,
-                Session.deleted_at.is_(None),
+                Fleet.fleet_id == fleet_id,
+                Fleet.deleted_at.is_(None),
             )
             .values(deleted_at=now)
-            .returning(Session.session_id)
+            .returning(Fleet.fleet_id)
         ).all()
         if not soft_deleted:
             return {"deregistered_count": 0}
@@ -328,37 +328,37 @@ def delete_session(session_id: str) -> dict:
         deregistered = session.execute(
             update(Agent)
             .where(
-                Agent.session_id == session_id,
+                Agent.fleet_id == fleet_id,
                 Agent.status == "active",
             )
             .values(status="deregistered", deregistered_at=now)
             .returning(Agent.agent_id)
         ).all()
         deregistered_count = len(deregistered)
-        agents_in_session = select(Agent.agent_id).where(Agent.session_id == session_id)
+        agents_in_fleet = select(Agent.agent_id).where(Agent.fleet_id == fleet_id)
         session.execute(
-            delete(AgentPlacement).where(AgentPlacement.agent_id.in_(agents_in_session))
+            delete(AgentPlacement).where(AgentPlacement.agent_id.in_(agents_in_fleet))
         )
 
     return {"deregistered_count": deregistered_count}
 
 
 def register_agent(
-    session_id: str,
+    fleet_id: str,
     name: str,
     description: str,
     skills: list[dict] | None = None,
     placement: dict | None = None,
 ) -> dict:
-    """Register a new agent in the session and optionally create its placement.
+    """Register a new agent in the fleet and optionally create its placement.
 
-    Rejects soft-deleted sessions with a message that differs from the
+    Rejects soft-deleted fleets with a message that differs from the
     "not found" case so callers can surface the right recovery hint. When
     ``placement`` is supplied, the named Director must be active in the
-    same session and must not be the Administrator.
+    same fleet and must not be the Administrator.
 
     Args:
-        session_id: Session UUID the new agent belongs to.
+        fleet_id: Fleet UUID the new agent belongs to.
         name: Short human-identifiable label.
         description: One-sentence purpose statement.
         skills: Optional list of skill dicts persisted into the agent's
@@ -372,16 +372,16 @@ def register_agent(
         Dict with ``agent_id``, ``name``, and ``registered_at``.
 
     Raises:
-        click.UsageError: If the session does not exist, is soft-deleted, or
-            the named Director is not active in the same session.
+        click.UsageError: If the fleet does not exist, is soft-deleted, or
+            the named Director is not active in the same fleet.
         click.ClickException: If the named Director is the built-in
             Administrator.
     """
-    sess = get_session(session_id)
+    sess = get_fleet(fleet_id)
     if sess is None:
-        raise click.UsageError(f"Session '{session_id}' not found.")
+        raise click.UsageError(f"Fleet '{fleet_id}' not found.")
     if sess["deleted_at"] is not None:
-        raise click.UsageError(f"session {session_id} is deleted")
+        raise click.UsageError(f"fleet {fleet_id} is deleted")
 
     agent_id = str(uuid.uuid4())
     registered_at = _now_iso()
@@ -398,14 +398,14 @@ def register_agent(
             director_card = session.execute(
                 select(Agent.agent_card_json).where(
                     Agent.agent_id == director_id,
-                    Agent.session_id == session_id,
+                    Agent.fleet_id == fleet_id,
                     Agent.status == "active",
                 )
             ).scalar_one_or_none()
             if director_card is None:
                 raise click.UsageError(
                     f"Director agent '{director_id}' not found or not active "
-                    f"in session '{session_id}'."
+                    f"in fleet '{fleet_id}'."
                 )
             if _is_administrator(director_card):
                 raise click.ClickException("Administrator cannot be a director")
@@ -413,7 +413,7 @@ def register_agent(
         session.add(
             Agent(
                 agent_id=agent_id,
-                session_id=session_id,
+                fleet_id=fleet_id,
                 name=name,
                 description=description,
                 status="active",
@@ -441,12 +441,12 @@ def register_agent(
     }
 
 
-def get_agent(agent_id: str, session_id: str) -> dict | None:
+def get_agent(agent_id: str, fleet_id: str) -> dict | None:
     """Return the active agent's detail (with placement) or None.
 
     Args:
         agent_id: Agent UUID to look up.
-        session_id: Session UUID the agent must belong to.
+        fleet_id: Fleet UUID the agent must belong to.
 
     Returns:
         Dict with ``agent_id``, ``name``, ``description``, ``status``,
@@ -459,7 +459,7 @@ def get_agent(agent_id: str, session_id: str) -> dict | None:
         agent = session.execute(
             select(Agent).where(
                 Agent.agent_id == agent_id,
-                Agent.session_id == session_id,
+                Agent.fleet_id == fleet_id,
                 Agent.status == "active",
             )
         ).scalar_one_or_none()
@@ -487,15 +487,15 @@ def get_agent(agent_id: str, session_id: str) -> dict | None:
     return result
 
 
-def list_agents(session_id: str) -> list[dict]:
-    """Return all active agents in the session."""
+def list_agents(fleet_id: str) -> list[dict]:
+    """Return all active agents in the fleet."""
     stmt = select(
         Agent.agent_id,
         Agent.name,
         Agent.description,
         Agent.registered_at,
     ).where(
-        Agent.session_id == session_id,
+        Agent.fleet_id == fleet_id,
         Agent.status == "active",
     )
     sm = get_sync_sessionmaker()
@@ -525,18 +525,18 @@ def deregister_agent(agent_id: str) -> bool:
 
     Raises:
         click.UsageError: If ``agent_id`` is the root Director of any
-            session — torn down via ``cafleet session delete`` instead.
+            fleet — torn down via ``cafleet fleet delete`` instead.
         click.ClickException: If ``agent_id`` is the built-in Administrator.
     """
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
         is_root_director = session.execute(
-            select(exists().where(Session.director_agent_id == agent_id))
+            select(exists().where(Fleet.director_agent_id == agent_id))
         ).scalar_one()
         if is_root_director:
             raise click.UsageError(
                 "cannot deregister the root Director; "
-                "use 'cafleet session delete' instead"
+                "use 'cafleet fleet delete' instead"
             )
 
         card_json = session.execute(
@@ -594,7 +594,7 @@ def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
     return _placement_dict(row)
 
 
-def _base_members_select(session_id: str, director_agent_id: str):
+def _base_members_select(fleet_id: str, director_agent_id: str):
     return (
         select(
             Agent.agent_id,
@@ -611,18 +611,18 @@ def _base_members_select(session_id: str, director_agent_id: str):
         )
         .join(AgentPlacement, Agent.agent_id == AgentPlacement.agent_id)
         .where(
-            Agent.session_id == session_id,
+            Agent.fleet_id == fleet_id,
             Agent.status == "active",
             AgentPlacement.director_agent_id == director_agent_id,
         )
     )
 
 
-def list_members(session_id: str, director_agent_id: str) -> list[dict]:
+def list_members(fleet_id: str, director_agent_id: str) -> list[dict]:
     """Return active members belonging to the given director, with placements.
 
     Args:
-        session_id: Session UUID to scope the query to.
+        fleet_id: Fleet UUID to scope the query to.
         director_agent_id: Director UUID; only members whose
             ``placement.director_agent_id`` matches are returned.
 
@@ -630,7 +630,7 @@ def list_members(session_id: str, director_agent_id: str) -> list[dict]:
         List of dicts each carrying ``agent_id``, ``name``, ``description``,
         ``status``, ``registered_at``, and ``placement``.
     """
-    stmt = _base_members_select(session_id, director_agent_id)
+    stmt = _base_members_select(fleet_id, director_agent_id)
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(stmt).all()
@@ -647,7 +647,7 @@ def list_members(session_id: str, director_agent_id: str) -> list[dict]:
     ]
 
 
-def list_members_with_activity(session_id: str, director_agent_id: str) -> list[dict]:
+def list_members_with_activity(fleet_id: str, director_agent_id: str) -> list[dict]:
     """``list_members`` plus per-member activity proxies sourced from ``tasks``.
 
     ``last_sent`` / ``last_recv`` / ``last_ack`` aggregate ``status_timestamp``
@@ -657,7 +657,7 @@ def list_members_with_activity(session_id: str, director_agent_id: str) -> list[
     and would otherwise pollute every proxy for the broadcaster.
 
     Args:
-        session_id: Session UUID to scope the query to.
+        fleet_id: Fleet UUID to scope the query to.
         director_agent_id: Director UUID whose members will be enumerated.
 
     Returns:
@@ -695,7 +695,7 @@ def list_members_with_activity(session_id: str, director_agent_id: str) -> list[
         .correlate(Agent)
         .scalar_subquery()
     )
-    stmt = _base_members_select(session_id, director_agent_id).add_columns(
+    stmt = _base_members_select(fleet_id, director_agent_id).add_columns(
         last_sent_sq.label("last_sent"),
         last_recv_sq.label("last_recv"),
         last_ack_sq.label("last_ack"),
@@ -733,12 +733,12 @@ def _idle_seconds(
     return max(0, int(delta))
 
 
-def verify_agent_session(agent_id: str, session_id: str) -> bool:
-    """Return True iff the agent belongs to the session (any status).
+def verify_agent_fleet(agent_id: str, fleet_id: str) -> bool:
+    """Return True iff the agent belongs to the fleet (any status).
 
     Args:
         agent_id: Agent UUID to verify.
-        session_id: Session UUID to check membership against.
+        fleet_id: Fleet UUID to check membership against.
 
     Returns:
         ``True`` if a matching row exists; ``False`` otherwise. Status is
@@ -750,7 +750,7 @@ def verify_agent_session(agent_id: str, session_id: str) -> bool:
             select(
                 exists().where(
                     Agent.agent_id == agent_id,
-                    Agent.session_id == session_id,
+                    Agent.fleet_id == fleet_id,
                 )
             )
         ).scalar_one()
@@ -819,7 +819,7 @@ def _unicast_task_dict(
     }
 
 
-def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
+def send_message(fleet_id: str, agent_id: str, to: str, text: str) -> dict:
     """Create a unicast task addressed to ``to`` and best-effort notify it.
 
     Persists a new ``Task`` row with ``type='unicast'`` and
@@ -829,7 +829,7 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
     insert — the message remains available via :func:`poll_tasks`.
 
     Args:
-        session_id: Session UUID; sender and recipient must both belong to it.
+        fleet_id: Fleet UUID; sender and recipient must both belong to it.
         agent_id: Sender's agent UUID.
         to: Recipient's agent UUID.
         text: Message body. Truncation is render-side; the persisted row
@@ -841,8 +841,8 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
 
     Raises:
         ValueError: If ``to`` is not a valid UUID, the sender is not active
-            in ``session_id``, or the recipient is missing or lives in a
-            different session.
+            in ``fleet_id``, or the recipient is missing or lives in a
+            different fleet.
     """
     try:
         uuid.UUID(to)
@@ -851,21 +851,21 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
 
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        if not _agent_is_active_in_session(session, agent_id, session_id):
+        if not _agent_is_active_in_fleet(session, agent_id, fleet_id):
             raise ValueError(
-                f"Sender agent not found or not active in session: {agent_id}"
+                f"Sender agent not found or not active in fleet: {agent_id}"
             )
 
-        dest_session = session.execute(
-            select(Agent.session_id).where(
+        dest_fleet = session.execute(
+            select(Agent.fleet_id).where(
                 Agent.agent_id == to,
                 Agent.status == "active",
             )
         ).scalar_one_or_none()
-        if dest_session is None:
+        if dest_fleet is None:
             raise ValueError(f"Destination agent not found: {to}")
-        if dest_session != session_id:
-            raise ValueError(f"Destination agent not in session: {to}")
+        if dest_fleet != fleet_id:
+            raise ValueError(f"Destination agent not in fleet: {to}")
 
         task_dict = _unicast_task_dict(
             recipient_id=to,
@@ -884,7 +884,7 @@ def send_message(session_id: str, agent_id: str, to: str, text: str) -> dict:
     return {"task": task_dict, "notification_sent": notification_sent}
 
 
-def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
+def broadcast_message(fleet_id: str, agent_id: str, text: str) -> list[dict]:
     """Fan out one delivery task per active non-admin peer plus a sender summary.
 
     Administrators are excluded at the SQL layer via ``json_extract`` so the
@@ -893,7 +893,7 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
     so receivers can thread back to the original broadcast.
 
     Args:
-        session_id: Session UUID to scope the broadcast to.
+        fleet_id: Fleet UUID to scope the broadcast to.
         agent_id: Broadcaster's agent UUID.
         text: Message body delivered to every recipient.
 
@@ -903,21 +903,21 @@ def broadcast_message(session_id: str, agent_id: str, text: str) -> list[dict]:
         number of inline-preview keystrokes that landed successfully.
 
     Raises:
-        ValueError: If the sender is not active in ``session_id``.
+        ValueError: If the sender is not active in ``fleet_id``.
     """
     summary_task_id = str(uuid.uuid4())
 
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        if not _agent_is_active_in_session(session, agent_id, session_id):
+        if not _agent_is_active_in_fleet(session, agent_id, fleet_id):
             raise ValueError(
-                f"Sender agent not found or not active in session: {agent_id}"
+                f"Sender agent not found or not active in fleet: {agent_id}"
             )
 
         recipient_ids = list(
             session.execute(
                 select(Agent.agent_id).where(
-                    Agent.session_id == session_id,
+                    Agent.fleet_id == fleet_id,
                     Agent.status == "active",
                     Agent.agent_id != agent_id,
                     func.coalesce(
@@ -1083,7 +1083,7 @@ def cancel_task(agent_id: str, task_id: str) -> dict:
     )
 
 
-def list_session_agents(session_id: str) -> list[dict]:
+def list_fleet_agents(fleet_id: str) -> list[dict]:
     """Return active agents plus deregistered agents that still own tasks.
 
     ``kind`` is derived in SQL via ``json_extract`` so the card blob never
@@ -1108,7 +1108,7 @@ def list_session_agents(session_id: str) -> list[dict]:
         Agent.registered_at,
         kind_expr.label("kind_raw"),
     ).where(
-        Agent.session_id == session_id,
+        Agent.fleet_id == fleet_id,
         or_(
             Agent.status == "active",
             and_(Agent.status == "deregistered", has_tasks),
@@ -1165,15 +1165,15 @@ def list_sent(agent_id: str) -> list[dict]:
     return _list_tasks_where(Task.from_agent_id == agent_id)
 
 
-def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
-    """Return the session's recent tasks in DESC ``status_timestamp`` order.
+def list_timeline(fleet_id: str, limit: int = 200) -> list[dict]:
+    """Return the fleet's recent tasks in DESC ``status_timestamp`` order.
 
     ``broadcast_summary`` rows are filtered out so the timeline shows only
     delivery rows. Membership is tested via ``from_agent_id`` joined to
-    ``agents.session_id``.
+    ``agents.fleet_id``.
 
     Args:
-        session_id: Session UUID to scope the query to.
+        fleet_id: Fleet UUID to scope the query to.
         limit: Maximum number of rows to return (default 200).
 
     Returns:
@@ -1183,7 +1183,7 @@ def list_timeline(session_id: str, limit: int = 200) -> list[dict]:
         select(*(getattr(Task, col) for col in _TASK_COLUMNS))
         .join(Agent, Task.from_agent_id == Agent.agent_id)
         .where(
-            Agent.session_id == session_id,
+            Agent.fleet_id == fleet_id,
             _NOT_BROADCAST_SUMMARY,
         )
         .order_by(Task.status_timestamp.desc())
@@ -1207,11 +1207,11 @@ def get_agent_names(agent_ids: list[str]) -> dict[str, str]:
     return {row.agent_id: row.name for row in rows}
 
 
-def get_task(session_id: str, task_id: str) -> dict:
-    """Return the task iff at least one of its endpoints lives in the session.
+def get_task(fleet_id: str, task_id: str) -> dict:
+    """Return the task iff at least one of its endpoints lives in the fleet.
 
     Args:
-        session_id: Session UUID used to gate visibility.
+        fleet_id: Fleet UUID used to gate visibility.
         task_id: Task UUID to fetch.
 
     Returns:
@@ -1219,7 +1219,7 @@ def get_task(session_id: str, task_id: str) -> dict:
 
     Raises:
         ValueError: If the task does not exist or neither endpoint belongs
-            to ``session_id``.
+            to ``fleet_id``.
     """
     sm = get_sync_sessionmaker()
     with sm() as session:
@@ -1231,15 +1231,15 @@ def get_task(session_id: str, task_id: str) -> dict:
         to_id = task_dict["to_agent_id"]
         if to_id:
             endpoint_ids.append(to_id)
-        in_session = session.execute(
+        in_fleet = session.execute(
             select(
                 exists().where(
                     Agent.agent_id.in_(endpoint_ids),
-                    Agent.session_id == session_id,
+                    Agent.fleet_id == fleet_id,
                 )
             )
         ).scalar_one()
-        if not in_session:
+        if not in_fleet:
             raise ValueError(f"Task {task_id} not found")
 
     return {"task": task_dict}
@@ -1270,7 +1270,7 @@ def _resolve_id_prefix(session, *, id_column, base_where, ref: str, entity: str)
         .limit(2)
     ).all()
     if not matches:
-        raise ValueError(f"no {entity} matches id '{ref}' in this session.")
+        raise ValueError(f"no {entity} matches id '{ref}' in this fleet.")
     if len(matches) > 1:
         raise ValueError(
             f"id prefix '{ref}' is ambiguous; supply more characters or the full UUID."
@@ -1278,13 +1278,13 @@ def _resolve_id_prefix(session, *, id_column, base_where, ref: str, entity: str)
     return matches[0][0]
 
 
-def resolve_agent_ref(session_id: str, ref: str) -> str:
+def resolve_agent_ref(fleet_id: str, ref: str) -> str:
     """Full agent UUID or unique prefix -> full agent_id.
 
-    Scoped to ACTIVE agents in ``session_id`` (mirrors ``get_agent``).
+    Scoped to ACTIVE agents in ``fleet_id`` (mirrors ``get_agent``).
 
     Raises:
-        ValueError: ambiguous prefix, or no active agent in the session
+        ValueError: ambiguous prefix, or no active agent in the fleet
             matches ``ref``.
     """
     sm = get_sync_sessionmaker()
@@ -1292,20 +1292,20 @@ def resolve_agent_ref(session_id: str, ref: str) -> str:
         return _resolve_id_prefix(
             session,
             id_column=Agent.agent_id,
-            base_where=(Agent.session_id == session_id, Agent.status == "active"),
+            base_where=(Agent.fleet_id == fleet_id, Agent.status == "active"),
             ref=ref,
             entity="agent",
         )
 
 
-def resolve_task_ref(session_id: str, ref: str) -> str:
+def resolve_task_ref(fleet_id: str, ref: str) -> str:
     """Full task UUID or unique prefix -> full task_id.
 
-    Scoped to tasks with at least one endpoint agent in ``session_id``
+    Scoped to tasks with at least one endpoint agent in ``fleet_id``
     (mirrors ``get_task`` visibility).
 
     Raises:
-        ValueError: ambiguous prefix, or no session-visible task matches
+        ValueError: ambiguous prefix, or no fleet-visible task matches
             ``ref``.
     """
     sm = get_sync_sessionmaker()
@@ -1315,7 +1315,7 @@ def resolve_task_ref(session_id: str, ref: str) -> str:
             id_column=Task.task_id,
             base_where=(
                 exists().where(
-                    Agent.session_id == session_id,
+                    Agent.fleet_id == fleet_id,
                     or_(
                         Agent.agent_id == Task.from_agent_id,
                         Agent.agent_id == Task.to_agent_id,
