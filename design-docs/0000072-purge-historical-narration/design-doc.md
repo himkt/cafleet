@@ -1,7 +1,7 @@
 # 0000072 — Purge Historical-Trajectory Narration
 
 **Status**: Approved
-**Progress**: 9/24 tasks complete
+**Progress**: 12/24 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -166,9 +166,9 @@ This is a documentation/test-hygiene cleanup. It removes **no runtime behavior**
 
 ### Step 3: Tests — delete pure removal-sentinels (Q2)
 
-- [ ] T1 — delete `test_bash_flag_removed__old_bash_flag_form_errors_with_no_such_option` <!-- completed: -->
-- [ ] T2 — delete `test_pretty_flag_rejected_as_unknown_option` <!-- completed: -->
-- [ ] T3 — delete `test_session_list_hides_soft_deleted__list_has_no_all_flag` <!-- completed: -->
+- [x] T1 — delete `test_bash_flag_removed__old_bash_flag_form_errors_with_no_such_option` <!-- completed: 2026-06-06T02:35 -->
+- [x] T2 — delete `test_pretty_flag_rejected_as_unknown_option` <!-- completed: 2026-06-06T02:35 -->
+- [x] T3 — delete `test_session_list_hides_soft_deleted__list_has_no_all_flag` <!-- completed: 2026-06-06T02:35 -->
 
 ### Step 4: Tests — mixed cases (keep live coverage, drop sentinel)
 

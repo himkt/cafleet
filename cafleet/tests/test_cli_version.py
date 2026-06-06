@@ -19,10 +19,3 @@ def test_version_flag_does_not_require_session_id() -> None:
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0, result.output
     assert "session-id" not in result.output.lower(), result.output
-
-
-def test_pretty_flag_rejected_as_unknown_option() -> None:
-    runner = CliRunner()
-    result = runner.invoke(cli, ["--pretty", "session", "list"])
-    assert result.exit_code == 2, result.output
-    assert "No such option: --pretty" in result.output

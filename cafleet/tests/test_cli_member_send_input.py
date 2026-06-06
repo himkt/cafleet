@@ -281,16 +281,6 @@ def test_output_format__json_envelope(
     assert data["value"] == expected_value
 
 
-def test_bash_flag_removed__old_bash_flag_form_errors_with_no_such_option(
-    runner, session_id, happy_path_agent
-):
-    result = _invoke(runner, session_id, "--bash", "x")
-    assert result.exit_code == 2, result.output
-    out = result.output or ""
-    assert "No such option" in out
-    assert "--bash" in out
-
-
 @pytest.mark.parametrize(
     ("scenario", "payload", "expect_exit", "expect_in", "expect_not_in"),
     [

@@ -332,13 +332,6 @@ def test_session_list_hides_soft_deleted__deleted_session_is_hidden_from_json_li
     assert drop_sid not in ids
 
 
-def test_session_list_hides_soft_deleted__list_has_no_all_flag(db_file):
-    """Design 0000026 explicitly removes/omits an ``--all`` flag."""
-    runner = CliRunner()
-    result = runner.invoke(cli, ["session", "list", "--all"])
-    assert result.exit_code == 2, result.output
-
-
 def test_session_delete_unknown_and_idempotent__unknown_session_id_exits_1_with_not_found(
     db_file, mock_tmux_ok
 ):
