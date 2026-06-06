@@ -26,24 +26,24 @@ def runner():
 
 
 def test_list_fleets__row_includes_director_agent_id():
-    session = _create_fleet(label="b-test")
+    fleet = _create_fleet(label="b-test")
     rows = broker.list_fleets()
-    row = next(r for r in rows if r["fleet_id"] == session["fleet_id"])
-    assert row["director_agent_id"] == session["director"]["agent_id"]
+    row = next(r for r in rows if r["fleet_id"] == fleet["fleet_id"])
+    assert row["director_agent_id"] == fleet["director"]["agent_id"]
 
 
 def test_fleet_list_json__exposes_director_agent_id(runner):
-    session = _create_fleet(label="b-test")
+    fleet = _create_fleet(label="b-test")
     result = runner.invoke(cli, ["fleet", "list", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    row = next(r for r in data if r["fleet_id"] == session["fleet_id"])
-    assert row["director_agent_id"] == session["director"]["agent_id"]
+    row = next(r for r in data if r["fleet_id"] == fleet["fleet_id"])
+    assert row["director_agent_id"] == fleet["director"]["agent_id"]
 
 
 def test_fleet_list_text__shows_full_director_uuid_after_fleet_id(runner):
-    session = _create_fleet(label="b-test")
-    director_id = session["director"]["agent_id"]
+    fleet = _create_fleet(label="b-test")
+    director_id = fleet["director"]["agent_id"]
     result = runner.invoke(cli, ["fleet", "list"])
     assert result.exit_code == 0, result.output
 

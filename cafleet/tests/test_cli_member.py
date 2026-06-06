@@ -428,7 +428,7 @@ def test_member_create__backend_spawn_argv_shape(
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
     prompt_path = tmp_path / "prompt.md"
-    prompt_path.write_text("session={fleet_id}", encoding="utf-8")
+    prompt_path.write_text("fleet={fleet_id}", encoding="utf-8")
     result = _invoke_member_create(
         runner,
         fleet_id,
@@ -439,7 +439,7 @@ def test_member_create__backend_spawn_argv_shape(
     )
     assert result.exit_code == 0, result.output
     command = split_window_recorder[0]["command"]
-    assert command[-1] == f"session={fleet_id}"
+    assert command[-1] == f"fleet={fleet_id}"
     if coding_agent == "claude":
         assert command[0] == "claude"
         # Member display name threaded through as --name <name>.
@@ -453,7 +453,7 @@ def test_member_create__backend_spawn_argv_shape(
             "never",
             "--sandbox",
             "workspace-write",
-            f"session={fleet_id}",
+            f"fleet={fleet_id}",
         ]
         # Codex has no --name analog.
         assert "--name" not in command

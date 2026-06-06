@@ -493,7 +493,7 @@ def test_authorization_boundary__placement_none_exits_one_with_deregister_hint(
     assert deregister_recorder == []
 
 
-def test_authorization_boundary__cross_director_same_session_is_rejected(
+def test_authorization_boundary__cross_director_same_fleet_is_rejected(
     runner, fleet_id, monkeypatch, deregister_recorder, send_exit_recorder
 ):
     """Regression guard for the cross-Director auth gap in ``member_delete``."""

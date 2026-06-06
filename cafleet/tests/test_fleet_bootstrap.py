@@ -70,7 +70,7 @@ def test_bootstrap__placement_matches_director_context_and_records_coding_agent(
     assert "created_at" in placement
 
 
-def test_bootstrap__db_rows_for_session_director_administrator_placement(
+def test_bootstrap__db_rows_for_fleet_director_administrator_placement(
     broker_session, director_context
 ):
     result = _bootstrap(ctx=director_context)
@@ -152,8 +152,7 @@ def test_delete_fleet__soft_deletes_deregisters_and_drops_placement(
     with broker_session() as s:
         fleet_row = s.query(FleetModel).filter(FleetModel.fleet_id == sid).one()
         statuses = {
-            r.name: r.status
-            for r in s.query(Agent).filter(Agent.fleet_id == sid).all()
+            r.name: r.status for r in s.query(Agent).filter(Agent.fleet_id == sid).all()
         }
         placement_count = s.query(AgentPlacement).count()
         tasks = s.query(Task).all()
@@ -174,7 +173,7 @@ def test_delete_fleet__idempotent_rerun_returns_zero(director_context):
     assert second["deregistered_count"] == 0
 
 
-def test_delete_fleet__unknown_session_raises_click_exception():
+def test_delete_fleet__unknown_fleet_raises_click_exception():
     fake_sid = str(uuid.uuid4())
     with pytest.raises(click.ClickException) as exc_info:
         broker.delete_fleet(fake_sid)
@@ -186,14 +185,14 @@ def test_delete_fleet__unknown_session_raises_click_exception():
 @pytest.mark.parametrize(
     ("scenario", "expected_substring", "must_not_contain"),
     [
-        ("soft_deleted_session", "is deleted", "not found"),
-        ("unknown_session", "not found", None),
+        ("soft_deleted_fleet", "is deleted", "not found"),
+        ("unknown_fleet", "not found", None),
     ],
 )
-def test_register_agent__rejects_dead_sessions(
+def test_register_agent__rejects_dead_fleets(
     director_context, scenario, expected_substring, must_not_contain
 ):
-    if scenario == "soft_deleted_session":
+    if scenario == "soft_deleted_fleet":
         result = _bootstrap(ctx=director_context)
         sid = result["fleet_id"]
         broker.delete_fleet(sid)
@@ -209,7 +208,7 @@ def test_register_agent__rejects_dead_sessions(
     msg = str(exc_info.value)
     assert (
         expected_substring in msg.lower()
-        if scenario == "unknown_session"
+        if scenario == "unknown_fleet"
         else expected_substring in msg
     )
     if must_not_contain is not None:
@@ -223,8 +222,8 @@ def test_list_fleets__hides_soft_deleted_but_get_fleet_still_returns(
     dead = _bootstrap(label="dead", ctx=director_context)
     broker.delete_fleet(dead["fleet_id"])
 
-    sessions = broker.list_fleets()
-    ids = {s["fleet_id"] for s in sessions}
+    fleets = broker.list_fleets()
+    ids = {s["fleet_id"] for s in fleets}
     assert alive["fleet_id"] in ids
     assert dead["fleet_id"] not in ids
 

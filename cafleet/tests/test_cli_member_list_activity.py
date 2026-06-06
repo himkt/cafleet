@@ -27,7 +27,7 @@ _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0
 
 @pytest.fixture
 def bootstrapped_team(tmp_path, monkeypatch, _reset_engine_singletons):
-    """Fresh DB + session + 3 registered members. Returns ``(sid, director,
+    """Fresh DB + fleet + 3 registered members. Returns ``(sid, director,
     [member_ids], runner)``.
 
     Members are registered via ``broker.register_agent`` (placement supplied)

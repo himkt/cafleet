@@ -214,7 +214,7 @@ def test_task_table_and_model__text_column_present_task_json_absent():
     assert row is not None
     assert row[0] == "via send_message body"
 
-    # Cross-session boundary check (subsumes test_get_task__rejects_task_not_in_session
+    # Cross-fleet boundary check (subsumes test_get_task__rejects_task_not_in_fleet
     # & test_read_task__returns_none_for_missing_task)
     other = _create_fleet()
     other_sender = _register_agent(other["fleet_id"], name="outsider-sender")

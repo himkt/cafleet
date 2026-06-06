@@ -188,7 +188,7 @@ def test_subcommands_that_do_not_require_fleet_id__fleet_create_without_fleet_id
     assert result.exit_code == 0, result.output
 
 
-def test_subcommands_that_do_not_require_fleet_id__session_list_without_fleet_id(
+def test_subcommands_that_do_not_require_fleet_id__fleet_list_without_fleet_id(
     db_runner,
 ):
     result = db_runner.invoke(cli, ["fleet", "list"])

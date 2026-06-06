@@ -2,7 +2,7 @@
 
 ``message show`` is gated by ``broker.verify_agent_fleet`` (the same
 membership check ``agent list`` / ``agent show`` use): a caller must prove it
-belongs to the session before it can fetch a task by ID.
+belongs to the fleet before it can fetch a task by ID.
 """
 
 import uuid
@@ -88,7 +88,7 @@ def test_message_show_auth_check__rejects_unknown_agent(
 def test_message_show_auth_check__accepts_valid_agent(
     runner, fleet_id, agent_id, task_id, monkeypatch
 ):
-    """Registered agent in session → broker.get_task is called and the
+    """Registered agent in fleet → broker.get_task is called and the
     task JSON reaches the user."""
     verify_calls: list[tuple] = []
 
@@ -141,7 +141,7 @@ def test_message_show_auth_check__accepts_valid_agent(
 
 # --- message_poll_auth_check: ``message poll`` must gate its
 # ``broker.poll_tasks`` call on ``broker.verify_agent_fleet`` so a caller
-# cannot drain another session's inbox by passing any ``--fleet-id`` they
+# cannot drain another fleet's inbox by passing any ``--fleet-id`` they
 # like. ---
 
 

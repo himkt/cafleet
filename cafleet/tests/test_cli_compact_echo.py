@@ -250,9 +250,7 @@ def test_broadcast_full__multi_line_per_recipient_envelopes(
 
 
 @pytest.mark.parametrize("command", ["send", "ack"])
-def test_quiet__emits_only_task_id_8(
-    runner, fleet_id, agent_id, monkeypatch, command
-):
+def test_quiet__emits_only_task_id_8(runner, fleet_id, agent_id, monkeypatch, command):
     args = _setup_command(monkeypatch, command, fleet_id, agent_id) + ["--quiet"]
     result = runner.invoke(cli, ["--fleet-id", fleet_id, *args])
     assert result.exit_code == 0, result.output

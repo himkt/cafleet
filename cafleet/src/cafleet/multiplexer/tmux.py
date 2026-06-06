@@ -147,9 +147,7 @@ class TmuxMultiplexer:
         """Best-effort ``cafleet ... message poll`` keystroke for the recipient's pane."""
         if shutil.which("tmux") is None:
             return False
-        payload = (
-            f"cafleet --fleet-id {fleet_id} message poll --agent-id {agent_id}"
-        )
+        payload = f"cafleet --fleet-id {fleet_id} message poll --agent-id {agent_id}"
         try:
             _send_literal_then_enter(
                 target_pane_id=target_pane_id, payload=payload, timeout=5

@@ -100,9 +100,9 @@ def test_is_administrator__invalid_inputs(scenario, payload):
 
 
 def test_deregister_administrator__protected_and_user_dereg_still_works(broker_session):
-    session = _create_fleet_with_ctx()
-    sid = session["fleet_id"]
-    admin_id = session["administrator_agent_id"]
+    fleet = _create_fleet_with_ctx()
+    sid = fleet["fleet_id"]
+    admin_id = fleet["administrator_agent_id"]
 
     with pytest.raises(click.ClickException) as exc_info:
         broker.deregister_agent(admin_id)
@@ -122,9 +122,9 @@ def test_deregister_administrator__protected_and_user_dereg_still_works(broker_s
 
 
 def test_register_agent_placement__administrator_cannot_be_director(broker_session):
-    session = _create_fleet_with_ctx()
-    sid = session["fleet_id"]
-    admin_id = session["administrator_agent_id"]
+    fleet = _create_fleet_with_ctx()
+    sid = fleet["fleet_id"]
+    admin_id = fleet["administrator_agent_id"]
     placement = {
         "director_agent_id": admin_id,
         "tmux_session": "main",
@@ -148,8 +148,8 @@ def test_register_agent_placement__administrator_cannot_be_director(broker_sessi
 
 
 def test_register_agent_placement__user_director_path_still_works(broker_session):
-    session = _create_fleet_with_ctx()
-    sid = session["fleet_id"]
+    fleet = _create_fleet_with_ctx()
+    sid = fleet["fleet_id"]
     director = broker.register_agent(
         fleet_id=sid, name="director", description="a user director"
     )

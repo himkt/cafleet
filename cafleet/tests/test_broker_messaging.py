@@ -54,7 +54,7 @@ def test_send_message__returns_typed_envelope_with_task_and_notification():
         ("invalid_uuid", "invalid_dest", "Invalid destination format"),
         ("missing_agent", "missing_dest", "Destination agent not found"),
         ("deregistered_agent", "deregistered_dest", "Destination agent not found"),
-        ("cross_session", "cross_session", "Destination agent not in fleet"),
+        ("cross_fleet", "cross_fleet", "Destination agent not in fleet"),
     ],
 )
 def test_send_message__validation_failures(scenario, build_args, expected_match):
@@ -66,7 +66,7 @@ def test_send_message__validation_failures(scenario, build_args, expected_match)
     elif build_args == "deregistered_dest":
         broker.deregister_agent(recipient)
         dest_sid, dest_sender, dest = sid, sender, recipient
-    else:  # cross_session
+    else:  # cross_fleet
         other = _create_fleet()
         other_recipient = _register_agent(other["fleet_id"], name="outsider")
         dest_sid, dest_sender, dest = sid, sender, other_recipient["agent_id"]
@@ -121,7 +121,7 @@ def test_broadcast_message__delivery_shape_and_origin_link():
             "admin_reaches_all",
         ),
         (
-            "bootstrap_session_admin_reaches_only_director",
+            "bootstrap_fleet_admin_reaches_only_director",
             "Broadcast sent to 1 recipients",
             "only_director",
         ),
@@ -131,24 +131,24 @@ def test_broadcast_message__recipient_selection_matrix(
     scenario, expected_text, extra_assertion
 ):
     if scenario == "no_other_agents":
-        session = _create_fleet()
-        sid = session["fleet_id"]
+        fleet = _create_fleet()
+        sid = fleet["fleet_id"]
         lone = _register_agent(sid, name="lonely")
         # Also need to subtract administrator + director from the recipient pool —
         # they are auto-seeded. So "Broadcast sent to N" depends on how many remain.
-        # In bootstrap-only session admin sends → reaches director (1).
+        # In bootstrap-only fleet admin sends → reaches director (1).
         # Here we have lone + admin + director; lone broadcasts; admin excluded; director receives.
         result = broker.broadcast_message(sid, lone["agent_id"], "Anyone?")
         assert result[0]["task"]["type"] == "broadcast_summary"
         # Director gets the message.
-        director_tasks = broker.poll_tasks(session["director"]["agent_id"])
+        director_tasks = broker.poll_tasks(fleet["director"]["agent_id"])
         assert len(director_tasks) == 1
         return
 
-    session = _create_fleet()
-    sid = session["fleet_id"]
-    admin_id = session["administrator_agent_id"]
-    director_id = session["director"]["agent_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    admin_id = fleet["administrator_agent_id"]
+    director_id = fleet["director"]["agent_id"]
 
     if scenario == "admin_exclusion_from_user_broadcast":
         sender = _register_agent(sid, name="sender")
@@ -170,7 +170,7 @@ def test_broadcast_message__recipient_selection_matrix(
         assert len(broker.poll_tasks(user_a["agent_id"])) == 1
         assert len(broker.poll_tasks(user_b["agent_id"])) == 1
         assert len(broker.poll_tasks(director_id)) == 1
-    else:  # bootstrap_session_admin_reaches_only_director
+    else:  # bootstrap_fleet_admin_reaches_only_director
         result = broker.broadcast_message(sid, admin_id, "anybody?")
         assert result[0]["task"]["text"] == expected_text
         assert len(broker.poll_tasks(director_id)) == 1
@@ -180,8 +180,8 @@ def test_broadcast_message__recipient_selection_matrix(
 
 
 def test_poll_tasks__empty_and_non_empty_shape():
-    session = _create_fleet()
-    idle = _register_agent(session["fleet_id"], name="idle")
+    fleet = _create_fleet()
+    idle = _register_agent(fleet["fleet_id"], name="idle")
     assert broker.poll_tasks(idle["agent_id"]) == []
 
     sid, sender, recipient = _setup_two_agents()
@@ -342,16 +342,16 @@ def test_get_task__returns_full_typed_envelope():
 
 
 def test_get_task__nonexistent_raises():
-    session = _create_fleet()
+    fleet = _create_fleet()
     with pytest.raises(ValueError, match="not found"):
-        broker.get_task(session["fleet_id"], str(uuid.uuid4()))
+        broker.get_task(fleet["fleet_id"], str(uuid.uuid4()))
 
 
-def test_get_task__session_boundary_rejects_foreign_session():
-    session_a = _create_fleet()
-    session_b = _create_fleet()
-    sid_a = session_a["fleet_id"]
-    sid_b = session_b["fleet_id"]
+def test_get_task__fleet_boundary_rejects_foreign_fleet():
+    fleet_a = _create_fleet()
+    fleet_b = _create_fleet()
+    sid_a = fleet_a["fleet_id"]
+    sid_b = fleet_b["fleet_id"]
     sender = _register_agent(sid_a, name="sender")
     recipient = _register_agent(sid_a, name="recipient")
     sent = broker.send_message(sid_a, sender["agent_id"], recipient["agent_id"], "hi")
@@ -366,6 +366,6 @@ def test_get_task__sender_or_recipient_can_read(actor_role):
     sid, sender, recipient = _setup_two_agents()
     sent = broker.send_message(sid, sender, recipient, f"read by {actor_role}")
     tid = sent["task"]["task_id"]
-    # get_task is session-scoped (doesn't require the actor agent_id);
+    # get_task is fleet-scoped (doesn't require the actor agent_id);
     # parametrize on the actor role exercises the symmetry of read access.
     assert broker.get_task(sid, tid)["task"]["task_id"] == tid

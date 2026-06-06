@@ -126,7 +126,7 @@ def test_list_members_with_activity__scoping_excludes_other_directors_and_deregi
     # in second-level's scope. Deregistered carol is excluded.
     assert agent_ids == {a, b, second_director}
 
-    # Empty session.
+    # Empty fleet.
     sid2, director_id2 = _bootstrap_fleet()
     assert broker.list_members_with_activity(sid2, director_id2) == []
 

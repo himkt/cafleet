@@ -270,9 +270,7 @@ def get_fleet(fleet_id: str) -> dict | None:
     """
     sm = get_sync_sessionmaker()
     with sm() as session:
-        result = session.execute(
-            select(Fleet).where(Fleet.fleet_id == fleet_id)
-        )
+        result = session.execute(select(Fleet).where(Fleet.fleet_id == fleet_id))
         row = result.scalar_one_or_none()
     if row is None:
         return None

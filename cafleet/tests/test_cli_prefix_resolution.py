@@ -30,8 +30,8 @@ TASK_FULL = "cccccccc-cccc-cccc-cccc-cccccccccccc"
 TASK_PREFIX = "cccccccc"
 
 AMBIGUOUS_MSG = "id prefix 'aa' is ambiguous; supply more characters or the full UUID."
-NO_AGENT_MSG = "no agent matches id 'zz' in this session."
-NO_TASK_MSG = "no task matches id 'zz' in this session."
+NO_AGENT_MSG = "no agent matches id 'zz' in this fleet."
+NO_TASK_MSG = "no task matches id 'zz' in this fleet."
 
 
 @pytest.fixture

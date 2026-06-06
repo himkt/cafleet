@@ -75,9 +75,7 @@ def _seed_agent(
 def _fleet_rows(db_path):
     conn = sqlite3.connect(str(db_path))
     try:
-        return conn.execute(
-            "SELECT fleet_id, label, created_at FROM fleets"
-        ).fetchall()
+        return conn.execute("SELECT fleet_id, label, created_at FROM fleets").fetchall()
     finally:
         conn.close()
 
@@ -273,7 +271,7 @@ def test_fleet_delete__soft_deletes_and_marks_row(fresh_db):
     assert "deleted" in result.output.lower()
 
 
-def test_fleet_delete__nonexistent_session_handles_gracefully(fresh_db):
+def test_fleet_delete__nonexistent_fleet_handles_gracefully(fresh_db):
     _db_file, runner = fresh_db
     fake_id = str(uuid.uuid4())
     result = runner.invoke(cli, ["fleet", "delete", fake_id])

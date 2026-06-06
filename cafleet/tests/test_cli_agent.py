@@ -3,7 +3,7 @@
 ``agent deregister`` is gated by ``broker.verify_agent_fleet`` (the same
 membership check ``agent list`` / ``agent show`` / ``message show`` use): a
 caller must prove its ``--agent-id`` belongs to the supplied ``--fleet-id``,
-so it cannot deregister an agent outside its session.
+so it cannot deregister an agent outside its fleet.
 """
 
 import uuid

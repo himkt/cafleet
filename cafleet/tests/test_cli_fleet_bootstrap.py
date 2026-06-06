@@ -207,7 +207,7 @@ def test_fleet_create_json_output__placement_sub_dict_matches_spec(
 
 # --- fleet_create_coding_agent: ``--coding-agent`` on
 # ``cafleet fleet create`` is operator-declared metadata that lands in
-# ``placement.coding_agent`` for the root Director. The session-create path
+# ``placement.coding_agent`` for the root Director. The fleet-create path
 # does NOT spawn anything, so the test does not need a fake codex binary.
 # ---
 
@@ -255,9 +255,7 @@ def test_fleet_create_coding_agent__unknown_value_rejected(db_file, mock_tmux_ok
 
 def test_fleet_create_json_output__label_propagates_to_json(db_file, mock_tmux_ok):
     runner = CliRunner()
-    result = runner.invoke(
-        cli, ["fleet", "create", "--label", "json-label", "--json"]
-    )
+    result = runner.invoke(cli, ["fleet", "create", "--label", "json-label", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["label"] == "json-label"
@@ -283,7 +281,7 @@ def test_fleet_create_outside_tmux__fails_with_specific_error_and_exit_1(
     assert "cafleet fleet create must be run inside a tmux session" in combined
 
 
-def test_fleet_create_outside_tmux__no_session_row_is_written_when_tmux_is_missing(
+def test_fleet_create_outside_tmux__no_fleet_row_is_written_when_tmux_is_missing(
     db_file, mock_tmux_unavailable
 ):
     runner = CliRunner()
@@ -294,7 +292,7 @@ def test_fleet_create_outside_tmux__no_session_row_is_written_when_tmux_is_missi
     assert before == after
 
 
-def test_fleet_list_hides_soft_deleted__deleted_session_is_hidden_from_text_list(
+def test_fleet_list_hides_soft_deleted__deleted_fleet_is_hidden_from_text_list(
     db_file, mock_tmux_ok
 ):
     runner = CliRunner()
@@ -314,7 +312,7 @@ def test_fleet_list_hides_soft_deleted__deleted_session_is_hidden_from_text_list
     assert drop_sid not in list_result.output
 
 
-def test_fleet_list_hides_soft_deleted__deleted_session_is_hidden_from_json_list(
+def test_fleet_list_hides_soft_deleted__deleted_fleet_is_hidden_from_json_list(
     db_file, mock_tmux_ok
 ):
     runner = CliRunner()

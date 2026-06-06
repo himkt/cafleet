@@ -35,8 +35,8 @@ def _create_fleet():
 
 
 def _two_agents():
-    session = _create_fleet()
-    sid = session["fleet_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
     a = broker.register_agent(fleet_id=sid, name="alpha", description="A")
     b = broker.register_agent(fleet_id=sid, name="beta", description="B")
     return sid, a["agent_id"], b["agent_id"]

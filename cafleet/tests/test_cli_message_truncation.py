@@ -183,9 +183,7 @@ def test_truncation__non_text_fields_byte_identical_between_default_and_full(
         monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
     )
     default_res = runner.invoke(cli, ["--fleet-id", fleet_id, "--json", *args])
-    full_res = runner.invoke(
-        cli, ["--fleet-id", fleet_id, "--json", *args, "--full"]
-    )
+    full_res = runner.invoke(cli, ["--fleet-id", fleet_id, "--json", *args, "--full"])
     assert default_res.exit_code == 0, default_res.output
     assert full_res.exit_code == 0, full_res.output
     if shape == "list":

@@ -41,9 +41,7 @@ def test_create_fleet__administrator_seed_shape_and_uniqueness(broker_session):
 
     with broker_session() as s:
         rows = (
-            s.query(Agent)
-            .filter(Agent.fleet_id == sid, Agent.status == "active")
-            .all()
+            s.query(Agent).filter(Agent.fleet_id == sid, Agent.status == "active").all()
         )
     assert len(rows) == 2
     admins = [r for r in rows if r.name == "Administrator"]
@@ -52,13 +50,13 @@ def test_create_fleet__administrator_seed_shape_and_uniqueness(broker_session):
     card = json.loads(admins[0].agent_card_json)
     assert card["cafleet"]["kind"] == ADMINISTRATOR_KIND
 
-    # Administrator registered_at matches sessions.created_at.
+    # Administrator registered_at matches fleets.created_at.
     with broker_session() as s:
         fleet_row = s.query(FleetModel).filter(FleetModel.fleet_id == sid).one()
         agent_row = s.query(Agent).filter(Agent.agent_id == admin_id).one()
     assert agent_row.registered_at == fleet_row.created_at
 
-    # Each session mints its own Administrator.
+    # Each fleet mints its own Administrator.
     r2 = _create_fleet()
     assert r2["administrator_agent_id"] != admin_id
 
@@ -83,8 +81,8 @@ def test_create_fleet__list_fleet_agents_marks_administrator_kind():
 def test_list_fleets__empty_and_non_empty_with_agent_count():
     assert broker.list_fleets() == []
 
-    session = _create_fleet(label="session-a")
-    sid = session["fleet_id"]
+    fleet = _create_fleet(label="fleet-a")
+    sid = fleet["fleet_id"]
     _register_agent(sid, name="agent-1")
     _register_agent(sid, name="agent-2")
     dead = _register_agent(sid, name="dead-agent")
@@ -94,7 +92,7 @@ def test_list_fleets__empty_and_non_empty_with_agent_count():
     assert len(rows) == 1
     row = rows[0]
     assert set(row.keys()) >= {"fleet_id", "label", "created_at", "agent_count"}
-    assert row["label"] == "session-a"
+    assert row["label"] == "fleet-a"
     # Two user agents (one deregistered → excluded) + Director + Administrator.
     assert row["agent_count"] == 4
 
@@ -145,9 +143,9 @@ def test_get_fleet__existing_and_nonexistent():
 
 
 def test_register_agent__shape_and_unique_id():
-    session = _create_fleet()
-    r1 = _register_agent(session["fleet_id"], name="a1")
-    r2 = _register_agent(session["fleet_id"], name="a2")
+    fleet = _create_fleet()
+    r1 = _register_agent(fleet["fleet_id"], name="a1")
+    r2 = _register_agent(fleet["fleet_id"], name="a2")
     assert {"agent_id", "name", "registered_at"}.issubset(r1.keys())
     uuid.UUID(r1["agent_id"])
     assert r1["name"] == "a1"
@@ -157,24 +155,24 @@ def test_register_agent__shape_and_unique_id():
 @pytest.mark.parametrize(
     ("scenario", "expected_match"),
     [
-        ("missing_session", "not found"),
+        ("missing_fleet", "not found"),
         ("director_not_found", "Director agent"),
-        ("director_cross_session", "Director agent"),
+        ("director_cross_fleet", "Director agent"),
         ("director_deregistered", "not active"),
     ],
 )
 def test_register_agent__validation_failures(scenario, expected_match):
-    if scenario == "missing_session":
+    if scenario == "missing_fleet":
         with pytest.raises(click.UsageError, match=expected_match):
             broker.register_agent(
                 fleet_id=str(uuid.uuid4()),
                 name="orphan",
-                description="no session",
+                description="no fleet",
             )
         return
 
-    session = _create_fleet()
-    sid = session["fleet_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
     if scenario == "director_not_found":
         placement = {
             "director_agent_id": str(uuid.uuid4()),
@@ -185,9 +183,9 @@ def test_register_agent__validation_failures(scenario, expected_match):
         }
         with pytest.raises(click.UsageError, match=expected_match):
             _register_agent(sid, name="orphan-member", placement=placement)
-    elif scenario == "director_cross_session":
+    elif scenario == "director_cross_fleet":
         director = _register_agent(sid, name="director")
-        session2 = _create_fleet()
+        fleet2 = _create_fleet()
         placement = {
             "director_agent_id": director["agent_id"],
             "tmux_session": "main",
@@ -197,8 +195,8 @@ def test_register_agent__validation_failures(scenario, expected_match):
         }
         with pytest.raises(click.UsageError, match=expected_match):
             _register_agent(
-                session2["fleet_id"],
-                name="cross-session-member",
+                fleet2["fleet_id"],
+                name="cross-fleet-member",
                 placement=placement,
             )
     else:  # director_deregistered
@@ -217,8 +215,8 @@ def test_register_agent__validation_failures(scenario, expected_match):
 
 @pytest.mark.parametrize("with_placement", [True, False])
 def test_register_agent__placement_stored_or_absent(with_placement):
-    session = _create_fleet()
-    sid = session["fleet_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
     if with_placement:
         director = _register_agent(sid, name="director")
         placement = {
@@ -243,8 +241,8 @@ def test_register_agent__placement_stored_or_absent(with_placement):
 
 
 def test_get_agent__returns_typed_envelope():
-    session = _create_fleet()
-    sid = session["fleet_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
     agent = _register_agent(sid, name="visible", description="test desc")
     result = broker.get_agent(agent["agent_id"], sid)
     assert result["agent_id"] == agent["agent_id"]
@@ -256,11 +254,11 @@ def test_get_agent__returns_typed_envelope():
 
 @pytest.mark.parametrize(
     "scenario",
-    ["nonexistent_agent", "deregistered_agent", "wrong_session"],
+    ["nonexistent_agent", "deregistered_agent", "wrong_fleet"],
 )
 def test_get_agent__returns_none_for_missing(scenario):
-    session = _create_fleet()
-    sid = session["fleet_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
     if scenario == "nonexistent_agent":
         assert broker.get_agent(str(uuid.uuid4()), sid) is None
     elif scenario == "deregistered_agent":
@@ -277,8 +275,8 @@ def test_get_agent__returns_none_for_missing(scenario):
 
 
 def test_list_agents__active_only_with_required_keys():
-    session = _create_fleet()
-    sid = session["fleet_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
     _register_agent(sid, name="active-1")
     _register_agent(sid, name="active-2")
     dead = _register_agent(sid, name="dead-agent")
@@ -296,17 +294,17 @@ def test_list_agents__active_only_with_required_keys():
 
 
 def test_list_agents__bootstrap_only_lists_director_and_admin():
-    session = _create_fleet()
-    result = broker.list_agents(session["fleet_id"])
+    fleet = _create_fleet()
+    result = broker.list_agents(fleet["fleet_id"])
     assert {a["name"] for a in result} == {"Director", "Administrator"}
 
 
-def test_list_agents__scoped_per_session():
-    session_a = _create_fleet()
-    session_b = _create_fleet()
-    _register_agent(session_a["fleet_id"], name="agent-a")
-    _register_agent(session_b["fleet_id"], name="agent-b")
-    result_a = broker.list_agents(session_a["fleet_id"])
+def test_list_agents__scoped_per_fleet():
+    fleet_a = _create_fleet()
+    fleet_b = _create_fleet()
+    _register_agent(fleet_a["fleet_id"], name="agent-a")
+    _register_agent(fleet_b["fleet_id"], name="agent-b")
+    result_a = broker.list_agents(fleet_a["fleet_id"])
     names_a = {a["name"] for a in result_a}
     assert "agent-a" in names_a
     assert "agent-b" not in names_a
@@ -318,23 +316,22 @@ def test_list_agents__scoped_per_session():
 @pytest.mark.parametrize(
     ("scenario", "expected"),
     [
-        ("agent_in_session", True),
-        ("agent_in_different_session", False),
+        ("agent_in_fleet", True),
+        ("agent_in_different_fleet", False),
         ("nonexistent_agent", False),
     ],
 )
 def test_verify_agent_fleet__matrix(scenario, expected):
-    session = _create_fleet()
-    sid = session["fleet_id"]
-    if scenario == "agent_in_session":
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    if scenario == "agent_in_fleet":
         agent = _register_agent(sid, name="here")
         assert broker.verify_agent_fleet(agent["agent_id"], sid) is expected
-    elif scenario == "agent_in_different_session":
+    elif scenario == "agent_in_different_fleet":
         other = _create_fleet()
         agent = _register_agent(sid, name="there")
         assert (
-            broker.verify_agent_fleet(agent["agent_id"], other["fleet_id"])
-            is expected
+            broker.verify_agent_fleet(agent["agent_id"], other["fleet_id"]) is expected
         )
     else:
         assert broker.verify_agent_fleet(str(uuid.uuid4()), sid) is expected
@@ -344,13 +341,13 @@ def test_verify_agent_fleet__matrix(scenario, expected):
 
 
 def test_deregister_agent__active_agent_returns_true():
-    session = _create_fleet()
-    sid = session["fleet_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
     agent = _register_agent(sid, name="retiring")
     assert broker.deregister_agent(agent["agent_id"]) is True
     names = {a["name"] for a in broker.list_agents(sid)}
     assert names == {"Director", "Administrator"}
-    # The deregistered agent still belongs to the session (verify_agent_fleet).
+    # The deregistered agent still belongs to the fleet (verify_agent_fleet).
     assert broker.verify_agent_fleet(agent["agent_id"], sid) is True
 
 
@@ -359,9 +356,9 @@ def test_deregister_agent__active_agent_returns_true():
     [("already_deregistered", False), ("nonexistent_agent", False)],
 )
 def test_deregister_agent__idempotent_and_missing(scenario, expected):
-    session = _create_fleet()
+    fleet = _create_fleet()
     if scenario == "already_deregistered":
-        agent = _register_agent(session["fleet_id"], name="x")
+        agent = _register_agent(fleet["fleet_id"], name="x")
         broker.deregister_agent(agent["agent_id"])
         assert broker.deregister_agent(agent["agent_id"]) is expected
     else:
@@ -369,8 +366,8 @@ def test_deregister_agent__idempotent_and_missing(scenario, expected):
 
 
 def test_deregister_agent__deletes_placement():
-    session = _create_fleet()
-    sid = session["fleet_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
     director = _register_agent(sid, name="director")
     placement = {
         "director_agent_id": director["agent_id"],
@@ -388,8 +385,8 @@ def test_deregister_agent__deletes_placement():
 
 
 def test_update_placement_pane_id__updates_and_persists():
-    session = _create_fleet()
-    sid = session["fleet_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
     director = _register_agent(sid, name="director")
     placement = {
         "director_agent_id": director["agent_id"],
@@ -407,9 +404,9 @@ def test_update_placement_pane_id__updates_and_persists():
 
 @pytest.mark.parametrize("scenario", ["no_placement", "nonexistent_agent"])
 def test_update_placement_pane_id__returns_none_for_missing(scenario):
-    session = _create_fleet()
+    fleet = _create_fleet()
     if scenario == "no_placement":
-        agent = _register_agent(session["fleet_id"], name="no-placement")
+        agent = _register_agent(fleet["fleet_id"], name="no-placement")
         assert broker.update_placement_pane_id(agent["agent_id"], "%99") is None
     else:
         assert broker.update_placement_pane_id(str(uuid.uuid4()), "%1") is None
@@ -419,8 +416,8 @@ def test_update_placement_pane_id__returns_none_for_missing(scenario):
 
 
 def test_list_members__returns_members_with_placement_info():
-    session = _create_fleet()
-    sid = session["fleet_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
     director = _register_agent(sid, name="director")
     did = director["agent_id"]
     placement = {
@@ -444,8 +441,8 @@ def test_list_members__returns_members_with_placement_info():
 
 
 def test_list_members__per_director_isolation_and_empty_case():
-    session = _create_fleet()
-    sid = session["fleet_id"]
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
     dir1 = _register_agent(sid, name="director-1")
     dir2 = _register_agent(sid, name="director-2")
     lonely = _register_agent(sid, name="lonely-director")

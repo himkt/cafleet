@@ -1,7 +1,7 @@
 """Tests for the ``_client_command`` decorator.
 
 The Programmer adds a private decorator ``_client_command`` to ``cli.py``
-that subsumes the ``--fleet-id`` guard, optional ``--agent-id``-belongs-to-session
+that subsumes the ``--fleet-id`` guard, optional ``--agent-id``-belongs-to-fleet
 validation, broker-error wrapping, and JSON-vs-text output branching.
 
 The tests use a tiny test-only click group (declared at module top) wired
@@ -76,7 +76,7 @@ def test_requires_agent_fleet__false_does_not_call_verify(runner, monkeypatch):
 
     result = runner.invoke(
         _test_cli,
-        ["--fleet-id", "session-1", "simple"],
+        ["--fleet-id", "fleet-1", "simple"],
     )
     assert result.exit_code == 0, result.output
     assert verify_calls == []
@@ -97,7 +97,7 @@ def test_requires_agent_fleet__true_calls_verify_and_raises_on_false(
         _test_cli,
         [
             "--fleet-id",
-            "session-1",
+            "fleet-1",
             "agent-bound",
             "--agent-id",
             "agent-1",
@@ -105,7 +105,7 @@ def test_requires_agent_fleet__true_calls_verify_and_raises_on_false(
     )
     assert result.exit_code != 0
     assert "not a member of fleet" in result.output
-    assert verify_calls == [("agent-1", "session-1")]
+    assert verify_calls == [("agent-1", "fleet-1")]
 
 
 def test_requires_agent_fleet__true_proceeds_when_verify_returns_true(
@@ -117,7 +117,7 @@ def test_requires_agent_fleet__true_proceeds_when_verify_returns_true(
         _test_cli,
         [
             "--fleet-id",
-            "session-1",
+            "fleet-1",
             "agent-bound",
             "--agent-id",
             "agent-1",
@@ -131,7 +131,7 @@ def test_requires_agent_fleet__true_proceeds_when_verify_returns_true(
 def test_broker_error_wrapping__runtime_error_wrapped_as_click_exception(runner):
     result = runner.invoke(
         _test_cli,
-        ["--fleet-id", "session-1", "raises"],
+        ["--fleet-id", "fleet-1", "raises"],
     )
     assert result.exit_code == 1, result.output
     assert "boom!" in result.output
@@ -140,7 +140,7 @@ def test_broker_error_wrapping__runtime_error_wrapped_as_click_exception(runner)
 def test_output_branching__json_output_branch_uses_format_json(runner):
     result = runner.invoke(
         _test_cli,
-        ["--json", "--fleet-id", "session-1", "simple"],
+        ["--json", "--fleet-id", "fleet-1", "simple"],
     )
     assert result.exit_code == 0, result.output
     parsed = json.loads(result.output)
@@ -150,7 +150,7 @@ def test_output_branching__json_output_branch_uses_format_json(runner):
 def test_output_branching__text_output_branch_uses_text_formatter(runner):
     result = runner.invoke(
         _test_cli,
-        ["--fleet-id", "session-1", "simple"],
+        ["--fleet-id", "fleet-1", "simple"],
     )
     assert result.exit_code == 0, result.output
     assert result.output.startswith("TEXT:")
