@@ -64,7 +64,7 @@ In `docs/concepts/token-reduction.md`, remove only the closing paragraph that de
 
 ### What stays (per `~/.claude/rules/removal.md`)
 
-- No design docs are touched. Per `~/.claude/rules/removal.md`, every design doc is part of the canonical historical record. Of the existing docs, only `0000049-token-reduction`, `0000061-test-suite-cleanup`, and `0000071-cli-ux-cleanup` reference the token-budget tests (verified: they are the only three containing the string `token_budget`); those three established and maintained the guards this change removes.
+- No design docs are touched. Per `~/.claude/rules/removal.md`, every design doc is part of the canonical historical record. Of the pre-0000073 docs, only `0000049-token-reduction`, `0000061-test-suite-cleanup`, and `0000071-cli-ux-cleanup` reference the token-budget tests; those three established and maintained the guards this change removes. (This doc and its prompt artifacts naturally contain `token_budget`, which is why the residual-reference check in Step 4 excludes `design-docs/`.)
 - This design doc records the removal and its accepted tradeoff.
 - Git history and the git log.
 
