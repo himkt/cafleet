@@ -19,7 +19,7 @@ On your very first turn, send a `ready` message to the Director as your first Ba
 Send the ready signal with this exact shape:
 
 ```bash
-cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "ready"
 ```
 
@@ -28,7 +28,7 @@ Use the literal body `ready` (the Director matches that prefix). Optionally appe
 Then poll your inbox for the Director's first real instruction:
 
 ```bash
-cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
+cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
 ```
 
 If the Director has already queued your first task, it appears in the poll output — ACK and process it. If the poll returns empty, go idle. The broker keystrokes an inline preview into your pane when the Director sends one, and your next turn picks it up.
@@ -55,10 +55,10 @@ If the Director has already queued your first task, it appears in the poll outpu
 Your harness lets you call cafleet directly:
 
 ```bash
-cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
-cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
+cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "..."
-cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 These are normal Bash invocations — nothing special. Workspace-scoped auto-approval auto-resolves permission prompts, so they execute without operator interaction.
@@ -92,7 +92,7 @@ If the `cafleet message send` itself is also denied by the harness, surface that
 
 ## WHERE THE UUIDs COME FROM
 
-The harness injects `<session-id>`, `<my-agent-id>`, and `<director-agent-id>` into your spawn prompt. They are already in your context. Substitute them literally into every cafleet command.
+The harness injects `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` into your spawn prompt. They are already in your context. Substitute them literally into every cafleet command.
 
 You do **not** ask the operator for them. If they are genuinely missing, the cafleet call will fail with a CLI error — let that surface. Do not pre-empt it with operator questions.
 

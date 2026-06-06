@@ -20,13 +20,13 @@ If you are a member and your default Bash is denied on a specific command, the b
 
 ## When to Use
 
-- Registering this agent with a session
+- Registering this agent with a fleet
 - Sending a unicast message to another agent
 - Polling for incoming messages
 - Acknowledging received messages
 - Canceling (retracting) a sent message
 - Inspecting a single task by id
-- Deregistering at end of session
+- Deregistering at end of fleet
 
 For broadcast, member spawning, member capture, member ping, and member exec, see the reference files above.
 
@@ -36,12 +36,12 @@ Every `cafleet` invocation that touches agents or messages must carry two litera
 
 | Flag | Scope | Required for | Notes |
 |---|---|---|---|
-| `--session-id <uuid>` | global (placed **before** the subcommand) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `show`, `agent *`, `deregister`, `member *`) | UUID of the session created via `cafleet session create`. Silently accepted (and ignored) on `db init` / `session *` / `server` / `doctor`. |
+| `--fleet-id <uuid>` | global (placed **before** the subcommand) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `show`, `agent *`, `deregister`, `member *`) | UUID of the fleet created via `cafleet fleet create`. Silently accepted (and ignored) on `db init` / `fleet *` / `server` / `doctor`. |
 | `--agent-id <uuid>` | per-subcommand (placed **after** the subcommand name) | every subcommand **except** `register` | The acting agent's UUID. `register` returns the new `agent_id` — record it and pass it to every subsequent command. |
 
-If `--session-id` is missing on a subcommand that needs it, the CLI exits with `Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id.`
+If `--fleet-id` is missing on a subcommand that needs it, the CLI exits with `Error: --fleet-id <uuid> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`
 
-> **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --session-id <uuid> <subcmd> --agent-id <uuid>` invocation matches a single allow pattern across every subcommand for that session. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet agent register` — never store them in shell variables.
+> **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --fleet-id <uuid> <subcmd> --agent-id <uuid>` invocation matches a single allow pattern across every subcommand for that fleet. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal UUIDs printed by `cafleet fleet create` and `cafleet agent register` — never store them in shell variables.
 
 The environment variables the CLI reads (all wired through `cafleet.config.Settings` via explicit `validation_alias` on each field, so the `CAFLEET_` prefix is uniform):
 
@@ -51,29 +51,29 @@ The environment variables the CLI reads (all wired through `cafleet.config.Setti
 
 ## Placeholder convention
 
-In every example below, substitute the literal UUID strings printed by `cafleet session create` / `cafleet agent register`. Angle-bracket tokens are placeholders, **not** shell variables:
+In every example below, substitute the literal UUID strings printed by `cafleet fleet create` / `cafleet agent register`. Angle-bracket tokens are placeholders, **not** shell variables:
 
-- `<session-id>` — the session UUID printed by `cafleet session create`
+- `<fleet-id>` — the fleet UUID printed by `cafleet fleet create`
 - `<my-agent-id>` — the UUID returned by your own `cafleet ... agent register` call
 - `<director-agent-id>` — the Director's UUID (in your spawn prompt if you are a member)
 - `<target-agent-id>` — the recipient of a unicast message
 - `<task-id>` — the task UUID printed by `message poll` / `message send`
 
-> **Prefix resolution**: the **target** ID inputs — `--to` (message send), `--id` (agent show), `--member-id` (member subcommands), and `--task-id` (message ack/cancel/show) — accept either a full UUID or any unique prefix of one, scoped to the current session. So an 8-char ID printed by `agent list`, a poll envelope, or `session create` can be pasted straight into the next command. An ambiguous or no-match prefix exits 1. The acting `--agent-id` is full-UUID-only. See [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md#id-prefix-resolution).
+> **Prefix resolution**: the **target** ID inputs — `--to` (message send), `--id` (agent show), `--member-id` (member subcommands), and `--task-id` (message ack/cancel/show) — accept either a full UUID or any unique prefix of one, scoped to the current fleet. So an 8-char ID printed by `agent list`, a poll envelope, or `fleet create` can be pasted straight into the next command. An ambiguous or no-match prefix exits 1. The acting `--agent-id` is full-UUID-only. See [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md#id-prefix-resolution).
 
 ## Global Options
 
-Only `--json`, `--session-id`, and `--version` are global (before the subcommand). `--agent-id` is a per-subcommand option and must appear **after** the subcommand name:
+Only `--json`, `--fleet-id`, and `--version` are global (before the subcommand). `--agent-id` is a per-subcommand option and must appear **after** the subcommand name:
 
 ```bash
-cafleet --session-id <session-id> --json agent register --name "My Agent" --description "..."
-cafleet --session-id <session-id> --json agent list --agent-id <my-agent-id>
-cafleet --session-id <session-id> --json message poll --agent-id <my-agent-id>
+cafleet --fleet-id <fleet-id> --json agent register --name "My Agent" --description "..."
+cafleet --fleet-id <fleet-id> --json agent list --agent-id <my-agent-id>
+cafleet --fleet-id <fleet-id> --json message poll --agent-id <my-agent-id>
 ```
 
-`cafleet agent list --json` will fail with `No such option: --json`. Same for `--session-id` placed after the subcommand — keep it before. `--agent-id` must come **after** the subcommand, not before it.
+`cafleet agent list --json` will fail with `No such option: --json`. Same for `--fleet-id` placed after the subcommand — keep it before. `--agent-id` must come **after** the subcommand, not before it.
 
-`cafleet --version` prints `cafleet <version>` and exits 0 without `--session-id`.
+`cafleet --version` prints `cafleet <version>` and exits 0 without `--fleet-id`.
 
 ## Coding-agent backends
 
@@ -84,7 +84,7 @@ Three backends are supported: `claude` (default), `codex`, and `opencode`. The D
 Use `--json` so the output is machine-parseable, and capture `agent_id` for every subsequent call:
 
 ```bash
-cafleet --session-id <session-id> --json agent register \
+cafleet --fleet-id <fleet-id> --json agent register \
   --name "<short-label>" \
   --description "<one-sentence purpose>"
 ```
@@ -101,16 +101,16 @@ Rules:
 - **Description**: one sentence stating who the agent is and what it is for.
 - **Capture `agent_id` immediately.** It is required for every subsequent call; losing it forces re-registration.
 - Non-`--json` output prints `Agent registered successfully!` followed by `  agent_id:  <uuid>` and `  name:      <name>`. Parse the `agent_id:` line if `--json` is not an option.
-- Call `cafleet --session-id <session-id> agent deregister --agent-id <my-agent-id>` at end of session so stale registrations do not accumulate.
+- Call `cafleet --fleet-id <fleet-id> agent deregister --agent-id <my-agent-id>` at end of fleet so stale registrations do not accumulate.
 
-> **Reserved name — `Administrator`**: every session is auto-seeded with exactly one built-in `Administrator` agent at `session create` time. Do NOT register a human or member agent under the name `Administrator`. The built-in Administrator is marked internally via `agent_card_json.cafleet.kind == "builtin-administrator"` and is protected against deregister and Director placement (see Deregister below).
+> **Reserved name — `Administrator`**: every fleet is auto-seeded with exactly one built-in `Administrator` agent at `fleet create` time. Do NOT register a human or member agent under the name `Administrator`. The built-in Administrator is marked internally via `agent_card_json.cafleet.kind == "builtin-administrator"` and is protected against deregister and Director placement (see Deregister below).
 
 ## Send (Unicast)
 
 Send a message to a specific agent by ID.
 
 ```bash
-cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
   --to <target-agent-id> --text "Did the API schema change?"
 ```
 
@@ -135,10 +135,10 @@ The recipient's coding agent processes the keystroked text as a fresh user-turn 
 Poll for incoming messages. Returns tasks addressed to this agent.
 
 ```bash
-cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
-cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --since "2026-03-28T12:00:00+00:00"
-cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --page-size 10
-cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --full
+cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
+cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --since "2026-03-28T12:00:00+00:00"
+cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --page-size 10
+cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --full
 ```
 
 | Flag | Required | Notes |
@@ -154,8 +154,8 @@ cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --full
 Acknowledge receipt of a message. Moves the task from `INPUT_REQUIRED` to `COMPLETED`.
 
 ```bash
-cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
-cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id> --quiet
+cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id> --quiet
 ```
 
 | Flag | Required | Notes |
@@ -169,7 +169,7 @@ cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id
 Cancel a sent message that has not been acknowledged yet. Only the sender can cancel.
 
 ```bash
-cafleet --session-id <session-id> message cancel --agent-id <my-agent-id> --task-id <task-id>
+cafleet --fleet-id <fleet-id> message cancel --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 | Flag | Required | Notes |
@@ -182,7 +182,7 @@ cafleet --session-id <session-id> message cancel --agent-id <my-agent-id> --task
 Get details of a specific task by ID.
 
 ```bash
-cafleet --session-id <session-id> message show --agent-id <my-agent-id> --task-id <task-id>
+cafleet --fleet-id <fleet-id> message show --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 | Flag | Required | Notes |
@@ -192,11 +192,11 @@ cafleet --session-id <session-id> message show --agent-id <my-agent-id> --task-i
 
 ## List Agents
 
-`agent list` returns all registered agents in the session. To fetch detail for a single agent, use `agent show --id <target-agent-id>`.
+`agent list` returns all registered agents in the fleet. To fetch detail for a single agent, use `agent show --id <target-agent-id>`.
 
 ```bash
-cafleet --session-id <session-id> agent list --agent-id <my-agent-id>
-cafleet --session-id <session-id> agent show --agent-id <my-agent-id> --id <target-agent-id>
+cafleet --fleet-id <fleet-id> agent list --agent-id <my-agent-id>
+cafleet --fleet-id <fleet-id> agent show --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
 Default output is one row per agent (`<id8> <name> <status>`); `description` is truncated to 60 codepoints. Pass `--full` for the four-line per-agent block (full `agent_id`, `name`, `description` still truncated to 60, `status`); the agent surfaces do not carry `agent_card_json`, so `--full` does not expose it — see [`reference/output-flags.md`](reference/output-flags.md).
@@ -210,30 +210,30 @@ cafleet doctor
 cafleet --json doctor
 ```
 
-Does NOT require `--session-id`. Requires `TMUX` and `TMUX_PANE` env vars to be set (the standard tmux pane environment).
+Does NOT require `--fleet-id`. Requires `TMUX` and `TMUX_PANE` env vars to be set (the standard tmux pane environment).
 
 ## Deregister
 
 Remove this agent's registration from the broker.
 
 ```bash
-cafleet --session-id <session-id> agent deregister --agent-id <my-agent-id>
+cafleet --fleet-id <fleet-id> agent deregister --agent-id <my-agent-id>
 ```
 
-> **Root Director cannot be deregistered**. The agent created by `cafleet session create` (the session's `sessions.director_agent_id`) is protected — `cafleet agent deregister --agent-id <root-director-id>` exits 1 with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` Use `cafleet session delete <session-id>` for session teardown.
+> **Root Director cannot be deregistered**. The agent created by `cafleet fleet create` (the fleet's `fleets.director_agent_id`) is protected — `cafleet agent deregister --agent-id <root-director-id>` exits 1 with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` Use `cafleet fleet delete <fleet-id>` for fleet teardown.
 
-> **Administrator cannot be deregistered**. Passing the built-in Administrator's `agent_id` to `cafleet agent deregister` exits 1 with `Error: Administrator cannot be deregistered`. The Administrator row stays `active`; there is no override flag. Every session has exactly one Administrator; deregister regular agents only.
+> **Administrator cannot be deregistered**. Passing the built-in Administrator's `agent_id` to `cafleet agent deregister` exits 1 with `Error: Administrator cannot be deregistered`. The Administrator row stays `active`; there is no override flag. Every fleet has exactly one Administrator; deregister regular agents only.
 
-## Session Delete
+## Fleet Delete
 
 ```bash
-cafleet session delete <session-id>
-# → Deleted session <session-id>. Deregistered N agents.
+cafleet fleet delete <fleet-id>
+# → Deleted fleet <fleet-id>. Deregistered N agents.
 ```
 
-Soft-deletes a session in a single transaction: stamps `sessions.deleted_at`, deregisters every active agent in the session (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. Idempotent.
+Soft-deletes a fleet in a single transaction: stamps `fleets.deleted_at`, deregisters every active agent in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. Idempotent.
 
-After soft-delete, the session is hidden from `cafleet session list` and further `cafleet --session-id <deleted> agent register` calls fail with `Error: session <id> is deleted`. Surviving member coding-agent processes are **not** automatically closed — call `cafleet member delete` per member **before** `cafleet session delete` for a clean teardown. See the Shutdown Protocol in [`reference/recovery.md`](reference/recovery.md) for the full ordering.
+After soft-delete, the fleet is hidden from `cafleet fleet list` and further `cafleet --fleet-id <deleted> agent register` calls fail with `Error: fleet <id> is deleted`. Surviving member coding-agent processes are **not** automatically closed — call `cafleet member delete` per member **before** `cafleet fleet delete` for a clean teardown. See the Shutdown Protocol in [`reference/recovery.md`](reference/recovery.md) for the full ordering.
 
 ## Typical Workflow
 
@@ -247,47 +247,47 @@ After soft-delete, the session is hidden from `cafleet session list` and further
    #   TMUX_PANE:     %<n>
    ```
 
-   Confirms the calling shell has `TMUX` and `TMUX_PANE` set. Reach for this BEFORE `cafleet session create` and BEFORE any `cafleet member create` call — it is the canonical pane-identity probe, replacing raw `tmux display-message` and `TMUX` / `TMUX_PANE` env-var expansion. See § *Doctor* for the subcommand's `--session-id` and env-var requirements, plus the `--json` variant.
+   Confirms the calling shell has `TMUX` and `TMUX_PANE` set. Reach for this BEFORE `cafleet fleet create` and BEFORE any `cafleet member create` call — it is the canonical pane-identity probe, replacing raw `tmux display-message` and `TMUX` / `TMUX_PANE` env-var expansion. See § *Doctor* for the subcommand's `--fleet-id` and env-var requirements, plus the `--json` variant.
 
-1. **Create a session** (if one does not already exist):
+1. **Create a fleet** (if one does not already exist):
    ```bash
-   cafleet session create --label "my-project"
-   # text output line 1: <session-id>; line 2: <root-director-agent-id>
-   cafleet session create --label "my-project" --json
-   # JSON: { "session_id": "...", "director": {...}, "administrator_agent_id": "..." }
+   cafleet fleet create --label "my-project"
+   # text output line 1: <fleet-id>; line 2: <root-director-agent-id>
+   cafleet fleet create --label "my-project" --json
+   # JSON: { "fleet_id": "...", "director": {...}, "administrator_agent_id": "..." }
    ```
 
-   Must be run inside a tmux session — outside tmux the command exits 1 with `Error: cafleet session create must be run inside a tmux session` and writes nothing.
+   Must be run inside a tmux session — outside tmux the command exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing.
 
 2. **Register** with the broker:
    ```bash
-   cafleet --session-id <session-id> agent register \
+   cafleet --fleet-id <fleet-id> agent register \
      --name "Code Review Agent" --description "Reviews pull requests"
    # → returns <my-agent-id>
    ```
 
 3. **Discover** other agents:
    ```bash
-   cafleet --session-id <session-id> agent list --agent-id <my-agent-id>
+   cafleet --fleet-id <fleet-id> agent list --agent-id <my-agent-id>
    ```
 
 4. **Send** a message:
    ```bash
-   cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+   cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
      --to <target-agent-id> --text "Please review PR #42"
    ```
 
 5. **Poll** for incoming messages:
    ```bash
-   cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
+   cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
    ```
 
 6. **Acknowledge** received messages:
    ```bash
-   cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+   cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
    ```
 
-7. **Repeat** steps 4–6 as needed. Use `cafleet --session-id <session-id> --json <cmd>` when parsing output programmatically.
+7. **Repeat** steps 4–6 as needed. Use `cafleet --fleet-id <fleet-id> --json <cmd>` when parsing output programmatically.
 
 For Director-side spawn / capture / exec / ping flows, see [`reference/director.md`](reference/director.md). For shutdown ordering, see [`reference/recovery.md`](reference/recovery.md).
 
@@ -303,8 +303,8 @@ For broadcast threading (the `origin_task_id` self-reference shape), see [`refer
 
 ## Error Handling
 
-- Missing `--session-id` on a client/member subcommand exits with `Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id.` (exit 1).
+- Missing `--fleet-id` on a client/member subcommand exits with `Error: --fleet-id <uuid> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1).
 - Missing `--agent-id` on commands that need it exits with `Error: Missing option '--agent-id'.` (Click built-in, exit 2).
 - Errors print to stderr and exit non-zero.
-- Use `cafleet --session-id <session-id> --json <cmd>` for machine-parseable output (including errors).
+- Use `cafleet --fleet-id <fleet-id> --json <cmd>` for machine-parseable output (including errors).
 - `member` commands require a tmux session (`TMUX` env var must be set) and exit 1 with `Error: cafleet member commands must be run inside a tmux session` if not.

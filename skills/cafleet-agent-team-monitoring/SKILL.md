@@ -9,12 +9,12 @@ Foundation layer for CAFleet Directors. This skill documents the cron-like mecha
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<session-id>`, `<director-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet session create` (which returns both the session UUID and the root Director's `agent_id` — see the `cafleet` skill § Typical Workflow for the exact output shape) directly into the command. Do **not** introduce shell variables for agent or session IDs — `permissions.allow` matches command strings literally, and shell expansion breaks that matching.
+Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet fleet create` (which returns both the fleet UUID and the root Director's `agent_id` — see the `cafleet` skill § Typical Workflow for the exact output shape) directly into the command. Do **not** introduce shell variables for agent or fleet IDs — `permissions.allow` matches command strings literally, and shell expansion breaks that matching.
 
-**Flag placement**: `--session-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>`.
+**Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>`.
 
-- `<session-id>` — the session UUID printed on line 1 of `cafleet session create` text output (or the `session_id` field in `--json` output)
-- `<director-agent-id>` — the root Director's UUID printed on line 2 of `cafleet session create` text output (or `director.agent_id` in `--json` output). `cafleet session create` inside a tmux session auto-bootstraps the root Director with its placement row — no separate `cafleet agent register` call is needed to obtain the Director's `agent_id`.
+- `<fleet-id>` — the fleet UUID printed on line 1 of `cafleet fleet create` text output (or the `fleet_id` field in `--json` output)
+- `<director-agent-id>` — the root Director's UUID printed on line 2 of `cafleet fleet create` text output (or `director.agent_id` in `--json` output). `cafleet fleet create` inside a tmux session auto-bootstraps the root Director with its placement row — no separate `cafleet agent register` call is needed to obtain the Director's `agent_id`.
 - `<member-agent-id>` — a target member's agent UUID (from `member create` / `member list`)
 
 ## Mechanism by backend
@@ -40,7 +40,7 @@ This means: **a codex or opencode root Director cannot run the active `/loop` mo
 
 #### Recommendation
 
-When active supervision of a CAFleet member team is required, **use `cafleet session create --coding-agent claude`** for the root Director. Codex and opencode members are fully supported via `cafleet member create --coding-agent codex` (or `--coding-agent opencode`) — only the Director needs the cron mechanism. A mixed-backend team (claude Director + codex / opencode members) is the canonical configuration for active-supervision workloads.
+When active supervision of a CAFleet member team is required, **use `cafleet fleet create --coding-agent claude`** for the root Director. Codex and opencode members are fully supported via `cafleet member create --coding-agent codex` (or `--coding-agent opencode`) — only the Director needs the cron mechanism. A mixed-backend team (claude Director + codex / opencode members) is the canonical configuration for active-supervision workloads.
 
 #### Fallback options when codex or opencode must be the Director
 
@@ -59,8 +59,8 @@ The fallback in use must be documented in the session's launch instructions. The
 
 On every supervision tick — whether fired by `/loop` (Claude Code) or by a fallback (codex or opencode), or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
 
-1. **Poll inbox.** `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>` (optionally with `--since <iso8601>` to filter to messages received since the last tick).
-2. **ACK every message** that requires no further action: `cafleet --session-id <session-id> message ack --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.
+1. **Poll inbox.** `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>` (optionally with `--since <iso8601>` to filter to messages received since the last tick).
+2. **ACK every message** that requires no further action: `cafleet --fleet-id <fleet-id> message ack --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.
 3. **Dispatch queued work.** If a member is idle and inputs are available (review comments to route, the next implementation step in a design doc, reviewer feedback waiting at the Drafter, a teammate reply waiting to be acted on), send the instruction immediately via `cafleet message send`. **Do not wait for a fresh "go" from the user** — the user's original authorization persists across ticks; see the `cafleet-agent-team-supervision` skill § Authorization-Scope Guard.
 4. **Run the health-check sequence** below for any member that has not reported recent progress.
 5. **Escalate** to the user via `AskUserQuestion` after two nudges produce no progress, or whenever a queued action requires a *new* user decision (option choice, risky/remote-visible operation, ambiguous teammate question). Do **not** emit passive-hold messages like `Skipping. Holding for go.` — the tick is a health check, not a permission renewal.
@@ -71,26 +71,26 @@ Run this sequence once per supervision tick. Order matters — cheapest non-intr
 
 | Step | Command | Purpose |
 |---|---|---|
-| 1 | `cafleet --session-id <session-id> member list --agent-id <director-agent-id>` | Enumerate all live members and their pane status |
-| 2 | `cafleet --session-id <session-id> message poll --agent-id <director-agent-id>` | Check inbox for progress reports or help requests from members |
-| 3 | For each member with no recent message: `cafleet --session-id <session-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id>` | Terminal capture fallback — inspect what the member is doing when it has not reported in. If the capture shows an `AskUserQuestion`-style prompt, see Stall Response below for the `member send-input` escape hatch. |
-| 4 | Based on findings, `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` to any stalled or idle member with a specific instruction | Drive the team forward |
+| 1 | `cafleet --fleet-id <fleet-id> member list --agent-id <director-agent-id>` | Enumerate all live members and their pane status |
+| 2 | `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>` | Check inbox for progress reports or help requests from members |
+| 3 | For each member with no recent message: `cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id>` | Terminal capture fallback — inspect what the member is doing when it has not reported in. If the capture shows an `AskUserQuestion`-style prompt, see Stall Response below for the `member send-input` escape hatch. |
+| 4 | Based on findings, `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` to any stalled or idle member with a specific instruction | Drive the team forward |
 | 5 | When all members have reported completion (via messages or visible in terminal output), report to the user: "All deliverables are ready for review." | Signal completion to user |
 
 ## `/loop` Prompt Template (Claude Code only)
 
 > **Claude Code-specific.** This template depends on `CronCreate` / `ScheduleWakeup`, which are Claude Code harness tools. Codex and opencode Directors cannot use this template — see § Mechanism by backend → Codex Director / Opencode Director for fallback options.
 
-Substitute the literal UUIDs into every `<session-id>`, `<director-agent-id>`, and `<member-agent-id>` placeholder before passing the prompt to `/loop`. The prompt must contain literal UUIDs, **not** shell variables — the `permissions.allow` matcher only allows literal command strings. Remember: `--session-id` goes before the subcommand, `--agent-id` goes after.
+Substitute the literal UUIDs into every `<fleet-id>`, `<director-agent-id>`, and `<member-agent-id>` placeholder before passing the prompt to `/loop`. The prompt must contain literal UUIDs, **not** shell variables — the `permissions.allow` matcher only allows literal command strings. Remember: `--fleet-id` goes before the subcommand, `--agent-id` goes after.
 
 ```
 Monitor team health (interval: 1 minute). For each member spawned via `cafleet member create`:
 
-1. Run `cafleet --session-id <session-id> --json member list --agent-id <director-agent-id>` to enumerate members.
-2. Run `cafleet --session-id <session-id> --json message poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check, with +00:00 suffix — not Z>"` to check incoming. ACK any progress reports.
-3. For each member that has NOT sent a message since last check, run `cafleet --session-id <session-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id> --lines 200` to inspect their terminal.
-4. If a member's terminal shows no forward progress, send a specific instruction via `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Report your progress now. If blocked, state what is blocking you."`.
-5. If a member appears stalled despite a recent `message send` (auto-fire missed or pane was busy), re-poke its inbox via `cafleet --session-id <session-id> member ping --agent-id <director-agent-id> --member-id <member-agent-id>`.
+1. Run `cafleet --fleet-id <fleet-id> --json member list --agent-id <director-agent-id>` to enumerate members.
+2. Run `cafleet --fleet-id <fleet-id> --json message poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check, with +00:00 suffix — not Z>"` to check incoming. ACK any progress reports.
+3. For each member that has NOT sent a message since last check, run `cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id> --lines 200` to inspect their terminal.
+4. If a member's terminal shows no forward progress, send a specific instruction via `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Report your progress now. If blocked, state what is blocking you."`.
+5. If a member appears stalled despite a recent `message send` (auto-fire missed or pane was busy), re-poke its inbox via `cafleet --fleet-id <fleet-id> member ping --agent-id <director-agent-id> --member-id <member-agent-id>`.
 6. If all members have reported completion, report to the user: "All deliverables are ready for review."
 7. If a member has been nudged 2 times with no progress, escalate to the user.
 ```
@@ -104,7 +104,7 @@ Monitor team health (interval: 1 minute). For each member spawned via `cafleet m
 | User review | Keep the loop alive during the review cycle — revisions and re-reviews still count as in-progress work. |
 | User approves final artifact | The loop terminates itself after teardown begins (see Cleanup below). |
 
-**Lifecycle rule:** The loop MUST stay active from the first `member create` through every phase (research, compilation, review, revision, user approval). At teardown, **stop the loop BEFORE deleting members** — this is step 1 of the Shutdown Protocol in the `cafleet` skill and is non-negotiable. A loop that keeps firing after members are deleted spams `member list` / `message poll` against a tearing-down session, can race with the member-delete path, and (most visibly) leaks cron output into the operator's terminal after the team is ostensibly gone. Full teardown order: stop every `/loop` cron (or fallback driver) → `cafleet member delete` each member → `cafleet member list` to verify the roster is empty → `cafleet session delete <session-id>` → `cafleet session list` sanity check. See the `cafleet` skill → "Shutdown Protocol" for the authoritative procedure.
+**Lifecycle rule:** The loop MUST stay active from the first `member create` through every phase (research, compilation, review, revision, user approval). At teardown, **stop the loop BEFORE deleting members** — this is step 1 of the Shutdown Protocol in the `cafleet` skill and is non-negotiable. A loop that keeps firing after members are deleted spams `member list` / `message poll` against a tearing-down fleet, can race with the member-delete path, and (most visibly) leaks cron output into the operator's terminal after the team is ostensibly gone. Full teardown order: stop every `/loop` cron (or fallback driver) → `cafleet member delete` each member → `cafleet member list` to verify the roster is empty → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check. See the `cafleet` skill → "Shutdown Protocol" for the authoritative procedure.
 
 ## Stall Response
 
@@ -115,7 +115,7 @@ When you receive any signal that a member may be stalled (loop check, idle notif
 ### Stage 1 — Message-based check (`cafleet message poll`)
 
 ```bash
-cafleet --session-id <session-id> message poll --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id> \
   --since "2026-04-12T10:00:00+00:00"
 ```
 
@@ -124,7 +124,7 @@ The `--since` flag accepts an ISO 8601 timestamp. The broker stores `status_time
 ### Stage 2 — Terminal capture fallback (`cafleet member capture`)
 
 ```bash
-cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> \
   --member-id <member-agent-id> --lines 120
 ```
 

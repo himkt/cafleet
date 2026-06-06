@@ -40,8 +40,8 @@ snippets below are the recommended starting points.
 ```
 
 The `Bash(cafleet *)` pattern is the single allow-everything entry that the
-literal `--session-id <uuid>` / `--agent-id <uuid>` flag convention enables —
-one pattern covers every subcommand for every session. `cafleet member exec *`
+literal `--fleet-id <uuid>` / `--agent-id <uuid>` flag convention enables —
+one pattern covers every subcommand for every fleet. `cafleet member exec *`
 is moved to the `ask` list because it dispatches arbitrary shell commands on
 behalf of a member; the operator should confirm each invocation.
 
@@ -73,8 +73,7 @@ prefix_rule(pattern = ["cafleet", "--version"],  decision = "allow")
 prefix_rule(pattern = ["cafleet", "doctor"],     decision = "allow")
 prefix_rule(pattern = ["cafleet", "server"],     decision = "allow")
 prefix_rule(pattern = ["cafleet", "db"],         decision = "allow")
-prefix_rule(pattern = ["cafleet", "session"],    decision = "allow")
-prefix_rule(pattern = ["cafleet", "base-dir"],   decision = "allow")
+prefix_rule(pattern = ["cafleet", "fleet"],      decision = "allow")
 prefix_rule(pattern = ["cafleet", "agent"],      decision = "allow")
 prefix_rule(pattern = ["cafleet", "message"],    decision = "allow")
 prefix_rule(pattern = ["cafleet", "member", "create"],     decision = "allow")
@@ -96,19 +95,19 @@ sequence — Codex's `prefix_rule` is a positional prefix matcher, so a broad
 `["cafleet"]` allow would also cover `cafleet member exec`. Enumerating the
 safe subgroups explicitly keeps the `member exec` prompt rule effective.
 
-The `cafleet --session-id <uuid> <subgroup> …` invocations also need to be
-allowed; since `--session-id` and its UUID sit between `cafleet` and the
-subgroup name, add a per-session allow for the specific UUIDs you use:
+The `cafleet --fleet-id <uuid> <subgroup> …` invocations also need to be
+allowed; since `--fleet-id` and its UUID sit between `cafleet` and the
+subgroup name, add a per-fleet allow for the specific UUIDs you use:
 
 ```text
-prefix_rule(pattern = ["cafleet", "--session-id", "<your-session-uuid>"], decision = "allow")
-prefix_rule(pattern = ["cafleet", "--session-id", "<your-session-uuid>", "member", "exec"],
+prefix_rule(pattern = ["cafleet", "--fleet-id", "<your-fleet-uuid>"], decision = "allow")
+prefix_rule(pattern = ["cafleet", "--fleet-id", "<your-fleet-uuid>", "member", "exec"],
             decision = "prompt",
             justification = "cafleet member exec runs arbitrary commands on a member")
 ```
 
-Repeat the pair for every session UUID you operate. The per-session prompt
-rule is more specific than the per-session allow, so `member exec` keeps
+Repeat the pair for every fleet UUID you operate. The per-fleet prompt
+rule is more specific than the per-fleet allow, so `member exec` keeps
 prompting even with the broader allow in place.
 
 ## Opencode

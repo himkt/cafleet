@@ -18,7 +18,7 @@ Any of the following signals means you are a member subject to this rule:
 
 1. **Run it.** Use the Bash tool directly. Permission prompts auto-resolve. No prefix, no routing.
 2. **Process the output** as your next-turn context.
-3. **Reply to the Director** via `cafleet --session-id <s> message send --agent-id <my-id> --to <director-id> --text "..."` if a reply is expected.
+3. **Reply to the Director** via `cafleet --fleet-id <s> message send --agent-id <my-id> --to <director-id> --text "..."` if a reply is expected.
 
 You take a single action — invoke Bash — instead of the previous "send a CAFleet message and wait" routing.
 
@@ -42,7 +42,7 @@ You take a single action — invoke Bash — instead of the previous "send a CAF
 The operator has already asked you to run the command. The Director is your fallback when your harness can't run it. Take the single action:
 
 ```bash
-cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> \
   --text "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
 ```
@@ -55,7 +55,7 @@ If the `cafleet message send` itself is also denied by the harness, surface that
 
 When you offer the operator a list of options ("(1) you run it via `!`, (2) route through Director, (3) skip"), you push a routing decision back to the operator that they already implicitly answered by asking you to run the command. They wanted it run. Routing is implementation. The bash-via-Director protocol exists precisely to handle the harness-denied case without operator interaction.
 
-## If `<session-id>` / `<my-agent-id>` / `<director-agent-id>` are missing
+## If `<fleet-id>` / `<my-agent-id>` / `<director-agent-id>` are missing
 
 The harness injects these into your spawn prompt. They should already be in your context. If they are genuinely missing, say so explicitly and ask the operator. Do **not** guess UUIDs.
 
@@ -67,17 +67,17 @@ The Bash tool is the entry point for every shell-execution request. If you can p
 
 If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you.
 
-For the **inbox-poll-only nudge case** (the monitoring loop wants the member to re-check its inbox after a missed broker auto-fire, or after a long idle window), the Director's primitive is `cafleet member ping`. This subcommand takes no positional argument — its action is fixed (it injects `cafleet --session-id <s> message poll --agent-id <m>` + Enter into the member's pane via the existing `tmux.send_poll_trigger` helper) — so it is pre-approved in `permissions.allow` and fires without a per-call confirmation prompt:
+For the **inbox-poll-only nudge case** (the monitoring loop wants the member to re-check its inbox after a missed broker auto-fire, or after a long idle window), the Director's primitive is `cafleet member ping`. This subcommand takes no positional argument — its action is fixed (it injects `cafleet --fleet-id <s> message poll --agent-id <m>` + Enter into the member's pane via the existing `tmux.send_poll_trigger` helper) — so it is pre-approved in `permissions.allow` and fires without a per-call confirmation prompt:
 
 ```bash
-cafleet --session-id <session-id> member ping \
+cafleet --fleet-id <fleet-id> member ping \
   --agent-id <director-agent-id> --member-id <member-agent-id>
 ```
 
 For the **shell-dispatch fallback** (a member auto-routed a denied command and needs the Director to dispatch arbitrary shell on its behalf), the Director's primitive is `cafleet member exec`. This subcommand carries the operator-controlled command as a positional argument, so it remains under `permissions.ask` for per-call confirmation:
 
 ```bash
-cafleet --session-id <session-id> member exec \
+cafleet --fleet-id <fleet-id> member exec \
   --agent-id <director-agent-id> --member-id <member-agent-id> \
   "<command>"
 ```

@@ -8,15 +8,15 @@ This file is the role-specific anchor. The actual protocols live in dedicated re
 
 1. **Before spawning your first member**, Read [`reference/director.md`](../reference/director.md). Covers `member create`, `member delete`, `member list --activity`, `member capture`, `member send-input` (with the AskUserQuestion three-beat delegation workflow), `member exec`, and `member ping`. This is the authoritative reference for every Director-only command.
 2. **Before processing a member's denial-fallback request**, Read [`reference/exec-routing.md`](../reference/exec-routing.md). Covers how to recognize a member-originated bash request, the `cafleet member exec` dispatch shape, the required `cafleet member ping` follow-up, serialization (process one request at a time in poll order), and the cross-Director boundary.
-3. **Before tearing down a member or session**, Read [`reference/recovery.md`](../reference/recovery.md). Covers the 2-stage health check, stalled-member shape classification, recovery from a wedged `/exit`, and the full Shutdown Protocol (stop crons → delete members → verify → `session delete` → confirm).
+3. **Before tearing down a member or fleet**, Read [`reference/recovery.md`](../reference/recovery.md). Covers the 2-stage health check, stalled-member shape classification, recovery from a wedged `/exit`, and the full Shutdown Protocol (stop crons → delete members → verify → `fleet delete` → confirm).
 4. **Before broadcasting**, Read [`reference/broadcast.md`](../reference/broadcast.md). Covers fan-out semantics, the `broadcast_summary` envelope, and threading via `origin_task_id`.
 5. **For `--full` opt-back-in semantics**, Read [`reference/output-flags.md`](../reference/output-flags.md).
 
 ## Placeholder convention
 
-Substitute the literal UUID strings printed by `cafleet session create` / `cafleet member create` in every example. Angle-bracket tokens are placeholders, **not** shell variables. The IDs you have:
+Substitute the literal UUID strings printed by `cafleet fleet create` / `cafleet member create` in every example. Angle-bracket tokens are placeholders, **not** shell variables. The IDs you have:
 
-- `<session-id>` — the session UUID (from `cafleet session create`)
+- `<fleet-id>` — the fleet UUID (from `cafleet fleet create`)
 - `<director-agent-id>` — your own UUID (the Director)
 - `<member-agent-id>` — a member's UUID (from `cafleet member list`)
 - `<command>` — a shell command (only when dispatching via `cafleet member exec`)

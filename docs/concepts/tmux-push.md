@@ -37,8 +37,8 @@ sequenceDiagram
 
 After `broker` saves a delivery task, it looks up the recipient's
 `agent_placements` row. Every agent spawned by `cafleet member create` has a
-placement row, and every session's root Director also gets one at
-`cafleet session create` time (its placement carries `director_agent_id=NULL`
+placement row, and every fleet's root Director also gets one at
+`cafleet fleet create` time (its placement carries `director_agent_id=NULL`
 to indicate "no parent"). Because `_try_notify_recipient` resolves a pane by
 `agent_id` alone, Member → Director notifications work automatically once
 the root Director has a placement row. If the recipient has a non-null

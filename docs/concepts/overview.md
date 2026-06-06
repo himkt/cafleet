@@ -7,9 +7,9 @@ icon: lucide/layers
 CAFleet is a message broker and agent registry for coding agents. All CLI
 commands and the admin WebUI access SQLite directly through a shared `broker`
 module (`cafleet/broker.py`) — no HTTP server is needed for agent operations.
-Agents are organized into **sessions** identified by a non-secret `session_id`
-created via `cafleet session create`. Agents sharing the same session can
-discover and message each other; agents in different sessions are invisible to
+Agents are organized into **fleets** identified by a non-secret `fleet_id`
+created via `cafleet fleet create`. Agents sharing the same fleet can
+discover and message each other; agents in different fleets are invisible to
 one another.
 
 ## Architecture diagram
@@ -21,7 +21,7 @@ flowchart LR
     WebUI["Admin WebUI"] --> Server["server.py<br/>(FastAPI)"]
     Server --> WebUIAPI["webui_api.py"]
     WebUIAPI --> Broker
-    Broker --> DB[(SQLite<br/>sessions / agents / tasks / agent_placements)]
+    Broker --> DB[(SQLite<br/>fleets / agents / tasks / agent_placements)]
     subgraph Multiplexer["tmux"]
         PaneA["coding-agent pane"]
         PaneB["coding-agent pane"]
@@ -40,9 +40,8 @@ call it. No async stores, no HTTP client, no protocol layer.
 | `broker.py` | `cafleet/src/cafleet/` | Single data access layer — sync SQLAlchemy operations for CLI + WebUI |
 | `server.py` | `cafleet/src/cafleet/` | Minimal FastAPI app: `webui_router` + static file serving |
 | `config.py` | `cafleet/src/cafleet/` | Settings via pydantic-settings; owns `~` expansion of `database_url` |
-| `cli.py` | `cafleet/src/cafleet/` | Unified `cafleet` console script: click group with `db` (Alembic schema management), `session` (session CRUD), `agent` (registry: `register` / `deregister` / `list` / `show`), `message` (broker: `send` / `broadcast` / `poll` / `ack` / `cancel` / `show`), `member` (lifecycle: `create` / `delete` / `list` / `capture` / `send-input` / `exec`), and `base-dir` (filesystem-only: `resolve [TASK_NAME]` / `record`) subgroups. Also exposes `cafleet server [--host <addr>] [--port <int>]` and `cafleet doctor` as top-level meta-command exceptions. Calls `broker` directly. |
-| `base_dir.py` | `cafleet/src/cafleet/` | Authoritative resolver for the `${BASE}` output-root used by every CAFleet scratch / audit / figure write. Owns the resolution state machine (CWD inference, anchor, `$HOME`-needs-user-input, task-scope), auto-mkdir of the task folder, and inline anchor writes at `<task-folder>/.cafleet-base-dir.json`. |
-| `db/models.py` | `cafleet/src/cafleet/db/` | SQLAlchemy declarative models: `Base`, `Session`, `Agent`, `Task`; column indexes |
+| `cli.py` | `cafleet/src/cafleet/` | Unified `cafleet` console script: click group with `db` (Alembic schema management), `fleet` (fleet CRUD), `agent` (registry: `register` / `deregister` / `list` / `show`), `message` (broker: `send` / `broadcast` / `poll` / `ack` / `cancel` / `show`), and `member` (lifecycle: `create` / `delete` / `list` / `capture` / `send-input` / `exec`) subgroups. Also exposes `cafleet server [--host <addr>] [--port <int>]` and `cafleet doctor` as top-level meta-command exceptions. Calls `broker` directly. |
+| `db/models.py` | `cafleet/src/cafleet/db/` | SQLAlchemy declarative models: `Base`, `Fleet`, `Agent`, `Task`; column indexes |
 | `db/engine.py` | `cafleet/src/cafleet/db/` | `get_sync_engine()`, `get_sync_sessionmaker()`, SQLite PRAGMA listener |
 | `alembic/` | `cafleet/src/cafleet/alembic/` | Alembic environment and migration scripts bundled into the wheel |
 | `webui_api.py` | `cafleet/src/cafleet/` | WebUI API router (`/api/*`) — calls `broker` for all data access |
@@ -64,7 +63,7 @@ is involved for CLI commands.
 | `message poll` | `broker.poll_tasks()` → SELECT tasks WHERE context_id |
 | `message ack` | `broker.ack_task()` → verify recipient + UPDATE status → completed |
 | `message cancel` | `broker.cancel_task()` → verify sender + UPDATE status → canceled |
-| `message show --task-id <x>` | `broker.get_task()` → SELECT task + verify session |
+| `message show --task-id <x>` | `broker.get_task()` → SELECT task + verify fleet |
 | `agent list` | `broker.list_agents()` → SELECT agents WHERE active |
 | `agent show --id <x>` | `broker.get_agent()` → SELECT agent + placement |
 | `agent deregister` | `broker.deregister_agent()` → UPDATE status + DELETE placement |
@@ -79,17 +78,17 @@ Each CLI parameter has exactly one input source:
 
 | Parameter | Source |
 |---|---|
-| Session ID | `--session-id` global flag (UUID; required for client + member subcommands) |
+| Fleet ID | `--fleet-id` global flag (UUID; required for client + member subcommands) |
 | Database URL | `CAFLEET_DATABASE_URL` env var (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db` with `~` expanded at load time) |
 | Agent ID | `--agent-id` subcommand option |
 | JSON output | `--json` global flag |
 
-Session ID and Agent ID are passed as literal CLI flags (not environment
+Fleet ID and Agent ID are passed as literal CLI flags (not environment
 variables) so a single Claude Code `permissions.allow` pattern of the form
-`cafleet --session-id <literal-uuid> *` matches every subcommand for that
-session, eliminating per-invocation permission prompts. `--session-id` is
+`cafleet --fleet-id <literal-uuid> *` matches every subcommand for that
+fleet, eliminating per-invocation permission prompts. `--fleet-id` is
 global (placed before the subcommand) and required for every client + member
-subcommand; it is silently accepted (and ignored) on `db init` / `session *`
+subcommand; it is silently accepted (and ignored) on `db init` / `fleet *`
 / `server` so one allow pattern stays usable everywhere. No broker URL is
 needed — CLI commands access SQLite directly.
 
@@ -107,26 +106,26 @@ The canonical CLI surface — every subcommand and option — lives at
 ## WebUI
 
 A browser-based dashboard served as a SPA at `/`. No login is required. The
-first-load lands on a session picker at `/#/sessions`; selecting a session
-navigates to a Discord-style unified timeline for that session — a sidebar
-listing every active (top) and deregistered (muted) agent in the session, a
+first-load lands on a fleet picker at `/#/fleets`; selecting a fleet
+navigates to a Discord-style unified timeline for that fleet — a sidebar
+listing every active (top) and deregistered (muted) agent in the fleet, a
 center timeline rendering unicast and broadcast messages ordered
 newest-at-bottom with auto-scroll, reactions-as-ACKs chips that reveal
 per-recipient ACK time on CSS hover, and a bottom input that parses
 `@<agent> text` for unicast and `@all text` for broadcast.
 
 The admin is NOT a CAFleet agent; the built-in `Administrator` agent
-auto-seeded at `session create` time is used as `from_agent_id` on every
+auto-seeded at `fleet create` time is used as `from_agent_id` on every
 send. The dashboard renders a read-only "Sending as Administrator" label
 (see `admin/src/components/Dashboard.tsx`). When the Administrator row is
 missing or deregistered, send is disabled and the header surfaces a
 diagnostic message pointing at `cafleet db init`.
 
-The three primary views (SessionPicker, Dashboard, Timeline) auto-refresh
+The three primary views (FleetPicker, Dashboard, Timeline) auto-refresh
 every 5 s with a subtle "Updating…" in-flight indicator; polling continues
-regardless of tab visibility and overlapping ticks are dropped. The session
-picker renders sessions newest-first by `created_at DESC, session_id ASC` as
-returned by `broker.list_sessions()` — no client-side re-sort.
+regardless of tab visibility and overlapping ticks are dropped. The fleet
+picker renders fleets newest-first by `created_at DESC, fleet_id ASC` as
+returned by `broker.list_fleets()` — no client-side re-sort.
 
 - **Frontend**: `admin/` — Vite + React 19 + TypeScript + Tailwind CSS 4
 - **Backend API**: `/api/*` endpoints in `webui_api.py` — all endpoints call
@@ -135,7 +134,7 @@ returned by `broker.list_sessions()` — no client-side re-sort.
 - **Server**: `server.py` is a minimal FastAPI app — just `webui_router` +
   static files. No protocol handler, no JSON-RPC, no executor. Only needed
   for the WebUI; CLI commands work without it.
-- **Session scoping**: Session-scoped endpoints require the `X-Session-Id`
+- **Fleet scoping**: Fleet-scoped endpoints require the `X-Fleet-Id`
   header. No authentication.
 - **Static serving**: `StaticFiles` mount at `/` serves the SPA bundled
   inside the package at `cafleet/src/cafleet/webui/`. `mise //admin:build`
@@ -143,7 +142,7 @@ returned by `broker.list_sessions()` — no client-side re-sort.
   populated; without it, `create_app()` emits a one-line warning and the
   server starts cleanly with `/` returning 404 until the SPA is built.
 
-The WebUI API surface — request / response shape, session header convention,
+The WebUI API surface — request / response shape, fleet header convention,
 and ACK chip metadata — lives at [WebUI API](../spec/webui-api.md).
 
 ## Package structure
@@ -152,7 +151,7 @@ A single Python package and a frontend app:
 
 - **`cafleet/`** — `cafleet`: FastAPI + SQLAlchemy + Alembic + click (server +
   CLI). Ships the unified `cafleet` console script for all operations:
-  `db init`, `session` management, agent registration, messaging, and member
+  `db init`, `fleet` management, agent registration, messaging, and member
   lifecycle. CLI commands access SQLite directly via `broker.py`; the FastAPI
   server is only needed for the admin WebUI.
 - **`admin/`** — WebUI SPA: Vite + React + TypeScript + Tailwind CSS

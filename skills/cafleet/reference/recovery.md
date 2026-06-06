@@ -10,8 +10,8 @@ Before assuming a member is stalled, run the cheap check first:
 2. **Capture the member's pane via `cafleet member capture`** — see what the member is actually doing. Default `--lines 30`. If the capture is too short to show the prompt frame, re-run with `--lines 120` or `--lines 200`.
 
 ```bash
-cafleet --session-id <session-id> message poll --agent-id <director-agent-id>
-cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>
+cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> \
   --member-id <member-agent-id>
 ```
 
@@ -20,7 +20,7 @@ cafleet --session-id <session-id> member capture --agent-id <director-agent-id> 
 The `--activity` flag aggregates per-member `last_sent` / `last_recv` / `last_ack` / `idle` columns so a routine `/loop` tick can decide which members need a capture WITHOUT capturing every member every minute. See [`reference/director.md`](director.md#member-list-with-activity).
 
 ```
-$ cafleet --session-id <s> member list --agent-id <d> --activity
+$ cafleet --fleet-id <s> member list --agent-id <d> --activity
 3 members:
   agent_id        name      state   last_sent    last_recv    last_ack     idle
   --------------  --------  ------  -----------  -----------  -----------  -----
@@ -67,10 +67,10 @@ The teardown MUST run in this exact order. Skipping any step leaves crons firing
 
 **Rule: use cafleet primitives only.** All tmux interactions — write, inspect, and metadata — are encapsulated by cafleet commands. For tmux session/window/pane metadata at Director startup, use `cafleet doctor`. Never invoke raw tmux directly from the Director. If a workflow appears to need a raw tmux call, file a gap in `cafleet member *` or `cafleet doctor` — NOT a raw tmux invocation.
 
-1. **Stop every background `/loop` monitor FIRST.** Any `/loop` cron the Director started during the session must be cancelled with `CronDelete <job-id>` **before** members are deleted. A cron that keeps firing after members are gone will issue `cafleet member list` / `poll` against a tearing-down session, spam `Error: session is deleted`, and (worse) race with the member-delete path and nudge agents that are mid-`/exit`. Fixed-cadence `/loop`s (e.g. the team-health monitor from the `cafleet-agent-team-monitoring` skill) and any augmented loops you created (PR review loops, verifier loops, etc.) all fall under this rule. Stop them all.
-2. **Delete every member** via `cafleet member delete`. This call blocks until the target pane is actually gone (15 s default timeout). On timeout follow the wedged-`/exit` decision tree above. Do this per member, not via `session delete` alone — `session delete` deregisters agents in the DB but does NOT send `/exit` to panes.
+1. **Stop every background `/loop` monitor FIRST.** Any `/loop` cron the Director started during the fleet must be cancelled with `CronDelete <job-id>` **before** members are deleted. A cron that keeps firing after members are gone will issue `cafleet member list` / `poll` against a tearing-down fleet, spam `Error: fleet is deleted`, and (worse) race with the member-delete path and nudge agents that are mid-`/exit`. Fixed-cadence `/loop`s (e.g. the team-health monitor from the `cafleet-agent-team-monitoring` skill) and any augmented loops you created (PR review loops, verifier loops, etc.) all fall under this rule. Stop them all.
+2. **Delete every member** via `cafleet member delete`. This call blocks until the target pane is actually gone (15 s default timeout). On timeout follow the wedged-`/exit` decision tree above. Do this per member, not via `fleet delete` alone — `fleet delete` deregisters agents in the DB but does NOT send `/exit` to panes.
 3. **Verify every member is gone via cafleet.** Run `cafleet member list --agent-id <director-agent-id>`. The team's member roster should be empty. Any agent still present means step 2 failed — re-run `cafleet member delete` on that member, capture if needed, and report to the user if it still refuses to leave. Do NOT use raw tmux to "check" or "force" anything.
-4. **Run `cafleet session delete <session-id>`** (positional, no `--session-id` flag). This deregisters the root Director, deregisters the Administrator, sweeps any agent rows that survived step 2, and physically deletes every `agent_placements` row. Plain `cafleet --session-id <session-id> agent deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` — always use `session delete` for the final teardown step.
-5. **Confirm the session is closed.** Run `cafleet session list`; the current session should not appear (soft-deleted sessions are hidden). If it still appears with `active` agents, repeat steps 2–4 for that session. Any cross-conversation orphan session surfaced by this final check is also cleaned up via `cafleet session delete <its-session-id>` — never via tmux.
+4. **Run `cafleet fleet delete <fleet-id>`** (positional, no `--fleet-id` flag). This deregisters the root Director, deregisters the Administrator, sweeps any agent rows that survived step 2, and physically deletes every `agent_placements` row. Plain `cafleet --fleet-id <fleet-id> agent deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` — always use `fleet delete` for the final teardown step.
+5. **Confirm the fleet is closed.** Run `cafleet fleet list`; the current fleet should not appear (soft-deleted fleets are hidden). If it still appears with `active` agents, repeat steps 2–4 for that fleet. Any cross-conversation orphan fleet surfaced by this final check is also cleaned up via `cafleet fleet delete <its-fleet-id>` — never via tmux.
 
-Skipping step 1 is the single most common failure and the one that visibly leaks into the operator's view (recurring cron output in the Director's terminal). Skipping step 3 means you proceed to `session delete` without knowing whether members actually quit, leaving orphan coding-agent processes behind.
+Skipping step 1 is the single most common failure and the one that visibly leaks into the operator's view (recurring cron output in the Director's terminal). Skipping step 3 means you proceed to `fleet delete` without knowing whether members actually quit, leaving orphan coding-agent processes behind.

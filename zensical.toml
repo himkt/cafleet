@@ -52,7 +52,7 @@ nav = [
     ] },
     { "Concepts" = [
         { "Overview" = "concepts/overview.md" },
-        { "Session isolation" = "concepts/session-isolation.md" },
+        { "Fleet isolation" = "concepts/fleet-isolation.md" },
         { "Storage" = "concepts/storage.md" },
         { "Member lifecycle" = "concepts/member-lifecycle.md" },
         { "Coding agents" = "concepts/coding-agents.md" },

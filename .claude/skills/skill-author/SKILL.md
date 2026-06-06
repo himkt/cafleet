@@ -21,13 +21,13 @@ Read this whole document before you start writing your `SKILL.md`. The rules are
 
 ## 1. What "CAFleet-orchestrated" means
 
-A CAFleet-orchestrated skill is one where the Director (the main Claude session running your slash command) bootstraps a fresh CAFleet session, spawns one or more **members** as separate `claude` (or `codex`) processes inside dedicated tmux panes, and coordinates the work through the CAFleet message broker (`cafleet message send` / `cafleet message poll` / `cafleet message ack`). Members are real, isolated coding-agent processes — not in-process subagents — and the broker delivers each message as a 2-line keystroke preview into the recipient's tmux pane.
+A CAFleet-orchestrated skill is one where the Director (the main Claude session running your slash command) bootstraps a fresh CAFleet fleet, spawns one or more **members** as separate `claude` (or `codex`) processes inside dedicated tmux panes, and coordinates the work through the CAFleet message broker (`cafleet message send` / `cafleet message poll` / `cafleet message ack`). Members are real, isolated coding-agent processes — not in-process subagents — and the broker delivers each message as a 2-line keystroke preview into the recipient's tmux pane.
 
 The shape always looks like this:
 
 ```
 User
- +-- Director (main Claude — runs cafleet session create / member create / drives the loop)
+ +-- Director (main Claude — runs cafleet fleet create / member create / drives the loop)
       +-- member-1 (claude pane)
       +-- member-2 (claude pane)
       +-- ...
@@ -45,7 +45,7 @@ Do **not** use this pattern when:
 - The work is a single-shot transformation (file edit, search, summarize). A normal slash command running inside the Director's session is enough.
 - You only need the harness `TaskList` for tracking — you do not need cross-pane coordination.
 
-If you are unsure: write the simpler version first. The CAFleet team pattern is overkill for most tasks and the orchestration overhead (`cafleet doctor`, `cafleet session create`, `cafleet member create`, `/loop` monitor, `member delete`, `session delete`) costs the user real seconds and real cognitive load.
+If you are unsure: write the simpler version first. The CAFleet team pattern is overkill for most tasks and the orchestration overhead (`cafleet doctor`, `cafleet fleet create`, `cafleet member create`, `/loop` monitor, `member delete`, `fleet delete`) costs the user real seconds and real cognitive load.
 
 ---
 
@@ -55,44 +55,40 @@ Every CAFleet-orchestrated skill must wire up these five sub-systems, in this or
 
 ### 2.1 Resolve the task-scoped BASE
 
-Before any other work, the Director resolves the task-scoped output directory by calling `cafleet base-dir resolve` with a positional `TASK_NAME` derived from the skill's per-task convention.
-
-```bash
-cafleet base-dir resolve <task-relpath> --json
-```
+Before any other work, the Director resolves the task-scoped output directory by following the `cafleet-base-dir` skill's task-scope resolution procedure with a `TASK_NAME` derived from the skill's per-task convention. The procedure uses only built-in tools (`git rev-parse --show-toplevel` via Bash, Read, Write) — there is no `cafleet` CLI subcommand for it.
 
 `<task-relpath>` is a path under the inferred repo root that describes the per-task folder. The two recognized buckets are:
 
 - `researches/<topic-slug>` — for research-style skills (one folder per research run).
 - `design-docs/<NNNNNNN>-<slug>` — for design-doc-style skills (one folder per design document, with a 7-digit zero-padded number prefix per `.claude/rules/design-doc-numbering.md`).
 
-The CLI:
+The procedure:
 
-1. Walks up from CWD via `is_git_repo_root` to infer the repo root.
+1. Walks up from CWD (`git rev-parse --show-toplevel`) to infer the repo root.
 2. Joins `<task-relpath>` against the repo root.
-3. Auto-creates the task folder via `pathlib.Path(...).mkdir(parents=True, exist_ok=True)`.
+3. Auto-creates the task folder via `Path(...).mkdir(parents=True, exist_ok=True)` (Write).
 4. Writes a per-task anchor inline at `<task-folder>/.cafleet-base-dir.json` with `source: "task-scope"` (or reads an existing one with `source: "anchor"`).
-5. Returns `{status: "resolved", base: <abs task-folder>, source: "task-scope" | "anchor", anchor: <abs anchor>, task_name: <task-relpath>}`.
+5. Yields `base = <abs task-folder>` (with `source: "task-scope" | "anchor"`).
 
-Use the returned `base` field as `${BASE}` for the rest of the run. **Every** scratch / audit / figure / spawn-prompt-render write the skill performs MUST live under `${BASE}` — never `/tmp`, never the repo root.
+Use the resolved `base` as `${BASE}` for the rest of the run. **Every** scratch / audit / figure / spawn-prompt-render write the skill performs MUST live under `${BASE}` — never `/tmp`, never the repo root.
 
-The CLI's positional branch also accepts an absolute path. If the path lies strictly under the inferred repo root, the CLI returns it verbatim as the task folder — the resolver does NOT walk ancestors or match skill-specific bucket patterns. If the path lies outside the repo root (or equals the repo root, which would clobber the shared-root anchor), the CLI returns `{status: "unset", base: null, source: "absolute-path-arg", anchor: null}` — the literal sentinel `<unset>` for `${BASE}`. **Consumer-strips contract**: because the resolver does not fold child paths, each consuming skill MUST canonicalize its argument to the actual task-folder relpath (strip trailing filenames like `/design-doc.md`, strip leading bucket prefixes like `design-docs/`, then prepend its own bucket) BEFORE calling the resolver. When `${BASE}` is `<unset>`, the skill MUST guard every BASE-derived write with an explicit `${BASE} != <unset>` check, omit the `BASE:` line from any spawn prompt entirely, and never fall back to `/tmp`. The standardized loud-error message is `Error: BASE is <unset>; refusing to fall back to /tmp`.
+The procedure's positional branch also accepts an absolute path. If the path lies strictly under the inferred repo root, it is used verbatim as the task folder — the resolver does NOT walk ancestors or match skill-specific bucket patterns. If the path lies outside the repo root (or equals the repo root, which would clobber the shared-root anchor), the resolver yields the literal sentinel `<unset>` for `${BASE}`. **Consumer-strips contract**: because the resolver does not fold child paths, each consuming skill MUST canonicalize its argument to the actual task-folder relpath (strip trailing filenames like `/design-doc.md`, strip leading bucket prefixes like `design-docs/`, then prepend its own bucket) BEFORE resolving. When `${BASE}` is `<unset>`, the skill MUST guard every BASE-derived write with an explicit `${BASE} != <unset>` check, omit the `BASE:` line from any spawn prompt entirely, and never fall back to `/tmp`. The standardized loud-error message is `Error: BASE is <unset>; refusing to fall back to /tmp`.
 
-When CWD has no `.git` ancestor (typical when CWD is `$HOME` or under `$HOME/.claude`) AND a positional `TASK_NAME` is supplied, the CLI exits 1 with `cannot resolve task-scope base-dir: no .git ancestor found from CWD <cwd>. cd to the repo root and retry.` on stderr (no JSON payload, even with `--json`). Surface this error to the user and stop.
+When CWD has no `.git` ancestor (typical when CWD is `$HOME` or under `$HOME/.claude`) AND a `TASK_NAME` is supplied, the resolution fails with `cannot resolve task-scope base-dir: no .git ancestor found from CWD <cwd>. cd to the repo root and retry.` — surface this error to the user and stop.
 
-### 2.2 Bootstrap a CAFleet session
+### 2.2 Bootstrap a CAFleet fleet
 
-The Director creates the session inside a tmux pane:
+The Director creates the fleet inside a tmux pane:
 
 ```bash
-cafleet --json session create --label "<short-label>"
+cafleet --json fleet create --label "<short-label>"
 ```
 
-The CLI atomically (1) creates a `sessions` row, (2) registers a root Director agent bound to the current tmux pane, (3) seeds a built-in Administrator agent. Capture both `session_id` and `director.agent_id` from the JSON response and substitute them as **literal UUID strings** into every subsequent `cafleet ...` call.
+The CLI atomically (1) creates a `fleets` row, (2) registers a root Director agent bound to the current tmux pane, (3) seeds a built-in Administrator agent. Capture both `fleet_id` and `director.agent_id` from the JSON response and substitute them as **literal UUID strings** into every subsequent `cafleet ...` call.
 
-Never store these IDs in shell variables (`export SESSION=...`). The Claude Code harness's `permissions.allow` matches Bash invocations as literal command strings; shell variables break the literal match and force per-invocation permission prompts that interrupt the agent loop.
+Never store these IDs in shell variables (`export FLEET=...`). The Claude Code harness's `permissions.allow` matches Bash invocations as literal command strings; shell variables break the literal match and force per-invocation permission prompts that interrupt the agent loop.
 
-If the user is not inside a tmux session, `cafleet session create` exits 1 with `Error: cafleet session create must be run inside a tmux session` and writes nothing. Surface this and stop — do NOT try to start a tmux session yourself.
+If the user is not inside a tmux session, `cafleet fleet create` exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing. Surface this and stop — do NOT try to start a tmux session yourself.
 
 ### 2.3 Start the agent-team-monitoring `/loop`
 
@@ -106,14 +102,14 @@ Start the loop **before** the first `cafleet member create` call so the first ti
 
 For each member you spawn, follow the **two-step render-to-file pattern**:
 
-1. **Render the spawn prompt locally**. Substitute every `[INSERT …]` marker with the concrete value. Leave the three str.format placeholders `{session_id}` / `{agent_id}` / `{director_agent_id}` single-braced — `cafleet member create` runs `str.format()` over the prompt at member-create time using the freshly-allocated `agent_id`. Double any other literal `{` or `}` in the prompt body (e.g. a JSON example, a `${{VAR}}` reference) to `{{` / `}}`.
+1. **Render the spawn prompt locally**. Substitute every `[INSERT …]` marker with the concrete value. Leave the three str.format placeholders `{fleet_id}` / `{agent_id}` / `{director_agent_id}` single-braced — `cafleet member create` runs `str.format()` over the prompt at member-create time using the freshly-allocated `agent_id`. Double any other literal `{` or `}` in the prompt body (e.g. a JSON example, a `${{VAR}}` reference) to `{{` / `}}`.
 
 2. **Write the rendered text** to `${BASE}/prompts/<role>-<UTC-compact>.md` where `<UTC-compact>` is `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")` (Python). Create `${BASE}/prompts/` on first write via `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`. On same-second collisions, append `_2`, `_3`, … to the filename until it is unique — never overwrite. **The pre-spawn file IS the audit artifact.** There is no second post-spawn re-render; the file is both the CLI input and the permanent record of what was spawned.
 
 3. **Spawn with `--prompt-file`** pointing at the absolute path of the rendered file:
 
    ```bash
-   cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
+   cafleet --fleet-id <fleet-id> --json member create --agent-id <director-agent-id> \
      --name "<member-name>" \
      --description "<one-sentence purpose>" \
      --prompt-file ${BASE}/prompts/<role>-<UTC-compact>.md
@@ -141,11 +137,11 @@ The spawned member opens its role file with `Read` on its first turn. The role f
 
 When the work is done, the Director MUST tear down in this exact order:
 
-1. **`cafleet member delete --member-id <id>`** for every member. This sends `/exit` to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet session delete` — call `member delete` first.
-2. **Stop the `/loop` monitor.** Use `CronDelete` with the cron job ID returned by `/loop` at startup. A loop that fires after the session is deleted will keystroke against a dead pane and clutter the broker log with errors.
-3. **`cafleet session delete <session-id>`**. Soft-deletes the session (sets `deleted_at`), deregisters every active agent in the session (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved.
+1. **`cafleet member delete --member-id <id>`** for every member. This sends `/exit` to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` first.
+2. **Stop the `/loop` monitor.** Use `CronDelete` with the cron job ID returned by `/loop` at startup. A loop that fires after the fleet is deleted will keystroke against a dead pane and clutter the broker log with errors.
+3. **`cafleet fleet delete <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active agent in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved.
 
-Order matters. If you call `session delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to). If you stop the `/loop` before `member delete`, the monitor cannot catch a member that fails its `/exit` shutdown.
+Order matters. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to). If you stop the `/loop` before `member delete`, the monitor cannot catch a member that fails its `/exit` shutdown.
 
 ---
 
@@ -162,7 +158,7 @@ Load these skills at startup:
 - the `cafleet` skill — for the broker primitives, literal-UUID flag convention, and bash-via-Director routing
 - <other skills as needed>
 
-SESSION ID: {session_id}
+FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
 BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
@@ -170,8 +166,8 @@ BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` ski
 <role-specific assignment text — e.g. CURRENT DATE, USER REQUEST, OUTPUT PATH, YOUR TASK ID>
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet --session-id {session_id} message ack --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 
 <role-specific instructions>
 ```
@@ -179,7 +175,7 @@ COMMUNICATION PROTOCOL:
 ### 3.1 The identity block
 
 ```
-SESSION ID: {session_id}
+FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
 BASE: <abs task-folder path>
@@ -189,7 +185,7 @@ These four lines are the member's grounding identity. The first three are the li
 
 ### 3.2 The `str.format()` placeholder rules
 
-`cafleet member create` runs `str.format()` over the prompt at member-create time with three kwargs: `session_id`, `agent_id` (the freshly allocated member's UUID), and `director_agent_id`. The placeholders `{session_id}` / `{agent_id}` / `{director_agent_id}` are replaced with the literal UUIDs.
+`cafleet member create` runs `str.format()` over the prompt at member-create time with three kwargs: `fleet_id`, `agent_id` (the freshly allocated member's UUID), and `director_agent_id`. The placeholders `{fleet_id}` / `{agent_id}` / `{director_agent_id}` are replaced with the literal UUIDs.
 
 **Three rules:**
 
@@ -215,7 +211,7 @@ Spawn prompt body references the role file by absolute path. The role file lives
 
 ### 3.6 The `${BASE} == <unset>` skip semantics
 
-When `cafleet base-dir resolve` returns `{status: "unset", base: null, ...}` (absolute-path argument outside the repo root, or equal to the repo root itself), `${BASE}` is the literal sentinel string `<unset>`. The skill MUST:
+When the base-dir resolution yields the `unset` outcome (absolute-path argument outside the repo root, or equal to the repo root itself), `${BASE}` is the literal sentinel string `<unset>`. The skill MUST:
 
 - **Skip the audit-file write.** Do not try to write `<unset>/prompts/<role>-<UTC-compact>.md` — that is a literal path with a `<` in it, which most filesystems reject. The guard is `if BASE != "<unset>"`.
 - **Omit the `BASE:` line from the spawn prompt.** The spawn prompt does NOT include the literal string `BASE: <unset>` — the line is dropped entirely. The member's existence-check naturally treats audit-file features as disabled.
@@ -288,7 +284,7 @@ Three pointer shapes:
 | Pointer | When |
 |:--|:--|
 | `paragraph-<HeadingPath>` | A specific section of the document — e.g. `paragraph-Implementation > Step 5`, `paragraph-Specification > 3. Anchor schema`. Use the literal heading text from the document with `>` separators. |
-| `<file>:<line>` | A specific file location — e.g. `cafleet/src/cafleet/base_dir.py:142`, `docs/concepts/overview.md:178`. |
+| `<file>:<line>` | A specific file location — e.g. `cafleet/src/cafleet/broker.py:142`, `docs/concepts/overview.md:178`. |
 | `doc` | The whole document; used for top-level milestones (`complete (doc)`, `approved (doc)`) and document-wide blocks (`blocked (doc) — test framework ambiguous`). |
 
 ### 5.4 The pointer-marker pairing rule
@@ -296,7 +292,7 @@ Three pointer shapes:
 When a sender includes substantive content in a `COMMENT(role)` marker, the marker MUST live at the same pointer the cafleet body references. Examples:
 
 - `blocked (paragraph-Implementation > Step 5)` + `COMMENT(programmer): test X expects Y but design doc says Z` at `paragraph-Implementation > Step 5` in the design doc.
-- `ready (cafleet/src/cafleet/base_dir.py:142)` + `COMMENT(director): use pathlib.Path.mkdir(parents=True, exist_ok=True), not subprocess.run(["mkdir", ...])` at line 142 of the file.
+- `ready (cafleet/src/cafleet/broker.py:142)` + `COMMENT(director): use pathlib.Path.mkdir(parents=True, exist_ok=True), not subprocess.run(["mkdir", ...])` at line 142 of the file.
 
 The recipient reads the cafleet body, navigates to the pointer, reads the standing marker, applies the fix or arbitration, removes the marker, and replies with the next-step verb (`addressed (...)` for member-side fixes, `ready (...)` for director-side arbitration handoffs).
 
@@ -318,7 +314,7 @@ The phrasing deliberately omits parentheses so a parser does not misinterpret it
 After acting on a polled message, the recipient MUST `cafleet message ack` it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle, polluting the recipient's context with stale work.
 
 ```bash
-cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 The `<task-id>` is the full UUID returned by `cafleet --json message poll --agent-id <my-agent-id> --full`. The default text-mode poll output truncates to an 8-character prefix; pass `--full` when you need the full UUID for ack.
@@ -327,7 +323,7 @@ The `<task-id>` is the full UUID returned by `cafleet --json message poll --agen
 
 ## 6. Worked example — `summarize-pr`
 
-This is a tiny end-to-end CAFleet-orchestrated skill called `summarize-pr` (single Director + single member named Summarizer). The example uses fake `<slug>`, `<session-id>`, etc. and is read-only — it is illustrative, not a template you copy. Read it to understand how all five sub-systems fit together; then write your own skill from scratch.
+This is a tiny end-to-end CAFleet-orchestrated skill called `summarize-pr` (single Director + single member named Summarizer). The example uses fake `<slug>`, `<fleet-id>`, etc. and is read-only — it is illustrative, not a template you copy. Read it to understand how all five sub-systems fit together; then write your own skill from scratch.
 
 ### Skill purpose
 
@@ -341,18 +337,19 @@ The user invokes `/summarize-pr <pr-number>`. The Director:
 
 The skill's task convention is `researches/pr-<pr-number>` (PR summaries are research-shaped — one folder per PR with the diff + summary inside).
 
-```bash
-cafleet base-dir resolve researches/pr-1234 --json
-# → {"status": "resolved", "base": "/repo/researches/pr-1234", "source": "task-scope", ...}
+```text
+# Resolve task-scope BASE for researches/pr-1234 (cafleet-base-dir skill procedure, built-in tools):
+#   git rev-parse --show-toplevel → /repo
+#   task folder → /repo/researches/pr-1234  (auto-created + anchored, source: task-scope)
 ```
 
 `${BASE} = /repo/researches/pr-1234`. The Director writes the diff to `${BASE}/diff.patch` (a non-audit working file) and the summary will land at `${BASE}/summary.md` (also a working file, not under `prompts/`).
 
-### Session bootstrap
+### Fleet bootstrap
 
 ```bash
-cafleet --json session create --label "summarize-pr-1234"
-# → {"session_id": "abc...", "director": {"agent_id": "def..."}, "administrator_agent_id": "ghi..."}
+cafleet --json fleet create --label "summarize-pr-1234"
+# → {"fleet_id": "abc...", "director": {"agent_id": "def..."}, "administrator_agent_id": "ghi..."}
 ```
 
 Substitute `abc...` and `def...` literally into every subsequent call.
@@ -360,7 +357,7 @@ Substitute `abc...` and `def...` literally into every subsequent call.
 ### Loop start
 
 ```
-/loop 1m <agent-team-monitoring template with session-id=abc... and director-agent-id=def...>
+/loop 1m <agent-team-monitoring template with fleet-id=abc... and director-agent-id=def...>
 ```
 
 Loop fires every minute starting before the first `member create`.
@@ -377,7 +374,7 @@ ROLE DEFINITION: Open [INSERT abs path to roles/summarizer.md] with the Read too
 Load these skills at startup:
 - the `cafleet` skill — for the broker primitives and bash-via-Director routing
 
-SESSION ID: {session_id}
+FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
 BASE: /repo/researches/pr-1234
@@ -386,8 +383,8 @@ INPUT FILE: /repo/researches/pr-1234/diff.patch
 OUTPUT FILE: /repo/researches/pr-1234/summary.md
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID and ack it via cafleet --session-id {session_id} message ack --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 
 Read INPUT FILE, write a 200-word summary highlighting the top 3 risk areas to OUTPUT FILE, then send `complete (doc)` to the Director.
 ```
@@ -397,7 +394,7 @@ The Director writes this rendered text to `/repo/researches/pr-1234/prompts/summ
 ### Spawn the Summarizer
 
 ```bash
-cafleet --session-id abc... --json member create --agent-id def... \
+cafleet --fleet-id abc... --json member create --agent-id def... \
   --name "summarizer" \
   --description "Digests a PR diff into a 200-word risk summary" \
   --prompt-file /repo/researches/pr-1234/prompts/summarizer-20260516T003344Z.md
@@ -411,14 +408,14 @@ Capture `jkl...` as the Summarizer's UUID for the rest of the run.
 The Summarizer reads the diff, writes the summary, and sends:
 
 ```bash
-cafleet --session-id abc... message send --agent-id jkl... --to def... \
+cafleet --fleet-id abc... message send --agent-id jkl... --to def... \
   --text "complete (doc) — summary 198 words, 3 risk areas"
 ```
 
 The Director polls, acks, reads `${BASE}/summary.md`, presents it to the user via `AskUserQuestion`. If the user approves, the Director tears down. If the user requests revisions, the Director sends:
 
 ```bash
-cafleet --session-id abc... message send --agent-id def... --to jkl... \
+cafleet --fleet-id abc... message send --agent-id def... --to jkl... \
   --text "ready (doc)"
 ```
 
@@ -427,16 +424,16 @@ cafleet --session-id abc... message send --agent-id def... --to jkl... \
 ### Teardown
 
 ```bash
-cafleet --session-id abc... member delete --agent-id def... --member-id jkl...
+cafleet --fleet-id abc... member delete --agent-id def... --member-id jkl...
 CronDelete <loop-job-id>
-cafleet session delete abc...
+cafleet fleet delete abc...
 ```
 
-Order matters. Member first, loop second, session last.
+Order matters. Member first, loop second, fleet last.
 
 ### What this example demonstrates
 
-- All five integration sub-systems fire (resolve BASE → bootstrap session → start loop → spawn member → tear down).
+- All five integration sub-systems fire (resolve BASE → bootstrap fleet → start loop → spawn member → tear down).
 - The audit file at `${BASE}/prompts/summarizer-<ts>.md` lives under the task folder, not the repo root.
 - The cafleet body uses the verb + pointer schema (`complete (doc)`, `ready (doc)`, `addressed (doc)`).
 - The substantive revision request rides as a `COMMENT(director)` marker in the document, not in the cafleet body.
@@ -464,13 +461,13 @@ Fix: use `--prompt-file` (always) and reference the role file by absolute path i
 
 Symptom: every `cafleet ...` call triggers a permission prompt that interrupts the agent loop. The user complains that the skill is "asking me about every single command."
 
-Fix: substitute the literal UUIDs printed by `cafleet session create` / `cafleet member create` directly into every command. The Claude Code harness's `permissions.allow` matches Bash invocations as literal command strings; shell variables (`$SESSION_ID`, `${SESSION_ID}`) break the literal match. Never `export` IDs and reference them via `$VAR`.
+Fix: substitute the literal UUIDs printed by `cafleet fleet create` / `cafleet member create` directly into every command. The Claude Code harness's `permissions.allow` matches Bash invocations as literal command strings; shell variables (`$FLEET_ID`, `${FLEET_ID}`) break the literal match. Never `export` IDs and reference them via `$VAR`.
 
 ### 7.4 Writing audit files under the repo root
 
 Symptom: `git status` shows untracked `prompts/` directory at the repo root after running the skill. Operators add `/prompts/` to `.gitignore`. Per-task evidence is scattered across the repo root instead of co-located with the task folder.
 
-Fix: resolve BASE via `cafleet base-dir resolve <task-relpath>` (per § 2.1). The returned `base` field IS the task folder; `${BASE}/prompts/` lives inside the task folder. Do NOT compute `${BASE} = $(cafleet base-dir resolve)` (no positional) and then write `${BASE}/researches/<slug>/prompts/...` — that pattern produces the stale repo-root artifacts.
+Fix: resolve BASE via the `cafleet-base-dir` skill's task-scope procedure with a `<task-relpath>` (per § 2.1). The resolved `base` IS the task folder; `${BASE}/prompts/` lives inside the task folder. Do NOT resolve the shared-root BASE (no task-relpath) and then write `${BASE}/researches/<slug>/prompts/...` — that pattern produces the stale repo-root artifacts.
 
 ### 7.5 Forgetting to omit the `BASE:` line under `${BASE} == <unset>`
 
@@ -484,11 +481,11 @@ Symptom: scratch and audit files appear under `/tmp/<random>/prompts/...` instea
 
 Fix: never fall back to `/tmp` silently. The `<unset>` sentinel is a hard stop, not a fallback. If `${BASE}` is `<unset>`, abort with the standardized error `Error: BASE is <unset>; refusing to fall back to /tmp` (or, for spawned members, follow the skip + inline-fallback branch in § 3.6).
 
-### 7.7 Calling `cafleet session delete` before `cafleet member delete`
+### 7.7 Calling `cafleet fleet delete` before `cafleet member delete`
 
-Symptom: orphan `claude` processes lingering in tmux panes after the skill completes. The user closes the panes manually. On the next `cafleet session create`, the panes are rebound and the orphan members re-emerge.
+Symptom: orphan `claude` processes lingering in tmux panes after the skill completes. The user closes the panes manually. On the next `cafleet fleet create`, the panes are rebound and the orphan members re-emerge.
 
-Fix: tear down in this exact order — `cafleet member delete` for every member, then stop the `/loop`, then `cafleet session delete`. See § 2.5.
+Fix: tear down in this exact order — `cafleet member delete` for every member, then stop the `/loop`, then `cafleet fleet delete`. See § 2.5.
 
 ### 7.8 Not starting the `/loop` before the first `cafleet member create`
 

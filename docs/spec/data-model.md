@@ -8,40 +8,40 @@ Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the ru
 
 ## SQL Schema
 
-### `sessions`
+### `fleets`
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `session_id` | `TEXT` | `PRIMARY KEY` | Opaque string. New sessions receive a UUIDv4. |
+| `fleet_id` | `TEXT` | `PRIMARY KEY` | Opaque string. New fleets receive a UUIDv4. |
 | `label` | `TEXT` | nullable | Optional free-form text for human bookkeeping (e.g. `"PR-42 review"`). |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
-| `deleted_at` | `TEXT` | nullable | `NULL` = active; non-NULL ISO-8601 timestamp = soft-deleted. Written by `broker.delete_session`; never cleared. |
-| `director_agent_id` | `TEXT` | nullable (DB), app-enforced NOT NULL after bootstrap; `REFERENCES agents(agent_id) ON DELETE RESTRICT` | Points at the session's root Director (the agent auto-registered by `cafleet session create`). DB-nullable so the 4-step bootstrap can INSERT `sessions` before the Director's `agents` row exists; post-bootstrap every non-deleted session has a non-NULL value. |
+| `deleted_at` | `TEXT` | nullable | `NULL` = active; non-NULL ISO-8601 timestamp = soft-deleted. Written by `broker.delete_fleet`; never cleared. |
+| `director_agent_id` | `TEXT` | nullable (DB), app-enforced NOT NULL after bootstrap; `REFERENCES agents(agent_id) ON DELETE RESTRICT` | Points at the fleet's root Director (the agent auto-registered by `cafleet fleet create`). DB-nullable so the 4-step bootstrap can INSERT `fleets` before the Director's `agents` row exists; post-bootstrap every non-deleted fleet has a non-NULL value. |
 
-Session deletion is a **soft-delete**: `broker.delete_session` sets `deleted_at=now`, then deregisters every active agent in the session (including the root Director) and physically deletes their `agent_placements` rows in the same transaction. Tasks are preserved. Re-running `session delete` on an already-soft-deleted session is a no-op that reports `Deregistered 0 agents.` because the initial `UPDATE` guard `WHERE deleted_at IS NULL` short-circuits the cascade.
+Fleet deletion is a **soft-delete**: `broker.delete_fleet` sets `deleted_at=now`, then deregisters every active agent in the fleet (including the root Director) and physically deletes their `agent_placements` rows in the same transaction. Tasks are preserved. Re-running `fleet delete` on an already-soft-deleted fleet is a no-op that reports `Deregistered 0 agents.` because the initial `UPDATE` guard `WHERE deleted_at IS NULL` short-circuits the cascade.
 
-`broker.get_session` always returns the row (regardless of `deleted_at`) and exposes the field so callers can decide; `broker.list_sessions` filters `WHERE deleted_at IS NULL`, so `cafleet session list` hides soft-deleted sessions (no `--all` flag). `broker.register_agent` inspects `get_session(...).deleted_at` and rejects a soft-deleted session with `Error: session X is deleted` (distinct from the `Session 'X' not found.` path).
+`broker.get_fleet` always returns the row (regardless of `deleted_at`) and exposes the field so callers can decide; `broker.list_fleets` filters `WHERE deleted_at IS NULL`, so `cafleet fleet list` hides soft-deleted fleets (no `--all` flag). `broker.register_agent` inspects `get_fleet(...).deleted_at` and rejects a soft-deleted fleet with `Error: fleet X is deleted` (distinct from the `Fleet 'X' not found.` path).
 
 #### Root Director bootstrap
 
-`cafleet session create` executes a single transaction that performs five ordered operations — all-or-nothing:
+`cafleet fleet create` executes a single transaction that performs five ordered operations — all-or-nothing:
 
-1. `INSERT INTO sessions (...)` with `deleted_at=NULL`, `director_agent_id=NULL`.
-2. `INSERT INTO agents (...)` for the hardcoded root Director (`name='Director'`, `description='Root Director for this session'`, `status='active'`).
+1. `INSERT INTO fleets (...)` with `deleted_at=NULL`, `director_agent_id=NULL`.
+2. `INSERT INTO agents (...)` for the hardcoded root Director (`name='Director'`, `description='Root Director for this fleet'`, `status='active'`).
 3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` (the root has no parent Director) and `coding_agent=<value of --coding-agent>` (default `'claude'`).
-4. `UPDATE sessions SET director_agent_id = <director's agent_id> WHERE session_id = <new>`.
+4. `UPDATE fleets SET director_agent_id = <director's agent_id> WHERE fleet_id = <new>`.
 5. `INSERT INTO agents (...)` for the built-in `Administrator` with `agent_card_json.cafleet.kind == 'builtin-administrator'`. The Administrator never gets an `agent_placements` row.
 
-The `tmux` context (`session`, `window_id`, `pane_id`) is read **before** the transaction opens, so any tmux failure surfaces as `Error: cafleet session create must be run inside a tmux session` and exit 1 without touching the DB. Rollback covers all five operations — a failure in any step leaves the DB unchanged.
+The `tmux` context (`session`, `window_id`, `pane_id`) is read **before** the transaction opens, so any tmux failure surfaces as `Error: cafleet fleet create must be run inside a tmux session` and exit 1 without touching the DB. Rollback covers all five operations — a failure in any step leaves the DB unchanged.
 
-`broker.deregister_agent` refuses to deregister an agent whose `agent_id` matches any `sessions.director_agent_id` and raises `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` (exit 1). `session delete` remains the only supported teardown path for the root Director.
+`broker.deregister_agent` refuses to deregister an agent whose `agent_id` matches any `fleets.director_agent_id` and raises `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` (exit 1). `fleet delete` remains the only supported teardown path for the root Director.
 
 ### `agents`
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `agent_id` | `TEXT` | `PRIMARY KEY` | UUID v4. |
-| `session_id` | `TEXT` | `NOT NULL`, `REFERENCES sessions(session_id) ON DELETE RESTRICT` | The owning session. SQLite enforces the FK once `PRAGMA foreign_keys=ON` is set. |
+| `fleet_id` | `TEXT` | `NOT NULL`, `REFERENCES fleets(fleet_id) ON DELETE RESTRICT` | The owning fleet. SQLite enforces the FK once `PRAGMA foreign_keys=ON` is set. |
 | `name` | `TEXT` | `NOT NULL` | |
 | `description` | `TEXT` | `NOT NULL` | |
 | `status` | `TEXT` | `NOT NULL` | `'active'` or `'deregistered'`. |
@@ -53,18 +53,18 @@ Indexes:
 
 | Name | Columns | Purpose |
 |---|---|---|
-| `idx_agents_session_status` | `(session_id, status)` | List active agents in a session; covers the `WHERE session_id = ? AND status = 'active'` predicate. |
+| `idx_agents_fleet_status` | `(fleet_id, status)` | List active agents in a fleet; covers the `WHERE fleet_id = ? AND status = 'active'` predicate. |
 
 Deregistration is a soft-delete: `status='deregistered'` plus `deregistered_at` is set in a single statement. There is no row delete and no background cleanup loop. Active query paths filter `status='active'` so dead rows are invisible to normal traffic.
 
 #### Built-in Administrator agent
 
-Each session owns exactly one built-in `Administrator` agent, marked by a flag inside `agent_card_json`:
+Each fleet owns exactly one built-in `Administrator` agent, marked by a flag inside `agent_card_json`:
 
 ```json
 {
   "name": "Administrator",
-  "description": "Built-in administrator agent for session <short-id>",
+  "description": "Built-in administrator agent for fleet <short-id>",
   "skills": [],
   "cafleet": {
     "kind": "builtin-administrator"
@@ -72,14 +72,14 @@ Each session owns exactly one built-in `Administrator` agent, marked by a flag i
 }
 ```
 
-The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned flags. `broker.register_agent` always builds the card itself from `(name, description, skills)`, so callers cannot smuggle `cafleet.kind` through any current public path. A module-level constant `ADMINISTRATOR_KIND = "builtin-administrator"` in `broker.py` plus a single `_is_administrator(agent_card_json)` predicate centralize Python-side predicate checks for this flag (the Administrator's `agent_card_json` is built inline at session-create time); some hot read paths (e.g. `broker.list_session_agents`, `broker.broadcast_message`) also probe `agent_card_json.cafleet.kind` directly in SQL via `json_extract(...)` to avoid shipping the full blob into Python.
+The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned flags. `broker.register_agent` always builds the card itself from `(name, description, skills)`, so callers cannot smuggle `cafleet.kind` through any current public path. A module-level constant `ADMINISTRATOR_KIND = "builtin-administrator"` in `broker.py` plus a single `_is_administrator(agent_card_json)` predicate centralize Python-side predicate checks for this flag (the Administrator's `agent_card_json` is built inline at fleet-create time); some hot read paths (e.g. `broker.list_fleet_agents`, `broker.broadcast_message`) also probe `agent_card_json.cafleet.kind` directly in SQL via `json_extract(...)` to avoid shipping the full blob into Python.
 
 **Creation paths**:
 
-- `broker.create_session(label, director_context)` inserts the Administrator row as the final operation of the 5-step root-Director bootstrap transaction (see "Root Director bootstrap" under the `sessions` table above); `registered_at` matches `sessions.created_at` exactly. The result dict exposes `administrator_agent_id` alongside the `director` sub-object for the caller.
-- Alembic revision `0006_seed_administrator_agent.py` is the migration that seeds the Administrator. The migration generates `agent_id = str(uuid.uuid4())` in Python (matching the broker's idiom — no SQL-side `gen_random_uuid()`), probes for an existing Administrator via `json_extract(agent_card_json, '$.cafleet.kind') = 'builtin-administrator'`, and is idempotent by construction (a second `upgrade` finds the existing row and skips the INSERT). Downgrade is provided for empty sessions only and is forward-only in practice — `tasks.context_id` uses `ON DELETE RESTRICT`, so downgrading a session that has tasks addressed to or from the Administrator raises `IntegrityError`. (`agent_placements.agent_id` uses `ON DELETE CASCADE`, but Administrators never receive a placement anyway.)
+- `broker.create_fleet(label, director_context)` inserts the Administrator row as the final operation of the 5-step root-Director bootstrap transaction (see "Root Director bootstrap" under the `fleets` table above); `registered_at` matches `fleets.created_at` exactly. The result dict exposes `administrator_agent_id` alongside the `director` sub-object for the caller.
+- Alembic revision `0006_seed_administrator_agent.py` is the migration that seeds the Administrator. The migration generates `agent_id = str(uuid.uuid4())` in Python (matching the broker's idiom — no SQL-side `gen_random_uuid()`), probes for an existing Administrator via `json_extract(agent_card_json, '$.cafleet.kind') = 'builtin-administrator'`, and is idempotent by construction (a second `upgrade` finds the existing row and skips the INSERT). Downgrade is provided for empty fleets only and is forward-only in practice — `tasks.context_id` uses `ON DELETE RESTRICT`, so downgrading a fleet that has tasks addressed to or from the Administrator raises `IntegrityError`. (`agent_placements.agent_id` uses `ON DELETE CASCADE`, but Administrators never receive a placement anyway.)
 
-**Invariant**: Every session has exactly one active `Administrator` agent. Both `broker.list_session_agents` and `broker.get_agent` surface a derived `kind` field (`"builtin-administrator"` | `"user"`) so the WebUI can locate the Administrator without matching on the name. `list_session_agents` derives the discriminator in SQL via `json_extract(agent_card_json, '$.cafleet.kind')` and never fetches the full card blob; `get_agent` already loads the full ORM row and computes the discriminator via `_is_administrator`.
+**Invariant**: Every fleet has exactly one active `Administrator` agent. Both `broker.list_fleet_agents` and `broker.get_agent` surface a derived `kind` field (`"builtin-administrator"` | `"user"`) so the WebUI can locate the Administrator without matching on the name. `list_fleet_agents` derives the discriminator in SQL via `json_extract(agent_card_json, '$.cafleet.kind')` and never fetches the full card blob; `get_agent` already loads the full ORM row and computes the discriminator via `_is_administrator`.
 
 **Protection**: A single `AdministratorProtectedError` class in `broker.py` guards two write paths today:
 
@@ -119,7 +119,7 @@ Indexes:
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `agent_id` | `TEXT` | `PRIMARY KEY`, `REFERENCES agents(agent_id) ON DELETE CASCADE` | The member agent. CASCADE ensures hard-delete of an agent (if any future path adds one) also removes the placement. |
-| `director_agent_id` | `TEXT` | nullable, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The Director that spawned this member. RESTRICT prevents hard-deleting a Director with live placements. **NULL** for the session's root Director (it has no parent), set by `broker.create_session` at bootstrap time. Member placements always have a non-NULL value. |
+| `director_agent_id` | `TEXT` | nullable, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The Director that spawned this member. RESTRICT prevents hard-deleting a Director with live placements. **NULL** for the fleet's root Director (it has no parent), set by `broker.create_fleet` at bootstrap time. Member placements always have a non-NULL value. |
 | `tmux_session` | `TEXT` | `NOT NULL` | e.g. `'main'`, from `tmux display-message '#{session_name}'`. |
 | `tmux_window_id` | `TEXT` | `NOT NULL` | e.g. `'@3'`, from `#{window_id}`. |
 | `tmux_pane_id` | `TEXT` | nullable | e.g. `'%7'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set via `PATCH /api/v1/agents/{id}/placement` after `tmux split-window` succeeds. |
@@ -140,30 +140,30 @@ If a user kills a pane manually without going through `cafleet member delete`, t
 
 SQLite ignores foreign key declarations unless `PRAGMA foreign_keys=ON` is issued on every connection. The registry installs a SQLAlchemy engine `connect` event listener that runs the PRAGMA on every new DBAPI connection. A regression test verifies the PRAGMA is active on a fresh connection.
 
-The two foreign keys (`agents.session_id → sessions.session_id`, `tasks.context_id → agents.agent_id`) both use `ON DELETE RESTRICT`. There is no path that physically deletes an agent — deregistration is a soft-status flip — so RESTRICT is the safest default. The added `sessions.director_agent_id → agents.agent_id` FK also uses `ON DELETE RESTRICT` for the same reason: it should never point at a row that can vanish. Session deletion uses a soft-delete (`deleted_at`) — it never physically removes rows, so the RESTRICTs are never triggered by the delete path.
+The two foreign keys (`agents.fleet_id → fleets.fleet_id`, `tasks.context_id → agents.agent_id`) both use `ON DELETE RESTRICT`. There is no path that physically deletes an agent — deregistration is a soft-status flip — so RESTRICT is the safest default. The added `fleets.director_agent_id → agents.agent_id` FK also uses `ON DELETE RESTRICT` for the same reason: it should never point at a row that can vanish. Fleet deletion uses a soft-delete (`deleted_at`) — it never physically removes rows, so the RESTRICTs are never triggered by the delete path.
 
 ## Operation mapping
 
 Every storage operation is implemented as a single SQL statement (or, where atomicity matters, a single transaction). The following tables enumerate the public store methods and the SQL they execute.
 
-### `RegistryStore` (agents + sessions)
+### `RegistryStore` (agents + fleets)
 
 | Method | SQL operation |
 |---|---|
-| `create_agent` | `INSERT INTO agents (...)` (single statement; `session_id` FK enforces the session exists). |
+| `create_agent` | `INSERT INTO agents (...)` (single statement; `fleet_id` FK enforces the fleet exists). |
 | `get_agent` | `SELECT … FROM agents WHERE agent_id = ?`. |
-| `list_active_agents(session_id)` | `SELECT agent_id, name, description, registered_at, agent_card_json FROM agents WHERE session_id = ? AND status = 'active'` (uses `idx_agents_session_status`). |
+| `list_active_agents(fleet_id)` | `SELECT agent_id, name, description, registered_at, agent_card_json FROM agents WHERE fleet_id = ? AND status = 'active'` (uses `idx_agents_fleet_status`). |
 | `list_active_agents(None)` | `SELECT … FROM agents WHERE status = 'active'` (rare; only used by tests). |
 | `deregister_agent` | `UPDATE agents SET status='deregistered', deregistered_at=? WHERE agent_id=? AND status='active'` (single statement; returns affected row count). |
-| `verify_agent_session` | `SELECT 1 FROM agents WHERE agent_id = ? AND session_id = ?`. |
+| `verify_agent_fleet` | `SELECT 1 FROM agents WHERE agent_id = ? AND fleet_id = ?`. |
 | `get_agent_name` | `SELECT name FROM agents WHERE agent_id = ?` (returns `''` if absent). |
-| `list_deregistered_agents_with_tasks(session_id)` | `SELECT a.agent_id, a.name, a.description, a.registered_at FROM agents a WHERE a.session_id = ? AND a.status = 'deregistered' AND EXISTS (SELECT 1 FROM tasks t WHERE t.context_id = a.agent_id LIMIT 1)`. |
-| `list_sessions` | `SELECT s.session_id, s.label, s.created_at, COUNT(a.agent_id) FROM sessions s LEFT JOIN agents a ON ... GROUP BY s.session_id`. |
-| `get_session` | `SELECT * FROM sessions WHERE session_id = ?`. |
+| `list_deregistered_agents_with_tasks(fleet_id)` | `SELECT a.agent_id, a.name, a.description, a.registered_at FROM agents a WHERE a.fleet_id = ? AND a.status = 'deregistered' AND EXISTS (SELECT 1 FROM tasks t WHERE t.context_id = a.agent_id LIMIT 1)`. |
+| `list_fleets` | `SELECT s.fleet_id, s.label, s.created_at, COUNT(a.agent_id) FROM fleets s LEFT JOIN agents a ON ... GROUP BY s.fleet_id`. |
+| `get_fleet` | `SELECT * FROM fleets WHERE fleet_id = ?`. |
 | `create_agent_with_placement(…, placement)` | Single transaction: `INSERT INTO agents (…)` + optional `INSERT INTO agent_placements (…)`. Superset of `create_agent` (which delegates with `placement=None`). |
 | `get_placement(agent_id)` | `SELECT * FROM agent_placements WHERE agent_id = ?`. |
 | `update_placement_pane_id(agent_id, pane_id)` | `UPDATE agent_placements SET tmux_pane_id = ? WHERE agent_id = ?`. |
-| `list_placements_for_director(session_id, director_agent_id)` | `SELECT a.*, p.* FROM agents a JOIN agent_placements p ON a.agent_id = p.agent_id WHERE a.session_id = ? AND p.director_agent_id = ? AND a.status = 'active'`. |
+| `list_placements_for_director(fleet_id, director_agent_id)` | `SELECT a.*, p.* FROM agents a JOIN agent_placements p ON a.agent_id = p.agent_id WHERE a.fleet_id = ? AND p.director_agent_id = ? AND a.status = 'active'`. |
 
 ### `TaskStore`
 
@@ -181,26 +181,26 @@ Every storage operation is implemented as a single SQL statement (or, where atom
 
 Stores receive an `async_sessionmaker[AsyncSession]` at construction time, **not** a per-call session. Each store method opens its own session via `async with self._sessionmaker() as session:` and any multi-statement operation wraps its body in `async with session.begin():`. Route handlers and the `BrokerExecutor` only ever see the store; they never construct or close a session.
 
-## Session Lifecycle
+## Fleet Lifecycle
 
-Sessions are created via `cafleet session create` (direct SQLite write, no HTTP; must be run inside a tmux session). `create_session` performs the 5-step transactional bootstrap described above — the session row, the root Director agent + placement, the `director_agent_id` back-reference, and the built-in Administrator are written atomically.
+Fleets are created via `cafleet fleet create` (direct SQLite write, no HTTP; must be run inside a tmux session). `create_fleet` performs the 5-step transactional bootstrap described above — the fleet row, the root Director agent + placement, the `director_agent_id` back-reference, and the built-in Administrator are written atomically.
 
-When member agents in a session deregister, the session remains valid — new members can still be spawned.
+When member agents in a fleet deregister, the fleet remains valid — new members can still be spawned.
 
-Deleting a session (via `cafleet session delete <id>`) is a **soft-delete**. `broker.delete_session` runs a single transaction that stamps `sessions.deleted_at = now`, deregisters every `status='active'` agent in the session (root Director included), and physically deletes every associated `agent_placements` row. `tasks` rows are preserved — the message history remains queryable. Re-running on an already-soft-deleted session is a no-op that reports `Deregistered 0 agents.` because the initial `UPDATE sessions SET deleted_at = now WHERE session_id = X AND deleted_at IS NULL` short-circuits the cascade. There is no `--force` flag, no un-delete path, and no cascade into `tasks`.
+Deleting a fleet (via `cafleet fleet delete <id>`) is a **soft-delete**. `broker.delete_fleet` runs a single transaction that stamps `fleets.deleted_at = now`, deregisters every `status='active'` agent in the fleet (root Director included), and physically deletes every associated `agent_placements` row. `tasks` rows are preserved — the message history remains queryable. Re-running on an already-soft-deleted fleet is a no-op that reports `Deregistered 0 agents.` because the initial `UPDATE fleets SET deleted_at = now WHERE fleet_id = X AND deleted_at IS NULL` short-circuits the cascade. There is no `--force` flag, no un-delete path, and no cascade into `tasks`.
 
-Soft-deleted sessions are hidden from `cafleet session list` (`broker.list_sessions` filters `WHERE deleted_at IS NULL`) and new registrations are rejected by `broker.register_agent` with `Error: session X is deleted`. `broker.get_session` always returns the row regardless of `deleted_at` and exposes the field so callers can distinguish "not found" vs. "soft-deleted".
+Soft-deleted fleets are hidden from `cafleet fleet list` (`broker.list_fleets` filters `WHERE deleted_at IS NULL`) and new registrations are rejected by `broker.register_agent` with `Error: fleet X is deleted`. `broker.get_fleet` always returns the row regardless of `deleted_at` and exposes the field so callers can distinguish "not found" vs. "soft-deleted".
 
-`broker.deregister_agent` refuses to deregister the root Director (detected by a match on `sessions.director_agent_id`). Use `session delete` for teardown.
+`broker.deregister_agent` refuses to deregister the root Director (detected by a match on `fleets.director_agent_id`). Use `fleet delete` for teardown.
 
 ## Task Visibility Rules
 
 | Caller | Can Access |
 |---|---|
-| Recipient (same-session agent matching `to_agent_id`) | `ListTasks` by contextId (= their agent_id), `GetTask`, `SendMessage` (ACK) |
-| Sender (same-session agent matching `from_agent_id`) | `GetTask` by known taskId, `CancelTask` |
+| Recipient (same-fleet agent matching `to_agent_id`) | `ListTasks` by contextId (= their agent_id), `GetTask`, `SendMessage` (ACK) |
+| Sender (same-fleet agent matching `from_agent_id`) | `GetTask` by known taskId, `CancelTask` |
 
-`ListTasks` enforces that `contextId` must equal the caller's `agent_id`. If a different `contextId` is provided, the Broker returns an error. This prevents inbox snooping — even within the same session. `GetTask` verifies that the task's `from_agent_id` or `to_agent_id` belongs to the caller's session; cross-session lookups return "not found".
+`ListTasks` enforces that `contextId` must equal the caller's `agent_id`. If a different `contextId` is provided, the Broker returns an error. This prevents inbox snooping — even within the same fleet. `GetTask` verifies that the task's `from_agent_id` or `to_agent_id` belongs to the caller's fleet; cross-fleet lookups return "not found".
 
 ## Broadcast Grouping
 

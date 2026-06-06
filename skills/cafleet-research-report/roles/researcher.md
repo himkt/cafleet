@@ -27,14 +27,14 @@ You do NOT speak to the Manager directly. All coordination flows through the Dir
 **Sending a message to the Director** (completion reports, questions, contradiction flags):
 
 ```bash
-cafleet --session-id [session-id] message send --agent-id [my-agent-id] \
+cafleet --fleet-id [fleet-id] message send --agent-id [my-agent-id] \
   --to [director-agent-id] \
   --text "[your report or question]"
 ```
 
-Substitute the literal `[session-id]`, `[my-agent-id]`, and `[director-agent-id]` UUIDs from your spawn prompt. Never use shell variables.
+Substitute the literal `[fleet-id]`, `[my-agent-id]`, and `[director-agent-id]` UUIDs from your spawn prompt. Never use shell variables.
 
-**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet --session-id [session-id] message poll --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the cafleet message-task id (called `[task-id]`; **distinct from** the harness `taskId` you use with `TaskUpdate` to claim your sub-topic task). After acting on the polled message, ack it via `cafleet --session-id [session-id] message ack --agent-id [my-agent-id] --task-id [task-id]`.
+**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet --fleet-id [fleet-id] message poll --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the cafleet message-task id (called `[task-id]`; **distinct from** the harness `taskId` you use with `TaskUpdate` to claim your sub-topic task). After acting on the polled message, ack it via `cafleet --fleet-id [fleet-id] message ack --agent-id [my-agent-id] --task-id [task-id]`.
 
 **Pane silence is normal.** After writing your file and sending a completion report you sit at the prompt. That is the expected flow — you are waiting for the Director to either relay a Manager follow-up or signal that you are done. Do not send status pings.
 

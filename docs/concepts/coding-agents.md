@@ -6,7 +6,7 @@ icon: lucide/cpu
 
 cafleet supports three coding-agent binaries inside member panes: `claude`
 (Claude Code), `codex` (OpenAI Codex CLI), and `opencode` (opencode.ai). The
-backend is selected at session-create and member-create time via
+backend is selected at fleet-create and member-create time via
 `--coding-agent {claude,codex,opencode}`; the default is `claude`.
 
 ## Backend resolution
@@ -41,10 +41,10 @@ CLI's `click.Choice(...)` enum gate is computed dynamically from
 so adding a future backend is one entry in the `CODING_AGENTS` registry.
 
 Mixed-backend teams are allowed: a single Director may spawn `claude`,
-`codex`, and `opencode` members in the same session with no broker-level
+`codex`, and `opencode` members in the same fleet with no broker-level
 differences.
 
-For `cafleet session create`, the `--coding-agent` flag is operator-declared
+For `cafleet fleet create`, the `--coding-agent` flag is operator-declared
 metadata only — cafleet does not spawn the root Director's coding-agent
 process and cannot auto-detect what is already running, so the operator
 declares which binary is in the pane. For `cafleet member create`, the flag
