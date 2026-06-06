@@ -1,6 +1,6 @@
 # Remove token-budget testing
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 5/5 tasks complete
 **Last Updated**: 2026-06-06
 
@@ -108,3 +108,4 @@ This is a clean removal: no replacement guard is added, and no restoration / mig
 | Date | Changes |
 |------|---------|
 | 2026-06-06 | Initial draft |
+| 2026-06-06 | Implemented: removed all token-budget testing (7 files + the `token-reduction.md` paragraph); `mise //cafleet:test` → 715 passed; opened PR #95. |
