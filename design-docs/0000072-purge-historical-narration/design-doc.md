@@ -1,12 +1,12 @@
 # 0000072 — Purge Historical-Trajectory Narration
 
 **Status**: Approved
-**Progress**: 21/24 tasks complete
+**Progress**: 24/24 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
 
-The repository carries "historical-trajectory" narration — text meaningful only to someone who knows the project's past ("X was deprecated in design NNNN", "previously Y, now Z", "preserved for forensic visibility", design-doc-number citations as the reason for current code, and sentinel "removed-flag → error" tests). This change deletes or rewrites every such mention across `docs/`, `README.md`, `.claude/`, `skills/`, `cafleet/src/` (excluding Alembic migrations), and `cafleet/tests/` so the repository reads as if the removed/rejected features never existed.
+The repository carries "historical-trajectory" narration — text meaningful only to someone who knows the project's past ("X was deprecated in design NNNN", "previously Y, now Z", "preserved for forensic visibility", design-doc-number citations as the reason for current code, and sentinel "removed-flag → error" tests). This change deletes or rewrites every such mention across `docs/`, `README.md`, `.claude/`, `skills/`, `admin/src/`, `cafleet/src/` (excluding Alembic migrations), and `cafleet/tests/` so the repository reads as if the removed/rejected features never existed.
 
 ## Success Criteria
 
@@ -190,9 +190,10 @@ This is a documentation/test-hygiene cleanup. It removes **no runtime behavior**
 
 ### Step 7: Verification
 
-- [ ] Run `mise //cafleet:test` — full suite green (special attention to T6) <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` — clean <!-- completed: -->
-- [ ] Re-run the sweep (use `git grep` over tracked files, which also excludes the untracked WebUI build output) and confirm zero matches **outside** the exempt areas (`design-docs/`, `researches/`, `cafleet/src/cafleet/alembic/`, `cafleet/src/cafleet/webui/assets/**`, lock files), for: `deprecat`, `no longer|formerly|previously|used to|historically`, `forensic|preserved for|for history`, `restoration`, `\blegacy\b`, `design[ -]?0000[0-9]{3}|\b0000[0-9]{3}\b` (word-boundary form so all-zero UUID constants like `00000000-0000-…` do not false-match; the KEEP-listed example slugs `0000060`/`0000099` are expected matches to ignore), `in v1|first cut`, `was removed|removed .* re-emerg`. Each remaining hit is either KEEP-listed or exempt — record any judgment calls. <!-- completed: -->
+- [x] Run `mise //cafleet:test` — full suite green (special attention to T6) <!-- completed: 2026-06-06T02:45 --> <!-- 727 passed; test_broker_typed_columns.py (T6) green -->
+- [x] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` — clean <!-- completed: 2026-06-06T02:45 --> <!-- ruff check + format --check clean (91 files); ty check clean -->
+
+- [x] Re-run the sweep (use `git grep` over tracked files, which also excludes the untracked WebUI build output) and confirm zero matches **outside** the exempt areas (`design-docs/`, `researches/`, `cafleet/src/cafleet/alembic/`, `cafleet/src/cafleet/webui/assets/**`, lock files), for: `deprecat`, `no longer|formerly|previously|used to|historically`, `forensic|preserved for|for history`, `restoration`, `\blegacy\b`, `design[ -]?0000[0-9]{3}|\b0000[0-9]{3}\b` (word-boundary form so all-zero UUID constants like `00000000-0000-…` do not false-match; the KEEP-listed example slugs `0000060`/`0000099` are expected matches to ignore), `in v1|first cut`, `was removed|removed .* re-emerg`. Each remaining hit is either KEEP-listed or exempt — record any judgment calls. <!-- completed: 2026-06-06T03:01 --> <!-- re-sweep after admin/src reword: zero unaccounted matches; all remaining hits KEEP-listed/exempt/benign -->
 
 ---
 
@@ -204,3 +205,4 @@ This is a documentation/test-hygiene cleanup. It removes **no runtime behavior**
 | 2026-06-06 | Reviewer pass: added C2 (`.claude/rules/commands.md`) and T12 (`test_output_render_task.py`); exempted generated WebUI build output; resolved the D15 downgrade-narration judgment (keep); added the D1/D2-vs-Out-of-scope note; extended example-slug KEEP coverage to skill files; tightened the Step 7 sweep to a word-boundary form |
 | 2026-06-06 | Reviewer pass: reworded the sweep success criterion to "zero unaccounted matches"; added the "Known-benign sweep matches" KEEP bullet |
 | 2026-06-06 | User approved; Status → Approved |
+| 2026-06-06 | Execution: Steps 1–6 applied and committed. Step 7 verification — test (727) / lint / typecheck green; narration sweep clean except one `first cut` hit in `admin/src/components/MessageInput.tsx`. User scope decision: extend scope to `admin/src/` and reword that string (the only narration outside the originally-declared surfaces). |
