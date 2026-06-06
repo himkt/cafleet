@@ -37,10 +37,9 @@ __pycache__/
 # branch inside <repo>/researches/<slug>/ and <repo>/design-docs/<NNNNNNN>-<slug>/.
 .cafleet-base-dir.json
 
-# Legacy spawn-prompt audit directory at the repo root. Audit files are now
-# written under per-task folders (`researches/<slug>/prompts/`,
-# `design-docs/<NNNNNNN>-<slug>/prompts/`); this entry keeps any straggler
-# writes during the rollout out of version control.
+# Stray spawn-prompt audit writes at the repo root; the canonical location is
+# per-task `prompts/` folders (`researches/<slug>/prompts/`,
+# `design-docs/<NNNNNNN>-<slug>/prompts/`).
 /prompts/
 
 # Spawn-prompt audit re-renders written by the Director when ${BASE} = repo root

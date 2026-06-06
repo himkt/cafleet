@@ -25,7 +25,7 @@
   - Stop on first failure with verbose output: `mise //cafleet:test -xvs tests/test_my.py`
   - Match a keyword: `mise //cafleet:test -k my_keyword`
   - Package-relative paths only (`tests/...`, not `cafleet/tests/...`), because the mise task's working directory is `cafleet/`.
-  - **Defensive `--` separator** for args that might collide with a mise flag: `mise //cafleet:test -- --collect-only -q tests/` — design-docs/0000044 uses this form. The bare form (without `--`) works in practice for the common pytest flags above; reach for `--` when an arg starts with two dashes AND could plausibly be parsed by mise itself.
+  - **Defensive `--` separator** for args that might collide with a mise flag: `mise //cafleet:test -- --collect-only -q tests/`. The bare form (without `--`) works in practice for the common pytest flags above; reach for `--` when an arg starts with two dashes AND could plausibly be parsed by mise itself.
 
 ## NEVER bypass mise with the underlying tool
 

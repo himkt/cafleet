@@ -1,7 +1,7 @@
 # 0000072 — Purge Historical-Trajectory Narration
 
 **Status**: Approved
-**Progress**: 7/24 tasks complete
+**Progress**: 9/24 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -160,8 +160,9 @@ This is a documentation/test-hygiene cleanup. It removes **no runtime behavior**
 
 ### Step 2: Config
 
-- [ ] C1 — `.gitignore`: reword the `/prompts/` comment to present tense (drop "Legacy"/"now"/"during the rollout") <!-- completed: -->
-- [ ] C2 — `.claude/rules/commands.md`: drop the "— design-docs/0000044 uses this form" citation <!-- completed: -->
+- [x] C1 — `.gitignore`: reword the `/prompts/` comment to present tense (drop "Legacy"/"now"/"during the rollout") <!-- completed: 2026-06-06T02:31 -->
+- [x] C2 — `.claude/rules/commands.md`: drop the "— design-docs/0000044 uses this form" citation <!-- completed: 2026-06-06T02:33 -->
+
 
 ### Step 3: Tests — delete pure removal-sentinels (Q2)
 
