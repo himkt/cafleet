@@ -86,7 +86,7 @@ def test_render_agent_full__returns_unchanged_source():
 
 
 @pytest.fixture
-def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
+def bootstrapped_fleet(tmp_path, monkeypatch, _reset_engine_singletons):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,
@@ -105,10 +105,10 @@ def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
     runner = CliRunner()
     init = runner.invoke(cli, ["db", "init"])
     assert init.exit_code == 0
-    create = runner.invoke(cli, ["session", "create", "--json"])
+    create = runner.invoke(cli, ["fleet", "create", "--json"])
     assert create.exit_code == 0
     data = json.loads(create.output)
-    return data["session_id"], data["director"]["agent_id"], runner
+    return data["fleet_id"], data["director"]["agent_id"], runner
 
 
 @pytest.mark.parametrize(
@@ -121,10 +121,10 @@ def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
     ],
 )
 def test_cli_agent_show_or_list__slim_and_full_shapes(
-    bootstrapped_session, verb, mode, expect_slim_keys, expect_full_uuid
+    bootstrapped_fleet, verb, mode, expect_slim_keys, expect_full_uuid
 ):
-    sid, director_id, runner = bootstrapped_session
-    args = ["--session-id", sid, "--json", "agent", verb, "--agent-id", director_id]
+    sid, director_id, runner = bootstrapped_fleet
+    args = ["--fleet-id", sid, "--json", "agent", verb, "--agent-id", director_id]
     if verb == "show":
         args.extend(["--id", director_id])
     if mode == "full":

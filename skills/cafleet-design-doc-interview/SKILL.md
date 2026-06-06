@@ -51,17 +51,17 @@ Director-Analyzer cafleet messages in this skill are explicitly exempt from the 
 
 ## Architecture
 
-The Director is the root agent of a CAFleet session — bootstrapped automatically by `cafleet session create` (no separate `cafleet agent register` call) — and spawns one short-lived Analyzer via `cafleet member create`. The Analyzer is torn down BEFORE the interview rounds begin; the Director then runs the rounds (and writes annotations) on its own. All Analyzer coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
+The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` (no separate `cafleet agent register` call) — and spawns one short-lived Analyzer via `cafleet member create`. The Analyzer is torn down BEFORE the interview rounds begin; the Director then runs the rounds (and writes annotations) on its own. All Analyzer coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
 
 ```
 User
- +-- Director (main Claude -- cafleet session create, cafleet member create, drives Q&A, writes annotations)
+ +-- Director (main Claude -- cafleet fleet create, cafleet member create, drives Q&A, writes annotations)
       +-- Analyzer (member agent -- spawned in tmux pane; returns question list; terminated)
 ```
 
 - **Director ↔ User**: `AskUserQuestion` (4 questions per call, batching the Analyzer's numbered list)
 - **Director ↔ Analyzer**: `cafleet message send` (assignment with doc path + already-reviewed sections; reply with numbered question list)
-- Members receive messages via push notification: the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview`. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves. `--session-id` is a global flag (placed **before** the subcommand); `--agent-id` is a per-subcommand option (placed **after** the subcommand name).
+- Members receive messages via push notification: the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview`. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves. `--fleet-id` is a global flag (placed **before** the subcommand); `--agent-id` is a per-subcommand option (placed **after** the subcommand name).
 
 ## Prerequisites
 
@@ -93,12 +93,12 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 
 | Agent Teams primitive | CAFleet equivalent |
 |---|---|
-| `TeamCreate(name="interview-{slug}")` | CAFleet session created via `cafleet session create` |
-| `Agent(subagent_type="Explore", prompt=...)` (Analyzer) | `cafleet --session-id <session-id> member create --agent-id <director-agent-id> --name "Analyzer" --description "..." -- "<prompt>"` |
-| `SendMessage(to="Analyzer")` | `cafleet --session-id <session-id> message send --agent-id <director-agent-id> --to <analyzer-agent-id> --text "..."` |
-| `SendMessage(to="Director")` (from Analyzer) | `cafleet --session-id <session-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
+| `TeamCreate(name="interview-{slug}")` | CAFleet fleet created via `cafleet fleet create` |
+| `Agent(subagent_type="Explore", prompt=...)` (Analyzer) | `cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> --name "Analyzer" --description "..." -- "<prompt>"` |
+| `SendMessage(to="Analyzer")` | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <analyzer-agent-id> --text "..."` |
+| `SendMessage(to="Director")` (from Analyzer) | `cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
 | `cafleet-agent-team-supervision` `/loop` | Load the `cafleet-agent-team-monitoring` skill (mechanism + `/loop`) and the `cafleet-agent-team-supervision` skill (governance), then run `/loop` from the `cafleet-agent-team-monitoring` skill |
-| `TeamDelete` | `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <analyzer-agent-id>`, then `cafleet session delete <session-id>` |
+| `TeamDelete` | `cafleet --fleet-id <fleet-id> member delete --agent-id <director-agent-id> --member-id <analyzer-agent-id>`, then `cafleet fleet delete <fleet-id>` |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
 ## Process
@@ -107,21 +107,11 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 
 1. Load the `cafleet-base-dir` skill for the no-bypass write protocol and `<unset>` sentinel contract. Then canonicalize `$ARGUMENTS` and resolve the task-scoped BASE:
 
-   - **Relative input** — accept any of: `0000060-foo`, `0000060-foo/design-doc.md`, `design-docs/0000060-foo`, `design-docs/0000060-foo/design-doc.md`. Canonicalize to `design-docs/<slug>` by: (1) stripping the trailing `/design-doc.md` if present; (2) stripping the leading `design-docs/` if present; (3) prepending `design-docs/`. The resolver itself does NOT perform this stripping (per the `cafleet-base-dir` skill § *Consumer contract*) — the consuming skill canonicalizes first, then calls:
+   - **Relative input** — accept any of: `0000060-foo`, `0000060-foo/design-doc.md`, `design-docs/0000060-foo`, `design-docs/0000060-foo/design-doc.md`. Canonicalize to `design-docs/<slug>` by: (1) stripping the trailing `/design-doc.md` if present; (2) stripping the leading `design-docs/` if present; (3) prepending `design-docs/`. The skill's Step 0 does NOT perform this stripping (per the `cafleet-base-dir` skill § *Consumer contract*) — canonicalize first, then run the skill's **Step 0 (task-scope resolution)** with the relpath `design-docs/<slug>`.
 
-     ```bash
-     cafleet base-dir resolve design-docs/<slug> --json
-     ```
+   - **Absolute path** (e.g. `/abs/path/to/design-docs/0000060-foo/design-doc.md`): Step 0 accepts only the task-folder path, not a child file. Strip the trailing `/design-doc.md` if present so the absolute path identifies the task folder, then run Step 0 with that absolute task-folder path. Step 0 accepts the absolute path if it lies strictly under the inferred repo root; otherwise it yields the `<unset>` sentinel.
 
-   - **Absolute path** (e.g. `/abs/path/to/design-docs/0000060-foo/design-doc.md`): the resolver accepts only the task-folder path, not a child file. Strip the trailing `/design-doc.md` if present so the absolute path identifies the task folder, then pass through positionally:
-
-     ```bash
-     cafleet base-dir resolve <abs-task-folder> --json
-     ```
-
-     The CLI accepts the absolute path if it lies strictly under the inferred repo root; otherwise the resolver returns the `unset` shape.
-
-   Branch on the returned `status`: on `status == "resolved"`, set `${BASE}` to the returned `base` field, `dir_path = ${BASE}`, and `doc_path = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). On `status == "unset"` (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `dir_path` to the **canonicalized** absolute task-folder path and `doc_path = dir_path / "design-doc.md"` (unless `$ARGUMENTS` already names `design-doc.md`, in which case use it verbatim and derive `dir_path = dirname(doc_path)`), and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet-base-dir` skill § *The `<unset>` sentinel*.
+   Branch on Step 0's outcome: when it **resolves**, set `${BASE}` to the resolved task folder, `dir_path = ${BASE}`, and `doc_path = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). When it yields **`<unset>`** (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `dir_path` to the **canonicalized** absolute task-folder path and `doc_path = dir_path / "design-doc.md"` (unless `$ARGUMENTS` already names `design-doc.md`, in which case use it verbatim and derive `dir_path = dirname(doc_path)`), and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet-base-dir` skill § *The `<unset>` sentinel*.
 2. Read the design document at `doc_path`. If missing or empty, report the error and stop.
 3. Run `cafleet doctor`. If it reports a problem, surface its message and stop.
 
@@ -141,17 +131,17 @@ In resume mode where Step 2 IS run, parse the JSON array from the existing `inte
 
 **Skip this step entirely when `SKIP_ANALYZER=true`** (Step 1 found unanswered questions still in `question.md` from a prior invocation — the Director already has the question list).
 
-#### 2a. Establish a CAFleet session
+#### 2a. Establish a CAFleet fleet
 
 ```bash
-cafleet session create --label "design-doc-interview-{slug}" --json
+cafleet fleet create --label "design-doc-interview-{slug}" --json
 ```
 
-Capture `session_id` and `director.agent_id` from the JSON response. Substitute them for `<session-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal UUIDs.
+Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal UUIDs.
 
 #### 2b. Start the monitoring `/loop`
 
-BEFORE spawning the Analyzer, load both the `cafleet-agent-team-monitoring` skill and the `cafleet-agent-team-supervision` skill (in that order) and use the `cafleet-agent-team-monitoring` skill's `/loop` Prompt Template to start a `/loop` monitor at the 1-minute interval using the literal `<session-id>` and `<director-agent-id>` UUIDs. **Record the cron job ID returned by `/loop` (and by any `CronCreate` it issues underneath) — Step 2f references this exact ID when tearing the loop down via `CronDelete`.** The loop stays active until the Analyzer is torn down at the end of this step.
+BEFORE spawning the Analyzer, load both the `cafleet-agent-team-monitoring` skill and the `cafleet-agent-team-supervision` skill (in that order) and use the `cafleet-agent-team-monitoring` skill's `/loop` Prompt Template to start a `/loop` monitor at the 1-minute interval using the literal `<fleet-id>` and `<director-agent-id>` UUIDs. **Record the cron job ID returned by `/loop` (and by any `CronCreate` it issues underneath) — Step 2f references this exact ID when tearing the loop down via `CronDelete`.** The loop stays active until the Analyzer is torn down at the end of this step.
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
@@ -169,7 +159,7 @@ ROLE DEFINITION: Open [INSERT abs path to roles/analyzer.md] with the Read tool 
 Load these skills at startup:
 - the `cafleet` skill — for communication with the Director
 
-SESSION ID: {session_id}
+FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
 BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
@@ -177,7 +167,7 @@ DESIGN DOCUMENT: [INSERT doc_path]
 ALREADY-REVIEWED SECTIONS: [INSERT JSON array from interview-progress, or "none" on fresh start]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your numbered question list"
+- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your numbered question list"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 Read the design document, generate a numbered question list per the role definition,
@@ -186,12 +176,12 @@ send it to the Director via cafleet message send, then idle pending shutdown.
 
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
 2. **Write the rendered text** to `${BASE}/prompts/analyzer-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --session-id <session-id> --json member create --agent-id <director-agent-id> \
+   cafleet --fleet-id <fleet-id> --json member create --agent-id <director-agent-id> \
      --name "Analyzer" \
      --description "Reads the design doc and generates a numbered question list" \
      --prompt-file ${BASE}/prompts/analyzer-<UTC-compact>.md
@@ -201,7 +191,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
 #### 2e. Wait for the Analyzer's question list
 
-Poll `cafleet --session-id <session-id> message poll --agent-id <director-agent-id> --full` until the Analyzer's reply arrives. **The `--full` flag is required**: `cafleet message poll` truncates each message body to 200 codepoints + `…` by default, which would silently mangle the Analyzer's numbered question list. Acknowledge with `cafleet --session-id <session-id> message ack --agent-id <director-agent-id> --task-id <task-id>`.
+Poll `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id> --full` until the Analyzer's reply arrives. **The `--full` flag is required**: `cafleet message poll` truncates each message body to 200 codepoints + `…` by default, which would silently mangle the Analyzer's numbered question list. Acknowledge with `cafleet --fleet-id <fleet-id> message ack --agent-id <director-agent-id> --task-id <task-id>`.
 
 The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll --full`. After 2 corrective rounds, escalate to the user.
 
@@ -210,10 +200,10 @@ The reply must be a flat numbered list following the format specified in [roles/
 The Analyzer is stateless — keeping it alive through the Q&A rounds wastes a pane and a monitor. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received:
 
 1. `CronDelete` the `/loop` monitor (cron ID recorded at Step 2b).
-2. `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <analyzer-agent-id>`. The call blocks until the pane is gone (15 s timeout); on exit 2, follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
-3. `cafleet --session-id <session-id> member list --agent-id <director-agent-id>` — the team's roster MUST be empty.
-4. `cafleet session delete <session-id>` (positional, no `--session-id` flag).
-5. `cafleet session list` — the session MUST not appear.
+2. `cafleet --fleet-id <fleet-id> member delete --agent-id <director-agent-id> --member-id <analyzer-agent-id>`. The call blocks until the pane is gone (15 s timeout); on exit 2, follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
+3. `cafleet --fleet-id <fleet-id> member list --agent-id <director-agent-id>` — the team's roster MUST be empty.
+4. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).
+5. `cafleet fleet list` — the fleet MUST not appear.
 
 #### 2g. Persist the question list to `question.md`
 
@@ -276,7 +266,7 @@ After persisting the question list (Step 2g) — or directly when `SKIP_ANALYZER
 
 ### Step 5: Session Report (Director)
 
-Present a session summary to the user:
+Present a summary to the user:
 
 | Field | Content |
 |:--|:--|

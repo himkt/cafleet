@@ -1,21 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Agent } from "./types";
-import { setSessionId, getAgents, listSessions } from "./api";
-import SessionPicker from "./components/SessionPicker";
+import { setFleetId, getAgents, listFleets } from "./api";
+import FleetPicker from "./components/FleetPicker";
 import Dashboard from "./components/Dashboard";
 
 interface Route {
-  kind: "sessions" | "dashboard";
-  sessionId?: string;
+  kind: "fleets" | "dashboard";
+  fleetId?: string;
 }
 
 function parseHash(): Route {
   const hash = window.location.hash.replace(/^#\/?/, "");
-  const match = hash.match(/^sessions\/([^/]+)\/agents/);
+  const match = hash.match(/^fleets\/([^/]+)\/agents/);
   if (match) {
-    return { kind: "dashboard", sessionId: match[1] };
+    return { kind: "dashboard", fleetId: match[1] };
   }
-  return { kind: "sessions" };
+  return { kind: "fleets" };
 }
 
 function navigate(hash: string): void {
@@ -34,7 +34,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (route.kind !== "dashboard" || !route.sessionId) {
+    if (route.kind !== "dashboard" || !route.fleetId) {
       setLoading(false);
       return;
     }
@@ -43,22 +43,22 @@ export default function App() {
 
     (async () => {
       try {
-        const sessions = await listSessions();
+        const fleets = await listFleets();
         if (cancelled) return;
 
-        const found = sessions.some((s) => s.session_id === route.sessionId);
+        const found = fleets.some((s) => s.fleet_id === route.fleetId);
         if (!found) {
-          navigate("/sessions");
+          navigate("/fleets");
           return;
         }
 
-        setSessionId(route.sessionId!);
+        setFleetId(route.fleetId!);
         const data = await getAgents();
         if (cancelled) return;
         setAgents(data.agents);
       } catch {
         if (!cancelled) {
-          navigate("/sessions");
+          navigate("/fleets");
         }
       } finally {
         if (!cancelled) {
@@ -72,21 +72,21 @@ export default function App() {
     };
   }, [route]);
 
-  const handleSelectSession = useCallback(async (sid: string) => {
-    setSessionId(sid);
+  const handleSelectFleet = useCallback(async (sid: string) => {
+    setFleetId(sid);
     try {
       const data = await getAgents();
       setAgents(data.agents);
-      navigate(`/sessions/${sid}/agents`);
+      navigate(`/fleets/${sid}/agents`);
     } catch {
-      setSessionId(null);
+      setFleetId(null);
     }
   }, []);
 
   const handleBack = useCallback(() => {
-    setSessionId(null);
+    setFleetId(null);
     setAgents([]);
-    navigate("/sessions");
+    navigate("/fleets");
   }, []);
 
   if (loading && route.kind === "dashboard") {
@@ -97,15 +97,15 @@ export default function App() {
     );
   }
 
-  if (route.kind === "dashboard" && route.sessionId) {
+  if (route.kind === "dashboard" && route.fleetId) {
     return (
       <Dashboard
-        sessionId={route.sessionId}
+        fleetId={route.fleetId}
         initialAgents={agents}
         onBack={handleBack}
       />
     );
   }
 
-  return <SessionPicker onSelect={handleSelectSession} />;
+  return <FleetPicker onSelect={handleSelectFleet} />;
 }

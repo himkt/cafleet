@@ -21,7 +21,7 @@ from tests._member_cli_helpers import (
 
 
 @pytest.fixture
-def session_id():
+def fleet_id():
     return str(uuid.uuid4())
 
 
@@ -32,8 +32,8 @@ def _stub_tmux_available(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda session_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda session_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 @pytest.fixture
@@ -70,8 +70,8 @@ def freetext_recorder(monkeypatch):
     return calls
 
 
-def _invoke(runner, session_id, *extra_args, json_output=False):
-    args = ["--session-id", session_id]
+def _invoke(runner, fleet_id, *extra_args, json_output=False):
+    args = ["--fleet-id", fleet_id]
     if json_output:
         args.append("--json")
     args.extend(
@@ -119,9 +119,9 @@ def _invoke(runner, session_id, *extra_args, json_output=False):
     ],
 )
 def test_flag_validation(
-    runner, session_id, happy_path_agent, scenario, extra_args, expected_substring
+    runner, fleet_id, happy_path_agent, scenario, extra_args, expected_substring
 ):
-    result = _invoke(runner, session_id, *extra_args)
+    result = _invoke(runner, fleet_id, *extra_args)
     assert result.exit_code == 2, result.output
     if expected_substring is not None:
         assert expected_substring in (result.output or "")
@@ -149,7 +149,7 @@ def test_flag_validation(
     ],
 )
 def test_authorization_boundary(
-    runner, session_id, monkeypatch, scenario, agent_return, expected_substrings
+    runner, fleet_id, monkeypatch, scenario, agent_return, expected_substrings
 ):
     if agent_return is None:
         monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
@@ -171,7 +171,7 @@ def test_authorization_boundary(
             "get_agent",
             lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
         )
-    result = _invoke(runner, session_id, "--choice", "1")
+    result = _invoke(runner, fleet_id, "--choice", "1")
     assert result.exit_code == 1, result.output
     out = (
         (result.output or "").lower()
@@ -186,9 +186,9 @@ def test_authorization_boundary(
 
 @pytest.mark.parametrize("digit", [1, 2, 3])
 def test_choice_dispatch__matching_digit_and_pane(
-    runner, session_id, happy_path_agent, choice_recorder, freetext_recorder, digit
+    runner, fleet_id, happy_path_agent, choice_recorder, freetext_recorder, digit
 ):
-    result = _invoke(runner, session_id, "--choice", str(digit))
+    result = _invoke(runner, fleet_id, "--choice", str(digit))
     assert result.exit_code == 0, result.output
     assert len(choice_recorder) == 1
     assert choice_recorder[0]["digit"] == digit
@@ -208,14 +208,14 @@ def test_choice_dispatch__matching_digit_and_pane(
 )
 def test_freetext_dispatch__literal_passthrough(
     runner,
-    session_id,
+    fleet_id,
     happy_path_agent,
     freetext_recorder,
     choice_recorder,
     scenario,
     payload,
 ):
-    result = _invoke(runner, session_id, "--freetext", payload)
+    result = _invoke(runner, fleet_id, "--freetext", payload)
     assert result.exit_code == 0, result.output
     assert len(freetext_recorder) == 1
     assert freetext_recorder[0]["text"] == payload
@@ -239,7 +239,7 @@ def test_freetext_dispatch__literal_passthrough(
 )
 def test_output_format__text(
     runner,
-    session_id,
+    fleet_id,
     happy_path_agent,
     choice_recorder,
     freetext_recorder,
@@ -248,7 +248,7 @@ def test_output_format__text(
     expected_substring,
     recorder_fixture,
 ):
-    result = _invoke(runner, session_id, *args_extra)
+    result = _invoke(runner, fleet_id, *args_extra)
     assert result.exit_code == 0, result.output
     assert expected_substring in (result.output or "")
 
@@ -262,7 +262,7 @@ def test_output_format__text(
 )
 def test_output_format__json_envelope(
     runner,
-    session_id,
+    fleet_id,
     happy_path_agent,
     choice_recorder,
     freetext_recorder,
@@ -271,7 +271,7 @@ def test_output_format__json_envelope(
     expected_action,
     expected_value,
 ):
-    result = _invoke(runner, session_id, *args_extra, json_output=True)
+    result = _invoke(runner, fleet_id, *args_extra, json_output=True)
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert set(data.keys()) == {"member_agent_id", "pane_id", "action", "value"}
@@ -307,7 +307,7 @@ def test_output_format__json_envelope(
 )
 def test_freetext_bang_rejection(
     runner,
-    session_id,
+    fleet_id,
     happy_path_agent,
     freetext_recorder,
     scenario,
@@ -316,7 +316,7 @@ def test_freetext_bang_rejection(
     expect_in,
     expect_not_in,
 ):
-    result = _invoke(runner, session_id, "--freetext", payload)
+    result = _invoke(runner, fleet_id, "--freetext", payload)
     assert result.exit_code == expect_exit, result.output
     out = result.output or ""
     for needle in expect_in:

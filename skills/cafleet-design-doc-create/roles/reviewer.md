@@ -20,9 +20,9 @@ Load these skills at startup:
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<session-id>`, `<my-agent-id>`, `<director-agent-id>`) as **placeholders, not shell variables**. Your spawn prompt contained the literal UUIDs for SESSION ID, DIRECTOR AGENT ID, and YOUR AGENT ID — substitute those literal UUIDs directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
+Every command below uses angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) as **placeholders, not shell variables**. Your spawn prompt contained the literal UUIDs for FLEET ID, DIRECTOR AGENT ID, and YOUR AGENT ID — substitute those literal UUIDs directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
 
-**Flag placement**: `--session-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --session-id <session-id> message poll --agent-id <my-agent-id>`.
+**Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>`.
 
 ## Communication Protocol
 
@@ -32,20 +32,20 @@ You do NOT speak to the user directly. All feedback goes through the Director vi
 
 **Sending feedback or approval to the Director:**
 ```bash
-cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "complete (doc) — N issues"
 ```
 or, when the draft meets all quality criteria:
 ```bash
-cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "approved (doc)"
 ```
 Findings are NOT in the cafleet body — each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design document at the affected section (see the parent SKILL.md's *Coordination Protocol* section for the full schema).
-The literal `<session-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
+The literal `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
 **Receiving review assignments from the Director:** When the Director sends a message, the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into your tmux pane via `tmux.send_inline_preview`. You process the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body (e.g., the path to a draft), run `cafleet message poll` yourself. Read the message, then acknowledge it:
 ```bash
-cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 Then read the document file and send your review back via `cafleet message send`.
 
@@ -81,7 +81,7 @@ Aim for thoroughness that makes re-review unnecessary. A review that catches all
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet --session-id <session-id> member delete --agent-id <director-agent-id> --member-id <my-agent-id>`. The CLI sends `/exit` to your pane and waits up to 15 s for it to disappear.
+You are terminated by the Director via `cafleet --fleet-id <fleet-id> member delete --agent-id <director-agent-id> --member-id <my-agent-id>`. The CLI sends `/exit` to your pane and waits up to 15 s for it to disappear.
 
 You do NOT need to handle any `shutdown_request` JSON message — that is the in-process Agent Teams primitive. The CAFleet equivalent is `/exit`, dispatched by the Director through the tmux push primitive. When you receive `/exit`, your `claude` process terminates immediately; nothing is required of you.
 

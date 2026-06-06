@@ -1,4 +1,4 @@
-"""Tests for the ``cafleet --session-id <uuid>`` global CLI flag."""
+"""Tests for the ``cafleet --fleet-id <uuid>`` global CLI flag."""
 
 import json
 import sqlite3
@@ -19,13 +19,13 @@ def _autouse_reset_engine(_reset_engine_singletons):
 
 @pytest.fixture(autouse=True)
 def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda session_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda session_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 @pytest.fixture(autouse=True)
-def _mock_tmux_for_session_create(monkeypatch):
-    """Let CliRunner-driven ``session create`` succeed without a real tmux pane."""
+def _mock_tmux_for_fleet_create(monkeypatch):
+    """Let CliRunner-driven ``fleet create`` succeed without a real tmux pane."""
     ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
     monkeypatch.setattr(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
@@ -51,7 +51,7 @@ def db_runner(tmp_path, monkeypatch):
     return runner
 
 
-def test_missing_session_id_fails_client_subcommands__register_without_session_id_shows_new_error_message(
+def test_missing_fleet_id_fails_client_subcommands__register_without_fleet_id_shows_new_error_message(
     db_runner,
 ):
     result = db_runner.invoke(
@@ -59,14 +59,14 @@ def test_missing_session_id_fails_client_subcommands__register_without_session_i
         ["agent", "register", "--name", "A", "--description", "a"],
     )
     out = result.output or ""
-    assert "--session-id" in out
+    assert "--fleet-id" in out
     assert "is required" in out
-    assert "cafleet session create" in out
-    assert "CAFLEET_SESSION_ID" not in out
+    assert "cafleet fleet create" in out
+    assert "CAFLEET_FLEET_ID" not in out
     assert "environment variable" not in out.lower()
 
 
-def test_session_id_flag_flows_into_broker__register_passes_session_id_to_broker(
+def test_fleet_id_flag_flows_into_broker__register_passes_fleet_id_to_broker(
     db_runner, monkeypatch
 ):
     captured: dict = {}
@@ -86,7 +86,7 @@ def test_session_id_flag_flows_into_broker__register_passes_session_id_to_broker
     result = db_runner.invoke(
         cli,
         [
-            "--session-id",
+            "--fleet-id",
             sid,
             "agent",
             "register",
@@ -102,7 +102,7 @@ def test_session_id_flag_flows_into_broker__register_passes_session_id_to_broker
     assert sid in all_values
 
 
-def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(
+def test_fleet_id_flag_flows_into_broker__send_passes_fleet_id_to_broker(
     db_runner, monkeypatch
 ):
     captured: dict = {}
@@ -128,7 +128,7 @@ def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(
         }
 
     monkeypatch.setattr(broker, "send_message", fake_send_message)
-    monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
+    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *a, **k: True)
 
     sid = str(uuid.uuid4())
     aid = str(uuid.uuid4())
@@ -136,7 +136,7 @@ def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(
     result = db_runner.invoke(
         cli,
         [
-            "--session-id",
+            "--fleet-id",
             sid,
             "message",
             "send",
@@ -154,11 +154,11 @@ def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(
     assert sid in all_values
 
 
-def test_session_id_flag_flows_into_broker__session_id_not_read_from_environment(
+def test_fleet_id_flag_flows_into_broker__fleet_id_not_read_from_environment(
     db_runner, monkeypatch
 ):
-    """Session id is read only from the ``--session-id`` flag; the environment is never consulted."""
-    monkeypatch.setenv("CAFLEET_SESSION_ID", str(uuid.uuid4()))
+    """Fleet id is read only from the ``--fleet-id`` flag; the environment is never consulted."""
+    monkeypatch.setenv("CAFLEET_FLEET_ID", str(uuid.uuid4()))
     result = db_runner.invoke(
         cli,
         ["agent", "register", "--name", "A", "--description", "a"],
@@ -166,7 +166,7 @@ def test_session_id_flag_flows_into_broker__session_id_not_read_from_environment
     assert result.exit_code == 1, result.output
 
 
-def test_subcommands_that_do_not_require_session_id__db_init_without_session_id(
+def test_subcommands_that_do_not_require_fleet_id__db_init_without_fleet_id(
     tmp_path, monkeypatch
 ):
     db_file = tmp_path / "registry.db"
@@ -180,22 +180,22 @@ def test_subcommands_that_do_not_require_session_id__db_init_without_session_id(
     assert result.exit_code == 0, result.output
 
 
-def test_subcommands_that_do_not_require_session_id__session_create_without_session_id(
+def test_subcommands_that_do_not_require_fleet_id__fleet_create_without_fleet_id(
     db_runner,
 ):
-    """session create mints a session, so it cannot itself require one."""
-    result = db_runner.invoke(cli, ["session", "create", "--label", "smoke"])
+    """fleet create mints a fleet, so it cannot itself require one."""
+    result = db_runner.invoke(cli, ["fleet", "create", "--label", "smoke"])
     assert result.exit_code == 0, result.output
 
 
-def test_subcommands_that_do_not_require_session_id__session_list_without_session_id(
+def test_subcommands_that_do_not_require_fleet_id__fleet_list_without_fleet_id(
     db_runner,
 ):
-    result = db_runner.invoke(cli, ["session", "list"])
+    result = db_runner.invoke(cli, ["fleet", "list"])
     assert result.exit_code == 0, result.output
 
 
-def test_session_id_silently_accepted_where_not_required__db_init_accepts_session_id_silently(
+def test_fleet_id_silently_accepted_where_not_required__db_init_accepts_fleet_id_silently(
     tmp_path, monkeypatch
 ):
     db_file = tmp_path / "registry.db"
@@ -206,30 +206,30 @@ def test_session_id_silently_accepted_where_not_required__db_init_accepts_sessio
     )
     runner = CliRunner()
     sid = str(uuid.uuid4())
-    result = runner.invoke(cli, ["--session-id", sid, "db", "init"])
+    result = runner.invoke(cli, ["--fleet-id", sid, "db", "init"])
     assert result.exit_code == 0, result.output
     combined = (result.output or "").lower()
     assert "unused" not in combined
     assert "unexpected" not in combined
 
 
-def test_session_id_silently_accepted_where_not_required__session_create_accepts_session_id_silently(
+def test_fleet_id_silently_accepted_where_not_required__fleet_create_accepts_fleet_id_silently(
     db_runner,
 ):
     sid = str(uuid.uuid4())
     result = db_runner.invoke(
         cli,
-        ["--session-id", sid, "session", "create", "--label", "x"],
+        ["--fleet-id", sid, "fleet", "create", "--label", "x"],
     )
     assert result.exit_code == 0, result.output
 
 
-def _create_session_via_cli(runner: CliRunner) -> tuple[str, str]:
-    """Run ``session create --json`` and return (session_id, administrator_agent_id)."""
-    result = runner.invoke(cli, ["session", "create", "--json"])
+def _create_fleet_via_cli(runner: CliRunner) -> tuple[str, str]:
+    """Run ``fleet create --json`` and return (fleet_id, administrator_agent_id)."""
+    result = runner.invoke(cli, ["fleet", "create", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    return data["session_id"], data["administrator_agent_id"]
+    return data["fleet_id"], data["administrator_agent_id"]
 
 
 def _fetch_agent_status(db_file, agent_id: str) -> tuple[str, str | None]:
@@ -259,11 +259,11 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(
     init = runner.invoke(cli, ["db", "init"])
     assert init.exit_code == 0
 
-    session_id, admin_id = _create_session_via_cli(runner)
+    fleet_id, admin_id = _create_fleet_via_cli(runner)
 
     result = runner.invoke(
         cli,
-        ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
+        ["--fleet-id", fleet_id, "agent", "deregister", "--agent-id", admin_id],
     )
     assert result.exit_code == 1, result.output
 
@@ -281,11 +281,11 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_use
     init = runner.invoke(cli, ["db", "init"])
     assert init.exit_code == 0
 
-    session_id, admin_id = _create_session_via_cli(runner)
+    fleet_id, admin_id = _create_fleet_via_cli(runner)
 
     result = runner.invoke(
         cli,
-        ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
+        ["--fleet-id", fleet_id, "agent", "deregister", "--agent-id", admin_id],
     )
     out = result.output or ""
     assert "Administrator cannot be deregistered" in out
@@ -305,14 +305,14 @@ def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_
     init = runner.invoke(cli, ["db", "init"])
     assert init.exit_code == 0
 
-    session_id, _admin_id = _create_session_via_cli(runner)
+    fleet_id, _admin_id = _create_fleet_via_cli(runner)
     bogus_agent_id = str(uuid.uuid4())
 
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "agent",
             "deregister",
             "--agent-id",
@@ -320,7 +320,7 @@ def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_
         ],
     )
     assert result.exit_code == 1, result.output
-    assert "is not a member of session" in (result.output or "")
+    assert "is not a member of fleet" in (result.output or "")
 
 
 def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_active(
@@ -336,12 +336,25 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_act
     init = runner.invoke(cli, ["db", "init"])
     assert init.exit_code == 0
 
-    session_id, admin_id = _create_session_via_cli(runner)
+    fleet_id, admin_id = _create_fleet_via_cli(runner)
 
     runner.invoke(
         cli,
-        ["--session-id", session_id, "agent", "deregister", "--agent-id", admin_id],
+        ["--fleet-id", fleet_id, "agent", "deregister", "--agent-id", admin_id],
     )
     status, deregistered_at = _fetch_agent_status(db_file, admin_id)
     assert status == "active"
     assert deregistered_at is None
+
+
+def test_old_surface_removed__session_flag_and_group_no_longer_parse(db_runner):
+    """Regression guard: the pre-rename ``--session-id`` flag and ``session``
+    command group are gone — Click rejects both (testing the absence, not a
+    deprecation shim)."""
+    flag = db_runner.invoke(cli, ["--session-id", str(uuid.uuid4()), "fleet", "list"])
+    assert flag.exit_code == 2
+    assert "no such option" in (flag.output or "").lower()
+
+    group = db_runner.invoke(cli, ["session", "create"])
+    assert group.exit_code == 2
+    assert "no such command" in (group.output or "").lower()

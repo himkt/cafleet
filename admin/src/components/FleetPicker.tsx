@@ -1,33 +1,33 @@
 import { useState, useEffect, useCallback } from "react";
-import type { SessionListItem } from "../types";
-import { listSessions } from "../api";
+import type { FleetListItem } from "../types";
+import { listFleets } from "../api";
 import { usePolling, POLL_INTERVAL_MS } from "../hooks/usePolling";
 
-interface SessionPickerProps {
-  onSelect: (sessionId: string) => void;
+interface FleetPickerProps {
+  onSelect: (fleetId: string) => void;
 }
 
-export default function SessionPicker({ onSelect }: SessionPickerProps) {
-  const [sessions, setSessions] = useState<SessionListItem[]>([]);
+export default function FleetPicker({ onSelect }: FleetPickerProps) {
+  const [fleets, setFleets] = useState<FleetListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
 
-  const loadSessions = useCallback(async () => {
+  const loadFleets = useCallback(async () => {
     setIsPolling(true);
     try {
-      const data = await listSessions();
-      setSessions(data);
+      const data = await listFleets();
+      setFleets(data);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load sessions");
+      setError(err instanceof Error ? err.message : "Failed to load fleets");
     } finally {
       setLoading(false);
       setIsPolling(false);
     }
   }, []);
 
-  const trigger = usePolling(loadSessions, POLL_INTERVAL_MS);
+  const trigger = usePolling(loadFleets, POLL_INTERVAL_MS);
 
   useEffect(() => {
     void trigger();
@@ -37,7 +37,7 @@ export default function SessionPicker({ onSelect }: SessionPickerProps) {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b border-gray-200 px-4 py-3">
         <h1 className="text-lg font-semibold text-gray-900">
-          CAFleet — Sessions
+          CAFleet — Fleets
         </h1>
       </header>
 
@@ -51,7 +51,7 @@ export default function SessionPicker({ onSelect }: SessionPickerProps) {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between gap-3">
             <h2 className="text-sm font-medium text-gray-700">
-              Select a Session
+              Select a Fleet
             </h2>
             {isPolling && (
               <span className="text-xs text-gray-400 italic">Updating…</span>
@@ -60,29 +60,29 @@ export default function SessionPicker({ onSelect }: SessionPickerProps) {
 
           {loading ? (
             <p className="text-center text-gray-400 py-8">Loading...</p>
-          ) : sessions.length === 0 ? (
+          ) : fleets.length === 0 ? (
             <div className="text-center py-8 px-4">
-              <p className="text-gray-400 text-sm">No sessions found.</p>
+              <p className="text-gray-400 text-sm">No fleets found.</p>
               <p className="text-gray-400 text-xs mt-2">
                 Run{" "}
                 <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
-                  cafleet session create
+                  cafleet fleet create
                 </code>{" "}
                 to create one.
               </p>
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
-              {sessions.map((s) => (
+              {fleets.map((s) => (
                 <button
-                  key={s.session_id}
-                  onClick={() => onSelect(s.session_id)}
+                  key={s.fleet_id}
+                  onClick={() => onSelect(s.fleet_id)}
                   className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-gray-50 text-left"
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <code className="text-sm font-mono text-gray-900">
-                        {s.session_id.slice(0, 8)}
+                        {s.fleet_id.slice(0, 8)}
                       </code>
                       {s.label && (
                         <span className="text-sm text-gray-600 truncate">

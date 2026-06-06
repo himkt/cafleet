@@ -21,7 +21,7 @@ from tests._member_cli_helpers import (
 
 
 @pytest.fixture
-def session_id():
+def fleet_id():
     return str(uuid.uuid4())
 
 
@@ -33,8 +33,8 @@ def _stub_tmux_available(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda session_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda session_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 @pytest.fixture
@@ -64,13 +64,13 @@ def bash_recorder(monkeypatch):
     return calls
 
 
-def _invoke(runner, session_id, *extra_args, **invoke_kwargs):
-    """Helper: call ``cafleet --session-id <sid> member exec ...``."""
+def _invoke(runner, fleet_id, *extra_args, **invoke_kwargs):
+    """Helper: call ``cafleet --fleet-id <sid> member exec ...``."""
     return runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "member",
             "exec",
             "--agent-id",
@@ -84,9 +84,9 @@ def _invoke(runner, session_id, *extra_args, **invoke_kwargs):
 
 
 def test_exec_dispatch__positional_cmd_dispatched_with_pane_and_command(
-    runner, session_id, happy_path_agent, bash_recorder
+    runner, fleet_id, happy_path_agent, bash_recorder
 ):
-    result = _invoke(runner, session_id, "git log -1 --oneline")
+    result = _invoke(runner, fleet_id, "git log -1 --oneline")
     assert result.exit_code == 0, result.output
     assert len(bash_recorder) == 1
     call = bash_recorder[0]
@@ -94,10 +94,8 @@ def test_exec_dispatch__positional_cmd_dispatched_with_pane_and_command(
     assert call["command"] == "git log -1 --oneline"
 
 
-def test_exec_dispatch__text_output(
-    runner, session_id, happy_path_agent, bash_recorder
-):
-    result = _invoke(runner, session_id, "git log -1 --oneline")
+def test_exec_dispatch__text_output(runner, fleet_id, happy_path_agent, bash_recorder):
+    result = _invoke(runner, fleet_id, "git log -1 --oneline")
     assert result.exit_code == 0, result.output
     out = result.output or ""
     assert "Sent bash command" in out
@@ -107,14 +105,14 @@ def test_exec_dispatch__text_output(
 
 
 def test_exec_dispatch__json_output_three_keys(
-    runner, session_id, happy_path_agent, bash_recorder
+    runner, fleet_id, happy_path_agent, bash_recorder
 ):
     payload = "git log -1 --oneline"
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "--json",
             "member",
             "exec",
@@ -134,25 +132,23 @@ def test_exec_dispatch__json_output_three_keys(
 
 
 def test_input_validation__missing_positional_exits_two(
-    runner, session_id, happy_path_agent
+    runner, fleet_id, happy_path_agent
 ):
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 2, result.output
     assert "Missing argument" in (result.output or "")
 
 
-def test_input_validation__empty_command_exits_two(
-    runner, session_id, happy_path_agent
-):
-    result = _invoke(runner, session_id, "")
+def test_input_validation__empty_command_exits_two(runner, fleet_id, happy_path_agent):
+    result = _invoke(runner, fleet_id, "")
     assert result.exit_code == 2, result.output
     assert "command may not be empty." in (result.output or "")
 
 
 def test_input_validation__whitespace_only_command_exits_two(
-    runner, session_id, happy_path_agent
+    runner, fleet_id, happy_path_agent
 ):
-    result = _invoke(runner, session_id, "   ")
+    result = _invoke(runner, fleet_id, "   ")
     assert result.exit_code == 2, result.output
     assert "command may not be empty." in (result.output or "")
 
@@ -168,32 +164,30 @@ def test_input_validation__whitespace_only_command_exits_two(
     ],
 )
 def test_input_validation__command_with_newline_exits_two(
-    runner, session_id, happy_path_agent, bad_command
+    runner, fleet_id, happy_path_agent, bad_command
 ):
-    result = _invoke(runner, session_id, bad_command)
+    result = _invoke(runner, fleet_id, bad_command)
     assert result.exit_code == 2, result.output
     assert "command may not contain newlines." in (result.output or "")
 
 
-def test_authorization_boundary__missing_agent_exits_one(
-    runner, session_id, monkeypatch
-):
+def test_authorization_boundary__missing_agent_exits_one(runner, fleet_id, monkeypatch):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
-    result = _invoke(runner, session_id, "git log -1")
+    result = _invoke(runner, fleet_id, "git log -1")
     assert result.exit_code == 1, result.output
     assert MEMBER_ID in (result.output or "")
     assert "not found" in (result.output or "").lower()
 
 
 def test_authorization_boundary__placement_none_exits_one_with_exact_message(
-    runner, session_id, monkeypatch
+    runner, fleet_id, monkeypatch
 ):
     monkeypatch.setattr(
         broker,
         "get_agent",
         lambda *_a, **_kw: _agent(placement=None),
     )
-    result = _invoke(runner, session_id, "git log -1")
+    result = _invoke(runner, fleet_id, "git log -1")
     assert result.exit_code == 1, result.output
     out = result.output or ""
     assert f"agent {MEMBER_ID}" in out
@@ -202,7 +196,7 @@ def test_authorization_boundary__placement_none_exits_one_with_exact_message(
 
 
 def test_authorization_boundary__cross_director_exits_one_with_exact_message(
-    runner, session_id, monkeypatch
+    runner, fleet_id, monkeypatch
 ):
     monkeypatch.setattr(
         broker,
@@ -211,7 +205,7 @@ def test_authorization_boundary__cross_director_exits_one_with_exact_message(
             placement=_placement(director_agent_id=OTHER_DIRECTOR_ID)
         ),
     )
-    result = _invoke(runner, session_id, "git log -1")
+    result = _invoke(runner, fleet_id, "git log -1")
     assert result.exit_code == 1, result.output
     out = result.output or ""
     assert f"agent {MEMBER_ID}" in out
@@ -220,14 +214,14 @@ def test_authorization_boundary__cross_director_exits_one_with_exact_message(
 
 
 def test_authorization_boundary__pending_pane_exits_one_with_exact_message(
-    runner, session_id, monkeypatch
+    runner, fleet_id, monkeypatch
 ):
     monkeypatch.setattr(
         broker,
         "get_agent",
         lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
     )
-    result = _invoke(runner, session_id, "git log -1")
+    result = _invoke(runner, fleet_id, "git log -1")
     assert result.exit_code == 1, result.output
     out = result.output or ""
     assert f"member {MEMBER_ID}" in out
@@ -236,13 +230,13 @@ def test_authorization_boundary__pending_pane_exits_one_with_exact_message(
 
 
 def test_tmux_unavailable__tmux_not_available_exits_one(
-    runner, session_id, happy_path_agent, monkeypatch
+    runner, fleet_id, happy_path_agent, monkeypatch
 ):
     def raise_unavailable(self):
         raise TmuxError("cafleet member commands must be run inside a tmux session")
 
     monkeypatch.setattr(TmuxMultiplexer, "ensure_available", raise_unavailable)
-    result = _invoke(runner, session_id, "git log -1")
+    result = _invoke(runner, fleet_id, "git log -1")
     assert result.exit_code == 1, result.output
     assert "cafleet member commands must be run inside a tmux session" in (
         result.output or ""

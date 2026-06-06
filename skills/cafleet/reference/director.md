@@ -4,24 +4,24 @@ Reference page for the `cafleet member` subgroup — `member create`, `member de
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/exec-routing.md`.
 
-> **`--member-id` accepts a unique prefix.** On `member delete` / `capture` / `send-input` / `exec` / `ping`, `--member-id` resolves either a full UUID or any unique prefix of an active agent's UUID in the session — so the 8-char member IDs printed by `cafleet member list` can be pasted straight in. An ambiguous or no-match prefix exits 1. The Director's own acting `--agent-id` stays full-UUID-only. See [`docs/spec/cli-options.md`](../../../docs/spec/cli-options.md#id-prefix-resolution).
+> **`--member-id` accepts a unique prefix.** On `member delete` / `capture` / `send-input` / `exec` / `ping`, `--member-id` resolves either a full UUID or any unique prefix of an active agent's UUID in the fleet — so the 8-char member IDs printed by `cafleet member list` can be pasted straight in. An ambiguous or no-match prefix exits 1. The Director's own acting `--agent-id` stays full-UUID-only. See [`docs/spec/cli-options.md`](../../../docs/spec/cli-options.md#id-prefix-resolution).
 
 ## Member Create
 
 Register a new member agent and spawn a coding-agent pane in the Director's own tmux window. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
 
 ```bash
-cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42"
 
-cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42" \
   -- "Review PR #42, post feedback via cafleet message send, and deregister on completion."
 
-cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
   --name Codex-A --description "Reviewer for PR #42" --coding-agent codex
 
-cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
   --name Drafter --description "Writes and revises the design document" \
   --prompt-file /abs/path/to/<BASE>/prompts/drafter-20260514T145000Z.md
 ```
@@ -33,7 +33,7 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. The flag both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex", "opencode"]`) so adding a future backend is one entry in `cafleet.coding_agent.CODING_AGENTS`. Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. For the `opencode` backend, the spawn-precondition step also materializes `~/.opencode/agents/cafleet.md` from the in-source `CAFLEET_AGENT` preset on first spawn (skip-if-exists) — see [`docs/reference/coding-agents/opencode.md`](../../../docs/reference/coding-agents/opencode.md). |
 | `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are the spawn prompt. Mutually exclusive with the positional prompt argument. Read verbatim (no stripping); passes through the same `str.format()` substitution as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all error non-zero with the messages catalogued in [`docs/spec/cli-options.md`](../../../docs/spec/cli-options.md) § Error Messages. The canonical input mode for every CAFleet-native team-skill spawn — see § *Member Create — Scratch and audit files* below. |
-| *(positional, after `--`)* | no | Prompt for the spawned coding-agent process. Mutually exclusive with `--prompt-file`. If both are omitted the default prompt template is used. The default template and any custom prompt go through `str.format()` with `session_id` / `agent_id` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
+| *(positional, after `--`)* | no | Prompt for the spawned coding-agent process. Mutually exclusive with `--prompt-file`. If both are omitted the default prompt template is used. The default template and any custom prompt go through `str.format()` with `fleet_id` / `agent_id` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
 
 The spawn argv depends on the chosen backend:
 
@@ -51,7 +51,7 @@ In all three modes the member's Bash tool is enabled and routine permission prom
 
 `--prompt-file` collapses that triple-layer stack down to one: only the path (tens of bytes) flows through the caller-side shell and the cafleet argv. cafleet reads the file into Python memory, runs `str.format()`, and hands the substituted text to `tmux split-window` as a single argv element — only that final `execve` carries the body. The single remaining layer still has an `ARG_MAX` ceiling, but it sits comfortably above any realistic spawn-prompt size. Use `--prompt-file` for every templated identity block + role-file-by-path prompt. Inline `-- "<prompt>"` remains a first-class input for trivial one-line ad-hoc spawns (e.g. test scripts, doctor flows).
 
-Whichever input mode is used, keep the prompt body itself focused: role-file path, skill-load list, session/agent/director IDs, the operational context (output dir, current date, user request), and "start now" cue. The member loads the role file via `Read` on its first turn; the role files live in the skill directory and are stable, so path-by-reference is safe.
+Whichever input mode is used, keep the prompt body itself focused: role-file path, skill-load list, fleet/agent/director IDs, the operational context (output dir, current date, user request), and "start now" cue. The member loads the role file via `Read` on its first turn; the role files live in the skill directory and are stable, so path-by-reference is safe.
 
 **Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved by the `cafleet-base-dir` skill) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--prompt-file` write at `<BASE>/prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
 
@@ -61,7 +61,7 @@ Whichever input mode is used, keep the prompt body itself focused: role-file pat
 - Same-second collisions: skills MUST NOT overwrite an existing file. If the target path already exists, append `_2`, `_3`, … until the name is unique.
 - The pre-spawn file IS the audit artifact — there is no second post-spawn re-render write. The file path used for `--prompt-file` is the single source of truth for what was spawned, in perpetuity.
 
-**`${BASE} == <unset>` fallback**: when the Director's startup-time `${BASE}` resolution returned the `<unset>` sentinel (the absolute-path argument branch of `cafleet base-dir resolve`), the team skill MUST follow the guarded-skip protocol from the `cafleet-base-dir` skill § *No-bypass write protocol*:
+**`${BASE} == <unset>` fallback**: when the Director's startup-time `${BASE}` resolution returned the `<unset>` sentinel (the absolute-path argument branch of the `cafleet-base-dir` skill's Step 0), the team skill MUST follow the guarded-skip protocol from the `cafleet-base-dir` skill § *No-bypass write protocol*:
 
 1. Skip the `<BASE>/prompts/<role>-<ts>.md` write entirely (do NOT compute the path).
 2. Fall back to the inline positional `prompt_argv` form — the size limit above still applies, so the skill MUST keep the inline-form prompt under ~2 KB (path-by-reference for role docs, short identity block).
@@ -80,10 +80,10 @@ If the tmux `split-window` fails, the registered agent is rolled back. If the pl
 The CLI sends `/exit`, polls `tmux list-panes` for the target `pane_id` until it disappears (15 s timeout), then deregisters the agent and rebalances the layout. On timeout, the pane buffer tail is captured and printed on stderr, and the command exits 2 without deregistering. Rerun with `--force` to skip `/exit` and kill the pane immediately.
 
 ```bash
-cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member delete --agent-id <director-agent-id> \
   --member-id <member-agent-id>
 
-cafleet --session-id <session-id> member delete --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member delete --agent-id <director-agent-id> \
   --member-id <member-agent-id> --force
 ```
 
@@ -100,8 +100,8 @@ Cross-Director delete is rejected: the CLI verifies `placement.director_agent_id
 ## Member List (with `--activity`)
 
 ```bash
-cafleet --session-id <session-id> member list --agent-id <director-agent-id>
-cafleet --session-id <session-id> member list --agent-id <director-agent-id> --activity
+cafleet --fleet-id <fleet-id> member list --agent-id <director-agent-id>
+cafleet --fleet-id <fleet-id> member list --agent-id <director-agent-id> --activity
 ```
 
 Default columns: `agent_id`, `name`, `status`, `backend`, `session`, `window_id`, `pane_id`, `created_at`. Pending placement renders `(pending)` in text mode, `null` in JSON.
@@ -109,7 +109,7 @@ Default columns: `agent_id`, `name`, `status`, `backend`, `session`, `window_id`
 `--activity` adds `last_sent` / `last_recv` / `last_ack` / `idle` columns aggregated from `tasks`:
 
 ```
-$ cafleet --session-id <s> member list --agent-id <d> --activity
+$ cafleet --fleet-id <s> member list --agent-id <d> --activity
 3 members:
   agent_id        name      state   last_sent    last_recv    last_ack     idle
   --------------  --------  ------  -----------  -----------  -----------  -----
@@ -125,10 +125,10 @@ The `last_ack` aggregation filters `Task.type != 'broadcast_summary'` (mirrors `
 Capture the last N lines of a member's pane buffer. Default `--lines 30`; `--no-ansi` is the default and strips ANSI escapes.
 
 ```bash
-cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> \
   --member-id <member-agent-id>
 
-cafleet --session-id <session-id> member capture --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> \
   --member-id <member-agent-id> --lines 200
 ```
 
@@ -194,7 +194,7 @@ The pane is ALWAYS on the AskUserQuestion 4-option frame when `send-input` is ap
 Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into the member's pane via `tmux.send_bash_command` so the coding agent's `!` shortcut runs the command natively. All three backends — `claude`, `codex`, and `opencode` — honor the leading-`!` shortcut. See [`reference/exec-routing.md`](exec-routing.md) for the full bash-via-Director fallback protocol.
 
 ```bash
-cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member exec --agent-id <director-agent-id> \
   --member-id <member-agent-id> "git log -1 --oneline"
 ```
 
@@ -219,7 +219,7 @@ For a series of `member exec` calls on the same member, the ping follows each ex
 Director-only manual inbox-poll nudge. The broker's auto-fire on every `cafleet message send` is an inline preview keystroked into the recipient's pane (`tmux.send_inline_preview`). `member ping` is the manually-invokable counterpart for re-poking a member that missed an inline preview.
 
 ```bash
-cafleet --session-id <session-id> member ping --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member ping --agent-id <director-agent-id> \
   --member-id <member-agent-id>
 ```
 

@@ -5,12 +5,12 @@ icon: lucide/download
 # Install
 
 CAFleet has two install surfaces: the **broker CLI** (`cafleet`), which every
-session needs, and the **coding-agent plugins**, one per backend you intend to
+fleet needs, and the **coding-agent plugins**, one per backend you intend to
 use.
 
 ## CAFleet CLI
 
-The CLI is the binary that every session needs. It is published as a Python
+The CLI is the binary that every fleet needs. It is published as a Python
 package; pick whichever installer matches your environment:
 
 ```bash

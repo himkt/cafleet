@@ -20,7 +20,7 @@ from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
 @pytest.fixture
-def session_id():
+def fleet_id():
     return str(uuid.uuid4())
 
 
@@ -35,16 +35,16 @@ def new_agent_id():
 
 
 @pytest.fixture
-def ctx(session_id):
+def ctx(fleet_id):
     command = click.Command("member-create")
     context = click.Context(command)
-    context.obj = {"session_id": session_id, "json_output": False}
+    context.obj = {"fleet_id": fleet_id, "json_output": False}
     return context
 
 
 @pytest.fixture
 def mock_get_agent(monkeypatch):
-    def fake_get_agent(agent_id, session_id):
+    def fake_get_agent(agent_id, fleet_id):
         return {"agent_id": agent_id, "name": "Director-X"}
 
     monkeypatch.setattr(broker, "get_agent", fake_get_agent)
@@ -55,7 +55,7 @@ _CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id
 
 
 @pytest.fixture
-def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
+def bootstrapped_fleet(tmp_path, monkeypatch, _reset_engine_singletons):
     db_file = tmp_path / "registry.db"
     monkeypatch.setattr(
         config.settings,
@@ -74,10 +74,10 @@ def bootstrapped_session(tmp_path, monkeypatch, _reset_engine_singletons):
     runner = CliRunner()
     init = runner.invoke(cli, ["db", "init"])
     assert init.exit_code == 0, init.output
-    create = runner.invoke(cli, ["session", "create", "--json"])
+    create = runner.invoke(cli, ["fleet", "create", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
-    return data["session_id"], data["director"]["agent_id"], runner
+    return data["fleet_id"], data["director"]["agent_id"], runner
 
 
 @pytest.fixture
@@ -112,7 +112,7 @@ def stub_coding_agent_binaries(monkeypatch):
 
 def _invoke_member_create(
     runner: CliRunner,
-    session_id: str,
+    fleet_id: str,
     director_id: str,
     *,
     coding_agent: str = "claude",
@@ -121,7 +121,7 @@ def _invoke_member_create(
     name: str = "Member",
     json_output: bool = False,
 ):
-    args = ["--session-id", session_id]
+    args = ["--fleet-id", fleet_id]
     if json_output:
         args.append("--json")
     args.extend(
@@ -170,7 +170,7 @@ def test_resolve_prompt__substitution_matrix(
     ctx,
     director_agent_id,
     new_agent_id,
-    session_id,
+    fleet_id,
     mock_get_agent,
     scenario,
     prompt_argv,
@@ -183,10 +183,10 @@ def test_resolve_prompt__substitution_matrix(
         prompt_argv=prompt_argv,
     )
     if asserts == "default":
-        assert session_id in result
+        assert fleet_id in result
         assert new_agent_id in result
         assert director_agent_id in result
-        for raw in ("{session_id}", "{agent_id}", "{director_agent_id}"):
+        for raw in ("{fleet_id}", "{agent_id}", "{director_agent_id}"):
             assert raw not in result
     elif asserts == "agent_id_only":
         assert result == f"message for {new_agent_id}"
@@ -204,7 +204,7 @@ def test_resolve_prompt__substitution_matrix(
         (
             "unknown_placeholder",
             ("hello", "{foo}"),
-            ("foo", "{session_id}", "{agent_id}"),
+            ("foo", "{fleet_id}", "{agent_id}"),
         ),
         ("unmatched_brace", ("hello", "{unclosed"), ("{{", "}}")),
         ("attribute_access", ("hello", "{agent_id.foo}"), ("{{", "}}")),
@@ -232,14 +232,14 @@ def test_resolve_prompt__malformed_raises_usage_error(
 
 
 def test_prompt_file__relative_path_rejected(
-    bootstrapped_session,
+    bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    session_id, director_id, runner = bootstrapped_session
+    fleet_id, director_id, runner = bootstrapped_fleet
     result = _invoke_member_create(
         runner,
-        session_id,
+        fleet_id,
         director_id,
         prompt_file="./foo.md",
     )
@@ -267,7 +267,7 @@ def test_prompt_file__relative_path_rejected(
 )
 def test_prompt_file__error_variants(
     tmp_path,
-    bootstrapped_session,
+    bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
     scenario,
@@ -275,7 +275,7 @@ def test_prompt_file__error_variants(
     expected_exit,
     expected_substring,
 ):
-    session_id, director_id, runner = bootstrapped_session
+    fleet_id, director_id, runner = bootstrapped_fleet
     if fixture_setup == "missing":
         target = tmp_path / "does-not-exist.md"
     elif fixture_setup == "directory":
@@ -296,7 +296,7 @@ def test_prompt_file__error_variants(
 
     result = _invoke_member_create(
         runner,
-        session_id,
+        fleet_id,
         director_id,
         prompt_file=str(target),
     )
@@ -311,18 +311,18 @@ def test_prompt_file__error_variants(
 )
 def test_prompt_file__not_readable_exits_with_message(
     tmp_path,
-    bootstrapped_session,
+    bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    session_id, director_id, runner = bootstrapped_session
+    fleet_id, director_id, runner = bootstrapped_fleet
     unreadable_file = tmp_path / "unreadable.md"
     unreadable_file.write_text("hello", encoding="utf-8")
     unreadable_file.chmod(0o000)
     try:
         result = _invoke_member_create(
             runner,
-            session_id,
+            fleet_id,
             director_id,
             prompt_file=str(unreadable_file),
         )
@@ -336,16 +336,16 @@ def test_prompt_file__not_readable_exits_with_message(
 
 def test_prompt_file__mutually_exclusive_with_positional(
     tmp_path,
-    bootstrapped_session,
+    bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    session_id, director_id, runner = bootstrapped_session
+    fleet_id, director_id, runner = bootstrapped_fleet
     prompt_path = tmp_path / "prompt.md"
     prompt_path.write_text("hello", encoding="utf-8")
     result = _invoke_member_create(
         runner,
-        session_id,
+        fleet_id,
         director_id,
         prompt_file=str(prompt_path),
         inline_prompt="hello positional",
@@ -359,14 +359,14 @@ def test_prompt_file__mutually_exclusive_with_positional(
 
 
 def test_prompt_file__parity_with_positional_form(tmp_path):
-    session_id = str(uuid.uuid4())
+    fleet_id = str(uuid.uuid4())
     director_id = str(uuid.uuid4())
     new_agent_id = str(uuid.uuid4())
     template = "hello {agent_id} from director {director_agent_id}"
 
     command = click.Command("member-create")
     ctx = click.Context(command)
-    ctx.obj = {"session_id": session_id, "json_output": False}
+    ctx.obj = {"fleet_id": fleet_id, "json_output": False}
 
     inline_result = _resolve_prompt(
         ctx,
@@ -399,18 +399,18 @@ def test_prompt_file__parity_with_positional_form(tmp_path):
 )
 def test_prompt_file__preserves_whitespace_verbatim(
     tmp_path,
-    bootstrapped_session,
+    bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
     scenario,
     content,
 ):
-    session_id, director_id, runner = bootstrapped_session
+    fleet_id, director_id, runner = bootstrapped_fleet
     prompt_path = tmp_path / "prompt.md"
     prompt_path.write_text(content, encoding="utf-8")
     result = _invoke_member_create(
         runner,
-        session_id,
+        fleet_id,
         director_id,
         prompt_file=str(prompt_path),
     )
@@ -421,17 +421,17 @@ def test_prompt_file__preserves_whitespace_verbatim(
 @pytest.mark.parametrize("coding_agent", ["claude", "codex"])
 def test_member_create__backend_spawn_argv_shape(
     tmp_path,
-    bootstrapped_session,
+    bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
     coding_agent,
 ):
-    session_id, director_id, runner = bootstrapped_session
+    fleet_id, director_id, runner = bootstrapped_fleet
     prompt_path = tmp_path / "prompt.md"
-    prompt_path.write_text("session={session_id}", encoding="utf-8")
+    prompt_path.write_text("fleet={fleet_id}", encoding="utf-8")
     result = _invoke_member_create(
         runner,
-        session_id,
+        fleet_id,
         director_id,
         coding_agent=coding_agent,
         prompt_file=str(prompt_path),
@@ -439,7 +439,7 @@ def test_member_create__backend_spawn_argv_shape(
     )
     assert result.exit_code == 0, result.output
     command = split_window_recorder[0]["command"]
-    assert command[-1] == f"session={session_id}"
+    assert command[-1] == f"fleet={fleet_id}"
     if coding_agent == "claude":
         assert command[0] == "claude"
         # Member display name threaded through as --name <name>.
@@ -453,7 +453,7 @@ def test_member_create__backend_spawn_argv_shape(
             "never",
             "--sandbox",
             "workspace-write",
-            f"session={session_id}",
+            f"fleet={fleet_id}",
         ]
         # Codex has no --name analog.
         assert "--name" not in command
@@ -461,14 +461,14 @@ def test_member_create__backend_spawn_argv_shape(
 
 
 def test_member_create__codex_placement_records_codex(
-    bootstrapped_session,
+    bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    session_id, director_id, runner = bootstrapped_session
+    fleet_id, director_id, runner = bootstrapped_fleet
     result = _invoke_member_create(
         runner,
-        session_id,
+        fleet_id,
         director_id,
         coding_agent="codex",
         inline_prompt="hello",
@@ -482,16 +482,16 @@ def test_member_create__codex_placement_records_codex(
 
 @pytest.mark.parametrize("coding_agent", ["claude", "codex"])
 def test_member_create__binary_missing_exits_with_backend_specific_message(
-    bootstrapped_session,
+    bootstrapped_fleet,
     split_window_recorder,
     monkeypatch,
     coding_agent,
 ):
     monkeypatch.setattr("cafleet.coding_agent.base.shutil.which", lambda _: None)
-    session_id, director_id, runner = bootstrapped_session
+    fleet_id, director_id, runner = bootstrapped_fleet
     result = _invoke_member_create(
         runner,
-        session_id,
+        fleet_id,
         director_id,
         coding_agent=coding_agent,
         inline_prompt="hello",
@@ -503,14 +503,14 @@ def test_member_create__binary_missing_exits_with_backend_specific_message(
 
 
 def test_member_create__claude_default_injects_dontask_permission_mode(
-    bootstrapped_session,
+    bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    session_id, director_id, runner = bootstrapped_session
+    fleet_id, director_id, runner = bootstrapped_fleet
     result = _invoke_member_create(
         runner,
-        session_id,
+        fleet_id,
         director_id,
         inline_prompt="hello",
         name="Drafter",

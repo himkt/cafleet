@@ -10,17 +10,17 @@ from cafleet import broker
 webui_router = APIRouter(prefix="/api")
 
 
-def get_webui_session(request: Request) -> str:
-    """Return ``X-Session-Id``; 400 if missing, 404 if the row is gone."""
-    session_id = request.headers.get("x-session-id")
-    if not session_id:
-        raise HTTPException(status_code=400, detail="X-Session-Id header required")
+def get_webui_fleet(request: Request) -> str:
+    """Return ``X-Fleet-Id``; 400 if missing, 404 if the row is gone."""
+    fleet_id = request.headers.get("x-fleet-id")
+    if not fleet_id:
+        raise HTTPException(status_code=400, detail="X-Fleet-Id header required")
 
-    result = broker.get_session(session_id)
+    result = broker.get_fleet(fleet_id)
     if result is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Fleet not found")
 
-    return session_id
+    return fleet_id
 
 
 def _format_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -54,23 +54,23 @@ class SendMessageRequest(BaseModel):
     text: str
 
 
-@webui_router.get("/sessions")
-def list_sessions():
-    return broker.list_sessions()
+@webui_router.get("/fleets")
+def list_fleets():
+    return broker.list_fleets()
 
 
 @webui_router.get("/agents")
-def list_agents(session_id: str = Depends(get_webui_session)):
-    agents = broker.list_session_agents(session_id)
+def list_agents(fleet_id: str = Depends(get_webui_fleet)):
+    agents = broker.list_fleet_agents(fleet_id)
     return {"agents": agents}
 
 
 @webui_router.get("/agents/{agent_id}/inbox")
 def get_inbox(
     agent_id: str,
-    session_id: str = Depends(get_webui_session),
+    fleet_id: str = Depends(get_webui_fleet),
 ):
-    if not broker.verify_agent_session(agent_id, session_id):
+    if not broker.verify_agent_fleet(agent_id, fleet_id):
         raise HTTPException(status_code=404, detail="Agent not found")
 
     rows = broker.list_inbox(agent_id)
@@ -80,9 +80,9 @@ def get_inbox(
 @webui_router.get("/agents/{agent_id}/sent")
 def get_sent(
     agent_id: str,
-    session_id: str = Depends(get_webui_session),
+    fleet_id: str = Depends(get_webui_fleet),
 ):
-    if not broker.verify_agent_session(agent_id, session_id):
+    if not broker.verify_agent_fleet(agent_id, fleet_id):
         raise HTTPException(status_code=404, detail="Agent not found")
 
     rows = broker.list_sent(agent_id)
@@ -91,30 +91,30 @@ def get_sent(
 
 @webui_router.get("/timeline")
 def get_timeline(
-    session_id: str = Depends(get_webui_session),
+    fleet_id: str = Depends(get_webui_fleet),
 ):
-    rows = broker.list_timeline(session_id)
+    rows = broker.list_timeline(fleet_id)
     return {"messages": _format_messages(rows)}
 
 
 @webui_router.post("/messages/send")
 def send_message(
     body: SendMessageRequest,
-    session_id: str = Depends(get_webui_session),
+    fleet_id: str = Depends(get_webui_fleet),
 ):
-    if broker.get_agent(body.from_agent_id, session_id) is None:
-        raise HTTPException(status_code=400, detail="from_agent not in session")
+    if broker.get_agent(body.from_agent_id, fleet_id) is None:
+        raise HTTPException(status_code=400, detail="from_agent not in fleet")
 
     if body.to_agent_id == "*":
-        result = broker.broadcast_message(session_id, body.from_agent_id, body.text)
+        result = broker.broadcast_message(fleet_id, body.from_agent_id, body.text)
         summary = result[0]["task"]
         return {"task_id": summary["task_id"], "status": summary["status_state"]}
 
-    if broker.get_agent(body.to_agent_id, session_id) is None:
+    if broker.get_agent(body.to_agent_id, fleet_id) is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
     result = broker.send_message(
-        session_id, body.from_agent_id, body.to_agent_id, body.text
+        fleet_id, body.from_agent_id, body.to_agent_id, body.text
     )
     task = result["task"]
     return {"task_id": task["task_id"], "status": task["status_state"]}

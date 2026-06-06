@@ -145,21 +145,20 @@ You can see the existing design docs on [`design-docs/`](design-docs/), which ar
 | Command group | One-line purpose |
 |---|---|
 | `cafleet db init` | Apply schema migrations (idempotent; rerun after upgrades) |
-| `cafleet session create [--coding-agent {claude,codex,opencode}]` | Create a session; declare the root Director's coding-agent backend (default `claude`) |
-| `cafleet session *` | List / show / delete sessions |
+| `cafleet fleet create [--coding-agent {claude,codex,opencode}]` | Create a fleet; declare the root Director's coding-agent backend (default `claude`) |
+| `cafleet fleet *` | List / show / delete fleets |
 | `cafleet agent *` | Register / deregister / list / show agents |
 | `cafleet message *` | Send / broadcast / poll / ack / cancel / show messages |
 | `cafleet member create [--coding-agent {claude,codex,opencode}]` | Spawn a member pane running `claude` (default), `codex`, or `opencode` |
 | `cafleet member *` | Delete / list / capture / send-input / exec / ping member panes (Director only) |
 | `cafleet server` | Start the admin WebUI on `127.0.0.1:8000` |
 | `cafleet doctor` | Print the calling pane's tmux identifiers |
-| `cafleet base-dir {resolve,record}` | Resolve / persist the `${BASE}` output-root used by every CAFleet scratch / audit / figure write (filesystem-only; no `--session-id`). `cafleet base-dir resolve [TASK_NAME]` accepts an optional positional `TASK_NAME` (relative path the consuming skill picks, e.g. `researches/<slug>` or `design-docs/<NNNNNNN>-<slug>`; or an absolute path strictly under the repo root); when supplied, returns the auto-created task folder as `${BASE}` and writes a per-task anchor inside it. Consumer-strips contract: the resolver does not strip child filenames; each consuming skill canonicalizes its argument before calling. |
 
-> CLI reference (per-command sections for `session`, `member`, `doctor`, `server`; `agent` / `message` / `db init` covered via the option-source table and `cafleet <cmd> --help`): [CLI options](https://himkt.github.io/cafleet/spec/cli-options/). Message envelope shape (compact rendered + `--full` typed-column) and message body truncation rules (`CAFLEET_MAX_TEXT_LEN`, `--full`, `--quiet`): [CLI options](https://himkt.github.io/cafleet/spec/cli-options/) § Message Body Truncation and [Message envelope](https://himkt.github.io/cafleet/spec/message-envelope/).
+> CLI reference (per-command sections for `fleet`, `member`, `doctor`, `server`; `agent` / `message` / `db init` covered via the option-source table and `cafleet <cmd> --help`): [CLI options](https://himkt.github.io/cafleet/spec/cli-options/). Message envelope shape (compact rendered + `--full` typed-column) and message body truncation rules (`CAFLEET_MAX_TEXT_LEN`, `--full`, `--quiet`): [CLI options](https://himkt.github.io/cafleet/spec/cli-options/) § Message Body Truncation and [Message envelope](https://himkt.github.io/cafleet/spec/message-envelope/).
 
 ## 5. Architecture
 
-CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Sessions partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. Full architecture documentation is published at <https://himkt.github.io/cafleet/concepts/overview/>.
+CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Fleets partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. Full architecture documentation is published at <https://himkt.github.io/cafleet/concepts/overview/>.
 
 ## 6. Contributing
 

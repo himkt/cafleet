@@ -27,7 +27,7 @@ _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0
 
 @pytest.fixture
 def bootstrapped_team(tmp_path, monkeypatch, _reset_engine_singletons):
-    """Fresh DB + session + 3 registered members. Returns ``(sid, director,
+    """Fresh DB + fleet + 3 registered members. Returns ``(sid, director,
     [member_ids], runner)``.
 
     Members are registered via ``broker.register_agent`` (placement supplied)
@@ -52,16 +52,16 @@ def bootstrapped_team(tmp_path, monkeypatch, _reset_engine_singletons):
     init = runner.invoke(cli, ["db", "init"])
     assert init.exit_code == 0, init.output
 
-    create = runner.invoke(cli, ["session", "create", "--json"])
+    create = runner.invoke(cli, ["fleet", "create", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
-    sid = data["session_id"]
+    sid = data["fleet_id"]
     director_id = data["director"]["agent_id"]
 
     members: list[str] = []
     for i, name in enumerate(("alice", "bob", "carol")):
         agent = broker.register_agent(
-            session_id=sid,
+            fleet_id=sid,
             name=name,
             description=f"member {name}",
             placement={
@@ -89,7 +89,7 @@ def test_member_list_no_activity_flag__omits_activity_keys(bootstrapped_team):
     result = runner.invoke(
         cli,
         [
-            "--session-id",
+            "--fleet-id",
             sid,
             "--json",
             "member",
@@ -117,7 +117,7 @@ def test_member_list_activity_flag__json_emits_activity_keys(bootstrapped_team):
     result = runner.invoke(
         cli,
         [
-            "--session-id",
+            "--fleet-id",
             sid,
             "--json",
             "member",
@@ -147,7 +147,7 @@ def test_member_list_activity_flag__none_for_silent_members(bootstrapped_team):
     result = runner.invoke(
         cli,
         [
-            "--session-id",
+            "--fleet-id",
             sid,
             "--json",
             "member",
@@ -180,7 +180,7 @@ def test_member_list_activity_flag__activity_visible_after_send(bootstrapped_tea
     result = runner.invoke(
         cli,
         [
-            "--session-id",
+            "--fleet-id",
             sid,
             "--json",
             "member",
@@ -210,7 +210,7 @@ def test_member_list_activity_flag__text_mode_includes_activity_columns(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
+            "--fleet-id",
             sid,
             "member",
             "list",
@@ -239,7 +239,7 @@ def test_member_list_activity_flag__text_mode_default_omits_activity_columns(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
+            "--fleet-id",
             sid,
             "member",
             "list",

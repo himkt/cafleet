@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, text
 from cafleet import broker
 from cafleet.db.models import Base, Task
 from tests._broker_helpers import (
-    _create_session,
+    _create_fleet,
     _register_agent,
     _setup_three_agents,
     _setup_two_agents,
@@ -214,13 +214,13 @@ def test_task_table_and_model__text_column_present_task_json_absent():
     assert row is not None
     assert row[0] == "via send_message body"
 
-    # Cross-session boundary check (subsumes test_get_task__rejects_task_not_in_session
+    # Cross-fleet boundary check (subsumes test_get_task__rejects_task_not_in_fleet
     # & test_read_task__returns_none_for_missing_task)
-    other = _create_session()
-    other_sender = _register_agent(other["session_id"], name="outsider-sender")
-    other_recipient = _register_agent(other["session_id"], name="outsider-recipient")
+    other = _create_fleet()
+    other_sender = _register_agent(other["fleet_id"], name="outsider-sender")
+    other_recipient = _register_agent(other["fleet_id"], name="outsider-recipient")
     foreign_sent = broker.send_message(
-        other["session_id"],
+        other["fleet_id"],
         other_sender["agent_id"],
         other_recipient["agent_id"],
         "elsewhere",

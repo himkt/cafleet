@@ -10,7 +10,7 @@ Create a Slidev presentation and reading transcript from an existing research re
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director** | Main Claude | Bootstrap CAFleet session, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
+| **Director** | Main Claude | Bootstrap CAFleet fleet, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
 | **Presentation** | claude pane (loads the `cafleet-my-slidev` and `cafleet-create-figure` skills) | Create Slidev presentation from report using the `cafleet-my-slidev` skill | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
 | **Transcript** | claude pane | Create reading transcript with 1:1 slide correspondence | Invent data, modify report, conduct research | [roles/transcript.md](roles/transcript.md) |
 | **Visual Reviewer** | claude pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`bun run agent-browser ...`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
@@ -23,11 +23,11 @@ For autonomous Slidev generation, see `my-slidev/SKILL.md` § Spawnable Agents �
 
 ## Architecture
 
-The Director is the root agent of a CAFleet session — bootstrapped automatically by `cafleet session create` — and spawns every member via `cafleet --session-id [session-id] member create --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications).
+The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns every member via `cafleet --fleet-id [fleet-id] member create --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications).
 
 ```text
 User
- +-- Director (main Claude — runs cafleet session create, cafleet member create, runs Slidev background server)
+ +-- Director (main Claude — runs cafleet fleet create, cafleet member create, runs Slidev background server)
       +-- presentation (claude pane — authors slide.md; loads the cafleet-my-slidev and cafleet-create-figure skills)
       +-- transcript   (claude pane — authors transcript.md)
       +-- vr-batch-<start> (claude pane — captures + reports on one slide batch; per-batch spawn/delete)
@@ -40,9 +40,9 @@ User
 
 Members cannot talk to the user directly — the Director always relays.
 
-> **Literal-UUID flag rule** — every `cafleet ...` invocation carries the literal `session_id` and `agent_id` UUIDs as flags (not shell variables). `--session-id` is global (before the subcommand); `--agent-id` is a per-subcommand option (after the subcommand name). See the `cafleet` skill for the full convention.
+> **Literal-UUID flag rule** — every `cafleet ...` invocation carries the literal `fleet_id` and `agent_id` UUIDs as flags (not shell variables). `--fleet-id` is global (before the subcommand); `--agent-id` is a per-subcommand option (after the subcommand name). See the `cafleet` skill for the full convention.
 
-> Never store IDs in shell variables — substitute the UUIDs printed by `cafleet session create` and `cafleet member create` directly into every `cafleet ...` call.
+> Never store IDs in shell variables — substitute the UUIDs printed by `cafleet fleet create` and `cafleet member create` directly into every `cafleet ...` call.
 
 ## Director Process
 
@@ -71,42 +71,34 @@ Step 5 (cleanup) is autonomous — no user prompt.
 2. Load the `cafleet-base-dir` skill for the no-bypass write protocol and `<unset>` sentinel contract.
 3. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
 
-   - If `$ARGUMENTS` is a relative folder name (e.g. `my-topic`), **canonicalize first**: strip a trailing `/report.md` if present, strip a leading `researches/` prefix if present, then prepend `researches/`. The resolver does no folding, so passing `researches/my-topic` raw would resolve `researches/researches/my-topic`. Call:
+   - If `$ARGUMENTS` is a relative folder name (e.g. `my-topic`), **canonicalize first**: strip a trailing `/report.md` if present, strip a leading `researches/` prefix if present, then prepend `researches/`. Step 0 does no folding, so passing `researches/my-topic` raw would resolve `researches/researches/my-topic`. Then run the skill's **Step 0 (task-scope resolution)** with the relpath `researches/$CANONICAL_SLUG`.
 
-     ```bash
-     cafleet base-dir resolve researches/$CANONICAL_SLUG --json
-     ```
+   - If `$ARGUMENTS` is an absolute path (e.g. `/abs/path/to/researches/my-topic`), **canonicalize first**: strip a trailing `/report.md` if present. Store the canonicalized absolute folder path in `$CANONICAL_ABS` and run Step 0 with that absolute path.
 
-   - If `$ARGUMENTS` is an absolute path (e.g. `/abs/path/to/researches/my-topic`), **canonicalize first**: strip a trailing `/report.md` if present. Store the canonicalized absolute folder path in `$CANONICAL_ABS` and call:
+     Step 0 treats the canonicalized absolute path as the task folder verbatim if it is strictly under the inferred repo root; otherwise it yields the `<unset>` sentinel. Step 0 does no filename folding, so a raw child path like `/abs/path/to/researches/my-topic/report.md` would create and anchor a `report.md` directory instead of the topic folder.
 
-     ```bash
-     cafleet base-dir resolve "$CANONICAL_ABS" --json
-     ```
-
-     The CLI treats the canonicalized absolute path as the task folder verbatim if it is strictly under the inferred repo root; otherwise returns the `unset` shape. The resolver does no filename folding, so a raw child path like `/abs/path/to/researches/my-topic/report.md` would create and anchor a `report.md` directory instead of the topic folder.
-
-   Branch on the returned `status`: on `status == "resolved"`, set both `${FOLDER}` and `${BASE}` to the returned `base` field (the task folder IS the report folder; no further `${BASE}/researches/...` concatenation). On `status == "unset"` (absolute `$ARGUMENTS` outside the repo root), set `${FOLDER}` to the **canonicalized** absolute path (the same trailing-`/report.md`-stripped path you passed to the resolver) so the report-folder check in step 4 still runs against a folder rather than a file, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet-base-dir` skill § *The `<unset>` sentinel*.
+   Branch on Step 0's outcome: when it **resolves**, set both `${FOLDER}` and `${BASE}` to the resolved task folder (the task folder IS the report folder; no further `${BASE}/researches/...` concatenation). When it yields **`<unset>`** (absolute `$ARGUMENTS` outside the repo root), set `${FOLDER}` to the **canonicalized** absolute path (the same trailing-`/report.md`-stripped path you passed to Step 0) so the report-folder check in step 4 still runs against a folder rather than a file, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet-base-dir` skill § *The `<unset>` sentinel*.
 4. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Invoke the `cafleet-research-report` skill first to generate a report."
 5. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts. The audit-file path `${BASE}/prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<topic-folder>/prompts/`, not under the repo root.
 
-### Step 1: Bootstrap CAFleet Session, Start Monitor & Spawn Presentation + Transcript (Director)
+### Step 1: Bootstrap CAFleet Fleet, Start Monitor & Spawn Presentation + Transcript (Director)
 
 Load the `cafleet` and `cafleet-agent-team-monitoring` skills — this skill spawns parallel members (Presentation + Transcript, and later VR batches), so the `/loop` monitor is mandatory.
 
-#### 1a. Environment precheck and session bootstrap
+#### 1a. Environment precheck and fleet bootstrap
 
 ```bash
 cafleet doctor
-cafleet --json session create --label "present-[topic-slug]"
+cafleet --json fleet create --label "present-[topic-slug]"
 ```
 
 `cafleet doctor` confirms the Director is inside a tmux session (a hard requirement of `cafleet member create`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.
 
-`cafleet session create` atomically creates the session, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture `session_id` and `director.agent_id` from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
+`cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture `fleet_id` and `director.agent_id` from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
 
 #### 1b. Start the `/loop` monitor BEFORE the first `cafleet member create` call
 
-Per the `cafleet-agent-team-monitoring` skill, start a 1-minute interval monitor before spawning so the first tick fires while spawning completes. Use the `cafleet-agent-team-monitoring` skill's template with literal `[session-id]` and `[director-agent-id]` substituted in. Expected deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
+Per the `cafleet-agent-team-monitoring` skill, start a 1-minute interval monitor before spawning so the first tick fires while spawning completes. Use the `cafleet-agent-team-monitoring` skill's template with literal `[fleet-id]` and `[director-agent-id]` substituted in. Expected deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -118,7 +110,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 
 > **Path-by-reference for role docs**: Each spawn prompt below references its role file by **absolute path**; the spawned member opens its role doc with `Read` on its first turn. Do NOT inline the role content — cafleet `member create` fails with `tmux command failed: command too long` once the shell-quoted prompt grows past a few KB, and rolls back the registration. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up. Resolve the absolute paths for each of `roles/presentation.md`, `roles/transcript.md`, and `roles/visual-reviewer.md` from this skill's `roles/` directory.
 >
-> **Template safety (str.format placeholders)**: cafleet runs `str.format()` over the entire spawn prompt (whether it arrived via `--prompt-file` or inline `prompt_argv`) with `session_id` / `agent_id` / `director_agent_id` as kwargs — leave those three single-braced. Double any other literal `{` or `}` in the prompt body. This rarely comes up, since role content is loaded via `Read` rather than embedded in the prompt.
+> **Template safety (str.format placeholders)**: cafleet runs `str.format()` over the entire spawn prompt (whether it arrived via `--prompt-file` or inline `prompt_argv`) with `fleet_id` / `agent_id` / `director_agent_id` as kwargs — leave those three single-braced. Double any other literal `{` or `}` in the prompt body. This rarely comes up, since role content is loaded via `Read` rather than embedded in the prompt.
 >
 > **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see the per-role flow below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
@@ -138,7 +130,7 @@ Load these skills at startup:
 - the `cafleet-my-slidev` skill — for Slidev authoring layouts and rules
 - the `cafleet-create-figure` skill — if the report includes data that would render better as a chart
 
-SESSION ID: {session_id}
+FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
 BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
@@ -151,20 +143,20 @@ FIGURE BASE:      [INSERT <folder>]    (substitute literally for the FIGURE_BASE
 OUTPUT:           [INSERT <folder>/slide.md]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet --session-id {session_id} message ack --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
+- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
 
 When complete, send the file path to the Director via cafleet message send.
 ```
 
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
 2. **Write the rendered text** to `${BASE}/prompts/presentation-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
+   cafleet --fleet-id [fleet-id] --json member create --agent-id [director-agent-id] \
      --name "presentation" \
      --description "Authors slide.md" \
      --prompt-file ${BASE}/prompts/presentation-<UTC-compact>.md
@@ -182,7 +174,7 @@ ROLE DEFINITION: Open [INSERT abs path to roles/transcript.md] with the Read too
 Load these skills at startup:
 - the `cafleet` skill — for the broker primitives and bash-via-Director routing
 
-SESSION ID: {session_id}
+FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
 BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
@@ -193,20 +185,20 @@ LANGUAGE: [INSERT language detected from report.md]
 OUTPUT:   [INSERT <folder>/transcript.md]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet --session-id {session_id} message ack --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
+- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
 
 When complete, send the file path to the Director via cafleet message send.
 ```
 
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
 2. **Write the rendered text** to `${BASE}/prompts/transcript-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
+   cafleet --fleet-id [fleet-id] --json member create --agent-id [director-agent-id] \
      --name "transcript" \
      --description "Authors transcript.md" \
      --prompt-file ${BASE}/prompts/transcript-<UTC-compact>.md
@@ -219,16 +211,16 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 Read the output files (`${FOLDER}/slide.md`, `${FOLDER}/transcript.md`) and review using the tag criteria in [roles/director.md](roles/director.md). Send tagged feedback via `cafleet message send`; members revise and reply. See [roles/director.md](roles/director.md) for revision approach and iteration limits.
 
 ```bash
-cafleet --session-id [session-id] message send --agent-id [director-agent-id] \
+cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
   --to [presentation-agent-id] \
   --text "slide revisions: [SLIDE STRUCTURE] ... / [VISUAL] ... / ..."
 
-cafleet --session-id [session-id] message send --agent-id [director-agent-id] \
+cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
   --to [transcript-agent-id] \
   --text "transcript revisions: [FLOW] ... / [TIMING] ... / ..."
 ```
 
-Each polled inbound message MUST be `ack`ed via `cafleet --session-id [session-id] message ack --agent-id [director-agent-id] --task-id <task-id>` after acting on it.
+Each polled inbound message MUST be `ack`ed via `cafleet --fleet-id [fleet-id] message ack --agent-id [director-agent-id] --task-id <task-id>` after acting on it.
 
 Once the slide deck is finalized, send the finalized slide structure to the Transcript member for 1:1 realignment.
 
@@ -271,19 +263,19 @@ while start <= total_slides:
         wait for report from VR for round <vr_round> via cafleet message poll arrival
         if no issues: break
         if vr_round >= 3: break                # max 2 re-check rounds reached; remaining issues escalate to user in Step 4
-        cafleet --session-id [session-id] message send --agent-id [director-agent-id] \
+        cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
             --to [presentation-agent-id] --text "<tagged issues>"   # fix
         vr_round += 1
-        cafleet --session-id [session-id] message send --agent-id [director-agent-id] \
+        cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
             --to [vr-batch-agent-id] --text "ROUND: <vr_round>\nRe-check slides: <list>"
         # VR writes the next capture to `vr<start>-r<vr_round>-p<slide_number>.png` and
         # the next persisted report to `vr<start>-r<vr_round>.md`, preserving prior rounds
 
     # Explicit close handshake before delete: the VR cannot reliably run extra commands after /exit.
-    cafleet --session-id [session-id] message send --agent-id [director-agent-id] \
+    cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
         --to [vr-batch-agent-id] --text "CLOSE: run `bun run agent-browser --session vr-batch-<start> close`, then reply 'closed'."
     wait for the VR's "closed" confirmation via cafleet message poll
-    cafleet --session-id [session-id] member delete --agent-id [director-agent-id] --member-id [vr-batch-agent-id]
+    cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [vr-batch-agent-id]
     start = end + 1
 ```
 
@@ -297,7 +289,7 @@ ROLE DEFINITION: Open [INSERT abs path to roles/visual-reviewer.md] with the Rea
 Load these skills at startup:
 - the `cafleet` skill — for the broker primitives and bash-via-Director routing
 
-SESSION ID: {session_id}
+FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
 BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
@@ -311,20 +303,20 @@ CHECK SLIDES:    [INSERT <start> to <end>]
 ROUND:           [INSERT <round>]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --session-id {session_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet --session-id {session_id} message ack --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
+- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
 
 When complete, persist the report to <folder>/screenshots/vr<start>-r<round>.md and send it to the Director via cafleet message send.
 ```
 
 Spawn with the two-step (render to file, then `--prompt-file`) pattern. Each VR batch gets its own timestamped pre-spawn file — no overwriting:
 
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{session_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
+1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
 2. **Write the rendered text** to `${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; `<start>` matches the batch's first-slide index used in `--name`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --session-id [session-id] --json member create --agent-id [director-agent-id] \
+   cafleet --fleet-id [fleet-id] --json member create --agent-id [director-agent-id] \
      --name "vr-batch-<start>" \
      --description "Visual Reviewer for slides <start>..<end>" \
      --prompt-file ${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md
@@ -351,17 +343,17 @@ No round limit — loop until approved.
 
 **Only enter after the user approves in Step 4.**
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet session delete` must complete first.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first.
 
-1. **Cancel the `/loop` monitor** with `CronDelete <job-id>`. The cron must stop firing BEFORE any member is deleted; a cron that keeps polling a tearing-down session spams `Error: session is deleted`.
+1. **Cancel the `/loop` monitor** with `CronDelete <job-id>`. The cron must stop firing BEFORE any member is deleted; a cron that keeps polling a tearing-down fleet spams `Error: fleet is deleted`.
 2. **Delete every member** — Presentation, Transcript, and any active VR batch. For any active VR batch, run the explicit close handshake first (Director sends `CLOSE:` via `cafleet message send`, VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`), THEN run `cafleet member delete`. Once all VR browser sessions are closed:
    ```bash
-   cafleet --session-id [session-id] member delete --agent-id [director-agent-id] --member-id [presentation-agent-id]
-   cafleet --session-id [session-id] member delete --agent-id [director-agent-id] --member-id [transcript-agent-id]
-   cafleet --session-id [session-id] member delete --agent-id [director-agent-id] --member-id [vr-batch-agent-id]   # if still alive — only after the close handshake
+   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [presentation-agent-id]
+   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [transcript-agent-id]
+   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [vr-batch-agent-id]   # if still alive — only after the close handshake
    ```
    Each call sends `/exit` and waits up to 15 s for the pane's `claude` process to exit. Do not rely on `/exit` to trigger any post-shutdown action — additional commands are not guaranteed to run after `/exit` arrives.
-3. **Verify the roster is empty**: `cafleet --session-id [session-id] member list --agent-id [director-agent-id]` must return zero members.
+3. **Verify the roster is empty**: `cafleet --fleet-id [fleet-id] member list --agent-id [director-agent-id]` must return zero members.
 4. **Run the agent-browser safety net** to close any orphan browser sessions left behind:
    ```bash
    bun run agent-browser close --all
@@ -369,8 +361,8 @@ Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Orde
 5. **Stop the Slidev dev server** if still running. Use the coding agent's **native task-stop primitive** with the task ID you recorded back in Step 3 *Visual Review & Fix* (Server Startup substep 2) — do NOT shell out to `pkill` or `kill`. `pkill -f slidev` matches too broadly (any other Slidev process on the host becomes collateral damage), and the harness-tracked background task keeps leaking stdout to the operator's pane until stopped through the harness, which `pkill` cannot do. Per-backend mechanism:
    - **Claude Code**: call the Claude Code harness's built-in `TaskStop` tool with the task ID recorded in Step 3 *Visual Review & Fix* (Server Startup substep 2).
    - **codex / opencode**: use the backend's task-management primitive (see the host project's `.claude/rules/`).
-6. **Delete the session**: `cafleet session delete [session-id]` (positional, no `--session-id` flag). Soft-deletes the session and deregisters the root Director and Administrator atomically.
-7. **Confirm**: `cafleet session list` — the current session must not appear (soft-deleted sessions are hidden).
+6. **Delete the fleet**: `cafleet fleet delete [fleet-id]` (positional, no `--fleet-id` flag). Soft-deletes the fleet and deregisters the root Director and Administrator atomically.
+7. **Confirm**: `cafleet fleet list` — the current fleet must not appear (soft-deleted fleets are hidden).
 
 Do NOT use raw `tmux kill-pane` or `tmux send-keys` at any point — `cafleet member delete` is the only supported teardown primitive.
 

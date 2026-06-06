@@ -27,14 +27,14 @@ You do NOT speak to the user directly. All coordination flows through the Direct
 **Sending a message to the Director** (completion reports, questions):
 
 ```bash
-cafleet --session-id [session-id] message send --agent-id [my-agent-id] \
+cafleet --fleet-id [fleet-id] message send --agent-id [my-agent-id] \
   --to [director-agent-id] \
   --text "[your report or question]"
 ```
 
-Substitute the literal `[session-id]`, `[my-agent-id]`, and `[director-agent-id]` UUIDs from your spawn prompt. Never use shell variables.
+Substitute the literal `[fleet-id]`, `[my-agent-id]`, and `[director-agent-id]` UUIDs from your spawn prompt. Never use shell variables.
 
-**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet --session-id [session-id] message poll --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the `[task-id]`. After acting on the polled message, ack it via `cafleet --session-id [session-id] message ack --agent-id [my-agent-id] --task-id [task-id]`.
+**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet --fleet-id [fleet-id] message poll --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the `[task-id]`. After acting on the polled message, ack it via `cafleet --fleet-id [fleet-id] message ack --agent-id [my-agent-id] --task-id [task-id]`.
 
 ## Timing Awareness
 

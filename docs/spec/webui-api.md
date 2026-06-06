@@ -4,26 +4,26 @@ Base path: `/api`
 
 ## Request Headers
 
-The WebUI does not require authentication. Session-scoped endpoints require an `X-Session-Id` header:
+The WebUI does not require authentication. Fleet-scoped endpoints require an `X-Fleet-Id` header:
 
 | Header | Purpose |
 |---|---|
-| `X-Session-Id: <session_id>` | Required on session-scoped endpoints (agents, inbox, sent, timeline, send). The backend verifies the session exists in the `sessions` table. |
+| `X-Fleet-Id: <fleet_id>` | Required on fleet-scoped endpoints (agents, inbox, sent, timeline, send). The backend verifies the fleet exists in the `fleets` table. |
 
-No server-side session cookies. The SPA stores the active session_id client-side via hash-based routing and sends it in the X-Session-Id header on each request.
+No server-side session cookies. The SPA stores the active fleet_id client-side via hash-based routing and sends it in the X-Fleet-Id header on each request.
 
 ## Endpoints
 
-### GET /api/sessions — List Sessions
+### GET /api/fleets — List Fleets
 
-Returns all sessions with agent counts, ordered newest-first by `created_at DESC, session_id ASC`. No headers required.
+Returns all fleets with agent counts, ordered newest-first by `created_at DESC, fleet_id ASC`. No headers required.
 
 **Response** (200 OK):
 
 ```json
 [
   {
-    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "fleet_id": "550e8400-e29b-41d4-a716-446655440000",
     "label": "PR-42 review",
     "created_at": "2026-04-12T10:00:00+00:00",
     "agent_count": 3
@@ -33,9 +33,9 @@ Returns all sessions with agent counts, ordered newest-first by `created_at DESC
 
 ### GET /api/agents — List Agents
 
-Returns agents belonging to the selected session. Every agent carries a `kind` discriminator so the frontend can locate the built-in Administrator without matching on its name.
+Returns agents belonging to the selected fleet. Every agent carries a `kind` discriminator so the frontend can locate the built-in Administrator without matching on its name.
 
-**Request**: `X-Session-Id: <session_id>` header.
+**Request**: `X-Fleet-Id: <fleet_id>` header.
 
 **Response** (200 OK):
 
@@ -45,7 +45,7 @@ Returns agents belonging to the selected session. Every agent carries a `kind` d
     {
       "agent_id": "uuid",
       "name": "Administrator",
-      "description": "Built-in administrator agent for session 3f9a1b2c",
+      "description": "Built-in administrator agent for fleet 3f9a1b2c",
       "status": "active",
       "registered_at": "2026-04-15T10:00:00+00:00",
       "kind": "builtin-administrator"
@@ -66,16 +66,16 @@ Returns agents belonging to the selected session. Every agent carries a `kind` d
 
 | Value | Meaning |
 |---|---|
-| `"builtin-administrator"` | The session's built-in Administrator agent. Exactly one per session. Derived from `agent_card_json.cafleet.kind == "builtin-administrator"`. |
+| `"builtin-administrator"` | The fleet's built-in Administrator agent. Exactly one per fleet. Derived from `agent_card_json.cafleet.kind == "builtin-administrator"`. |
 | `"user"` | Any other agent (human-registered, spawned member, etc.). |
 
-The discriminator is derived at read time from the stored `agent_card_json` blob — there is no dedicated column. `broker.list_session_agents` reads it in SQL via `json_extract(agent_card_json, '$.cafleet.kind')`, while `broker.get_agent` (which already loads the full ORM row) computes it via the `_is_administrator` helper.
+The discriminator is derived at read time from the stored `agent_card_json` blob — there is no dedicated column. `broker.list_fleet_agents` reads it in SQL via `json_extract(agent_card_json, '$.cafleet.kind')`, while `broker.get_agent` (which already loads the full ORM row) computes it via the `_is_administrator` helper.
 
 ### GET /api/agents/{agent_id}/inbox — Inbox Messages
 
 Returns messages received by the agent (`context_id = agent_id`), excluding `broadcast_summary` type tasks. Ordered newest first.
 
-**Request**: `X-Session-Id: <session_id>` header.
+**Request**: `X-Fleet-Id: <fleet_id>` header.
 
 **Response** (200 OK):
 
@@ -105,17 +105,17 @@ The `body` field is extracted from the task's first artifact's first text part. 
 
 Returns messages sent by the agent (single SQL query against `tasks` filtered by `from_agent_id` and ordered by `status_timestamp DESC`, served by `idx_tasks_from_agent_status_ts`), excluding `broadcast_summary` type tasks. Ordered newest first.
 
-**Request**: `X-Session-Id: <session_id>` header.
+**Request**: `X-Fleet-Id: <fleet_id>` header.
 
 Same response format as inbox.
 
-### GET /api/timeline — Unified Session Timeline
+### GET /api/timeline — Unified Fleet Timeline
 
-Returns up to 200 most-recent non-`broadcast_summary` tasks for the selected session, newest first. Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_task_id` into a single broadcast entry client-side.
+Returns up to 200 most-recent non-`broadcast_summary` tasks for the selected fleet, newest first. Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_task_id` into a single broadcast entry client-side.
 
-**Request**: `X-Session-Id: <session_id>` header.
+**Request**: `X-Fleet-Id: <fleet_id>` header.
 
-Session scoping is reached through the `tasks.context_id → agents.agent_id → agents.session_id` join. Only tasks whose recipient belongs to the header session are returned; cross-session tasks are invisible.
+Fleet scoping is reached through the `tasks.context_id → agents.agent_id → agents.fleet_id` join. Only tasks whose recipient belongs to the header fleet are returned; cross-fleet tasks are invisible.
 
 **Response** (200 OK):
 
@@ -158,12 +158,12 @@ The client groups rows by `origin_task_id` (non-null rows sharing a value form o
 
 ### POST /api/messages/send — Send Message
 
-Sends a message from a same-session active agent. Supports both unicast (`to_agent_id=<uuid>`) and broadcast (`to_agent_id="*"`).
+Sends a message from a same-fleet active agent. Supports both unicast (`to_agent_id=<uuid>`) and broadcast (`to_agent_id="*"`).
 
 **Request**:
 
 ```
-X-Session-Id: <session_id>
+X-Fleet-Id: <fleet_id>
 ```
 
 ```json
@@ -174,11 +174,11 @@ X-Session-Id: <session_id>
 }
 ```
 
-**Unicast** (`to_agent_id` is a UUID): the server verifies both the sender and the destination belong to the caller's session and that the destination is active.
+**Unicast** (`to_agent_id` is a UUID): the server verifies both the sender and the destination belong to the caller's fleet and that the destination is active.
 
-**Broadcast** (`to_agent_id == "*"`): the server skips destination validation (no specific recipient to verify) and the WebUI route calls `broker.broadcast_message(...)`, which fans out to every active agent in the session (except the built-in Administrator, which is filtered out of the recipient set at the broker layer) plus a summary task. The sender is still required to be active and in the caller's session; the sender MAY be the Administrator. The response's `task_id` is the summary task's id.
+**Broadcast** (`to_agent_id == "*"`): the server skips destination validation (no specific recipient to verify) and the WebUI route calls `broker.broadcast_message(...)`, which fans out to every active agent in the fleet (except the built-in Administrator, which is filtered out of the recipient set at the broker layer) plus a summary task. The sender is still required to be active and in the caller's fleet; the sender MAY be the Administrator. The response's `task_id` is the summary task's id.
 
-**Sender identity**: The Admin WebUI always submits `from_agent_id = administrator.agent_id` (the session's built-in Administrator). The endpoint itself is sender-agnostic — it accepts any active agent in the session — but no UI path lets the operator pick a different sender.
+**Sender identity**: The Admin WebUI always submits `from_agent_id = administrator.agent_id` (the fleet's built-in Administrator). The endpoint itself is sender-agnostic — it accepts any active agent in the fleet — but no UI path lets the operator pick a different sender.
 
 **Response** (200 OK):
 
@@ -190,8 +190,8 @@ X-Session-Id: <session_id>
 ```
 
 **Errors**:
-- 400: Missing fields, `from_agent` not in session, destination is deregistered
-- 404: Agent not found or cross-session
+- 400: Missing fields, `from_agent` not in fleet, destination is deregistered
+- 404: Agent not found or cross-fleet
 - 409 (reserved for future deregister endpoint): for any future endpoint that attempts to deregister or otherwise modify the built-in Administrator, the broker's `AdministratorProtectedError` must be translated to `raise HTTPException(status_code=409, detail=...)`. This 409 is not currently reachable through `POST /api/messages/send` and the WebUI router does not yet register an exception handler for `AdministratorProtectedError`; this entry documents the required mapping for the future endpoint.
 
 ## Error Format

@@ -21,7 +21,7 @@
 - Do NOT use `mise run <task>` — the `run` subcommand is unnecessary.
 - Run all tasks from the project root. No `cd` required.
 - **mise tasks forward positional args to the underlying command.** When you need to pass pytest args (test selectors, `-x`, `-v`, etc.), pass them directly to the mise task — do NOT fall back to `uv run python -m pytest` to "get more control". Examples:
-  - Run one test: `mise //cafleet:test tests/test_base_dir.py::test_my_case`
+  - Run one test: `mise //cafleet:test tests/test_fleet_cli.py::test_my_case`
   - Stop on first failure with verbose output: `mise //cafleet:test -xvs tests/test_my.py`
   - Match a keyword: `mise //cafleet:test -k my_keyword`
   - Package-relative paths only (`tests/...`, not `cafleet/tests/...`), because the mise task's working directory is `cafleet/`.
@@ -39,7 +39,7 @@ The commands above are the **only** way to run these operations. Do NOT invoke t
 | `uv run --frozen --package cafleet python -m pytest ...` | `mise //cafleet:test` | bypasses the project's test runner config and env setup |
 | `uv run cafleet ...` for verification/smoke | delegate to a teammate that already has permission, or ask the user | see `skills/agent-team-supervision/SKILL.md` § *Authorization-Scope Guard* |
 
-This rule applies **even when a teammate is blocked on permissions** and you are tempted to "just run it yourself" — using `mise` keeps commands matching the project's `permissions.allow` patterns, which is the entire point of this project's session-id / agent-id CLI design.
+This rule applies **even when a teammate is blocked on permissions** and you are tempted to "just run it yourself" — using `mise` keeps commands matching the project's `permissions.allow` patterns, which is the entire point of this project's fleet-id / agent-id CLI design.
 
 ## Skill artifact runners (project-specific glue)
 

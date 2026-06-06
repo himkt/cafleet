@@ -142,14 +142,12 @@ class TmuxMultiplexer:
         )
 
     def send_poll_trigger(
-        self, *, target_pane_id: str, session_id: str, agent_id: str
+        self, *, target_pane_id: str, fleet_id: str, agent_id: str
     ) -> bool:
         """Best-effort ``cafleet ... message poll`` keystroke for the recipient's pane."""
         if shutil.which("tmux") is None:
             return False
-        payload = (
-            f"cafleet --session-id {session_id} message poll --agent-id {agent_id}"
-        )
+        payload = f"cafleet --fleet-id {fleet_id} message poll --agent-id {agent_id}"
         try:
             _send_literal_then_enter(
                 target_pane_id=target_pane_id, payload=payload, timeout=5

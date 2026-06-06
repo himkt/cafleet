@@ -8,12 +8,12 @@ Each parameter has exactly one input source:
 
 | Parameter | Source |
 |---|---|
-| Session ID | `--session-id <uuid>` global flag |
+| Fleet ID | `--fleet-id <uuid>` global flag |
 | Database URL | `CAFLEET_DATABASE_URL` env var (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db` with `~` expanded at load time. When setting `CAFLEET_DATABASE_URL` yourself, use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs.) |
 | Agent ID | `--agent-id <uuid>` subcommand option |
 | JSON output | `--json` global flag |
 
-> **Why `--session-id` is a literal CLI flag, not an environment variable.** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --session-id <uuid> ...` invocation matches a single `permissions.allow` pattern of the same shape across every subcommand for that session. Shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts that interrupt agent work. Substitute the literal UUIDs printed by `cafleet session create` and `cafleet agent register` — do not use shell variables to hold them.
+> **Why `--fleet-id` is a literal CLI flag, not an environment variable.** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --fleet-id <uuid> ...` invocation matches a single `permissions.allow` pattern of the same shape across every subcommand for that fleet. Shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts that interrupt agent work. Substitute the literal UUIDs printed by `cafleet fleet create` and `cafleet agent register` — do not use shell variables to hold them.
 
 ## Global Options
 
@@ -22,8 +22,8 @@ Placed **before** the subcommand:
 | Flag | Required | Notes |
 |---|---|---|
 | `--json` | no | Emit JSON output. JSON encoding is compact (`json.dumps(..., separators=(",",":"), ensure_ascii=False)` — non-ASCII like the `…` truncation suffix is emitted as UTF-8, not `\uXXXX`). |
-| `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
-| `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
+| `--fleet-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `fleet *`, `server`, `doctor` | Fleet identifier (opaque string; new fleets receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --fleet-id <literal-id> *` works for every subcommand. |
+| `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--fleet-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
 ### `--full` semantics (cross-subcommand escape hatch) {#full-semantics}
 
@@ -36,24 +36,24 @@ Placed **before** the subcommand:
 | `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status` (plus `coding_agent` when a placement is present). | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never load it. |
 | `member capture` | Default `--lines 30` (down from 80); ANSI escape sequences stripped in post-process unless `--ansi` is supplied. | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
 
-### Subcommands that require `--session-id`
+### Subcommands that require `--fleet-id`
 
 `agent register`, `agent deregister`, `agent list`, `agent show`, `message send`, `message broadcast`, `message poll`, `message ack`, `message cancel`, `message show`, `member create`, `member delete`, `member list`, `member capture`, `member send-input`, `member exec`, `member ping`.
 
-### Subcommands that do NOT require `--session-id`
+### Subcommands that do NOT require `--fleet-id`
 
-`db init`, `db *`, `session create`, `session list`, `session show`, `session delete`, `server`, `doctor`.
+`db init`, `db *`, `fleet create`, `fleet list`, `fleet show`, `fleet delete`, `server`, `doctor`.
 
-The top-level `--version` flag also short-circuits this check: it is an eager Click option whose callback runs during option parsing and exits before any subcommand (and the `_require_session_id` guard) is reached, so `cafleet --version` succeeds with no `--session-id`.
+The top-level `--version` flag also short-circuits this check: it is an eager Click option whose callback runs during option parsing and exits before any subcommand (and the `_require_fleet_id` guard) is reached, so `cafleet --version` succeeds with no `--fleet-id`.
 
-Create a session first if you don't have one:
+Create a fleet first if you don't have one:
 
 ```bash
-cafleet session create --label "my-project"
-# → prints the session_id
+cafleet fleet create --label "my-project"
+# → prints the fleet_id
 ```
 
-Then pass the printed UUID as `--session-id <uuid>` on every client + member command.
+Then pass the printed UUID as `--fleet-id <uuid>` on every client + member command.
 
 ## Agent ID (`--agent-id`)
 
@@ -62,7 +62,7 @@ Then pass the printed UUID as `--session-id <uuid>` on every client + member com
 ### Commands that require `--agent-id`
 
 - `agent deregister` — Deregister an agent
-- `agent list` — List agents in the session
+- `agent list` — List agents in the fleet
 - `agent show` — Show detail for a specific agent
 - `message send` — Send a message to another agent
 - `message broadcast` — Broadcast a message to all agents
@@ -84,23 +84,23 @@ Then pass the printed UUID as `--session-id <uuid>` on every client + member com
 
 ## ID Prefix Resolution
 
-Human-facing and default JSON output truncate IDs to an 8-char prefix (task id, agent id, `session create` director/admin, member id). To make those displayed prefixes pasteable into the next command, the **target** ID inputs accept either a full UUID or any unique prefix of one:
+Human-facing and default JSON output truncate IDs to an 8-char prefix (task id, agent id, `fleet create` director/admin, member id). To make those displayed prefixes pasteable into the next command, the **target** ID inputs accept either a full UUID or any unique prefix of one:
 
 | Input | Subcommand(s) | Resolved against |
 |---|---|---|
-| `--to` | `message send` | active agents in the session |
-| `--id` | `agent show` | active agents in the session |
-| `--member-id` | `member delete` / `capture` / `send-input` / `exec` / `ping` | active agents in the session |
-| `--task-id` | `message ack` / `cancel` / `show` | tasks with at least one endpoint agent in the session |
+| `--to` | `message send` | active agents in the fleet |
+| `--id` | `agent show` | active agents in the fleet |
+| `--member-id` | `member delete` / `capture` / `send-input` / `exec` / `ping` | active agents in the fleet |
+| `--task-id` | `message ack` / `cancel` / `show` | tasks with at least one endpoint agent in the fleet |
 
 Resolution rules:
 
 - **Exact-match short-circuit.** A full UUID matches by exact equality before any prefix scan, so it always resolves to itself and is never reported ambiguous (an 8-char prefix cannot equal a 36-char id).
 - **Unique prefix wins.** Any prefix — no minimum length — that matches exactly one row resolves to that row's full id.
-- **Session-scoped.** Resolution only sees rows visible to the supplied `--session-id`: agents active in the session, tasks with an endpoint agent in the session. A prefix that is unique in another session is invisible here. Task lookup for `ack` / `cancel` / `show` is therefore tightened to session-visible tasks.
+- **Fleet-scoped.** Resolution only sees rows visible to the supplied `--fleet-id`: agents active in the fleet, tasks with an endpoint agent in the fleet. A prefix that is unique in another fleet is invisible here. Task lookup for `ack` / `cancel` / `show` is therefore tightened to fleet-visible tasks.
 - **Ambiguous or no-match → exit 1.** A prefix matching more than one row, and a prefix (or full UUID) matching zero rows, each exit `1` with a distinct message (see [Error Messages](#error-messages)).
 
-The acting `--agent-id` is **not** prefix-resolved — an agent always knows its own full UUID (returned at `register`, baked into the spawn prompt), so it is never re-typed from an 8-char display. Passing a prefix there is rejected by the existing acting-agent validation, not by prefix resolution: on every `requires_agent_session` command (including `message send`) the `verify_agent_session` gate runs before the handler resolves its target and yields `Error: agent <prefix> is not a member of session <sid>.`.
+The acting `--agent-id` is **not** prefix-resolved — an agent always knows its own full UUID (returned at `register`, baked into the spawn prompt), so it is never re-typed from an 8-char display. Passing a prefix there is rejected by the existing acting-agent validation, not by prefix resolution: on every `requires_agent_fleet` command (including `message send`) the `verify_agent_fleet` gate runs before the handler resolves its target and yields `Error: agent <prefix> is not a member of fleet <sid>.`.
 
 ## Message Body Truncation
 
@@ -131,40 +131,40 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split.
 
 ```bash
-cafleet --session-id <session-id> message poll --agent-id <my-agent-id>          # default: text truncated to 200 cp + "…"
-cafleet --session-id <session-id> message poll --agent-id <my-agent-id> --full   # full body
+cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>          # default: text truncated to 200 cp + "…"
+cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --full   # full body
 ```
 
 This applies to CLI emit sites only. FastAPI `/api/*` responses (see [webui-api.md](./webui-api.md)) are unchanged — the WebUI is human-facing and renders full bodies. `agent.description`, `skills[].description`, `agent_card_json` sub-fields, and `member capture` content are also untouched in this release.
 
-## `cafleet session` — Session Management
+## `cafleet fleet` — Fleet Management
 
-The `cafleet session` subgroup manages sessions. These commands write directly to SQLite — the broker server does not need to be running.
+The `cafleet fleet` subgroup manages fleets. These commands write directly to SQLite — the broker server does not need to be running.
 
-### `session create`
+### `fleet create`
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--label` | no | Free-form text label for the session |
-| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. Operator-declared metadata only — `session create` does not spawn the root Director's coding-agent process and cannot auto-detect the binary running in the calling pane. The value is recorded as `placement.coding_agent` for the root Director. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex", "opencode"]`) so adding a future backend is one entry in `cafleet.coding_agent.CODING_AGENTS`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically via `show_default=True`.) |
+| `--label` | no | Free-form text label for the fleet |
+| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. Operator-declared metadata only — `fleet create` does not spawn the root Director's coding-agent process and cannot auto-detect the binary running in the calling pane. The value is recorded as `placement.coding_agent` for the root Director. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex", "opencode"]`) so adding a future backend is one entry in `cafleet.coding_agent.CODING_AGENTS`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically via `show_default=True`.) |
 | `--json` | no | Output as JSON |
 
-There are no `--name` / `--description` flags. The root Director's name and description are hardcoded (`name="Director"`, `description="Root Director for this session"`).
+There are no `--name` / `--description` flags. The root Director's name and description are hardcoded (`name="Director"`, `description="Root Director for this fleet"`).
 
-Creates a new session with a UUIDv4 identifier. **Must be run inside a tmux session** — outside tmux the command exits 1 with `Error: cafleet session create must be run inside a tmux session` and writes nothing to the DB. The command atomically performs five writes in a single transaction:
+Creates a new fleet with a UUIDv4 identifier. **Must be run inside a tmux session** — outside tmux the command exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing to the DB. The command atomically performs five writes in a single transaction:
 
-1. `INSERT INTO sessions (...)` with `deleted_at=NULL`, `director_agent_id=NULL`.
+1. `INSERT INTO fleets (...)` with `deleted_at=NULL`, `director_agent_id=NULL`.
 2. `INSERT INTO agents (...)` for the hardcoded root Director.
 3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` and `coding_agent=<value of --coding-agent>` (default `"claude"`).
-4. `UPDATE sessions SET director_agent_id = <director_agent_id>`.
+4. `UPDATE fleets SET director_agent_id = <director_agent_id>`.
 5. `INSERT INTO agents (...)` for the built-in `Administrator` (see [data-model.md](./data-model.md) for the Administrator's distinguishing `agent_card_json.cafleet.kind` flag).
 
 Any exception inside the transaction rolls back all five writes.
 
-**Non-JSON output** — line 1 is `session_id` (preserves backward-compatible scripts that parse only the first line), line 2 is the root Director's `agent_id`:
+**Non-JSON output** — line 1 is `fleet_id` (preserves backward-compatible scripts that parse only the first line), line 2 is the root Director's `agent_id`:
 
 ```
-<session_id>
+<fleet_id>
 <director_agent_id>
 label:            <label or empty>
 created_at:       <iso8601>
@@ -177,14 +177,14 @@ administrator:    <administrator_agent_id>
 
 ```json
 {
-  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "fleet_id": "550e8400-e29b-41d4-a716-446655440000",
   "label": "my-project",
   "created_at": "2026-04-15T10:00:00+00:00",
   "administrator_agent_id": "3c4d5e6f-7890-1234-5678-90abcdef1234",
   "director": {
     "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
     "name": "Director",
-    "description": "Root Director for this session",
+    "description": "Root Director for this fleet",
     "registered_at": "2026-04-15T10:00:00+00:00",
     "placement": {
       "director_agent_id": null,
@@ -200,35 +200,35 @@ administrator:    <administrator_agent_id>
 
 `placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is the value of `--coding-agent` (default `"claude"`); operators running the codex CLI in the calling pane should pass `--coding-agent codex` so the placement metadata is accurate. cafleet does not spawn the root Director's coding-agent process and cannot auto-detect what is running in the calling pane.
 
-Attempting `cafleet --session-id <session_id> agent deregister --agent-id <director_agent_id>` is rejected by the broker with `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` and exits 1. Attempting `cafleet --session-id <session_id> agent deregister --agent-id <administrator_agent_id>` is rejected with `Error: Administrator cannot be deregistered` (exit 1) via the `AdministratorProtectedError` path.
+Attempting `cafleet --fleet-id <fleet_id> agent deregister --agent-id <director_agent_id>` is rejected by the broker with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` and exits 1. Attempting `cafleet --fleet-id <fleet_id> agent deregister --agent-id <administrator_agent_id>` is rejected with `Error: Administrator cannot be deregistered` (exit 1) via the `AdministratorProtectedError` path.
 
-### `session list`
+### `fleet list`
 
 | Flag | Required | Notes |
 |---|---|---|
 | `--json` | no | Output as JSON |
 
-Lists all **non-soft-deleted** sessions with their `director_agent_id`, label, created_at, and active agent count. Soft-deleted sessions (`sessions.deleted_at IS NOT NULL`) are hidden.
+Lists all **non-soft-deleted** fleets with their `director_agent_id`, label, created_at, and active agent count. Soft-deleted fleets (`fleets.deleted_at IS NOT NULL`) are hidden.
 
-Each row exposes the session's root `director_agent_id` so the Director's ID can be recovered from a list after `session create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (full UUID). Text output renders it as a `DIRECTOR` column placed immediately after `SESSION_ID`, showing the **full** director UUID (not an 8-char prefix) because the value is pasted into `--agent-id`, which stays full-only:
+Each row exposes the fleet's root `director_agent_id` so the Director's ID can be recovered from a list after `fleet create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (full UUID). Text output renders it as a `DIRECTOR` column placed immediately after `FLEET_ID`, showing the **full** director UUID (not an 8-char prefix) because the value is pasted into `--agent-id`, which stays full-only:
 
 ```
-SESSION_ID                               DIRECTOR                                 LABEL                AGENTS   CREATED_AT
+FLEET_ID                               DIRECTOR                                 LABEL                AGENTS   CREATED_AT
 ```
 
-### `session show`
+### `fleet show`
 
 | Argument | Required | Notes |
 |---|---|---|
-| `session_id` | yes | The session to show |
+| `fleet_id` | yes | The fleet to show |
 | `--json` | no | Output as JSON |
 
-Shows details of a single session. Exits 1 with `Error: session 'X' not found.` if the row does not exist at all.
+Shows details of a single fleet. Exits 1 with `Error: fleet 'X' not found.` if the row does not exist at all.
 
-`broker.get_session` intentionally returns soft-deleted rows (to keep audit info reachable), so `session show` succeeds on a soft-deleted session. When the row's `deleted_at` is non-NULL, the text output adds a `deleted_at:` line so callers can distinguish a soft-deleted session from an active one without parsing JSON:
+`broker.get_fleet` intentionally returns soft-deleted rows (to keep audit info reachable), so `fleet show` succeeds on a soft-deleted fleet. When the row's `deleted_at` is non-NULL, the text output adds a `deleted_at:` line so callers can distinguish a soft-deleted fleet from an active one without parsing JSON:
 
 ```
-session_id: <uuid>
+fleet_id: <uuid>
 label:      example
 created_at: 2026-04-16T09:00:00+00:00
 deleted_at: 2026-04-16T10:00:00+00:00
@@ -236,29 +236,29 @@ deleted_at: 2026-04-16T10:00:00+00:00
 
 The `--json` output always includes `deleted_at` (null when active).
 
-### `session delete`
+### `fleet delete`
 
 | Argument | Required | Notes |
 |---|---|---|
-| `session_id` | yes | The session to delete |
+| `fleet_id` | yes | The fleet to delete |
 
-Soft-deletes a session. All three operations run in one transaction:
+Soft-deletes a fleet. All three operations run in one transaction:
 
-1. `UPDATE sessions SET deleted_at = now WHERE session_id = X AND deleted_at IS NULL`.
-2. `UPDATE agents SET status = 'deregistered', deregistered_at = now WHERE session_id = X AND status = 'active'` (sweeps every active agent in the session — root Director included).
-3. `DELETE FROM agent_placements WHERE agent_id IN (SELECT agent_id FROM agents WHERE session_id = X)`.
+1. `UPDATE fleets SET deleted_at = now WHERE fleet_id = X AND deleted_at IS NULL`.
+2. `UPDATE agents SET status = 'deregistered', deregistered_at = now WHERE fleet_id = X AND status = 'active'` (sweeps every active agent in the fleet — root Director included).
+3. `DELETE FROM agent_placements WHERE agent_id IN (SELECT agent_id FROM agents WHERE fleet_id = X)`.
 
 Tasks are untouched — the message history remains queryable. Output:
 
 ```
-Deleted session <session_id>. Deregistered N agents.
+Deleted fleet <fleet_id>. Deregistered N agents.
 ```
 
-`N` counts every agent that was active at the moment of deletion (root Director included). On re-run against an already-deleted session, the `WHERE deleted_at IS NULL` guard on step 1 short-circuits the cascade and the command prints `Deleted session <session_id>. Deregistered 0 agents.` and exits 0 — the command is idempotent.
+`N` counts every agent that was active at the moment of deletion (root Director included). On re-run against an already-deleted fleet, the `WHERE deleted_at IS NULL` guard on step 1 short-circuits the cascade and the command prints `Deleted fleet <fleet_id>. Deregistered 0 agents.` and exits 0 — the command is idempotent.
 
-There is no `--force` flag. Calling `session delete` on an unknown `session_id` exits 1 with `Error: session 'X' not found.`.
+There is no `--force` flag. Calling `fleet delete` on an unknown `fleet_id` exits 1 with `Error: fleet 'X' not found.`.
 
-Member tmux panes spawned by `cafleet member create` are **not** automatically closed by `session delete`. For a clean teardown, call `cafleet member delete` per member first (which sends `/exit` to the pane). If a member pane refuses to close (e.g. blocked on a confirmation prompt), rerun `cafleet member delete` with `--force`, which kill-panes the target, sweeps the placement, and rebalances the layout.
+Member tmux panes spawned by `cafleet member create` are **not** automatically closed by `fleet delete`. For a clean teardown, call `cafleet member delete` per member first (which sends `/exit` to the pane). If a member pane refuses to close (e.g. blocked on a confirmation prompt), rerun `cafleet member delete` with `--force`, which kill-panes the target, sweeps the placement, and rebalances the layout.
 
 ## `cafleet doctor` — Placement Diagnostics
 
@@ -267,7 +267,7 @@ Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE
 | Flag | Required | Notes |
 |---|---|---|
 | `--json` | no | Global `--json`, placed before the subcommand (same pattern as every other CLI command). |
-| `--session-id` | no | Silently accepted and ignored, matching `db init` / `session *` / `server`. |
+| `--fleet-id` | no | Silently accepted and ignored, matching `db init` / `fleet *` / `server`. |
 
 Environment requirements:
 
@@ -308,7 +308,7 @@ Exit codes:
 
 Starts the admin WebUI FastAPI app (the same app served by `mise //cafleet:dev`) via uvicorn. CLI commands do not require this server to be running — it is only needed when a user wants to view the WebUI at `/` or hit the `/api/*` endpoints from a browser.
 
-`cafleet server` does NOT require `--session-id`. Supplying `--session-id` is silently accepted and ignored, matching the `db init` / `session *` pattern.
+`cafleet server` does NOT require `--fleet-id`. Supplying `--fleet-id` is silently accepted and ignored, matching the `db init` / `fleet *` pattern.
 
 | Flag | Default | Notes |
 |---|---|---|
@@ -347,8 +347,8 @@ cafleet server --host 0.0.0.0 --port 9000
 # Override via env vars
 CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 
-# --session-id is silently accepted and ignored
-cafleet --session-id 550e8400-e29b-41d4-a716-446655440000 server
+# --fleet-id is silently accepted and ignored
+cafleet --fleet-id 550e8400-e29b-41d4-a716-446655440000 server
 ```
 
 ## Member Commands
@@ -363,7 +363,7 @@ The `cafleet member` subgroup manages tmux-backed member agents. All commands re
 | `--name` | yes | Display name of the new member. Forwarded to the spawned `claude` process as `claude --name <member-name> <prompt>` so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. Neither codex nor opencode has a `--name` analog — operators discover those panes via `cafleet member list`. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. The flag both selects the `cafleet.coding_agent.CODING_AGENTS` registry entry whose `build_spawn_argv` produces the spawn argv AND is recorded as `placement.coding_agent`. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex", "opencode"]`) so adding a future backend is one entry in `CODING_AGENTS`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically via `show_default=True`.) Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. For the `opencode` backend, `OpencodeAgent.ensure_available()` also materializes `~/.opencode/agents/cafleet.md` from the in-source `CAFLEET_AGENT` preset on first spawn (skip-if-exists semantics) — see [Opencode members](../reference/coding-agents/opencode.md) for operational detail. |
-| `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are used as the spawn prompt. Mutually exclusive with the positional prompt argument. The file is read verbatim (no stripping) and passes through the same `str.format()` substitution (`session_id` / `agent_id` / `director_agent_id`) as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. |
+| `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are used as the spawn prompt. Mutually exclusive with the positional prompt argument. The file is read verbatim (no stripping) and passes through the same `str.format()` substitution (`fleet_id` / `agent_id` / `director_agent_id`) as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. |
 | *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. All three backends receive the same prompt; the prompt template is backend-neutral. Mutually exclusive with `--prompt-file`. |
 
 #### Spawn command per backend
@@ -382,7 +382,7 @@ The `claude` spawn carries `--permission-mode dontAsk`; the `codex` spawn carrie
 
 | Inputs | Resulting spawn prompt |
 |---|---|
-| Neither `--prompt-file` nor positional `prompt_argv` | The built-in `_MEMBER_PROMPT_TEMPLATE` default, with `{session_id}` / `{agent_id}` / `{director_agent_id}` substituted. |
+| Neither `--prompt-file` nor positional `prompt_argv` | The built-in `_MEMBER_PROMPT_TEMPLATE` default, with `{fleet_id}` / `{agent_id}` / `{director_agent_id}` substituted. |
 | Positional `prompt_argv` only | `" ".join(prompt_argv)` after the same `str.format()` substitution. |
 | `--prompt-file PATH` only | The file contents, byte-for-byte, after the same `str.format()` substitution. Surrounding whitespace and trailing newlines are preserved verbatim. |
 | Both positional `prompt_argv` and `--prompt-file` | `click.UsageError` (exit 2) — see [Error Messages](#error-messages). |
@@ -401,7 +401,7 @@ The spawn always invokes `tmux split-window` with `-d` so the Director's pane an
 | `--member-id` | yes | Target member's agent ID |
 | `--force` / `-f` | no | Skip the `/exit` wait. Immediately kill-pane the target, then deregister, then rebalance layout. Exit 0 even if the pane was already gone. |
 
-Cross-Director delete is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before calling `broker.deregister_agent` or sending `/exit` to the pane. An attempt to delete another Director's member in the same session exits 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other-director>).` (mirrors `member capture` / `member send-input`).
+Cross-Director delete is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before calling `broker.deregister_agent` or sending `/exit` to the pane. An attempt to delete another Director's member in the same fleet exits 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other-director>).` (mirrors `member capture` / `member send-input`).
 
 #### Polling contract (default path)
 
@@ -420,7 +420,7 @@ Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet
 | Exit | When |
 |---|---|
 | `0` | Success — default path pane-gone confirmed, `--force` pane killed, or pending-placement deregister. |
-| `1` | Any non-timeout failure: auth rejection, missing session, unknown member-id, `broker.deregister_agent` failure, `send_exit` tmux failure (pre-poll), `MULTIPLEXERS.tmux.wait_for_pane_gone` raising TmuxError (server crash mid-poll). |
+| `1` | Any non-timeout failure: auth rejection, missing fleet, unknown member-id, `broker.deregister_agent` failure, `send_exit` tmux failure (pre-poll), `MULTIPLEXERS.tmux.wait_for_pane_gone` raising TmuxError (server crash mid-poll). |
 | `2` | Default-path timeout — `/exit` was sent, the pane did not disappear within 15.0 s, buffer tail has been printed on stderr. |
 
 ### `member list`
@@ -433,7 +433,7 @@ Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet
 #### `member list --activity` output
 
 ```
-$ cafleet --session-id <s> member list --agent-id <d> --activity
+$ cafleet --fleet-id <s> member list --agent-id <d> --activity
 3 members:
   agent_id        name      state   last_sent    last_recv    last_ack     idle
   --------------  --------  ------  -----------  -----------  -----------  -----
@@ -498,7 +498,7 @@ Three separate tmux invocations for `--freetext` because tmux's `-l` (literal) f
 
 Mirrors `cafleet member capture` step-for-step:
 
-1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
+1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
 4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
@@ -543,7 +543,7 @@ The canonical Director-side workflow is three-beat and AskUserQuestion-delegated
 Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane so the coding agent's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). All three backends (`claude`, `codex`, and `opencode`) honor the leading-`!` shortcut on their input line, so `member exec` works against any backend without modification. The fallback path for the bash-via-Director protocol — see [Bash routing](../concepts/bash-routing.md).
 
 ```bash
-cafleet --session-id <session-id> member exec --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member exec --agent-id <director-agent-id> \
   --member-id <member-agent-id> "git log -1 --oneline"
 ```
 
@@ -575,7 +575,7 @@ Two separate tmux invocations because tmux's `-l` (literal) flag is per-invocati
 
 Mirrors `cafleet member send-input` step-for-step:
 
-1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
+1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
 4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to exec.`.
@@ -619,10 +619,10 @@ Three keys: `member_agent_id`, `pane_id`, `command`. No `action` field — the s
 
 ### `member ping`
 
-Director-only manual inbox-poll nudge. Keystrokes the same `cafleet --session-id <s> message poll --agent-id <m>` + `Enter` sequence that `broker._try_notify_recipient` auto-fires today, but as an operator-driven entry-point: failures surface as exit 1 (the auto-fire path swallows `False` silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
+Director-only manual inbox-poll nudge. Keystrokes the same `cafleet --fleet-id <s> message poll --agent-id <m>` + `Enter` sequence that `broker._try_notify_recipient` auto-fires today, but as an operator-driven entry-point: failures surface as exit 1 (the auto-fire path swallows `False` silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
 
 ```bash
-cafleet --session-id <session-id> member ping --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member ping --agent-id <director-agent-id> \
   --member-id <member-agent-id>
 ```
 
@@ -635,7 +635,7 @@ cafleet --session-id <session-id> member ping --agent-id <director-agent-id> \
 
 | Invocation | tmux calls issued in order |
 |---|---|
-| `member ping` | `MULTIPLEXERS.tmux.send_poll_trigger(target_pane_id=<pane>, session_id=<sid>, agent_id=<member_id>)` — types `cafleet --session-id <sid> message poll --agent-id <member_id>` + `Enter` into the pane. |
+| `member ping` | `MULTIPLEXERS.tmux.send_poll_trigger(target_pane_id=<pane>, fleet_id=<sid>, agent_id=<member_id>)` — types `cafleet --fleet-id <sid> message poll --agent-id <member_id>` + `Enter` into the pane. |
 
 #### Validation rules
 
@@ -652,7 +652,7 @@ The subcommand has no positional argument and no other flags. There is no operat
 
 Mirrors `cafleet member exec` step-for-step:
 
-1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
+1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
 4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to ping.`.
@@ -695,14 +695,14 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 
 | Situation | Error Message |
 |---|---|
-| Missing `--session-id` on a client/member subcommand | `Error: --session-id <uuid> is required for this subcommand. Create a session with 'cafleet session create' and pass its id.` |
+| Missing `--fleet-id` on a client/member subcommand | `Error: --fleet-id <uuid> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` |
 | Missing `--agent-id` | `Error: Missing option '--agent-id'.` (Click built-in) |
-| `session create` run outside a tmux session | `Error: cafleet session create must be run inside a tmux session` (exit 1; no DB writes) |
-| `session delete` on unknown session_id | `Error: session 'X' not found.` (exit 1) |
-| `agent register` into a soft-deleted session | `Error: session X is deleted` (exit 1) |
-| `agent deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` (exit 1) |
+| `fleet create` run outside a tmux session | `Error: cafleet fleet create must be run inside a tmux session` (exit 1; no DB writes) |
+| `fleet delete` on unknown fleet_id | `Error: fleet 'X' not found.` (exit 1) |
+| `agent register` into a soft-deleted fleet | `Error: fleet X is deleted` (exit 1) |
+| `agent deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` (exit 1) |
 | `agent deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
-| `agent list` / `agent show` / `agent deregister` / `message send` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--session-id` | `Error: agent <id> is not a member of session <sid>.` (exit 1) — gate is `broker.verify_agent_session` and runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different session" apart and treats both as not-a-member). |
+| `agent list` / `agent show` / `agent deregister` / `message send` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--fleet-id` | `Error: agent <id> is not a member of fleet <sid>.` (exit 1) — gate is `broker.verify_agent_fleet` and runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different fleet" apart and treats both as not-a-member). |
 | `member send-input` with zero or both of `--choice` / `--freetext` | `Error: --choice and --freetext are mutually exclusive; supply exactly one.` (exit 2) |
 | `member send-input --choice` outside `1..3` | Click `IntRange(1, 3)` built-in (exit 2) |
 | `member send-input --freetext` whose first non-whitespace character is `!` | `Error: --freetext may not start with '!' — that triggers the coding agent's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` (exit 2) |
@@ -723,8 +723,8 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `member create --prompt-file` to an unreadable file | `Error: --prompt-file <path>: file is not readable.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to a file containing invalid UTF-8 | `Error: --prompt-file <path>: file is not valid UTF-8.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to a zero-byte or whitespace-only file | `Error: --prompt-file <path>: file is empty.` (exit 1; `click.ClickException`) |
-| `--to` / `--id` / `--member-id` prefix matching >1 active agent in the session | `Error: id prefix '<ref>' is ambiguous; supply more characters or the full UUID.` (exit 1) |
-| `--to` / `--id` / `--member-id` prefix or full UUID matching 0 active agents in the session | `Error: no agent matches id '<ref>' in this session.` (exit 1) |
-| `--task-id` prefix matching >1 session-visible task | `Error: id prefix '<ref>' is ambiguous; supply more characters or the full UUID.` (exit 1) |
-| `--task-id` prefix or full UUID matching 0 session-visible tasks | `Error: no task matches id '<ref>' in this session.` (exit 1) |
+| `--to` / `--id` / `--member-id` prefix matching >1 active agent in the fleet | `Error: id prefix '<ref>' is ambiguous; supply more characters or the full UUID.` (exit 1) |
+| `--to` / `--id` / `--member-id` prefix or full UUID matching 0 active agents in the fleet | `Error: no agent matches id '<ref>' in this fleet.` (exit 1) |
+| `--task-id` prefix matching >1 fleet-visible task | `Error: id prefix '<ref>' is ambiguous; supply more characters or the full UUID.` (exit 1) |
+| `--task-id` prefix or full UUID matching 0 fleet-visible tasks | `Error: no task matches id '<ref>' in this fleet.` (exit 1) |
 

@@ -13,86 +13,66 @@ The `cafleet-base-dir` skill is the single authoritative resolver for every CAFl
 
 ## Procedure
 
-The deterministic side of resolution is implemented in Python and exposed via `cafleet base-dir resolve` / `cafleet base-dir record` (see § *CLI surface* below). Claude's job is to (a) invoke `cafleet base-dir resolve` — with a positional `TASK_NAME` when the consuming skill operates on a per-task folder, otherwise without — (b) branch on the `status` field, (c) drive `AskUserQuestion` only when `status == "needs-user-input"`, and (d) call `cafleet base-dir record` to persist the answer.
+This skill resolves `${BASE}` using only built-in tools — `git rev-parse --show-toplevel` (Bash), Read, Write, and AskUserQuestion. There is no resolver CLI; the deterministic guarantees the resolver once enforced in compiled Python are preserved below as explicit, checkable steps. Claude's job is to (a) pick the task-scope branch (Step 0) when the consuming skill operates on a per-task folder, otherwise the shared-root branch (Step 1); (b) drive `AskUserQuestion` (Step 2) only when Step 1 ends in "needs user input"; and (c) persist the anchor with the Write tool.
+
+### Deterministic guarantees (MUST hold in every branch)
+
+These four guarantees were previously enforced by compiled Python. Execute them exactly as written — they are not optional, and "needs user input" / "stop and surface" outcomes are never replaced by a silent `/tmp` fallback.
+
+1. **Repo-root inference (task-scope branch).** Infer the repo root by running `git rev-parse --show-toplevel` (Bash) from the CWD. A non-zero exit or empty output means "no `.git` ancestor" → STOP and instruct the user to `cd` to the repo root and retry. (Mirrors the old `RuntimeError`.)
+2. **Traversal-escape + repo-root-degenerate rejection (task-scope branch).** Before creating a task folder: reject a `task_name` that resolves OUTSIDE the repo root (a relative path whose `..` segments escape the root, or an absolute path not strictly under the root) and reject one that resolves TO the repo root itself (`.`, `""`, `design-docs/..`, or an absolute path equal to the root). A relative escape or relative repo-root-degenerate is a hard stop; an absolute path that is outside-or-equal yields the `<unset>` sentinel (see Step 0).
+3. **Anchor `version: 1` validation.** When reading any `<dir>/.cafleet-base-dir.json`: parse it as JSON and require ALL of — it is a JSON object; `version` is the integer `1`; `base` is a non-empty absolute path whose resolved form equals the resolved directory the anchor lives in; `source ∈ {cwd-inference, askuserquestion, task-scope}`. If any check fails, STOP and instruct "delete the anchor and re-resolve" — do NOT silently use or overwrite it. (Mirrors the old `AnchorError`.)
+4. **Idempotent record-on-mismatch.** Before writing an anchor: if one already exists and its `base` (resolved) matches the directory it lives in, no-op — do not rewrite. If it exists but its `base` mismatches, STOP and surface the conflict — never overwrite (the existing anchor wins; the user must delete it manually if the change is intentional).
 
 ### Step 0. Task-scope resolution (preferred for task-aware consuming skills)
 
-When the consuming skill operates on a per-task folder, it picks the task-relpath itself (the resolver is general-purpose and does NOT enumerate or special-case any bucket name — `researches/`, `design-docs/`, etc. are all consumer-side conventions). Pass the relpath as a positional argument and skip Steps 1–2:
+When the consuming skill operates on a per-task folder, it picks the task-relpath itself (the resolver is general-purpose and does NOT enumerate or special-case any bucket name — `researches/`, `design-docs/`, etc. are all consumer-side conventions). Resolve as follows:
 
-```bash
-cafleet base-dir resolve <task-relpath> --json
-# e.g. cafleet base-dir resolve researches/my-topic --json
-# e.g. cafleet base-dir resolve design-docs/0000060-skill-task-scoped-base-dir --json
-```
+1. **Infer the repo root** (guarantee 1): run `git rev-parse --show-toplevel`. Empty / non-zero exit → STOP, tell the user to `cd` to the repo root and retry.
+2. **Canonicalize** `$ARGUMENTS` to the task-folder relpath per the consumer's convention (table below) BEFORE proceeding.
+3. **Guard the path** (guarantee 2):
+   - **Relative `task_name`**: join it under the repo root and resolve. If the result equals the repo root → STOP ("the repo root is not a task folder"). If the result is not under the repo root (a `..` escape) → STOP ("refusing to create a task folder outside the repo").
+   - **Absolute `task_name`**: resolve it. If it equals the repo root OR is not strictly under it → `${BASE} = <unset>` (the absolute-path-arg branch); create nothing.
+4. **Create the task folder.** The Write tool auto-creates parent directories when you write the anchor in step 5, so no explicit `mkdir` is needed.
+5. **Resolve the anchor** (guarantees 3, 4): if `<task-folder>/.cafleet-base-dir.json` already exists, Read + validate it (its `source` field stays as recorded; the resolution `source` is reported as `anchor`); otherwise Write a fresh anchor with `source: "task-scope"`.
+6. `${BASE}` = the task folder itself, so `${BASE}/prompts/<role>-<UTC-compact>.md` audit files land under the task folder rather than at the repo root.
 
-The CLI:
+**The consuming skill is responsible for passing a relpath that is the actual task folder**, not a child file path — this procedure does no slug-folding or filename-stripping.
 
-1. Walks up from CWD via `is_git_repo_root` to infer the repo root.
-2. Joins `<task-relpath>` against the repo root and resolves the path. Rejects traversal escapes (`../outside`, `design-docs/../../escaped`) and the repo-root degenerate (`.`, `""`, `design-docs/..`) with `RuntimeError`.
-3. Auto-creates the task folder via `pathlib.Path(...).mkdir(parents=True, exist_ok=True)` — no shell-out.
-4. Writes a per-task anchor inline at `<task-folder>/.cafleet-base-dir.json` with `source: "task-scope"` (or reads an existing one with `source: "anchor"`).
-5. Returns `{status: "resolved", base: <abs task-folder>, source: "task-scope" | "anchor", anchor: <abs anchor>, task_name: <task-relpath>}`.
-
-`${BASE}` is the task folder itself, so `${BASE}/prompts/<role>-<UTC-compact>.md` audit files land under the task folder rather than at the repo root. **The consuming skill is responsible for passing a relpath that is the actual task folder**, not a child file path — the resolver does no slug-folding or filename-stripping.
-
-If the consuming skill received an absolute path (e.g. `/abs/path/to/task-folder`), pass it through positionally:
-
-```bash
-cafleet base-dir resolve <abs-path> --json
-```
-
-The CLI checks whether the absolute path is strictly under the inferred repo root. If so, the path is treated as the task folder verbatim (auto-created, anchored, returned as `task-scope`). If the path lies outside the repo root or equals the repo root (which would clobber the shared-root anchor), the CLI returns the `unset` shape (`status: "unset"`, `source: "absolute-path-arg"`). No bucket-pattern ancestor walk; no skill-specific slug matching.
-
-**Consumer contract — canonicalize ARGUMENTS to the task-folder relpath before calling.** The resolver is deliberately general: it does not strip trailing filenames (e.g. `/design-doc.md`, `/report.md`) and does not strip leading bucket prefixes (e.g. `design-docs/`, `researches/`). It creates `<task-folder>/` exactly as supplied. Each consuming skill MUST canonicalize `$ARGUMENTS` against its own convention BEFORE calling `cafleet base-dir resolve`:
+**Consumer contract — canonicalize ARGUMENTS to the task-folder relpath before resolving.** The procedure is deliberately general: it does not strip trailing filenames (e.g. `/design-doc.md`, `/report.md`) and does not strip leading bucket prefixes (e.g. `design-docs/`, `researches/`). It creates `<task-folder>/` exactly as supplied. Each consuming skill MUST canonicalize `$ARGUMENTS` against its own convention BEFORE running Step 0:
 
 | Consumer | Canonical relpath form | Canonicalization steps |
 |:--|:--|:--|
-| The `cafleet-design-doc-create` / `cafleet-design-doc-execute` / `cafleet-design-doc-interview` skills | `design-docs/<slug>` | (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`. **Absolute paths**: apply the same `/design-doc.md` strip (the resolver does not fold child filenames; a child file path becomes a directory named after the file). |
-| The `cafleet-research-report` / `cafleet-research-presentation` skills | `researches/<topic-slug>` | (1) strip trailing `/report.md` (or other known per-topic filenames) if present; (2) strip leading `researches/` if present; (3) prepend `researches/`. **Absolute paths**: apply the same `/report.md` strip (the resolver does not fold child filenames; a child file path becomes a directory named after the file). |
+| The `cafleet-design-doc-create` / `cafleet-design-doc-execute` / `cafleet-design-doc-interview` skills | `design-docs/<slug>` | (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`. **Absolute paths**: apply the same `/design-doc.md` strip (a child file path otherwise becomes a directory named after the file). |
+| The `cafleet-research-report` / `cafleet-research-presentation` skills | `researches/<topic-slug>` | (1) strip trailing `/report.md` (or other known per-topic filenames) if present; (2) strip leading `researches/` if present; (3) prepend `researches/`. **Absolute paths**: apply the same `/report.md` strip (a child file path otherwise becomes a directory named after the file). |
 
-The stripping logic is skill-specific because each skill knows the file conventions inside its own bucket. The resolver stays bucket-agnostic. Skipping canonicalization causes the resolver to create a directory literally named `design-doc.md` (or `report.md`, etc.) and anchor the wrong BASE.
+The stripping logic is skill-specific because each skill knows the file conventions inside its own bucket. The resolution procedure stays bucket-agnostic. Skipping canonicalization creates a directory literally named `design-doc.md` (or `report.md`, etc.) and anchors the wrong BASE.
 
-When `_infer_repo_root(cwd)` returns `None` (CWD has no `.git` ancestor — typical when CWD is `$HOME` or under `$HOME/.claude`) AND a positional `TASK_NAME` is supplied, the CLI exits 1 with `cannot resolve task-scope base-dir: no .git ancestor found from CWD <cwd>. cd to the repo root and retry.` on stderr (no JSON payload, even with `--json`). `cd` to the repo root and retry.
+### Step 1. Shared-root resolution (no task name)
 
-### Step 1. Probe via the CLI (no-positional / shared-root case)
+When the consuming skill has no per-task folder convention (the shared-root case):
 
-When the consuming skill has no task-folder convention (the shared-root case), run the no-positional form:
+1. Determine the CWD and `$HOME`. Let `claude_subdir = $HOME/.claude`.
+2. **If the CWD is NOT `$HOME` and NOT `claude_subdir` (nor under it)** → `${BASE}` is the CWD itself (the working directory, **not** the repo root). Anchor handling (guarantees 3, 4): if `<CWD>/.cafleet-base-dir.json` exists, Read + validate it (resolution `source` reported as `anchor`); otherwise Write a fresh anchor with `source: "cwd-inference"`. Done.
+3. **Otherwise** (CWD is `$HOME` or under `~/.claude`) → for each candidate in order `[/tmp/claude-code, <CWD>]`, check for an existing valid anchor; the first valid anchor resolves `${BASE}` (`source: anchor`). If neither candidate has a valid anchor → the result is "needs user input"; go to Step 2 with candidates `[/tmp/claude-code, <CWD>]`.
 
-```bash
-cafleet base-dir resolve --json
-```
+A missing anchor never silently falls back. A fatal anchor (guarantee 3) stops resolution here exactly as in any other branch.
 
-The CLI returns one of three JSON shapes (plus a fourth fatal branch that exits non-zero with an error message rather than a JSON payload):
-
-| `status` field | Meaning | `${BASE}` outcome |
-|:--|:--|:--|
-| `resolved` | A concrete BASE was determined from CWD inference or from an existing anchor. The `base` field is the absolute path; the `source` field is `cwd-inference` or `anchor`. | `${BASE} = <base>`. Done. |
-| `needs-user-input` | The CLI could not resolve deterministically (CWD is `$HOME` or under `$HOME/.claude`, and no usable anchor exists). The `candidates` field lists the options to present. | Go to Step 2. |
-| (no JSON — non-zero exit) | Anchor schema mismatch, version mismatch, or other fatal condition. The CLI exits non-zero with an error message on stderr; no JSON payload is emitted. | Surface the error and stop — do NOT fall back to `/tmp`. |
-
-The `unset` status is emitted only by the positional branch (Step 0) when an absolute-path `TASK_NAME` lies outside the inferred repo root (or equals the repo root itself); the no-positional probe never produces it.
-
-### Step 2. AskUserQuestion (only when `status == "needs-user-input"`)
+### Step 2. AskUserQuestion (only when Step 1 ends in "needs user input")
 
 Present the candidates via `AskUserQuestion` ("Select the base directory for output files:"):
 
 - `/tmp/claude-code (recommended)` → `${BASE} = /tmp/claude-code`
-- `${CWD}` → `${BASE} = ${CWD}` (the CWD literal from the `candidates` array)
+- `${CWD}` → `${BASE} = ${CWD}` (the CWD literal from the candidates list)
 - `Other` (free text) → `${BASE} = user input` (resolve against `${CWD}` if relative)
 
-Then persist the answer:
-
-```bash
-cafleet base-dir record --base <abs-path> --source askuserquestion
-```
-
-`record` is idempotent: re-running with the same `--base` is a no-op; re-running with a mismatched `--base` against an existing anchor errors and exits non-zero (the existing anchor wins; the caller must delete it manually if intentional).
+Then persist the answer by writing the anchor (guarantee 4): if `<BASE>/.cafleet-base-dir.json` already exists and its `base` matches, no-op; if it mismatches, STOP and surface the conflict (the existing anchor wins; the user must delete it manually if intentional); otherwise Write a fresh anchor with `source: "askuserquestion"`.
 
 ### Anchor file
 
-`cafleet base-dir record` writes an anchor file alongside the resolved BASE so that re-loading this skill (after auto-compression, after a fresh Director, after the next session) returns the same answer without re-prompting. The positional task-scope branch ALSO writes an anchor — inline, inside the task folder — so each task carries its own independent anchor under the same schema.
+Writing the anchor (in Step 0 / 1 / 2) persists the resolution alongside the resolved BASE so that re-loading this skill (after auto-compression, after a fresh Director, after the next session) returns the same answer without re-prompting. The task-scope branch (Step 0) writes its anchor inline, inside the task folder — so each task carries its own independent anchor under the same schema.
 
-- **Path**: `${BASE}/.cafleet-base-dir.json`. For the no-positional branch this is the repo root or `/tmp/claude-code`; for the positional task-scope branch this is `<task-folder>/.cafleet-base-dir.json` (one anchor per task).
+- **Path**: `${BASE}/.cafleet-base-dir.json`. For the shared-root branch this is the CWD or `/tmp/claude-code`; for the task-scope branch this is `<task-folder>/.cafleet-base-dir.json` (one anchor per task).
 - **Schema** (version 1):
 
   ```json
@@ -104,61 +84,20 @@ cafleet base-dir record --base <abs-path> --source askuserquestion
   }
   ```
 
-  - `version`: `1`. Future versions land alongside an explicit upgrade path. `resolve` rejects any anchor whose `version` field is missing, not a positive integer, or not `1` with a single standardized error message — silent forward-compatibility would let two installations on the same machine at different cafleet versions disagree about BASE.
-  - `base`: absolute path. MUST equal the directory the anchor lives in. Mismatch is a fatal error in `resolve`.
-  - `source`: one of `"cwd-inference"` (anchor written automatically when CWD inference produced a BASE), `"askuserquestion"` (anchor written after the user picked an option via `cafleet base-dir record`), or `"task-scope"` (anchor written inline by the positional task-scope branch on first resolution of a task folder).
-  - `resolved_at`: ISO 8601, UTC, microsecond precision, `+00:00` suffix (same convention as cafleet `status_timestamp`).
+  - `version`: `1`. Future versions land alongside an explicit upgrade path. Reading rejects any anchor whose `version` field is missing, not a positive integer, or not `1` (guarantee 3) — silent forward-compatibility would let two installations on the same machine at different cafleet versions disagree about BASE.
+  - `base`: absolute path. MUST equal the directory the anchor lives in (compare resolved forms, so symlinks / `..` segments / trailing slashes do not false-positive a mismatch). Mismatch is a fatal error (guarantee 3 / 4).
+  - `source`: one of `"cwd-inference"` (Step 1 inferred BASE from the CWD), `"askuserquestion"` (Step 2 — the user picked an option), or `"task-scope"` (Step 0 — first resolution of a task folder).
+  - `resolved_at`: ISO 8601, UTC, microsecond precision, `+00:00` suffix (same convention as cafleet `status_timestamp`). When writing, stamp the current UTC time in that exact form.
 
-The anchor at `/tmp/claude-code/.cafleet-base-dir.json` does NOT survive reboot — acceptable. After reboot the `AskUserQuestion` branch fires once and re-creates the anchor. Per-task anchors at `<task-folder>/.cafleet-base-dir.json` survive across sessions and are picked up by subsequent `cafleet base-dir resolve <task-name>` invocations as `source: "anchor"`.
+The anchor at `/tmp/claude-code/.cafleet-base-dir.json` does NOT survive reboot — acceptable. After reboot the `AskUserQuestion` branch fires once and re-creates the anchor. Per-task anchors at `<task-folder>/.cafleet-base-dir.json` survive across sessions and are picked up by subsequent Step 0 resolutions as `source: anchor`.
 
 ### Gitignore handling
 
 When `${BASE}` is a git-repo CWD (the normal case in this project), the anchor file would otherwise show up in `git status`.
 
-1. **Host projects should exclude `.cafleet-base-dir.json` (unanchored — matches both the repo-root anchor AND per-task anchors under `<task-folder>/.cafleet-base-dir.json` written by the positional task-scope branch)** so anchor files do not surface as untracked. This project's `.gitignore` uses the unanchored pattern.
-2. **`cafleet base-dir record` does NOT mutate any `.gitignore`** — silently editing a user repo's gitignore as a side-effect would be a surprising write.
-3. **Users who do not want anchor noise in arbitrary repos should add `.cafleet-base-dir.json` to their global excludes** (`~/.config/git/ignore` or `core.excludesFile`). The first `record` call under a fresh git-repo BASE prints a one-line stderr tip pointing at this recommendation.
-
-## CLI surface
-
-The two subcommands live under the `cafleet` CLI as the `base-dir` subgroup. Like `cafleet doctor`, they operate on the local filesystem only and do NOT require `--session-id`.
-
-```bash
-# Non-interactive resolution. Never prompts the user.
-#
-# No-positional form: walks CWD inference / anchor / askuserquestion. On the
-# CWD-inference branch it auto-writes the anchor at ${CWD}/.cafleet-base-dir.json
-# so the next call returns from "anchor" instead.
-#
-# Positional form: TASK_NAME is a relative path under the inferred repo root
-# (e.g. researches/<slug>, design-docs/<NNNNNNN>-<slug>) or an absolute path
-# strictly under the repo root. The CLI auto-creates the task folder (verbatim
-# — no skill-specific ancestor walk), writes <task-folder>/.cafleet-base-dir.json
-# with source: "task-scope", and returns the task folder as the resolved base.
-cafleet base-dir resolve [TASK_NAME] [--json]
-
-# Possible JSON outputs:
-# {"status": "resolved", "base": "/home/user/proj", "source": "cwd-inference", "anchor": "/home/user/proj/.cafleet-base-dir.json"}
-# {"status": "resolved", "base": "/tmp/claude-code", "source": "anchor", "anchor": "/tmp/claude-code/.cafleet-base-dir.json"}
-# {"status": "resolved", "base": "/home/user/proj/researches/my-topic", "source": "task-scope", "anchor": "/home/user/proj/researches/my-topic/.cafleet-base-dir.json", "task_name": "researches/my-topic"}
-# {"status": "unset", "base": null, "source": "absolute-path-arg", "anchor": null, "task_name": "/abs/path/outside/any/task/folder"}
-# {"status": "needs-user-input", "base": null, "source": null, "candidates": ["/tmp/claude-code", "<cwd>"]}
-#
-# Fatal positional-branch failure (no .git ancestor): exit 1 with the message
-# "cannot resolve task-scope base-dir: no .git ancestor found from CWD <cwd>.
-# cd to the repo root and retry." on stderr — no JSON payload, even with --json.
-
-# Persist an anchor after AskUserQuestion. Claude calls this after presenting the picker.
-# Note: the positional task-scope branch above writes its own anchor inline, so
-# `record` is reserved for the explicit-AskUserQuestion flow that targets the
-# shared root. `--source` accepts {askuserquestion, cwd-inference} only —
-# "task-scope" is not a valid `record` source.
-cafleet base-dir record --base <abs-path> --source askuserquestion
-# Writes <base>/.cafleet-base-dir.json with version=1 and a UTC resolved_at.
-# Idempotent: if the anchor already exists and matches, no-op; if it mismatches, error.
-```
-
-Default text output is human-readable; `--json` switches to machine-parseable.
+1. **Host projects should exclude `.cafleet-base-dir.json` (unanchored — matches both the repo-root anchor AND per-task anchors under `<task-folder>/.cafleet-base-dir.json` written by the task-scope branch)** so anchor files do not surface as untracked. This project's `.gitignore` uses the unanchored pattern.
+2. **Writing the anchor does NOT mutate any `.gitignore`** — silently editing a user repo's gitignore as a side-effect would be a surprising write.
+3. **Users who do not want anchor noise in arbitrary repos should add `.cafleet-base-dir.json` to their global excludes** (`~/.config/git/ignore` or `core.excludesFile`).
 
 ## No-bypass write protocol
 
@@ -168,9 +107,9 @@ Every CAFleet member, every consumer skill, and every Director MUST follow this 
 
 2. **`${BASE} == <unset>` is a hard stop, not a fallback.** If `${BASE}` is the literal sentinel `<unset>` (absolute-path argument branch), any code that tries to compute a path from `${BASE}` MUST abort with `Error: BASE is <unset>; refusing to fall back to /tmp`. The loud failure is the safety net for sites that forgot to guard explicitly.
 
-3. **Members never re-resolve BASE.** The Director's spawn-prompt substitution delivers `${BASE}` to each spawned member as a literal absolute path baked into the spawn prompt. Members MUST use that literal path verbatim. Members DO load this skill at startup (per their role file's *Load at Startup* block) to pick up the no-bypass write protocol and the `<unset>` sentinel contract — but they MUST NOT run `cafleet base-dir resolve` / `cafleet base-dir record` or otherwise derive a new `${BASE}` of their own. Re-resolving would invite drift if the Director's anchor changed mid-session.
+3. **Members never re-resolve BASE.** The Director's spawn-prompt substitution delivers `${BASE}` to each spawned member as a literal absolute path baked into the spawn prompt. Members MUST use that literal path verbatim. Members DO load this skill at startup (per their role file's *Load at Startup* block) to pick up the no-bypass write protocol and the `<unset>` sentinel contract — but they MUST NOT run the resolution procedure (Steps 0–2) or otherwise derive a new `${BASE}` of their own. Re-resolving would invite drift if the Director's anchor changed mid-session.
 
-4. **Missing-BASE-line anchorless status.** If a member's spawn prompt is missing the `BASE:` line entirely (an expected outcome when the Director resolved `${BASE} = <unset>`), the member treats the audit-file feature as disabled and emits a single CAFleet message back to the Director as a parens-free anchorless status (per `skills/design-doc/coordination.md` § *Anchorless Status*):
+4. **Missing-BASE-line anchorless status.** If a member's spawn prompt is missing the `BASE:` line entirely (an expected outcome when the Director resolved `${BASE} = <unset>`), the member treats the audit-file feature as disabled and emits a single CAFleet message back to the Director as a parens-free anchorless status (per `skills/cafleet-design-doc/coordination.md` § *Anchorless Status*):
 
    ```
    audit-disabled no BASE in spawn prompt

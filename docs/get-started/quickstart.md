@@ -4,7 +4,7 @@ icon: lucide/zap
 
 # Quickstart
 
-This page is a one-screen walkthrough that creates a CAFleet session, spawns
+This page is a one-screen walkthrough that creates a CAFleet fleet, spawns
 two member panes, and sends a message between them. It assumes you have
 already followed [Install](install.md) and [Configure](configure.md).
 
@@ -20,7 +20,7 @@ After the demonstration, please shutdown the team.
 ```
 
 The coding agent will invoke the `cafleet` skill, which guides it through the
-session-create / member-create / message-send loop and finally tears the team
+fleet-create / member-create / message-send loop and finally tears the team
 down.
 
 ## Design-doc-driven development
@@ -42,28 +42,28 @@ See your coding-agent's skill documentation for the literal invocation syntax
 
 If you would rather drive CAFleet from the shell directly, the commands below
 mirror what the skill does internally. Run them inside a tmux session — the
-`session create` and `member create` commands require one.
+`fleet create` and `member create` commands require one.
 
 ```bash
-# 1. Create a session. Records this pane as the root Director's pane.
-cafleet session create --label "demo"
+# 1. Create a fleet. Records this pane as the root Director's pane.
+cafleet fleet create --label "demo" --full
 
-# The output prints the session id and the root Director's agent id on the
+# The output prints the fleet id and the root Director's agent id on the
 # first two lines. Export them as shell vars for the snippets below.
-export SESSION_ID="<paste from the first output line>"
+export FLEET_ID="<paste from the first output line>"
 export DIRECTOR_ID="<paste from the second output line>"
 
 # 2. Spawn a member pane. The member's prompt is just a one-line greeting.
-cafleet --session-id "$SESSION_ID" member create \
+cafleet --fleet-id "$FLEET_ID" member create \
   --agent-id "$DIRECTOR_ID" \
   --name "demo-member" \
   --description "Demo member" \
   -- "You are demo-member. Reply hello when polled."
 
 # 3. The Director sends a message to the new member.
-cafleet --session-id "$SESSION_ID" agent list --agent-id "$DIRECTOR_ID"
+cafleet --fleet-id "$FLEET_ID" agent list --agent-id "$DIRECTOR_ID"
 # Pick the demo-member agent_id from the output and replace <member-id> below.
-cafleet --session-id "$SESSION_ID" message send --agent-id "$DIRECTOR_ID" \
+cafleet --fleet-id "$FLEET_ID" message send --agent-id "$DIRECTOR_ID" \
   --to "<member-id>" --text "hi"
 ```
 
@@ -72,12 +72,12 @@ tmux pane and the message lands in the broker queue. From here, the typical
 flow is `cafleet message poll` from the recipient and `cafleet message ack`
 once it has consumed the message.
 
-When you are done, tear the session down:
+When you are done, tear the fleet down:
 
 ```bash
-cafleet --session-id "$SESSION_ID" member delete --agent-id "$DIRECTOR_ID" \
+cafleet --fleet-id "$FLEET_ID" member delete --agent-id "$DIRECTOR_ID" \
   --member-id "<member-id>"
-cafleet session delete "$SESSION_ID"
+cafleet fleet delete "$FLEET_ID"
 ```
 
 See the [CLI options](../spec/cli-options.md) reference for every subcommand

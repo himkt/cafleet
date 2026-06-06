@@ -73,7 +73,7 @@ existence check, UTF-8 decode, and emptiness check all run inside
 rolls back the registration.
 
 The file contents are read verbatim (no stripping) and pass through the same
-`str.format()` substitution (`session_id` / `agent_id` /
+`str.format()` substitution (`fleet_id` / `agent_id` /
 `director_agent_id`) as the inline form. The file path is the input AND the
 permanent audit artifact: every CAFleet-native team skill writes its
 rendered spawn prompt to `<BASE>/prompts/<role>-<UTC-compact>.md` before
@@ -160,32 +160,19 @@ the member surface.
 
 ## Base-dir resolution
 
-The `cafleet base-dir` subgroup is the authoritative resolver for the
-`${BASE}` output-root used by every CAFleet scratch / audit / figure write.
-Like `cafleet doctor`, it operates on the local filesystem only and does
-NOT require `--session-id`. Two subcommands:
-
-- `cafleet base-dir resolve [TASK_NAME] [--json]` — probe-only resolution.
-  With no positional argument, emits one of three statuses: `resolved`
-  (BASE determined from CWD inference or an existing anchor),
-  `needs-user-input` (CWD is `$HOME` or under `$HOME/.claude` and no usable
-  anchor exists — Claude drives `AskUserQuestion` on the returned
-  candidates), or a non-zero exit with a standardized error (anchor schema
-  / version mismatch). With a positional `TASK_NAME`, engages the
-  task-scope branch: walks up from CWD via `is_git_repo_root` to infer the
-  repo root, joins `TASK_NAME` against it, auto-creates the task folder via
-  `pathlib.Path(...).mkdir(parents=True, exist_ok=True)`, writes an anchor
-  inline at `<task-folder>/.cafleet-base-dir.json` (`source: "task-scope"`),
-  and returns `{status: "resolved", base: <abs task-folder>, source:
-  "task-scope" | "anchor", anchor: <abs anchor>, task_name: <TASK_NAME>}`.
-  An absolute-path `TASK_NAME` is accepted only when it lives strictly under
-  the inferred repo root (the path is then used verbatim as the task
-  folder); otherwise the `unset` shape is returned. Never falls back to
-  `/tmp` silently.
-- `cafleet base-dir record --base <abs-path> --source askuserquestion` —
-  persist an anchor at `<abs-path>/.cafleet-base-dir.json` after Claude has
-  driven `AskUserQuestion`. Idempotent: matching re-runs are no-ops;
-  mismatched re-runs error.
+The `${BASE}` output-root used by every CAFleet scratch / audit / figure write
+is resolved by the `cafleet-base-dir` skill (loaded by each consuming team
+skill), not by a CLI subcommand. Resolution operates on the local filesystem
+only. The skill determines BASE from CWD inference or an existing anchor; when
+CWD is `$HOME` or under `$HOME/.claude` and no usable anchor exists, it drives
+`AskUserQuestion` on the candidate roots. For task-aware skills it engages a
+task-scope branch: it infers the repo root via `git rev-parse --show-toplevel`,
+joins the task relpath under it, auto-creates the task folder, and writes an
+anchor inline at `<task-folder>/.cafleet-base-dir.json` (`source: "task-scope"`).
+An absolute-path task name is accepted only when it lives strictly under the
+inferred repo root; otherwise the `<unset>` sentinel is returned. Resolution
+never falls back to `/tmp` silently, and writing an anchor is idempotent — a
+matching anchor is a no-op, a mismatched one is a hard error.
 
 The anchor schema is version-locked at `1` and rejected on any other value
 (silent forward-compatibility would let two installations at different

@@ -13,16 +13,16 @@ def _autouse_broker(broker_session):
     return broker_session
 
 
-def _bootstrap_session():
-    info = broker.create_session(
+def _bootstrap_fleet():
+    info = broker.create_fleet(
         label="activity-test",
         director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
         coding_agent="claude",
     )
-    return info["session_id"], info["director"]["agent_id"]
+    return info["fleet_id"], info["director"]["agent_id"]
 
 
-def _register_member(session_id, director_id, name, pane):
+def _register_member(fleet_id, director_id, name, pane):
     placement = {
         "director_agent_id": director_id,
         "tmux_session": "main",
@@ -31,7 +31,7 @@ def _register_member(session_id, director_id, name, pane):
         "coding_agent": "claude",
     }
     agent = broker.register_agent(
-        session_id=session_id,
+        fleet_id=fleet_id,
         name=name,
         description=f"member {name}",
         placement=placement,
@@ -40,7 +40,7 @@ def _register_member(session_id, director_id, name, pane):
 
 
 def _setup_three_member_team():
-    sid, director_id = _bootstrap_session()
+    sid, director_id = _bootstrap_fleet()
     a = _register_member(sid, director_id, "alice", "%10")
     b = _register_member(sid, director_id, "bob", "%11")
     c = _register_member(sid, director_id, "carol", "%12")
@@ -126,9 +126,9 @@ def test_list_members_with_activity__scoping_excludes_other_directors_and_deregi
     # in second-level's scope. Deregistered carol is excluded.
     assert agent_ids == {a, b, second_director}
 
-    # Empty session.
-    sid2, director_id2 = _bootstrap_session()
+    # Empty fleet.
+    sid2, director_id2 = _bootstrap_fleet()
     assert broker.list_members_with_activity(sid2, director_id2) == []
 
-    # Unknown session-id returns [].
+    # Unknown fleet-id returns [].
     assert broker.list_members_with_activity(str(uuid.uuid4()), str(uuid.uuid4())) == []

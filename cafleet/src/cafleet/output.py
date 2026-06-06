@@ -238,25 +238,25 @@ def format_agent(agent: dict, *, full: bool = False) -> str:
     return "\n".join(lines)
 
 
-def format_session_create(data: dict, *, full: bool = False) -> str:
-    """Render the session-create result as text.
+def format_fleet_create(data: dict, *, full: bool = False) -> str:
+    """Render the fleet-create result as text.
 
     ``full=False`` (default): 1-line compact form
-    ``<session_id> director=<id8> admin=<id8>``.
-    ``full=True``: 7-line block (session_id + director_agent_id on
+    ``<fleet_id> director=<id8> admin=<id8>``.
+    ``full=True``: 7-line block (fleet_id + director_agent_id on
     their own lines, plus ``label``, ``created_at``, ``director_name``,
     ``pane``, ``administrator``).
     """
     director = data["director"]
     if not full:
         return (
-            f"{data['session_id']} "
+            f"{data['fleet_id']} "
             f"director={director['agent_id'][:8]} "
             f"admin={data['administrator_agent_id'][:8]}"
         )
     placement = director["placement"]
     lines = [
-        data["session_id"],
+        data["fleet_id"],
         director["agent_id"],
         f"label:            {data['label'] or ''}",
         f"created_at:       {data['created_at']}",

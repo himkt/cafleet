@@ -123,13 +123,13 @@ class Multiplexer(Protocol):
         ...
 
     def send_poll_trigger(
-        self, *, target_pane_id: str, session_id: str, agent_id: str
+        self, *, target_pane_id: str, fleet_id: str, agent_id: str
     ) -> bool:
         """Keystroke a ``cafleet message poll`` shortcut into the pane.
 
         Args:
             target_pane_id: Pane id of the agent to nudge.
-            session_id: Session UUID embedded in the keystroked command.
+            fleet_id: Fleet UUID embedded in the keystroked command.
             agent_id: Recipient agent UUID embedded in the keystroked
                 command.
 

@@ -18,15 +18,15 @@ def _agent(
     }
 
 
-def _session_create_data(
+def _fleet_create_data(
     *,
-    session_id="550e8400-e29b-41d4-a716-446655440000",
+    fleet_id="550e8400-e29b-41d4-a716-446655440000",
     director_agent_id="7ba91234-5678-90ab-cdef-112233445566",
     label="my-project",
     administrator_agent_id="3c4d5e6f-7890-1234-5678-90abcdef1234",
 ) -> dict:
     return {
-        "session_id": session_id,
+        "fleet_id": fleet_id,
         "label": label,
         "created_at": "2026-04-16T08:50:00+00:00",
         "administrator_agent_id": administrator_agent_id,
@@ -88,20 +88,20 @@ def test_format_agent__full_layout_has_labels_and_more_lines():
     assert full.count("\n") > compact.count("\n")
 
 
-def test_format_session_create__compact_shape_and_default_kwarg():
-    rendered = output.format_session_create(_session_create_data(), full=False)
+def test_format_fleet_create__compact_shape_and_default_kwarg():
+    rendered = output.format_fleet_create(_fleet_create_data(), full=False)
     assert "\n" not in rendered
     sid = "550e8400-e29b-41d4-a716-446655440000"
     assert sid in rendered or sid[:8] in rendered
-    data = _session_create_data()
-    assert output.format_session_create(data) == output.format_session_create(
+    data = _fleet_create_data()
+    assert output.format_fleet_create(data) == output.format_fleet_create(
         data, full=False
     )
 
 
-def test_format_session_create__full_layout_has_labels_and_more_lines():
-    full = output.format_session_create(_session_create_data(), full=True)
-    compact = output.format_session_create(_session_create_data(), full=False)
+def test_format_fleet_create__full_layout_has_labels_and_more_lines():
+    full = output.format_fleet_create(_fleet_create_data(), full=True)
+    compact = output.format_fleet_create(_fleet_create_data(), full=False)
     assert full.count("\n") >= 6
     for needle in ("director_name", "administrator", "pane"):
         assert needle in full

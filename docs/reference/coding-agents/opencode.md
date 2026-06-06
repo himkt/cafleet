@@ -9,11 +9,11 @@ For the multi-backend overview and selection rules, see the [Coding agents](../.
 An opencode member is a cafleet member whose `agent_placements.coding_agent` value is `"opencode"`. The Director selects the backend at member-create time:
 
 ```bash
-cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
   --name Opencode-A --description "<one-sentence purpose>" --coding-agent opencode
 ```
 
-The default is `--coding-agent claude`. A single Director may spawn `claude`, `codex`, and `opencode` members in the same session — the broker, message lifecycle, and tmux primitives behave identically for all three.
+The default is `--coding-agent claude`. A single Director may spawn `claude`, `codex`, and `opencode` members in the same fleet — the broker, message lifecycle, and tmux primitives behave identically for all three.
 
 The opencode pane runs the bare `opencode` command, which per <https://opencode.ai/docs/cli/> is the documented TUI entry point ("The OpenCode CLI by default starts the TUI when run without any arguments"). The pane stays alive as a long-lived TUI you can scroll, switch to, and observe — matching the operator affordance of `claude` and `codex` panes. The `opencode run` subcommand (the documented headless / scripting entry) is **not** used.
 
@@ -57,7 +57,7 @@ Skip-if-exists means a CAFleet upgrade that improves the deny-list (e.g. a new w
 
 ```bash
 rm ~/.opencode/agents/cafleet.md
-cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
   --name Opencode-Refresh --description "preset refresh" --coding-agent opencode
 ```
 
@@ -80,10 +80,10 @@ If `~/.opencode/agents/cafleet.md` cannot be written (e.g. `$HOME` is read-only,
 Opencode does not load Claude Code's `Skill()` tool. **You read this file directly** instead — the spawn prompt tells you to. The same cafleet CLI surface works from an opencode pane unchanged:
 
 ```bash
-cafleet --session-id <session-id> message poll --agent-id <my-agent-id>
-cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
+cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
+cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "..."
-cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 Substitute the literal UUIDs handed to you in your spawn prompt. There is no env-var fallback.
@@ -102,7 +102,7 @@ Opencode's TUI input box honors a leading-`!` shell shortcut — typing `! <comm
 `claude --name <member-name>` sets the tmux pane title via Claude Code's internal title-emit. **Neither `codex` nor `opencode` has an equivalent flag.** Opencode panes display whatever default title the binary emits. Pane discovery for all three backends goes through `cafleet member list`:
 
 ```bash
-cafleet --session-id <session-id> member list --agent-id <director-agent-id>
+cafleet --fleet-id <fleet-id> member list --agent-id <director-agent-id>
 ```
 
 The `pane_id` column is ground truth. For mixed-backend teams in particular, do NOT rely on tmux pane titles to find a specific member's pane.
@@ -111,7 +111,7 @@ The `pane_id` column is ground truth. For mixed-backend teams in particular, do 
 
 In normal operation the TUI never shows a permission popup — the catch-all-allow + specific-deny ruleset means every check resolves without `ask`. If a popup ever appears, it is a regression escape from the safety floor (e.g. opencode added a new tool category in a future release that uses `ask` semantics and the `cafleet` agent definition does not yet cover it), NOT a runtime decision-point.
 
-The Director MUST escalate back to the user, capture pane state via `cafleet --session-id <s> member capture --member-id <opencode-member>` for diagnosis, and re-run Step 0-style empirical verification to extend the deny-list (which means updating `CAFLEET_AGENT` in source, shipping a new CAFleet release, and refreshing the preset per the recipe above). The Director MUST NOT wire `send_choice_key` against an opencode placement as an ad-hoc workaround — that defeats the safety floor invariant.
+The Director MUST escalate back to the user, capture pane state via `cafleet --fleet-id <s> member capture --member-id <opencode-member>` for diagnosis, and re-run Step 0-style empirical verification to extend the deny-list (which means updating `CAFLEET_AGENT` in source, shipping a new CAFleet release, and refreshing the preset per the recipe above). The Director MUST NOT wire `send_choice_key` against an opencode placement as an ad-hoc workaround — that defeats the safety floor invariant.
 
 ## Safety floor caveats
 
@@ -137,34 +137,34 @@ Gated on local install of `opencode`. Run from inside a tmux session:
 ```bash
 rm -f ~/.opencode/agents/cafleet.md
 
-cafleet session create --label opencode-smoke --coding-agent claude
-# Capture: SESSION=<uuid>, DIRECTOR=<uuid> from the output.
+cafleet fleet create --label opencode-smoke --coding-agent claude
+# Capture: FLEET=<uuid>, DIRECTOR=<uuid> from the output.
 
-cafleet --session-id $SESSION member create --agent-id $DIRECTOR \
+cafleet --fleet-id $FLEET member create --agent-id $DIRECTOR \
   --name Opencode-Smoke --description "opencode smoke member" --coding-agent opencode
 # Expect: ~/.opencode/agents/cafleet.md is materialized with the
 # CAFLEET_AGENT preset (cat it and verify the JSON frontmatter).
 
-cafleet --session-id $SESSION member list --agent-id $DIRECTOR
+cafleet --fleet-id $FLEET member list --agent-id $DIRECTOR
 # Expect: backend column shows 'opencode' for the smoke member.
 
-cafleet --session-id $SESSION message send --agent-id $DIRECTOR \
+cafleet --fleet-id $FLEET message send --agent-id $DIRECTOR \
   --to <opencode-member-id> --text "ping"
 # Expect: opencode pane receives the inline preview and the member ack-loops.
 
-cafleet --session-id $SESSION member exec --agent-id $DIRECTOR \
+cafleet --fleet-id $FLEET member exec --agent-id $DIRECTOR \
   --member-id <opencode-member-id> "git status --short"
 # Expect: '! git status --short' lands in the opencode pane and the
 # command runs.
 
-cafleet --session-id $SESSION member exec --agent-id $DIRECTOR \
+cafleet --fleet-id $FLEET member exec --agent-id $DIRECTOR \
   --member-id <opencode-member-id> "curl https://example.com"
 # Expect: the deny-list blocks the curl command. If it does NOT, the
 # safety floor is broken — STOP and re-run the agent-load smoke from
 # the design doc's Step 0 GATE.
 
-cafleet --session-id $SESSION member delete --agent-id $DIRECTOR --member-id <opencode-member-id>
-cafleet session delete $SESSION
+cafleet --fleet-id $FLEET member delete --agent-id $DIRECTOR --member-id <opencode-member-id>
+cafleet fleet delete $FLEET
 ```
 
 A second `cafleet member create --coding-agent opencode` invocation with the preset file already in place should leave the file unchanged (verify by capturing `stat --format=%Y ~/.opencode/agents/cafleet.md` before and after).

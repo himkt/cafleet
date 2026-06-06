@@ -36,17 +36,17 @@ def poll_trigger_call_count(monkeypatch):
     return counter
 
 
-def _create_session():
-    return broker.create_session(
+def _create_fleet():
+    return broker.create_fleet(
         label=None,
         director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
         coding_agent="claude",
     )
 
 
-def _register_member(session_id, name, director_id, pane):
+def _register_member(fleet_id, name, director_id, pane):
     return broker.register_agent(
-        session_id=session_id,
+        fleet_id=fleet_id,
         name=name,
         description=f"{name} description",
         placement={
@@ -60,8 +60,8 @@ def _register_member(session_id, name, director_id, pane):
 
 
 def _setup_two_agents():
-    s = _create_session()
-    sid = s["session_id"]
+    s = _create_fleet()
+    sid = s["fleet_id"]
     director_id = s["director"]["agent_id"]
     sender = _register_member(sid, "sender", director_id, "%1")
     recipient = _register_member(sid, "recipient", director_id, "%2")
@@ -146,12 +146,12 @@ def test_send_message__skip_conditions(inline_preview_calls, scenario):
         sid, sender, _recipient = _setup_two_agents()
         broker.send_message(sid, sender, sender, "self")
     else:
-        s = _create_session()
-        sid = s["session_id"]
+        s = _create_fleet()
+        sid = s["fleet_id"]
         director_id = s["director"]["agent_id"]
         sender = _register_member(sid, "sender", director_id, "%1")
         recipient = broker.register_agent(
-            session_id=sid,
+            fleet_id=sid,
             name="lonely",
             description="no placement",
         )

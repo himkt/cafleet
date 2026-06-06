@@ -31,8 +31,8 @@ content). Every Task field lives in its own typed column.
 ```mermaid
 %%{init: {'theme': 'default', 'themeVariables': {'fontSize': '15px'}}}%%
 erDiagram
-    sessions {
-        TEXT session_id PK
+    fleets {
+        TEXT fleet_id PK
         TEXT label
         TEXT created_at
         TEXT deleted_at
@@ -40,7 +40,7 @@ erDiagram
     }
     agents {
         TEXT agent_id PK
-        TEXT session_id FK
+        TEXT fleet_id FK
         TEXT name
         TEXT description
         TEXT status
@@ -69,7 +69,7 @@ erDiagram
         TEXT coding_agent
         TEXT created_at
     }
-    sessions ||--o{ agents : "session_id"
+    fleets ||--o{ agents : "fleet_id"
     agents ||--o| agent_placements : "agent_id CASCADE"
     agents ||--o{ tasks : "from_agent_id"
     agents ||--o{ tasks : "to_agent_id and context_id"
@@ -79,8 +79,8 @@ erDiagram
 
 | Table | Indexed columns | JSON blob |
 |---|---|---|
-| `sessions` | `session_id` (PK) | — |
-| `agents` | `agent_id` (PK), `session_id` (FK → `sessions`), `status` | `agent_card_json` |
+| `fleets` | `fleet_id` (PK) | — |
+| `agents` | `agent_id` (PK), `fleet_id` (FK → `fleets`), `status` | `agent_card_json` |
 | `tasks` | `task_id` (PK), `context_id` (FK → `agents`), `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text` | — |
 | `agent_placements` | `agent_id` (PK, FK → `agents` CASCADE), `director_agent_id` (nullable, FK → `agents` RESTRICT), `tmux_session`, `tmux_window_id`, `tmux_pane_id` (nullable) | — |
 
@@ -98,7 +98,7 @@ shape.
 
 Four indexes serve the hot read paths:
 
-- `idx_agents_session_status (session_id, status)` — list active agents in a session.
+- `idx_agents_fleet_status (fleet_id, status)` — list active agents in a fleet.
 - `idx_tasks_context_status_ts (context_id, status_timestamp DESC)` — inbox listing.
 - `idx_tasks_from_agent_status_ts (from_agent_id, status_timestamp DESC)` — sender outbox in the WebUI.
 - `idx_placements_director (director_agent_id)` — list members spawned by a Director.
