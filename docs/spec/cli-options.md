@@ -498,7 +498,7 @@ Three separate tmux invocations for `--freetext` because tmux's `-l` (literal) f
 
 Mirrors `cafleet member capture` step-for-step:
 
-1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
 4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
@@ -575,7 +575,7 @@ Two separate tmux invocations because tmux's `-l` (literal) flag is per-invocati
 
 Mirrors `cafleet member send-input` step-for-step:
 
-1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
 4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to exec.`.
@@ -635,7 +635,7 @@ cafleet --session-id <session-id> member ping --agent-id <director-agent-id> \
 
 | Invocation | tmux calls issued in order |
 |---|---|
-| `member ping` | `MULTIPLEXERS.tmux.send_poll_trigger(target_pane_id=<pane>, session_id=<sid>, agent_id=<member_id>)` — types `cafleet --session-id <sid> message poll --agent-id <member_id>` + `Enter` into the pane (same helper as the broker auto-fire). |
+| `member ping` | `MULTIPLEXERS.tmux.send_poll_trigger(target_pane_id=<pane>, session_id=<sid>, agent_id=<member_id>)` — types `cafleet --session-id <sid> message poll --agent-id <member_id>` + `Enter` into the pane. |
 
 #### Validation rules
 
@@ -652,7 +652,7 @@ The subcommand has no positional argument and no other flags. There is no operat
 
 Mirrors `cafleet member exec` step-for-step:
 
-1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
 4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to ping.`.
