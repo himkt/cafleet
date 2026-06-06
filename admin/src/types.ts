@@ -33,8 +33,8 @@ export interface TimelineResponse {
   messages: TimelineMessage[];
 }
 
-export interface SessionListItem {
-  session_id: string;
+export interface FleetListItem {
+  fleet_id: string;
   label: string | null;
   created_at: string;
   agent_count: number;

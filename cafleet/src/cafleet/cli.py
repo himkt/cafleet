@@ -281,7 +281,7 @@ def fleet_create(
     if as_json or ctx.obj["json_output"]:
         click.echo(output.format_json(result))
     else:
-        click.echo(output.format_session_create(result, full=full))
+        click.echo(output.format_fleet_create(result, full=full))
 
 
 @fleet.command("list")

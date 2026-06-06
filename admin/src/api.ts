@@ -1,13 +1,13 @@
 import type {
   AgentsResponse,
   TimelineResponse,
-  SessionListItem,
+  FleetListItem,
 } from "./types";
 
-let sessionId: string | null = null;
+let fleetId: string | null = null;
 
-export function setSessionId(id: string | null): void {
-  sessionId = id;
+export function setFleetId(id: string | null): void {
+  fleetId = id;
 }
 
 async function request<T>(
@@ -18,8 +18,8 @@ async function request<T>(
     ...(options.headers as Record<string, string>),
   };
 
-  if (sessionId) {
-    headers["X-Session-Id"] = sessionId;
+  if (fleetId) {
+    headers["X-Fleet-Id"] = fleetId;
   }
 
   if (options.body && typeof options.body === "string") {
@@ -40,8 +40,8 @@ async function request<T>(
   return resp.json() as Promise<T>;
 }
 
-export async function listSessions(): Promise<SessionListItem[]> {
-  return request<SessionListItem[]>("/sessions");
+export async function listFleets(): Promise<FleetListItem[]> {
+  return request<FleetListItem[]>("/fleets");
 }
 
 export async function getAgents(): Promise<AgentsResponse> {

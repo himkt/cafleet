@@ -1,7 +1,7 @@
 # 0000074 — base-dir skill self-containment + `session`→`fleet` Tier-C rename
 
 **Status**: Approved
-**Progress**: 27/41 tasks complete
+**Progress**: 32/41 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -231,11 +231,11 @@ Per the project documentation-first rule, these are updated **before** code. CAF
 
 ### Step 6: Item 3 — output.py + WebUI + admin frontend
 
-- [ ] `output.py`: `format_session_create`→`format_fleet_create` + `fleet_id` key/docstring; KEEP the tmux `session` column in `format_member_list` <!-- completed: -->
-- [ ] `webui_api.py`: `get_webui_session`→`get_webui_fleet`, `X-Fleet-Id`, `/fleets` route, `list_fleets`, `broker.get_fleet`/`list_fleets`, `session_id`→`fleet_id` params <!-- completed: -->
-- [ ] `admin/src/api.ts` + `types.ts`: rename vars/fns/header/route/interface/field <!-- completed: -->
-- [ ] Rename `SessionPicker.tsx`→`FleetPicker.tsx` (component, props, state, UI copy, snippet) + update every importer (`App.tsx` etc.) <!-- completed: -->
-- [ ] Rename CAFleet-session refs in `admin/src/components/Dashboard.tsx` (`sessionId` prop→`fleetId` + copy "Back to Sessions"/"This session has no Administrator agent"/"No agents registered in this session") and `Sidebar.tsx` (same copy) <!-- completed: -->
+- [x] `output.py`: `format_session_create`→`format_fleet_create` + `fleet_id` key/docstring; KEEP the tmux `session` column in `format_member_list` <!-- completed: 2026-06-06T15:16 -->
+- [x] `webui_api.py`: `get_webui_session`→`get_webui_fleet`, `X-Fleet-Id`, `/fleets` route, `list_fleets`, `broker.get_fleet`/`list_fleets`, `session_id`→`fleet_id` params <!-- completed: 2026-06-06T15:16 -->
+- [x] `admin/src/api.ts` + `types.ts`: rename vars/fns/header/route/interface/field <!-- completed: 2026-06-06T15:16 -->
+- [x] Rename `SessionPicker.tsx`→`FleetPicker.tsx` (component, props, state, UI copy, snippet) + update every importer (`App.tsx` etc.) <!-- completed: 2026-06-06T15:16 -->
+- [x] Rename CAFleet-session refs in `admin/src/components/Dashboard.tsx` (`sessionId` prop→`fleetId` + copy "Back to Sessions"/"This session has no Administrator agent"/"No agents registered in this session") and `Sidebar.tsx` (same copy) <!-- completed: 2026-06-06T15:16 -->
 
 ### Step 7: Item 3 — tests
 

@@ -7,13 +7,13 @@ import Timeline from "./Timeline";
 import MessageInput from "./MessageInput";
 
 interface DashboardProps {
-  sessionId: string;
+  fleetId: string;
   initialAgents: Agent[];
   onBack: () => void;
 }
 
 export default function Dashboard({
-  sessionId,
+  fleetId,
   initialAgents,
   onBack,
 }: DashboardProps) {
@@ -47,7 +47,7 @@ export default function Dashboard({
         <h1 className="text-lg font-semibold text-gray-900">
           CAFleet —{" "}
           <span className="font-mono text-sm text-gray-500">
-            {sessionId.slice(0, 8)}
+            {fleetId.slice(0, 8)}
           </span>
         </h1>
         <div className="flex items-center gap-3">
@@ -72,7 +72,7 @@ export default function Dashboard({
             onClick={onBack}
             className="text-sm text-gray-500 hover:text-gray-700"
           >
-            Back to Sessions
+            Back to Fleets
           </button>
         </div>
       </header>
@@ -82,7 +82,7 @@ export default function Dashboard({
         <div className="flex flex-col flex-1 min-h-0">
           {senderId === null && (
             <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-700">
-              This session has no Administrator agent. Send is disabled.
+              This fleet has no Administrator agent. Send is disabled.
               If you just upgraded, run
               <code className="mx-1 bg-red-100 px-1 rounded">
                 cafleet db init
@@ -96,7 +96,7 @@ export default function Dashboard({
           {agents.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
               <p className="text-gray-400 text-sm">
-                No agents registered in this session. Use the{" "}
+                No agents registered in this fleet. Use the{" "}
                 <code className="text-gray-500">cafleet agent register</code> CLI to
                 add one.
               </p>
