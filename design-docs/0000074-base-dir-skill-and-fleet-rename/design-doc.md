@@ -1,7 +1,7 @@
 # 0000074 — base-dir skill self-containment + `session`→`fleet` Tier-C rename
 
 **Status**: Approved
-**Progress**: 12/41 tasks complete
+**Progress**: 17/41 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -204,11 +204,11 @@ Per the project documentation-first rule, these are updated **before** code. CAF
 
 ### Step 2: Item 1 — remove `cafleet base-dir` and delete the dead module
 
-- [ ] Delete the `base-dir` Click group + `resolve` + `record` (`cli.py:402-502`) <!-- completed: -->
-- [ ] Drop `base_dir` from the `cli.py:20` import <!-- completed: -->
-- [ ] Delete `cafleet/src/cafleet/base_dir.py` <!-- completed: -->
-- [ ] Delete `cafleet/tests/test_base_dir.py` and `cafleet/tests/test_base_dir_spawn_flow.py` <!-- completed: -->
-- [ ] Confirm `.gitignore` keeps the unanchored `.cafleet-base-dir.json` entry (no change) <!-- completed: -->
+- [x] Delete the `base-dir` Click group + `resolve` + `record` (`cli.py:402-502`) <!-- completed: 2026-06-06T13:56 -->
+- [x] Drop `base_dir` from the `cli.py:20` import <!-- completed: 2026-06-06T13:56 -->
+- [x] Delete `cafleet/src/cafleet/base_dir.py` (Director ran git rm) <!-- completed: 2026-06-06T13:59 -->
+- [x] Delete `cafleet/tests/test_base_dir.py` and `cafleet/tests/test_base_dir_spawn_flow.py` (Director ran git rm) <!-- completed: 2026-06-06T13:59 -->
+- [x] Confirm `.gitignore` keeps the unanchored `.cafleet-base-dir.json` entry (no change) <!-- completed: 2026-06-06T13:56 -->
 
 ### Step 3: Item 3 — data layer + migration
 
