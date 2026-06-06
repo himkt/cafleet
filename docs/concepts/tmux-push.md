@@ -123,10 +123,11 @@ helpers and is wired into the message subcommands through the shared
 `broker.broadcast_message` returns a single envelope list containing a
 `broadcast_summary` task whose top-level `text` column is the broker-
 generated summary string (e.g. `Broadcast sent to N recipients`), not the
-original body. Truncating that summary would hide the recipient count, so
-`message_broadcast` is wired with `truncates_task_text=False`. The `--full`
-Click option is preserved on `message broadcast` for flag-surface
-consistency across all six subcommands but is a no-op there.
+original body. `message_broadcast` is wired with `truncates_task_text=True`: the summary
+renders as a one-line `broadcast id=… recipients=…` by default and as the
+full typed-column envelope under `--full`. The short summary string is
+truncated only if `CAFLEET_MAX_TEXT_LEN` is set below its length, and
+`--full` never adds per-recipient envelopes or a `recipient_ids` list.
 
 The truncation applies to CLI emit sites only. FastAPI `/api/*` responses
 are unchanged — the WebUI is human-facing and renders full bodies. `member

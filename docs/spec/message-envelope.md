@@ -103,7 +103,7 @@ A poll result with one unicast delivery (id `abc12345…`, from `xy23ef67…`, b
 
 > Indented here for readability; the actual `--json` output is a single compact line with no whitespace. `--full` only changes which fields are emitted, never the encoding.
 
-A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id8>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary task plus the wrapper-level `notifications_sent_count` field — there is no per-recipient envelope list, and `--full` is a no-op for `message broadcast` (see [`--full` semantics](cli-options.md#full-semantics) for the cross-subcommand summary).
+A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id8>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary task plus the wrapper-level `notifications_sent_count` field — there is no per-recipient envelope list. `--full` renders that single summary task in full (verbose envelope / typed-column dict) instead of the one-line summary, but never adds per-recipient envelopes (see [`--full` semantics](cli-options.md#full-semantics) for the cross-subcommand summary).
 
 ### Text mode
 

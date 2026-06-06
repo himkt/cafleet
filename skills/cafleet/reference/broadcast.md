@@ -14,7 +14,7 @@ cafleet --session-id <session-id> message broadcast --agent-id <my-agent-id> \
 
 ## What the broker does
 
-`broker.broadcast_message` writes one row per recipient as an individual delivery task (each visible to its recipient via `cafleet message poll`) PLUS one `broadcast_summary` row addressed to the broadcaster. The summary's `text` is the human-readable string `"Broadcast sent to N recipients"`, written by the broker at insert time. The function returns a list containing exactly one envelope: the summary task plus a top-level `notifications_sent_count` field. The per-recipient delivery rows are NOT echoed back to the caller (they are observable only via the recipients' own `cafleet message poll`), and there is no `recipient_ids` list in the response — `--full` is a no-op for broadcast and does not change either omission.
+`broker.broadcast_message` writes one row per recipient as an individual delivery task (each visible to its recipient via `cafleet message poll`) PLUS one `broadcast_summary` row addressed to the broadcaster. The summary's `text` is the human-readable string `"Broadcast sent to N recipients"`, written by the broker at insert time. The function returns a list containing exactly one envelope: the summary task plus a top-level `notifications_sent_count` field. The per-recipient delivery rows are NOT echoed back to the caller (they are observable only via the recipients' own `cafleet message poll`), and there is no `recipient_ids` list in the response — `--full` renders the single summary task in full but never adds the per-recipient delivery rows or a `recipient_ids` list.
 
 The response carries `notifications_sent_count` indicating how many recipient panes were successfully triggered by the inline-preview keystroke (see `reference/recovery.md` for the failure-mode chain when an inline preview misses).
 
@@ -26,7 +26,7 @@ The default broadcast echo is a one-line summary:
 broadcast id=<id8> recipients=<count>
 ```
 
-The default echo collapses the broker response to one operator-readable line. The per-recipient envelopes and a `recipient_ids` list are NOT in the broker response in the first place (the broker has only ever returned the single summary + `notifications_sent_count`), so `--full` is a no-op for `message broadcast` and does not restore them. To inspect per-recipient delivery rows, each recipient polls its own inbox via `cafleet message poll`.
+The default echo collapses the broker response to one operator-readable line; `--full` renders that single summary task as the full typed-column envelope instead. The per-recipient envelopes and a `recipient_ids` list are NOT in the broker response in the first place (the broker has only ever returned the single summary + `notifications_sent_count`), so `--full` cannot restore them. To inspect per-recipient delivery rows, each recipient polls its own inbox via `cafleet message poll`.
 
 ## Threading via `origin_task_id`
 
@@ -54,4 +54,4 @@ The summary row is NOT acked by recipients — it is a sender-side artifact, add
 
 ## Flag-surface consistency
 
-`--full` is preserved on `message broadcast` for surface consistency with `message {send,poll,ack,cancel,show}`. On those five subcommands `--full` disables body truncation; on `message broadcast` it has no effect — the broker's return value is a single summary task plus `notifications_sent_count`, the summary's `text` is the broker-computed string and is emitted untruncated regardless, and there are no per-recipient envelopes or `recipient_ids` list in the response to gate. See `reference/output-flags.md` for the cross-subcommand `--full` semantics table.
+`--full` is preserved on `message broadcast` for surface consistency with `message {send,poll,ack,cancel,show}`. On those five subcommands `--full` disables body truncation; on `message broadcast` it switches the single summary task's rendering — the one-line `broadcast id=<id8> recipients=<count>` by default, the full verbose / typed-column envelope under `--full`. The broker's return value is always that single summary task plus `notifications_sent_count`, so `--full` never adds per-recipient envelopes or a `recipient_ids` list. See `reference/output-flags.md` for the cross-subcommand `--full` semantics table.
