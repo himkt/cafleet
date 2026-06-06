@@ -741,15 +741,18 @@ def _load_authorized_member(
     director_agent_id: str,
     member_id: str,
     *,
-    placement_missing_msg: str,
+    placement_missing_template: str = _PLACEMENT_MISSING_DEFAULT,
 ) -> tuple[dict, dict]:
     """Load a member's agent + placement, enforcing the cross-Director boundary.
 
-    ``placement_missing_msg`` is the full error body for the "no placement"
-    path, because each caller points users at a different follow-up command
-    (``cafleet agent deregister`` from delete; ``cafleet member create`` from
-    capture / send-input). Pane-id presence is NOT checked here — delete
-    tolerates a pending placement while the others reject it.
+    ``placement_missing_template`` is a ``{member_id}`` format string for the
+    "no placement" path, because each caller points users at a different
+    follow-up command (``cafleet member create`` by default; ``cafleet agent
+    deregister`` from delete). It is formatted with the *resolved* member id, so
+    this error echoes the same full id as the "not found" / "not a member of
+    your team" errors rather than the pasted prefix. Pane-id presence is NOT
+    checked here — delete tolerates a pending placement while the others reject
+    it.
 
     ``member_id`` may be a full UUID or a unique prefix; it is resolved to the
     full id first so every downstream operation runs against the real id, not
@@ -770,7 +773,9 @@ def _load_authorized_member(
         raise click.ClickException(f"Agent {member_id} not found")
     placement = target["placement"]
     if placement is None:
-        raise click.ClickException(placement_missing_msg)
+        raise click.ClickException(
+            placement_missing_template.format(member_id=member_id)
+        )
     if placement["director_agent_id"] != director_agent_id:
         raise click.ClickException(
             f"agent {member_id} is not a member of your team "
@@ -1032,8 +1037,8 @@ def member_delete(ctx, agent_id, member_id, force):
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=(
-            f"agent {member_id} has no placement; use `cafleet agent deregister` instead"
+        placement_missing_template=(
+            "agent {member_id} has no placement; use `cafleet agent deregister` instead"
         ),
     )
     member_id = target["agent_id"]
@@ -1210,7 +1215,6 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
     member_id = target["agent_id"]
     pane_id = _require_member_pane(placement, member_id, "capture")
@@ -1282,7 +1286,6 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
     member_id = target["agent_id"]
     pane_id = _require_member_pane(placement, member_id, "send")
@@ -1336,7 +1339,6 @@ def member_exec(ctx, agent_id, member_id, command):
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
     member_id = target["agent_id"]
     pane_id = _require_member_pane(placement, member_id, "exec")
@@ -1377,7 +1379,6 @@ def member_ping(ctx, agent_id, member_id, quiet):
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
     member_id = target["agent_id"]
     pane_id = _require_member_pane(placement, member_id, "ping")
