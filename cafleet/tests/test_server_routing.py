@@ -1,6 +1,6 @@
 """Tests for FastAPI app routing: SPA mount, reserved-prefix re-raise, mount order.
 
-Guards the behaviors specified in design-doc 0000068 §Part A Backend and §Risks:
+Guards the following behaviors:
 
 - The mount at ``/`` serves the SPA shell for ``/`` and unknown client-side routes.
 - ``SPAStaticFiles.get_response`` re-raises 404 for paths under the reserved
@@ -61,7 +61,7 @@ def test_create_app__unknown_api_path_returns_404_not_spa(client, path):
 
 
 def test_create_app__known_api_route_reaches_router_returns_json_400(client):
-    # Mount-order regression guard from design-doc 0000068 §Risks: if the SPA
+    # Mount-order regression guard: if the SPA
     # mount intercepts /api/* before the router, this would return the SPA
     # mount's 404 instead of the expected JSON 400 from get_webui_session().
     # The 400 short-circuits before any DB access, so no broker fixture needed.

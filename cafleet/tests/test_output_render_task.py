@@ -162,7 +162,7 @@ def test_format_task__compact_two_lines_with_expected_fields(line, needle):
 
 
 def test_format_task__full_layout_has_more_lines_and_field_labels():
-    task = _typed_task(text="legacy body")
+    task = _typed_task(text="message body")
     compact = output.format_task(task, full=False)
     full = output.format_task(task, full=True)
     assert full.count("\n") > compact.count("\n")

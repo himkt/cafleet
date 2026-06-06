@@ -13,7 +13,7 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Opencode-A --description "<one-sentence purpose>" --coding-agent opencode
 ```
 
-The default is `--coding-agent claude`, so existing invocations are unchanged. A single Director may spawn `claude`, `codex`, and `opencode` members in the same session — the broker, message lifecycle, and tmux primitives behave identically for all three.
+The default is `--coding-agent claude`. A single Director may spawn `claude`, `codex`, and `opencode` members in the same session — the broker, message lifecycle, and tmux primitives behave identically for all three.
 
 The opencode pane runs the bare `opencode` command, which per <https://opencode.ai/docs/cli/> is the documented TUI entry point ("The OpenCode CLI by default starts the TUI when run without any arguments"). The pane stays alive as a long-lived TUI you can scroll, switch to, and observe — matching the operator affordance of `claude` and `codex` panes. The `opencode run` subcommand (the documented headless / scripting entry) is **not** used.
 

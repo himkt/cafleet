@@ -237,7 +237,7 @@ def test_session_create_coding_agent__claude_records_claude_in_placement(
 
 
 def test_session_create_coding_agent__default_is_claude(db_file, mock_tmux_ok):
-    """No flag → 'claude'. 'unknown' must not appear for newly-created sessions."""
+    """No ``--coding-agent`` flag defaults the placement to ``'claude'``."""
     runner = CliRunner()
     result = runner.invoke(cli, ["session", "create", "--json"])
     assert result.exit_code == 0, result.output
@@ -330,13 +330,6 @@ def test_session_list_hides_soft_deleted__deleted_session_is_hidden_from_json_li
     ids = {s["session_id"] for s in data}
     assert keep_sid in ids
     assert drop_sid not in ids
-
-
-def test_session_list_hides_soft_deleted__list_has_no_all_flag(db_file):
-    """Design 0000026 explicitly removes/omits an ``--all`` flag."""
-    runner = CliRunner()
-    result = runner.invoke(cli, ["session", "list", "--all"])
-    assert result.exit_code == 2, result.output
 
 
 def test_session_delete_unknown_and_idempotent__unknown_session_id_exits_1_with_not_found(

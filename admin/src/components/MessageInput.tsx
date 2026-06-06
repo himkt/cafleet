@@ -50,7 +50,7 @@ function parseInput(raw: string, recipients: Agent[]): ParseResult {
 
   if (nonAll.length > 1) {
     return parseError(
-      "Multi-recipient unicast not supported in first cut; use @all for broadcast",
+      "Multi-recipient unicast is not supported; use @all for broadcast",
     );
   }
 

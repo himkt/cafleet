@@ -55,10 +55,7 @@ per-test `monkeypatch.setattr` on the class method is honored):
 The recipient's coding agent processes the keystroked text as a fresh
 user-turn input — no `cafleet message poll` invocation is in the auto-fire
 path. The recipient acks via `cafleet message ack --task-id <task_id>` once
-it has consumed the message. This replaces the design-0000049-pre keystroke
-(the literal `cafleet --session-id <s> message poll --agent-id <r>` + Enter
-sequence, which forced the recipient to dump its full unacked-inbox envelope
-on every send and dominated per-message token cost).
+it has consumed the message.
 
 The `TmuxMultiplexer.send_inline_preview` method is **NOT** a reuse of
 `send_freetext_and_submit` (which prepends a literal `4` for

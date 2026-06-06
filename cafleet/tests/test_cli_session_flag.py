@@ -157,7 +157,7 @@ def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(
 def test_session_id_flag_flows_into_broker__session_id_not_read_from_environment(
     db_runner, monkeypatch
 ):
-    """The env var CAFLEET_SESSION_ID was removed; only the CLI flag works."""
+    """Session id is read only from the ``--session-id`` flag; the environment is never consulted."""
     monkeypatch.setenv("CAFLEET_SESSION_ID", str(uuid.uuid4()))
     result = db_runner.invoke(
         cli,

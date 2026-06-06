@@ -1,5 +1,3 @@
-Rationale-of-record: design-docs/0000050-design-doc-as-medium/design-doc.md.
-
 # Coordination Protocol
 
 Mechanics for inter-agent coordination. The design document is the substantive communication medium; `cafleet message send --text` carries only a single-line **verb + pointer** poke. Substantive content (feedback, reports, escalation reasons, review items) lives in inline `COMMENT(role)` markers in the design doc — except for source-anchored Copilot inline review, which is annotated in the source file at `<file>:<line>` because that is where the comment lives.

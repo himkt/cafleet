@@ -104,8 +104,8 @@ session in the same transaction as the session row. The Administrator is an
 ordinary `agents` row distinguished only by `agent_card_json.cafleet.kind ==
 "builtin-administrator"` — no schema change, no separate table. Every session
 has exactly one Administrator, and Alembic revision
-`0006_seed_administrator_agent.py` backfills one into each pre-existing
-session on `cafleet db init` (idempotent via a `json_extract` probe).
+`0006_seed_administrator_agent.py` seeds it (idempotent via a `json_extract`
+probe).
 
 The Admin WebUI Send control always submits messages with
 `from_agent_id = administrator.agent_id`, so there is no sender dropdown.
