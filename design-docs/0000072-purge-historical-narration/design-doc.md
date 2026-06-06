@@ -1,7 +1,7 @@
 # 0000072 — Purge Historical-Trajectory Narration
 
 **Status**: Approved
-**Progress**: 16/24 tasks complete
+**Progress**: 19/24 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -179,9 +179,9 @@ This is a documentation/test-hygiene cleanup. It removes **no runtime behavior**
 
 ### Step 5: Tests — design-doc-number citations (reword)
 
-- [ ] T8 + T9 — `test_server_routing.py`: drop the `design-doc 0000068` citations from the docstring and the mount-order comment <!-- completed: -->
-- [ ] T10 + T11 — `test_base_dir_spawn_flow.py`: drop the `design-0000055` / `Design 0000060` citations from the docstring and comment <!-- completed: -->
-- [ ] T12 — `test_output_render_task.py`: reword the incidental `text="legacy body"` fixture → `text="message body"` <!-- completed: -->
+- [x] T8 + T9 — `test_server_routing.py`: drop the `design-doc 0000068` citations from the docstring and the mount-order comment <!-- completed: 2026-06-06T02:41 -->
+- [x] T10 + T11 — `test_base_dir_spawn_flow.py`: drop the `design-0000055` / `Design 0000060` citations from the docstring and comment <!-- completed: 2026-06-06T02:41 -->
+- [x] T12 — `test_output_render_task.py`: reword the incidental `text="legacy body"` fixture → `text="message body"` <!-- completed: 2026-06-06T02:41 -->
 
 ### Step 6: Skills — design-doc pointers (judgment)
 

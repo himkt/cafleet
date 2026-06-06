@@ -1,4 +1,4 @@
-"""Integration tests for the design-0000055 spawn-prompt + audit-write contract.
+"""Integration tests for the spawn-prompt + audit-write contract.
 
 These tests exercise:
 
@@ -191,7 +191,7 @@ def test_director_side_audit_writes_land_under_base_not_tmp(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Design 0000060 — task-scoped spawn-prompt audit-write flow
+# Task-scoped spawn-prompt audit-write flow
 # ---------------------------------------------------------------------------
 
 
