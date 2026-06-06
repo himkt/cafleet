@@ -19,8 +19,8 @@ def _redirect_home_for_opencode_materialize(tmp_path, monkeypatch):
     """Redirect HOME → ``tmp_path`` for every test in this file.
 
     ``OpencodeAgent.ensure_available()`` materializes the CAFleet agent
-    preset to ``~/.opencode/agents/cafleet.md`` as a spawn precondition
-    (per design 0000067 §4). When the protocol-contract parametrization
+    preset to ``~/.opencode/agents/cafleet.md`` as a spawn precondition.
+    When the protocol-contract parametrization
     runs the ``ensure_available`` cases for OpencodeAgent, that write
     would otherwise pollute the real user's ``$HOME``. Redirecting HOME
     is a no-op for claude / codex (they do not touch ``$HOME``) and

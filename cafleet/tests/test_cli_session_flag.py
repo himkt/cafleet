@@ -18,6 +18,12 @@ def _autouse_reset_engine(_reset_engine_singletons):
 
 
 @pytest.fixture(autouse=True)
+def _stub_id_resolvers(monkeypatch):
+    monkeypatch.setattr(broker, "resolve_agent_ref", lambda session_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_task_ref", lambda session_id, ref: ref)
+
+
+@pytest.fixture(autouse=True)
 def _mock_tmux_for_session_create(monkeypatch):
     """Let CliRunner-driven ``session create`` succeed without a real tmux pane."""
     ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
@@ -122,6 +128,7 @@ def test_session_id_flag_flows_into_broker__send_passes_session_id_to_broker(
         }
 
     monkeypatch.setattr(broker, "send_message", fake_send_message)
+    monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
 
     sid = str(uuid.uuid4())
     aid = str(uuid.uuid4())

@@ -35,7 +35,7 @@ def test_broadcast_summary__exactly_typed_column_keys_no_recipient_ids_no_metada
     }
     extra = set(summary.keys()) - expected_keys
     assert not extra, f"unexpected extras: {sorted(extra)}"
-    # Defensive guards against legacy keys re-emerging.
+    # Defensive guards against removed wrapper keys re-emerging.
     for forbidden in ("recipient_ids", "recipientIds", "metadata"):
         assert forbidden not in summary
 

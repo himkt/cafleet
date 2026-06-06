@@ -55,9 +55,7 @@ sequenceDiagram
 Any failure in the transaction rolls the whole thing back — no partial
 session / agent / placement rows can persist. Outside tmux the CLI fails with
 `Error: cafleet session create must be run inside a tmux session` and exit
-code 1 before touching the DB. Legacy `agent_placements` rows that carry the
-value `"unknown"` from older session bootstraps are normalized to `"claude"`
-by Alembic revision `0010_backfill_unknown_coding_agent.py`.
+code 1 before touching the DB.
 
 The post-bootstrap invariant is that every non-deleted `sessions` row has a
 non-NULL `director_agent_id`. The column itself is DB-nullable because the

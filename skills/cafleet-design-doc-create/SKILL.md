@@ -160,7 +160,7 @@ The audit trail of every status hop lives in the cafleet message log (admin WebU
 
 ### Director Per-File Detail Recovery
 
-Members no longer ship file lists in cafleet bodies. The Director recovers per-file detail directly via git when a commit message needs it: `git status` for unstaged/staged file lists, `git diff --stat <base>..HEAD` for cumulative scope, `git log <base>..HEAD --name-only` for file-touch history, `git diff <base>..HEAD -- <pattern>` for content.
+Members do not ship file lists in cafleet bodies (the verb + pointer schema carries only a poke). The Director recovers per-file detail directly via git when a commit message needs it: `git status` for unstaged/staged file lists, `git diff --stat <base>..HEAD` for cumulative scope, `git log <base>..HEAD --name-only` for file-touch history, `git diff <base>..HEAD -- <pattern>` for content.
 
 ### Skill-specific overrides
 

@@ -1,6 +1,6 @@
-# Legacy flags — `--full` / `--pretty` / `--json` opt-back-ins
+# Output flags — `--full` / `--json` / `--quiet`
 
-`--full` / `--pretty` / `--json` are the opt-back-ins for cafleet's compact default output. Each flag is documented below.
+`--full`, `--json`, and `--quiet` are cafleet's output-control flags over its compact default output: `--full` and `--json` opt back into untruncated / structured output, while `--quiet` trims output to the bare id. Each flag is documented below.
 
 ## `--full` (cross-subcommand escape hatch)
 
@@ -9,28 +9,17 @@
 | Subcommand | Default | `--full` |
 |---|---|---|
 | `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix; compact rendered envelope (`id`, `from`, `ts`, `text` + optional `kind`/`origin`). | Untruncated `text` + full typed-column envelope (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text`). |
-| `message broadcast` | One-line summary `broadcast id=<id8> recipients=<count>`. The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper field — there are no per-recipient envelopes or `recipient_ids` list in the response. | No effect. `--full` is preserved for surface consistency with the five `message {send,poll,ack,cancel,show}` subcommands but is a no-op on broadcast. |
-| `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints; `agent_card_json` projected to minimum-required fields. | Four-line per-agent block including untruncated `description` and the full `agent_card_json` blob. |
+| `message broadcast` | One-line summary `broadcast id=<id8> recipients=<count>`. The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper field — there are no per-recipient envelopes or `recipient_ids` list in the response. | Renders the single `broadcast_summary` task as the full verbose envelope (typed-column dict in `--json`) instead of the one-line summary. Never adds per-recipient envelopes or a `recipient_ids` list — the response is always that one summary task plus `notifications_sent_count`. |
+| `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status` (plus `coding_agent` when a placement is present). | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never load it. |
 | `member capture` | Default `--lines 30`; ANSI escapes stripped (`--no-ansi` is the default). | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
-
-## `--pretty` (global, indented JSON)
-
-```bash
-cafleet --json message poll --agent-id <m>             # default: compact JSON, no whitespace
-cafleet --json --pretty message poll --agent-id <m>    # indented JSON (json.dumps(..., indent=2))
-```
-
-Default JSON encoding is `json.dumps(data, separators=(",",":"))` — no whitespace. `--pretty` switches to indented (`json.dumps(data, indent=2)`). No effect on text-mode output; no effect when `--json` is not passed.
 
 ## `--json` (global, machine-parseable)
 
-`--json` switches CLI output from text to JSON. Combined with the new compact-by-default JSON encoding, `--json` is now cheap to pipe into `jq` from a Director loop without paying for indentation. Compose with `--pretty` when a human is reading the output.
+`--json` switches CLI output from text to JSON. JSON encoding is compact (`json.dumps(data, separators=(",",":"), ensure_ascii=False)` — no whitespace, non-ASCII like the `…` suffix emitted as UTF-8), so `--json` is cheap to pipe into `jq` from a Director loop without paying for indentation.
 
 ```bash
 cafleet --json message poll --agent-id <m>
-cafleet --json --pretty message poll --agent-id <m>
 cafleet --json message poll --agent-id <m> --full
-cafleet --json --pretty message poll --agent-id <m> --full
 ```
 
 ## `--quiet` (per-subcommand, message-id-only)

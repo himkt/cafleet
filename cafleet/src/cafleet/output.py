@@ -24,16 +24,15 @@ def strip_ansi(text: str) -> str:
     return "\n".join(line.rsplit("\r", 1)[-1] for line in cleaned.split("\n"))
 
 
-def format_json(data: Any, *, pretty: bool = False) -> str:
-    """Render ``data`` as JSON.
+def format_json(data: Any) -> str:
+    """Render ``data`` as compact JSON.
 
-    Default is compact (no whitespace separators) so per-poll envelopes stay
-    short for agent consumers. Pass ``pretty=True`` for ``indent=2`` output
-    when a human is reading the result.
+    Compact (no whitespace separators) so per-poll envelopes stay short for
+    agent consumers. ``ensure_ascii=False`` keeps non-ASCII (e.g. the ``…``
+    truncation suffix) as UTF-8 rather than ``\\uXXXX`` escapes, matching the
+    UTF-8 byte budgets.
     """
-    if pretty:
-        return json.dumps(data, indent=2)
-    return json.dumps(data, separators=(",", ":"))
+    return json.dumps(data, separators=(",", ":"), ensure_ascii=False)
 
 
 def truncate_text(
@@ -173,8 +172,8 @@ def format_task(task: dict, *, full: bool = False) -> str:
     line 1 is ``[<id8> | from:<from8> | <ts>]`` (with optional
     ``| kind:<kind>`` and ``| origin:<id8>`` segments), line 2 is the body.
 
-    ``full=True``: 6-line legacy verbose layout that exposes every typed
-    column (``id``, ``state``, ``from``, ``to``, ``type``, ``text``).
+    ``full=True``: 6-line verbose layout that exposes every typed column
+    (``id``, ``state``, ``from``, ``to``, ``type``, ``text``).
     """
     if "task" in task and isinstance(task["task"], dict):
         task = task["task"]
@@ -211,9 +210,9 @@ def format_indexed_list(
 ) -> str:
     """Join formatted items with a single blank line between them.
 
-    Surface 17 dropped the legacy ``[1]`` / ``[2]`` index markers — agents
-    reference tasks by ``task_id`` (8-char prefix), not list index, so the
-    markers cost tokens without surfacing useful information.
+    Items are not numbered — agents reference tasks by ``task_id`` (8-char
+    prefix), not list index, so index markers would cost tokens without
+    surfacing useful information.
     """
     if not items:
         return empty_msg
@@ -224,9 +223,8 @@ def format_agent(agent: dict, *, full: bool = False) -> str:
     """Render an agent as text.
 
     ``full=False`` (default): 1-line compact ``<id8> <name> <status>``.
-    ``full=True``: 4-line legacy block exposing the full ``agent_id``,
-    ``name``, truncated ``description`` (60 codepoints + ``…`` per
-    Surface 5), and ``status``.
+    ``full=True``: 4-line block exposing the full ``agent_id``, ``name``,
+    truncated ``description`` (60 codepoints + ``…``), and ``status``.
     """
     if not full:
         return f"{agent['agent_id'][:8]} {agent['name']} {agent['status']}"
@@ -245,7 +243,7 @@ def format_session_create(data: dict, *, full: bool = False) -> str:
 
     ``full=False`` (default): 1-line compact form
     ``<session_id> director=<id8> admin=<id8>``.
-    ``full=True``: 7-line legacy block (session_id + director_agent_id on
+    ``full=True``: 7-line block (session_id + director_agent_id on
     their own lines, plus ``label``, ``created_at``, ``director_name``,
     ``pane``, ``administrator``).
     """
@@ -274,7 +272,7 @@ def format_member(data: dict, *, full: bool = False) -> str:
 
     ``full=False`` (default): 1-line compact form
     ``<id8> <name> backend=<coding_agent> pane=<pane_id>``.
-    ``full=True``: 6-line legacy block.
+    ``full=True``: 6-line block.
     """
     placement = data["placement"]
     if not full:

@@ -65,12 +65,11 @@ Field decisions:
 
 ### JSON output
 
-CLI JSON output is governed by two global flags:
+CLI JSON output is governed by the `--json` flag:
 
-| Flag combination | Output |
+| Mode | Output |
 |---|---|
-| `--json` (default) | Compact JSON: `json.dumps(data, separators=(",",":"))` — no whitespace. |
-| `--json --pretty` | Indented JSON: `json.dumps(data, indent=2)`. |
+| `--json` | Compact JSON: `json.dumps(data, separators=(",",":"), ensure_ascii=False)` — no whitespace; non-ASCII (e.g. the `…` suffix) emitted as UTF-8. |
 | (text mode) | Two lines per task in the compact rendered shape; six lines per task in `--full`. |
 
 #### Examples
@@ -83,20 +82,7 @@ A poll result with one unicast delivery (id `abc12345…`, from `xy23ef67…`, b
 [{"id":"abc12345","from":"xy23ef67","ts":"2026-05-05T05:42:11.123456+00:00","text":"build OK"}]
 ```
 
-**`--pretty` (`cafleet --json --pretty message poll --agent-id <r>`)**:
-
-```json
-[
-  {
-    "id": "abc12345",
-    "from": "xy23ef67",
-    "ts": "2026-05-05T05:42:11.123456+00:00",
-    "text": "build OK"
-  }
-]
-```
-
-**`--full` (`cafleet --json --pretty message poll --agent-id <r> --full`)**:
+**`--full` (`cafleet --json message poll --agent-id <r> --full`)**:
 
 ```json
 [
@@ -115,7 +101,9 @@ A poll result with one unicast delivery (id `abc12345…`, from `xy23ef67…`, b
 ]
 ```
 
-A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id8>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary task plus the wrapper-level `notifications_sent_count` field — there is no per-recipient envelope list, and `--full` is a no-op for `message broadcast` (see [`--full` semantics](cli-options.md#full-semantics) for the cross-subcommand summary).
+> Indented here for readability; the actual `--json` output is a single compact line with no whitespace. `--full` only changes which fields are emitted, never the encoding.
+
+A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id8>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary task plus the wrapper-level `notifications_sent_count` field — there is no per-recipient envelope list. `--full` renders that single summary task in full (verbose envelope / typed-column dict) instead of the one-line summary, but never adds per-recipient envelopes (see [`--full` semantics](cli-options.md#full-semantics) for the cross-subcommand summary).
 
 ### Text mode
 
@@ -134,8 +122,7 @@ Optional segments `| kind:<kind>` and `| origin:<id8>` are appended to line 1 wh
 
 The flags that govern envelope rendering are documented in [cli-options.md](cli-options.md):
 
-- [`--json`](cli-options.md#global-options) — emit JSON output (compact by default).
-- [`--pretty`](cli-options.md#global-options) — switch JSON output from compact to indented.
+- [`--json`](cli-options.md#global-options) — emit JSON output (compact).
 - [`--full`](cli-options.md#full-semantics) — return the full typed-column envelope and untruncated body.
 - [`--quiet`](cli-options.md#message-body-truncation) — on `message send` / `message ack` / `member ping`, emit only the new task id (8-char prefix).
 

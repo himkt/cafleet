@@ -26,7 +26,7 @@ def test_core_skill_file_exists():
 def test_core_skill_file_under_350_lines():
     """≤ 350 lines for the core file. Blowing past 350 means we re-merged
     reference content (director.md, broadcast.md, exec-routing.md,
-    recovery.md, legacy-flags.md) back into the core file."""
+    recovery.md, output-flags.md) back into the core file."""
     line_count = _line_count(_SKILL_FILE)
     assert line_count <= 350, (
         f"skills/cafleet/SKILL.md grew to {line_count} lines (budget 350); "
@@ -55,7 +55,7 @@ def test_reference_files_exist():
         "broadcast.md",
         "exec-routing.md",
         "recovery.md",
-        "legacy-flags.md",
+        "output-flags.md",
     )
     reference_dir = _REPO_ROOT / "skills" / "cafleet" / "reference"
     for name in expected_refs:

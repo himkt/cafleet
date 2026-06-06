@@ -81,7 +81,7 @@ def _client_command(
     - ``truncates_task_text=True`` → JSON output goes through
       ``render_tasks_in_result`` + ``truncate_task_text``; text formatter is
       called as ``text_formatter(result, full=, quiet=)``.
-    - ``renders_agent_card=True`` (Surface 18) → JSON output goes through
+    - ``renders_agent_card=True`` → JSON output goes through
       ``render_agents_in_result``; text formatter is called as
       ``text_formatter(result, full=)``.
     - Neither → JSON output is the raw broker result; text formatter is
@@ -111,7 +111,6 @@ def _client_command(
                         )
                 result = func(ctx, *args, **kwargs)
                 full = kwargs.get("full", False)
-                pretty = ctx.obj["pretty"]
                 if truncates_task_text:
                     output.truncate_task_text(result, full=full)
                     rendered = output.render_tasks_in_result(result, full=full)
@@ -120,7 +119,7 @@ def _client_command(
                 else:
                     rendered = result
                 if ctx.obj["json_output"]:
-                    click.echo(output.format_json(rendered, pretty=pretty))
+                    click.echo(output.format_json(rendered))
                 elif text_formatter is not None:
                     if truncates_task_text:
                         extra = {"quiet": kwargs["quiet"]} if "quiet" in kwargs else {}
@@ -130,7 +129,7 @@ def _client_command(
                     else:
                         click.echo(text_formatter(result))
                 else:
-                    click.echo(output.format_json(rendered, pretty=pretty))
+                    click.echo(output.format_json(rendered))
             except click.ClickException:
                 raise
             except Exception as exc:
@@ -152,25 +151,17 @@ def _sync_db_url() -> str:
     "--json", "json_output", is_flag=True, default=False, help="Output in JSON format"
 )
 @click.option(
-    "--pretty",
-    "pretty",
-    is_flag=True,
-    default=False,
-    help="Switch JSON output from compact (default) to indent=2.",
-)
-@click.option(
     "--session-id",
     "session_id",
     default=None,
     help="Session ID (UUID); required for client subcommands.",
 )
 @click.pass_context
-def cli(ctx, json_output, pretty, session_id):
+def cli(ctx, json_output, session_id):
     """CAFleet — CLI for the message broker and agent registry."""
     ctx.ensure_object(dict)
     ctx.obj["session_id"] = session_id
     ctx.obj["json_output"] = json_output
-    ctx.obj["pretty"] = pretty
 
 
 @cli.group()
@@ -288,7 +279,7 @@ def session_create(
     )
 
     if as_json or ctx.obj["json_output"]:
-        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(result))
     else:
         click.echo(output.format_session_create(result, full=full))
 
@@ -301,16 +292,19 @@ def session_list(ctx: click.Context, as_json: bool) -> None:
     rows = broker.list_sessions()
 
     if as_json or ctx.obj["json_output"]:
-        click.echo(output.format_json(rows, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(rows))
     else:
         if not rows:
             click.echo("No sessions found.")
             return
-        click.echo(f"{'SESSION_ID':<40} {'LABEL':<20} {'AGENTS':<8} {'CREATED_AT'}")
+        click.echo(
+            f"{'SESSION_ID':<40} {'DIRECTOR':<40} {'LABEL':<20} "
+            f"{'AGENTS':<8} {'CREATED_AT'}"
+        )
         for r in rows:
             click.echo(
-                f"{r['session_id']:<40} {r['label'] or '':<20} "
-                f"{r['agent_count']:<8} {r['created_at']}"
+                f"{r['session_id']:<40} {r['director_agent_id'] or '':<40} "
+                f"{r['label'] or '':<20} {r['agent_count']:<8} {r['created_at']}"
             )
 
 
@@ -325,7 +319,7 @@ def session_show(ctx: click.Context, session_id: str, as_json: bool) -> None:
         raise click.ClickException(f"session '{session_id}' not found.")
 
     if as_json or ctx.obj["json_output"]:
-        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(result))
     else:
         lines = [
             f"session_id: {result['session_id']}",
@@ -395,7 +389,6 @@ def doctor(ctx) -> None:
                         "tmux_pane_env": tmux_pane_env,
                     }
                 },
-                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -451,7 +444,7 @@ def base_dir_resolve(ctx: click.Context, task_name: str | None, as_json: bool) -
         raise click.ClickException(str(exc)) from exc
 
     if as_json or ctx.obj["json_output"]:
-        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(result))
         return
 
     click.echo(f"status: {result['status']}")
@@ -495,9 +488,7 @@ def base_dir_record(ctx: click.Context, base_arg: str, source_arg: str) -> None:
         raise click.ClickException(str(exc)) from exc
 
     if ctx.obj["json_output"]:
-        click.echo(
-            output.format_json({"anchor": str(anchor)}, pretty=ctx.obj["pretty"])
-        )
+        click.echo(output.format_json({"anchor": str(anchor)}))
     else:
         click.echo(f"anchor: {anchor}")
 
@@ -550,6 +541,7 @@ def agent_register(ctx, name, description, skills):
 @_quiet_flag
 @click.pass_context
 @_client_command(
+    requires_agent_session=True,
     text_formatter=lambda r, *, full, quiet: (
         r["task"]["task_id"][:8]
         if quiet
@@ -559,8 +551,10 @@ def agent_register(ctx, name, description, skills):
 )
 def message_send(ctx, agent_id, to, text, full, quiet):
     """Send a unicast message to another agent."""
+    session_id = ctx.obj["session_id"]
+    to = broker.resolve_agent_ref(session_id, to)
     return broker.send_message(
-        ctx.obj["session_id"],
+        session_id,
         agent_id,
         to,
         text,
@@ -629,6 +623,7 @@ def message_poll(ctx, agent_id, since, page_size, full):
 )
 def message_ack(ctx, agent_id, task_id, full, quiet):
     """Acknowledge receipt of a message."""
+    task_id = broker.resolve_task_ref(ctx.obj["session_id"], task_id)
     return broker.ack_task(agent_id, task_id)
 
 
@@ -646,6 +641,7 @@ def message_ack(ctx, agent_id, task_id, full, quiet):
 )
 def message_cancel(ctx, agent_id, task_id, full):
     """Cancel (retract) a sent message."""
+    task_id = broker.resolve_task_ref(ctx.obj["session_id"], task_id)
     return broker.cancel_task(agent_id, task_id)
 
 
@@ -661,7 +657,9 @@ def message_cancel(ctx, agent_id, task_id, full):
 )
 def message_show(ctx, agent_id, task_id, full):
     """Get details of a specific task."""
-    return broker.get_task(ctx.obj["session_id"], task_id)
+    session_id = ctx.obj["session_id"]
+    task_id = broker.resolve_task_ref(session_id, task_id)
+    return broker.get_task(session_id, task_id)
 
 
 @agent.command("list")
@@ -692,7 +690,9 @@ def agent_list(ctx, agent_id, full):
 )
 def agent_show(ctx, agent_id, target_agent_id, full):
     """Show detail for a specific agent."""
-    result = broker.get_agent(target_agent_id, ctx.obj["session_id"])
+    session_id = ctx.obj["session_id"]
+    target_agent_id = broker.resolve_agent_ref(session_id, target_agent_id)
+    result = broker.get_agent(target_agent_id, session_id)
     if result is None:
         raise click.ClickException(f"Agent {target_agent_id} not found")
     return result
@@ -741,16 +741,30 @@ def _load_authorized_member(
     director_agent_id: str,
     member_id: str,
     *,
-    placement_missing_msg: str,
+    placement_missing_template: str = _PLACEMENT_MISSING_DEFAULT,
 ) -> tuple[dict, dict]:
     """Load a member's agent + placement, enforcing the cross-Director boundary.
 
-    ``placement_missing_msg`` is the full error body for the "no placement"
-    path, because each caller points users at a different follow-up command
-    (``cafleet agent deregister`` from delete; ``cafleet member create`` from
-    capture / send-input). Pane-id presence is NOT checked here — delete
-    tolerates a pending placement while the others reject it.
+    ``placement_missing_template`` is a ``{member_id}`` format string for the
+    "no placement" path, because each caller points users at a different
+    follow-up command (``cafleet member create`` by default; ``cafleet agent
+    deregister`` from delete). It is formatted with the *resolved* member id, so
+    this error echoes the same full id as the "not found" / "not a member of
+    your team" errors rather than the pasted prefix. Pane-id presence is NOT
+    checked here — delete tolerates a pending placement while the others reject
+    it.
+
+    ``member_id`` may be a full UUID or a unique prefix; it is resolved to the
+    full id first so every downstream operation runs against the real id, not
+    the pasted prefix. Callers MUST use ``target["agent_id"]`` (the resolved
+    id), since reassigning this local param does not propagate to the caller.
+    The resolver's ``ValueError`` surfaces raw (ambiguous / no-match), not via
+    the generic "failed to fetch member" wrapper.
     """
+    try:
+        member_id = broker.resolve_agent_ref(session_id, member_id)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     try:
         target = broker.get_agent(member_id, session_id)
     except Exception as exc:
@@ -759,7 +773,9 @@ def _load_authorized_member(
         raise click.ClickException(f"Agent {member_id} not found")
     placement = target["placement"]
     if placement is None:
-        raise click.ClickException(placement_missing_msg)
+        raise click.ClickException(
+            placement_missing_template.format(member_id=member_id)
+        )
     if placement["director_agent_id"] != director_agent_id:
         raise click.ClickException(
             f"agent {member_id} is not a member of your team "
@@ -994,7 +1010,7 @@ def member_create(
 
     result["placement"] = placement_view
     if ctx.obj["json_output"]:
-        click.echo(output.format_json(result, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(result))
     else:
         click.echo(output.format_member(result, full=full))
 
@@ -1017,14 +1033,15 @@ def member_delete(ctx, agent_id, member_id, force):
 
     _ensure_tmux_or_die()
 
-    _target, placement = _load_authorized_member(
+    target, placement = _load_authorized_member(
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=(
-            f"agent {member_id} has no placement; use `cafleet agent deregister` instead"
+        placement_missing_template=(
+            "agent {member_id} has no placement; use `cafleet agent deregister` instead"
         ),
     )
+    member_id = target["agent_id"]
     pane_id = placement["tmux_pane_id"]
 
     if pane_id is None:
@@ -1115,7 +1132,6 @@ def member_delete(ctx, agent_id, member_id, force):
         click.echo(
             output.format_json(
                 {"agent_id": member_id, "pane_status": pane_status},
-                pretty=ctx.obj["pretty"],
             )
         )
     ctx.exit(2)
@@ -1132,7 +1148,6 @@ def _emit_member_delete_output(
         click.echo(
             output.format_json(
                 {"agent_id": member_id, "pane_status": pane_status},
-                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1165,7 +1180,7 @@ def member_list(ctx, agent_id, activity):
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
     if ctx.obj["json_output"]:
-        click.echo(output.format_json(rows, pretty=ctx.obj["pretty"]))
+        click.echo(output.format_json(rows))
     elif activity:
         click.echo(output.format_member_list_activity(rows))
     else:
@@ -1196,12 +1211,12 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
 
     _ensure_tmux_or_die()
 
-    _target, placement = _load_authorized_member(
+    target, placement = _load_authorized_member(
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
+    member_id = target["agent_id"]
     pane_id = _require_member_pane(placement, member_id, "capture")
 
     try:
@@ -1221,7 +1236,6 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
                     "lines": lines,
                     "content": content,
                 },
-                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1272,8 +1286,8 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
+    member_id = target["agent_id"]
     pane_id = _require_member_pane(placement, member_id, "send")
 
     try:
@@ -1297,7 +1311,6 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
                     "action": action,
                     "value": value,
                 },
-                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1326,9 +1339,9 @@ def member_exec(ctx, agent_id, member_id, command):
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
-    pane_id = _require_member_pane(placement, member_id, "send")
+    member_id = target["agent_id"]
+    pane_id = _require_member_pane(placement, member_id, "exec")
 
     try:
         MULTIPLEXERS["tmux"].send_bash_command(target_pane_id=pane_id, command=command)
@@ -1343,7 +1356,6 @@ def member_exec(ctx, agent_id, member_id, command):
                     "pane_id": pane_id,
                     "command": command,
                 },
-                pretty=ctx.obj["pretty"],
             )
         )
     else:
@@ -1367,9 +1379,9 @@ def member_ping(ctx, agent_id, member_id, quiet):
         session_id,
         agent_id,
         member_id,
-        placement_missing_msg=_PLACEMENT_MISSING_DEFAULT.format(member_id=member_id),
     )
-    pane_id = _require_member_pane(placement, member_id, "send")
+    member_id = target["agent_id"]
+    pane_id = _require_member_pane(placement, member_id, "ping")
 
     try:
         ok = MULTIPLEXERS["tmux"].send_poll_trigger(
@@ -1392,7 +1404,6 @@ def member_ping(ctx, agent_id, member_id, quiet):
                     "member_agent_id": member_id,
                     "pane_id": pane_id,
                 },
-                pretty=ctx.obj["pretty"],
             )
         )
     elif quiet:

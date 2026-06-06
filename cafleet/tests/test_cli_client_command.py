@@ -21,14 +21,12 @@ from cafleet.cli import _client_command
 
 @click.group()
 @click.option("--json", "json_output", is_flag=True, default=False)
-@click.option("--pretty", "pretty", is_flag=True, default=False)
 @click.option("--session-id", "session_id", default=None)
 @click.pass_context
-def _test_cli(ctx, json_output, pretty, session_id):
+def _test_cli(ctx, json_output, session_id):
     ctx.ensure_object(dict)
     ctx.obj["session_id"] = session_id
     ctx.obj["json_output"] = json_output
-    ctx.obj["pretty"] = pretty
 
 
 @_test_cli.command("simple")

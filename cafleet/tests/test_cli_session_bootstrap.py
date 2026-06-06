@@ -80,7 +80,7 @@ def _agent_rows(db_path) -> list[tuple]:
 def test_session_create_text_output__compact_default_emits_session_id_and_id8_prefixes(
     db_file, mock_tmux_ok
 ):
-    """Post-Surface-3 default: 1-line compact ``<session_id> director=<id8> admin=<id8>``."""
+    """Default text output is 1 line: ``<session_id> director=<id8> admin=<id8>``."""
     runner = CliRunner()
     result = runner.invoke(cli, ["session", "create"])
     assert result.exit_code == 0, result.output
@@ -99,10 +99,10 @@ def test_session_create_text_output__compact_default_emits_session_id_and_id8_pr
     assert any(r[0] == sid for r in rows)
 
 
-def test_session_create_text_output__full_flag_restores_legacy_7_line_layout(
+def test_session_create_text_output__full_flag_emits_verbose_7_line_layout(
     db_file, mock_tmux_ok
 ):
-    """``--full`` brings back the legacy verbose layout with field labels."""
+    """``--full`` emits the verbose 7-line layout with field labels."""
     runner = CliRunner()
     result = runner.invoke(
         cli, ["session", "create", "--label", "bootstrap-check", "--full"]

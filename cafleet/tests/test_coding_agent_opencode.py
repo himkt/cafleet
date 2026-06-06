@@ -61,26 +61,25 @@ def test_build_spawn_argv_byte_exact():
 
 
 def test_build_spawn_argv_does_not_pass_run_subcommand():
-    """Per § Background: ``opencode run`` is the headless / scripting entry
-    that the user explicitly rejected. Regression guard: the argv MUST NOT
-    contain ``"run"`` as a subcommand token."""
+    """``opencode run`` is the headless / scripting entry; the spawn argv
+    MUST NOT contain ``"run"`` as a subcommand token."""
     impl = OpencodeAgent()
     argv = impl.build_spawn_argv("p", display_name="x")
     assert "run" not in argv
 
 
 def test_build_spawn_argv_does_not_pass_interactive_flag():
-    """Per § Background: ``--interactive`` is an internal flag of the
-    ``opencode run`` subcommand (not in public docs). Regression guard."""
+    """``--interactive`` is an internal flag of the ``opencode run``
+    subcommand (not in public docs); the spawn argv MUST NOT contain it."""
     impl = OpencodeAgent()
     argv = impl.build_spawn_argv("p", display_name="x")
     assert "--interactive" not in argv
 
 
 def test_build_spawn_argv_does_not_pass_dangerously_skip_permissions():
-    """Per § Background: ``--dangerously-skip-permissions`` is documented
-    only under ``opencode run`` AND is silently ignored in interactive
-    code paths. Regression guard against accidentally re-adding it."""
+    """``--dangerously-skip-permissions`` is documented only under
+    ``opencode run`` and is silently ignored in interactive code paths.
+    Regression guard against accidentally re-adding it."""
     impl = OpencodeAgent()
     argv = impl.build_spawn_argv("p", display_name="x")
     assert "--dangerously-skip-permissions" not in argv

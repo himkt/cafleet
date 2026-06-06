@@ -132,8 +132,8 @@ def test_format_member__full_layout_has_labels_and_more_lines():
 def test_format_indexed_list__drops_index_and_blank_line_separated():
     items = ["alpha", "beta", "gamma"]
     rendered = output.format_indexed_list(items, lambda x: x, "empty")
-    for legacy in ("[1]", "[2]", "[3]"):
-        assert legacy not in rendered
+    for index_marker in ("[1]", "[2]", "[3]"):
+        assert index_marker not in rendered
     assert rendered == "alpha\n\nbeta\n\ngamma"
     # Single item: no blank separator.
     assert output.format_indexed_list(["alpha"], lambda x: x, "empty") == "alpha"

@@ -41,7 +41,7 @@ def _sample_agent_without_placement() -> dict:
     }
 
 
-def test_render_agent_slim__shape_id_name_status_coding_agent_no_legacy_keys():
+def test_render_agent_slim__shape_id_name_status_coding_agent_no_full_card_keys():
     rendered = output.render_agent(_sample_agent_with_placement(), full=False)
     assert rendered["id"] == "abcdef12"
     assert rendered["name"] == "Worker-A"
@@ -50,7 +50,7 @@ def test_render_agent_slim__shape_id_name_status_coding_agent_no_legacy_keys():
     assert "abcdef12-3456-7890-abcd-ef1234567890" not in json.dumps(rendered)
     # coding_agent is projected from placement.
     assert rendered["coding_agent"] == "claude"
-    # Legacy keys absent.
+    # Full-card keys absent.
     for forbidden in ("agent_id", "registered_at", "kind", "placement"):
         assert forbidden not in rendered
 

@@ -30,9 +30,8 @@ def _help_lines(*subcommand_path: str) -> list[str]:
     return result.output.rstrip("\n").splitlines()
 
 
-# Per-subcommand line budgets. These are intentionally below the current
-# (pre-Step-17) line counts; Phase B's trim of multi-sentence option helps
-# is what brings each below its budget.
+# Per-subcommand line budgets. Each command's --help output must stay at or
+# below its budget; option helps are kept to a single concise sentence.
 _PER_SUBCOMMAND_BUDGETS: dict[tuple[str, ...], int] = {
     ("message", "send"): 9,
     ("message", "broadcast"): 8,
@@ -75,8 +74,7 @@ def test_subcommand_help_within_line_budget(
 
 def test_aggregate_help_under_byte_budget():
     """Aggregate ``--help`` byte cost across every subcommand listed in
-    ``_PER_SUBCOMMAND_BUDGETS`` MUST cut by ≥ 40 % from the pre-Step-17
-    baseline. The 4520-byte budget below is sized accordingly: every
+    ``_PER_SUBCOMMAND_BUDGETS`` stays under a fixed 4520-byte budget: every
     multi-line option help in the table above MUST collapse to a single
     line for this to pass."""
     total_bytes = sum(

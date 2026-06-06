@@ -118,9 +118,9 @@ def test_send_inline_preview__failure_modes_return_false(
         assert run_called["yes"] is False
 
 
-def test_send_poll_trigger__preserved_post_surface_15(monkeypatch):
-    """`cafleet member ping` still depends on ``send_poll_trigger`` — Surface 15
-    MUST NOT delete or regress its observable keystroke contract."""
+def test_send_poll_trigger__keystroke_contract(monkeypatch):
+    """`cafleet member ping` depends on ``send_poll_trigger``; this guards its
+    observable keystroke contract against deletion or regression."""
     assert hasattr(TmuxMultiplexer, "send_poll_trigger")
     assert callable(TmuxMultiplexer.send_poll_trigger)
 

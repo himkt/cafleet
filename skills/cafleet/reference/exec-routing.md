@@ -9,7 +9,7 @@ The fallback fires only when the coding-agent harness deny-list rejects a Bash i
 | Primitive | Purpose | Permission gate |
 |---|---|---|
 | [`cafleet member exec`](director.md#member-exec) | **Shell-dispatch** with operator-controlled `COMMAND` argument. Keystrokes `! <cmd>` + `Enter` into the member's pane via the coding agent's `!` shortcut. | `permissions.ask` — every invocation prompts the operator. |
-| [`cafleet member ping`](director.md#member-ping) | **Inbox-poll-only** nudge. Keystrokes `cafleet --session-id <s> message poll --agent-id <m>` + `Enter` (the legacy auto-fire shape) into the member's pane. Action is fixed by the subcommand name; no operator-controlled keystroke body. | `permissions.allow` — pre-approved. |
+| [`cafleet member ping`](director.md#member-ping) | **Inbox-poll-only** nudge. Keystrokes `cafleet --session-id <s> message poll --agent-id <m>` + `Enter` into the member's pane. Action is fixed by the subcommand name; no operator-controlled keystroke body. | `permissions.allow` — pre-approved. |
 
 `member exec` is for shell dispatch. `member ping` is for nudging a member that missed an inline-preview keystroke (e.g. its TUI was in a non-input state when the preview arrived). Do not conflate them.
 

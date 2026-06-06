@@ -8,13 +8,13 @@ Use the `cafleet` CLI to register as an agent, send and receive messages, and di
 
 ## Reference files
 
-This file (the core) covers the identity / poll / send / ack / cancel / show lifecycle every agent uses. Director-only flows, broadcast semantics, the bash-via-Director fallback, recovery decision trees, and the `--full` / `--pretty` opt-back-ins live in dedicated reference files. Read on demand:
+This file (the core) covers the identity / poll / send / ack / cancel / show lifecycle every agent uses. Director-only flows, broadcast semantics, the bash-via-Director fallback, recovery decision trees, and the `--full` opt-back-in live in dedicated reference files. Read on demand:
 
 - For Director-only commands (`member create`, `member delete`, `member list --activity`, `member capture`, `member send-input`, `member exec`, `member ping`, plus the AskUserQuestion three-beat workflow), Read [`reference/director.md`](reference/director.md).
 - For broadcast send/ack and threading via `origin_task_id`, Read [`reference/broadcast.md`](reference/broadcast.md).
 - For the bash-via-Director fallback protocol (member-side reconsider-then-route, Director-side `member exec` dispatch, serialization, cross-Director boundary), Read [`reference/exec-routing.md`](reference/exec-routing.md).
 - For crash / disconnect / idle / wedged-pane recovery decision trees AND the Shutdown Protocol, Read [`reference/recovery.md`](reference/recovery.md).
-- For `--full` / `--pretty` / `--json` / `--quiet` opt-back-in semantics and `CAFLEET_MAX_TEXT_LEN`, Read [`reference/legacy-flags.md`](reference/legacy-flags.md).
+- For `--full` / `--json` / `--quiet` opt-back-in semantics and `CAFLEET_MAX_TEXT_LEN`, Read [`reference/output-flags.md`](reference/output-flags.md).
 
 If you are a member and your default Bash is denied on a specific command, the bash-via-Director fallback is in [`reference/exec-routing.md`](reference/exec-routing.md). If you are a Director, Read [`reference/director.md`](reference/director.md) before spawning your first member.
 
@@ -47,7 +47,7 @@ The environment variables the CLI reads (all wired through `cafleet.config.Setti
 
 - `CAFLEET_DATABASE_URL` — SQLite database URL (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db`). Use an absolute path when overriding — SQLAlchemy does not expand `~` in SQLite URLs.
 - `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` — defaults for `cafleet server` (`127.0.0.1` / `8000`).
-- `CAFLEET_MAX_TEXT_LEN` — body truncation codepoint limit (default `200`); see [`reference/legacy-flags.md`](reference/legacy-flags.md).
+- `CAFLEET_MAX_TEXT_LEN` — body truncation codepoint limit (default `200`); see [`reference/output-flags.md`](reference/output-flags.md).
 
 ## Placeholder convention
 
@@ -59,19 +59,21 @@ In every example below, substitute the literal UUID strings printed by `cafleet 
 - `<target-agent-id>` — the recipient of a unicast message
 - `<task-id>` — the task UUID printed by `message poll` / `message send`
 
+> **Prefix resolution**: the **target** ID inputs — `--to` (message send), `--id` (agent show), `--member-id` (member subcommands), and `--task-id` (message ack/cancel/show) — accept either a full UUID or any unique prefix of one, scoped to the current session. So an 8-char ID printed by `agent list`, a poll envelope, or `session create` can be pasted straight into the next command. An ambiguous or no-match prefix exits 1. The acting `--agent-id` is full-UUID-only. See [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md#id-prefix-resolution).
+
 ## Global Options
 
-Only `--json`, `--pretty`, `--session-id`, and `--version` are global (before the subcommand). `--agent-id` is a per-subcommand option and must appear **after** the subcommand name:
+Only `--json`, `--session-id`, and `--version` are global (before the subcommand). `--agent-id` is a per-subcommand option and must appear **after** the subcommand name:
 
 ```bash
 cafleet --session-id <session-id> --json agent register --name "My Agent" --description "..."
 cafleet --session-id <session-id> --json agent list --agent-id <my-agent-id>
-cafleet --session-id <session-id> --json --pretty message poll --agent-id <my-agent-id>
+cafleet --session-id <session-id> --json message poll --agent-id <my-agent-id>
 ```
 
 `cafleet agent list --json` will fail with `No such option: --json`. Same for `--session-id` placed after the subcommand — keep it before. `--agent-id` must come **after** the subcommand, not before it.
 
-`cafleet --version` prints `cafleet <version>` and exits 0 without `--session-id`. `--pretty` switches JSON output from compact (the default) to indented; see [`reference/legacy-flags.md`](reference/legacy-flags.md).
+`cafleet --version` prints `cafleet <version>` and exits 0 without `--session-id`.
 
 ## Coding-agent backends
 
@@ -116,7 +118,7 @@ cafleet --session-id <session-id> message send --agent-id <my-agent-id> \
 |---|---|---|
 | `--to <agent-id>` | yes | Recipient agent UUID. |
 | `--text <body>` | yes | Message body. Truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the echoed response by default. |
-| `--full` | no | Disable body truncation; emit the full typed-column envelope. See [`reference/legacy-flags.md`](reference/legacy-flags.md). |
+| `--full` | no | Disable body truncation; emit the full typed-column envelope. See [`reference/output-flags.md`](reference/output-flags.md). |
 | `--quiet` | no | Emit only the new task id (8-char prefix). Useful in scripted loops. |
 
 After persisting the message, the broker keystrokes a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview`:
@@ -197,7 +199,7 @@ cafleet --session-id <session-id> agent list --agent-id <my-agent-id>
 cafleet --session-id <session-id> agent show --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
-Default output is one row per agent (`<id8> <name> <status>`); `description` is truncated to 60 codepoints. Pass `--full` for the four-line per-agent block including the full `agent_card_json` blob — see [`reference/legacy-flags.md`](reference/legacy-flags.md).
+Default output is one row per agent (`<id8> <name> <status>`); `description` is truncated to 60 codepoints. Pass `--full` for the four-line per-agent block (full `agent_id`, `name`, `description` still truncated to 60, `status`); the agent surfaces do not carry `agent_card_json`, so `--full` does not expose it — see [`reference/output-flags.md`](reference/output-flags.md).
 
 ## Doctor
 
@@ -285,7 +287,7 @@ After soft-delete, the session is hidden from `cafleet session list` and further
    cafleet --session-id <session-id> message ack --agent-id <my-agent-id> --task-id <task-id>
    ```
 
-7. **Repeat** steps 4–6 as needed. Use `cafleet --session-id <session-id> --json <cmd>` when parsing output programmatically; pair with `--pretty` when a human is reading the output.
+7. **Repeat** steps 4–6 as needed. Use `cafleet --session-id <session-id> --json <cmd>` when parsing output programmatically.
 
 For Director-side spawn / capture / exec / ping flows, see [`reference/director.md`](reference/director.md). For shutdown ordering, see [`reference/recovery.md`](reference/recovery.md).
 

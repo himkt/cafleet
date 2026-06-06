@@ -1,11 +1,12 @@
 """Per-poll envelope size budget.
 
-The compact rendered envelope (default ``output.format_json(..., pretty=False)``
-+ ``output.render_task``) MUST stay materially smaller than the indented
-envelope. The pass criterion below is a fixture-anchored **UTF-8 byte**
-budget rather than a derived percentage so the test detects ALL classes
-of regression — extra fields, longer keys, removed truncation, multi-byte
-content sneaking in, etc.
+The compact rendered envelope (``output.format_json`` + projected
+``output.render_task``) MUST stay materially smaller than the compact full
+(un-projected) envelope. This file applies two complementary criteria:
+fixture-anchored **UTF-8 byte** budgets (absolute caps on the rendered
+envelope) and a **ratio guard** (compact slim stays below a fraction of
+compact full). Together they detect ALL classes of regression — extra
+fields, longer keys, removed truncation, multi-byte content sneaking in, etc.
 
 Tokenizer choice: tests assert UTF-8 byte counts (cheap, deterministic).
 The on-wire cost is bytes, not Python codepoints — the Unicode ellipsis
@@ -93,10 +94,7 @@ def test_compact_envelope_fits_within_byte_budget():
     (e.g. the ``…`` truncation suffix is 3 UTF-8 bytes) will overshoot it
     immediately."""
     fixture = _five_unicast_fixture()
-    rendered = output.format_json(
-        [output.render_task(t) for t in fixture],
-        pretty=False,
-    )
+    rendered = output.format_json([output.render_task(t) for t in fixture])
     rendered_bytes = len(rendered.encode("utf-8"))
     assert rendered_bytes <= 750, (
         f"compact envelope grew to {rendered_bytes} UTF-8 bytes (budget 750); "
@@ -104,32 +102,30 @@ def test_compact_envelope_fits_within_byte_budget():
     )
 
 
-def test_compact_slim_envelope_at_most_30pct_of_pretty_full():
-    """Compact rendered (slim ``render_task``) ≤ 30 % of pretty rendered
+def test_compact_slim_envelope_smaller_than_compact_full():
+    """Compact rendered (slim ``render_task``) ≤ budget of compact rendered
     (full / un-projected ``render_task(full=True)``) for the SAME fixture,
     measured in UTF-8 bytes (the on-wire cost). The default wire format
-    (compact + projected) is what an agent actually pays for; the pretty +
+    (compact + projected) is what an agent actually pays for; the compact +
     full form is the un-projected baseline."""
     fixture = _five_unicast_fixture()
     compact_slim = output.format_json(
-        [output.render_task(t, full=False) for t in fixture],
-        pretty=False,
+        [output.render_task(t, full=False) for t in fixture]
     )
-    pretty_full = output.format_json(
-        [output.render_task(t, full=True) for t in fixture],
-        pretty=True,
+    compact_full = output.format_json(
+        [output.render_task(t, full=True) for t in fixture]
     )
     compact_slim_bytes = len(compact_slim.encode("utf-8"))
-    pretty_full_bytes = len(pretty_full.encode("utf-8"))
-    ratio = compact_slim_bytes / pretty_full_bytes
-    assert ratio <= 0.30, (
-        f"compact-slim / pretty-full UTF-8 byte ratio rose to {ratio:.3f} "
-        f"(budget ≤ 0.30); "
-        f"compact_slim={compact_slim_bytes}B pretty_full={pretty_full_bytes}B"
+    compact_full_bytes = len(compact_full.encode("utf-8"))
+    ratio = compact_slim_bytes / compact_full_bytes
+    assert ratio <= 0.40, (
+        f"compact-slim / compact-full UTF-8 byte ratio rose to {ratio:.3f} "
+        f"(budget ≤ 0.40); "
+        f"compact_slim={compact_slim_bytes}B compact_full={compact_full_bytes}B"
     )
 
 
-def test_full_envelope_keeps_legacy_keys():
+def test_full_envelope_keeps_all_typed_column_keys():
     """``render_task(task, full=True)`` MUST keep every typed-column key so
     operators using ``--full`` still get the verbose shape they reach for
     when debugging. This is a guardrail against an over-eager projection
@@ -162,8 +158,7 @@ def test_compact_envelope_per_task_below_150_bytes():
     bloated task is enough to fail the test."""
     fixture = _five_unicast_fixture()
     sizes = [
-        len(output.format_json(output.render_task(t), pretty=False).encode("utf-8"))
-        for t in fixture
+        len(output.format_json(output.render_task(t)).encode("utf-8")) for t in fixture
     ]
     assert max(sizes) <= 150, (
         f"per-task compact render largest = {max(sizes)} UTF-8 bytes "

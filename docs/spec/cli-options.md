@@ -21,8 +21,7 @@ Placed **before** the subcommand:
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--json` | no | Emit JSON output. Default JSON encoding is compact (`json.dumps(..., separators=(",",":"))`); pair with `--pretty` for indented output. |
-| `--pretty` | no | Switch JSON output from the compact default to indented (`json.dumps(..., indent=2)`). No effect on text-mode output. Composes orthogonally with `--json`. |
+| `--json` | no | Emit JSON output. JSON encoding is compact (`json.dumps(..., separators=(",",":"), ensure_ascii=False)` — non-ASCII like the `…` truncation suffix is emitted as UTF-8, not `\uXXXX`). |
 | `--session-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `session *`, `server`, `doctor` | Session identifier (opaque string; new sessions receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --session-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--session-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
@@ -33,8 +32,8 @@ Placed **before** the subcommand:
 | Subcommand | Default behavior | `--full` behavior |
 |---|---|---|
 | `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix (see [Message Body Truncation](#message-body-truncation)). Compact rendered envelope: `id` (8-char prefix), `from` (8-char prefix), `ts`, `text`, plus `kind`/`origin` only when present. | Untruncated `text` AND the full typed-column envelope (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text`). |
-| `message broadcast` | One-line summary (`broadcast id=<id8> recipients=<count>`). The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper — there are no per-recipient envelopes or `recipient_ids` list in the response. | No effect. `--full` is preserved for surface consistency with the five `message {send,poll,ack,cancel,show}` subcommands but is a no-op on broadcast. |
-| `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints; `agent_card_json` projected to the minimum-required fields. | Four-line per-agent block (the legacy view) including untruncated `description` and the full `agent_card_json` blob. |
+| `message broadcast` | One-line summary (`broadcast id=<id8> recipients=<count>`). The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper — there are no per-recipient envelopes or `recipient_ids` list in the response. | Renders the single `broadcast_summary` task as the full verbose envelope (typed-column dict in `--json`) instead of the one-line summary. It never adds per-recipient envelopes or a `recipient_ids` list — the response is always that one summary task plus `notifications_sent_count`. |
+| `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status` (plus `coding_agent` when a placement is present). | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never load it. |
 | `member capture` | Default `--lines 30` (down from 80); ANSI escape sequences stripped in post-process unless `--ansi` is supplied. | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
 
 ### Subcommands that require `--session-id`
@@ -83,6 +82,26 @@ Then pass the printed UUID as `--session-id <uuid>` on every client + member com
 
 - `agent register` — Register a new agent (returns an agent ID)
 
+## ID Prefix Resolution
+
+Human-facing and default JSON output truncate IDs to an 8-char prefix (task id, agent id, `session create` director/admin, member id). To make those displayed prefixes pasteable into the next command, the **target** ID inputs accept either a full UUID or any unique prefix of one:
+
+| Input | Subcommand(s) | Resolved against |
+|---|---|---|
+| `--to` | `message send` | active agents in the session |
+| `--id` | `agent show` | active agents in the session |
+| `--member-id` | `member delete` / `capture` / `send-input` / `exec` / `ping` | active agents in the session |
+| `--task-id` | `message ack` / `cancel` / `show` | tasks with at least one endpoint agent in the session |
+
+Resolution rules:
+
+- **Exact-match short-circuit.** A full UUID matches by exact equality before any prefix scan, so it always resolves to itself and is never reported ambiguous (an 8-char prefix cannot equal a 36-char id).
+- **Unique prefix wins.** Any prefix — no minimum length — that matches exactly one row resolves to that row's full id.
+- **Session-scoped.** Resolution only sees rows visible to the supplied `--session-id`: agents active in the session, tasks with an endpoint agent in the session. A prefix that is unique in another session is invisible here. Task lookup for `ack` / `cancel` / `show` is therefore tightened to session-visible tasks.
+- **Ambiguous or no-match → exit 1.** A prefix matching more than one row, and a prefix (or full UUID) matching zero rows, each exit `1` with a distinct message (see [Error Messages](#error-messages)).
+
+The acting `--agent-id` is **not** prefix-resolved — an agent always knows its own full UUID (returned at `register`, baked into the spawn prompt), so it is never re-typed from an 8-char display. Passing a prefix there is rejected by the existing acting-agent validation, not by prefix resolution: on every `requires_agent_session` command (including `message send`) the `verify_agent_session` gate runs before the handler resolves its target and yields `Error: agent <prefix> is not a member of session <sid>.`.
+
 ## Message Body Truncation
 
 The five subcommands that emit a user-supplied delivery body — `cafleet message {send,poll,ack,cancel,show}` — truncate the `text` body to the first `CAFLEET_MAX_TEXT_LEN` Unicode codepoints (default `200`) plus a single `…` codepoint suffix by default. The truncation applies in both text and `--json` output and is implemented in `cafleet/src/cafleet/output.py` (`truncate_text`, `truncate_task_text`) wired into the shared `_client_command` decorator.
@@ -93,7 +112,7 @@ The five subcommands that emit a user-supplied delivery body — `cafleet messag
 
 The suffix is the single Unicode codepoint `…` (U+2026 HORIZONTAL ELLIPSIS) — exactly one codepoint with no count and no companion `text_length` field.
 
-`cafleet message broadcast` is different — `broker.broadcast_message` returns a `broadcast_summary` task whose top-level `text` column is a broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. Post-Surface-14 the task envelope is a flat typed-column dict with no `metadata` / `artifacts` wrappers; see [message-envelope.md](./message-envelope.md) for the canonical schema. Truncating that summary would hide the recipient count, so `message_broadcast` runs with `truncates_task_text=False` and its summary always emits in full. The `--full` Click option is preserved on `message broadcast` for flag-surface consistency across all six subcommands but is a no-op there.
+`cafleet message broadcast` is different — `broker.broadcast_message` returns a `broadcast_summary` task whose top-level `text` column is a broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. `message_broadcast` runs with `truncates_task_text=True`: by default the summary renders as the one-line `broadcast id=<id8> recipients=<count>`, while `--full` renders the single `broadcast_summary` task as the full typed-column envelope. The default summary string is short, so compact truncation only applies if `CAFLEET_MAX_TEXT_LEN` is set below its length. `--full` never adds per-recipient envelopes or a `recipient_ids` list. The task envelope is a flat typed-column dict with no `metadata` / `artifacts` wrappers; see [message-envelope.md](./message-envelope.md) for the canonical schema.
 
 The table describes the resulting `text` value AFTER truncation. Text mode omits the `text:` line entirely when the resulting value is empty, while `--json` always includes it.
 
@@ -189,7 +208,13 @@ Attempting `cafleet --session-id <session_id> agent deregister --agent-id <direc
 |---|---|---|
 | `--json` | no | Output as JSON |
 
-Lists all **non-soft-deleted** sessions with their label, created_at, and active agent count. There is no `--all` flag in this revision — soft-deleted sessions (`sessions.deleted_at IS NOT NULL`) are hidden.
+Lists all **non-soft-deleted** sessions with their `director_agent_id`, label, created_at, and active agent count. Soft-deleted sessions (`sessions.deleted_at IS NOT NULL`) are hidden.
+
+Each row exposes the session's root `director_agent_id` so the Director's ID can be recovered from a list after `session create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (full UUID). Text output renders it as a `DIRECTOR` column placed immediately after `SESSION_ID`, showing the **full** director UUID (not an 8-char prefix) because the value is pasted into `--agent-id`, which stays full-only:
+
+```
+SESSION_ID                               DIRECTOR                                 LABEL                AGENTS   CREATED_AT
+```
 
 ### `session show`
 
@@ -473,7 +498,7 @@ Three separate tmux invocations for `--freetext` because tmux's `-l` (literal) f
 
 Mirrors `cafleet member capture` step-for-step:
 
-1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
 4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
@@ -508,20 +533,6 @@ JSON (`cafleet --json ... member send-input ...`):
   "value": "<user text as-sent>"
 }
 ```
-
-#### Typical Director workflow
-
-> **Note**: Superseded by the canonical **Director-side usage pattern** subsection below. The canonical pattern requires the Director to delegate the decision to the user via `AskUserQuestion` FIRST and then invoke the resolved `cafleet member send-input` via its own Bash tool — AskUserQuestion is required, not optional. This older subsection is retained for historical context only; new readers should follow the canonical pattern.
-
-The CLI is deliberately one-shot — the surrounding choose-and-answer loop stays in the Director's control:
-
-1. `cafleet --session-id <s> member capture --agent-id <d> --member-id <m> --lines 120` — read the current prompt options off the pane.
-2. Ask the end user (for example via `AskUserQuestion`) with the observed labels.
-3. Based on the answer, either:
-   - Option 1 / 2 / 3 → `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --choice N`
-   - Free-text → `cafleet --session-id <s> member send-input --agent-id <d> --member-id <m> --freetext "<user text>"`
-
-Capture parsing is intentionally left manual because prompt layouts differ across Claude Code versions. The CLI's job is to *send* restricted keystrokes safely; reading and presenting options belongs to the Director.
 
 #### Director-side usage pattern
 
@@ -564,10 +575,10 @@ Two separate tmux invocations because tmux's `-l` (literal) flag is per-invocati
 
 Mirrors `cafleet member send-input` step-for-step:
 
-1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
-4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
+4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to exec.`.
 
 Cross-Director write attempts are rejected before any tmux call is made. Wording reuses the existing `_load_authorized_member` strings verbatim.
 
@@ -624,7 +635,7 @@ cafleet --session-id <session-id> member ping --agent-id <director-agent-id> \
 
 | Invocation | tmux calls issued in order |
 |---|---|
-| `member ping` | `MULTIPLEXERS.tmux.send_poll_trigger(target_pane_id=<pane>, session_id=<sid>, agent_id=<member_id>)` — types `cafleet --session-id <sid> message poll --agent-id <member_id>` + `Enter` into the pane (same helper as the broker auto-fire). |
+| `member ping` | `MULTIPLEXERS.tmux.send_poll_trigger(target_pane_id=<pane>, session_id=<sid>, agent_id=<member_id>)` — types `cafleet --session-id <sid> message poll --agent-id <member_id>` + `Enter` into the pane. |
 
 #### Validation rules
 
@@ -641,10 +652,10 @@ The subcommand has no positional argument and no other flags. There is no operat
 
 Mirrors `cafleet member exec` step-for-step:
 
-1. Resolve the target via `broker.get_agent(member_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, session_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
-4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
+4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to ping.`.
 
 Cross-Director write attempts are rejected before any tmux call is made. Wording reuses the existing `_load_authorized_member` strings verbatim.
 
@@ -691,7 +702,7 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `agent register` into a soft-deleted session | `Error: session X is deleted` (exit 1) |
 | `agent deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet session delete' instead.` (exit 1) |
 | `agent deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
-| `agent list` / `agent show` / `agent deregister` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--session-id` | `Error: agent <id> is not a member of session <sid>.` (exit 1) — gate is `broker.verify_agent_session` and runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different session" apart and treats both as not-a-member). |
+| `agent list` / `agent show` / `agent deregister` / `message send` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--session-id` | `Error: agent <id> is not a member of session <sid>.` (exit 1) — gate is `broker.verify_agent_session` and runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different session" apart and treats both as not-a-member). |
 | `member send-input` with zero or both of `--choice` / `--freetext` | `Error: --choice and --freetext are mutually exclusive; supply exactly one.` (exit 2) |
 | `member send-input --choice` outside `1..3` | Click `IntRange(1, 3)` built-in (exit 2) |
 | `member send-input --freetext` whose first non-whitespace character is `!` | `Error: --freetext may not start with '!' — that triggers the coding agent's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` (exit 2) |
@@ -701,9 +712,9 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `member exec` with missing positional `COMMAND` | Click built-in `Error: Missing argument 'COMMAND'.` (exit 2) |
 | `member exec ""` (empty / whitespace-only) | `Error: command may not be empty.` (exit 2) |
 | `member exec` with `\n` or `\r` | `Error: command may not contain newlines.` (exit 2) |
-| `member exec` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
+| `member exec` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to exec.` (exit 1) |
 | `member exec` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
-| `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
+| `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to ping.` (exit 1) |
 | `member ping` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
 | `member ping` when `tmux send-keys` fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
 | `member create` with both `--prompt-file` and positional `prompt_argv` | `Error: --prompt-file and the positional prompt argument are mutually exclusive.` (exit 2; `click.UsageError`) |
@@ -712,4 +723,8 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `member create --prompt-file` to an unreadable file | `Error: --prompt-file <path>: file is not readable.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to a file containing invalid UTF-8 | `Error: --prompt-file <path>: file is not valid UTF-8.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to a zero-byte or whitespace-only file | `Error: --prompt-file <path>: file is empty.` (exit 1; `click.ClickException`) |
+| `--to` / `--id` / `--member-id` prefix matching >1 active agent in the session | `Error: id prefix '<ref>' is ambiguous; supply more characters or the full UUID.` (exit 1) |
+| `--to` / `--id` / `--member-id` prefix or full UUID matching 0 active agents in the session | `Error: no agent matches id '<ref>' in this session.` (exit 1) |
+| `--task-id` prefix matching >1 session-visible task | `Error: id prefix '<ref>' is ambiguous; supply more characters or the full UUID.` (exit 1) |
+| `--task-id` prefix or full UUID matching 0 session-visible tasks | `Error: no task matches id '<ref>' in this session.` (exit 1) |
 
