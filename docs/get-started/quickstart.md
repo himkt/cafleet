@@ -46,7 +46,7 @@ mirror what the skill does internally. Run them inside a tmux session — the
 
 ```bash
 # 1. Create a fleet. Records this pane as the root Director's pane.
-cafleet fleet create --label "demo"
+cafleet fleet create --label "demo" --full
 
 # The output prints the fleet id and the root Director's agent id on the
 # first two lines. Export them as shell vars for the snippets below.
