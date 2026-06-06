@@ -1,6 +1,6 @@
 # 0000072 — Purge Historical-Trajectory Narration
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 24/24 tasks complete
 **Last Updated**: 2026-06-06
 
@@ -10,12 +10,12 @@ The repository carries "historical-trajectory" narration — text meaningful onl
 
 ## Success Criteria
 
-- [ ] Every inventory item in the Specification table is resolved (removed or reworded to present-tense current-behavior phrasing).
-- [ ] `docs/spec/data-model.md` no longer documents `coding_agent = "unknown"` as a current value, and its root-Director bootstrap description matches `docs/spec/cli-options.md` (default `"claude"`).
-- [ ] No source, doc, skill, or test (outside the exempt areas) cites a design-doc number as the reason for current code, or narrates a removal/deprecation.
-- [ ] Every "removal-sentinel" test (asserts a non-existent flag/key errors) is deleted; every test that mixes a sentinel with live coverage keeps the live assertion and loses only the sentinel framing — no live coverage is lost.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
-- [ ] A re-run of the verification sweep (Step 7) returns zero **unaccounted** matches — every remaining hit is KEEP-listed, exempt, or a benign present-tense usage confirmed by judgment (see "Known-benign sweep matches" in the KEEP list); no historical-trajectory narration remains.
+- [x] Every inventory item in the Specification table is resolved (removed or reworded to present-tense current-behavior phrasing).
+- [x] `docs/spec/data-model.md` no longer documents `coding_agent = "unknown"` as a current value, and its root-Director bootstrap description matches `docs/spec/cli-options.md` (default `"claude"`).
+- [x] No source, doc, skill, or test (outside the exempt areas) cites a design-doc number as the reason for current code, or narrates a removal/deprecation.
+- [x] Every "removal-sentinel" test (asserts a non-existent flag/key errors) is deleted; every test that mixes a sentinel with live coverage keeps the live assertion and loses only the sentinel framing — no live coverage is lost.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] A re-run of the verification sweep (Step 7) returns zero **unaccounted** matches — every remaining hit is KEEP-listed, exempt, or a benign present-tense usage confirmed by judgment (see "Known-benign sweep matches" in the KEEP list); no historical-trajectory narration remains.
 
 ---
 
@@ -206,3 +206,4 @@ This is a documentation/test-hygiene cleanup. It removes **no runtime behavior**
 | 2026-06-06 | Reviewer pass: reworded the sweep success criterion to "zero unaccounted matches"; added the "Known-benign sweep matches" KEEP bullet |
 | 2026-06-06 | User approved; Status → Approved |
 | 2026-06-06 | Execution: Steps 1–6 applied and committed. Step 7 verification — test (727) / lint / typecheck green; narration sweep clean except one `first cut` hit in `admin/src/components/MessageInput.tsx`. User scope decision: extend scope to `admin/src/` and reword that string (the only narration outside the originally-declared surfaces). |
+| 2026-06-06 | Execution complete: all 24 tasks done, 6 Success Criteria verified. PR #94 opened; Copilot reviewed HEAD with zero comments. Status → Complete. |
