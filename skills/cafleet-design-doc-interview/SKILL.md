@@ -23,7 +23,7 @@ Validate an existing design document through structured, fine-grained Q&A across
 
 This skill writes only `COMMENT(claude)` markers in the design document, and the Director-Analyzer cafleet messages are exempt from the verb + pointer + `COMMENT(role)` schema used by the `cafleet-design-doc-create` and `cafleet-design-doc-execute` skills. The Analyzer's question list is a one-time payload deliverable (a numbered list, not iterative coordination), and the Director's user-facing relay goes through `AskUserQuestion`, not cafleet. Only the inline `COMMENT(claude)` annotation rules below are in scope.
 
-> **Maintainer source-of-truth.** The `COMMENT(role)` marker convention is mirrored from `skills/cafleet-design-doc/coordination.md` (the canonical reference; updates to one require updates to the other). The convention is fully inlined below so this skill stands alone when packaged as an independent plugin — no cross-skill markdown link is added, by design (see `design-docs/0000050-design-doc-as-medium/design-doc.md` Step 7 for the plugin-install self-containment rationale).
+> **Maintainer source-of-truth.** The `COMMENT(role)` marker convention is mirrored from `skills/cafleet-design-doc/coordination.md` (the canonical reference; updates to one require updates to the other). The convention is fully inlined below so this skill stands alone when packaged as an independent plugin — no cross-skill markdown link is added, by design.
 
 ### COMMENT(claude) Marker
 

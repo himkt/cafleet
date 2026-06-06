@@ -1,7 +1,7 @@
 # 0000072 — Purge Historical-Trajectory Narration
 
 **Status**: Approved
-**Progress**: 19/24 tasks complete
+**Progress**: 21/24 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -185,8 +185,8 @@ This is a documentation/test-hygiene cleanup. It removes **no runtime behavior**
 
 ### Step 6: Skills — design-doc pointers (judgment)
 
-- [ ] S1 — `skills/cafleet-design-doc/coordination.md`: remove the "Rationale-of-record: design-docs/0000050…" pointer line <!-- completed: -->
-- [ ] S2 — `skills/cafleet-design-doc-interview/SKILL.md`: drop the `design-docs/0000050` parenthetical; keep the "by design" statement <!-- completed: -->
+- [x] S1 — `skills/cafleet-design-doc/coordination.md`: remove the "Rationale-of-record: design-docs/0000050…" pointer line <!-- completed: 2026-06-06T02:43 -->
+- [x] S2 — `skills/cafleet-design-doc-interview/SKILL.md`: drop the `design-docs/0000050` parenthetical; keep the "by design" statement <!-- completed: 2026-06-06T02:43 -->
 
 ### Step 7: Verification
 
