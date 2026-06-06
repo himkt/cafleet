@@ -1,7 +1,7 @@
 # Remove token-budget testing
 
 **Status**: Approved
-**Progress**: 1/5 tasks complete
+**Progress**: 5/5 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -10,11 +10,11 @@ Remove all token-budget testing from the repository: the real pytest suite under
 
 ## Success Criteria
 
-- [ ] Both `token_budget/` directories are deleted (7 tracked files: 3 repo-root + 4 package).
-- [ ] The repo-root `tests/` directory is removed entirely (it is empty once `tests/token_budget/` is gone).
-- [ ] `docs/concepts/token-reduction.md` no longer describes the regression suite or the baseline stub; the techniques table describing the actual architectural features is retained verbatim.
-- [ ] `mise //cafleet:test` collects and passes with the 12 token-budget tests gone.
-- [ ] No reference to `token_budget` or to the repo-root `tests/` path remains in any tracked file outside `design-docs/` (git and this design doc are the only historical record).
+- [x] Both `token_budget/` directories are deleted (7 tracked files: 3 repo-root + 4 package).
+- [x] The repo-root `tests/` directory is removed entirely (it is empty once `tests/token_budget/` is gone).
+- [x] `docs/concepts/token-reduction.md` no longer describes the regression suite or the baseline stub; the techniques table describing the actual architectural features is retained verbatim.
+- [x] `mise //cafleet:test` collects and passes with the 12 token-budget tests gone.
+- [x] No reference to `token_budget` or to the repo-root `tests/` path remains in any tracked file outside `design-docs/` (git and this design doc are the only historical record).
 
 ---
 
@@ -90,16 +90,16 @@ This is a clean removal: no replacement guard is added, and no restoration / mig
 
 ### Step 2: Remove the package test suite
 
-- [ ] Delete `cafleet/tests/token_budget/` and its 4 files (`__init__.py`, `test_envelope_size.py`, `test_skill_size.py`, `test_spawn_prompt_size.py`). <!-- completed: -->
+- [x] Delete `cafleet/tests/token_budget/` and its 4 files (`__init__.py`, `test_envelope_size.py`, `test_skill_size.py`, `test_spawn_prompt_size.py`). <!-- completed: 2026-06-06T04:44 -->
 
 ### Step 3: Remove the repo-root stub and the empty tests/ dir
 
-- [ ] Delete repo-root `tests/token_budget/` and its 3 files (`__init__.py`, `scenarios/__init__.py`, `scenarios/idle_3_member_baseline_stub.py`), then delete the now-empty repo-root `tests/` directory. <!-- completed: -->
+- [x] Delete repo-root `tests/token_budget/` and its 3 files (`__init__.py`, `scenarios/__init__.py`, `scenarios/idle_3_member_baseline_stub.py`), then delete the now-empty repo-root `tests/` directory. <!-- completed: 2026-06-06T04:44 -->
 
 ### Step 4: Verify
 
-- [ ] Run `mise //cafleet:test` and confirm the remaining suite collects and passes with the 12 token-budget tests gone. <!-- completed: -->
-- [ ] Run `git grep token_budget -- ':!design-docs/'` (scoped to tracked files, so it auto-skips the gitignored `site/` build output and other generated artifacts); confirm no residual reference remains in source, docs, skills, README, or config. The only matches before this change are `docs/concepts/token-reduction.md` and the repo-root stub — both removed by Steps 1 and 3. <!-- completed: -->
+- [x] Run `mise //cafleet:test` and confirm the remaining suite collects and passes with the 12 token-budget tests gone. <!-- completed: 2026-06-06T04:44 -->
+- [x] Run `git grep token_budget -- ':!design-docs/'` (scoped to tracked files, so it auto-skips the gitignored `site/` build output and other generated artifacts); confirm no residual reference remains in source, docs, skills, README, or config. The only matches before this change are `docs/concepts/token-reduction.md` and the repo-root stub — both removed by Steps 1 and 3. <!-- completed: 2026-06-06T04:44 -->
 
 ---
 
