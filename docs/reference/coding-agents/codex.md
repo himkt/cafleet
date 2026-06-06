@@ -13,7 +13,7 @@ cafleet --session-id <session-id> member create --agent-id <director-agent-id> \
   --name Codex-A --description "<one-sentence purpose>" --coding-agent codex
 ```
 
-The default is `--coding-agent claude`, so existing invocations are unchanged. A single Director may spawn `claude`, `codex`, and `opencode` members in the same session — the broker, message lifecycle, and tmux primitives behave identically for all three. See [Opencode members](opencode.md) for opencode-specific operational detail.
+The default is `--coding-agent claude`. A single Director may spawn `claude`, `codex`, and `opencode` members in the same session — the broker, message lifecycle, and tmux primitives behave identically for all three. See [Opencode members](opencode.md) for opencode-specific operational detail.
 
 ## Spawn flags
 

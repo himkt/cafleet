@@ -7,8 +7,7 @@ icon: lucide/cpu
 cafleet supports three coding-agent binaries inside member panes: `claude`
 (Claude Code), `codex` (OpenAI Codex CLI), and `opencode` (opencode.ai). The
 backend is selected at session-create and member-create time via
-`--coding-agent {claude,codex,opencode}`; the default is `claude` so existing
-invocations behave unchanged.
+`--coding-agent {claude,codex,opencode}`; the default is `claude`.
 
 ## Backend resolution
 

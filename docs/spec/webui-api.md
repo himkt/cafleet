@@ -141,7 +141,7 @@ Session scoping is reached through the `tasks.context_id → agents.agent_id →
 
 **Ordering**: `status_timestamp DESC` (newest first). The frontend re-orders ascending for newest-at-bottom chat rendering.
 
-**Row cap**: Hard-capped at 200 rows. No pagination in the first cut.
+**Row cap**: Hard-capped at 200 rows; no pagination.
 
 **Exclusions**: Rows with `type == "broadcast_summary"` are filtered out of the response. The summary row's metadata (`recipientIds`) is not needed for the UI; the grouping convention below lets the frontend reconstruct broadcasts from their delivery rows alone.
 
@@ -151,7 +151,6 @@ Session scoping is reached through the `tasks.context_id → agents.agent_id →
 |---|---|
 | Unicast delivery | `null` |
 | Broadcast delivery | The broadcast's summary task id (shared across all N delivery rows in the same broadcast) |
-| Historical row from before the `origin_task_id` migration | `null` |
 
 The client groups rows by `origin_task_id` (non-null rows sharing a value form one broadcast entry; null rows are standalone unicast entries). Each broadcast entry's sort key is the `MIN(created_at)` of its rows — stable, so a broadcast never drifts when a lagging recipient ACKs.
 

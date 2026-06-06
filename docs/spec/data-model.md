@@ -20,7 +20,7 @@ Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the ru
 
 Session deletion is a **soft-delete**: `broker.delete_session` sets `deleted_at=now`, then deregisters every active agent in the session (including the root Director) and physically deletes their `agent_placements` rows in the same transaction. Tasks are preserved. Re-running `session delete` on an already-soft-deleted session is a no-op that reports `Deregistered 0 agents.` because the initial `UPDATE` guard `WHERE deleted_at IS NULL` short-circuits the cascade.
 
-`broker.get_session` always returns the row (regardless of `deleted_at`) and exposes the field so callers can decide; `broker.list_sessions` filters `WHERE deleted_at IS NULL`, so `cafleet session list` hides soft-deleted sessions (no `--all` flag in v1). `broker.register_agent` inspects `get_session(...).deleted_at` and rejects a soft-deleted session with `Error: session X is deleted` (distinct from the `Session 'X' not found.` path).
+`broker.get_session` always returns the row (regardless of `deleted_at`) and exposes the field so callers can decide; `broker.list_sessions` filters `WHERE deleted_at IS NULL`, so `cafleet session list` hides soft-deleted sessions (no `--all` flag). `broker.register_agent` inspects `get_session(...).deleted_at` and rejects a soft-deleted session with `Error: session X is deleted` (distinct from the `Session 'X' not found.` path).
 
 #### Root Director bootstrap
 
@@ -28,7 +28,7 @@ Session deletion is a **soft-delete**: `broker.delete_session` sets `deleted_at=
 
 1. `INSERT INTO sessions (...)` with `deleted_at=NULL`, `director_agent_id=NULL`.
 2. `INSERT INTO agents (...)` for the hardcoded root Director (`name='Director'`, `description='Root Director for this session'`, `status='active'`).
-3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` (the root has no parent Director) and `coding_agent='unknown'` (auto-detection is deferred).
+3. `INSERT INTO agent_placements (...)` for the Director with `director_agent_id=NULL` (the root has no parent Director) and `coding_agent=<value of --coding-agent>` (default `'claude'`).
 4. `UPDATE sessions SET director_agent_id = <director's agent_id> WHERE session_id = <new>`.
 5. `INSERT INTO agents (...)` for the built-in `Administrator` with `agent_card_json.cafleet.kind == 'builtin-administrator'`. The Administrator never gets an `agent_placements` row.
 
@@ -77,7 +77,7 @@ The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned 
 **Creation paths**:
 
 - `broker.create_session(label, director_context)` inserts the Administrator row as the final operation of the 5-step root-Director bootstrap transaction (see "Root Director bootstrap" under the `sessions` table above); `registered_at` matches `sessions.created_at` exactly. The result dict exposes `administrator_agent_id` alongside the `director` sub-object for the caller.
-- Alembic revision `0006_seed_administrator_agent.py` backfills one Administrator into each pre-existing session. The migration generates `agent_id = str(uuid.uuid4())` in Python (matching the broker's idiom — no SQL-side `gen_random_uuid()`), probes for an existing Administrator via `json_extract(agent_card_json, '$.cafleet.kind') = 'builtin-administrator'`, and is idempotent by construction (a second `upgrade` finds the existing row and skips the INSERT). Downgrade is provided for empty sessions only and is forward-only in practice — `tasks.context_id` uses `ON DELETE RESTRICT`, so downgrading a session that has tasks addressed to or from the Administrator raises `IntegrityError`. (`agent_placements.agent_id` uses `ON DELETE CASCADE`, but Administrators never receive a placement anyway.)
+- Alembic revision `0006_seed_administrator_agent.py` is the migration that seeds the Administrator. The migration generates `agent_id = str(uuid.uuid4())` in Python (matching the broker's idiom — no SQL-side `gen_random_uuid()`), probes for an existing Administrator via `json_extract(agent_card_json, '$.cafleet.kind') = 'builtin-administrator'`, and is idempotent by construction (a second `upgrade` finds the existing row and skips the INSERT). Downgrade is provided for empty sessions only and is forward-only in practice — `tasks.context_id` uses `ON DELETE RESTRICT`, so downgrading a session that has tasks addressed to or from the Administrator raises `IntegrityError`. (`agent_placements.agent_id` uses `ON DELETE CASCADE`, but Administrators never receive a placement anyway.)
 
 **Invariant**: Every session has exactly one active `Administrator` agent. Both `broker.list_session_agents` and `broker.get_agent` surface a derived `kind` field (`"builtin-administrator"` | `"user"`) so the WebUI can locate the Administrator without matching on the name. `list_session_agents` derives the discriminator in SQL via `json_extract(agent_card_json, '$.cafleet.kind')` and never fetches the full card blob; `get_agent` already loads the full ORM row and computes the discriminator via `_is_administrator`.
 
@@ -123,7 +123,7 @@ Indexes:
 | `tmux_session` | `TEXT` | `NOT NULL` | e.g. `'main'`, from `tmux display-message '#{session_name}'`. |
 | `tmux_window_id` | `TEXT` | `NOT NULL` | e.g. `'@3'`, from `#{window_id}`. |
 | `tmux_pane_id` | `TEXT` | nullable | e.g. `'%7'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set via `PATCH /api/v1/agents/{id}/placement` after `tmux split-window` succeeds. |
-| `coding_agent` | `TEXT` | `NOT NULL`, `DEFAULT 'claude'` | Free-form coding-agent identifier. Current known values are `"claude"` (the server default for normal registrations) and `"unknown"` for the session's root Director placement created by `broker.create_session`. The SQL default ensures existing rows are backfilled on migration. |
+| `coding_agent` | `TEXT` | `NOT NULL`, `DEFAULT 'claude'` | Free-form coding-agent identifier. Current known values are `"claude"` (the server default for normal registrations) and `"codex"` / `"opencode"` when chosen at create time. The SQL default ensures existing rows are backfilled on migration. |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp, set server-side to match `agents.registered_at`. |
 
 Indexes:
@@ -140,7 +140,7 @@ If a user kills a pane manually without going through `cafleet member delete`, t
 
 SQLite ignores foreign key declarations unless `PRAGMA foreign_keys=ON` is issued on every connection. The registry installs a SQLAlchemy engine `connect` event listener that runs the PRAGMA on every new DBAPI connection. A regression test verifies the PRAGMA is active on a fresh connection.
 
-The two foreign keys (`agents.session_id → sessions.session_id`, `tasks.context_id → agents.agent_id`) both use `ON DELETE RESTRICT`. There is no path in v1 that physically deletes an agent — deregistration is a soft-status flip — so RESTRICT is the safest default. The added `sessions.director_agent_id → agents.agent_id` FK also uses `ON DELETE RESTRICT` for the same reason: it should never point at a row that can vanish. Session deletion uses a soft-delete (`deleted_at`) — it never physically removes rows, so the RESTRICTs are never triggered by the delete path.
+The two foreign keys (`agents.session_id → sessions.session_id`, `tasks.context_id → agents.agent_id`) both use `ON DELETE RESTRICT`. There is no path that physically deletes an agent — deregistration is a soft-status flip — so RESTRICT is the safest default. The added `sessions.director_agent_id → agents.agent_id` FK also uses `ON DELETE RESTRICT` for the same reason: it should never point at a row that can vanish. Session deletion uses a soft-delete (`deleted_at`) — it never physically removes rows, so the RESTRICTs are never triggered by the delete path.
 
 ## Operation mapping
 
@@ -211,7 +211,6 @@ Broadcast fan-out in `BrokerExecutor._handle_broadcast` produces N+1 rows per `S
 | Unicast delivery (today's `_handle_unicast`) | `NULL` |
 | Broadcast delivery row (one per recipient) | The summary task's `task_id` (shared across all N delivery rows in the same broadcast) |
 | Broadcast summary row | Its own `task_id` (self-reference) |
-| Historical row from before the `0002_add_origin_task_id` migration | `NULL` (no backfill) |
 
 The column is populated by pre-allocating the summary task's UUID **before** the delivery loop in `_handle_broadcast`, then threading that UUID into every delivery task's metadata as `originTaskId`. `TaskStore.save` reads `metadata.get("originTaskId")` and writes it into the column on both `INSERT` and `ON CONFLICT DO UPDATE` so idempotent re-saves preserve the value. `_handle_unicast` is NOT touched — the absence of `originTaskId` in its metadata writes the column as `NULL`.
 
@@ -221,10 +220,10 @@ The grouping predicate on the wire is `origin_task_id IS NOT NULL`, which cleanl
 
 The timeline UI renders a per-recipient ACK time in each broadcast's hover tooltip. That time is read from the `status_timestamp` of the matching delivery row whose `status_state == 'completed'`. This works today because **delivery tasks make exactly one state transition over their lifetime**: `input_required → completed` via `BrokerExecutor._handle_ack`, which overwrites `status_timestamp` with the ACK moment. Consequently, for any completed delivery row, `status_timestamp` IS the ACK timestamp.
 
-**No dedicated `acknowledged_at` column is added.** If any future change introduces a second state transition on a delivery task — retry, resurrect, a metadata-only re-save that moves `status_timestamp`, or any other path that rewrites `status_timestamp` after ACK — this invariant breaks and the reaction tooltip silently starts showing wrong times. At that point a dedicated `acknowledged_at` TEXT column MUST be added to `tasks`, populated in `_handle_ack`, and the WebUI tooltip code MUST be switched to read it instead of `status_timestamp`. This is accepted residual risk for the first cut of the Discord-style timeline and is explicitly flagged here so the next contributor who breaks the invariant knows exactly which column to add.
+**No dedicated `acknowledged_at` column is added.** If any future change introduces a second state transition on a delivery task — retry, resurrect, a metadata-only re-save that moves `status_timestamp`, or any other path that rewrites `status_timestamp` after ACK — this invariant breaks and the reaction tooltip silently starts showing wrong times. At that point a dedicated `acknowledged_at` TEXT column MUST be added to `tasks`, populated in `_handle_ack`, and the WebUI tooltip code MUST be switched to read it instead of `status_timestamp`. This is accepted residual risk and is explicitly flagged here so the next contributor who breaks the invariant knows exactly which column to add.
 
 ## Deregistered Agents
 
 Deregistration is a soft-delete only. There is no background cleanup loop and no physical removal of agent or task rows. Deregistered agents continue to exist as rows with `status='deregistered'` indefinitely; their inbox tasks remain readable by the WebUI (the only consumer that surfaces deregistered agents). Active query paths filter `status='active'` so dead rows are invisible to normal traffic.
 
-If physical cleanup becomes necessary in the future, it can be reintroduced as an opt-in admin command (e.g., `cafleet db purge --older-than 30d`) without disturbing the runtime. The previous `DEREGISTERED_TASK_TTL_DAYS` and `CLEANUP_INTERVAL_SECONDS` settings have been removed.
+If physical cleanup becomes necessary in the future, it can be added as an opt-in admin command (e.g., `cafleet db purge --older-than 30d`) without disturbing the runtime.

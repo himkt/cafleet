@@ -23,7 +23,7 @@ Every message lives in `tasks` as a flat row of typed columns. There is no JSON 
 
 The persisted shape is the canonical source of truth. Every render the broker produces is a projection of these columns.
 
-See [data-model.md](data-model.md) for the full SQL schema (including indexes, foreign-key declarations, and the `0009_drop_task_json_add_text` migration shape with the operator backup procedure).
+See [data-model.md](data-model.md) for the full SQL schema (including indexes, foreign-key declarations, and the `0009_drop_task_json_add_text` migration shape).
 
 ## Rendered shape
 

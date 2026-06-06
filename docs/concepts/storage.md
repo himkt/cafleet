@@ -135,7 +135,7 @@ is idempotent across six DB states:
 Without `db init`, the first request fails with `OperationalError: no such
 table: agents`. The development workflow uses `alembic revision
 --autogenerate` directly; the `revision` and `downgrade` commands are not
-exposed via the CLI in v1.
+exposed via the CLI.
 
 ## No physical cleanup
 
