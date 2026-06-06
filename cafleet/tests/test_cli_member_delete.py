@@ -23,7 +23,7 @@ _DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 
 @pytest.fixture
-def session_id():
+def fleet_id():
     return str(uuid.uuid4())
 
 
@@ -39,8 +39,8 @@ def call_log() -> list[tuple]:
 
 @pytest.fixture(autouse=True)
 def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda session_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda session_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 @pytest.fixture(autouse=True)
@@ -147,12 +147,12 @@ def kill_pane_recorder(monkeypatch, call_log):
     return _make_kwargs_recorder(monkeypatch, call_log, TmuxMultiplexer, "kill_pane")
 
 
-def _invoke(runner, session_id, *extra_args):
+def _invoke(runner, fleet_id, *extra_args):
     return runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "member",
             "delete",
             "--agent-id",
@@ -164,12 +164,12 @@ def _invoke(runner, session_id, *extra_args):
     )
 
 
-def _invoke_json(runner, session_id, *extra_args):
+def _invoke_json(runner, fleet_id, *extra_args):
     return runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "--json",
             "member",
             "delete",
@@ -184,7 +184,7 @@ def _invoke_json(runner, session_id, *extra_args):
 
 def test_happy_path__call_ordering_send_exit_then_wait_then_deregister(
     runner,
-    session_id,
+    fleet_id,
     monkeypatch,
     call_log,
     deregister_recorder,
@@ -194,7 +194,7 @@ def test_happy_path__call_ordering_send_exit_then_wait_then_deregister(
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
     wait_for_pane_gone_recorder.state["return_value"] = True
 
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
 
     names = [name for (name, *_) in call_log]
@@ -215,7 +215,7 @@ def test_happy_path__call_ordering_send_exit_then_wait_then_deregister(
 
 def test_happy_path__json_output_returns_agent_id_and_pane_status(
     runner,
-    session_id,
+    fleet_id,
     monkeypatch,
     deregister_recorder,
     wait_for_pane_gone_recorder,
@@ -223,7 +223,7 @@ def test_happy_path__json_output_returns_agent_id_and_pane_status(
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
     wait_for_pane_gone_recorder.state["return_value"] = True
 
-    result = _invoke_json(runner, session_id)
+    result = _invoke_json(runner, fleet_id)
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
     assert data == {
@@ -234,7 +234,7 @@ def test_happy_path__json_output_returns_agent_id_and_pane_status(
 
 def test_pane_already_gone__pane_already_gone_first_poll_yields_happy_path(
     runner,
-    session_id,
+    fleet_id,
     monkeypatch,
     call_log,
     deregister_recorder,
@@ -245,7 +245,7 @@ def test_pane_already_gone__pane_already_gone_first_poll_yields_happy_path(
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
     wait_for_pane_gone_recorder.state["return_value"] = True
 
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
 
     assert capture_pane_recorder.calls == []
@@ -268,7 +268,7 @@ def test_pane_already_gone__pane_already_gone_first_poll_yields_happy_path(
 
 def test_timeout__timeout_exits_two_with_tail_and_recovery_hint(
     runner,
-    session_id,
+    fleet_id,
     monkeypatch,
     call_log,
     deregister_recorder,
@@ -281,7 +281,7 @@ def test_timeout__timeout_exits_two_with_tail_and_recovery_hint(
     wait_for_pane_gone_recorder.state["return_value"] = False
     capture_pane_recorder.state["return_value"] = "STUCK_BUFFER_TAIL"
 
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 2, (result.output, getattr(result, "stderr", ""))
 
     combined = (result.output or "") + (getattr(result, "stderr", "") or "")
@@ -306,7 +306,7 @@ def test_timeout__timeout_exits_two_with_tail_and_recovery_hint(
 
 def test_timeout__timeout_json_output_pane_status(
     runner,
-    session_id,
+    fleet_id,
     monkeypatch,
     deregister_recorder,
     wait_for_pane_gone_recorder,
@@ -316,7 +316,7 @@ def test_timeout__timeout_json_output_pane_status(
     wait_for_pane_gone_recorder.state["return_value"] = False
     capture_pane_recorder.state["return_value"] = "STUCK_BUFFER_TAIL"
 
-    result = _invoke_json(runner, session_id)
+    result = _invoke_json(runner, fleet_id)
     assert result.exit_code == 2, result.output
     data = json.loads(result.stdout)
     assert data == {
@@ -327,7 +327,7 @@ def test_timeout__timeout_json_output_pane_status(
 
 def test_timeout__capture_failure_still_exits_two(
     runner,
-    session_id,
+    fleet_id,
     monkeypatch,
     deregister_recorder,
     send_exit_recorder,
@@ -340,7 +340,7 @@ def test_timeout__capture_failure_still_exits_two(
         "capture-pane failed: pane is dead"
     )
 
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 2, (result.output, getattr(result, "stderr", ""))
 
     combined = (result.output or "") + (getattr(result, "stderr", "") or "")
@@ -356,7 +356,7 @@ def test_timeout__capture_failure_still_exits_two(
 
 def test_force__force_kills_pane_then_deregisters(
     runner,
-    session_id,
+    fleet_id,
     monkeypatch,
     call_log,
     deregister_recorder,
@@ -366,7 +366,7 @@ def test_force__force_kills_pane_then_deregisters(
 ):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
 
-    result = _invoke(runner, session_id, "--force")
+    result = _invoke(runner, fleet_id, "--force")
     assert result.exit_code == 0, result.output
 
     assert send_exit_recorder == []
@@ -388,7 +388,7 @@ def test_force__force_kills_pane_then_deregisters(
 
 def test_force__force_short_flag_works(
     runner,
-    session_id,
+    fleet_id,
     monkeypatch,
     deregister_recorder,
     send_exit_recorder,
@@ -396,7 +396,7 @@ def test_force__force_short_flag_works(
 ):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
 
-    result = _invoke(runner, session_id, "-f")
+    result = _invoke(runner, fleet_id, "-f")
     assert result.exit_code == 0, result.output
     assert send_exit_recorder == []
     assert kill_pane_recorder == [{"target_pane_id": PANE_ID, "ignore_missing": True}]
@@ -404,14 +404,14 @@ def test_force__force_short_flag_works(
 
 def test_force__force_json_output_pane_status_killed(
     runner,
-    session_id,
+    fleet_id,
     monkeypatch,
     deregister_recorder,
     kill_pane_recorder,
 ):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
 
-    result = _invoke_json(runner, session_id, "--force")
+    result = _invoke_json(runner, fleet_id, "--force")
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
     assert data == {
@@ -422,7 +422,7 @@ def test_force__force_json_output_pane_status_killed(
 
 def test_pending_placement_force__force_with_pending_placement_skips_all_tmux(
     runner,
-    session_id,
+    fleet_id,
     monkeypatch,
     call_log,
     deregister_recorder,
@@ -437,7 +437,7 @@ def test_pending_placement_force__force_with_pending_placement_skips_all_tmux(
         lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
     )
 
-    result = _invoke(runner, session_id, "--force")
+    result = _invoke(runner, fleet_id, "--force")
     assert result.exit_code == 0, result.output
 
     assert deregister_recorder == [MEMBER_ID]
@@ -451,10 +451,10 @@ def test_pending_placement_force__force_with_pending_placement_skips_all_tmux(
 
 
 def test_authorization_boundary__missing_agent_exits_one(
-    runner, session_id, monkeypatch, deregister_recorder
+    runner, fleet_id, monkeypatch, deregister_recorder
 ):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
     assert MEMBER_ID in out
@@ -464,7 +464,7 @@ def test_authorization_boundary__missing_agent_exits_one(
 
 
 def test_authorization_boundary__fetch_db_error_surfaces_failed_to_fetch_wording(
-    runner, session_id, monkeypatch, deregister_recorder
+    runner, fleet_id, monkeypatch, deregister_recorder
 ):
     """Symmetric guard: real ``get_agent`` failures surface as ClickException."""
 
@@ -472,7 +472,7 @@ def test_authorization_boundary__fetch_db_error_surfaces_failed_to_fetch_wording
         raise RuntimeError("db connection lost")
 
     monkeypatch.setattr(broker, "get_agent", boom)
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 1
     out = result.output or ""
     assert "failed to fetch member" in out
@@ -481,10 +481,10 @@ def test_authorization_boundary__fetch_db_error_surfaces_failed_to_fetch_wording
 
 
 def test_authorization_boundary__placement_none_exits_one_with_deregister_hint(
-    runner, session_id, monkeypatch, deregister_recorder
+    runner, fleet_id, monkeypatch, deregister_recorder
 ):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
     assert f"agent {MEMBER_ID}" in out
@@ -494,7 +494,7 @@ def test_authorization_boundary__placement_none_exits_one_with_deregister_hint(
 
 
 def test_authorization_boundary__cross_director_same_session_is_rejected(
-    runner, session_id, monkeypatch, deregister_recorder, send_exit_recorder
+    runner, fleet_id, monkeypatch, deregister_recorder, send_exit_recorder
 ):
     """Regression guard for the cross-Director auth gap in ``member_delete``."""
     monkeypatch.setattr(
@@ -504,7 +504,7 @@ def test_authorization_boundary__cross_director_same_session_is_rejected(
             placement=_placement(director_agent_id=OTHER_DIRECTOR_ID)
         ),
     )
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
     assert f"agent {MEMBER_ID}" in out
@@ -515,7 +515,7 @@ def test_authorization_boundary__cross_director_same_session_is_rejected(
 
 
 def test_pending_placement__pending_pane_id_skips_send_exit(
-    runner, session_id, monkeypatch, deregister_recorder, send_exit_recorder
+    runner, fleet_id, monkeypatch, deregister_recorder, send_exit_recorder
 ):
     """Pending placements still deregister but skip the pane ``/exit``."""
     monkeypatch.setattr(
@@ -523,7 +523,7 @@ def test_pending_placement__pending_pane_id_skips_send_exit(
         "get_agent",
         lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
     )
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
     assert deregister_recorder == [MEMBER_ID]
     assert send_exit_recorder == []
@@ -533,7 +533,7 @@ def test_pending_placement__pending_pane_id_skips_send_exit(
 
 
 def test_tmux_error_on_send_exit__send_exit_failure_now_exits_one_with_recovery_wording(
-    runner, session_id, monkeypatch, deregister_recorder
+    runner, fleet_id, monkeypatch, deregister_recorder
 ):
     """send_exit TmuxError is a hard exit-1.
 
@@ -546,7 +546,7 @@ def test_tmux_error_on_send_exit__send_exit_failure_now_exits_one_with_recovery_
         raise TmuxError("send-keys failed: pane is dead")
 
     monkeypatch.setattr(TmuxMultiplexer, "send_exit", fake_send_exit)
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
 
     assert result.exit_code == 1, (result.output, getattr(result, "stderr", ""))
     combined = (result.output or "") + (getattr(result, "stderr", "") or "")

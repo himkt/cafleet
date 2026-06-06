@@ -63,9 +63,9 @@ def test_create_app__unknown_api_path_returns_404_not_spa(client, path):
 def test_create_app__known_api_route_reaches_router_returns_json_400(client):
     # Mount-order regression guard: if the SPA
     # mount intercepts /api/* before the router, this would return the SPA
-    # mount's 404 instead of the expected JSON 400 from get_webui_session().
+    # mount's 404 instead of the expected JSON 400 from get_webui_fleet().
     # The 400 short-circuits before any DB access, so no broker fixture needed.
     response = client.get("/api/agents")
     assert response.status_code == 400
     assert response.headers["content-type"].startswith("application/json")
-    assert response.json() == {"detail": "X-Session-Id header required"}
+    assert response.json() == {"detail": "X-Fleet-Id header required"}

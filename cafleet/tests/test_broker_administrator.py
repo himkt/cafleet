@@ -16,8 +16,8 @@ from cafleet.multiplexer import MultiplexerContext as DirectorContext
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 
-def _create_session_with_ctx():
-    return broker.create_session(
+def _create_fleet_with_ctx():
+    return broker.create_fleet(
         director_context=_FAKE_DIRECTOR_CTX, coding_agent="claude"
     )
 
@@ -100,8 +100,8 @@ def test_is_administrator__invalid_inputs(scenario, payload):
 
 
 def test_deregister_administrator__protected_and_user_dereg_still_works(broker_session):
-    session = _create_session_with_ctx()
-    sid = session["session_id"]
+    session = _create_fleet_with_ctx()
+    sid = session["fleet_id"]
     admin_id = session["administrator_agent_id"]
 
     with pytest.raises(click.ClickException) as exc_info:
@@ -115,15 +115,15 @@ def test_deregister_administrator__protected_and_user_dereg_still_works(broker_s
     assert row.deregistered_at is None
 
     # Regular user agent can still be deregistered.
-    user = broker.register_agent(session_id=sid, name="user", description="test user")
+    user = broker.register_agent(fleet_id=sid, name="user", description="test user")
     assert broker.deregister_agent(user["agent_id"]) is True
     names = {a["name"] for a in broker.list_agents(sid)}
     assert names == {"Director", "Administrator"}
 
 
 def test_register_agent_placement__administrator_cannot_be_director(broker_session):
-    session = _create_session_with_ctx()
-    sid = session["session_id"]
+    session = _create_fleet_with_ctx()
+    sid = session["fleet_id"]
     admin_id = session["administrator_agent_id"]
     placement = {
         "director_agent_id": admin_id,
@@ -134,7 +134,7 @@ def test_register_agent_placement__administrator_cannot_be_director(broker_sessi
     }
     with pytest.raises(click.ClickException) as exc_info:
         broker.register_agent(
-            session_id=sid,
+            fleet_id=sid,
             name="rejected-member",
             description="should not exist",
             placement=placement,
@@ -148,10 +148,10 @@ def test_register_agent_placement__administrator_cannot_be_director(broker_sessi
 
 
 def test_register_agent_placement__user_director_path_still_works(broker_session):
-    session = _create_session_with_ctx()
-    sid = session["session_id"]
+    session = _create_fleet_with_ctx()
+    sid = session["fleet_id"]
     director = broker.register_agent(
-        session_id=sid, name="director", description="a user director"
+        fleet_id=sid, name="director", description="a user director"
     )
     placement = {
         "director_agent_id": director["agent_id"],
@@ -161,7 +161,7 @@ def test_register_agent_placement__user_director_path_still_works(broker_session
         "coding_agent": "claude",
     }
     member = broker.register_agent(
-        session_id=sid,
+        fleet_id=sid,
         name="member",
         description="member of a user director",
         placement=placement,

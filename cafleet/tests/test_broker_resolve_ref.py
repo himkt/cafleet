@@ -14,8 +14,8 @@ from cafleet.db import models
 
 _TS = "2026-05-05T12:00:00.000000+00:00"
 
-SESSION_A = "11111111-1111-1111-1111-aaaaaaaaaaaa"
-SESSION_B = "22222222-2222-2222-2222-bbbbbbbbbbbb"
+FLEET_A = "11111111-1111-1111-1111-aaaaaaaaaaaa"
+FLEET_B = "22222222-2222-2222-2222-bbbbbbbbbbbb"
 
 # Active agents in session A. ALPHA and BETA share the 8-char "aaaaaaaa"
 # prefix (ambiguous); GAMMA's "bbbbbbbb" prefix is unique.
@@ -36,11 +36,11 @@ TASK_GAMMA = "bbbb0000-3333-3333-3333-333333333333"
 TASK_DELTA = "cccc0000-4444-4444-4444-444444444444"
 
 
-def _add_session(sm, session_id: str) -> None:
+def _add_fleet(sm, fleet_id: str) -> None:
     with sm() as s:
         s.add(
-            models.Session(
-                session_id=session_id,
+            models.Fleet(
+                fleet_id=fleet_id,
                 label=None,
                 created_at=_TS,
                 deleted_at=None,
@@ -50,12 +50,12 @@ def _add_session(sm, session_id: str) -> None:
         s.commit()
 
 
-def _add_agent(sm, *, agent_id: str, session_id: str, status: str = "active") -> None:
+def _add_agent(sm, *, agent_id: str, fleet_id: str, status: str = "active") -> None:
     with sm() as s:
         s.add(
             models.Agent(
                 agent_id=agent_id,
-                session_id=session_id,
+                fleet_id=fleet_id,
                 name="agent",
                 description="d",
                 status=status,
@@ -88,13 +88,13 @@ def _add_task(sm, *, task_id: str, from_agent_id: str, to_agent_id: str) -> None
 @pytest.fixture
 def populated(broker_session):
     sm = broker_session
-    _add_session(sm, SESSION_A)
-    _add_session(sm, SESSION_B)
-    _add_agent(sm, agent_id=AGENT_ALPHA, session_id=SESSION_A)
-    _add_agent(sm, agent_id=AGENT_BETA, session_id=SESSION_A)
-    _add_agent(sm, agent_id=AGENT_GAMMA, session_id=SESSION_A)
-    _add_agent(sm, agent_id=AGENT_INACTIVE, session_id=SESSION_A, status="deregistered")
-    _add_agent(sm, agent_id=AGENT_DELTA, session_id=SESSION_B)
+    _add_fleet(sm, FLEET_A)
+    _add_fleet(sm, FLEET_B)
+    _add_agent(sm, agent_id=AGENT_ALPHA, fleet_id=FLEET_A)
+    _add_agent(sm, agent_id=AGENT_BETA, fleet_id=FLEET_A)
+    _add_agent(sm, agent_id=AGENT_GAMMA, fleet_id=FLEET_A)
+    _add_agent(sm, agent_id=AGENT_INACTIVE, fleet_id=FLEET_A, status="deregistered")
+    _add_agent(sm, agent_id=AGENT_DELTA, fleet_id=FLEET_B)
     _add_task(
         sm, task_id=TASK_ALPHA, from_agent_id=AGENT_ALPHA, to_agent_id=AGENT_GAMMA
     )
@@ -112,16 +112,16 @@ def populated(broker_session):
 
 
 def test_resolve_agent_ref__exact_full_uuid_returns_unchanged(populated):
-    assert broker.resolve_agent_ref(SESSION_A, AGENT_ALPHA) == AGENT_ALPHA
+    assert broker.resolve_agent_ref(FLEET_A, AGENT_ALPHA) == AGENT_ALPHA
 
 
 def test_resolve_agent_ref__unique_prefix_resolves(populated):
-    assert broker.resolve_agent_ref(SESSION_A, "bbbbbbbb") == AGENT_GAMMA
+    assert broker.resolve_agent_ref(FLEET_A, "bbbbbbbb") == AGENT_GAMMA
 
 
 def test_resolve_agent_ref__ambiguous_prefix_raises(populated):
     with pytest.raises(ValueError, match="is ambiguous") as excinfo:
-        broker.resolve_agent_ref(SESSION_A, "aaaaaaaa")
+        broker.resolve_agent_ref(FLEET_A, "aaaaaaaa")
     assert str(excinfo.value) == (
         "id prefix 'aaaaaaaa' is ambiguous; supply more characters or the full UUID."
     )
@@ -129,25 +129,25 @@ def test_resolve_agent_ref__ambiguous_prefix_raises(populated):
 
 def test_resolve_agent_ref__no_match_raises(populated):
     with pytest.raises(ValueError, match="no agent matches") as excinfo:
-        broker.resolve_agent_ref(SESSION_A, "zzzzzzzz")
-    assert str(excinfo.value) == "no agent matches id 'zzzzzzzz' in this session."
+        broker.resolve_agent_ref(FLEET_A, "zzzzzzzz")
+    assert str(excinfo.value) == "no agent matches id 'zzzzzzzz' in this fleet."
 
 
 def test_resolve_agent_ref__other_session_invisible_by_prefix(populated):
     with pytest.raises(ValueError, match="no agent matches") as excinfo:
-        broker.resolve_agent_ref(SESSION_A, "cccccccc")
-    assert str(excinfo.value) == "no agent matches id 'cccccccc' in this session."
+        broker.resolve_agent_ref(FLEET_A, "cccccccc")
+    assert str(excinfo.value) == "no agent matches id 'cccccccc' in this fleet."
 
 
 def test_resolve_agent_ref__other_session_invisible_by_full_uuid(populated):
     with pytest.raises(ValueError, match="no agent matches") as excinfo:
-        broker.resolve_agent_ref(SESSION_A, AGENT_DELTA)
-    assert str(excinfo.value) == f"no agent matches id '{AGENT_DELTA}' in this session."
+        broker.resolve_agent_ref(FLEET_A, AGENT_DELTA)
+    assert str(excinfo.value) == f"no agent matches id '{AGENT_DELTA}' in this fleet."
 
 
 def test_resolve_agent_ref__inactive_agent_invisible(populated):
     with pytest.raises(ValueError, match="no agent matches"):
-        broker.resolve_agent_ref(SESSION_A, AGENT_INACTIVE)
+        broker.resolve_agent_ref(FLEET_A, AGENT_INACTIVE)
 
 
 @pytest.mark.parametrize("wildcard", ["_", "%"])
@@ -155,24 +155,24 @@ def test_resolve_agent_ref__wildcard_matched_literally(populated, wildcard):
     # Without autoescape, "_"/"%" would LIKE-match every active agent and
     # report ambiguous; with autoescape they match literally → no match.
     with pytest.raises(ValueError, match="no agent matches") as excinfo:
-        broker.resolve_agent_ref(SESSION_A, wildcard)
-    assert str(excinfo.value) == f"no agent matches id '{wildcard}' in this session."
+        broker.resolve_agent_ref(FLEET_A, wildcard)
+    assert str(excinfo.value) == f"no agent matches id '{wildcard}' in this fleet."
 
 
 # --- resolve_task_ref ----------------------------------------------------
 
 
 def test_resolve_task_ref__exact_full_uuid_returns_unchanged(populated):
-    assert broker.resolve_task_ref(SESSION_A, TASK_ALPHA) == TASK_ALPHA
+    assert broker.resolve_task_ref(FLEET_A, TASK_ALPHA) == TASK_ALPHA
 
 
 def test_resolve_task_ref__unique_prefix_resolves(populated):
-    assert broker.resolve_task_ref(SESSION_A, "bbbb0000") == TASK_GAMMA
+    assert broker.resolve_task_ref(FLEET_A, "bbbb0000") == TASK_GAMMA
 
 
 def test_resolve_task_ref__ambiguous_prefix_raises(populated):
     with pytest.raises(ValueError, match="is ambiguous") as excinfo:
-        broker.resolve_task_ref(SESSION_A, "aaaa0000")
+        broker.resolve_task_ref(FLEET_A, "aaaa0000")
     assert str(excinfo.value) == (
         "id prefix 'aaaa0000' is ambiguous; supply more characters or the full UUID."
     )
@@ -180,24 +180,24 @@ def test_resolve_task_ref__ambiguous_prefix_raises(populated):
 
 def test_resolve_task_ref__no_match_raises(populated):
     with pytest.raises(ValueError, match="no task matches") as excinfo:
-        broker.resolve_task_ref(SESSION_A, "zzzzzzzz")
-    assert str(excinfo.value) == "no task matches id 'zzzzzzzz' in this session."
+        broker.resolve_task_ref(FLEET_A, "zzzzzzzz")
+    assert str(excinfo.value) == "no task matches id 'zzzzzzzz' in this fleet."
 
 
 def test_resolve_task_ref__other_session_invisible_by_prefix(populated):
     with pytest.raises(ValueError, match="no task matches") as excinfo:
-        broker.resolve_task_ref(SESSION_A, "cccc0000")
-    assert str(excinfo.value) == "no task matches id 'cccc0000' in this session."
+        broker.resolve_task_ref(FLEET_A, "cccc0000")
+    assert str(excinfo.value) == "no task matches id 'cccc0000' in this fleet."
 
 
 def test_resolve_task_ref__other_session_invisible_by_full_uuid(populated):
     with pytest.raises(ValueError, match="no task matches") as excinfo:
-        broker.resolve_task_ref(SESSION_A, TASK_DELTA)
-    assert str(excinfo.value) == f"no task matches id '{TASK_DELTA}' in this session."
+        broker.resolve_task_ref(FLEET_A, TASK_DELTA)
+    assert str(excinfo.value) == f"no task matches id '{TASK_DELTA}' in this fleet."
 
 
 @pytest.mark.parametrize("wildcard", ["_", "%"])
 def test_resolve_task_ref__wildcard_matched_literally(populated, wildcard):
     with pytest.raises(ValueError, match="no task matches") as excinfo:
-        broker.resolve_task_ref(SESSION_A, wildcard)
-    assert str(excinfo.value) == f"no task matches id '{wildcard}' in this session."
+        broker.resolve_task_ref(FLEET_A, wildcard)
+    assert str(excinfo.value) == f"no task matches id '{wildcard}' in this fleet."

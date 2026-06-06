@@ -69,13 +69,13 @@ def test_doctor_outside_tmux__outside_tmux_exits_one(runner, monkeypatch):
     assert "cafleet member commands must be run inside a tmux session" in combined
 
 
-def test_doctor_session_id_silently_ignored__session_id_flag_silently_ignored(
+def test_doctor_fleet_id_silently_ignored__fleet_id_flag_silently_ignored(
     runner, mock_tmux_ok
 ):
     result = runner.invoke(
         cli,
         [
-            "--session-id",
+            "--fleet-id",
             "00000000-0000-0000-0000-000000000000",
             "doctor",
         ],
@@ -90,5 +90,5 @@ def test_doctor_session_id_silently_ignored__session_id_flag_silently_ignored(
     assert "%0" in out
     assert "TMUX_PANE:" in out
     assert _TMUX_PANE_VALUE in out
-    assert "--session-id" not in out
+    assert "--fleet-id" not in out
     assert "is required for this subcommand" not in out

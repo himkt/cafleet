@@ -1,4 +1,4 @@
-"""Tests for ``cafleet session *`` CLI verbs."""
+"""Tests for ``cafleet fleet *`` CLI verbs."""
 
 import json
 import sqlite3
@@ -18,7 +18,7 @@ def _autouse_reset_engine(_reset_engine_singletons):
 
 
 @pytest.fixture(autouse=True)
-def _mock_tmux_for_session_create(monkeypatch):
+def _mock_tmux_for_fleet_create(monkeypatch):
     ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
     monkeypatch.setattr(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
@@ -35,12 +35,12 @@ def _init_db(runner: CliRunner) -> None:
     assert result.exit_code == 0, result.output
 
 
-def _seed_session(db_path, session_id: str, label: str | None = None) -> None:
+def _seed_fleet(db_path, fleet_id: str, label: str | None = None) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
-            "INSERT INTO sessions (session_id, label, created_at) VALUES (?, ?, ?)",
-            (session_id, label, "2026-01-01T00:00:00+00:00"),
+            "INSERT INTO fleets (fleet_id, label, created_at) VALUES (?, ?, ?)",
+            (fleet_id, label, "2026-01-01T00:00:00+00:00"),
         )
         conn.commit()
     finally:
@@ -48,18 +48,18 @@ def _seed_session(db_path, session_id: str, label: str | None = None) -> None:
 
 
 def _seed_agent(
-    db_path, agent_id: str, session_id: str, *, status: str = "active"
+    db_path, agent_id: str, fleet_id: str, *, status: str = "active"
 ) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
             "INSERT INTO agents "
-            "(agent_id, session_id, name, description, status, "
+            "(agent_id, fleet_id, name, description, status, "
             "registered_at, deregistered_at, agent_card_json) "
             "VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
             (
                 agent_id,
-                session_id,
+                fleet_id,
                 f"agent-{agent_id[:8]}",
                 "test agent",
                 status,
@@ -72,21 +72,21 @@ def _seed_agent(
         conn.close()
 
 
-def _session_rows(db_path):
+def _fleet_rows(db_path):
     conn = sqlite3.connect(str(db_path))
     try:
         return conn.execute(
-            "SELECT session_id, label, created_at FROM sessions"
+            "SELECT fleet_id, label, created_at FROM fleets"
         ).fetchall()
     finally:
         conn.close()
 
 
-def _session_deleted_at(db_path, session_id: str) -> str | None:
+def _fleet_deleted_at(db_path, fleet_id: str) -> str | None:
     conn = sqlite3.connect(str(db_path))
     try:
         row = conn.execute(
-            "SELECT deleted_at FROM sessions WHERE session_id = ?", (session_id,)
+            "SELECT deleted_at FROM fleets WHERE fleet_id = ?", (fleet_id,)
         ).fetchone()
     finally:
         conn.close()
@@ -107,17 +107,17 @@ def fresh_db(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("output_mode", ["text", "json"])
-def test_session_create__happy_path(fresh_db, output_mode):
+def test_fleet_create__happy_path(fresh_db, output_mode):
     db_file, runner = fresh_db
-    args = ["session", "create"]
+    args = ["fleet", "create"]
     if output_mode == "json":
         args.append("--json")
     result = runner.invoke(cli, args)
     assert result.exit_code == 0, result.output
     if output_mode == "json":
         data = json.loads(result.output)
-        assert "session_id" in data
-        uuid.UUID(data["session_id"])
+        assert "fleet_id" in data
+        uuid.UUID(data["fleet_id"])
     else:
         # Find a UUID in the text output.
         found = next(
@@ -125,7 +125,7 @@ def test_session_create__happy_path(fresh_db, output_mode):
             None,
         )
         assert found is not None
-    rows = _session_rows(db_file)
+    rows = _fleet_rows(db_file)
     assert len(rows) == 1
 
 
@@ -137,41 +137,41 @@ def _is_uuid(word: str) -> bool:
         return False
 
 
-def test_session_create__label_round_trip_and_default_none(fresh_db):
+def test_fleet_create__label_round_trip_and_default_none(fresh_db):
     db_file, runner = fresh_db
-    result = runner.invoke(cli, ["session", "create", "--label", "PR-42 review"])
+    result = runner.invoke(cli, ["fleet", "create", "--label", "PR-42 review"])
     assert result.exit_code == 0, result.output
-    assert _session_rows(db_file)[0][1] == "PR-42 review"
+    assert _fleet_rows(db_file)[0][1] == "PR-42 review"
 
     # Default label is None.
-    result2 = runner.invoke(cli, ["session", "create"])
+    result2 = runner.invoke(cli, ["fleet", "create"])
     assert result2.exit_code == 0
-    labels = sorted([r[1] or "" for r in _session_rows(db_file)])
+    labels = sorted([r[1] or "" for r in _fleet_rows(db_file)])
     assert "" in labels
     assert "PR-42 review" in labels
 
 
-def test_session_create__each_create_mints_unique_id(fresh_db):
+def test_fleet_create__each_create_mints_unique_id(fresh_db):
     db_file, runner = fresh_db
-    r1 = runner.invoke(cli, ["session", "create", "--json"])
-    r2 = runner.invoke(cli, ["session", "create", "--json"])
-    assert json.loads(r1.output)["session_id"] != json.loads(r2.output)["session_id"]
-    assert len(_session_rows(db_file)) == 2
+    r1 = runner.invoke(cli, ["fleet", "create", "--json"])
+    r2 = runner.invoke(cli, ["fleet", "create", "--json"])
+    assert json.loads(r1.output)["fleet_id"] != json.loads(r2.output)["fleet_id"]
+    assert len(_fleet_rows(db_file)) == 2
 
 
-def test_session_create__bootstraps_administrator_recorded_in_db(fresh_db):
+def test_fleet_create__bootstraps_administrator_recorded_in_db(fresh_db):
     db_file, runner = fresh_db
-    result = runner.invoke(cli, ["session", "create", "--json"])
+    result = runner.invoke(cli, ["fleet", "create", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    sid = data["session_id"]
+    sid = data["fleet_id"]
     admin_id = data["administrator_agent_id"]
     uuid.UUID(admin_id)
 
     conn = sqlite3.connect(str(db_file))
     try:
         rows = conn.execute(
-            "SELECT agent_id, session_id, name, status, agent_card_json "
+            "SELECT agent_id, fleet_id, name, status, agent_card_json "
             "FROM agents WHERE agent_id = ?",
             (admin_id,),
         ).fetchall()
@@ -187,15 +187,15 @@ def test_session_create__bootstraps_administrator_recorded_in_db(fresh_db):
 
 
 @pytest.mark.parametrize("output_mode", ["text", "json"])
-def test_session_list__shape_and_agent_count(fresh_db, output_mode):
+def test_fleet_list__shape_and_agent_count(fresh_db, output_mode):
     db_file, runner = fresh_db
     sid = str(uuid.uuid4())
-    _seed_session(db_file, sid, label="test-session")
+    _seed_fleet(db_file, sid, label="test-fleet")
     _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
     _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
     _seed_agent(db_file, str(uuid.uuid4()), sid, status="deregistered")
 
-    args = ["session", "list"]
+    args = ["fleet", "list"]
     if output_mode == "json":
         args.append("--json")
     result = runner.invoke(cli, args)
@@ -203,12 +203,12 @@ def test_session_list__shape_and_agent_count(fresh_db, output_mode):
     if output_mode == "json":
         data = json.loads(result.output)
         assert len(data) == 1
-        assert data[0]["session_id"] == sid
-        assert data[0]["label"] == "test-session"
+        assert data[0]["fleet_id"] == sid
+        assert data[0]["label"] == "test-fleet"
         assert data[0]["agent_count"] == 2  # active only
     else:
         assert sid in result.output
-        assert "test-session" in result.output
+        assert "test-fleet" in result.output
 
 
 @pytest.mark.parametrize(
@@ -224,23 +224,23 @@ def test_session_list__shape_and_agent_count(fresh_db, output_mode):
         ),
     ],
 )
-def test_session_show__shape_and_branches(
+def test_fleet_show__shape_and_branches(
     fresh_db, scenario, expected_exit, expected_in, expected_not_in
 ):
     db_file, runner = fresh_db
     if scenario == "existing_active":
         sid = str(uuid.uuid4())
-        _seed_session(db_file, sid, label="show-test")
+        _seed_fleet(db_file, sid, label="show-test")
         target = sid
     elif scenario == "missing":
         target = str(uuid.uuid4())
     else:
         sid = str(uuid.uuid4())
-        _seed_session(db_file, sid, label="audit-me")
+        _seed_fleet(db_file, sid, label="audit-me")
         conn = sqlite3.connect(str(db_file))
         try:
             conn.execute(
-                "UPDATE sessions SET deleted_at = ? WHERE session_id = ?",
+                "UPDATE fleets SET deleted_at = ? WHERE fleet_id = ?",
                 ("2026-04-16T10:00:00+00:00", sid),
             )
             conn.commit()
@@ -248,7 +248,7 @@ def test_session_show__shape_and_branches(
             conn.close()
         target = sid
 
-    result = runner.invoke(cli, ["session", "show", target])
+    result = runner.invoke(cli, ["fleet", "show", target])
     assert result.exit_code == expected_exit, result.output
     out = result.output.lower() if scenario == "missing" else result.output
     for needle in expected_in:
@@ -258,41 +258,41 @@ def test_session_show__shape_and_branches(
         assert needle not in result.output
 
 
-def test_session_delete__soft_deletes_and_marks_row(fresh_db):
+def test_fleet_delete__soft_deletes_and_marks_row(fresh_db):
     db_file, runner = fresh_db
     sid = str(uuid.uuid4())
-    _seed_session(db_file, sid)
+    _seed_fleet(db_file, sid)
     _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
     _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
 
-    result = runner.invoke(cli, ["session", "delete", sid])
+    result = runner.invoke(cli, ["fleet", "delete", sid])
     assert result.exit_code == 0, result.output
     # Row persists, deleted_at set.
-    assert sid in [r[0] for r in _session_rows(db_file)]
-    assert _session_deleted_at(db_file, sid) is not None
+    assert sid in [r[0] for r in _fleet_rows(db_file)]
+    assert _fleet_deleted_at(db_file, sid) is not None
     assert "deleted" in result.output.lower()
 
 
-def test_session_delete__nonexistent_session_handles_gracefully(fresh_db):
+def test_fleet_delete__nonexistent_session_handles_gracefully(fresh_db):
     _db_file, runner = fresh_db
     fake_id = str(uuid.uuid4())
-    result = runner.invoke(cli, ["session", "delete", fake_id])
+    result = runner.invoke(cli, ["fleet", "delete", fake_id])
     # Either exits non-zero or returns SystemExit — never crashes uncleanly.
     assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
-def test_session_group_structure__subcommands_under_session_not_db(fresh_db):
+def test_fleet_group_structure__subcommands_under_fleet_not_db(fresh_db):
     _db_file, runner = fresh_db
-    help_result = runner.invoke(cli, ["session", "--help"])
+    help_result = runner.invoke(cli, ["fleet", "--help"])
     assert help_result.exit_code == 0
     out = help_result.output.lower()
     for verb in ("create", "list", "show", "delete"):
         assert verb in out
 
-    # session is NOT exposed under db.
-    not_under_db = runner.invoke(cli, ["db", "session", "create"])
+    # fleet is NOT exposed under db.
+    not_under_db = runner.invoke(cli, ["db", "fleet", "create"])
     assert not_under_db.exit_code == 2, not_under_db.output
 
-    # db init creates no sessions (regression guard).
-    rows = _session_rows(_db_file)
+    # db init creates no fleets (regression guard).
+    rows = _fleet_rows(_db_file)
     assert len(rows) == 0

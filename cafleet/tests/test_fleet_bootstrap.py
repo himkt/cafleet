@@ -1,4 +1,4 @@
-"""Broker-level session bootstrap tests."""
+"""Broker-level fleet bootstrap tests."""
 
 import uuid
 from unittest.mock import Mock
@@ -14,7 +14,7 @@ from cafleet.db.models import (
     Task,
 )
 from cafleet.db.models import (
-    Session as SessionModel,
+    Fleet as FleetModel,
 )
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
@@ -30,7 +30,7 @@ def director_context():
 
 
 def _bootstrap(label=None, ctx=None, coding_agent="claude"):
-    return broker.create_session(
+    return broker.create_fleet(
         label=label,
         director_context=ctx
         or DirectorContext(session="main", window_id="@1", pane_id="%0"),
@@ -41,7 +41,7 @@ def _bootstrap(label=None, ctx=None, coding_agent="claude"):
 def test_bootstrap__top_level_envelope_and_director_subdict(director_context):
     result = _bootstrap(label="bootstrap-1", ctx=director_context)
     for key in (
-        "session_id",
+        "fleet_id",
         "label",
         "created_at",
         "administrator_agent_id",
@@ -52,7 +52,7 @@ def test_bootstrap__top_level_envelope_and_director_subdict(director_context):
     for key in ("agent_id", "name", "description", "registered_at", "placement"):
         assert key in director
     assert director["name"] == "Director"
-    assert director["description"] == "Root Director for this session"
+    assert director["description"] == "Root Director for this fleet"
     assert result["label"] == "bootstrap-1"
 
 
@@ -74,17 +74,17 @@ def test_bootstrap__db_rows_for_session_director_administrator_placement(
     broker_session, director_context
 ):
     result = _bootstrap(ctx=director_context)
-    sid = result["session_id"]
+    sid = result["fleet_id"]
 
     with broker_session() as s:
-        session_rows = s.query(SessionModel).all()
-        agent_rows = s.query(Agent).filter(Agent.session_id == sid).all()
+        fleet_rows = s.query(FleetModel).all()
+        agent_rows = s.query(Agent).filter(Agent.fleet_id == sid).all()
         placement_rows = s.query(AgentPlacement).all()
 
-    assert len(session_rows) == 1
-    assert session_rows[0].session_id == sid
-    assert session_rows[0].director_agent_id == result["director"]["agent_id"]
-    assert session_rows[0].deleted_at is None
+    assert len(fleet_rows) == 1
+    assert fleet_rows[0].fleet_id == sid
+    assert fleet_rows[0].director_agent_id == result["director"]["agent_id"]
+    assert fleet_rows[0].deleted_at is None
 
     assert len(agent_rows) == 2
     by_name = {r.name: r for r in agent_rows}
@@ -101,8 +101,8 @@ def test_bootstrap__db_rows_for_session_director_administrator_placement(
     assert placement.director_agent_id is None
     assert placement.tmux_pane_id == director_context.pane_id
 
-    # Administrator.registered_at == sessions.created_at.
-    assert by_name["Administrator"].registered_at == session_rows[0].created_at
+    # Administrator.registered_at == fleets.created_at.
+    assert by_name["Administrator"].registered_at == fleet_rows[0].created_at
 
 
 @pytest.mark.parametrize("label", ["hello-world", None])
@@ -110,7 +110,7 @@ def test_bootstrap__label_handling_and_unique_ids(director_context, label):
     r1 = _bootstrap(label=label, ctx=director_context)
     r2 = _bootstrap(label=label, ctx=director_context)
     assert r1["label"] == label
-    assert r1["session_id"] != r2["session_id"]
+    assert r1["fleet_id"] != r2["fleet_id"]
     assert r1["director"]["agent_id"] != r2["director"]["agent_id"]
     assert r1["administrator_agent_id"] != r2["administrator_agent_id"]
 
@@ -124,40 +124,40 @@ def test_bootstrap__atomic_rollback_on_failure(
 
     monkeypatch.setattr(broker, "AgentPlacement", _BoomPlacement)
     with pytest.raises(RuntimeError, match="injected failure"):
-        broker.create_session(
+        broker.create_fleet(
             label="rollback",
             director_context=director_context,
             coding_agent="claude",
         )
 
     with broker_session() as s:
-        assert s.query(SessionModel).count() == 0
+        assert s.query(FleetModel).count() == 0
         assert s.query(Agent).count() == 0
         assert s.query(AgentPlacement).count() == 0
 
 
-def test_delete_session__soft_deletes_deregisters_and_drops_placement(
+def test_delete_fleet__soft_deletes_deregisters_and_drops_placement(
     broker_session, director_context
 ):
     result = _bootstrap(ctx=director_context)
-    sid = result["session_id"]
+    sid = result["fleet_id"]
     admin_id = result["administrator_agent_id"]
     director_id = result["director"]["agent_id"]
     sent = broker.send_message(sid, admin_id, director_id, "audit me")
     task_id = sent["task"]["task_id"]
 
-    ret = broker.delete_session(sid)
+    ret = broker.delete_fleet(sid)
     assert ret["deregistered_count"] == 2
 
     with broker_session() as s:
-        session_row = s.query(SessionModel).filter(SessionModel.session_id == sid).one()
+        fleet_row = s.query(FleetModel).filter(FleetModel.fleet_id == sid).one()
         statuses = {
             r.name: r.status
-            for r in s.query(Agent).filter(Agent.session_id == sid).all()
+            for r in s.query(Agent).filter(Agent.fleet_id == sid).all()
         }
         placement_count = s.query(AgentPlacement).count()
         tasks = s.query(Task).all()
-    assert session_row.deleted_at is not None
+    assert fleet_row.deleted_at is not None
     assert statuses["Director"] == "deregistered"
     assert statuses["Administrator"] == "deregistered"
     assert placement_count == 0
@@ -165,19 +165,19 @@ def test_delete_session__soft_deletes_deregisters_and_drops_placement(
     assert any(t.task_id == task_id for t in tasks)
 
 
-def test_delete_session__idempotent_rerun_returns_zero(director_context):
+def test_delete_fleet__idempotent_rerun_returns_zero(director_context):
     result = _bootstrap(ctx=director_context)
-    sid = result["session_id"]
-    first = broker.delete_session(sid)
-    second = broker.delete_session(sid)
+    sid = result["fleet_id"]
+    first = broker.delete_fleet(sid)
+    second = broker.delete_fleet(sid)
     assert first["deregistered_count"] == 2
     assert second["deregistered_count"] == 0
 
 
-def test_delete_session__unknown_session_raises_click_exception():
+def test_delete_fleet__unknown_session_raises_click_exception():
     fake_sid = str(uuid.uuid4())
     with pytest.raises(click.ClickException) as exc_info:
-        broker.delete_session(fake_sid)
+        broker.delete_fleet(fake_sid)
     msg = str(exc_info.value)
     assert "not found" in msg.lower()
     assert fake_sid in msg
@@ -195,14 +195,14 @@ def test_register_agent__rejects_dead_sessions(
 ):
     if scenario == "soft_deleted_session":
         result = _bootstrap(ctx=director_context)
-        sid = result["session_id"]
-        broker.delete_session(sid)
+        sid = result["fleet_id"]
+        broker.delete_fleet(sid)
     else:
         sid = str(uuid.uuid4())
 
     with pytest.raises(click.UsageError) as exc_info:
         broker.register_agent(
-            session_id=sid,
+            fleet_id=sid,
             name="late-comer",
             description="too late",
         )
@@ -216,20 +216,20 @@ def test_register_agent__rejects_dead_sessions(
         assert must_not_contain not in msg.lower()
 
 
-def test_list_sessions__hides_soft_deleted_but_get_session_still_returns(
+def test_list_fleets__hides_soft_deleted_but_get_fleet_still_returns(
     director_context,
 ):
     alive = _bootstrap(label="alive", ctx=director_context)
     dead = _bootstrap(label="dead", ctx=director_context)
-    broker.delete_session(dead["session_id"])
+    broker.delete_fleet(dead["fleet_id"])
 
-    sessions = broker.list_sessions()
-    ids = {s["session_id"] for s in sessions}
-    assert alive["session_id"] in ids
-    assert dead["session_id"] not in ids
+    sessions = broker.list_fleets()
+    ids = {s["fleet_id"] for s in sessions}
+    assert alive["fleet_id"] in ids
+    assert dead["fleet_id"] not in ids
 
-    # get_session still returns the soft-deleted row.
-    row = broker.get_session(dead["session_id"])
+    # get_fleet still returns the soft-deleted row.
+    row = broker.get_fleet(dead["fleet_id"])
     assert row is not None
     assert row["deleted_at"] is not None
 
@@ -238,14 +238,14 @@ def test_deregister_agent__root_director_protected_non_root_unaffected(
     broker_session, director_context
 ):
     result = _bootstrap(ctx=director_context)
-    sid = result["session_id"]
+    sid = result["fleet_id"]
     director_id = result["director"]["agent_id"]
 
     with pytest.raises(click.UsageError) as exc_info:
         broker.deregister_agent(director_id)
     msg = str(exc_info.value)
     assert "cannot deregister the root Director" in msg
-    assert "cafleet session delete" in msg
+    assert "cafleet fleet delete" in msg
 
     # State unchanged.
     with broker_session() as s:
@@ -253,7 +253,7 @@ def test_deregister_agent__root_director_protected_non_root_unaffected(
         p_row = (
             s.query(AgentPlacement).filter(AgentPlacement.agent_id == director_id).one()
         )
-        sess_row = s.query(SessionModel).filter(SessionModel.session_id == sid).one()
+        sess_row = s.query(FleetModel).filter(FleetModel.fleet_id == sid).one()
     assert d_row.status == "active"
     assert d_row.deregistered_at is None
     assert p_row.tmux_pane_id == director_context.pane_id
@@ -261,7 +261,7 @@ def test_deregister_agent__root_director_protected_non_root_unaffected(
 
     # Non-root member can still be deregistered.
     member = broker.register_agent(
-        session_id=sid,
+        fleet_id=sid,
         name="regular-member",
         description="regular",
     )
@@ -276,15 +276,15 @@ def test_send_message__notification_invokes_inline_preview_with_director_pane(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.send_inline_preview",
         lambda self, **kwargs: mock_preview(**kwargs),
     )
-    result = broker.create_session(
+    result = broker.create_fleet(
         label="notify",
         director_context=director_context,
         coding_agent="claude",
     )
-    sid = result["session_id"]
+    sid = result["fleet_id"]
     root_director_id = result["director"]["agent_id"]
     member = broker.register_agent(
-        session_id=sid,
+        fleet_id=sid,
         name="member",
         description="member under root",
         placement={

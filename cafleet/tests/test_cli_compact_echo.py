@@ -20,7 +20,7 @@ def runner():
 
 
 @pytest.fixture
-def session_id():
+def fleet_id():
     return str(uuid.uuid4())
 
 
@@ -31,13 +31,13 @@ def agent_id():
 
 @pytest.fixture(autouse=True)
 def _stub_verify(monkeypatch):
-    monkeypatch.setattr(broker, "verify_agent_session", lambda *_a, **_k: True)
+    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *_a, **_k: True)
 
 
 @pytest.fixture(autouse=True)
 def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda session_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda session_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 def _typed_task(
@@ -102,7 +102,7 @@ def _ping_setup(monkeypatch):
     )
 
 
-def _setup_command(monkeypatch, command, session_id, agent_id):
+def _setup_command(monkeypatch, command, fleet_id, agent_id):
     if command == "broadcast":
         monkeypatch.setattr(
             broker,
@@ -167,7 +167,7 @@ def _setup_command(monkeypatch, command, session_id, agent_id):
 )
 def test_command_echo__one_line_vs_multi_line_shape(
     runner,
-    session_id,
+    fleet_id,
     agent_id,
     monkeypatch,
     command,
@@ -175,12 +175,12 @@ def test_command_echo__one_line_vs_multi_line_shape(
     expect_oneline,
     must_not_contain,
 ):
-    args = _setup_command(monkeypatch, command, session_id, agent_id)
+    args = _setup_command(monkeypatch, command, fleet_id, agent_id)
     if mode == "quiet":
         args.append("--quiet")
     elif mode == "full":
         args.append("--full")
-    result = runner.invoke(cli, ["--session-id", session_id, *args])
+    result = runner.invoke(cli, ["--fleet-id", fleet_id, *args])
     assert result.exit_code == 0, result.output
     out = result.output.strip()
     if expect_oneline:
@@ -193,7 +193,7 @@ def test_command_echo__one_line_vs_multi_line_shape(
 
 
 def test_broadcast_default__canonical_summary_pattern(
-    runner, session_id, agent_id, monkeypatch
+    runner, fleet_id, agent_id, monkeypatch
 ):
     monkeypatch.setattr(
         broker,
@@ -205,8 +205,8 @@ def test_broadcast_default__canonical_summary_pattern(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "message",
             "broadcast",
             "--agent-id",
@@ -223,7 +223,7 @@ def test_broadcast_default__canonical_summary_pattern(
 
 
 def test_broadcast_full__multi_line_per_recipient_envelopes(
-    runner, session_id, agent_id, monkeypatch
+    runner, fleet_id, agent_id, monkeypatch
 ):
     monkeypatch.setattr(
         broker,
@@ -233,8 +233,8 @@ def test_broadcast_full__multi_line_per_recipient_envelopes(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "message",
             "broadcast",
             "--agent-id",
@@ -251,9 +251,9 @@ def test_broadcast_full__multi_line_per_recipient_envelopes(
 
 @pytest.mark.parametrize("command", ["send", "ack"])
 def test_quiet__emits_only_task_id_8(
-    runner, session_id, agent_id, monkeypatch, command
+    runner, fleet_id, agent_id, monkeypatch, command
 ):
-    args = _setup_command(monkeypatch, command, session_id, agent_id) + ["--quiet"]
-    result = runner.invoke(cli, ["--session-id", session_id, *args])
+    args = _setup_command(monkeypatch, command, fleet_id, agent_id) + ["--quiet"]
+    result = runner.invoke(cli, ["--fleet-id", fleet_id, *args])
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "abcdef01"

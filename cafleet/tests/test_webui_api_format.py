@@ -27,18 +27,18 @@ _EXPECTED_KEYS = {
 }
 
 
-def _create_session():
-    return broker.create_session(
+def _create_fleet():
+    return broker.create_fleet(
         director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
         coding_agent="claude",
     )
 
 
 def _two_agents():
-    session = _create_session()
-    sid = session["session_id"]
-    a = broker.register_agent(session_id=sid, name="alpha", description="A")
-    b = broker.register_agent(session_id=sid, name="beta", description="B")
+    session = _create_fleet()
+    sid = session["fleet_id"]
+    a = broker.register_agent(fleet_id=sid, name="alpha", description="A")
+    b = broker.register_agent(fleet_id=sid, name="beta", description="B")
     return sid, a["agent_id"], b["agent_id"]
 
 

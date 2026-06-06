@@ -32,15 +32,15 @@ def bootstrapped_member(tmp_path, monkeypatch, _reset_engine_singletons):
     runner = CliRunner()
     init = runner.invoke(cli, ["db", "init"])
     assert init.exit_code == 0, init.output
-    create = runner.invoke(cli, ["session", "create", "--json"])
+    create = runner.invoke(cli, ["fleet", "create", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
-    sid = data["session_id"]
+    sid = data["fleet_id"]
     director_id = data["director"]["agent_id"]
 
     pane_id = "%17"
     agent = broker.register_agent(
-        session_id=sid,
+        fleet_id=sid,
         name="capture-target",
         description="member to capture from",
         placement={
@@ -83,7 +83,7 @@ def test_member_capture__default_lines_and_flag_aliases(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
+            "--fleet-id",
             sid,
             "member",
             "capture",
@@ -137,7 +137,7 @@ def test_member_capture__ansi_handling(
     sid, director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
-        "--session-id",
+        "--fleet-id",
         sid,
         "member",
         "capture",
@@ -194,7 +194,7 @@ def test_member_capture__cr_defragmentation(
     sid, director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
-        "--session-id",
+        "--fleet-id",
         sid,
         "member",
         "capture",
@@ -222,7 +222,7 @@ def test_member_capture__json_envelope_post_processed_and_lines_default(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
+            "--fleet-id",
             sid,
             "--json",
             "member",

@@ -6,7 +6,7 @@ import pytest
 
 from cafleet import broker
 from tests._broker_helpers import (
-    _create_session,
+    _create_fleet,
     _register_agent,
     _setup_three_agents,
     _setup_two_agents,
@@ -54,7 +54,7 @@ def test_send_message__returns_typed_envelope_with_task_and_notification():
         ("invalid_uuid", "invalid_dest", "Invalid destination format"),
         ("missing_agent", "missing_dest", "Destination agent not found"),
         ("deregistered_agent", "deregistered_dest", "Destination agent not found"),
-        ("cross_session", "cross_session", "Destination agent not in session"),
+        ("cross_session", "cross_session", "Destination agent not in fleet"),
     ],
 )
 def test_send_message__validation_failures(scenario, build_args, expected_match):
@@ -67,8 +67,8 @@ def test_send_message__validation_failures(scenario, build_args, expected_match)
         broker.deregister_agent(recipient)
         dest_sid, dest_sender, dest = sid, sender, recipient
     else:  # cross_session
-        other = _create_session()
-        other_recipient = _register_agent(other["session_id"], name="outsider")
+        other = _create_fleet()
+        other_recipient = _register_agent(other["fleet_id"], name="outsider")
         dest_sid, dest_sender, dest = sid, sender, other_recipient["agent_id"]
     with pytest.raises(ValueError, match=expected_match):
         broker.send_message(dest_sid, dest_sender, dest, "Hello")
@@ -131,8 +131,8 @@ def test_broadcast_message__recipient_selection_matrix(
     scenario, expected_text, extra_assertion
 ):
     if scenario == "no_other_agents":
-        session = _create_session()
-        sid = session["session_id"]
+        session = _create_fleet()
+        sid = session["fleet_id"]
         lone = _register_agent(sid, name="lonely")
         # Also need to subtract administrator + director from the recipient pool —
         # they are auto-seeded. So "Broadcast sent to N" depends on how many remain.
@@ -145,8 +145,8 @@ def test_broadcast_message__recipient_selection_matrix(
         assert len(director_tasks) == 1
         return
 
-    session = _create_session()
-    sid = session["session_id"]
+    session = _create_fleet()
+    sid = session["fleet_id"]
     admin_id = session["administrator_agent_id"]
     director_id = session["director"]["agent_id"]
 
@@ -180,8 +180,8 @@ def test_broadcast_message__recipient_selection_matrix(
 
 
 def test_poll_tasks__empty_and_non_empty_shape():
-    session = _create_session()
-    idle = _register_agent(session["session_id"], name="idle")
+    session = _create_fleet()
+    idle = _register_agent(session["fleet_id"], name="idle")
     assert broker.poll_tasks(idle["agent_id"]) == []
 
     sid, sender, recipient = _setup_two_agents()
@@ -342,16 +342,16 @@ def test_get_task__returns_full_typed_envelope():
 
 
 def test_get_task__nonexistent_raises():
-    session = _create_session()
+    session = _create_fleet()
     with pytest.raises(ValueError, match="not found"):
-        broker.get_task(session["session_id"], str(uuid.uuid4()))
+        broker.get_task(session["fleet_id"], str(uuid.uuid4()))
 
 
 def test_get_task__session_boundary_rejects_foreign_session():
-    session_a = _create_session()
-    session_b = _create_session()
-    sid_a = session_a["session_id"]
-    sid_b = session_b["session_id"]
+    session_a = _create_fleet()
+    session_b = _create_fleet()
+    sid_a = session_a["fleet_id"]
+    sid_b = session_b["fleet_id"]
     sender = _register_agent(sid_a, name="sender")
     recipient = _register_agent(sid_a, name="recipient")
     sent = broker.send_message(sid_a, sender["agent_id"], recipient["agent_id"], "hi")

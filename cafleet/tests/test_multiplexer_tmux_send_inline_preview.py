@@ -127,12 +127,12 @@ def test_send_poll_trigger__keystroke_contract(monkeypatch):
     captured = _capture_run(monkeypatch)
     ok = _tmux.send_poll_trigger(
         target_pane_id="%5",
-        session_id="550e8400-e29b-41d4-a716-446655440000",
+        fleet_id="550e8400-e29b-41d4-a716-446655440000",
         agent_id="7ba91234-5678-90ab-cdef-112233445566",
     )
     assert ok is True
     assert len(captured) == 2
     keystroke = captured[0][-1]
-    assert keystroke.startswith("cafleet --session-id ")
+    assert keystroke.startswith("cafleet --fleet-id ")
     assert "message poll --agent-id" in keystroke
     assert captured[1] == ["tmux", "send-keys", "-t", "%5", "Enter"]

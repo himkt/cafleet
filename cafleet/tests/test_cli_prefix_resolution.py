@@ -35,7 +35,7 @@ NO_TASK_MSG = "no task matches id 'zz' in this session."
 
 
 @pytest.fixture
-def session_id():
+def fleet_id():
     return str(uuid.uuid4())
 
 
@@ -62,8 +62,8 @@ def _typed_task(*, task_id: str = TASK_FULL) -> dict:
 def _record_resolver(monkeypatch, attr: str, return_value: str) -> list[tuple]:
     calls: list[tuple] = []
 
-    def fake(session_id, ref):
-        calls.append((session_id, ref))
+    def fake(fleet_id, ref):
+        calls.append((fleet_id, ref))
         return return_value
 
     monkeypatch.setattr(broker, attr, fake)
@@ -71,7 +71,7 @@ def _record_resolver(monkeypatch, attr: str, return_value: str) -> list[tuple]:
 
 
 def _raise_resolver(monkeypatch, attr: str, exc: Exception) -> None:
-    def fake(session_id, ref):
+    def fake(fleet_id, ref):
         raise exc
 
     monkeypatch.setattr(broker, attr, fake)
@@ -82,9 +82,9 @@ def _raise_resolver(monkeypatch, attr: str, exc: Exception) -> None:
 
 @pytest.mark.parametrize("to_ref", [TARGET_PREFIX, TARGET_FULL])
 def test_message_send__to_resolved_before_send_message(
-    runner, session_id, monkeypatch, to_ref
+    runner, fleet_id, monkeypatch, to_ref
 ):
-    monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
+    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *a, **k: True)
     resolve_calls = _record_resolver(monkeypatch, "resolve_agent_ref", TARGET_FULL)
     send_calls: list[tuple] = []
 
@@ -97,8 +97,8 @@ def test_message_send__to_resolved_before_send_message(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "message",
             "send",
             "--agent-id",
@@ -111,15 +111,15 @@ def test_message_send__to_resolved_before_send_message(
     )
     assert result.exit_code == 0, result.output
     # Only --to is resolved; the acting --agent-id is passed through untouched.
-    assert resolve_calls == [(session_id, to_ref)]
-    assert send_calls == [(session_id, ACTING_AGENT, TARGET_FULL, "hi")]
+    assert resolve_calls == [(fleet_id, to_ref)]
+    assert send_calls == [(fleet_id, ACTING_AGENT, TARGET_FULL, "hi")]
 
 
 @pytest.mark.parametrize(("ref", "msg"), [("aa", AMBIGUOUS_MSG), ("zz", NO_AGENT_MSG)])
 def test_message_send__to_resolver_error_exits_one(
-    runner, session_id, monkeypatch, ref, msg
+    runner, fleet_id, monkeypatch, ref, msg
 ):
-    monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
+    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *a, **k: True)
     _raise_resolver(monkeypatch, "resolve_agent_ref", ValueError(msg))
     send_calls: list[tuple] = []
     monkeypatch.setattr(broker, "send_message", lambda *a, **k: send_calls.append(a))
@@ -127,8 +127,8 @@ def test_message_send__to_resolver_error_exits_one(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "message",
             "send",
             "--agent-id",
@@ -145,13 +145,13 @@ def test_message_send__to_resolver_error_exits_one(
 
 
 def test_message_send__prefix_on_acting_agent_id_is_rejected(
-    runner, session_id, monkeypatch
+    runner, fleet_id, monkeypatch
 ):
-    # message send is requires_agent_session-wrapped: verify_agent_session runs
+    # message send is requires_agent_fleet-wrapped: verify_agent_fleet runs
     # in _client_command before --to resolves. A prefix acting id is not a
     # member, so it is rejected before the handler body — and never resolved.
     monkeypatch.setattr(
-        broker, "verify_agent_session", lambda aid, sid: aid == ACTING_AGENT
+        broker, "verify_agent_fleet", lambda aid, sid: aid == ACTING_AGENT
     )
     resolve_calls = _record_resolver(monkeypatch, "resolve_agent_ref", TARGET_FULL)
     send_calls: list[tuple] = []
@@ -161,8 +161,8 @@ def test_message_send__prefix_on_acting_agent_id_is_rejected(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "message",
             "send",
             "--agent-id",
@@ -174,9 +174,9 @@ def test_message_send__prefix_on_acting_agent_id_is_rejected(
         ],
     )
     assert result.exit_code == 1, result.output
-    assert "is not a member of session" in result.output
+    assert "is not a member of fleet" in result.output
     assert acting_prefix in result.output
-    assert session_id in result.output
+    assert fleet_id in result.output
     assert resolve_calls == []
     assert send_calls == []
 
@@ -186,9 +186,9 @@ def test_message_send__prefix_on_acting_agent_id_is_rejected(
 
 @pytest.mark.parametrize("id_ref", [TARGET_PREFIX, TARGET_FULL])
 def test_agent_show__id_resolved_before_get_agent(
-    runner, session_id, monkeypatch, id_ref
+    runner, fleet_id, monkeypatch, id_ref
 ):
-    monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
+    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *a, **k: True)
     resolve_calls = _record_resolver(monkeypatch, "resolve_agent_ref", TARGET_FULL)
     get_calls: list[tuple] = []
 
@@ -207,8 +207,8 @@ def test_agent_show__id_resolved_before_get_agent(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "agent",
             "show",
             "--agent-id",
@@ -218,15 +218,15 @@ def test_agent_show__id_resolved_before_get_agent(
         ],
     )
     assert result.exit_code == 0, result.output
-    assert resolve_calls == [(session_id, id_ref)]
-    assert get_calls == [(TARGET_FULL, session_id)]
+    assert resolve_calls == [(fleet_id, id_ref)]
+    assert get_calls == [(TARGET_FULL, fleet_id)]
 
 
 @pytest.mark.parametrize(("ref", "msg"), [("aa", AMBIGUOUS_MSG), ("zz", NO_AGENT_MSG)])
 def test_agent_show__id_resolver_error_exits_one(
-    runner, session_id, monkeypatch, ref, msg
+    runner, fleet_id, monkeypatch, ref, msg
 ):
-    monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
+    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *a, **k: True)
     _raise_resolver(monkeypatch, "resolve_agent_ref", ValueError(msg))
     get_calls: list[tuple] = []
     monkeypatch.setattr(broker, "get_agent", lambda *a, **k: get_calls.append(a))
@@ -234,8 +234,8 @@ def test_agent_show__id_resolver_error_exits_one(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "agent",
             "show",
             "--agent-id",
@@ -250,12 +250,12 @@ def test_agent_show__id_resolver_error_exits_one(
 
 
 def test_agent_show__prefix_on_acting_agent_id_is_rejected(
-    runner, session_id, monkeypatch
+    runner, fleet_id, monkeypatch
 ):
-    # verify_agent_session accepts the full acting UUID only; a prefix is not a
+    # verify_agent_fleet accepts the full acting UUID only; a prefix is not a
     # member, so it is rejected before the handler body — and never resolved.
     monkeypatch.setattr(
-        broker, "verify_agent_session", lambda aid, sid: aid == ACTING_AGENT
+        broker, "verify_agent_fleet", lambda aid, sid: aid == ACTING_AGENT
     )
     resolve_calls = _record_resolver(monkeypatch, "resolve_agent_ref", TARGET_FULL)
     get_calls: list[tuple] = []
@@ -265,8 +265,8 @@ def test_agent_show__prefix_on_acting_agent_id_is_rejected(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "agent",
             "show",
             "--agent-id",
@@ -276,9 +276,9 @@ def test_agent_show__prefix_on_acting_agent_id_is_rejected(
         ],
     )
     assert result.exit_code == 1, result.output
-    assert "is not a member of session" in result.output
+    assert "is not a member of fleet" in result.output
     assert acting_prefix in result.output
-    assert session_id in result.output
+    assert fleet_id in result.output
     assert resolve_calls == []
     assert get_calls == []
 
@@ -288,9 +288,9 @@ def test_agent_show__prefix_on_acting_agent_id_is_rejected(
 
 @pytest.mark.parametrize("task_ref", [TASK_PREFIX, TASK_FULL])
 def test_message_ack__task_id_resolved_before_ack_task(
-    runner, session_id, monkeypatch, task_ref
+    runner, fleet_id, monkeypatch, task_ref
 ):
-    monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
+    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *a, **k: True)
     resolve_calls = _record_resolver(monkeypatch, "resolve_task_ref", TASK_FULL)
     ack_calls: list[tuple] = []
 
@@ -303,8 +303,8 @@ def test_message_ack__task_id_resolved_before_ack_task(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "message",
             "ack",
             "--agent-id",
@@ -314,15 +314,15 @@ def test_message_ack__task_id_resolved_before_ack_task(
         ],
     )
     assert result.exit_code == 0, result.output
-    assert resolve_calls == [(session_id, task_ref)]
+    assert resolve_calls == [(fleet_id, task_ref)]
     assert ack_calls == [(ACTING_AGENT, TASK_FULL)]
 
 
 @pytest.mark.parametrize(("ref", "msg"), [("aa", AMBIGUOUS_MSG), ("zz", NO_TASK_MSG)])
 def test_message_ack__task_id_resolver_error_exits_one(
-    runner, session_id, monkeypatch, ref, msg
+    runner, fleet_id, monkeypatch, ref, msg
 ):
-    monkeypatch.setattr(broker, "verify_agent_session", lambda *a, **k: True)
+    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *a, **k: True)
     _raise_resolver(monkeypatch, "resolve_task_ref", ValueError(msg))
     ack_calls: list[tuple] = []
     monkeypatch.setattr(broker, "ack_task", lambda *a: ack_calls.append(a))
@@ -330,8 +330,8 @@ def test_message_ack__task_id_resolver_error_exits_one(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "message",
             "ack",
             "--agent-id",
@@ -362,7 +362,7 @@ def _stub_member_tmux(monkeypatch):
 
 @pytest.mark.usefixtures("_stub_member_tmux")
 def test_member_delete__member_id_resolved_and_full_id_used_downstream(
-    runner, session_id, monkeypatch
+    runner, fleet_id, monkeypatch
 ):
     resolve_calls = _record_resolver(monkeypatch, "resolve_agent_ref", MEMBER_ID)
     get_calls: list[tuple] = []
@@ -381,8 +381,8 @@ def test_member_delete__member_id_resolved_and_full_id_used_downstream(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "member",
             "delete",
             "--agent-id",
@@ -392,16 +392,16 @@ def test_member_delete__member_id_resolved_and_full_id_used_downstream(
         ],
     )
     assert result.exit_code == 0, result.output
-    assert resolve_calls == [(session_id, member_prefix)]
+    assert resolve_calls == [(fleet_id, member_prefix)]
     # get_agent receives the resolved full id; the member is actually deleted
     # by the resolved full id, not the pasted prefix.
-    assert get_calls == [(MEMBER_ID, session_id)]
+    assert get_calls == [(MEMBER_ID, fleet_id)]
     assert deregister_calls == [MEMBER_ID]
 
 
 @pytest.mark.usefixtures("_stub_member_tmux")
 def test_member_delete__member_id_full_uuid_still_accepted(
-    runner, session_id, monkeypatch
+    runner, fleet_id, monkeypatch
 ):
     resolve_calls = _record_resolver(monkeypatch, "resolve_agent_ref", MEMBER_ID)
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_k: _agent())
@@ -410,8 +410,8 @@ def test_member_delete__member_id_full_uuid_still_accepted(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "member",
             "delete",
             "--agent-id",
@@ -421,13 +421,13 @@ def test_member_delete__member_id_full_uuid_still_accepted(
         ],
     )
     assert result.exit_code == 0, result.output
-    assert resolve_calls == [(session_id, MEMBER_ID)]
+    assert resolve_calls == [(fleet_id, MEMBER_ID)]
 
 
 @pytest.mark.parametrize(("ref", "msg"), [("aa", AMBIGUOUS_MSG), ("zz", NO_AGENT_MSG)])
 @pytest.mark.usefixtures("_stub_member_tmux")
 def test_member_delete__member_id_resolver_error_exits_one(
-    runner, session_id, monkeypatch, ref, msg
+    runner, fleet_id, monkeypatch, ref, msg
 ):
     _raise_resolver(monkeypatch, "resolve_agent_ref", ValueError(msg))
     get_calls: list[tuple] = []
@@ -436,8 +436,8 @@ def test_member_delete__member_id_resolver_error_exits_one(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "member",
             "delete",
             "--agent-id",

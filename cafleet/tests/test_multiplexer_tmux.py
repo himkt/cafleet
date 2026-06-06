@@ -251,7 +251,7 @@ def test_send_poll_trigger__return_branches_and_argv(
     monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     result = _tmux.send_poll_trigger(
         target_pane_id="%7",
-        session_id="sess-001",
+        fleet_id="sess-001",
         agent_id="agent-001",
     )
     assert result is expected_result
@@ -263,7 +263,7 @@ def test_send_poll_trigger__return_branches_and_argv(
                 "-t",
                 "%7",
                 "-l",
-                "cafleet --session-id sess-001 message poll --agent-id agent-001",
+                "cafleet --fleet-id sess-001 message poll --agent-id agent-001",
             ],
             ["tmux", "send-keys", "-t", "%7", "Enter"],
         ]

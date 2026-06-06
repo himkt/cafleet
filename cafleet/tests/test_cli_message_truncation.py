@@ -15,7 +15,7 @@ SUMMARY_TEXT = "Broadcast sent to 3 recipients"
 
 
 @pytest.fixture
-def session_id():
+def fleet_id():
     return str(uuid.uuid4())
 
 
@@ -41,13 +41,13 @@ def runner():
 
 @pytest.fixture(autouse=True)
 def _stub_verify(monkeypatch):
-    monkeypatch.setattr(broker, "verify_agent_session", lambda *_a, **_k: True)
+    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *_a, **_k: True)
 
 
 @pytest.fixture(autouse=True)
 def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda session_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda session_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 def _task_payload(task_id, *, sender, recipient, text, type_="unicast"):
@@ -86,7 +86,7 @@ def _broadcast_summary_payload(task_id, *, sender, count):
 
 
 def _setup_subcommand(
-    monkeypatch, subcommand, session_id, agent_id, other_agent_id, task_id
+    monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
 ):
     """Patch the broker call and return the CLI argv prefix for the chosen subcommand."""
     if subcommand == "poll":
@@ -143,13 +143,13 @@ def _setup_subcommand(
 @pytest.mark.parametrize("subcommand", ["poll", "show", "send"])
 @pytest.mark.parametrize("full", [False, True])
 def test_truncation__poll_show_send_text_output(
-    runner, session_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand, full
+    runner, fleet_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand, full
 ):
     args, _shape = _setup_subcommand(
-        monkeypatch, subcommand, session_id, agent_id, other_agent_id, task_id
+        monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
     )
     full_args = args + (["--full"] if full else [])
-    result = runner.invoke(cli, ["--session-id", session_id, *full_args])
+    result = runner.invoke(cli, ["--fleet-id", fleet_id, *full_args])
     assert result.exit_code == 0, result.output
     if full:
         assert LONG_BODY in result.output
@@ -161,13 +161,13 @@ def test_truncation__poll_show_send_text_output(
 @pytest.mark.parametrize("subcommand", ["poll", "show", "send"])
 @pytest.mark.parametrize("full", [False, True])
 def test_truncation__poll_show_send_json_output(
-    runner, session_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand, full
+    runner, fleet_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand, full
 ):
     args, shape = _setup_subcommand(
-        monkeypatch, subcommand, session_id, agent_id, other_agent_id, task_id
+        monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
     )
     full_args = args + (["--full"] if full else [])
-    result = runner.invoke(cli, ["--session-id", session_id, "--json", *full_args])
+    result = runner.invoke(cli, ["--fleet-id", fleet_id, "--json", *full_args])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     task = payload[0] if shape == "list" else payload["task"]
@@ -177,14 +177,14 @@ def test_truncation__poll_show_send_json_output(
 
 @pytest.mark.parametrize("subcommand", ["poll", "show", "send"])
 def test_truncation__non_text_fields_byte_identical_between_default_and_full(
-    runner, session_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand
+    runner, fleet_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand
 ):
     args, shape = _setup_subcommand(
-        monkeypatch, subcommand, session_id, agent_id, other_agent_id, task_id
+        monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
     )
-    default_res = runner.invoke(cli, ["--session-id", session_id, "--json", *args])
+    default_res = runner.invoke(cli, ["--fleet-id", fleet_id, "--json", *args])
     full_res = runner.invoke(
-        cli, ["--session-id", session_id, "--json", *args, "--full"]
+        cli, ["--fleet-id", fleet_id, "--json", *args, "--full"]
     )
     assert default_res.exit_code == 0, default_res.output
     assert full_res.exit_code == 0, full_res.output
@@ -202,7 +202,7 @@ def test_truncation__non_text_fields_byte_identical_between_default_and_full(
 @pytest.mark.parametrize("output_mode", ["text", "json"])
 @pytest.mark.parametrize("full", [False, True])
 def test_truncation__broadcast_summary_emitted_verbatim(
-    runner, session_id, agent_id, task_id, monkeypatch, output_mode, full
+    runner, fleet_id, agent_id, task_id, monkeypatch, output_mode, full
 ):
     monkeypatch.setattr(
         broker,
@@ -213,9 +213,9 @@ def test_truncation__broadcast_summary_emitted_verbatim(
     if full:
         args.append("--full")
     if output_mode == "json":
-        result = runner.invoke(cli, ["--session-id", session_id, "--json", *args])
+        result = runner.invoke(cli, ["--fleet-id", fleet_id, "--json", *args])
     else:
-        result = runner.invoke(cli, ["--session-id", session_id, *args])
+        result = runner.invoke(cli, ["--fleet-id", fleet_id, *args])
     assert result.exit_code == 0, result.output
     if output_mode == "json":
         payload = json.loads(result.output)
@@ -238,7 +238,7 @@ def test_truncation__broadcast_summary_emitted_verbatim(
 
 
 def test_truncation__poll_list_of_three_tasks_each_truncated(
-    runner, session_id, agent_id, monkeypatch
+    runner, fleet_id, agent_id, monkeypatch
 ):
     bodies = [LONG_BODY + "X", LONG_BODY + "Y", LONG_BODY + "Z"]
     monkeypatch.setattr(
@@ -254,8 +254,8 @@ def test_truncation__poll_list_of_three_tasks_each_truncated(
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "--json",
             "message",
             "poll",

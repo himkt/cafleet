@@ -44,7 +44,7 @@ def test_db_init_creates_schema(tmp_path, monkeypatch):
     assert db_file.exists()
 
     tables = _table_names(db_file)
-    expected = {"sessions", "agents", "tasks", "agent_placements", "alembic_version"}
+    expected = {"fleets", "agents", "tasks", "agent_placements", "alembic_version"}
     assert expected <= tables
 
     assert "applied" in result.output.lower()
@@ -67,7 +67,7 @@ def test_db_init_idempotent(tmp_path, monkeypatch):
     assert first.exit_code == 0, first.output
 
     tables_after_first = _table_names(db_file)
-    expected = {"sessions", "agents", "tasks", "agent_placements", "alembic_version"}
+    expected = {"fleets", "agents", "tasks", "agent_placements", "alembic_version"}
     assert expected <= tables_after_first
 
     conn = sqlite3.connect(str(db_file))

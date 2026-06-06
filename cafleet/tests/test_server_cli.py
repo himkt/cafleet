@@ -23,7 +23,7 @@ def uvicorn_recorder(monkeypatch):
     return captured
 
 
-def test_server_help__shows_host_port_and_session_id_accepted_silently():
+def test_server_help__shows_host_port_and_fleet_id_accepted_silently():
     runner = CliRunner()
     no_session_result = runner.invoke(cli, ["server", "--help"])
     assert no_session_result.exit_code == 0
@@ -31,9 +31,9 @@ def test_server_help__shows_host_port_and_session_id_accepted_silently():
     assert "--port" in no_session_result.output
     assert "is required" not in no_session_result.output
 
-    # --session-id is silently accepted and ignored on `server`.
+    # --fleet-id is silently accepted and ignored on `server`.
     sid = str(uuid.uuid4())
-    with_session = runner.invoke(cli, ["--session-id", sid, "server", "--help"])
+    with_session = runner.invoke(cli, ["--fleet-id", sid, "server", "--help"])
     assert with_session.exit_code == 0
     out_lower = with_session.output.lower()
     for forbidden in ("unused", "unexpected", "no such option"):

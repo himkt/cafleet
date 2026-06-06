@@ -33,7 +33,7 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         tables = set(insp.get_table_names())
 
         expected = {
-            "sessions",
+            "fleets",
             "agents",
             "tasks",
             "agent_placements",

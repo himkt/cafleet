@@ -21,7 +21,7 @@ from tests._member_cli_helpers import (
 
 
 @pytest.fixture
-def session_id():
+def fleet_id():
     return str(uuid.uuid4())
 
 
@@ -33,8 +33,8 @@ def _stub_tmux_available(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda session_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda session_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
+    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 @pytest.fixture
@@ -67,13 +67,13 @@ def poll_recorder(monkeypatch):
     return calls
 
 
-def _invoke(runner, session_id, **invoke_kwargs):
-    """Helper: call ``cafleet --session-id <sid> member ping ...`` (no positional)."""
+def _invoke(runner, fleet_id, **invoke_kwargs):
+    """Helper: call ``cafleet --fleet-id <sid> member ping ...`` (no positional)."""
     return runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "member",
             "ping",
             "--agent-id",
@@ -86,21 +86,21 @@ def _invoke(runner, session_id, **invoke_kwargs):
 
 
 def test_ping_dispatch__poll_trigger_called_with_correct_kwargs(
-    runner, session_id, happy_path_agent, poll_recorder
+    runner, fleet_id, happy_path_agent, poll_recorder
 ):
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
     assert len(poll_recorder) == 1
     call = poll_recorder[0]
     assert call["target_pane_id"] == PANE_ID
-    assert call["session_id"] == session_id
+    assert call["fleet_id"] == fleet_id
     assert call["agent_id"] == MEMBER_ID
 
 
 def test_ping_dispatch__text_output(
-    runner, session_id, happy_path_agent, poll_recorder
+    runner, fleet_id, happy_path_agent, poll_recorder
 ):
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
     out = result.output or ""
     assert "Pinged member" in out
@@ -110,13 +110,13 @@ def test_ping_dispatch__text_output(
 
 
 def test_ping_dispatch__json_output_two_keys(
-    runner, session_id, happy_path_agent, poll_recorder
+    runner, fleet_id, happy_path_agent, poll_recorder
 ):
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "--json",
             "member",
             "ping",
@@ -134,12 +134,12 @@ def test_ping_dispatch__json_output_two_keys(
 
 
 def test_send_failure__send_poll_trigger_returns_false_exits_one(
-    runner, session_id, happy_path_agent, monkeypatch
+    runner, fleet_id, happy_path_agent, monkeypatch
 ):
     monkeypatch.setattr(
         TmuxMultiplexer, "send_poll_trigger", lambda self, **_kw: False, raising=False
     )
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
     assert "send failed" in out
@@ -148,36 +148,36 @@ def test_send_failure__send_poll_trigger_returns_false_exits_one(
 
 
 def test_send_failure__send_poll_trigger_raises_tmux_error_exits_one(
-    runner, session_id, happy_path_agent, monkeypatch
+    runner, fleet_id, happy_path_agent, monkeypatch
 ):
     def raise_err(self, **_kw):
         raise TmuxError("simulated")
 
     monkeypatch.setattr(TmuxMultiplexer, "send_poll_trigger", raise_err, raising=False)
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     assert "send failed: simulated" in (result.output or "")
 
 
 def test_authorization_boundary__missing_agent_exits_one(
-    runner, session_id, monkeypatch
+    runner, fleet_id, monkeypatch
 ):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     assert MEMBER_ID in (result.output or "")
     assert "not found" in (result.output or "").lower()
 
 
 def test_authorization_boundary__placement_none_exits_one_with_exact_message(
-    runner, session_id, monkeypatch
+    runner, fleet_id, monkeypatch
 ):
     monkeypatch.setattr(
         broker,
         "get_agent",
         lambda *_a, **_kw: _agent(placement=None),
     )
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
     assert f"agent {MEMBER_ID}" in out
@@ -186,7 +186,7 @@ def test_authorization_boundary__placement_none_exits_one_with_exact_message(
 
 
 def test_authorization_boundary__cross_director_exits_one_with_exact_message(
-    runner, session_id, monkeypatch
+    runner, fleet_id, monkeypatch
 ):
     monkeypatch.setattr(
         broker,
@@ -195,7 +195,7 @@ def test_authorization_boundary__cross_director_exits_one_with_exact_message(
             placement=_placement(director_agent_id=OTHER_DIRECTOR_ID)
         ),
     )
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
     assert f"agent {MEMBER_ID}" in out
@@ -204,14 +204,14 @@ def test_authorization_boundary__cross_director_exits_one_with_exact_message(
 
 
 def test_authorization_boundary__pending_pane_exits_one_with_exact_message(
-    runner, session_id, monkeypatch
+    runner, fleet_id, monkeypatch
 ):
     monkeypatch.setattr(
         broker,
         "get_agent",
         lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
     )
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
     assert f"member {MEMBER_ID}" in out
@@ -220,25 +220,25 @@ def test_authorization_boundary__pending_pane_exits_one_with_exact_message(
 
 
 def test_tmux_unavailable__tmux_not_available_exits_one(
-    runner, session_id, happy_path_agent, monkeypatch
+    runner, fleet_id, happy_path_agent, monkeypatch
 ):
     def raise_unavailable(self):
         raise TmuxError("cafleet member commands must be run inside a tmux session")
 
     monkeypatch.setattr(TmuxMultiplexer, "ensure_available", raise_unavailable)
-    result = _invoke(runner, session_id)
+    result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     assert "cafleet member commands must be run inside a tmux session" in (
         result.output or ""
     )
 
 
-def test_input_validation__missing_agent_id_exits_two(runner, session_id):
+def test_input_validation__missing_agent_id_exits_two(runner, fleet_id):
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "member",
             "ping",
             "--member-id",
@@ -251,12 +251,12 @@ def test_input_validation__missing_agent_id_exits_two(runner, session_id):
     assert "--agent-id" in out
 
 
-def test_input_validation__missing_member_id_exits_two(runner, session_id):
+def test_input_validation__missing_member_id_exits_two(runner, fleet_id):
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "member",
             "ping",
             "--agent-id",
@@ -269,12 +269,12 @@ def test_input_validation__missing_member_id_exits_two(runner, session_id):
     assert "--member-id" in out
 
 
-def test_input_validation__unexpected_positional_argument_exits_two(runner, session_id):
+def test_input_validation__unexpected_positional_argument_exits_two(runner, fleet_id):
     result = runner.invoke(
         cli,
         [
-            "--session-id",
-            session_id,
+            "--fleet-id",
+            fleet_id,
             "member",
             "ping",
             "--agent-id",

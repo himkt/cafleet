@@ -13,7 +13,7 @@ def _cli():
 
 
 _STANDARD_KWARGS = {
-    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "fleet_id": "550e8400-e29b-41d4-a716-446655440000",
     "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
     "director_name": "Alice",
     "director_agent_id": "dir-001",
@@ -21,11 +21,11 @@ _STANDARD_KWARGS = {
 
 
 def test_member_prompt_template__has_required_placeholders():
-    """The slim spawn prompt uses ``{session_id}`` / ``{agent_id}`` /
+    """The slim spawn prompt uses ``{fleet_id}`` / ``{agent_id}`` /
     ``{director_agent_id}`` and does not include ``{director_name}``."""
     cli = _cli()
     template = cli._MEMBER_PROMPT_TEMPLATE
-    assert "{session_id}" in template
+    assert "{fleet_id}" in template
     assert "{agent_id}" in template
     assert "{director_name}" not in template
     assert "{director_agent_id}" in template
@@ -55,6 +55,6 @@ def test_member_prompt_template__format_succeeds_with_standard_kwargs():
     assert "7ba91234-5678-90ab-cdef-112233445566" in result
     assert "dir-001" in result
     # Substitution is total: no raw placeholders survive the .format() call.
-    assert "{session_id}" not in result
+    assert "{fleet_id}" not in result
     assert "{agent_id}" not in result
     assert "{director_agent_id}" not in result

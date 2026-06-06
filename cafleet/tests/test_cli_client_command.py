@@ -1,7 +1,7 @@
 """Tests for the ``_client_command`` decorator.
 
 The Programmer adds a private decorator ``_client_command`` to ``cli.py``
-that subsumes the ``--session-id`` guard, optional ``--agent-id``-belongs-to-session
+that subsumes the ``--fleet-id`` guard, optional ``--agent-id``-belongs-to-session
 validation, broker-error wrapping, and JSON-vs-text output branching.
 
 The tests use a tiny test-only click group (declared at module top) wired
@@ -21,11 +21,11 @@ from cafleet.cli import _client_command
 
 @click.group()
 @click.option("--json", "json_output", is_flag=True, default=False)
-@click.option("--session-id", "session_id", default=None)
+@click.option("--fleet-id", "fleet_id", default=None)
 @click.pass_context
-def _test_cli(ctx, json_output, session_id):
+def _test_cli(ctx, json_output, fleet_id):
     ctx.ensure_object(dict)
-    ctx.obj["session_id"] = session_id
+    ctx.obj["fleet_id"] = fleet_id
     ctx.obj["json_output"] = json_output
 
 
@@ -40,7 +40,7 @@ def _simple(ctx):
 @click.option("--agent-id", required=True)
 @click.pass_context
 @_client_command(
-    requires_agent_session=True,
+    requires_agent_fleet=True,
     text_formatter=lambda r: f"TEXT:{r}",
 )
 def _agent_bound(ctx, agent_id):
@@ -59,30 +59,30 @@ def runner():
     return CliRunner()
 
 
-def test_session_id_guard__missing_session_id_raises_click_exception(runner):
+def test_fleet_id_guard__missing_fleet_id_raises_click_exception(runner):
     result = runner.invoke(_test_cli, ["simple"])
     assert result.exit_code != 0
-    assert "session-id" in result.output.lower() or "is required" in result.output
+    assert "fleet-id" in result.output.lower() or "is required" in result.output
 
 
-def test_requires_agent_session__false_does_not_call_verify(runner, monkeypatch):
+def test_requires_agent_fleet__false_does_not_call_verify(runner, monkeypatch):
     verify_calls = []
 
     def fake_verify(aid, sid):
         verify_calls.append((aid, sid))
         return True
 
-    monkeypatch.setattr(broker, "verify_agent_session", fake_verify)
+    monkeypatch.setattr(broker, "verify_agent_fleet", fake_verify)
 
     result = runner.invoke(
         _test_cli,
-        ["--session-id", "session-1", "simple"],
+        ["--fleet-id", "session-1", "simple"],
     )
     assert result.exit_code == 0, result.output
     assert verify_calls == []
 
 
-def test_requires_agent_session__true_calls_verify_and_raises_on_false(
+def test_requires_agent_fleet__true_calls_verify_and_raises_on_false(
     runner, monkeypatch
 ):
     verify_calls = []
@@ -91,12 +91,12 @@ def test_requires_agent_session__true_calls_verify_and_raises_on_false(
         verify_calls.append((aid, sid))
         return False
 
-    monkeypatch.setattr(broker, "verify_agent_session", fake_verify)
+    monkeypatch.setattr(broker, "verify_agent_fleet", fake_verify)
 
     result = runner.invoke(
         _test_cli,
         [
-            "--session-id",
+            "--fleet-id",
             "session-1",
             "agent-bound",
             "--agent-id",
@@ -104,19 +104,19 @@ def test_requires_agent_session__true_calls_verify_and_raises_on_false(
         ],
     )
     assert result.exit_code != 0
-    assert "not a member of session" in result.output
+    assert "not a member of fleet" in result.output
     assert verify_calls == [("agent-1", "session-1")]
 
 
-def test_requires_agent_session__true_proceeds_when_verify_returns_true(
+def test_requires_agent_fleet__true_proceeds_when_verify_returns_true(
     runner, monkeypatch
 ):
-    monkeypatch.setattr(broker, "verify_agent_session", lambda _a, _s: True)
+    monkeypatch.setattr(broker, "verify_agent_fleet", lambda _a, _s: True)
 
     result = runner.invoke(
         _test_cli,
         [
-            "--session-id",
+            "--fleet-id",
             "session-1",
             "agent-bound",
             "--agent-id",
@@ -131,7 +131,7 @@ def test_requires_agent_session__true_proceeds_when_verify_returns_true(
 def test_broker_error_wrapping__runtime_error_wrapped_as_click_exception(runner):
     result = runner.invoke(
         _test_cli,
-        ["--session-id", "session-1", "raises"],
+        ["--fleet-id", "session-1", "raises"],
     )
     assert result.exit_code == 1, result.output
     assert "boom!" in result.output
@@ -140,7 +140,7 @@ def test_broker_error_wrapping__runtime_error_wrapped_as_click_exception(runner)
 def test_output_branching__json_output_branch_uses_format_json(runner):
     result = runner.invoke(
         _test_cli,
-        ["--json", "--session-id", "session-1", "simple"],
+        ["--json", "--fleet-id", "session-1", "simple"],
     )
     assert result.exit_code == 0, result.output
     parsed = json.loads(result.output)
@@ -150,7 +150,7 @@ def test_output_branching__json_output_branch_uses_format_json(runner):
 def test_output_branching__text_output_branch_uses_text_formatter(runner):
     result = runner.invoke(
         _test_cli,
-        ["--session-id", "session-1", "simple"],
+        ["--fleet-id", "session-1", "simple"],
     )
     assert result.exit_code == 0, result.output
     assert result.output.startswith("TEXT:")

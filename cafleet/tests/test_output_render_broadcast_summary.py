@@ -3,7 +3,7 @@
 import pytest
 
 from cafleet import broker
-from tests._broker_helpers import _create_session, _register_agent
+from tests._broker_helpers import _create_fleet, _register_agent
 
 
 @pytest.fixture(autouse=True)
@@ -12,8 +12,8 @@ def _autouse_broker(broker_session):
 
 
 def test_broadcast_summary__exactly_typed_column_keys_no_recipient_ids_no_metadata():
-    s = _create_session()
-    sid = s["session_id"]
+    s = _create_fleet()
+    sid = s["fleet_id"]
     sender = _register_agent(sid, "sender")
     _register_agent(sid, "recipient-a")
     _register_agent(sid, "recipient-b")
@@ -38,8 +38,8 @@ def test_broadcast_summary__exactly_typed_column_keys_no_recipient_ids_no_metada
 
 
 def test_broadcast_summary__wrapper_count_and_text_describes_recipient_count():
-    s = _create_session()
-    sid = s["session_id"]
+    s = _create_fleet()
+    sid = s["fleet_id"]
     sender = _register_agent(sid, "sender")
     _register_agent(sid, "recipient-a")
     _register_agent(sid, "recipient-b")
