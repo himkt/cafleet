@@ -13,7 +13,7 @@ The `cafleet-base-dir` skill is the single authoritative resolver for every CAFl
 
 ## Procedure
 
-This skill resolves `${BASE}` using only `git rev-parse --show-toplevel` (Bash) and `AskUserQuestion`. It writes nothing at resolution time. Claude's job is to (a) pick the task-scope branch (Step 0) when the consuming skill operates on a per-task folder, otherwise the shared-root branch (Step 1); and (b) drive `AskUserQuestion` (Step 2) only when Step 1 ends in "needs user input".
+This skill resolves `${BASE}` using only `git rev-parse --show-toplevel` (Bash) and `AskUserQuestion`. It writes nothing at resolution time. Claude's job is to (a) pick the task-scope branch (Step 0) when the consuming skill operates on a per-task folder, otherwise the shared-root branch (Step 1); and (b) drive `AskUserQuestion` (Step 2) only when Step 1 reaches branch 3 (CWD is `$HOME` or under `~/.claude`).
 
 ### Step 0. Task-scope resolution (preferred for task-aware consuming skills)
 
@@ -45,7 +45,7 @@ When the consuming skill has no per-task folder convention (the shared-root case
 2. **If the CWD is NOT `$HOME` and NOT `claude_subdir` (nor under it)** → `${BASE}` is the CWD itself (the working directory, **not** the repo root). Done.
 3. **Otherwise** (CWD is `$HOME` or under `~/.claude`) → go to Step 2 with candidates `[/tmp/claude-code, <CWD>]`.
 
-### Step 2. AskUserQuestion (only when Step 1 ends in "needs user input")
+### Step 2. AskUserQuestion (only when Step 1 reaches branch 3)
 
 Present the candidates via `AskUserQuestion` ("Select the base directory for output files:"):
 
