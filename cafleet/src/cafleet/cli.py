@@ -63,7 +63,7 @@ def _director_member_options(func):
 
 
 def _require_fleet_id(ctx: click.Context) -> None:
-    if not ctx.obj["fleet_id"]:
+    if ctx.obj["fleet_id"] is None:
         raise click.ClickException(
             "--fleet-id <int> is required for this subcommand. "
             "Create a fleet with 'cafleet fleet create' and pass its id."
