@@ -28,14 +28,14 @@ When the consuming skill operates on a per-task folder, it picks the task-folder
 
 **The consuming skill is responsible for passing a task-folder path that is the actual task folder**, not a child file path — this procedure does no slug-folding or filename-stripping.
 
-**Consumer contract — canonicalize ARGUMENTS to the task-folder path before resolving.** The procedure is deliberately general: it does not strip trailing filenames (e.g. `/design-doc.md`, `/report.md`) and does not strip leading bucket prefixes (e.g. `design-docs/`, `researches/`). It creates `<task-folder>/` exactly as supplied. Each consuming skill MUST canonicalize `$ARGUMENTS` against its own convention BEFORE running Step 0:
+**Consumer contract — canonicalize ARGUMENTS to the task-folder path before resolving.** The procedure is deliberately general: it does not strip trailing filenames (e.g. `/design-doc.md`, `/report.md`) and does not strip leading bucket prefixes (e.g. `design-docs/`, `researches/`). It treats `<task-folder>/` as the task folder exactly as supplied (created lazily on the first consumer write). Each consuming skill MUST canonicalize `$ARGUMENTS` against its own convention BEFORE running Step 0:
 
 | Consumer | Canonical task-folder path form | Canonicalization steps |
 |:--|:--|:--|
 | The `cafleet-design-doc-create` / `cafleet-design-doc-execute` / `cafleet-design-doc-interview` skills | `design-docs/<slug>` | (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`. **Absolute paths**: apply the same `/design-doc.md` strip (a child file path otherwise becomes a directory named after the file). |
 | The `cafleet-research-report` / `cafleet-research-presentation` skills | `researches/<topic-slug>` | (1) strip trailing `/report.md` (or other known per-topic filenames) if present; (2) strip leading `researches/` if present; (3) prepend `researches/`. **Absolute paths**: apply the same `/report.md` strip (a child file path otherwise becomes a directory named after the file). |
 
-The stripping logic is skill-specific because each skill knows the file conventions inside its own bucket. The resolution procedure stays bucket-agnostic. Skipping canonicalization creates a directory literally named `design-doc.md` (or `report.md`, etc.) and resolves the wrong BASE.
+The stripping logic is skill-specific because each skill knows the file conventions inside its own bucket. The resolution procedure stays bucket-agnostic. Skipping canonicalization resolves the wrong BASE — a directory literally named `design-doc.md` (or `report.md`, etc.) instead of the intended task folder.
 
 ### Step 1. Shared-root resolution (no task name)
 
