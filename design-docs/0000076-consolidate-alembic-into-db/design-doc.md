@@ -1,7 +1,7 @@
 # Consolidate Alembic schema-management files into the `db` package
 
-**Status**: Approved
-**Progress**: 10/15 tasks complete
+**Status**: Complete
+**Progress**: 15/15 tasks complete
 **Last Updated**: 2026-06-07
 
 ## Overview
@@ -10,11 +10,11 @@ Relocate the Alembic configuration (`alembic.ini`) and migration tree (`alembic/
 
 ## Success Criteria
 
-- [ ] `alembic.ini` lives at `cafleet/src/cafleet/db/alembic.ini` and the migration tree at `cafleet/src/cafleet/db/alembic/` (`env.py`, `script.py.mako`, `versions/0001_initial_schema.py`).
-- [ ] `cafleet db init` and the Alembic smoke tests resolve the bundled `alembic.ini` from the `cafleet.db` package and run migrations to head successfully.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` are all green.
-- [ ] `mise //cafleet:build` produces a wheel that bundles `db/alembic.ini` and `db/alembic/**/*`.
-- [ ] No stale `importlib.resources.files("cafleet") / "alembic.ini"` lookup and no stale `src/cafleet/alembic` / `cafleet/src/cafleet/alembic` path reference remains anywhere in the repo outside `design-docs/`.
+- [x] `alembic.ini` lives at `cafleet/src/cafleet/db/alembic.ini` and the migration tree at `cafleet/src/cafleet/db/alembic/` (`env.py`, `script.py.mako`, `versions/0001_initial_schema.py`).
+- [x] `cafleet db init` and the Alembic smoke tests resolve the bundled `alembic.ini` from the `cafleet.db` package and run migrations to head successfully.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` are all green.
+- [x] `mise //cafleet:build` produces a wheel that bundles `db/alembic.ini` and `db/alembic/**/*`.
+- [x] No stale `importlib.resources.files("cafleet") / "alembic.ini"` lookup and no stale `src/cafleet/alembic` / `cafleet/src/cafleet/alembic` path reference remains anywhere in the repo outside `design-docs/`.
 
 ---
 
@@ -127,11 +127,11 @@ The file move (Step 2) and the in-tree reference updates (Step 3) MUST land in a
 
 ### Step 4: Verify
 
-- [ ] `mise //cafleet:test` green — `test_alembic_smoke.py` exercises the relocated bundle directly (migrate to head, expected tables, single `0001` revision) and `test_db_init.py` exercises it via `cafleet db init` → `cli.py:191`. (`_helpers.py:11` is dead code, not run by the suite; it is verified only by the Step-4 grep sweep below.) <!-- completed: -->
-- [ ] `mise //cafleet:lint` green. <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` green. <!-- completed: -->
-- [ ] `mise //cafleet:build` succeeds and the resulting wheel under `cafleet/dist/` contains `cafleet/db/alembic.ini` and `cafleet/db/alembic/**/*` (confirms the updated `include` globs bundle the relocated files). <!-- completed: -->
-- [ ] Editable reinstall (`mise //cafleet:install`) so the global `cafleet` binary picks up the new resource path, then final removal-rule sweep: zero `files("cafleet") / "alembic.ini"` lookups and zero `src/cafleet/alembic` / `cafleet/src/cafleet/alembic` path references outside `design-docs/`. <!-- completed: -->
+- [x] `mise //cafleet:test` green — `test_alembic_smoke.py` exercises the relocated bundle directly (migrate to head, expected tables, single `0001` revision) and `test_db_init.py` exercises it via `cafleet db init` → `cli.py:191`. (`_helpers.py:11` is dead code, not run by the suite; it is verified only by the Step-4 grep sweep below.) <!-- completed: 2026-06-07T06:21 -->
+- [x] `mise //cafleet:lint` green. <!-- completed: 2026-06-07T06:21 -->
+- [x] `mise //cafleet:typecheck` green. <!-- completed: 2026-06-07T06:21 -->
+- [x] `mise //cafleet:build` succeeds and the resulting wheel under `cafleet/dist/` contains `cafleet/db/alembic.ini` and `cafleet/db/alembic/**/*` (confirms the updated `include` globs bundle the relocated files). <!-- completed: 2026-06-07T06:23 -->
+- [x] Editable reinstall (`mise //cafleet:install`) so the global `cafleet` binary picks up the new resource path, then final removal-rule sweep: zero `files("cafleet") / "alembic.ini"` lookups and zero `src/cafleet/alembic` / `cafleet/src/cafleet/alembic` path references outside `design-docs/`. <!-- completed: 2026-06-07T06:21 -->
 
 ---
 
@@ -141,3 +141,4 @@ The file move (Step 2) and the in-tree reference updates (Step 3) MUST land in a
 |------|---------|
 | 2026-06-07 | Initial draft |
 | 2026-06-07 | Review round 1: annotated site #4 (`_helpers.py:11`) as dead-but-retargeted; corrected Step-4 test-coverage claim (`test_db_init.py` over `_helpers.py`); added the docs-first design-doc commit task |
+| 2026-06-07 | Implemented: relocated `alembic.ini` + `alembic/` into `cafleet.db`; all 15 tasks + 5 Success Criteria complete; verified (test 662, lint, typecheck, wheel bundles `db/alembic`, removal sweep clean); PR #98 (Copilot reviewed, no findings); Status → Complete |
