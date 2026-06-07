@@ -227,7 +227,7 @@ Load the `cafleet-base-dir` skill for the no-bypass write protocol and `<unset>`
 
 - **`$ARGUMENTS` absent** (the discover-all-approved-docs flow): the no-argument form scans `<repo-root>/design-docs/`, so the Director MUST invoke from the repo root. Verify with `git rev-parse --show-toplevel` and abort with a clear "invoke from the repo root" error if `cwd` differs. Then run the skill's **Step 1 (shared-root resolution)**:
 
-  Because we just verified `cwd == repo root` (and the repo root is never `$HOME` / `~/.claude`), Step 1 here always **resolves** deterministically to the CWD — branch 3 and its `AskUserQuestion` are unreachable in this flow. Set `${BASE}` to that CWD, then set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
+  Because we just verified `cwd == repo root`, Step 1 normally **resolves** to the CWD (the repo root); only in the rare case where the repo root is itself `$HOME` or under `~/.claude` does Step 1 reach branch 3 and drive **Step 2** `AskUserQuestion`. Take the resulting value as `${BASE}`, then set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
 
 #### Phase 2: Three-Tier Detection
 

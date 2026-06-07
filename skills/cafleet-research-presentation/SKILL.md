@@ -71,7 +71,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
 2. Load the `cafleet-base-dir` skill for the no-bypass write protocol and `<unset>` sentinel contract.
 3. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
 
-   - If `$ARGUMENTS` is a relative folder name (e.g. `my-topic`), **canonicalize first**: strip a trailing `/report.md` if present, strip a leading `researches/` prefix if present, then prepend `researches/`. Step 0 does no folding, so passing `researches/my-topic` raw would resolve `researches/researches/my-topic`. Then run the skill's **Step 0 (task-scope resolution)** with the relpath `researches/$CANONICAL_SLUG`.
+   - If `$ARGUMENTS` is a relative folder name (e.g. `my-topic`), **canonicalize first**: strip a trailing `/report.md` if present, strip a leading `researches/` prefix if present, then prepend `researches/`. Step 0 does no folding, so the strip-leading-`researches/` step is what prevents a doubled `researches/researches/my-topic` when `$ARGUMENTS` already begins with `researches/`. Then run the skill's **Step 0 (task-scope resolution)** with the relpath `researches/$CANONICAL_SLUG`.
 
    - If `$ARGUMENTS` is an absolute path (e.g. `/abs/path/to/researches/my-topic`), **canonicalize first**: strip a trailing `/report.md` if present. Store the canonicalized absolute folder path in `$CANONICAL_ABS` and run Step 0 with that absolute path.
 
