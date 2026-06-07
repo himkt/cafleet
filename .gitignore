@@ -32,11 +32,6 @@ __pycache__/
 /researches/
 
 # ==== CAFleet runtime artifacts at the repo root ====
-# Anchor file written by the `cafleet-base-dir` skill's record step.
-# Also matches per-task anchors the skill writes inside
-# <repo>/researches/<slug>/ and <repo>/design-docs/<NNNNNNN>-<slug>/.
-.cafleet-base-dir.json
-
 # Stray spawn-prompt audit writes at the repo root; the canonical location is
 # per-task `prompts/` folders (`researches/<slug>/prompts/`,
 # `design-docs/<NNNNNNN>-<slug>/prompts/`).

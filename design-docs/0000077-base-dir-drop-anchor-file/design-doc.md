@@ -1,7 +1,7 @@
 # 0000077 — Drop the `.cafleet-base-dir.json` anchor file
 
 **Status**: Approved
-**Progress**: 13/18 tasks complete
+**Progress**: 15/18 tasks complete
 **Last Updated**: 2026-06-07
 
 ## Overview
@@ -147,8 +147,8 @@ Per the project documentation-first rule, the skill and docs land before any oth
 
 ### Step 3: Remove the `.gitignore` anchor entry
 
-- [ ] Delete the `.cafleet-base-dir.json` entry + its 3-line comment; keep the section header and the `/prompts/` + per-role audit entries <!-- completed: -->
-- [ ] Sweep the working tree for any lingering `.cafleet-base-dir.json` files (repo root, `researches/<slug>/`, `design-docs/<NNNNNNN>-<slug>/`) and delete them, or confirm none exist — so dropping the ignore pattern does not surface stale anchors as untracked (per `rules/removal.md`) <!-- completed: -->
+- [x] Delete the `.cafleet-base-dir.json` entry + its 3-line comment; keep the section header and the `/prompts/` + per-role audit entries <!-- completed: 2026-06-07T09:00 -->
+- [x] Sweep the working tree for any lingering `.cafleet-base-dir.json` files (repo root, `researches/<slug>/`, `design-docs/<NNNNNNN>-<slug>/`) and delete them, or confirm none exist — so dropping the ignore pattern does not surface stale anchors as untracked (per `rules/removal.md`) <!-- completed: 2026-06-07T09:04 -->
 
 
 ### Step 4: Verify
