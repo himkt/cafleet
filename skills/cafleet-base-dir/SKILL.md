@@ -17,20 +17,20 @@ This skill resolves `${BASE}` using only `git rev-parse --show-toplevel` (Bash) 
 
 ### Step 0. Task-scope resolution (preferred for task-aware consuming skills)
 
-When the consuming skill operates on a per-task folder, it picks the task-relpath itself (the resolver is general-purpose and does NOT enumerate or special-case any bucket name — `researches/`, `design-docs/`, etc. are all consumer-side conventions). Resolve as follows:
+When the consuming skill operates on a per-task folder, it picks the task-folder path itself (the resolver is general-purpose and does NOT enumerate or special-case any bucket name — `researches/`, `design-docs/`, etc. are all consumer-side conventions). Resolve as follows:
 
 1. **Infer the repo root.** Run `git rev-parse --show-toplevel` (Bash) from the CWD. A non-zero exit or empty output means "no `.git` ancestor" → STOP and tell the user to `cd` to the repo root and retry.
-2. **Canonicalize** `$ARGUMENTS` to the task-folder relpath per the consumer's convention (table below) BEFORE proceeding.
-3. **Guard the path.** Reject a `task_name` that escapes or degenerates to the repo root:
-   - **Relative `task_name`**: join it under the repo root and resolve. If the result equals the repo root → STOP ("the repo root is not a task folder"). If the result is not under the repo root (a `..` escape) → STOP ("refusing to create a task folder outside the repo").
-   - **Absolute `task_name`**: resolve it. If it equals the repo root OR is not strictly under it → `${BASE} = <unset>` (the absolute-path-arg branch); create nothing.
+2. **Canonicalize** `$ARGUMENTS` to the task-folder path per the consumer's convention (table below) BEFORE proceeding. The task-folder path may be relative or absolute.
+3. **Guard the task-folder path.** Reject one that escapes or degenerates to the repo root:
+   - **Relative task-folder path**: join it under the repo root and resolve. If the result equals the repo root → STOP ("the repo root is not a task folder"). If the result is not under the repo root (a `..` escape) → STOP ("refusing to create a task folder outside the repo").
+   - **Absolute task-folder path**: resolve it. If it equals the repo root OR is not strictly under it → `${BASE} = <unset>` (the absolute-path-arg branch); create nothing.
 4. `${BASE}` = the absolute task folder. The folder is created lazily on the first consumer write (the `Write` tool auto-creates parent directories), so there is no resolution-time write. Audit files such as `${BASE}/prompts/<role>-<UTC-compact>.md` land under the task folder rather than at the repo root.
 
-**The consuming skill is responsible for passing a relpath that is the actual task folder**, not a child file path — this procedure does no slug-folding or filename-stripping.
+**The consuming skill is responsible for passing a task-folder path that is the actual task folder**, not a child file path — this procedure does no slug-folding or filename-stripping.
 
-**Consumer contract — canonicalize ARGUMENTS to the task-folder relpath before resolving.** The procedure is deliberately general: it does not strip trailing filenames (e.g. `/design-doc.md`, `/report.md`) and does not strip leading bucket prefixes (e.g. `design-docs/`, `researches/`). It creates `<task-folder>/` exactly as supplied. Each consuming skill MUST canonicalize `$ARGUMENTS` against its own convention BEFORE running Step 0:
+**Consumer contract — canonicalize ARGUMENTS to the task-folder path before resolving.** The procedure is deliberately general: it does not strip trailing filenames (e.g. `/design-doc.md`, `/report.md`) and does not strip leading bucket prefixes (e.g. `design-docs/`, `researches/`). It creates `<task-folder>/` exactly as supplied. Each consuming skill MUST canonicalize `$ARGUMENTS` against its own convention BEFORE running Step 0:
 
-| Consumer | Canonical relpath form | Canonicalization steps |
+| Consumer | Canonical task-folder path form | Canonicalization steps |
 |:--|:--|:--|
 | The `cafleet-design-doc-create` / `cafleet-design-doc-execute` / `cafleet-design-doc-interview` skills | `design-docs/<slug>` | (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`. **Absolute paths**: apply the same `/design-doc.md` strip (a child file path otherwise becomes a directory named after the file). |
 | The `cafleet-research-report` / `cafleet-research-presentation` skills | `researches/<topic-slug>` | (1) strip trailing `/report.md` (or other known per-topic filenames) if present; (2) strip leading `researches/` if present; (3) prepend `researches/`. **Absolute paths**: apply the same `/report.md` strip (a child file path otherwise becomes a directory named after the file). |
