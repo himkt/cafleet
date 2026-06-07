@@ -42,8 +42,8 @@ The stripping logic is skill-specific because each skill knows the file conventi
 When the consuming skill has no per-task folder convention (the shared-root case):
 
 1. Determine the CWD and `$HOME`. Let `claude_subdir = $HOME/.claude`.
-2. **If the CWD is NOT `$HOME` and NOT `claude_subdir` (nor under it)** → `${BASE}` is the CWD itself (the working directory, **not** the repo root). Done.
-3. **Otherwise** (CWD is `$HOME` or under `~/.claude`) → go to Step 2 with candidates `[/tmp/claude-code, <CWD>]`.
+2. **If the CWD is neither `$HOME` itself nor `claude_subdir` (`~/.claude`) nor any directory under `~/.claude`** → `${BASE}` is the CWD itself (the working directory, **not** the repo root). Done. (Only `$HOME` exactly and the `~/.claude` subtree fall through to Step 2 — an ordinary project elsewhere under `$HOME` resolves here.)
+3. **Otherwise** (CWD is `$HOME` exactly, or `~/.claude` / any directory under it) → go to Step 2 with candidates `[/tmp/claude-code, <CWD>]`.
 
 ### Step 2. AskUserQuestion (only when Step 1 reaches branch 3)
 
