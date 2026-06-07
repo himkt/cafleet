@@ -163,21 +163,15 @@ the member surface.
 The `${BASE}` output-root used by every CAFleet scratch / audit / figure write
 is resolved by the `cafleet-base-dir` skill (loaded by each consuming team
 skill), not by a CLI subcommand. Resolution operates on the local filesystem
-only. The skill determines BASE from CWD inference or an existing anchor; when
-CWD is `$HOME` or under `$HOME/.claude` and no usable anchor exists, it drives
+only and writes nothing at resolution time. The skill determines BASE from CWD
+inference; when CWD is `$HOME` or under `$HOME/.claude` it drives
 `AskUserQuestion` on the candidate roots. For task-aware skills it engages a
 task-scope branch: it infers the repo root via `git rev-parse --show-toplevel`,
-joins the task relpath under it, auto-creates the task folder, and writes an
-anchor inline at `<task-folder>/.cafleet-base-dir.json` (`source: "task-scope"`).
-An absolute-path task name is accepted only when it lives strictly under the
-inferred repo root; otherwise the `<unset>` sentinel is returned. Resolution
-never falls back to `/tmp` silently, and writing an anchor is idempotent — a
-matching anchor is a no-op, a mismatched one is a hard error.
-
-The anchor schema is version-locked at `1` and rejected on any other value
-(silent forward-compatibility would let two installations at different
-cafleet versions disagree about BASE). `resolved_at` follows the same
-UTC-microsecond `+00:00` convention as cafleet `status_timestamp`.
+joins the task relpath under it, and resolves `${BASE}` to that absolute task
+folder (created lazily on the first consumer write). An absolute-path task name
+is accepted only when it lives strictly under the inferred repo root; otherwise
+the `<unset>` sentinel is returned. Resolution never falls back to `/tmp`
+silently.
 
 The `<unset>` sentinel (literal string `"<unset>"`, case-sensitive) is
 returned only when the caller passed an absolute-path argument. Consumers
