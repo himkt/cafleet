@@ -4,7 +4,7 @@ The `Task` payload is fully relational: every routing field plus the message bod
 
 The model is **predominantly relational**: every queried field on `tasks` is a typed column, and the only opaque payload is the `agent_card_json` document on `agents`.
 
-Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver (see `cafleet/src/cafleet/db/engine.py`'s `get_sync_engine` / `get_sync_sessionmaker`). The schema is created by a single initial migration (`0001_initial_schema.py`, `down_revision=None`); operators apply it once via `cafleet db init` before starting the server.
+Schema management is handled by Alembic (`cafleet/src/cafleet/db/alembic/`); the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver (see `cafleet/src/cafleet/db/engine.py`'s `get_sync_engine` / `get_sync_sessionmaker`). The schema is created by a single initial migration (`0001_initial_schema.py`, `down_revision=None`); operators apply it once via `cafleet db init` before starting the server.
 
 ## SQL Schema
 

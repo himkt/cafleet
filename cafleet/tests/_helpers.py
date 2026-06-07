@@ -8,7 +8,7 @@ from alembic.config import Config
 
 def _make_alembic_cfg(db_path) -> Config:
     with importlib.resources.as_file(
-        importlib.resources.files("cafleet") / "alembic.ini"
+        importlib.resources.files("cafleet.db") / "alembic.ini"
     ) as ini_path:
         cfg = Config(str(ini_path))
         cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")

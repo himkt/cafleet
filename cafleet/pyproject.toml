@@ -23,8 +23,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/cafleet"]
 include = [
-  "src/cafleet/alembic.ini",
-  "src/cafleet/alembic/**/*",
+  "src/cafleet/db/alembic.ini",
+  "src/cafleet/db/alembic/**/*",
   "src/cafleet/webui/**/*",
 ]
 
