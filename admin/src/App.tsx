@@ -46,13 +46,13 @@ export default function App() {
         const fleets = await listFleets();
         if (cancelled) return;
 
-        const found = fleets.some((s) => s.fleet_id === route.fleetId);
+        const found = fleets.some((s) => s.fleet_id === Number(route.fleetId));
         if (!found) {
           navigate("/fleets");
           return;
         }
 
-        setFleetId(route.fleetId!);
+        setFleetId(Number(route.fleetId));
         const data = await getAgents();
         if (cancelled) return;
         setAgents(data.agents);
@@ -72,7 +72,7 @@ export default function App() {
     };
   }, [route]);
 
-  const handleSelectFleet = useCallback(async (sid: string) => {
+  const handleSelectFleet = useCallback(async (sid: number) => {
     setFleetId(sid);
     try {
       const data = await getAgents();
@@ -100,7 +100,7 @@ export default function App() {
   if (route.kind === "dashboard" && route.fleetId) {
     return (
       <Dashboard
-        fleetId={route.fleetId}
+        fleetId={Number(route.fleetId)}
         initialAgents={agents}
         onBack={handleBack}
       />

@@ -299,13 +299,15 @@ def test_fleet_list_hides_soft_deleted__deleted_fleet_is_hidden_from_text_list(
     keep_sid = json.loads(r1.output)["fleet_id"]
     drop_sid = json.loads(r2.output)["fleet_id"]
 
-    del_result = runner.invoke(cli, ["fleet", "delete", drop_sid])
+    del_result = runner.invoke(cli, ["fleet", "delete", str(drop_sid)])
     assert del_result.exit_code == 0, del_result.output
 
     list_result = runner.invoke(cli, ["fleet", "list"])
     assert list_result.exit_code == 0
-    assert keep_sid in list_result.output
-    assert drop_sid not in list_result.output
+    data_lines = list_result.output.splitlines()[1:]
+    fleet_id_column = {line.split()[0] for line in data_lines if line.split()}
+    assert str(keep_sid) in fleet_id_column
+    assert str(drop_sid) not in fleet_id_column
 
 
 def test_fleet_list_hides_soft_deleted__deleted_fleet_is_hidden_from_json_list(
@@ -316,7 +318,7 @@ def test_fleet_list_hides_soft_deleted__deleted_fleet_is_hidden_from_json_list(
     r2 = runner.invoke(cli, ["fleet", "create", "--json"])
     keep_sid = json.loads(r1.output)["fleet_id"]
     drop_sid = json.loads(r2.output)["fleet_id"]
-    runner.invoke(cli, ["fleet", "delete", drop_sid])
+    runner.invoke(cli, ["fleet", "delete", str(drop_sid)])
 
     list_result = runner.invoke(cli, ["fleet", "list", "--json"])
     assert list_result.exit_code == 0
@@ -346,8 +348,8 @@ def test_fleet_delete_unknown_and_idempotent__second_delete_is_idempotent_and_re
     assert r.exit_code == 0
     sid = json.loads(r.output)["fleet_id"]
 
-    first = runner.invoke(cli, ["fleet", "delete", sid])
-    second = runner.invoke(cli, ["fleet", "delete", sid])
+    first = runner.invoke(cli, ["fleet", "delete", str(sid)])
+    second = runner.invoke(cli, ["fleet", "delete", str(sid)])
 
     assert first.exit_code == 0, first.output
     assert second.exit_code == 0, second.output

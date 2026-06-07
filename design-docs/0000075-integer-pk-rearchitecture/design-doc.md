@@ -1,8 +1,8 @@
 # Integer Primary-Key Rearchitecture + `cafleet.db` Rename + Migration Collapse
 
 **Status**: Approved
-**Progress**: 17/54 tasks complete
-**Last Updated**: 2026-06-06
+**Progress**: 54/54 tasks complete
+**Last Updated**: 2026-06-07
 
 ## Overview
 
@@ -29,14 +29,14 @@ The `resolve_agent_ref` / `resolve_task_ref` broker functions are **not** rename
 
 ## Success Criteria
 
-- [ ] All four tables (`fleets`, `agents`, `tasks`, `agent_placements`) key on `INTEGER` columns; minted-id tables (`fleets`, `agents`, `tasks`) use `AUTOINCREMENT` (a `sqlite_sequence` row guarantees ids are never reused).
-- [ ] Default DB path is `~/.local/share/cafleet/cafleet.db`; no source, doc, skill, or test references `registry.db`.
-- [ ] Exactly one Alembic migration file exists (`0001_initial_schema.py`, `down_revision=None`), and `cafleet db init` on an empty DB produces the current cumulative (fleet-named) schema with integer keys.
-- [ ] The entire id-prefix-resolution feature is gone: `broker._resolve_id_prefix` / `resolve_agent_ref` / `resolve_task_ref`, every **id** `[:8]` slice in `output.py` / `cli.py` / `broker.py`, and the `send_inline_preview` `task_id_8` / `sender_8` params no longer exist.
-- [ ] CLI id options (`--fleet-id`, `--agent-id`, `--to`, `--id`, `--member-id`, `--task-id`) are typed `int`; passing a non-integer fails with Click's standard "not a valid integer" error.
-- [ ] Ids cross the JSON/CLI/HTTP wire as native JSON integers; the admin frontend types them as `number`.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint`, and `mise //admin:build` all pass.
-- [ ] `test_cli_prefix_resolution.py` and `test_broker_resolve_ref.py` are deleted; no remaining test asserts UUID-shaped ids, 8-char prefixes, or prefix resolution.
+- [x] All four tables (`fleets`, `agents`, `tasks`, `agent_placements`) key on `INTEGER` columns; minted-id tables (`fleets`, `agents`, `tasks`) use `AUTOINCREMENT` (a `sqlite_sequence` row guarantees ids are never reused).
+- [x] Default DB path is `~/.local/share/cafleet/cafleet.db`; no source, doc, skill, or test references `registry.db`.
+- [x] Exactly one Alembic migration file exists (`0001_initial_schema.py`, `down_revision=None`), and `cafleet db init` on an empty DB produces the current cumulative (fleet-named) schema with integer keys.
+- [x] The entire id-prefix-resolution feature is gone: `broker._resolve_id_prefix` / `resolve_agent_ref` / `resolve_task_ref`, every **id** `[:8]` slice in `output.py` / `cli.py` / `broker.py`, and the `send_inline_preview` `task_id_8` / `sender_8` params no longer exist.
+- [x] CLI id options (`--fleet-id`, `--agent-id`, `--to`, `--id`, `--member-id`, `--task-id`) are typed `int`; passing a non-integer fails with Click's standard "not a valid integer" error.
+- [x] Ids cross the JSON/CLI/HTTP wire as native JSON integers; the admin frontend types them as `number`.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint`, and `mise //admin:build` all pass.
+- [x] `test_cli_prefix_resolution.py` and `test_broker_resolve_ref.py` are deleted; no remaining test asserts UUID-shaped ids, 8-char prefixes, or prefix resolution.
 
 ---
 
@@ -278,67 +278,67 @@ There is **no data migration and no backward compatibility**. An existing `regis
 
 ### Step 2: Schema, migration, config
 
-- [ ] Rewrite `db/models.py` per §2 (add `Integer` import; retype all PKs/FKs; add `sqlite_autoincrement` to `fleets`/`agents`/`tasks`; keep `agent_placements` PK plain). <!-- completed: -->
-- [ ] Delete `alembic/versions/0001_*.py` … `0011_*.py`. <!-- completed: -->
-- [ ] Add `alembic/versions/0001_initial_schema.py` (`down_revision=None`, schema-only, `sqlite_autoincrement=True` on the three minted-id tables, all indexes, FK-safe create order). <!-- completed: -->
-- [ ] `config.py`: `_default_database_url` → `cafleet.db`; update docstrings. <!-- completed: -->
+- [x] Rewrite `db/models.py` per §2 (add `Integer` import; retype all PKs/FKs; add `sqlite_autoincrement` to `fleets`/`agents`/`tasks`; keep `agent_placements` PK plain). <!-- completed: 2026-06-07T00:24 -->
+- [x] Delete `alembic/versions/0001_*.py` … `0011_*.py`. <!-- completed: 2026-06-07T00:24 -->
+- [x] Add `alembic/versions/0001_initial_schema.py` (`down_revision=None`, schema-only, `sqlite_autoincrement=True` on the three minted-id tables, all indexes, FK-safe create order). <!-- completed: 2026-06-07T00:24 -->
+- [x] `config.py`: `_default_database_url` → `cafleet.db`; update docstrings. <!-- completed: 2026-06-07T01:32 -->
 
 ### Step 3: Broker
 
-- [ ] Remove `import uuid`; stop generating ids in `create_fleet` / `register_agent` / `send_message` / `broadcast_message`; read DB-assigned ids via `flush()`/`returning`. <!-- completed: -->
-- [ ] `create_fleet`: reorder so the Administrator card description is built after `fleet_id` is assigned (drop `[:8]`). <!-- completed: -->
-- [ ] `broadcast_message`: reorder to insert-summary-first → self-reference `origin_task_id` → deliveries; `to_agent_id=0` on the summary. <!-- completed: -->
-- [ ] `send_message`: replace `uuid.UUID(to)` with `int(to)` coercion + preserved error message. <!-- completed: -->
-- [ ] Split `_save_task` / adjust `_unicast_task_dict` for insert-without-id vs transition-with-id. <!-- completed: -->
-- [ ] `_try_notify_recipient`: pass full integer `task_id` / `sender_id` (drop `[:8]`). <!-- completed: -->
-- [ ] Delete `_resolve_id_prefix`, `resolve_agent_ref`, `resolve_task_ref`. <!-- completed: -->
+- [x] Remove `import uuid`; stop generating ids in `create_fleet` / `register_agent` / `send_message` / `broadcast_message`; read DB-assigned ids via `flush()`/`returning`. <!-- completed: 2026-06-07T01:32 -->
+- [x] `create_fleet`: reorder so the Administrator card description is built after `fleet_id` is assigned (drop `[:8]`). <!-- completed: 2026-06-07T01:32 -->
+- [x] `broadcast_message`: reorder to insert-summary-first → self-reference `origin_task_id` → deliveries; `to_agent_id=0` on the summary. <!-- completed: 2026-06-07T01:32 -->
+- [x] `send_message`: replace `uuid.UUID(to)` with `int(to)` coercion + preserved error message. <!-- completed: 2026-06-07T01:32 -->
+- [x] Split `_save_task` / adjust `_unicast_task_dict` for insert-without-id vs transition-with-id. <!-- completed: 2026-06-07T01:32 -->
+- [x] `_try_notify_recipient`: pass full integer `task_id` / `sender_id` (drop `[:8]`). <!-- completed: 2026-06-07T01:32 -->
+- [x] Delete `_resolve_id_prefix`, `resolve_agent_ref`, `resolve_task_ref`. <!-- completed: 2026-06-07T01:32 -->
 
 ### Step 4: Output
 
-- [ ] Remove every **id** `[:8]` in `render_task`, `render_agent`, `format_task`, `format_agent`, `format_fleet_create`, `format_member`, `_agent_id_for_column`; string-format integer ids for column padding. **Leave `_format_iso_hms`'s time `[:8]` intact** (§5). <!-- completed: -->
+- [x] Remove every **id** `[:8]` in `render_task`, `render_agent`, `format_task`, `format_agent`, `format_fleet_create`, `format_member`, `_agent_id_for_column`; string-format integer ids for column padding. **Leave `_format_iso_hms`'s time `[:8]` intact** (§5). <!-- completed: 2026-06-07T01:32 -->
 
 ### Step 5: CLI
 
-- [ ] Add `type=int` to `--fleet-id` (root group), `--agent-id`, `--to`, `--id`, `--member-id`, `--task-id`; fix the `--fleet-id` help string `(UUID)` → integer. <!-- completed: -->
-- [ ] Remove `resolve_agent_ref` / `resolve_task_ref` calls in `message_send`/`ack`/`cancel`/`show`, `agent_show`, `_load_authorized_member`. <!-- completed: -->
-- [ ] Drop id `[:8]` in the `--quiet` branches of `message_send` / `message_ack` and in `member_ping --quiet`. <!-- completed: -->
+- [x] Add `type=int` to `--fleet-id` (root group), `--agent-id`, `--to`, `--id`, `--member-id`, `--task-id`; fix the `--fleet-id` help string `(UUID)` → integer. <!-- completed: 2026-06-07T01:32 -->
+- [x] Remove `resolve_agent_ref` / `resolve_task_ref` calls in `message_send`/`ack`/`cancel`/`show`, `agent_show`, `_load_authorized_member`. <!-- completed: 2026-06-07T01:32 -->
+- [x] Drop id `[:8]` in the `--quiet` branches of `message_send` / `message_ack` and in `member_ping --quiet`. <!-- completed: 2026-06-07T01:32 -->
 
 ### Step 6: Multiplexer
 
-- [ ] Rename `send_inline_preview` params (`task_id_8 → task_id`, `sender_8 → sender_id`, typed `int`) in `multiplexer/tmux.py` and `multiplexer/base.py` (+ docstrings); update the payload f-string. <!-- completed: -->
+- [x] Rename `send_inline_preview` params (`task_id_8 → task_id`, `sender_8 → sender_id`, typed `int`) in `multiplexer/tmux.py` and `multiplexer/base.py` (+ docstrings); update the payload f-string. <!-- completed: 2026-06-07T01:32 -->
 
 ### Step 7: WebUI API
 
-- [ ] `get_webui_fleet`: int-coerce `X-Fleet-Id` (400 on non-int); retype return `-> int`. <!-- completed: -->
-- [ ] Retype the five `fleet_id: int = Depends(get_webui_fleet)` route params (was `str`). <!-- completed: -->
-- [ ] Type path params `agent_id: int` on inbox/sent routes. <!-- completed: -->
-- [ ] `SendMessageRequest.from_agent_id: int`; `to_agent_id: int | Literal["*"]`. <!-- completed: -->
+- [x] `get_webui_fleet`: int-coerce `X-Fleet-Id` (400 on non-int); retype return `-> int`. <!-- completed: 2026-06-07T00:24 -->
+- [x] Retype the five `fleet_id: int = Depends(get_webui_fleet)` route params (was `str`). <!-- completed: 2026-06-07T00:24 -->
+- [x] Type path params `agent_id: int` on inbox/sent routes. <!-- completed: 2026-06-07T00:24 -->
+- [x] `SendMessageRequest.from_agent_id: int`; `to_agent_id: int | Literal["*"]`. <!-- completed: 2026-06-07T00:24 -->
 
 ### Step 8: Admin frontend
 
-- [ ] `types.ts`: retype id fields `string → number` (`origin_task_id: number | null`; `FleetListItem.fleet_id: number`). <!-- completed: -->
-- [ ] `api.ts`: `setFleetId`/`fleetId` as `number`; stringify at the `X-Fleet-Id` header; `sendMessage` param types. <!-- completed: -->
-- [ ] `Dashboard.tsx`, `FleetPicker.tsx`, `ReactionBar.tsx`: remove id `.slice(0, 8)` display logic. <!-- completed: -->
-- [ ] `MessageInput.tsx`: adjust agent-id consumption (mentions) for the `number` retype; leave text `.slice` calls intact. <!-- completed: -->
+- [x] `types.ts`: retype id fields `string → number` (`origin_task_id: number | null`; `FleetListItem.fleet_id: number`). <!-- completed: 2026-06-07T00:17 -->
+- [x] `api.ts`: `setFleetId`/`fleetId` as `number`; stringify at the `X-Fleet-Id` header; `sendMessage` param types. <!-- completed: 2026-06-07T00:17 -->
+- [x] `Dashboard.tsx`, `FleetPicker.tsx`, `ReactionBar.tsx`: remove id `.slice(0, 8)` display logic. <!-- completed: 2026-06-07T00:17 -->
+- [x] `MessageInput.tsx`: adjust agent-id consumption (mentions) for the `number` retype; leave text `.slice` calls intact. <!-- completed: 2026-06-07T00:17 -->
 
 ### Step 9: Tests
 
-- [ ] Delete `tests/test_cli_prefix_resolution.py` and `tests/test_broker_resolve_ref.py`. <!-- completed: -->
-- [ ] Update shared fixtures/helpers (`conftest.py`, `_helpers.py`, `_broker_helpers.py` incl. `_create_fleet`, `_member_cli_helpers.py`) to use DB-assigned integer ids (stop fabricating `str(uuid.uuid4())` ids; capture ids returned by `create_fleet` / `register_agent`). <!-- completed: -->
-- [ ] Update `test_alembic_smoke.py` for the single migration (one revision, head == `0001`). <!-- completed: -->
-- [ ] Update inline-preview tests (`test_broker_inline_preview.py`, `test_multiplexer_tmux_send_inline_preview.py`) for the renamed params / integer ids. <!-- completed: -->
-- [ ] Update output tests (`test_output_render_task.py`, `test_output_render_agent.py`, `test_output_compact_formatters.py`, `test_output_render_broadcast_summary.py`, `test_output.py`) for full integer ids; confirm the `_format_iso_hms` time render still asserts `HH:MM:SS`. <!-- completed: -->
-- [ ] Update CLI tests (`test_cli_message.py`, `test_cli_agent.py`, `test_cli_member*.py`, `test_cli_compact_echo.py`, `test_cli_message_truncation.py`, `test_cli_fleet_flag.py`, `test_cli_fleet_bootstrap.py`, `test_cli_help_budget.py`) for `type=int` options, integer ids, removed prefix help, and `registry.db → cafleet.db`. <!-- completed: -->
-- [ ] Update broker/webui tests (`test_broker_messaging.py`, `test_broker_registry.py`, `test_broker_administrator.py`, `test_broker_typed_columns.py`, `test_broker_webui.py`, `test_broker_member_activity.py`, `test_webui_api_format.py`, `test_server_routing.py`) for integer ids and the `to_agent_id=0` sentinel. <!-- completed: -->
-- [ ] Update `test_db_init.py` and fleet tests (`test_fleet_cli.py`, `test_fleet_bootstrap.py`, `test_fleet_list_director.py`) for the new default path and integer ids. <!-- completed: -->
-- [ ] Grep the test tree for residual `uuid`, id-`[:8]`, `registry.db`, and prefix assertions. <!-- completed: -->
+- [x] Delete `tests/test_cli_prefix_resolution.py` and `tests/test_broker_resolve_ref.py`. <!-- completed: 2026-06-07T01:32 -->
+- [x] Update shared fixtures/helpers (`conftest.py`, `_helpers.py`, `_broker_helpers.py` incl. `_create_fleet`, `_member_cli_helpers.py`) to use DB-assigned integer ids (stop fabricating `str(uuid.uuid4())` ids; capture ids returned by `create_fleet` / `register_agent`). <!-- completed: 2026-06-07T01:32 -->
+- [x] Update `test_alembic_smoke.py` for the single migration (one revision, head == `0001`). <!-- completed: 2026-06-07T01:32 -->
+- [x] Update inline-preview tests (`test_broker_inline_preview.py`, `test_multiplexer_tmux_send_inline_preview.py`) for the renamed params / integer ids. <!-- completed: 2026-06-07T01:32 -->
+- [x] Update output tests (`test_output_render_task.py`, `test_output_render_agent.py`, `test_output_compact_formatters.py`, `test_output_render_broadcast_summary.py`, `test_output.py`) for full integer ids; confirm the `_format_iso_hms` time render still asserts `HH:MM:SS`. <!-- completed: 2026-06-07T01:32 -->
+- [x] Update CLI tests (`test_cli_message.py`, `test_cli_agent.py`, `test_cli_member*.py`, `test_cli_compact_echo.py`, `test_cli_message_truncation.py`, `test_cli_fleet_flag.py`, `test_cli_fleet_bootstrap.py`, `test_cli_help_budget.py`) for `type=int` options, integer ids, removed prefix help, and `registry.db → cafleet.db`. <!-- completed: 2026-06-07T01:32 -->
+- [x] Update broker/webui tests (`test_broker_messaging.py`, `test_broker_registry.py`, `test_broker_administrator.py`, `test_broker_typed_columns.py`, `test_broker_webui.py`, `test_broker_member_activity.py`, `test_webui_api_format.py`, `test_server_routing.py`) for integer ids and the `to_agent_id=0` sentinel. <!-- completed: 2026-06-07T01:32 -->
+- [x] Update `test_db_init.py` and fleet tests (`test_fleet_cli.py`, `test_fleet_bootstrap.py`, `test_fleet_list_director.py`) for the new default path and integer ids. <!-- completed: 2026-06-07T01:32 -->
+- [x] Grep the test tree for residual `uuid`, id-`[:8]`, `registry.db`, and prefix assertions. <!-- completed: 2026-06-07T01:32 -->
 
 ### Step 10: Verification
 
-- [ ] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck` pass. <!-- completed: -->
-- [ ] `mise //cafleet:test` passes. <!-- completed: -->
-- [ ] `mise //admin:lint` and `mise //admin:build` pass. <!-- completed: -->
-- [ ] Smoke: a fresh `cafleet db init` creates `cafleet.db` at head `0001`; `sqlite_sequence` exists for `fleets`/`agents`/`tasks`; `fleet create` → `member create` → `message send` → `poll` → `ack` round-trips with integer ids. <!-- completed: -->
+- [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck` pass. <!-- completed: 2026-06-07T01:32 -->
+- [x] `mise //cafleet:test` passes. <!-- completed: 2026-06-07T01:32 -->
+- [x] `mise //admin:lint` and `mise //admin:build` pass. <!-- completed: 2026-06-07T01:32 -->
+- [x] Smoke: a fresh `cafleet db init` creates `cafleet.db` at head `0001`; `sqlite_sequence` exists for `fleets`/`agents`/`tasks`; `fleet create` → `member create` → `message send` → `poll` → `ack` round-trips with integer ids. <!-- completed: 2026-06-07T01:32 -->
 
 ---
 

@@ -3,7 +3,7 @@ import type { Agent } from "../types";
 import { sendMessage } from "../api";
 
 interface MessageInputProps {
-  senderId: string | null;
+  senderId: number | null;
   agents: Agent[];
   onSent: () => void;
 }
@@ -12,10 +12,10 @@ function slugify(name: string): string {
   return name.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase();
 }
 
-type ParseResult = { to: string; body: string; error: string | null };
+type ParseResult = { to: number | "*"; body: string; error: string | null };
 
 function parseError(error: string): ParseResult {
-  return { to: "", body: "", error };
+  return { to: 0, body: "", error };
 }
 
 function parseInput(raw: string, recipients: Agent[]): ParseResult {

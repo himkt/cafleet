@@ -675,7 +675,7 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 
 | Situation | Error Message |
 |---|---|
-| Missing `--fleet-id` on a client/member subcommand | `Error: --fleet-id <uuid> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` |
+| Missing `--fleet-id` on a client/member subcommand | `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` |
 | Missing `--agent-id` | `Error: Missing option '--agent-id'.` (Click built-in) |
 | `fleet create` run outside a tmux session | `Error: cafleet fleet create must be run inside a tmux session` (exit 1; no DB writes) |
 | `fleet delete` on unknown fleet_id | `Error: fleet 'X' not found.` (exit 1) |

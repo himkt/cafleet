@@ -17,12 +17,12 @@ interface TimelineProps {
 
 function entryKey(entry: TimelineEntry): string {
   return entry.kind === "unicast"
-    ? entry.message.task_id
+    ? String(entry.message.task_id)
     : `bcast:${entry.rows[0].origin_task_id ?? entry.rows[0].task_id}`;
 }
 
 function groupMessages(msgs: TimelineMessage[]): TimelineEntry[] {
-  const groups = new Map<string, TimelineMessage[]>();
+  const groups = new Map<number, TimelineMessage[]>();
   const singletons: TimelineEntry[] = [];
 
   for (const m of msgs) {

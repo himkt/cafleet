@@ -7,7 +7,7 @@ import Timeline from "./Timeline";
 import MessageInput from "./MessageInput";
 
 interface DashboardProps {
-  fleetId: string;
+  fleetId: number;
   initialAgents: Agent[];
   onBack: () => void;
 }
@@ -47,7 +47,7 @@ export default function Dashboard({
         <h1 className="text-lg font-semibold text-gray-900">
           CAFleet —{" "}
           <span className="font-mono text-sm text-gray-500">
-            {fleetId.slice(0, 8)}
+            {fleetId}
           </span>
         </h1>
         <div className="flex items-center gap-3">

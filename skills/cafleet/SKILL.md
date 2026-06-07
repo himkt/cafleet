@@ -39,7 +39,7 @@ Every `cafleet` invocation that touches agents or messages must carry two litera
 | `--fleet-id <int>` | global (placed **before** the subcommand) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `show`, `agent *`, `deregister`, `member *`) | Integer id of the fleet created via `cafleet fleet create`. Typed `int` — a non-integer fails with Click's standard "is not a valid integer" error. Silently accepted (and ignored) on `db init` / `fleet *` / `server` / `doctor`. |
 | `--agent-id <int>` | per-subcommand (placed **after** the subcommand name) | every subcommand **except** `register` | The acting agent's integer id. `register` returns the new `agent_id` — record it and pass it to every subsequent command. |
 
-If `--fleet-id` is missing on a subcommand that needs it, the CLI exits with `Error: --fleet-id <uuid> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`
+If `--fleet-id` is missing on a subcommand that needs it, the CLI exits with `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`
 
 > **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --fleet-id <int> <subcmd> --agent-id <int>` invocation matches a single allow pattern across every subcommand for that fleet. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal ids printed by `cafleet fleet create` and `cafleet agent register` — never store them in shell variables.
 
@@ -303,7 +303,7 @@ For broadcast threading (the `origin_task_id` self-reference shape), see [`refer
 
 ## Error Handling
 
-- Missing `--fleet-id` on a client/member subcommand exits with `Error: --fleet-id <uuid> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1).
+- Missing `--fleet-id` on a client/member subcommand exits with `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1).
 - Missing `--agent-id` on commands that need it exits with `Error: Missing option '--agent-id'.` (Click built-in, exit 2).
 - Errors print to stderr and exit non-zero.
 - Use `cafleet --fleet-id <fleet-id> --json <cmd>` for machine-parseable output (including errors).

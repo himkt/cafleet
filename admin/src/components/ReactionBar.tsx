@@ -9,9 +9,9 @@ function formatIso(iso: string): string {
   return new Date(iso).toISOString();
 }
 
-function agentLabel(agentId: string, agents: Agent[]): string {
+function agentLabel(agentId: number, agents: Agent[]): string {
   const agent = agents.find((a) => a.agent_id === agentId);
-  if (!agent) return agentId.slice(0, 8);
+  if (!agent) return String(agentId);
   const suffix = agent.status === "deregistered" ? " (deregistered)" : "";
   return `@${agent.name}${suffix}`;
 }

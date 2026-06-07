@@ -1,7 +1,6 @@
 """Sync SQLAlchemy data-access layer shared by the CLI and WebUI."""
 
 import json
-import uuid
 from datetime import UTC, datetime
 
 import click
@@ -48,7 +47,7 @@ def _placement_dict(row) -> dict:
     }
 
 
-def _agent_is_active_in_fleet(session, agent_id: str, fleet_id: str) -> bool:
+def _agent_is_active_in_fleet(session, agent_id: int, fleet_id: int) -> bool:
     return session.execute(
         select(
             exists().where(
@@ -61,7 +60,7 @@ def _agent_is_active_in_fleet(session, agent_id: str, fleet_id: str) -> bool:
 
 
 def _try_notify_recipient(
-    session, *, recipient_id: str, sender_id: str, task_dict: dict
+    session, *, recipient_id: int, sender_id: int, task_dict: dict
 ) -> bool:
     """Best-effort inline-preview keystroke for the recipient's pane.
 
@@ -95,8 +94,8 @@ def _try_notify_recipient(
 
     return TmuxMultiplexer().send_inline_preview(
         target_pane_id=pane_id,
-        task_id_8=task_dict["task_id"][:8],
-        sender_8=sender_id[:8],
+        task_id=task_dict["task_id"],
+        sender_id=sender_id,
         ts=task_dict["status_timestamp"],
         text=preview_text,
     )
@@ -128,16 +127,7 @@ def create_fleet(
         ``administrator_agent_id``, and a ``director`` sub-dict with the
         Director's identity and placement metadata.
     """
-    fleet_id = str(uuid.uuid4())
     created_at = _now_iso()
-    director_agent_id = str(uuid.uuid4())
-    administrator_agent_id = str(uuid.uuid4())
-    administrator_card = {
-        "name": "Administrator",
-        "description": f"Built-in administrator agent for fleet {fleet_id[:8]}",
-        "skills": [],
-        "cafleet": {"kind": ADMINISTRATOR_KIND},
-    }
     director_card = {
         "name": _DIRECTOR_NAME,
         "description": _DIRECTOR_DESCRIPTION,
@@ -154,29 +144,27 @@ def create_fleet(
 
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
-        session.add(
-            Fleet(
-                fleet_id=fleet_id,
-                label=label,
-                created_at=created_at,
-                deleted_at=None,
-                director_agent_id=None,
-            )
+        fleet = Fleet(
+            label=label,
+            created_at=created_at,
+            deleted_at=None,
+            director_agent_id=None,
         )
+        session.add(fleet)
         session.flush()
-        session.add(
-            Agent(
-                agent_id=director_agent_id,
-                fleet_id=fleet_id,
-                name=_DIRECTOR_NAME,
-                description=_DIRECTOR_DESCRIPTION,
-                status="active",
-                registered_at=created_at,
-                deregistered_at=None,
-                agent_card_json=json.dumps(director_card),
-            )
+        fleet_id = fleet.fleet_id
+        director = Agent(
+            fleet_id=fleet_id,
+            name=_DIRECTOR_NAME,
+            description=_DIRECTOR_DESCRIPTION,
+            status="active",
+            registered_at=created_at,
+            deregistered_at=None,
+            agent_card_json=json.dumps(director_card),
         )
+        session.add(director)
         session.flush()
+        director_agent_id = director.agent_id
         session.add(AgentPlacement(agent_id=director_agent_id, **director_placement))
         session.flush()
         session.execute(
@@ -184,18 +172,24 @@ def create_fleet(
             .where(Fleet.fleet_id == fleet_id)
             .values(director_agent_id=director_agent_id)
         )
-        session.add(
-            Agent(
-                agent_id=administrator_agent_id,
-                fleet_id=fleet_id,
-                name=administrator_card["name"],
-                description=administrator_card["description"],
-                status="active",
-                registered_at=created_at,
-                deregistered_at=None,
-                agent_card_json=json.dumps(administrator_card),
-            )
+        administrator_card = {
+            "name": "Administrator",
+            "description": f"Built-in administrator agent for fleet {fleet_id}",
+            "skills": [],
+            "cafleet": {"kind": ADMINISTRATOR_KIND},
+        }
+        administrator = Agent(
+            fleet_id=fleet_id,
+            name=administrator_card["name"],
+            description=administrator_card["description"],
+            status="active",
+            registered_at=created_at,
+            deregistered_at=None,
+            agent_card_json=json.dumps(administrator_card),
         )
+        session.add(administrator)
+        session.flush()
+        administrator_agent_id = administrator.agent_id
 
     return {
         "fleet_id": fleet_id,
@@ -254,7 +248,7 @@ def list_fleets() -> list[dict]:
     ]
 
 
-def get_fleet(fleet_id: str) -> dict | None:
+def get_fleet(fleet_id: int) -> dict | None:
     """Return the fleet row (including soft-deleted) or None.
 
     The returned dict exposes ``deleted_at`` so callers can distinguish a
@@ -262,7 +256,7 @@ def get_fleet(fleet_id: str) -> dict | None:
     this to reject soft-deleted fleets with a different error message.
 
     Args:
-        fleet_id: Fleet UUID to look up.
+        fleet_id: Fleet id to look up.
 
     Returns:
         Dict with ``fleet_id``, ``label``, ``created_at``, ``deleted_at``,
@@ -283,7 +277,7 @@ def get_fleet(fleet_id: str) -> dict | None:
     }
 
 
-def delete_fleet(fleet_id: str) -> dict:
+def delete_fleet(fleet_id: int) -> dict:
     """Soft-delete a fleet and deregister its agents, in one transaction.
 
     Tasks are left untouched so audit history survives. Idempotent: re-running
@@ -291,7 +285,7 @@ def delete_fleet(fleet_id: str) -> dict:
     guard and returns ``deregistered_count=0``.
 
     Args:
-        fleet_id: Fleet UUID to soft-delete.
+        fleet_id: Fleet id to soft-delete.
 
     Returns:
         Dict with ``deregistered_count`` — the number of agents flipped from
@@ -342,7 +336,7 @@ def delete_fleet(fleet_id: str) -> dict:
 
 
 def register_agent(
-    fleet_id: str,
+    fleet_id: int,
     name: str,
     description: str,
     skills: list[dict] | None = None,
@@ -356,7 +350,7 @@ def register_agent(
     same fleet and must not be the Administrator.
 
     Args:
-        fleet_id: Fleet UUID the new agent belongs to.
+        fleet_id: Fleet id the new agent belongs to.
         name: Short human-identifiable label.
         description: One-sentence purpose statement.
         skills: Optional list of skill dicts persisted into the agent's
@@ -381,7 +375,6 @@ def register_agent(
     if sess["deleted_at"] is not None:
         raise click.UsageError(f"fleet {fleet_id} is deleted")
 
-    agent_id = str(uuid.uuid4())
     registered_at = _now_iso()
     agent_card = {
         "name": name,
@@ -408,17 +401,17 @@ def register_agent(
             if _is_administrator(director_card):
                 raise click.ClickException("Administrator cannot be a director")
 
-        session.add(
-            Agent(
-                agent_id=agent_id,
-                fleet_id=fleet_id,
-                name=name,
-                description=description,
-                status="active",
-                registered_at=registered_at,
-                agent_card_json=json.dumps(agent_card),
-            )
+        agent = Agent(
+            fleet_id=fleet_id,
+            name=name,
+            description=description,
+            status="active",
+            registered_at=registered_at,
+            agent_card_json=json.dumps(agent_card),
         )
+        session.add(agent)
+        session.flush()
+        agent_id = agent.agent_id
         if placement is not None:
             session.add(
                 AgentPlacement(
@@ -439,12 +432,12 @@ def register_agent(
     }
 
 
-def get_agent(agent_id: str, fleet_id: str) -> dict | None:
+def get_agent(agent_id: int, fleet_id: int) -> dict | None:
     """Return the active agent's detail (with placement) or None.
 
     Args:
-        agent_id: Agent UUID to look up.
-        fleet_id: Fleet UUID the agent must belong to.
+        agent_id: Agent id to look up.
+        fleet_id: Fleet id the agent must belong to.
 
     Returns:
         Dict with ``agent_id``, ``name``, ``description``, ``status``,
@@ -485,7 +478,7 @@ def get_agent(agent_id: str, fleet_id: str) -> dict | None:
     return result
 
 
-def list_agents(fleet_id: str) -> list[dict]:
+def list_agents(fleet_id: int) -> list[dict]:
     """Return all active agents in the fleet."""
     stmt = select(
         Agent.agent_id,
@@ -511,11 +504,11 @@ def list_agents(fleet_id: str) -> list[dict]:
     ]
 
 
-def deregister_agent(agent_id: str) -> bool:
+def deregister_agent(agent_id: int) -> bool:
     """Soft-delete the agent and drop its placement.
 
     Args:
-        agent_id: Agent UUID to deregister.
+        agent_id: Agent id to deregister.
 
     Returns:
         ``True`` if a row was flipped from ``active`` to ``deregistered``;
@@ -561,7 +554,7 @@ def deregister_agent(agent_id: str) -> bool:
     return bool(deregistered)
 
 
-def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
+def update_placement_pane_id(agent_id: int, pane_id: str) -> dict | None:
     """Patch the agent's placement with a freshly resolved tmux pane id.
 
     Called after ``split_window`` returns the spawned pane's id so the
@@ -569,7 +562,7 @@ def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
     during the initial INSERT.
 
     Args:
-        agent_id: Agent UUID whose placement should be updated.
+        agent_id: Agent id whose placement should be updated.
         pane_id: New ``tmux_pane_id`` value.
 
     Returns:
@@ -592,7 +585,7 @@ def update_placement_pane_id(agent_id: str, pane_id: str) -> dict | None:
     return _placement_dict(row)
 
 
-def _base_members_select(fleet_id: str, director_agent_id: str):
+def _base_members_select(fleet_id: int, director_agent_id: int):
     return (
         select(
             Agent.agent_id,
@@ -616,12 +609,12 @@ def _base_members_select(fleet_id: str, director_agent_id: str):
     )
 
 
-def list_members(fleet_id: str, director_agent_id: str) -> list[dict]:
+def list_members(fleet_id: int, director_agent_id: int) -> list[dict]:
     """Return active members belonging to the given director, with placements.
 
     Args:
-        fleet_id: Fleet UUID to scope the query to.
-        director_agent_id: Director UUID; only members whose
+        fleet_id: Fleet id to scope the query to.
+        director_agent_id: Director id; only members whose
             ``placement.director_agent_id`` matches are returned.
 
     Returns:
@@ -645,7 +638,7 @@ def list_members(fleet_id: str, director_agent_id: str) -> list[dict]:
     ]
 
 
-def list_members_with_activity(fleet_id: str, director_agent_id: str) -> list[dict]:
+def list_members_with_activity(fleet_id: int, director_agent_id: int) -> list[dict]:
     """``list_members`` plus per-member activity proxies sourced from ``tasks``.
 
     ``last_sent`` / ``last_recv`` / ``last_ack`` aggregate ``status_timestamp``
@@ -655,8 +648,8 @@ def list_members_with_activity(fleet_id: str, director_agent_id: str) -> list[di
     and would otherwise pollute every proxy for the broadcaster.
 
     Args:
-        fleet_id: Fleet UUID to scope the query to.
-        director_agent_id: Director UUID whose members will be enumerated.
+        fleet_id: Fleet id to scope the query to.
+        director_agent_id: Director id whose members will be enumerated.
 
     Returns:
         List of dicts as in :func:`list_members`, additionally carrying
@@ -731,12 +724,12 @@ def _idle_seconds(
     return max(0, int(delta))
 
 
-def verify_agent_fleet(agent_id: str, fleet_id: str) -> bool:
+def verify_agent_fleet(agent_id: int, fleet_id: int) -> bool:
     """Return True iff the agent belongs to the fleet (any status).
 
     Args:
-        agent_id: Agent UUID to verify.
-        fleet_id: Fleet UUID to check membership against.
+        agent_id: Agent id to verify.
+        fleet_id: Fleet id to check membership against.
 
     Returns:
         ``True`` if a matching row exists; ``False`` otherwise. Status is
@@ -758,33 +751,40 @@ def _row_to_task_dict(row) -> dict:
     return {col: getattr(row, col) for col in _TASK_COLUMNS}
 
 
+def _insert_task(session, task_dict: dict) -> int:
+    """INSERT a new task without a ``task_id`` and return the DB-assigned id."""
+    return session.execute(
+        sqlite_insert(Task)
+        .values(
+            context_id=task_dict["context_id"],
+            from_agent_id=task_dict["from_agent_id"],
+            to_agent_id=task_dict["to_agent_id"],
+            type=task_dict["type"],
+            created_at=task_dict["created_at"],
+            status_state=task_dict["status_state"],
+            status_timestamp=task_dict["status_timestamp"],
+            origin_task_id=task_dict["origin_task_id"],
+            text=task_dict["text"],
+        )
+        .returning(Task.task_id)
+    ).scalar_one()
+
+
 def _save_task(session, task_dict: dict) -> None:
-    """UPSERT the task; ``created_at`` is preserved across conflicts."""
-    stmt = sqlite_insert(Task).values(
-        task_id=task_dict["task_id"],
-        context_id=task_dict["context_id"],
-        from_agent_id=task_dict["from_agent_id"],
-        to_agent_id=task_dict["to_agent_id"],
-        type=task_dict["type"],
-        created_at=task_dict["created_at"],
-        status_state=task_dict["status_state"],
-        status_timestamp=task_dict["status_timestamp"],
-        origin_task_id=task_dict["origin_task_id"],
-        text=task_dict["text"],
+    """UPDATE an existing task's mutable fields, keyed by ``task_id``."""
+    session.execute(
+        update(Task)
+        .where(Task.task_id == task_dict["task_id"])
+        .values(
+            status_state=task_dict["status_state"],
+            status_timestamp=task_dict["status_timestamp"],
+            origin_task_id=task_dict["origin_task_id"],
+            text=task_dict["text"],
+        )
     )
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["task_id"],
-        set_={
-            "status_state": stmt.excluded.status_state,
-            "status_timestamp": stmt.excluded.status_timestamp,
-            "origin_task_id": stmt.excluded.origin_task_id,
-            "text": stmt.excluded.text,
-        },
-    )
-    session.execute(stmt)
 
 
-def _read_task(session, task_id: str) -> dict | None:
+def _read_task(session, task_id: int) -> dict | None:
     row = session.execute(
         select(*(getattr(Task, col) for col in _TASK_COLUMNS)).where(
             Task.task_id == task_id
@@ -797,14 +797,13 @@ def _read_task(session, task_id: str) -> dict | None:
 
 def _unicast_task_dict(
     *,
-    recipient_id: str,
-    sender_id: str,
+    recipient_id: int,
+    sender_id: int,
     text: str,
     now: str,
-    origin_task_id: str | None = None,
+    origin_task_id: int | None = None,
 ) -> dict:
     return {
-        "task_id": str(uuid.uuid4()),
         "context_id": recipient_id,
         "from_agent_id": sender_id,
         "to_agent_id": recipient_id,
@@ -817,7 +816,7 @@ def _unicast_task_dict(
     }
 
 
-def send_message(fleet_id: str, agent_id: str, to: str, text: str) -> dict:
+def send_message(fleet_id: int, agent_id: int, to: int | str, text: str) -> dict:
     """Create a unicast task addressed to ``to`` and best-effort notify it.
 
     Persists a new ``Task`` row with ``type='unicast'`` and
@@ -827,9 +826,10 @@ def send_message(fleet_id: str, agent_id: str, to: str, text: str) -> dict:
     insert — the message remains available via :func:`poll_tasks`.
 
     Args:
-        fleet_id: Fleet UUID; sender and recipient must both belong to it.
-        agent_id: Sender's agent UUID.
-        to: Recipient's agent UUID.
+        fleet_id: Fleet id; sender and recipient must both belong to it.
+        agent_id: Sender's agent id.
+        to: Recipient's agent id. Accepts a string for non-CLI callers
+            (WebUI, tests); it is coerced with ``int(...)``.
         text: Message body. Truncation is render-side; the persisted row
             holds the full string.
 
@@ -838,13 +838,13 @@ def send_message(fleet_id: str, agent_id: str, to: str, text: str) -> dict:
         (boolean indicating whether the inline-preview keystroke landed).
 
     Raises:
-        ValueError: If ``to`` is not a valid UUID, the sender is not active
-            in ``fleet_id``, or the recipient is missing or lives in a
+        ValueError: If ``to`` is not a valid integer, the sender is not
+            active in ``fleet_id``, or the recipient is missing or lives in a
             different fleet.
     """
     try:
-        uuid.UUID(to)
-    except ValueError as exc:
+        to_id = int(to)
+    except (TypeError, ValueError) as exc:
         raise ValueError(f"Invalid destination format: {to}") from exc
 
     sm = get_sync_sessionmaker()
@@ -856,25 +856,25 @@ def send_message(fleet_id: str, agent_id: str, to: str, text: str) -> dict:
 
         dest_fleet = session.execute(
             select(Agent.fleet_id).where(
-                Agent.agent_id == to,
+                Agent.agent_id == to_id,
                 Agent.status == "active",
             )
         ).scalar_one_or_none()
         if dest_fleet is None:
-            raise ValueError(f"Destination agent not found: {to}")
+            raise ValueError(f"Destination agent not found: {to_id}")
         if dest_fleet != fleet_id:
-            raise ValueError(f"Destination agent not in fleet: {to}")
+            raise ValueError(f"Destination agent not in fleet: {to_id}")
 
         task_dict = _unicast_task_dict(
-            recipient_id=to,
+            recipient_id=to_id,
             sender_id=agent_id,
             text=text,
             now=_now_iso(),
         )
-        _save_task(session, task_dict)
+        task_dict["task_id"] = _insert_task(session, task_dict)
         notification_sent = _try_notify_recipient(
             session,
-            recipient_id=to,
+            recipient_id=to_id,
             sender_id=agent_id,
             task_dict=task_dict,
         )
@@ -882,7 +882,7 @@ def send_message(fleet_id: str, agent_id: str, to: str, text: str) -> dict:
     return {"task": task_dict, "notification_sent": notification_sent}
 
 
-def broadcast_message(fleet_id: str, agent_id: str, text: str) -> list[dict]:
+def broadcast_message(fleet_id: int, agent_id: int, text: str) -> list[dict]:
     """Fan out one delivery task per active non-admin peer plus a sender summary.
 
     Administrators are excluded at the SQL layer via ``json_extract`` so the
@@ -891,8 +891,8 @@ def broadcast_message(fleet_id: str, agent_id: str, text: str) -> list[dict]:
     so receivers can thread back to the original broadcast.
 
     Args:
-        fleet_id: Fleet UUID to scope the broadcast to.
-        agent_id: Broadcaster's agent UUID.
+        fleet_id: Fleet id to scope the broadcast to.
+        agent_id: Broadcaster's agent id.
         text: Message body delivered to every recipient.
 
     Returns:
@@ -903,8 +903,6 @@ def broadcast_message(fleet_id: str, agent_id: str, text: str) -> list[dict]:
     Raises:
         ValueError: If the sender is not active in ``fleet_id``.
     """
-    summary_task_id = str(uuid.uuid4())
-
     sm = get_sync_sessionmaker()
     with sm() as session, session.begin():
         if not _agent_is_active_in_fleet(session, agent_id, fleet_id):
@@ -927,7 +925,24 @@ def broadcast_message(fleet_id: str, agent_id: str, text: str) -> list[dict]:
             ).scalars()
         )
 
-        deliveries: list[tuple[str, dict]] = []
+        now = _now_iso()
+        summary_dict = {
+            "context_id": agent_id,
+            "from_agent_id": agent_id,
+            "to_agent_id": 0,
+            "type": "broadcast_summary",
+            "created_at": now,
+            "status_state": "completed",
+            "status_timestamp": now,
+            "origin_task_id": None,
+            "text": f"Broadcast sent to {len(recipient_ids)} recipients",
+        }
+        summary_task_id = _insert_task(session, summary_dict)
+        summary_dict["task_id"] = summary_task_id
+        summary_dict["origin_task_id"] = summary_task_id
+        _save_task(session, summary_dict)
+
+        deliveries: list[tuple[int, dict]] = []
         for recipient_id in recipient_ids:
             delivery_dict = _unicast_task_dict(
                 recipient_id=recipient_id,
@@ -936,23 +951,8 @@ def broadcast_message(fleet_id: str, agent_id: str, text: str) -> list[dict]:
                 now=_now_iso(),
                 origin_task_id=summary_task_id,
             )
-            _save_task(session, delivery_dict)
+            delivery_dict["task_id"] = _insert_task(session, delivery_dict)
             deliveries.append((recipient_id, delivery_dict))
-
-        now = _now_iso()
-        summary_dict = {
-            "task_id": summary_task_id,
-            "context_id": agent_id,
-            "from_agent_id": agent_id,
-            "to_agent_id": "",
-            "type": "broadcast_summary",
-            "created_at": now,
-            "status_state": "completed",
-            "status_timestamp": now,
-            "origin_task_id": summary_task_id,
-            "text": f"Broadcast sent to {len(recipient_ids)} recipients",
-        }
-        _save_task(session, summary_dict)
 
         notifications_sent_count = sum(
             _try_notify_recipient(
@@ -970,7 +970,7 @@ def broadcast_message(fleet_id: str, agent_id: str, text: str) -> list[dict]:
 
 
 def poll_tasks(
-    agent_id: str,
+    agent_id: int,
     since: str | None = None,
     page_size: int | None = None,
     status: str | None = None,
@@ -981,7 +981,7 @@ def poll_tasks(
     broadcaster's own context and are not deliveries.
 
     Args:
-        agent_id: Recipient agent UUID; matches ``Task.context_id``.
+        agent_id: Recipient agent id; matches ``Task.context_id``.
         since: Optional ISO-8601 timestamp; only tasks strictly newer than
             this value are returned (lexicographic comparison on the
             microsecond-precision ``+00:00`` form).
@@ -1001,8 +1001,8 @@ def poll_tasks(
 
 
 def _transition_task_state(
-    agent_id: str,
-    task_id: str,
+    agent_id: int,
+    task_id: int,
     *,
     expected_agent_field: str,
     new_state: str,
@@ -1031,12 +1031,12 @@ def _transition_task_state(
     return {"task": task_dict}
 
 
-def ack_task(agent_id: str, task_id: str) -> dict:
+def ack_task(agent_id: int, task_id: int) -> dict:
     """Transition a task from ``input_required`` to ``completed`` for the recipient.
 
     Args:
-        agent_id: Recipient agent UUID; must match ``Task.context_id``.
-        task_id: Task UUID to ack.
+        agent_id: Recipient agent id; must match ``Task.context_id``.
+        task_id: Task id to ack.
 
     Returns:
         Dict with ``task`` — the updated task dict.
@@ -1056,12 +1056,12 @@ def ack_task(agent_id: str, task_id: str) -> dict:
     )
 
 
-def cancel_task(agent_id: str, task_id: str) -> dict:
+def cancel_task(agent_id: int, task_id: int) -> dict:
     """Transition a task from ``input_required`` to ``canceled`` for the sender.
 
     Args:
-        agent_id: Sender agent UUID; must match ``Task.from_agent_id``.
-        task_id: Task UUID to cancel.
+        agent_id: Sender agent id; must match ``Task.from_agent_id``.
+        task_id: Task id to cancel.
 
     Returns:
         Dict with ``task`` — the updated task dict.
@@ -1081,7 +1081,7 @@ def cancel_task(agent_id: str, task_id: str) -> dict:
     )
 
 
-def list_fleet_agents(fleet_id: str) -> list[dict]:
+def list_fleet_agents(fleet_id: int) -> list[dict]:
     """Return active agents plus deregistered agents that still own tasks.
 
     ``kind`` is derived in SQL via ``json_extract`` so the card blob never
@@ -1153,17 +1153,17 @@ def _list_tasks_where(
     return [_row_to_task_dict(row) for row in rows]
 
 
-def list_inbox(agent_id: str) -> list[dict]:
+def list_inbox(agent_id: int) -> list[dict]:
     """Return raw task rows addressed to ``agent_id`` (no broadcast_summary)."""
     return _list_tasks_where(Task.context_id == agent_id)
 
 
-def list_sent(agent_id: str) -> list[dict]:
+def list_sent(agent_id: int) -> list[dict]:
     """Return raw task rows sent by ``agent_id`` (no broadcast_summary)."""
     return _list_tasks_where(Task.from_agent_id == agent_id)
 
 
-def list_timeline(fleet_id: str, limit: int = 200) -> list[dict]:
+def list_timeline(fleet_id: int, limit: int = 200) -> list[dict]:
     """Return the fleet's recent tasks in DESC ``status_timestamp`` order.
 
     ``broadcast_summary`` rows are filtered out so the timeline shows only
@@ -1171,7 +1171,7 @@ def list_timeline(fleet_id: str, limit: int = 200) -> list[dict]:
     ``agents.fleet_id``.
 
     Args:
-        fleet_id: Fleet UUID to scope the query to.
+        fleet_id: Fleet id to scope the query to.
         limit: Maximum number of rows to return (default 200).
 
     Returns:
@@ -1193,7 +1193,7 @@ def list_timeline(fleet_id: str, limit: int = 200) -> list[dict]:
     return [_row_to_task_dict(row) for row in rows]
 
 
-def get_agent_names(agent_ids: list[str]) -> dict[str, str]:
+def get_agent_names(agent_ids: list[int]) -> dict[int, str]:
     """Batch ``agent_id → name`` lookup including deregistered agents."""
     if not agent_ids:
         return {}
@@ -1205,12 +1205,12 @@ def get_agent_names(agent_ids: list[str]) -> dict[str, str]:
     return {row.agent_id: row.name for row in rows}
 
 
-def get_task(fleet_id: str, task_id: str) -> dict:
+def get_task(fleet_id: int, task_id: int) -> dict:
     """Return the task iff at least one of its endpoints lives in the fleet.
 
     Args:
-        fleet_id: Fleet UUID used to gate visibility.
-        task_id: Task UUID to fetch.
+        fleet_id: Fleet id used to gate visibility.
+        task_id: Task id to fetch.
 
     Returns:
         Dict with ``task`` — the flat typed-column task dict.
@@ -1241,85 +1241,3 @@ def get_task(fleet_id: str, task_id: str) -> dict:
             raise ValueError(f"Task {task_id} not found")
 
     return {"task": task_dict}
-
-
-def _resolve_id_prefix(session, *, id_column, base_where, ref: str, entity: str) -> str:
-    """Resolve ``ref`` (a full UUID or unique prefix) to a full id.
-
-    Exact-match short-circuits before any prefix scan, so a full UUID returns
-    immediately and is never reported ambiguous (an 8-char prefix cannot equal
-    a 36-char id, so it falls through to the scan). The prefix scan uses
-    ``startswith(..., autoescape=True)`` so ``%`` / ``_`` in ``ref`` match
-    literally rather than as LIKE wildcards, and is bounded to two rows.
-
-    Raises:
-        ValueError: zero matches (no-match) or more than one match (ambiguous),
-            each with a distinct message.
-    """
-    exact = session.execute(
-        select(id_column).where(id_column == ref, *base_where)
-    ).first()
-    if exact is not None:
-        return ref
-
-    matches = session.execute(
-        select(id_column)
-        .where(id_column.startswith(ref, autoescape=True), *base_where)
-        .limit(2)
-    ).all()
-    if not matches:
-        raise ValueError(f"no {entity} matches id '{ref}' in this fleet.")
-    if len(matches) > 1:
-        raise ValueError(
-            f"id prefix '{ref}' is ambiguous; supply more characters or the full UUID."
-        )
-    return matches[0][0]
-
-
-def resolve_agent_ref(fleet_id: str, ref: str) -> str:
-    """Full agent UUID or unique prefix -> full agent_id.
-
-    Scoped to ACTIVE agents in ``fleet_id`` (mirrors ``get_agent``).
-
-    Raises:
-        ValueError: ambiguous prefix, or no active agent in the fleet
-            matches ``ref``.
-    """
-    sm = get_sync_sessionmaker()
-    with sm() as session:
-        return _resolve_id_prefix(
-            session,
-            id_column=Agent.agent_id,
-            base_where=(Agent.fleet_id == fleet_id, Agent.status == "active"),
-            ref=ref,
-            entity="agent",
-        )
-
-
-def resolve_task_ref(fleet_id: str, ref: str) -> str:
-    """Full task UUID or unique prefix -> full task_id.
-
-    Scoped to tasks with at least one endpoint agent in ``fleet_id``
-    (mirrors ``get_task`` visibility).
-
-    Raises:
-        ValueError: ambiguous prefix, or no fleet-visible task matches
-            ``ref``.
-    """
-    sm = get_sync_sessionmaker()
-    with sm() as session:
-        return _resolve_id_prefix(
-            session,
-            id_column=Task.task_id,
-            base_where=(
-                exists().where(
-                    Agent.fleet_id == fleet_id,
-                    or_(
-                        Agent.agent_id == Task.from_agent_id,
-                        Agent.agent_id == Task.to_agent_id,
-                    ),
-                ),
-            ),
-            ref=ref,
-            entity="task",
-        )

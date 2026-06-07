@@ -1,5 +1,5 @@
 export interface Agent {
-  agent_id: string;
+  agent_id: number;
   name: string;
   description: string;
   status: "active" | "deregistered";
@@ -8,15 +8,15 @@ export interface Agent {
 }
 
 export interface TimelineMessage {
-  task_id: string;
-  from_agent_id: string;
+  task_id: number;
+  from_agent_id: number;
   from_agent_name: string;
-  to_agent_id: string;
+  to_agent_id: number;
   to_agent_name: string;
   type: string;
   status: "input_required" | "completed" | "canceled";
   created_at: string;
-  origin_task_id: string | null;
+  origin_task_id: number | null;
   status_timestamp: string;
   body: string;
 }
@@ -34,7 +34,7 @@ export interface TimelineResponse {
 }
 
 export interface FleetListItem {
-  fleet_id: string;
+  fleet_id: number;
   label: string | null;
   created_at: string;
   agent_count: number;
