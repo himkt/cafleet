@@ -1,7 +1,7 @@
 # 0000077 — Drop the `.cafleet-base-dir.json` anchor file
 
 **Status**: Approved
-**Progress**: 15/18 tasks complete
+**Progress**: 18/18 tasks complete
 **Last Updated**: 2026-06-07
 
 ## Overview
@@ -153,9 +153,9 @@ Per the project documentation-first rule, the skill and docs land before any oth
 
 ### Step 4: Verify
 
-- [ ] Confirm no Python change: `cafleet/src/cafleet/cli.py` is untouched (the `cli.py:694` error string still names the skill) <!-- completed: -->
-- [ ] Repo-wide search for `.cafleet-base-dir.json` and base-dir-sense "anchor" returns zero hits outside `design-docs/` and git history (treat the Sweep note's do-not-touch list as the allowed-"anchor" set) <!-- completed: -->
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass (sanity gate — no code change expected) <!-- completed: -->
+- [x] Confirm no Python change: `cafleet/src/cafleet/cli.py` is untouched (the `cli.py:694` error string still names the skill) <!-- completed: 2026-06-07T09:08 -->
+- [x] Repo-wide search for `.cafleet-base-dir.json` and base-dir-sense "anchor" returns zero hits outside `design-docs/` and git history (treat the Sweep note's do-not-touch list as the allowed-"anchor" set) <!-- completed: 2026-06-07T09:08 -->
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass (sanity gate — no code change expected) <!-- completed: 2026-06-07T09:08 -->
 
 ---
 
