@@ -43,7 +43,7 @@ call it. No async stores, no HTTP client, no protocol layer.
 | `cli.py` | `cafleet/src/cafleet/` | Unified `cafleet` console script: click group with `db` (Alembic schema management), `fleet` (fleet CRUD), `agent` (registry: `register` / `deregister` / `list` / `show`), `message` (broker: `send` / `broadcast` / `poll` / `ack` / `cancel` / `show`), and `member` (lifecycle: `create` / `delete` / `list` / `capture` / `send-input` / `exec`) subgroups. Also exposes `cafleet server [--host <addr>] [--port <int>]` and `cafleet doctor` as top-level meta-command exceptions. Calls `broker` directly. |
 | `db/models.py` | `cafleet/src/cafleet/db/` | SQLAlchemy declarative models: `Base`, `Fleet`, `Agent`, `Task`; column indexes |
 | `db/engine.py` | `cafleet/src/cafleet/db/` | `get_sync_engine()`, `get_sync_sessionmaker()`, SQLite PRAGMA listener |
-| `alembic/` | `cafleet/src/cafleet/alembic/` | Alembic environment and migration scripts bundled into the wheel |
+| `alembic/` | `cafleet/src/cafleet/db/alembic/` | Alembic environment and migration scripts bundled into the wheel |
 | `webui_api.py` | `cafleet/src/cafleet/` | WebUI API router (`/api/*`) — calls `broker` for all data access |
 | `output.py` | `cafleet/src/cafleet/` | CLI output formatting (tables + JSON) |
 | `coding_agent/` | `cafleet/src/cafleet/coding_agent/` | Coding-agent backend subpackage: `CodingAgent` Protocol (`base.py`), `ClaudeCodeAgent`, `CodexAgent`, `OpencodeAgent`, and the `CODING_AGENTS` registry. |
