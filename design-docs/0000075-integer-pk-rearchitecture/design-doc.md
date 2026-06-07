@@ -1,7 +1,7 @@
 # Integer Primary-Key Rearchitecture + `cafleet.db` Rename + Migration Collapse
 
 **Status**: Approved
-**Progress**: 0/54 tasks complete
+**Progress**: 17/54 tasks complete
 **Last Updated**: 2026-06-06
 
 ## Overview
@@ -258,23 +258,23 @@ There is **no data migration and no backward compatibility**. An existing `regis
 
 ### Step 1: Documentation (docs / README / skills) — FIRST
 
-- [ ] `docs/spec/data-model.md`: retype every PK/FK row to `INTEGER` `AUTOINCREMENT`; document the `sqlite_sequence` table and "ids never reused"; document `tasks.to_agent_id=0` broadcast_summary sentinel (and that real ids are `>= 1`); note `agent_placements.agent_id` is the agents FK reused as PK (no AUTOINCREMENT); replace "UUID v4" notes; update the Administrator-seed paragraph (now seeded only at runtime by `create_fleet`, not by a migration); reflect the single-migration collapse; `registry.db → cafleet.db`. Keep the `### Session ownership` (ORM) + "tmux session" wording untouched. <!-- completed: -->
-- [ ] `docs/spec/message-envelope.md`: id fields are integers; remove any 8-char/prefix language. <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: document `type=int` id options; remove every prefix-resolution / "unique prefix" / "8-char" row, the resolver error-message rows, and the "Human-facing … truncate IDs to an 8-char prefix" paragraph; `--fleet-id` help wording `(UUID)` → integer; `registry.db → cafleet.db`. <!-- completed: -->
-- [ ] `docs/spec/webui-api.md`: retype the API id fields (`fleet_id`, `agent_id`, `task_id`, `from_agent_id`, `to_agent_id`, `origin_task_id`) from `"uuid"` to integers in every example; keep the `to_agent_id="*"` broadcast sentinel; the `X-Fleet-Id` header value is the integer fleet id. <!-- completed: -->
-- [ ] `docs/concepts/overview.md`: `registry.db → cafleet.db`; integer-id model. <!-- completed: -->
-- [ ] `docs/concepts/storage.md`: `registry.db → cafleet.db`; single-migration / schema-collapse description; add the §11 upgrade note. <!-- completed: -->
-- [ ] `docs/concepts/token-reduction.md`: rewrite the compact-envelope row — replace "8-char IDs … pasteable back … via prefix resolution on `--to`/`--id`/`--member-id`/`--task-id`" with "full integer ids (short by construction; no prefix resolution)". <!-- completed: -->
-- [ ] `docs/concepts/fleet-isolation.md`: integer-id references; confirm no prefix language. <!-- completed: -->
-- [ ] `docs/get-started/install.md`: `registry.db → cafleet.db`; add the §11 "delete old DB" upgrade note. <!-- completed: -->
-- [ ] `docs/get-started/configure.md`: `CAFLEET_DATABASE_URL` default → `cafleet.db`. <!-- completed: -->
-- [ ] `docs/reference/coding-agents/codex.md`: `registry.db → cafleet.db`. <!-- completed: -->
-- [ ] `README.md`: `registry.db → cafleet.db`; integer-id model; remove prefix-resolution mentions (use `/update-readme` if the surface is large). <!-- completed: -->
-- [ ] `skills/cafleet/SKILL.md`: `registry.db → cafleet.db`; remove the reserved-prefix / "8-char prefix" language (e.g. the `--quiet` rows and inline-preview header description); integer-id examples; confirm `--fleet-id`/`--agent-id`/`--to`/`--task-id` examples read as integers. <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md`: integer-id examples; remove prefix mentions. <!-- completed: -->
-- [ ] `skills/cafleet/reference/broadcast.md`: integer-id / `origin_task_id` examples; remove prefix mentions. <!-- completed: -->
-- [ ] `skills/cafleet/reference/output-flags.md`: remove `--quiet` "8-char prefix" and any prefix-resolution language. <!-- completed: -->
-- [ ] Grep the repo for residual `registry.db`, id-`[:8]`, "prefix", "8-char", "uuid" in docs/skills to confirm no stragglers — but do NOT flag the time-slice `[:8]` in `_format_iso_hms` (it is not an id slice; see §5). <!-- completed: -->
+- [x] `docs/spec/data-model.md`: retype every PK/FK row to `INTEGER` `AUTOINCREMENT`; document the `sqlite_sequence` table and "ids never reused"; document `tasks.to_agent_id=0` broadcast_summary sentinel (and that real ids are `>= 1`); note `agent_placements.agent_id` is the agents FK reused as PK (no AUTOINCREMENT); replace "UUID v4" notes; update the Administrator-seed paragraph (now seeded only at runtime by `create_fleet`, not by a migration); reflect the single-migration collapse; `registry.db → cafleet.db`. Keep the `### Session ownership` (ORM) + "tmux session" wording untouched. <!-- completed: 2026-06-06T23:41 -->
+- [x] `docs/spec/message-envelope.md`: id fields are integers; remove any 8-char/prefix language. <!-- completed: 2026-06-06T23:41 -->
+- [x] `docs/spec/cli-options.md`: document `type=int` id options; remove every prefix-resolution / "unique prefix" / "8-char" row, the resolver error-message rows, and the "Human-facing … truncate IDs to an 8-char prefix" paragraph; `--fleet-id` help wording `(UUID)` → integer; `registry.db → cafleet.db`. <!-- completed: 2026-06-06T23:41 -->
+- [x] `docs/spec/webui-api.md`: retype the API id fields (`fleet_id`, `agent_id`, `task_id`, `from_agent_id`, `to_agent_id`, `origin_task_id`) from `"uuid"` to integers in every example; keep the `to_agent_id="*"` broadcast sentinel; the `X-Fleet-Id` header value is the integer fleet id. <!-- completed: 2026-06-06T23:41 -->
+- [x] `docs/concepts/overview.md`: `registry.db → cafleet.db`; integer-id model. <!-- completed: 2026-06-06T23:41 -->
+- [x] `docs/concepts/storage.md`: `registry.db → cafleet.db`; single-migration / schema-collapse description; add the §11 upgrade note. <!-- completed: 2026-06-06T23:41 -->
+- [x] `docs/concepts/token-reduction.md`: rewrite the compact-envelope row — replace "8-char IDs … pasteable back … via prefix resolution on `--to`/`--id`/`--member-id`/`--task-id`" with "full integer ids (short by construction; no prefix resolution)". <!-- completed: 2026-06-06T23:41 -->
+- [x] `docs/concepts/fleet-isolation.md`: integer-id references; confirm no prefix language. <!-- completed: 2026-06-06T23:41 -->
+- [x] `docs/get-started/install.md`: `registry.db → cafleet.db`; add the §11 "delete old DB" upgrade note. <!-- completed: 2026-06-06T23:41 -->
+- [x] `docs/get-started/configure.md`: `CAFLEET_DATABASE_URL` default → `cafleet.db`. <!-- completed: 2026-06-06T23:41 -->
+- [x] `docs/reference/coding-agents/codex.md`: `registry.db → cafleet.db`. <!-- completed: 2026-06-06T23:41 -->
+- [x] `README.md`: `registry.db → cafleet.db`; integer-id model; remove prefix-resolution mentions (use `/update-readme` if the surface is large). <!-- completed: 2026-06-06T23:41 -->
+- [x] `skills/cafleet/SKILL.md`: `registry.db → cafleet.db`; remove the reserved-prefix / "8-char prefix" language (e.g. the `--quiet` rows and inline-preview header description); integer-id examples; confirm `--fleet-id`/`--agent-id`/`--to`/`--task-id` examples read as integers. <!-- completed: 2026-06-06T23:41 -->
+- [x] `skills/cafleet/reference/director.md`: integer-id examples; remove prefix mentions. <!-- completed: 2026-06-06T23:41 -->
+- [x] `skills/cafleet/reference/broadcast.md`: integer-id / `origin_task_id` examples; remove prefix mentions. <!-- completed: 2026-06-06T23:41 -->
+- [x] `skills/cafleet/reference/output-flags.md`: remove `--quiet` "8-char prefix" and any prefix-resolution language. <!-- completed: 2026-06-06T23:41 -->
+- [x] Grep the repo for residual `registry.db`, id-`[:8]`, "prefix", "8-char", "uuid" in docs/skills to confirm no stragglers — but do NOT flag the time-slice `[:8]` in `_format_iso_hms` (it is not an id slice; see §5). <!-- completed: 2026-06-06T23:41 -->
 
 ### Step 2: Schema, migration, config
 

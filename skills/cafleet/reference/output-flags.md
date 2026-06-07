@@ -9,8 +9,8 @@
 | Subcommand | Default | `--full` |
 |---|---|---|
 | `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix; compact rendered envelope (`id`, `from`, `ts`, `text` + optional `kind`/`origin`). | Untruncated `text` + full typed-column envelope (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text`). |
-| `message broadcast` | One-line summary `broadcast id=<id8> recipients=<count>`. The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper field — there are no per-recipient envelopes or `recipient_ids` list in the response. | Renders the single `broadcast_summary` task as the full verbose envelope (typed-column dict in `--json`) instead of the one-line summary. Never adds per-recipient envelopes or a `recipient_ids` list — the response is always that one summary task plus `notifications_sent_count`. |
-| `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status` (plus `coding_agent` when a placement is present). | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never load it. |
+| `message broadcast` | One-line summary `broadcast id=<id> recipients=<count>`. The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper field — there are no per-recipient envelopes or `recipient_ids` list in the response. | Renders the single `broadcast_summary` task as the full verbose envelope (typed-column dict in `--json`) instead of the one-line summary. Never adds per-recipient envelopes or a `recipient_ids` list — the response is always that one summary task plus `notifications_sent_count`. |
+| `agent list` / `agent show` | One row per agent (`<id> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status` (plus `coding_agent` when a placement is present). | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never load it. |
 | `member capture` | Default `--lines 30`; ANSI escapes stripped (`--no-ansi` is the default). | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
 
 ## `--json` (global, machine-parseable)
@@ -24,11 +24,11 @@ cafleet --json message poll --agent-id <m> --full
 
 ## `--quiet` (per-subcommand, message-id-only)
 
-On `message send`, `message ack`, and `member ping`: emit only the new task id (8-char prefix) on stdout, nothing else. Mutually exclusive with `--full`. Useful for scripted loops where the rest of the echo is noise.
+On `message send`, `message ack`, and `member ping`: emit only the new task id on stdout, nothing else. Mutually exclusive with `--full`. Useful for scripted loops where the rest of the echo is noise.
 
 ```bash
 cafleet --fleet-id <s> message send --agent-id <m> --to <r> --text "..." --quiet
-# → abc12345
+# → 42
 ```
 
 ## `CAFLEET_MAX_TEXT_LEN`

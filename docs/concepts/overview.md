@@ -78,14 +78,14 @@ Each CLI parameter has exactly one input source:
 
 | Parameter | Source |
 |---|---|
-| Fleet ID | `--fleet-id` global flag (UUID; required for client + member subcommands) |
-| Database URL | `CAFLEET_DATABASE_URL` env var (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db` with `~` expanded at load time) |
+| Fleet ID | `--fleet-id` global flag (integer; required for client + member subcommands) |
+| Database URL | `CAFLEET_DATABASE_URL` env var (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/cafleet.db` with `~` expanded at load time) |
 | Agent ID | `--agent-id` subcommand option |
 | JSON output | `--json` global flag |
 
 Fleet ID and Agent ID are passed as literal CLI flags (not environment
 variables) so a single Claude Code `permissions.allow` pattern of the form
-`cafleet --fleet-id <literal-uuid> *` matches every subcommand for that
+`cafleet --fleet-id <literal-id> *` matches every subcommand for that
 fleet, eliminating per-invocation permission prompts. `--fleet-id` is
 global (placed before the subcommand) and required for every client + member
 subcommand; it is silently accepted (and ignored) on `db init` / `fleet *`

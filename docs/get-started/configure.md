@@ -40,7 +40,7 @@ snippets below are the recommended starting points.
 ```
 
 The `Bash(cafleet *)` pattern is the single allow-everything entry that the
-literal `--fleet-id <uuid>` / `--agent-id <uuid>` flag convention enables —
+literal `--fleet-id <int>` / `--agent-id <int>` flag convention enables —
 one pattern covers every subcommand for every fleet. `cafleet member exec *`
 is moved to the `ask` list because it dispatches arbitrary shell commands on
 behalf of a member; the operator should confirm each invocation.
@@ -95,18 +95,18 @@ sequence — Codex's `prefix_rule` is a positional prefix matcher, so a broad
 `["cafleet"]` allow would also cover `cafleet member exec`. Enumerating the
 safe subgroups explicitly keeps the `member exec` prompt rule effective.
 
-The `cafleet --fleet-id <uuid> <subgroup> …` invocations also need to be
-allowed; since `--fleet-id` and its UUID sit between `cafleet` and the
-subgroup name, add a per-fleet allow for the specific UUIDs you use:
+The `cafleet --fleet-id <int> <subgroup> …` invocations also need to be
+allowed; since `--fleet-id` and its integer value sit between `cafleet` and the
+subgroup name, add a per-fleet allow for the specific fleet ids you use:
 
 ```text
-prefix_rule(pattern = ["cafleet", "--fleet-id", "<your-fleet-uuid>"], decision = "allow")
-prefix_rule(pattern = ["cafleet", "--fleet-id", "<your-fleet-uuid>", "member", "exec"],
+prefix_rule(pattern = ["cafleet", "--fleet-id", "<your-fleet-id>"], decision = "allow")
+prefix_rule(pattern = ["cafleet", "--fleet-id", "<your-fleet-id>", "member", "exec"],
             decision = "prompt",
             justification = "cafleet member exec runs arbitrary commands on a member")
 ```
 
-Repeat the pair for every fleet UUID you operate. The per-fleet prompt
+Repeat the pair for every fleet id you operate. The per-fleet prompt
 rule is more specific than the per-fleet allow, so `member exec` keeps
 prompting even with the broader allow in place.
 

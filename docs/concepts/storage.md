@@ -12,10 +12,10 @@ by Alembic, bundled inside the `cafleet` wheel and applied via
 `cafleet db init`. There is no separate database daemon to operate, monitor,
 or back up — the database is a single file.
 
-The default database path is `~/.local/share/cafleet/registry.db` (XDG state
+The default database path is `~/.local/share/cafleet/cafleet.db` (XDG state
 directory), expanded once at config load time. Override with the
 `CAFLEET_DATABASE_URL` environment variable, e.g.
-`sqlite:////var/lib/cafleet/registry.db`.
+`sqlite:////var/lib/cafleet/cafleet.db`.
 
 **Concurrency**: `PRAGMA busy_timeout=5000` is set on every connection.
 SQLite retries internally for up to 5 seconds before returning `SQLITE_BUSY`.
@@ -32,15 +32,15 @@ content). Every Task field lives in its own typed column.
 %%{init: {'theme': 'default', 'themeVariables': {'fontSize': '15px'}}}%%
 erDiagram
     fleets {
-        TEXT fleet_id PK
+        INTEGER fleet_id PK
         TEXT label
         TEXT created_at
         TEXT deleted_at
-        TEXT director_agent_id FK
+        INTEGER director_agent_id FK
     }
     agents {
-        TEXT agent_id PK
-        TEXT fleet_id FK
+        INTEGER agent_id PK
+        INTEGER fleet_id FK
         TEXT name
         TEXT description
         TEXT status
@@ -49,20 +49,20 @@ erDiagram
         TEXT agent_card_json
     }
     tasks {
-        TEXT task_id PK
-        TEXT context_id FK
-        TEXT from_agent_id FK
-        TEXT to_agent_id
+        INTEGER task_id PK
+        INTEGER context_id FK
+        INTEGER from_agent_id
+        INTEGER to_agent_id
         TEXT type
         TEXT created_at
         TEXT status_state
         TEXT status_timestamp
-        TEXT origin_task_id FK
+        INTEGER origin_task_id
         TEXT text
     }
     agent_placements {
-        TEXT agent_id PK,FK
-        TEXT director_agent_id FK
+        INTEGER agent_id PK,FK
+        INTEGER director_agent_id FK
         TEXT tmux_session
         TEXT tmux_window_id
         TEXT tmux_pane_id
@@ -118,8 +118,11 @@ plain function calls.
 
 ## Schema management
 
-Alembic revisions are committed to the repository: `0001_initial_schema.py`,
-`0002_add_origin_task_id.py`, `0003_add_agent_placements.py`, and onward.
+A single Alembic revision is committed to the repository:
+`0001_initial_schema.py` (`down_revision=None`). It is schema-only — it
+creates all four tables (with `INTEGER PRIMARY KEY AUTOINCREMENT` on the three
+minted-id tables) and the four indexes, and carries no seed INSERTs (the
+Administrator and Director are created at runtime by `broker.create_fleet`).
 Operators run `cafleet db init` once before starting the server. The command
 is idempotent across six DB states:
 
@@ -136,6 +139,17 @@ Without `db init`, the first request fails with `OperationalError: no such
 table: agents`. The development workflow uses `alembic revision
 --autogenerate` directly; the `revision` and `downgrade` commands are not
 exposed via the CLI.
+
+## Upgrading across the integer-PK rearchitecture
+
+There is **no data migration and no backward compatibility** across the
+integer-PK rearchitecture. Delete any pre-existing database. The default file
+moved from `~/.local/share/cafleet/registry.db` to
+`~/.local/share/cafleet/cafleet.db`, so the old file is left untouched and
+ignored — remove it manually. If you set `CAFLEET_DATABASE_URL` to a custom
+path holding an old (UUID-era) schema, `cafleet db init` refuses to run
+against its unknown Alembic revision; delete that file and re-run
+`cafleet db init`.
 
 ## No physical cleanup
 

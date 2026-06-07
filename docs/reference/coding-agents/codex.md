@@ -27,7 +27,7 @@ codex --ask-for-approval never --sandbox workspace-write <prompt>
 - `--sandbox workspace-write` confines codex to writing files within the current workspace. See <https://developers.openai.com/codex/agent-approvals-security> for the upstream description of the approval / sandbox combo.
 
 > [!IMPORTANT]
-> Codex's `--sandbox workspace-write` blocks writes outside the workspace, including cafleet's default SQLite DB at `~/.local/share/cafleet/registry.db`. Operators must add the cafleet DB directory to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads, such as `~/.codex/config.toml`:
+> Codex's `--sandbox workspace-write` blocks writes outside the workspace, including cafleet's default SQLite DB at `~/.local/share/cafleet/cafleet.db`. Operators must add the cafleet DB directory to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads, such as `~/.codex/config.toml`:
 >
 > ```toml
 > [sandbox_workspace_write]
@@ -57,7 +57,7 @@ cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
 cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 
-Substitute the literal UUIDs handed to you in your spawn prompt. There is no env-var fallback.
+Substitute the literal ids handed to you in your spawn prompt. There is no env-var fallback.
 
 For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see `skills/cafleet/SKILL.md`.
 
@@ -84,7 +84,7 @@ Gated on local install of both `claude` and `codex` binaries. Run from inside a 
 
 ```bash
 cafleet fleet create --label codex-smoke --coding-agent claude
-# Capture: FLEET=<uuid>, DIRECTOR=<uuid> from the output.
+# Capture: FLEET=<id>, DIRECTOR=<id> from the output.
 
 cafleet --fleet-id $FLEET member create --agent-id $DIRECTOR \
   --name Claude-Smoke --description "claude smoke member" --coding-agent claude

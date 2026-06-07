@@ -4,7 +4,7 @@ Reference page for the `cafleet member` subgroup — `member create`, `member de
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/exec-routing.md`.
 
-> **`--member-id` accepts a unique prefix.** On `member delete` / `capture` / `send-input` / `exec` / `ping`, `--member-id` resolves either a full UUID or any unique prefix of an active agent's UUID in the fleet — so the 8-char member IDs printed by `cafleet member list` can be pasted straight in. An ambiguous or no-match prefix exits 1. The Director's own acting `--agent-id` stays full-UUID-only. See [`docs/spec/cli-options.md`](../../../docs/spec/cli-options.md#id-prefix-resolution).
+> **`--member-id` is an integer.** On `member delete` / `capture` / `send-input` / `exec` / `ping`, pass the full integer member id printed by `cafleet member list` — ids are typed `int` and short by construction, so there is no prefix resolution. The Director's own acting `--agent-id` is likewise an integer.
 
 ## Member Create
 
@@ -33,7 +33,7 @@ cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. The flag both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex", "opencode"]`) so adding a future backend is one entry in `cafleet.coding_agent.CODING_AGENTS`. Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. For the `opencode` backend, the spawn-precondition step also materializes `~/.opencode/agents/cafleet.md` from the in-source `CAFLEET_AGENT` preset on first spawn (skip-if-exists) — see [`docs/reference/coding-agents/opencode.md`](../../../docs/reference/coding-agents/opencode.md). |
 | `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are the spawn prompt. Mutually exclusive with the positional prompt argument. Read verbatim (no stripping); passes through the same `str.format()` substitution as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all error non-zero with the messages catalogued in [`docs/spec/cli-options.md`](../../../docs/spec/cli-options.md) § Error Messages. The canonical input mode for every CAFleet-native team-skill spawn — see § *Member Create — Scratch and audit files* below. |
-| *(positional, after `--`)* | no | Prompt for the spawned coding-agent process. Mutually exclusive with `--prompt-file`. If both are omitted the default prompt template is used. The default template and any custom prompt go through `str.format()` with `fleet_id` / `agent_id` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal UUIDs substituted in. |
+| *(positional, after `--`)* | no | Prompt for the spawned coding-agent process. Mutually exclusive with `--prompt-file`. If both are omitted the default prompt template is used. The default template and any custom prompt go through `str.format()` with `fleet_id` / `agent_id` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal ids substituted in. |
 
 The spawn argv depends on the chosen backend:
 
@@ -111,11 +111,11 @@ Default columns: `agent_id`, `name`, `status`, `backend`, `session`, `window_id`
 ```
 $ cafleet --fleet-id <s> member list --agent-id <d> --activity
 3 members:
-  agent_id        name      state   last_sent    last_recv    last_ack     idle
-  --------------  --------  ------  -----------  -----------  -----------  -----
-  abc12345        alice     active  12:34:56     12:34:50     12:34:50     6s
-  def67890        bob       active  12:30:11     12:33:02     12:33:02     2m
-  ghi24680        carol     idle    -            12:20:00     12:20:00     14m
+  agent_id  name      state   last_sent    last_recv    last_ack     idle
+  --------  --------  ------  -----------  -----------  -----------  -----
+  5         alice     active  12:34:56     12:34:50     12:34:50     6s
+  6         bob       active  12:30:11     12:33:02     12:33:02     2m
+  7         carol     idle    -            12:20:00     12:20:00     14m
 ```
 
 The `last_ack` aggregation filters `Task.type != 'broadcast_summary'` (mirrors `poll_tasks`). Use `--activity` for routine `/loop` ticks instead of capturing every member every minute — capture is reserved for the cases the activity columns flag.

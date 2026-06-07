@@ -8,12 +8,12 @@ Each parameter has exactly one input source:
 
 | Parameter | Source |
 |---|---|
-| Fleet ID | `--fleet-id <uuid>` global flag |
-| Database URL | `CAFLEET_DATABASE_URL` env var (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db` with `~` expanded at load time. When setting `CAFLEET_DATABASE_URL` yourself, use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs.) |
-| Agent ID | `--agent-id <uuid>` subcommand option |
+| Fleet ID | `--fleet-id <int>` global flag |
+| Database URL | `CAFLEET_DATABASE_URL` env var (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/cafleet.db` with `~` expanded at load time. When setting `CAFLEET_DATABASE_URL` yourself, use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs.) |
+| Agent ID | `--agent-id <int>` subcommand option |
 | JSON output | `--json` global flag |
 
-> **Why `--fleet-id` is a literal CLI flag, not an environment variable.** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --fleet-id <uuid> ...` invocation matches a single `permissions.allow` pattern of the same shape across every subcommand for that fleet. Shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts that interrupt agent work. Substitute the literal UUIDs printed by `cafleet fleet create` and `cafleet agent register` — do not use shell variables to hold them.
+> **Why `--fleet-id` is a literal CLI flag, not an environment variable.** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --fleet-id <int> ...` invocation matches a single `permissions.allow` pattern of the same shape across every subcommand for that fleet. Shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts that interrupt agent work. Substitute the literal integer ids printed by `cafleet fleet create` and `cafleet agent register` — do not use shell variables to hold them.
 
 ## Global Options
 
@@ -22,7 +22,7 @@ Placed **before** the subcommand:
 | Flag | Required | Notes |
 |---|---|---|
 | `--json` | no | Emit JSON output. JSON encoding is compact (`json.dumps(..., separators=(",",":"), ensure_ascii=False)` — non-ASCII like the `…` truncation suffix is emitted as UTF-8, not `\uXXXX`). |
-| `--fleet-id <id>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `fleet *`, `server`, `doctor` | Fleet identifier (opaque string; new fleets receive a UUIDv4). Also called the namespace identifier. Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --fleet-id <literal-id> *` works for every subcommand. |
+| `--fleet-id <int>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `fleet *`, `server`, `doctor` | Fleet identifier (integer, typed `int`; new fleets receive a DB-assigned id). Also called the namespace identifier. Passing a non-integer fails with Click's standard `Error: Invalid value for '--fleet-id': '<x>' is not a valid integer.` (exit 2). Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --fleet-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--fleet-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
 
 ### `--full` semantics (cross-subcommand escape hatch) {#full-semantics}
@@ -31,9 +31,9 @@ Placed **before** the subcommand:
 
 | Subcommand | Default behavior | `--full` behavior |
 |---|---|---|
-| `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix (see [Message Body Truncation](#message-body-truncation)). Compact rendered envelope: `id` (8-char prefix), `from` (8-char prefix), `ts`, `text`, plus `kind`/`origin` only when present. | Untruncated `text` AND the full typed-column envelope (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text`). |
-| `message broadcast` | One-line summary (`broadcast id=<id8> recipients=<count>`). The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper — there are no per-recipient envelopes or `recipient_ids` list in the response. | Renders the single `broadcast_summary` task as the full verbose envelope (typed-column dict in `--json`) instead of the one-line summary. It never adds per-recipient envelopes or a `recipient_ids` list — the response is always that one summary task plus `notifications_sent_count`. |
-| `agent list` / `agent show` | One row per agent (`<id8> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status` (plus `coding_agent` when a placement is present). | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never load it. |
+| `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix (see [Message Body Truncation](#message-body-truncation)). Compact rendered envelope: `id`, `from`, `ts`, `text`, plus `kind`/`origin` only when present (ids are full integers). | Untruncated `text` AND the full typed-column envelope (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text`). |
+| `message broadcast` | One-line summary (`broadcast id=<id> recipients=<count>`). The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper — there are no per-recipient envelopes or `recipient_ids` list in the response. | Renders the single `broadcast_summary` task as the full verbose envelope (typed-column dict in `--json`) instead of the one-line summary. It never adds per-recipient envelopes or a `recipient_ids` list — the response is always that one summary task plus `notifications_sent_count`. |
+| `agent list` / `agent show` | One row per agent (`<id> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status` (plus `coding_agent` when a placement is present). | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never load it. |
 | `member capture` | Default `--lines 30` (down from 80); ANSI escape sequences stripped in post-process unless `--ansi` is supplied. | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
 
 ### Subcommands that require `--fleet-id`
@@ -53,11 +53,11 @@ cafleet fleet create --label "my-project"
 # → prints the fleet_id
 ```
 
-Then pass the printed UUID as `--fleet-id <uuid>` on every client + member command.
+Then pass the printed id as `--fleet-id <id>` on every client + member command.
 
 ## Agent ID (`--agent-id`)
 
-`--agent-id` is a **per-subcommand option** (not a global option). It identifies which agent is acting and must be specified on each invocation.
+`--agent-id` is a **per-subcommand option** (not a global option). It identifies which agent is acting and must be specified on each invocation. It is typed `int`; a non-integer fails with Click's standard `Error: Invalid value for '--agent-id': '<x>' is not a valid integer.` (exit 2). The same `type=int` applies to every id option — `--to`, `--id` (`agent show`), `--member-id`, and `--task-id` — so each rejects a non-integer the same way. Ids are short by construction (DB-assigned integers, typically 1–4 digits), so they are pasted in full; there is no prefix resolution.
 
 ### Commands that require `--agent-id`
 
@@ -82,26 +82,6 @@ Then pass the printed UUID as `--fleet-id <uuid>` on every client + member comma
 
 - `agent register` — Register a new agent (returns an agent ID)
 
-## ID Prefix Resolution
-
-Human-facing and default JSON output truncate IDs to an 8-char prefix (task id, agent id, `fleet create` director/admin, member id). To make those displayed prefixes pasteable into the next command, the **target** ID inputs accept either a full UUID or any unique prefix of one:
-
-| Input | Subcommand(s) | Resolved against |
-|---|---|---|
-| `--to` | `message send` | active agents in the fleet |
-| `--id` | `agent show` | active agents in the fleet |
-| `--member-id` | `member delete` / `capture` / `send-input` / `exec` / `ping` | active agents in the fleet |
-| `--task-id` | `message ack` / `cancel` / `show` | tasks with at least one endpoint agent in the fleet |
-
-Resolution rules:
-
-- **Exact-match short-circuit.** A full UUID matches by exact equality before any prefix scan, so it always resolves to itself and is never reported ambiguous (an 8-char prefix cannot equal a 36-char id).
-- **Unique prefix wins.** Any prefix — no minimum length — that matches exactly one row resolves to that row's full id.
-- **Fleet-scoped.** Resolution only sees rows visible to the supplied `--fleet-id`: agents active in the fleet, tasks with an endpoint agent in the fleet. A prefix that is unique in another fleet is invisible here. Task lookup for `ack` / `cancel` / `show` is therefore tightened to fleet-visible tasks.
-- **Ambiguous or no-match → exit 1.** A prefix matching more than one row, and a prefix (or full UUID) matching zero rows, each exit `1` with a distinct message (see [Error Messages](#error-messages)).
-
-The acting `--agent-id` is **not** prefix-resolved — an agent always knows its own full UUID (returned at `register`, baked into the spawn prompt), so it is never re-typed from an 8-char display. Passing a prefix there is rejected by the existing acting-agent validation, not by prefix resolution: on every `requires_agent_fleet` command (including `message send`) the `verify_agent_fleet` gate runs before the handler resolves its target and yields `Error: agent <prefix> is not a member of fleet <sid>.`.
-
 ## Message Body Truncation
 
 The five subcommands that emit a user-supplied delivery body — `cafleet message {send,poll,ack,cancel,show}` — truncate the `text` body to the first `CAFLEET_MAX_TEXT_LEN` Unicode codepoints (default `200`) plus a single `…` codepoint suffix by default. The truncation applies in both text and `--json` output and is implemented in `cafleet/src/cafleet/output.py` (`truncate_text`, `truncate_task_text`) wired into the shared `_client_command` decorator.
@@ -112,7 +92,7 @@ The five subcommands that emit a user-supplied delivery body — `cafleet messag
 
 The suffix is the single Unicode codepoint `…` (U+2026 HORIZONTAL ELLIPSIS) — exactly one codepoint with no count and no companion `text_length` field.
 
-`cafleet message broadcast` is different — `broker.broadcast_message` returns a `broadcast_summary` task whose top-level `text` column is a broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. `message_broadcast` runs with `truncates_task_text=True`: by default the summary renders as the one-line `broadcast id=<id8> recipients=<count>`, while `--full` renders the single `broadcast_summary` task as the full typed-column envelope. The default summary string is short, so compact truncation only applies if `CAFLEET_MAX_TEXT_LEN` is set below its length. `--full` never adds per-recipient envelopes or a `recipient_ids` list. The task envelope is a flat typed-column dict with no `metadata` / `artifacts` wrappers; see [message-envelope.md](./message-envelope.md) for the canonical schema.
+`cafleet message broadcast` is different — `broker.broadcast_message` returns a `broadcast_summary` task whose top-level `text` column is a broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. `message_broadcast` runs with `truncates_task_text=True`: by default the summary renders as the one-line `broadcast id=<id> recipients=<count>`, while `--full` renders the single `broadcast_summary` task as the full typed-column envelope. The default summary string is short, so compact truncation only applies if `CAFLEET_MAX_TEXT_LEN` is set below its length. `--full` never adds per-recipient envelopes or a `recipient_ids` list. The task envelope is a flat typed-column dict with no `metadata` / `artifacts` wrappers; see [message-envelope.md](./message-envelope.md) for the canonical schema.
 
 The table describes the resulting `text` value AFTER truncation. Text mode omits the `text:` line entirely when the resulting value is empty, while `--json` always includes it.
 
@@ -126,7 +106,7 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 | Flag | Required | Notes |
 |---|---|---|
 | `--full` | no | Per-subcommand option (placed after the subcommand name, like `--agent-id` and `--task-id`). Disables truncation; emits the full message body and the full typed-column envelope. Composes orthogonally with `--json`. See [`--full` semantics](#full-semantics) for the cross-subcommand summary. |
-| `--quiet` | no | On `message send`, `message ack`, and `member ping`: emit only the new task id (8-char prefix) on stdout, nothing else. Mutually exclusive with `--full`; the two are not expected to be combined. |
+| `--quiet` | no | On `message send`, `message ack`, and `member ping`: emit only the new task id on stdout, nothing else. Mutually exclusive with `--full`; the two are not expected to be combined. |
 
 Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split.
 
@@ -151,7 +131,7 @@ The `cafleet fleet` subgroup manages fleets. These commands write directly to SQ
 
 There are no `--name` / `--description` flags. The root Director's name and description are hardcoded (`name="Director"`, `description="Root Director for this fleet"`).
 
-Creates a new fleet with a UUIDv4 identifier. **Must be run inside a tmux session** — outside tmux the command exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing to the DB. The command atomically performs five writes in a single transaction:
+Creates a new fleet with a DB-assigned integer identifier. **Must be run inside a tmux session** — outside tmux the command exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing to the DB. The command atomically performs five writes in a single transaction:
 
 1. `INSERT INTO fleets (...)` with `deleted_at=NULL`, `director_agent_id=NULL`.
 2. `INSERT INTO agents (...)` for the hardcoded root Director.
@@ -177,12 +157,12 @@ administrator:    <administrator_agent_id>
 
 ```json
 {
-  "fleet_id": "550e8400-e29b-41d4-a716-446655440000",
+  "fleet_id": 1,
   "label": "my-project",
   "created_at": "2026-04-15T10:00:00+00:00",
-  "administrator_agent_id": "3c4d5e6f-7890-1234-5678-90abcdef1234",
+  "administrator_agent_id": 3,
   "director": {
-    "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
+    "agent_id": 2,
     "name": "Director",
     "description": "Root Director for this fleet",
     "registered_at": "2026-04-15T10:00:00+00:00",
@@ -210,7 +190,7 @@ Attempting `cafleet --fleet-id <fleet_id> agent deregister --agent-id <director_
 
 Lists all **non-soft-deleted** fleets with their `director_agent_id`, label, created_at, and active agent count. Soft-deleted fleets (`fleets.deleted_at IS NOT NULL`) are hidden.
 
-Each row exposes the fleet's root `director_agent_id` so the Director's ID can be recovered from a list after `fleet create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (full UUID). Text output renders it as a `DIRECTOR` column placed immediately after `FLEET_ID`, showing the **full** director UUID (not an 8-char prefix) because the value is pasted into `--agent-id`, which stays full-only:
+Each row exposes the fleet's root `director_agent_id` so the Director's ID can be recovered from a list after `fleet create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (integer). Text output renders it as a `DIRECTOR` column placed immediately after `FLEET_ID`:
 
 ```
 FLEET_ID                               DIRECTOR                                 LABEL                AGENTS   CREATED_AT
@@ -228,7 +208,7 @@ Shows details of a single fleet. Exits 1 with `Error: fleet 'X' not found.` if t
 `broker.get_fleet` intentionally returns soft-deleted rows (to keep audit info reachable), so `fleet show` succeeds on a soft-deleted fleet. When the row's `deleted_at` is non-NULL, the text output adds a `deleted_at:` line so callers can distinguish a soft-deleted fleet from an active one without parsing JSON:
 
 ```
-fleet_id: <uuid>
+fleet_id: <id>
 label:      example
 created_at: 2026-04-16T09:00:00+00:00
 deleted_at: 2026-04-16T10:00:00+00:00
@@ -348,7 +328,7 @@ cafleet server --host 0.0.0.0 --port 9000
 CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 
 # --fleet-id is silently accepted and ignored
-cafleet --fleet-id 550e8400-e29b-41d4-a716-446655440000 server
+cafleet --fleet-id 1 server
 ```
 
 ## Member Commands
@@ -435,11 +415,11 @@ Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet
 ```
 $ cafleet --fleet-id <s> member list --agent-id <d> --activity
 3 members:
-  agent_id        name      state   last_sent    last_recv    last_ack     idle
-  --------------  --------  ------  -----------  -----------  -----------  -----
-  abc12345        alice     active  12:34:56     12:34:50     12:34:50     6s
-  def67890        bob       active  12:30:11     12:33:02     12:33:02     2m
-  ghi24680        carol     idle    -            12:20:00     12:20:00     14m
+  agent_id  name      state   last_sent    last_recv    last_ack     idle
+  --------  --------  ------  -----------  -----------  -----------  -----
+  5         alice     active  12:34:56     12:34:50     12:34:50     6s
+  6         bob       active  12:30:11     12:33:02     12:33:02     2m
+  7         carol     idle    -            12:20:00     12:20:00     14m
 ```
 
 `last_sent` / `last_recv` come from `MAX(tasks.status_timestamp)` filtered by `from_agent_id` / `context_id`; `last_ack` is `MAX(tasks.status_timestamp WHERE status_state='completed' AND type != 'broadcast_summary')`. `idle` is wall-time minus `MAX(last_sent, last_recv)`. Existing indexes `idx_tasks_context_status_ts` and `idx_tasks_from_agent_status_ts` cover the aggregation joins; benchmark target is < 100 ms at 1k messages.
@@ -498,7 +478,7 @@ Three separate tmux invocations for `--freetext` because tmux's `-l` (literal) f
 
 Mirrors `cafleet member capture` step-for-step:
 
-1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
+1. Load the target via `broker.get_agent(member_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
 4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
@@ -518,7 +498,7 @@ JSON (`cafleet --json ... member send-input ...`):
 
 ```json
 {
-  "member_agent_id": "<uuid>",
+  "member_agent_id": <id>,
   "pane_id": "%7",
   "action": "choice",
   "value": "1"
@@ -527,7 +507,7 @@ JSON (`cafleet --json ... member send-input ...`):
 
 ```json
 {
-  "member_agent_id": "<uuid>",
+  "member_agent_id": <id>,
   "pane_id": "%7",
   "action": "freetext",
   "value": "<user text as-sent>"
@@ -575,7 +555,7 @@ Two separate tmux invocations because tmux's `-l` (literal) flag is per-invocati
 
 Mirrors `cafleet member send-input` step-for-step:
 
-1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
+1. Load the target via `broker.get_agent(member_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
 4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to exec.`.
@@ -594,7 +574,7 @@ JSON (`cafleet --json ... member exec ...`):
 
 ```json
 {
-  "member_agent_id": "<uuid>",
+  "member_agent_id": <id>,
   "pane_id": "%7",
   "command": "<command as-sent>"
 }
@@ -652,7 +632,7 @@ The subcommand has no positional argument and no other flags. There is no operat
 
 Mirrors `cafleet member exec` step-for-step:
 
-1. Resolve `--member-id` (full UUID or unique prefix) via `broker.resolve_agent_ref`, then load the target via `broker.get_agent(resolved_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`. (An ambiguous / no-match prefix exits 1 with the resolver's message before this step.)
+1. Load the target via `broker.get_agent(member_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
 4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to ping.`.
@@ -671,7 +651,7 @@ JSON (`cafleet --json ... member ping ...`):
 
 ```json
 {
-  "member_agent_id": "<uuid>",
+  "member_agent_id": <id>,
   "pane_id": "%7"
 }
 ```
@@ -723,8 +703,4 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `member create --prompt-file` to an unreadable file | `Error: --prompt-file <path>: file is not readable.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to a file containing invalid UTF-8 | `Error: --prompt-file <path>: file is not valid UTF-8.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to a zero-byte or whitespace-only file | `Error: --prompt-file <path>: file is empty.` (exit 1; `click.ClickException`) |
-| `--to` / `--id` / `--member-id` prefix matching >1 active agent in the fleet | `Error: id prefix '<ref>' is ambiguous; supply more characters or the full UUID.` (exit 1) |
-| `--to` / `--id` / `--member-id` prefix or full UUID matching 0 active agents in the fleet | `Error: no agent matches id '<ref>' in this fleet.` (exit 1) |
-| `--task-id` prefix matching >1 fleet-visible task | `Error: id prefix '<ref>' is ambiguous; supply more characters or the full UUID.` (exit 1) |
-| `--task-id` prefix or full UUID matching 0 fleet-visible tasks | `Error: no task matches id '<ref>' in this fleet.` (exit 1) |
 

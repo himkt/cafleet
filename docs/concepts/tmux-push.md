@@ -48,7 +48,7 @@ preview of the message itself into the recipient's pane via
 per-test `monkeypatch.setattr` on the class method is honored):
 
 ```text
-[cafleet msg <task_id_8> from <sender_8> <ts>]
+[cafleet msg <task_id> from <sender_id> <ts>]
 <text-truncated-to-CAFLEET_MAX_TEXT_LEN>
 ```
 

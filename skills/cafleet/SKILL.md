@@ -32,34 +32,34 @@ For broadcast, member spawning, member capture, member ping, and member exec, se
 
 ## Required Flags
 
-Every `cafleet` invocation that touches agents or messages must carry two literal UUIDs as flags. There is no env-var fallback.
+Every `cafleet` invocation that touches agents or messages must carry two literal integer ids as flags. There is no env-var fallback.
 
 | Flag | Scope | Required for | Notes |
 |---|---|---|---|
-| `--fleet-id <uuid>` | global (placed **before** the subcommand) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `show`, `agent *`, `deregister`, `member *`) | UUID of the fleet created via `cafleet fleet create`. Silently accepted (and ignored) on `db init` / `fleet *` / `server` / `doctor`. |
-| `--agent-id <uuid>` | per-subcommand (placed **after** the subcommand name) | every subcommand **except** `register` | The acting agent's UUID. `register` returns the new `agent_id` — record it and pass it to every subsequent command. |
+| `--fleet-id <int>` | global (placed **before** the subcommand) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `show`, `agent *`, `deregister`, `member *`) | Integer id of the fleet created via `cafleet fleet create`. Typed `int` — a non-integer fails with Click's standard "is not a valid integer" error. Silently accepted (and ignored) on `db init` / `fleet *` / `server` / `doctor`. |
+| `--agent-id <int>` | per-subcommand (placed **after** the subcommand name) | every subcommand **except** `register` | The acting agent's integer id. `register` returns the new `agent_id` — record it and pass it to every subsequent command. |
 
 If `--fleet-id` is missing on a subcommand that needs it, the CLI exits with `Error: --fleet-id <uuid> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`
 
-> **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --fleet-id <uuid> <subcmd> --agent-id <uuid>` invocation matches a single allow pattern across every subcommand for that fleet. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal UUIDs printed by `cafleet fleet create` and `cafleet agent register` — never store them in shell variables.
+> **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --fleet-id <int> <subcmd> --agent-id <int>` invocation matches a single allow pattern across every subcommand for that fleet. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal ids printed by `cafleet fleet create` and `cafleet agent register` — never store them in shell variables.
 
 The environment variables the CLI reads (all wired through `cafleet.config.Settings` via explicit `validation_alias` on each field, so the `CAFLEET_` prefix is uniform):
 
-- `CAFLEET_DATABASE_URL` — SQLite database URL (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/registry.db`). Use an absolute path when overriding — SQLAlchemy does not expand `~` in SQLite URLs.
+- `CAFLEET_DATABASE_URL` — SQLite database URL (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/cafleet.db`). Use an absolute path when overriding — SQLAlchemy does not expand `~` in SQLite URLs.
 - `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` — defaults for `cafleet server` (`127.0.0.1` / `8000`).
 - `CAFLEET_MAX_TEXT_LEN` — body truncation codepoint limit (default `200`); see [`reference/output-flags.md`](reference/output-flags.md).
 
 ## Placeholder convention
 
-In every example below, substitute the literal UUID strings printed by `cafleet fleet create` / `cafleet agent register`. Angle-bracket tokens are placeholders, **not** shell variables:
+In every example below, substitute the literal integer ids printed by `cafleet fleet create` / `cafleet agent register`. Angle-bracket tokens are placeholders, **not** shell variables:
 
-- `<fleet-id>` — the fleet UUID printed by `cafleet fleet create`
-- `<my-agent-id>` — the UUID returned by your own `cafleet ... agent register` call
-- `<director-agent-id>` — the Director's UUID (in your spawn prompt if you are a member)
+- `<fleet-id>` — the fleet id printed by `cafleet fleet create`
+- `<my-agent-id>` — the id returned by your own `cafleet ... agent register` call
+- `<director-agent-id>` — the Director's id (in your spawn prompt if you are a member)
 - `<target-agent-id>` — the recipient of a unicast message
-- `<task-id>` — the task UUID printed by `message poll` / `message send`
+- `<task-id>` — the task id printed by `message poll` / `message send`
 
-> **Prefix resolution**: the **target** ID inputs — `--to` (message send), `--id` (agent show), `--member-id` (member subcommands), and `--task-id` (message ack/cancel/show) — accept either a full UUID or any unique prefix of one, scoped to the current fleet. So an 8-char ID printed by `agent list`, a poll envelope, or `fleet create` can be pasted straight into the next command. An ambiguous or no-match prefix exits 1. The acting `--agent-id` is full-UUID-only. See [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md#id-prefix-resolution).
+> **Ids are integers**: every id input (`--fleet-id`, `--agent-id`, `--to`, `--id`, `--member-id`, `--task-id`) is a DB-assigned integer, typically 1–4 digits. Each is typed `int` and is passed in full — there is no prefix resolution. A non-integer fails with Click's standard `Error: Invalid value for '...': '<x>' is not a valid integer.` (exit 2).
 
 ## Global Options
 
@@ -92,7 +92,7 @@ cafleet --fleet-id <fleet-id> --json agent register \
 JSON response (field order is not guaranteed):
 
 ```json
-{"agent_id":"<uuid>","name":"<short-label>","registered_at":"<iso8601>"}
+{"agent_id":<id>,"name":"<short-label>","registered_at":"<iso8601>"}
 ```
 
 Rules:
@@ -100,7 +100,7 @@ Rules:
 - **Name**: short, human-identifiable label (`Claude-A`, `reviewer-bot`, …). Not `test`, `foo`, etc.
 - **Description**: one sentence stating who the agent is and what it is for.
 - **Capture `agent_id` immediately.** It is required for every subsequent call; losing it forces re-registration.
-- Non-`--json` output prints `Agent registered successfully!` followed by `  agent_id:  <uuid>` and `  name:      <name>`. Parse the `agent_id:` line if `--json` is not an option.
+- Non-`--json` output prints `Agent registered successfully!` followed by `  agent_id:  <id>` and `  name:      <name>`. Parse the `agent_id:` line if `--json` is not an option.
 - Call `cafleet --fleet-id <fleet-id> agent deregister --agent-id <my-agent-id>` at end of fleet so stale registrations do not accumulate.
 
 > **Reserved name — `Administrator`**: every fleet is auto-seeded with exactly one built-in `Administrator` agent at `fleet create` time. Do NOT register a human or member agent under the name `Administrator`. The built-in Administrator is marked internally via `agent_card_json.cafleet.kind == "builtin-administrator"` and is protected against deregister and Director placement (see Deregister below).
@@ -116,15 +116,15 @@ cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--to <agent-id>` | yes | Recipient agent UUID. |
+| `--to <agent-id>` | yes | Recipient agent id (integer). |
 | `--text <body>` | yes | Message body. Truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the echoed response by default. |
 | `--full` | no | Disable body truncation; emit the full typed-column envelope. See [`reference/output-flags.md`](reference/output-flags.md). |
-| `--quiet` | no | Emit only the new task id (8-char prefix). Useful in scripted loops. |
+| `--quiet` | no | Emit only the new task id. Useful in scripted loops. |
 
 After persisting the message, the broker keystrokes a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview`:
 
 ```
-[cafleet msg <task_id_8> from <sender_8> <ts>]
+[cafleet msg <task_id> from <sender_id> <ts>]
 <text-truncated-to-CAFLEET_MAX_TEXT_LEN>
 ```
 
@@ -160,9 +160,9 @@ cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <ta
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--task-id <uuid>` | yes | Task to acknowledge. |
+| `--task-id <int>` | yes | Task to acknowledge. |
 | `--full` | no | Disable body truncation in the echoed task. |
-| `--quiet` | no | Emit only the acked task id (8-char prefix). |
+| `--quiet` | no | Emit only the acked task id. |
 
 ## Cancel (Retract)
 
@@ -174,7 +174,7 @@ cafleet --fleet-id <fleet-id> message cancel --agent-id <my-agent-id> --task-id 
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--task-id <uuid>` | yes | Task to cancel. |
+| `--task-id <int>` | yes | Task to cancel. |
 | `--full` | no | Disable body truncation in the echoed task. |
 
 ## Show (Get Task)
@@ -187,7 +187,7 @@ cafleet --fleet-id <fleet-id> message show --agent-id <my-agent-id> --task-id <t
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--task-id <uuid>` | yes | Task to fetch. |
+| `--task-id <int>` | yes | Task to fetch. |
 | `--full` | no | Disable body truncation; emit the full typed-column envelope. |
 
 ## List Agents
@@ -199,7 +199,7 @@ cafleet --fleet-id <fleet-id> agent list --agent-id <my-agent-id>
 cafleet --fleet-id <fleet-id> agent show --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
-Default output is one row per agent (`<id8> <name> <status>`); `description` is truncated to 60 codepoints. Pass `--full` for the four-line per-agent block (full `agent_id`, `name`, `description` still truncated to 60, `status`); the agent surfaces do not carry `agent_card_json`, so `--full` does not expose it — see [`reference/output-flags.md`](reference/output-flags.md).
+Default output is one row per agent (`<id> <name> <status>`); `description` is truncated to 60 codepoints. Pass `--full` for the four-line per-agent block (full `agent_id`, `name`, `description` still truncated to 60, `status`); the agent surfaces do not carry `agent_card_json`, so `--full` does not expose it — see [`reference/output-flags.md`](reference/output-flags.md).
 
 ## Doctor
 
