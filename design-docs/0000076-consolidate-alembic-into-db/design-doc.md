@@ -1,7 +1,7 @@
 # Consolidate Alembic schema-management files into the `db` package
 
 **Status**: Approved
-**Progress**: 4/15 tasks complete
+**Progress**: 10/15 tasks complete
 **Last Updated**: 2026-06-07
 
 ## Overview
@@ -115,15 +115,15 @@ The file move (Step 2) and the in-tree reference updates (Step 3) MUST land in a
 
 ### Step 2: Relocate files with `git mv` (same commit as Step 3)
 
-- [ ] `git mv cafleet/src/cafleet/alembic.ini cafleet/src/cafleet/db/alembic.ini` <!-- completed: -->
-- [ ] `git mv cafleet/src/cafleet/alembic cafleet/src/cafleet/db/alembic` (moves `env.py`, `script.py.mako`, `versions/0001_initial_schema.py`; do not add `__init__.py`). <!-- completed: -->
+- [x] `git mv cafleet/src/cafleet/alembic.ini cafleet/src/cafleet/db/alembic.ini` <!-- completed: 2026-06-07T06:18 -->
+- [x] `git mv cafleet/src/cafleet/alembic cafleet/src/cafleet/db/alembic` (moves `env.py`, `script.py.mako`, `versions/0001_initial_schema.py`; do not add `__init__.py`). <!-- completed: 2026-06-07T06:18 -->
 
 ### Step 3: Update in-tree reference sites (same commit as Step 2)
 
-- [ ] `cafleet/src/cafleet/cli.py:191` — `files("cafleet") / "alembic.ini"` → `files("cafleet.db") / "alembic.ini"`. <!-- completed: -->
-- [ ] `cafleet/tests/test_alembic_smoke.py:21` and `:64` — both → `files("cafleet.db") / "alembic.ini"`. <!-- completed: -->
-- [ ] `cafleet/tests/_helpers.py:11` — → `files("cafleet.db") / "alembic.ini"`. <!-- completed: -->
-- [ ] `cafleet/pyproject.toml` `[tool.hatch.build.targets.wheel].include` — `"src/cafleet/alembic.ini"` → `"src/cafleet/db/alembic.ini"` and `"src/cafleet/alembic/**/*"` → `"src/cafleet/db/alembic/**/*"`. <!-- completed: -->
+- [x] `cafleet/src/cafleet/cli.py:191` — `files("cafleet") / "alembic.ini"` → `files("cafleet.db") / "alembic.ini"`. <!-- completed: 2026-06-07T06:18 -->
+- [x] `cafleet/tests/test_alembic_smoke.py:21` and `:64` — both → `files("cafleet.db") / "alembic.ini"`. <!-- completed: 2026-06-07T06:18 -->
+- [x] `cafleet/tests/_helpers.py:11` — → `files("cafleet.db") / "alembic.ini"`. <!-- completed: 2026-06-07T06:18 -->
+- [x] `cafleet/pyproject.toml` `[tool.hatch.build.targets.wheel].include` — `"src/cafleet/alembic.ini"` → `"src/cafleet/db/alembic.ini"` and `"src/cafleet/alembic/**/*"` → `"src/cafleet/db/alembic/**/*"`. <!-- completed: 2026-06-07T06:18 -->
 
 ### Step 4: Verify
 

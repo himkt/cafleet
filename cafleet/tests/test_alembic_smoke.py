@@ -18,7 +18,7 @@ def alembic_upgraded_db(tmp_path_factory):
     tmp_db_path = tmp_path_factory.mktemp("alembic_smoke") / "smoke.db"
 
     with importlib.resources.as_file(
-        importlib.resources.files("cafleet") / "alembic.ini"
+        importlib.resources.files("cafleet.db") / "alembic.ini"
     ) as ini_path:
         cfg = Config(str(ini_path))
         cfg.set_main_option("sqlalchemy.url", f"sqlite:///{tmp_db_path}")
@@ -61,7 +61,7 @@ def test_alembic_version_table_records_collapsed_head_0001(alembic_upgraded_db):
 def test_only_one_migration_revision_exists():
     """The migration history collapses to a single schema-only initial revision."""
     with importlib.resources.as_file(
-        importlib.resources.files("cafleet") / "alembic.ini"
+        importlib.resources.files("cafleet.db") / "alembic.ini"
     ) as ini_path:
         cfg = Config(str(ini_path))
         script = ScriptDirectory.from_config(cfg)
