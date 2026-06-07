@@ -1,7 +1,5 @@
 """Tests for ``broker`` messaging operations."""
 
-import uuid
-
 import pytest
 
 from cafleet import broker
@@ -43,7 +41,7 @@ def test_send_message__returns_typed_envelope_with_task_and_notification():
     assert task["context_id"] == recipient
     assert task["text"] == "Did the API change?"
     assert task["status_state"] == "input_required"
-    uuid.UUID(task["task_id"])
+    assert isinstance(task["task_id"], int)
     assert "T" in task["status_timestamp"]
     assert "notification_sent" in result
 
@@ -51,7 +49,7 @@ def test_send_message__returns_typed_envelope_with_task_and_notification():
 @pytest.mark.parametrize(
     ("scenario", "build_args", "expected_match"),
     [
-        ("invalid_uuid", "invalid_dest", "Invalid destination format"),
+        ("non_integer", "invalid_dest", "Invalid destination format"),
         ("missing_agent", "missing_dest", "Destination agent not found"),
         ("deregistered_agent", "deregistered_dest", "Destination agent not found"),
         ("cross_fleet", "cross_fleet", "Destination agent not in fleet"),
@@ -60,9 +58,9 @@ def test_send_message__returns_typed_envelope_with_task_and_notification():
 def test_send_message__validation_failures(scenario, build_args, expected_match):
     sid, sender, recipient = _setup_two_agents()
     if build_args == "invalid_dest":
-        dest_sid, dest_sender, dest = sid, sender, "not-a-uuid"
+        dest_sid, dest_sender, dest = sid, sender, "not-a-number"
     elif build_args == "missing_dest":
-        dest_sid, dest_sender, dest = sid, sender, str(uuid.uuid4())
+        dest_sid, dest_sender, dest = sid, sender, 999999
     elif build_args == "deregistered_dest":
         broker.deregister_agent(recipient)
         dest_sid, dest_sender, dest = sid, sender, recipient
@@ -344,7 +342,7 @@ def test_get_task__returns_full_typed_envelope():
 def test_get_task__nonexistent_raises():
     fleet = _create_fleet()
     with pytest.raises(ValueError, match="not found"):
-        broker.get_task(fleet["fleet_id"], str(uuid.uuid4()))
+        broker.get_task(fleet["fleet_id"], 999999)
 
 
 def test_get_task__fleet_boundary_rejects_foreign_fleet():

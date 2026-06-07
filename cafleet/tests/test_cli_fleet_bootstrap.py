@@ -2,7 +2,6 @@
 
 import json
 import sqlite3
-import uuid
 
 import pytest
 from click.testing import CliRunner
@@ -22,7 +21,7 @@ def _autouse_reset_engine(_reset_engine_singletons):
 
 @pytest.fixture
 def db_file(tmp_path, monkeypatch):
-    path = tmp_path / "registry.db"
+    path = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -77,10 +76,10 @@ def _agent_rows(db_path) -> list[tuple]:
         conn.close()
 
 
-def test_fleet_create_text_output__compact_default_emits_fleet_id_and_id8_prefixes(
+def test_fleet_create_text_output__compact_default_emits_fleet_id_and_full_ids(
     db_file, mock_tmux_ok
 ):
-    """Default text output is 1 line: ``<fleet_id> director=<id8> admin=<id8>``."""
+    """Default text output is 1 line: ``<fleet_id> director=<id> admin=<id>``."""
     runner = CliRunner()
     result = runner.invoke(cli, ["fleet", "create"])
     assert result.exit_code == 0, result.output
@@ -91,12 +90,12 @@ def test_fleet_create_text_output__compact_default_emits_fleet_id_and_id8_prefix
     parts = out.split()
     assert len(parts) == 3
     sid = parts[0]
-    uuid.UUID(sid)
+    assert sid.isdigit()
     assert parts[1].startswith("director=")
     assert parts[2].startswith("admin=")
 
     rows = _fleet_rows(db_file)
-    assert any(r[0] == sid for r in rows)
+    assert any(str(r[0]) == sid for r in rows)
 
 
 def test_fleet_create_text_output__full_flag_emits_verbose_7_line_layout(
@@ -142,12 +141,9 @@ def test_fleet_create_text_output__full_administrator_line_references_seeded_adm
     assert admin_line is not None
     admin_id = None
     for token in admin_line.replace(":", " ").split():
-        try:
-            uuid.UUID(token)
-            admin_id = token
+        if token.isdigit():
+            admin_id = int(token)
             break
-        except ValueError:
-            continue
     assert admin_id is not None
 
     rows = _agent_rows(db_file)
@@ -171,7 +167,7 @@ def test_fleet_create_json_output__top_level_keys(db_file, mock_tmux_ok):
     ):
         assert key in data
 
-    uuid.UUID(data["administrator_agent_id"])
+    assert isinstance(data["administrator_agent_id"], int)
 
 
 def test_fleet_create_json_output__director_sub_dict(db_file, mock_tmux_ok):
@@ -184,7 +180,7 @@ def test_fleet_create_json_output__director_sub_dict(db_file, mock_tmux_ok):
         assert key in director
     assert director["name"] == "Director"
     assert director["description"] == "Root Director for this fleet"
-    uuid.UUID(director["agent_id"])
+    assert isinstance(director["agent_id"], int)
 
 
 def test_fleet_create_json_output__placement_sub_dict_matches_spec(
@@ -261,7 +257,7 @@ def test_fleet_create_json_output__label_propagates_to_json(db_file, mock_tmux_o
     assert data["label"] == "json-label"
 
 
-def test_fleet_create_json_output__administrator_and_director_are_distinct_uuids(
+def test_fleet_create_json_output__administrator_and_director_are_distinct_ids(
     db_file, mock_tmux_ok
 ):
     runner = CliRunner()
@@ -334,12 +330,12 @@ def test_fleet_delete_unknown_and_idempotent__unknown_fleet_id_exits_1_with_not_
     db_file, mock_tmux_ok
 ):
     runner = CliRunner()
-    fake = str(uuid.uuid4())
-    result = runner.invoke(cli, ["fleet", "delete", fake])
+    fake = 999
+    result = runner.invoke(cli, ["fleet", "delete", str(fake)])
     assert result.exit_code == 1, result.output
     combined = ((result.output or "") + (result.stderr or "")).lower()
     assert "not found" in combined
-    assert fake in (result.output or "") + (result.stderr or "")
+    assert str(fake) in (result.output or "") + (result.stderr or "")
 
 
 def test_fleet_delete_unknown_and_idempotent__second_delete_is_idempotent_and_reports_zero(

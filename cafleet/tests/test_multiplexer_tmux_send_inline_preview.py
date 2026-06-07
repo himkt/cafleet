@@ -41,8 +41,8 @@ def test_send_inline_preview__happy_path_envelope_body_and_submit(monkeypatch):
     ts = "2026-05-05T12:00:00.123456+00:00"
     result = _tmux.send_inline_preview(
         target_pane_id="%9",
-        task_id_8="abcdef01",
-        sender_8="zyxwvuts",
+        task_id=1234,
+        sender_id=5678,
         ts=ts,
         text=body,
     )
@@ -50,8 +50,8 @@ def test_send_inline_preview__happy_path_envelope_body_and_submit(monkeypatch):
     assert result is True
     joined = "\n".join(_literal_payloads(captured))
     assert ENVELOPE_PREFIX in joined
-    assert "abcdef01" in joined
-    assert "zyxwvuts" in joined
+    assert "1234" in joined
+    assert "5678" in joined
     assert ts in joined
     assert body in joined
 
@@ -108,8 +108,8 @@ def test_send_inline_preview__failure_modes_return_false(
     monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     result = _tmux.send_inline_preview(
         target_pane_id="%7",
-        task_id_8="abcdef01",
-        sender_8="zyxwvuts",
+        task_id=1234,
+        sender_id=5678,
         ts="2026-05-05T12:00:00.000000+00:00",
         text="body",
     )
@@ -127,8 +127,8 @@ def test_send_poll_trigger__keystroke_contract(monkeypatch):
     captured = _capture_run(monkeypatch)
     ok = _tmux.send_poll_trigger(
         target_pane_id="%5",
-        fleet_id="550e8400-e29b-41d4-a716-446655440000",
-        agent_id="7ba91234-5678-90ab-cdef-112233445566",
+        fleet_id=42,
+        agent_id=7,
     )
     assert ok is True
     assert len(captured) == 2

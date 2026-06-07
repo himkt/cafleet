@@ -7,7 +7,6 @@ materially smaller than the compact full (untruncated) envelope.
 """
 
 import json
-import uuid
 
 import pytest
 
@@ -16,25 +15,22 @@ from cafleet import output
 
 def _typed_task(
     *,
-    task_id: str | None = None,
-    from_agent_id: str | None = None,
-    to_agent_id: str | None = None,
-    context_id: str | None = None,
+    task_id: int = 101,
+    from_agent_id: int = 202,
+    to_agent_id: int = 303,
+    context_id: int | None = None,
     text: str = "the body",
     type_: str = "unicast",
     status_state: str = "input_required",
     status_timestamp: str = "2026-05-05T12:00:00.000000+00:00",
     created_at: str = "2026-05-05T12:00:00.000000+00:00",
-    origin_task_id: str | None = None,
+    origin_task_id: int | None = None,
 ) -> dict:
-    tid = task_id or str(uuid.uuid4())
-    fid = from_agent_id or str(uuid.uuid4())
-    rid = to_agent_id or str(uuid.uuid4())
     return {
-        "task_id": tid,
-        "context_id": context_id or rid,
-        "from_agent_id": fid,
-        "to_agent_id": rid,
+        "task_id": task_id,
+        "context_id": context_id if context_id is not None else to_agent_id,
+        "from_agent_id": from_agent_id,
+        "to_agent_id": to_agent_id,
         "type": type_,
         "created_at": created_at,
         "status_state": status_state,
@@ -46,16 +42,16 @@ def _typed_task(
 
 def test_render_task__compact_typical_unicast_shape():
     task = _typed_task(
-        task_id="abcdef0123456789-tail",
-        from_agent_id="zyxwvutsrq-tail",
+        task_id=42,
+        from_agent_id=7,
         status_timestamp="2026-04-01T08:09:10.111213+00:00",
         text="the actual body content",
     )
     rendered = output.render_task(task, full=False)
 
     assert set(rendered.keys()) == {"id", "from", "ts", "text"}
-    assert rendered["id"] == "abcdef01"
-    assert rendered["from"] == "zyxwvuts"
+    assert rendered["id"] == 42
+    assert rendered["from"] == 7
     assert rendered["ts"] == "2026-04-01T08:09:10.111213+00:00"
     assert rendered["text"] == "the actual body content"
 
@@ -77,7 +73,7 @@ def test_render_task__compact_typical_unicast_shape():
     ],
 )
 def test_render_task__compact_drops_default_state_and_metadata(forbidden_key):
-    task = _typed_task(status_state="input_required", origin_task_id="origin01-tail")
+    task = _typed_task(status_state="input_required", origin_task_id=99)
     rendered = output.render_task(task, full=False)
     assert forbidden_key not in rendered
 
@@ -85,21 +81,21 @@ def test_render_task__compact_drops_default_state_and_metadata(forbidden_key):
 def test_render_task__compact_broadcast_summary_shape_includes_kind_and_origin():
     task = _typed_task(
         type_="broadcast_summary",
-        origin_task_id="origin01-tail-stuff-here",
+        origin_task_id=99,
     )
     rendered = output.render_task(task, full=False)
     assert set(rendered.keys()) == {"id", "from", "ts", "text", "kind", "origin"}
     assert rendered["kind"] == "broadcast_summary"
-    assert rendered["origin"] == "origin01"
+    assert rendered["origin"] == 99
 
 
 @pytest.mark.parametrize(
     ("type_", "origin_task_id", "expects_kind", "expects_origin"),
     [
         ("unicast", None, False, False),
-        ("unicast", "origin01-tail-stuff-here", False, True),
+        ("unicast", 99, False, True),
         ("broadcast_summary", None, True, False),
-        ("broadcast_summary", "origin01-tail-stuff-here", True, True),
+        ("broadcast_summary", 99, True, True),
     ],
 )
 def test_render_task__compact_kind_and_origin_present_only_when_meaningful(
@@ -134,16 +130,16 @@ def test_format_json__compact_no_whitespace_and_round_trips():
     ("line", "needle"),
     [
         (0, "["),
-        (0, "abcdef01"),
-        (0, "from:zyxwvuts"),
+        (0, "42"),
+        (0, "from:7"),
         (0, "2026-04-01T08:09:10.111213+00:00"),
         (1, "the body of the message"),
     ],
 )
 def test_format_task__compact_two_lines_with_expected_fields(line, needle):
     task = _typed_task(
-        task_id="abcdef0123456789-tail",
-        from_agent_id="zyxwvutsrq-tail",
+        task_id=42,
+        from_agent_id=7,
         status_timestamp="2026-04-01T08:09:10.111213+00:00",
         text="the body of the message",
     )
@@ -172,37 +168,37 @@ def test_format_task__full_layout_has_more_lines_and_field_labels():
 
 @pytest.fixture
 def five_task_fixture() -> list[dict]:
-    summary_id = "11111111-2222-3333-4444-555555555555"
+    summary_id = 2001
     return [
         _typed_task(
-            task_id="aaaaaaaa-1111-2222-3333-444444444444",
-            from_agent_id="ffffffff-1111-2222-3333-444444444444",
+            task_id=1001,
+            from_agent_id=11,
             text="Did the API schema change?",
             type_="unicast",
         ),
         _typed_task(
-            task_id="bbbbbbbb-1111-2222-3333-444444444444",
-            from_agent_id="11111111-2222-3333-4444-555555555555",
+            task_id=1002,
+            from_agent_id=22,
             text="Yes — see migration 0042.",
             type_="unicast",
         ),
         _typed_task(
-            task_id="cccccccc-1111-2222-3333-444444444444",
-            from_agent_id="dddddddd-1111-2222-3333-444444444444",
+            task_id=1003,
+            from_agent_id=44,
             text="Build failed on main branch.",
             type_="unicast",
             origin_task_id=summary_id,
         ),
         _typed_task(
-            task_id="eeeeeeee-1111-2222-3333-444444444444",
-            from_agent_id="dddddddd-1111-2222-3333-444444444444",
+            task_id=1004,
+            from_agent_id=44,
             text="Build failed on main branch.",
             type_="unicast",
             origin_task_id=summary_id,
         ),
         _typed_task(
             task_id=summary_id,
-            from_agent_id="dddddddd-1111-2222-3333-444444444444",
+            from_agent_id=44,
             text="Broadcast sent to 2 recipients",
             type_="broadcast_summary",
             origin_task_id=summary_id,
@@ -213,7 +209,12 @@ def five_task_fixture() -> list[dict]:
 
 def test_budget__compact_slim_json_smaller_than_compact_full(five_task_fixture):
     """Compact slim (projected ``render_task``) JSON stays materially smaller
-    than the compact full (untruncated typed-column) JSON for the same fixture."""
+    than the compact full (untruncated typed-column) JSON for the same fixture.
+
+    With integer ids the gap narrows versus the UUID era (ids are short by
+    construction, so the slim projection no longer saves on id length); the
+    remaining savings come from dropping several typed columns and one of the
+    two timestamps. The budget is recalibrated to ≤ 55% accordingly."""
     compact_full = output.format_json(five_task_fixture)
     compact_slim = output.format_json(
         [output.render_task(t, full=False) for t in five_task_fixture]
@@ -221,9 +222,9 @@ def test_budget__compact_slim_json_smaller_than_compact_full(five_task_fixture):
     full_len = len(compact_full)
     slim_len = len(compact_slim)
     ratio = slim_len / full_len
-    assert ratio <= 0.40, (
+    assert ratio <= 0.55, (
         f"compact slim is {ratio:.0%} of compact full "
-        f"(slim={slim_len} chars, full={full_len} chars); budget ≤ 40%."
+        f"(slim={slim_len} chars, full={full_len} chars); budget ≤ 55%."
     )
 
 

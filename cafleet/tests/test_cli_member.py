@@ -8,7 +8,6 @@ permission-mode injection, and binary-missing exit messages.
 import json
 import os
 import sys
-import uuid
 
 import click
 import pytest
@@ -21,17 +20,17 @@ from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 @pytest.fixture
 def fleet_id():
-    return str(uuid.uuid4())
+    return 100
 
 
 @pytest.fixture
 def director_agent_id():
-    return str(uuid.uuid4())
+    return 200
 
 
 @pytest.fixture
 def new_agent_id():
-    return str(uuid.uuid4())
+    return 300
 
 
 @pytest.fixture
@@ -56,7 +55,7 @@ _CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id
 
 @pytest.fixture
 def bootstrapped_fleet(tmp_path, monkeypatch, _reset_engine_singletons):
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -112,8 +111,8 @@ def stub_coding_agent_binaries(monkeypatch):
 
 def _invoke_member_create(
     runner: CliRunner,
-    fleet_id: str,
-    director_id: str,
+    fleet_id: int,
+    director_id: int,
     *,
     coding_agent: str = "claude",
     prompt_file: str | None = None,
@@ -121,7 +120,7 @@ def _invoke_member_create(
     name: str = "Member",
     json_output: bool = False,
 ):
-    args = ["--fleet-id", fleet_id]
+    args = ["--fleet-id", str(fleet_id)]
     if json_output:
         args.append("--json")
     args.extend(
@@ -129,7 +128,7 @@ def _invoke_member_create(
             "member",
             "create",
             "--agent-id",
-            director_id,
+            str(director_id),
             "--name",
             name,
             "--description",
@@ -183,9 +182,9 @@ def test_resolve_prompt__substitution_matrix(
         prompt_argv=prompt_argv,
     )
     if asserts == "default":
-        assert fleet_id in result
-        assert new_agent_id in result
-        assert director_agent_id in result
+        assert str(fleet_id) in result
+        assert str(new_agent_id) in result
+        assert str(director_agent_id) in result
         for raw in ("{fleet_id}", "{agent_id}", "{director_agent_id}"):
             assert raw not in result
     elif asserts == "agent_id_only":
@@ -194,8 +193,8 @@ def test_resolve_prompt__substitution_matrix(
         assert result == "no placeholders here"
     else:
         assert result == "data is {not a placeholder} closed"
-        assert new_agent_id not in result
-        assert director_agent_id not in result
+        assert str(new_agent_id) not in result
+        assert str(director_agent_id) not in result
 
 
 @pytest.mark.parametrize(
@@ -359,9 +358,9 @@ def test_prompt_file__mutually_exclusive_with_positional(
 
 
 def test_prompt_file__parity_with_positional_form(tmp_path):
-    fleet_id = str(uuid.uuid4())
-    director_id = str(uuid.uuid4())
-    new_agent_id = str(uuid.uuid4())
+    fleet_id = 100
+    director_id = 200
+    new_agent_id = 300
     template = "hello {agent_id} from director {director_agent_id}"
 
     command = click.Command("member-create")
@@ -386,8 +385,8 @@ def test_prompt_file__parity_with_positional_form(tmp_path):
     )
 
     assert inline_result == file_result
-    assert new_agent_id in file_result
-    assert director_id in file_result
+    assert str(new_agent_id) in file_result
+    assert str(director_id) in file_result
 
 
 @pytest.mark.parametrize(

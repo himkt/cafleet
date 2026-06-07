@@ -14,7 +14,7 @@ _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0
 
 @pytest.fixture
 def bootstrapped_member(tmp_path, monkeypatch, _reset_engine_singletons):
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -51,7 +51,10 @@ def bootstrapped_member(tmp_path, monkeypatch, _reset_engine_singletons):
             "coding_agent": "claude",
         },
     )
-    return sid, director_id, agent["agent_id"], pane_id, runner
+    # Stringify ids here: this module feeds them only into CLI argv (which must
+    # be strings under ``--fleet-id``/``--agent-id`` ``type=int``) and never
+    # compares them as integers.
+    return str(sid), str(director_id), str(agent["agent_id"]), pane_id, runner
 
 
 def _record_run(monkeypatch, *, returns: str = "") -> list[list[str]]:

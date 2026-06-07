@@ -81,8 +81,8 @@ def test_send_message__auto_fire_invokes_inline_preview_with_full_kwargs(
     )
     assert isinstance(pane_id, str)
     assert pane_id
-    assert kwargs.get("task_id_8") == result["task"]["task_id"][:8]
-    assert kwargs.get("sender_8") == sender[:8]
+    assert kwargs.get("task_id") == result["task"]["task_id"]
+    assert kwargs.get("sender_id") == sender
     assert kwargs.get("ts") == result["task"]["status_timestamp"]
     assert kwargs.get("text") == "Did the API change?"
 
@@ -97,8 +97,8 @@ def test_send_message__sequential_sends_produce_distinct_previews_no_poll_trigge
     broker.send_message(sid, sender, recipient, "msg3")
     assert len(inline_preview_calls) == 3
     assert poll_trigger_call_count["n"] == 0
-    task_id_8s = [c["kwargs"]["task_id_8"] for c in inline_preview_calls]
-    assert len(set(task_id_8s)) == 3
+    task_ids = [c["kwargs"]["task_id"] for c in inline_preview_calls]
+    assert len(set(task_ids)) == 3
     texts = [c["kwargs"]["text"] for c in inline_preview_calls]
     assert texts == ["msg1", "msg2", "msg3"]
 

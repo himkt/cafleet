@@ -1,6 +1,5 @@
 """Broker-level fleet bootstrap tests."""
 
-import uuid
 from unittest.mock import Mock
 
 import click
@@ -174,12 +173,12 @@ def test_delete_fleet__idempotent_rerun_returns_zero(director_context):
 
 
 def test_delete_fleet__unknown_fleet_raises_click_exception():
-    fake_sid = str(uuid.uuid4())
+    fake_sid = 999999
     with pytest.raises(click.ClickException) as exc_info:
         broker.delete_fleet(fake_sid)
     msg = str(exc_info.value)
     assert "not found" in msg.lower()
-    assert fake_sid in msg
+    assert str(fake_sid) in msg
 
 
 @pytest.mark.parametrize(
@@ -197,7 +196,7 @@ def test_register_agent__rejects_dead_fleets(
         sid = result["fleet_id"]
         broker.delete_fleet(sid)
     else:
-        sid = str(uuid.uuid4())
+        sid = 999999
 
     with pytest.raises(click.UsageError) as exc_info:
         broker.register_agent(
@@ -304,5 +303,5 @@ def test_send_message__notification_invokes_inline_preview_with_director_pane(
     assert mock_preview.call_count == 1
     kwargs = mock_preview.call_args.kwargs
     assert kwargs["target_pane_id"] == director_context.pane_id
-    assert kwargs["sender_8"] == member["agent_id"][:8]
+    assert kwargs["sender_id"] == member["agent_id"]
     assert kwargs["text"] == "hi director"

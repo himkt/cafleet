@@ -1,7 +1,6 @@
 """CLI tests for ``cafleet member delete`` (cross-Director guard regression)."""
 
 import json
-import uuid
 
 import pytest
 from click.testing import CliRunner
@@ -24,7 +23,7 @@ _DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 @pytest.fixture
 def fleet_id():
-    return str(uuid.uuid4())
+    return 100
 
 
 @pytest.fixture
@@ -35,12 +34,6 @@ def runner():
 @pytest.fixture
 def call_log() -> list[tuple]:
     return []
-
-
-@pytest.fixture(autouse=True)
-def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 @pytest.fixture(autouse=True)
@@ -152,13 +145,13 @@ def _invoke(runner, fleet_id, *extra_args):
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "member",
             "delete",
             "--agent-id",
-            DIRECTOR_ID,
+            str(DIRECTOR_ID),
             "--member-id",
-            MEMBER_ID,
+            str(MEMBER_ID),
             *extra_args,
         ],
     )
@@ -169,14 +162,14 @@ def _invoke_json(runner, fleet_id, *extra_args):
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "--json",
             "member",
             "delete",
             "--agent-id",
-            DIRECTOR_ID,
+            str(DIRECTOR_ID),
             "--member-id",
-            MEMBER_ID,
+            str(MEMBER_ID),
             *extra_args,
         ],
     )
@@ -209,7 +202,7 @@ def test_happy_path__call_ordering_send_exit_then_wait_then_deregister(
 
     out = result.output
     assert "Member deleted." in out
-    assert MEMBER_ID in out
+    assert str(MEMBER_ID) in out
     assert f"{PANE_ID} (closed)" in out
 
 
@@ -457,7 +450,7 @@ def test_authorization_boundary__missing_agent_exits_one(
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
-    assert MEMBER_ID in out
+    assert str(MEMBER_ID) in out
     assert "failed to fetch member" not in out
     assert f"Error: Agent {MEMBER_ID} not found" in out
     assert deregister_recorder == []
@@ -509,7 +502,7 @@ def test_authorization_boundary__cross_director_same_fleet_is_rejected(
     out = result.output or ""
     assert f"agent {MEMBER_ID}" in out
     assert "is not a member of your team" in out
-    assert OTHER_DIRECTOR_ID in out
+    assert str(OTHER_DIRECTOR_ID) in out
     assert deregister_recorder == []
     assert send_exit_recorder == []
 

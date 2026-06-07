@@ -6,8 +6,6 @@ caller must prove its ``--agent-id`` belongs to the supplied ``--fleet-id``,
 so it cannot deregister an agent outside its fleet.
 """
 
-import uuid
-
 import pytest
 from click.testing import CliRunner
 
@@ -17,12 +15,12 @@ from cafleet.cli import cli
 
 @pytest.fixture
 def fleet_id():
-    return str(uuid.uuid4())
+    return 100
 
 
 @pytest.fixture
 def agent_id():
-    return str(uuid.uuid4())
+    return 200
 
 
 @pytest.fixture
@@ -57,18 +55,18 @@ def test_agent_deregister_auth_check__rejects_unknown_agent(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "agent",
             "deregister",
             "--agent-id",
-            agent_id,
+            str(agent_id),
         ],
     )
     assert result.exit_code == 1, result.output
     out = result.output or ""
-    assert agent_id in out
+    assert str(agent_id) in out
     assert "not a member of fleet" in out
-    assert fleet_id in out
+    assert str(fleet_id) in out
     assert deregister_calls == [], (
         "broker.deregister_agent must not be invoked when verify_agent_fleet fails"
     )
@@ -95,11 +93,11 @@ def test_agent_deregister_auth_check__accepts_valid_agent(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "agent",
             "deregister",
             "--agent-id",
-            agent_id,
+            str(agent_id),
         ],
     )
     assert result.exit_code == 0, result.output

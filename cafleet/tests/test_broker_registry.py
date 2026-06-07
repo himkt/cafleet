@@ -1,7 +1,6 @@
 """Tests for ``broker`` fleet + registry operations."""
 
 import json
-import uuid
 
 import click
 import pytest
@@ -24,7 +23,7 @@ def _autouse_broker(broker_session):
 def test_create_fleet__shape_and_label_handling():
     r_default = _create_fleet()
     assert {"fleet_id", "label", "created_at"}.issubset(r_default.keys())
-    uuid.UUID(r_default["fleet_id"])
+    assert isinstance(r_default["fleet_id"], int)
     assert r_default["label"] is None
     assert "T" in r_default["created_at"]
 
@@ -37,7 +36,7 @@ def test_create_fleet__administrator_seed_shape_and_uniqueness(broker_session):
     r1 = _create_fleet()
     sid = r1["fleet_id"]
     admin_id = r1["administrator_agent_id"]
-    uuid.UUID(admin_id)
+    assert isinstance(admin_id, int)
 
     with broker_session() as s:
         rows = (
@@ -136,7 +135,7 @@ def test_get_fleet__existing_and_nonexistent():
     assert found["label"] == "find-me"
     assert "created_at" in found
 
-    assert broker.get_fleet(str(uuid.uuid4())) is None
+    assert broker.get_fleet(999999) is None
 
 
 # --- register_agent ------------------------------------------------------
@@ -147,7 +146,7 @@ def test_register_agent__shape_and_unique_id():
     r1 = _register_agent(fleet["fleet_id"], name="a1")
     r2 = _register_agent(fleet["fleet_id"], name="a2")
     assert {"agent_id", "name", "registered_at"}.issubset(r1.keys())
-    uuid.UUID(r1["agent_id"])
+    assert isinstance(r1["agent_id"], int)
     assert r1["name"] == "a1"
     assert r1["agent_id"] != r2["agent_id"]
 
@@ -165,7 +164,7 @@ def test_register_agent__validation_failures(scenario, expected_match):
     if scenario == "missing_fleet":
         with pytest.raises(click.UsageError, match=expected_match):
             broker.register_agent(
-                fleet_id=str(uuid.uuid4()),
+                fleet_id=999999,
                 name="orphan",
                 description="no fleet",
             )
@@ -175,7 +174,7 @@ def test_register_agent__validation_failures(scenario, expected_match):
     sid = fleet["fleet_id"]
     if scenario == "director_not_found":
         placement = {
-            "director_agent_id": str(uuid.uuid4()),
+            "director_agent_id": 999999,
             "tmux_session": "main",
             "tmux_window_id": "@1",
             "tmux_pane_id": None,
@@ -260,7 +259,7 @@ def test_get_agent__returns_none_for_missing(scenario):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     if scenario == "nonexistent_agent":
-        assert broker.get_agent(str(uuid.uuid4()), sid) is None
+        assert broker.get_agent(999999, sid) is None
     elif scenario == "deregistered_agent":
         agent = _register_agent(sid, name="temp")
         broker.deregister_agent(agent["agent_id"])
@@ -334,7 +333,7 @@ def test_verify_agent_fleet__matrix(scenario, expected):
             broker.verify_agent_fleet(agent["agent_id"], other["fleet_id"]) is expected
         )
     else:
-        assert broker.verify_agent_fleet(str(uuid.uuid4()), sid) is expected
+        assert broker.verify_agent_fleet(999999, sid) is expected
 
 
 # --- deregister_agent ----------------------------------------------------
@@ -362,7 +361,7 @@ def test_deregister_agent__idempotent_and_missing(scenario, expected):
         broker.deregister_agent(agent["agent_id"])
         assert broker.deregister_agent(agent["agent_id"]) is expected
     else:
-        assert broker.deregister_agent(str(uuid.uuid4())) is expected
+        assert broker.deregister_agent(999999) is expected
 
 
 def test_deregister_agent__deletes_placement():
@@ -409,7 +408,7 @@ def test_update_placement_pane_id__returns_none_for_missing(scenario):
         agent = _register_agent(fleet["fleet_id"], name="no-placement")
         assert broker.update_placement_pane_id(agent["agent_id"], "%99") is None
     else:
-        assert broker.update_placement_pane_id(str(uuid.uuid4()), "%1") is None
+        assert broker.update_placement_pane_id(999999, "%1") is None
 
 
 # --- list_members --------------------------------------------------------

@@ -1,7 +1,7 @@
 """Workstream B: ``fleet list`` exposes ``director_agent_id``.
 
-``broker.list_fleets`` returns the director's full UUID in each row dict;
-the CLI ``fleet list`` surfaces it in JSON output and as a full-UUID
+``broker.list_fleets`` returns the director's full integer id in each row
+dict; the CLI ``fleet list`` surfaces it in JSON output and as a
 ``DIRECTOR`` text column placed immediately after ``FLEET_ID``.
 """
 
@@ -41,7 +41,7 @@ def test_fleet_list_json__exposes_director_agent_id(runner):
     assert row["director_agent_id"] == fleet["director"]["agent_id"]
 
 
-def test_fleet_list_text__shows_full_director_uuid_after_fleet_id(runner):
+def test_fleet_list_text__shows_full_director_id_after_fleet_id(runner):
     fleet = _create_fleet(label="b-test")
     director_id = fleet["director"]["agent_id"]
     result = runner.invoke(cli, ["fleet", "list"])
@@ -50,6 +50,5 @@ def test_fleet_list_text__shows_full_director_uuid_after_fleet_id(runner):
     header = next(line for line in result.output.splitlines() if "FLEET_ID" in line)
     assert "DIRECTOR" in header
     assert header.index("FLEET_ID") < header.index("DIRECTOR") < header.index("LABEL")
-    # Full UUID (not an 8-char prefix), since it is pasted into the full-only
-    # acting --agent-id.
-    assert director_id in result.output
+    # Full integer id is rendered (no prefix slicing).
+    assert str(director_id) in result.output

@@ -5,8 +5,6 @@ membership check ``agent list`` / ``agent show`` use): a caller must prove it
 belongs to the fleet before it can fetch a task by ID.
 """
 
-import uuid
-
 import pytest
 from click.testing import CliRunner
 
@@ -16,28 +14,22 @@ from cafleet.cli import cli
 
 @pytest.fixture
 def fleet_id():
-    return str(uuid.uuid4())
+    return 100
 
 
 @pytest.fixture
 def agent_id():
-    return str(uuid.uuid4())
+    return 200
 
 
 @pytest.fixture
 def task_id():
-    return str(uuid.uuid4())
+    return 300
 
 
 @pytest.fixture
 def runner():
     return CliRunner()
-
-
-@pytest.fixture(autouse=True)
-def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 def test_message_show_auth_check__rejects_unknown_agent(
@@ -66,20 +58,20 @@ def test_message_show_auth_check__rejects_unknown_agent(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "message",
             "show",
             "--agent-id",
-            agent_id,
+            str(agent_id),
             "--task-id",
-            task_id,
+            str(task_id),
         ],
     )
     assert result.exit_code == 1, result.output
     out = result.output or ""
-    assert agent_id in out
+    assert str(agent_id) in out
     assert "not a member of fleet" in out
-    assert fleet_id in out
+    assert str(fleet_id) in out
     assert get_task_calls == [], (
         "broker.get_task must not be invoked when verify_agent_fleet fails"
     )
@@ -101,7 +93,7 @@ def test_message_show_auth_check__accepts_valid_agent(
             "task_id": task_id,
             "context_id": agent_id,
             "from_agent_id": agent_id,
-            "to_agent_id": str(uuid.uuid4()),
+            "to_agent_id": 999,
             "type": "unicast",
             "created_at": "2026-05-01T00:00:00+00:00",
             "status_state": "input_required",
@@ -123,20 +115,20 @@ def test_message_show_auth_check__accepts_valid_agent(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "--json",
             "message",
             "show",
             "--agent-id",
-            agent_id,
+            str(agent_id),
             "--task-id",
-            task_id,
+            str(task_id),
         ],
     )
     assert result.exit_code == 0, result.output
     assert verify_calls == [(agent_id, fleet_id)]
-    # Compact rendered envelope carries the 8-char task_id prefix as ``id``.
-    assert task_id[:8] in (result.output or "")
+    # Compact rendered envelope carries the full integer task_id as ``id``.
+    assert str(task_id) in (result.output or "")
 
 
 # --- message_poll_auth_check: ``message poll`` must gate its
@@ -166,18 +158,18 @@ def test_message_poll_auth_check__rejects_unknown_agent(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "message",
             "poll",
             "--agent-id",
-            agent_id,
+            str(agent_id),
         ],
     )
     assert result.exit_code == 1, result.output
     out = result.output or ""
-    assert agent_id in out
+    assert str(agent_id) in out
     assert "not a member of fleet" in out
-    assert fleet_id in out
+    assert str(fleet_id) in out
     assert poll_calls == [], (
         "broker.poll_tasks must not be invoked when verify_agent_fleet fails"
     )
@@ -204,12 +196,12 @@ def test_message_poll_auth_check__accepts_valid_agent(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "--json",
             "message",
             "poll",
             "--agent-id",
-            agent_id,
+            str(agent_id),
         ],
     )
     assert result.exit_code == 0, result.output
@@ -243,20 +235,20 @@ def test_message_ack_auth_check__rejects_unknown_agent(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "message",
             "ack",
             "--agent-id",
-            agent_id,
+            str(agent_id),
             "--task-id",
-            task_id,
+            str(task_id),
         ],
     )
     assert result.exit_code == 1, result.output
     out = result.output or ""
-    assert agent_id in out
+    assert str(agent_id) in out
     assert "not a member of fleet" in out
-    assert fleet_id in out
+    assert str(fleet_id) in out
     assert ack_calls == [], (
         "broker.ack_task must not be invoked when verify_agent_fleet fails"
     )
@@ -276,7 +268,7 @@ def test_message_ack_auth_check__accepts_valid_agent(
         "task": {
             "task_id": task_id,
             "context_id": agent_id,
-            "from_agent_id": str(uuid.uuid4()),
+            "from_agent_id": 999,
             "to_agent_id": agent_id,
             "type": "unicast",
             "created_at": "2026-05-01T00:00:00+00:00",
@@ -298,14 +290,14 @@ def test_message_ack_auth_check__accepts_valid_agent(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "--json",
             "message",
             "ack",
             "--agent-id",
-            agent_id,
+            str(agent_id),
             "--task-id",
-            task_id,
+            str(task_id),
         ],
     )
     assert result.exit_code == 0, result.output
@@ -338,20 +330,20 @@ def test_message_cancel_auth_check__rejects_unknown_agent(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "message",
             "cancel",
             "--agent-id",
-            agent_id,
+            str(agent_id),
             "--task-id",
-            task_id,
+            str(task_id),
         ],
     )
     assert result.exit_code == 1, result.output
     out = result.output or ""
-    assert agent_id in out
+    assert str(agent_id) in out
     assert "not a member of fleet" in out
-    assert fleet_id in out
+    assert str(fleet_id) in out
     assert cancel_calls == [], (
         "broker.cancel_task must not be invoked when verify_agent_fleet fails"
     )
@@ -370,9 +362,9 @@ def test_message_cancel_auth_check__accepts_valid_agent(
     fake_task = {
         "task": {
             "task_id": task_id,
-            "context_id": str(uuid.uuid4()),
+            "context_id": 999,
             "from_agent_id": agent_id,
-            "to_agent_id": str(uuid.uuid4()),
+            "to_agent_id": 999,
             "type": "unicast",
             "created_at": "2026-05-01T00:00:00+00:00",
             "status_state": "canceled",
@@ -393,14 +385,14 @@ def test_message_cancel_auth_check__accepts_valid_agent(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "--json",
             "message",
             "cancel",
             "--agent-id",
-            agent_id,
+            str(agent_id),
             "--task-id",
-            task_id,
+            str(task_id),
         ],
     )
     assert result.exit_code == 0, result.output

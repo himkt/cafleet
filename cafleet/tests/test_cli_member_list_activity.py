@@ -33,7 +33,7 @@ def bootstrapped_team(tmp_path, monkeypatch, _reset_engine_singletons):
     Members are registered via ``broker.register_agent`` (placement supplied)
     so the test does not have to spin up real tmux panes via ``member create``.
     """
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -90,12 +90,12 @@ def test_member_list_no_activity_flag__omits_activity_keys(bootstrapped_team):
         cli,
         [
             "--fleet-id",
-            sid,
+            str(sid),
             "--json",
             "member",
             "list",
             "--agent-id",
-            director_id,
+            str(director_id),
         ],
     )
     assert result.exit_code == 0, result.output
@@ -118,12 +118,12 @@ def test_member_list_activity_flag__json_emits_activity_keys(bootstrapped_team):
         cli,
         [
             "--fleet-id",
-            sid,
+            str(sid),
             "--json",
             "member",
             "list",
             "--agent-id",
-            director_id,
+            str(director_id),
             "--activity",
         ],
     )
@@ -148,12 +148,12 @@ def test_member_list_activity_flag__none_for_silent_members(bootstrapped_team):
         cli,
         [
             "--fleet-id",
-            sid,
+            str(sid),
             "--json",
             "member",
             "list",
             "--agent-id",
-            director_id,
+            str(director_id),
             "--activity",
         ],
     )
@@ -181,12 +181,12 @@ def test_member_list_activity_flag__activity_visible_after_send(bootstrapped_tea
         cli,
         [
             "--fleet-id",
-            sid,
+            str(sid),
             "--json",
             "member",
             "list",
             "--agent-id",
-            director_id,
+            str(director_id),
             "--activity",
         ],
     )
@@ -211,11 +211,11 @@ def test_member_list_activity_flag__text_mode_includes_activity_columns(
         cli,
         [
             "--fleet-id",
-            sid,
+            str(sid),
             "member",
             "list",
             "--agent-id",
-            director_id,
+            str(director_id),
             "--activity",
         ],
     )
@@ -240,11 +240,11 @@ def test_member_list_activity_flag__text_mode_default_omits_activity_columns(
         cli,
         [
             "--fleet-id",
-            sid,
+            str(sid),
             "member",
             "list",
             "--agent-id",
-            director_id,
+            str(director_id),
         ],
     )
     assert result.exit_code == 0, result.output

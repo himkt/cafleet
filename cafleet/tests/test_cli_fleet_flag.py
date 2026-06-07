@@ -1,8 +1,7 @@
-"""Tests for the ``cafleet --fleet-id <uuid>`` global CLI flag."""
+"""Tests for the ``cafleet --fleet-id <int>`` global CLI flag."""
 
 import json
 import sqlite3
-import uuid
 
 import pytest
 from click.testing import CliRunner
@@ -15,12 +14,6 @@ from cafleet.multiplexer import MultiplexerContext as DirectorContext
 @pytest.fixture(autouse=True)
 def _autouse_reset_engine(_reset_engine_singletons):
     pass
-
-
-@pytest.fixture(autouse=True)
-def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +32,7 @@ def _mock_tmux_for_fleet_create(monkeypatch):
 
 @pytest.fixture
 def db_runner(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -75,19 +68,19 @@ def test_fleet_id_flag_flows_into_broker__register_passes_fleet_id_to_broker(
         captured["args"] = args
         captured["kwargs"] = kwargs
         return {
-            "agent_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            "agent_id": 3000,
             "name": "A",
             "registered_at": "2026-01-01T00:00:00+00:00",
         }
 
     monkeypatch.setattr(broker, "register_agent", fake_register_agent)
 
-    sid = str(uuid.uuid4())
+    sid = 100
     result = db_runner.invoke(
         cli,
         [
             "--fleet-id",
-            sid,
+            str(sid),
             "agent",
             "register",
             "--name",
@@ -114,7 +107,7 @@ def test_fleet_id_flag_flows_into_broker__send_passes_fleet_id_to_broker(
         recipient = args[2] if len(args) > 2 else kwargs.get("to")
         return {
             "task": {
-                "task_id": "tttttttt-tttt-tttt-tttt-tttttttttttt",
+                "task_id": 5000,
                 "context_id": recipient,
                 "from_agent_id": sender,
                 "to_agent_id": recipient,
@@ -130,20 +123,20 @@ def test_fleet_id_flag_flows_into_broker__send_passes_fleet_id_to_broker(
     monkeypatch.setattr(broker, "send_message", fake_send_message)
     monkeypatch.setattr(broker, "verify_agent_fleet", lambda *a, **k: True)
 
-    sid = str(uuid.uuid4())
-    aid = str(uuid.uuid4())
-    bid = str(uuid.uuid4())
+    sid = 100
+    aid = 200
+    bid = 300
     result = db_runner.invoke(
         cli,
         [
             "--fleet-id",
-            sid,
+            str(sid),
             "message",
             "send",
             "--agent-id",
-            aid,
+            str(aid),
             "--to",
-            bid,
+            str(bid),
             "--text",
             "hi",
         ],
@@ -158,7 +151,7 @@ def test_fleet_id_flag_flows_into_broker__fleet_id_not_read_from_environment(
     db_runner, monkeypatch
 ):
     """Fleet id is read only from the ``--fleet-id`` flag; the environment is never consulted."""
-    monkeypatch.setenv("CAFLEET_FLEET_ID", str(uuid.uuid4()))
+    monkeypatch.setenv("CAFLEET_FLEET_ID", "100")
     result = db_runner.invoke(
         cli,
         ["agent", "register", "--name", "A", "--description", "a"],
@@ -169,7 +162,7 @@ def test_fleet_id_flag_flows_into_broker__fleet_id_not_read_from_environment(
 def test_subcommands_that_do_not_require_fleet_id__db_init_without_fleet_id(
     tmp_path, monkeypatch
 ):
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -198,14 +191,14 @@ def test_subcommands_that_do_not_require_fleet_id__fleet_list_without_fleet_id(
 def test_fleet_id_silently_accepted_where_not_required__db_init_accepts_fleet_id_silently(
     tmp_path, monkeypatch
 ):
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
         f"sqlite+aiosqlite:///{db_file}",
     )
     runner = CliRunner()
-    sid = str(uuid.uuid4())
+    sid = "100"
     result = runner.invoke(cli, ["--fleet-id", sid, "db", "init"])
     assert result.exit_code == 0, result.output
     combined = (result.output or "").lower()
@@ -216,7 +209,7 @@ def test_fleet_id_silently_accepted_where_not_required__db_init_accepts_fleet_id
 def test_fleet_id_silently_accepted_where_not_required__fleet_create_accepts_fleet_id_silently(
     db_runner,
 ):
-    sid = str(uuid.uuid4())
+    sid = "100"
     result = db_runner.invoke(
         cli,
         ["--fleet-id", sid, "fleet", "create", "--label", "x"],
@@ -224,7 +217,7 @@ def test_fleet_id_silently_accepted_where_not_required__fleet_create_accepts_fle
     assert result.exit_code == 0, result.output
 
 
-def _create_fleet_via_cli(runner: CliRunner) -> tuple[str, str]:
+def _create_fleet_via_cli(runner: CliRunner) -> tuple[int, int]:
     """Run ``fleet create --json`` and return (fleet_id, administrator_agent_id)."""
     result = runner.invoke(cli, ["fleet", "create", "--json"])
     assert result.exit_code == 0, result.output
@@ -249,7 +242,7 @@ def _fetch_agent_status(db_file, agent_id: str) -> tuple[str, str | None]:
 def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(
     tmp_path, monkeypatch
 ):
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -263,7 +256,14 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(
 
     result = runner.invoke(
         cli,
-        ["--fleet-id", fleet_id, "agent", "deregister", "--agent-id", admin_id],
+        [
+            "--fleet-id",
+            str(fleet_id),
+            "agent",
+            "deregister",
+            "--agent-id",
+            str(admin_id),
+        ],
     )
     assert result.exit_code == 1, result.output
 
@@ -271,7 +271,7 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(
 def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_user_friendly(
     tmp_path, monkeypatch
 ):
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -285,7 +285,14 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_use
 
     result = runner.invoke(
         cli,
-        ["--fleet-id", fleet_id, "agent", "deregister", "--agent-id", admin_id],
+        [
+            "--fleet-id",
+            str(fleet_id),
+            "agent",
+            "deregister",
+            "--agent-id",
+            str(admin_id),
+        ],
     )
     out = result.output or ""
     assert "Administrator cannot be deregistered" in out
@@ -295,7 +302,7 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_use
 def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_nonzero(
     tmp_path, monkeypatch
 ):
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -306,17 +313,17 @@ def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_
     assert init.exit_code == 0
 
     fleet_id, _admin_id = _create_fleet_via_cli(runner)
-    bogus_agent_id = str(uuid.uuid4())
+    bogus_agent_id = 999999
 
     result = runner.invoke(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "agent",
             "deregister",
             "--agent-id",
-            bogus_agent_id,
+            str(bogus_agent_id),
         ],
     )
     assert result.exit_code == 1, result.output
@@ -326,7 +333,7 @@ def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_
 def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_active(
     tmp_path, monkeypatch
 ):
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -340,7 +347,14 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_act
 
     runner.invoke(
         cli,
-        ["--fleet-id", fleet_id, "agent", "deregister", "--agent-id", admin_id],
+        [
+            "--fleet-id",
+            str(fleet_id),
+            "agent",
+            "deregister",
+            "--agent-id",
+            str(admin_id),
+        ],
     )
     status, deregistered_at = _fetch_agent_status(db_file, admin_id)
     assert status == "active"
@@ -351,7 +365,7 @@ def test_old_surface_removed__session_flag_and_group_no_longer_parse(db_runner):
     """Regression guard: the pre-rename ``--session-id`` flag and ``session``
     command group are gone — Click rejects both (testing the absence, not a
     deprecation shim)."""
-    flag = db_runner.invoke(cli, ["--session-id", str(uuid.uuid4()), "fleet", "list"])
+    flag = db_runner.invoke(cli, ["--session-id", "100", "fleet", "list"])
     assert flag.exit_code == 2
     assert "no such option" in (flag.output or "").lower()
 
