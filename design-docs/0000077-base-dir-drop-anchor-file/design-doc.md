@@ -176,4 +176,5 @@ Per the project documentation-first rule, the skill and docs land before any oth
 | 2026-06-07 | User approved; Status → Approved. Spec frozen; ready for implementation (0/18 tasks) |
 | 2026-06-07 | Implementation complete (18/18 tasks); all success criteria verified; lint/typecheck/662 tests green |
 | 2026-06-07 | Status → Complete (PR #99 review addressed) |
-| 2026-06-07 | Copilot review loop concluded — 5 rounds of wording/consistency nits addressed (capped by user after round 5); PR #99 finalized |
+| 2026-06-07 | Copilot review loop — 5 rounds of wording/consistency nits addressed, then capped by user after round 5 |
+| 2026-06-07 | Copilot review loop resumed at user request and run to convergence — Copilot generated no new comments on the final HEAD; PR #99 review complete |
