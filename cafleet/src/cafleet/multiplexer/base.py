@@ -123,7 +123,7 @@ class Multiplexer(Protocol):
         ...
 
     def send_poll_trigger(
-        self, *, target_pane_id: str, fleet_id: str, agent_id: str
+        self, *, target_pane_id: str, fleet_id: int, agent_id: int
     ) -> bool:
         """Keystroke a ``cafleet message poll`` shortcut into the pane.
 

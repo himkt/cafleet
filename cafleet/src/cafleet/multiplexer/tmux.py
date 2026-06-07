@@ -142,7 +142,7 @@ class TmuxMultiplexer:
         )
 
     def send_poll_trigger(
-        self, *, target_pane_id: str, fleet_id: str, agent_id: str
+        self, *, target_pane_id: str, fleet_id: int, agent_id: int
     ) -> bool:
         """Best-effort ``cafleet ... message poll`` keystroke for the recipient's pane."""
         if shutil.which("tmux") is None:
