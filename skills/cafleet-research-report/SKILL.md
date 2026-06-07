@@ -59,7 +59,7 @@ Before creating the team, resolve the task-scoped base directory for this run.
 
    Run the skill's **Step 0 (task-scope resolution)** with the relpath `researches/[topic-slug]`.
 
-   Step 0 infers the repo root via `git rev-parse --show-toplevel`, joins `researches/[topic-slug]` against it, auto-creates the folder, writes `<task-folder>/.cafleet-base-dir.json` with `source: "task-scope"` (or reads an existing anchor), and resolves `${BASE}` to the absolute task folder. Use that `${BASE}` for the rest of this run.
+   Step 0 infers the repo root via `git rev-parse --show-toplevel`, joins `researches/[topic-slug]` under it, and resolves `${BASE}` to that absolute task folder (created lazily on the first write). Use that `${BASE}` for the rest of this run.
 3. `${OUTPUT_DIR} = ${BASE}` — the task folder IS the output directory. There is no further concatenation.
 4. Pass `${OUTPUT_DIR}` (i.e., `${BASE}`) as the resolved absolute path to the Manager and all Researchers/Scouts in their spawn prompts. The audit-file path `${BASE}/prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<topic-folder>/prompts/`, not under the repo root.
 

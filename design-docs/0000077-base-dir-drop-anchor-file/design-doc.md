@@ -1,7 +1,7 @@
 # 0000077 — Drop the `.cafleet-base-dir.json` anchor file
 
 **Status**: Approved
-**Progress**: 7/18 tasks complete
+**Progress**: 13/18 tasks complete
 **Last Updated**: 2026-06-07
 
 ## Overview
@@ -138,12 +138,12 @@ Per the project documentation-first rule, the skill and docs land before any oth
 
 ### Step 2: Trim the blast-radius docs/skills
 
-- [ ] `docs/concepts/member-lifecycle.md`: trim the "Base-dir resolution" section (drop anchor read/write + idempotency + the `version`-lock / `resolved_at` paragraph; keep CWD-inference, task-scope reworded, and `<unset>`) <!-- completed: -->
-- [ ] `skills/cafleet-research-report/SKILL.md`: trim Step 0 anchor wording (drop the `.cafleet-base-dir.json` write + "auto-creates the folder" claim) <!-- completed: -->
-- [ ] `skills/cafleet-design-doc-execute/SKILL.md`: drop "persist the answer by writing the anchor" in Step 1 Phase 1 <!-- completed: -->
-- [ ] `skills/cafleet-research-presentation/SKILL.md`: reword the "anchor" verb in Step 0 <!-- completed: -->
-- [ ] `.claude/skills/skill-author/SKILL.md`: drop the anchor write/read from the reproduced procedure; reword "drift from the Director's anchor" and "(auto-created + anchored, source: task-scope)" <!-- completed: -->
-- [ ] Sweep every consuming skill for residual anchor-file wording and trim; leave coordination-protocol "Anchorless"/"source-anchored" terms and `bbox_to_anchor` untouched <!-- completed: -->
+- [x] `docs/concepts/member-lifecycle.md`: trim the "Base-dir resolution" section (drop anchor read/write + idempotency + the `version`-lock / `resolved_at` paragraph; keep CWD-inference, task-scope reworded, and `<unset>`) <!-- completed: 2026-06-07T08:48 -->
+- [x] `skills/cafleet-research-report/SKILL.md`: trim Step 0 anchor wording (drop the `.cafleet-base-dir.json` write + "auto-creates the folder" claim) <!-- completed: 2026-06-07T08:48 -->
+- [x] `skills/cafleet-design-doc-execute/SKILL.md`: drop "persist the answer by writing the anchor" in Step 1 Phase 1 <!-- completed: 2026-06-07T08:48 -->
+- [x] `skills/cafleet-research-presentation/SKILL.md`: reword the "anchor" verb in Step 0 <!-- completed: 2026-06-07T08:48 -->
+- [x] `.claude/skills/skill-author/SKILL.md`: drop the anchor write/read from the reproduced procedure; reword "drift from the Director's anchor" and "(auto-created + anchored, source: task-scope)" <!-- completed: 2026-06-07T08:51 -->
+- [x] Sweep every consuming skill for residual anchor-file wording and trim; leave coordination-protocol "Anchorless"/"source-anchored" terms and `bbox_to_anchor` untouched <!-- completed: 2026-06-07T08:51 -->
 
 ### Step 3: Remove the `.gitignore` anchor entry
 

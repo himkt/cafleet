@@ -55,7 +55,7 @@ Every CAFleet-orchestrated skill must wire up these five sub-systems, in this or
 
 ### 2.1 Resolve the task-scoped BASE
 
-Before any other work, the Director resolves the task-scoped output directory by following the `cafleet-base-dir` skill's task-scope resolution procedure with a `TASK_NAME` derived from the skill's per-task convention. The procedure uses only built-in tools (`git rev-parse --show-toplevel` via Bash, Read, Write) — there is no `cafleet` CLI subcommand for it.
+Before any other work, the Director resolves the task-scoped output directory by following the `cafleet-base-dir` skill's task-scope resolution procedure with a `TASK_NAME` derived from the skill's per-task convention. The procedure uses only `git rev-parse --show-toplevel` (via Bash) and writes nothing at resolution time — there is no `cafleet` CLI subcommand for it.
 
 `<task-relpath>` is a path under the inferred repo root that describes the per-task folder. The two recognized buckets are:
 
@@ -65,14 +65,12 @@ Before any other work, the Director resolves the task-scoped output directory by
 The procedure:
 
 1. Walks up from CWD (`git rev-parse --show-toplevel`) to infer the repo root.
-2. Joins `<task-relpath>` against the repo root.
-3. Auto-creates the task folder via `Path(...).mkdir(parents=True, exist_ok=True)` (Write).
-4. Writes a per-task anchor inline at `<task-folder>/.cafleet-base-dir.json` with `source: "task-scope"` (or reads an existing one with `source: "anchor"`).
-5. Yields `base = <abs task-folder>` (with `source: "task-scope" | "anchor"`).
+2. Joins `<task-relpath>` against the repo root and resolves it to the absolute task folder.
+3. Yields `base = <abs task-folder>`; the folder is created lazily on the first consumer write.
 
 Use the resolved `base` as `${BASE}` for the rest of the run. **Every** scratch / audit / figure / spawn-prompt-render write the skill performs MUST live under `${BASE}` — never `/tmp`, never the repo root.
 
-The procedure's positional branch also accepts an absolute path. If the path lies strictly under the inferred repo root, it is used verbatim as the task folder — the resolver does NOT walk ancestors or match skill-specific bucket patterns. If the path lies outside the repo root (or equals the repo root, which would clobber the shared-root anchor), the resolver yields the literal sentinel `<unset>` for `${BASE}`. **Consumer-strips contract**: because the resolver does not fold child paths, each consuming skill MUST canonicalize its argument to the actual task-folder relpath (strip trailing filenames like `/design-doc.md`, strip leading bucket prefixes like `design-docs/`, then prepend its own bucket) BEFORE resolving. When `${BASE}` is `<unset>`, the skill MUST guard every BASE-derived write with an explicit `${BASE} != <unset>` check, omit the `BASE:` line from any spawn prompt entirely, and never fall back to `/tmp`. The standardized loud-error message is `Error: BASE is <unset>; refusing to fall back to /tmp`.
+The procedure's positional branch also accepts an absolute path. If the path lies strictly under the inferred repo root, it is used verbatim as the task folder — the resolver does NOT walk ancestors or match skill-specific bucket patterns. If the path lies outside the repo root (or equals the repo root), the resolver yields the literal sentinel `<unset>` for `${BASE}`. **Consumer-strips contract**: because the resolver does not fold child paths, each consuming skill MUST canonicalize its argument to the actual task-folder relpath (strip trailing filenames like `/design-doc.md`, strip leading bucket prefixes like `design-docs/`, then prepend its own bucket) BEFORE resolving. When `${BASE}` is `<unset>`, the skill MUST guard every BASE-derived write with an explicit `${BASE} != <unset>` check, omit the `BASE:` line from any spawn prompt entirely, and never fall back to `/tmp`. The standardized loud-error message is `Error: BASE is <unset>; refusing to fall back to /tmp`.
 
 When CWD has no `.git` ancestor (typical when CWD is `$HOME` or under `$HOME/.claude`) AND a `TASK_NAME` is supplied, the resolution fails with `cannot resolve task-scope base-dir: no .git ancestor found from CWD <cwd>. cd to the repo root and retry.` — surface this error to the user and stop.
 
@@ -181,7 +179,7 @@ YOUR AGENT ID: {agent_id}
 BASE: <abs task-folder path>
 ```
 
-These four lines are the member's grounding identity. The first three are the literal UUIDs the member will substitute into every `cafleet ...` call. The fourth is the resolved task-scoped BASE the Director computed in § 2.1 — the member uses this verbatim and MUST NOT re-resolve BASE on its own. Members that re-resolve risk drift from the Director's anchor.
+These four lines are the member's grounding identity. The first three are the literal UUIDs the member will substitute into every `cafleet ...` call. The fourth is the resolved task-scoped BASE the Director computed in § 2.1 — the member uses this verbatim and MUST NOT re-resolve BASE on its own. Members that re-resolve risk drift from the Director's resolved BASE.
 
 ### 3.2 The `str.format()` placeholder rules
 
@@ -340,7 +338,7 @@ The skill's task convention is `researches/pr-<pr-number>` (PR summaries are res
 ```text
 # Resolve task-scope BASE for researches/pr-1234 (cafleet-base-dir skill procedure, built-in tools):
 #   git rev-parse --show-toplevel → /repo
-#   task folder → /repo/researches/pr-1234  (auto-created + anchored, source: task-scope)
+#   task folder → /repo/researches/pr-1234  (auto-created)
 ```
 
 `${BASE} = /repo/researches/pr-1234`. The Director writes the diff to `${BASE}/diff.patch` (a non-audit working file) and the summary will land at `${BASE}/summary.md` (also a working file, not under `prompts/`).
