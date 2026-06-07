@@ -1,6 +1,6 @@
 # Integer Primary-Key Rearchitecture + `cafleet.db` Rename + Migration Collapse
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 54/54 tasks complete
 **Last Updated**: 2026-06-07
 
@@ -350,3 +350,4 @@ There is **no data migration and no backward compatibility**. An existing `regis
 | 2026-06-06 | Rewrote entirely in post-0074 `fleet` naming (0000074 is now a hard prerequisite that lands first); added "Relationship to 0000074" section; resolved 6 Reviewer markers — cross-fleet wording, plain `type=int` (no `IntRange`) + `--fleet-id` help fix, preserve `_format_iso_hms` time-slice, retype `get_webui_fleet`/route params to `int`, add `docs/spec/webui-api.md` to the doc-update list |
 | 2026-06-06 | Resolved 2 Reviewer nits — Progress recounted to the implementation-task total (0/54); §3 "three indexes" → "four indexes" |
 | 2026-06-06 | User approved; Status → Approved. Spec frozen; ready for implementation (0/54 tasks) |
+| 2026-06-07 | Implemented (54/54 tasks). All mise gates + 662 tests + db-init/round-trip smoke green. PR #97 opened; Copilot review converged over 3 rounds (2 fixes applied — `send_poll_trigger` int hints, `_require_fleet_id` explicit `is None`; 1 false positive declined — broadcast-summary `to_agent_id=0` suppression). Status → Complete |
