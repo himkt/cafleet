@@ -1,7 +1,6 @@
 """CLI tests for ``cafleet member send-input``."""
 
 import json
-import uuid
 
 import pytest
 from click.testing import CliRunner
@@ -22,18 +21,12 @@ from tests._member_cli_helpers import (
 
 @pytest.fixture
 def fleet_id():
-    return str(uuid.uuid4())
+    return 100
 
 
 @pytest.fixture(autouse=True)
 def _stub_tmux_available(monkeypatch):
     monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
-
-
-@pytest.fixture(autouse=True)
-def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 @pytest.fixture
@@ -71,7 +64,7 @@ def freetext_recorder(monkeypatch):
 
 
 def _invoke(runner, fleet_id, *extra_args, json_output=False):
-    args = ["--fleet-id", fleet_id]
+    args = ["--fleet-id", str(fleet_id)]
     if json_output:
         args.append("--json")
     args.extend(
@@ -79,9 +72,9 @@ def _invoke(runner, fleet_id, *extra_args, json_output=False):
             "member",
             "send-input",
             "--agent-id",
-            DIRECTOR_ID,
+            str(DIRECTOR_ID),
             "--member-id",
-            MEMBER_ID,
+            str(MEMBER_ID),
             *extra_args,
         ]
     )
@@ -130,7 +123,7 @@ def test_flag_validation(
 @pytest.mark.parametrize(
     ("scenario", "agent_return", "expected_substrings"),
     [
-        ("missing_agent", None, [MEMBER_ID, "not found"]),
+        ("missing_agent", None, [str(MEMBER_ID), "not found"]),
         (
             "placement_none",
             "placement_none_sentinel",
@@ -139,7 +132,11 @@ def test_flag_validation(
         (
             "cross_director",
             "cross_director_sentinel",
-            [f"agent {MEMBER_ID}", "is not a member of your team", OTHER_DIRECTOR_ID],
+            [
+                f"agent {MEMBER_ID}",
+                "is not a member of your team",
+                str(OTHER_DIRECTOR_ID),
+            ],
         ),
         (
             "pending_pane",

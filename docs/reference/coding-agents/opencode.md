@@ -86,7 +86,7 @@ cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
 cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 
-Substitute the literal UUIDs handed to you in your spawn prompt. There is no env-var fallback.
+Substitute the literal ids handed to you in your spawn prompt. There is no env-var fallback.
 
 For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see `skills/cafleet/SKILL.md`.
 
@@ -138,7 +138,7 @@ Gated on local install of `opencode`. Run from inside a tmux session:
 rm -f ~/.opencode/agents/cafleet.md
 
 cafleet fleet create --label opencode-smoke --coding-agent claude
-# Capture: FLEET=<uuid>, DIRECTOR=<uuid> from the output.
+# Capture: FLEET=<id>, DIRECTOR=<id> from the output.
 
 cafleet --fleet-id $FLEET member create --agent-id $DIRECTOR \
   --name Opencode-Smoke --description "opencode smoke member" --coding-agent opencode

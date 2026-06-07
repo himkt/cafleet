@@ -1,7 +1,5 @@
 """Tests for the ``cafleet server`` CLI subcommand."""
 
-import uuid
-
 import pytest
 import uvicorn
 from click.testing import CliRunner
@@ -32,7 +30,7 @@ def test_server_help__shows_host_port_and_fleet_id_accepted_silently():
     assert "is required" not in no_fleet_result.output
 
     # --fleet-id is silently accepted and ignored on `server`.
-    sid = str(uuid.uuid4())
+    sid = "100"
     with_fleet = runner.invoke(cli, ["--fleet-id", sid, "server", "--help"])
     assert with_fleet.exit_code == 0
     out_lower = with_fleet.output.lower()

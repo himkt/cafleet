@@ -14,11 +14,11 @@ This file is the role-specific anchor. The actual protocols live in dedicated re
 
 ## Placeholder convention
 
-Substitute the literal UUID strings printed by `cafleet fleet create` / `cafleet member create` in every example. Angle-bracket tokens are placeholders, **not** shell variables. The IDs you have:
+Substitute the literal integer ids printed by `cafleet fleet create` / `cafleet member create` in every example. Angle-bracket tokens are placeholders, **not** shell variables. The IDs you have:
 
-- `<fleet-id>` — the fleet UUID (from `cafleet fleet create`)
-- `<director-agent-id>` — your own UUID (the Director)
-- `<member-agent-id>` — a member's UUID (from `cafleet member list`)
+- `<fleet-id>` — the fleet id (from `cafleet fleet create`)
+- `<director-agent-id>` — your own id (the Director)
+- `<member-agent-id>` — a member's id (from `cafleet member list`)
 - `<command>` — a shell command (only when dispatching via `cafleet member exec`)
 
 ## Director-only summary

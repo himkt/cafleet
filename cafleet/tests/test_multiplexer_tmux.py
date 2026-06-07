@@ -76,7 +76,7 @@ def test_split_window__argv_construction(monkeypatch, run_recorder):
     )
     pane_id = _tmux.split_window(
         target_window_id="@3",
-        env={"CAFLEET_DATABASE_URL": "sqlite+aiosqlite:////tmp/registry.db"},
+        env={"CAFLEET_DATABASE_URL": "sqlite+aiosqlite:////tmp/cafleet.db"},
         command=["claude", "Hello world"],
     )
     assert pane_id == "%7"
@@ -99,8 +99,7 @@ def test_split_window__argv_construction(monkeypatch, run_recorder):
     # 2. env vars forwarded as `-e KEY=VAL` flags.
     flag_idx = argv.index("-e")
     assert (
-        argv[flag_idx + 1]
-        == "CAFLEET_DATABASE_URL=sqlite+aiosqlite:////tmp/registry.db"
+        argv[flag_idx + 1] == "CAFLEET_DATABASE_URL=sqlite+aiosqlite:////tmp/cafleet.db"
     )
 
     # 3. Command is appended directly after env flags.

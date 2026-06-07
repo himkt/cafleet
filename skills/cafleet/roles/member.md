@@ -90,7 +90,7 @@ If the `cafleet message send` itself is also denied by the harness, surface that
 
 ---
 
-## WHERE THE UUIDs COME FROM
+## WHERE THE IDs COME FROM
 
 The harness injects `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` into your spawn prompt. They are already in your context. Substitute them literally into every cafleet command.
 

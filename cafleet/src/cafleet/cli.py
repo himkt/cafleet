@@ -54,16 +54,18 @@ def _quiet_flag_with_help(help_text: str):
 
 
 def _director_member_options(func):
-    func = click.option("--member-id", required=True, help="Target member's agent ID")(
-        func
-    )
-    return click.option("--agent-id", required=True, help="Director's agent ID")(func)
+    func = click.option(
+        "--member-id", type=int, required=True, help="Target member's agent ID"
+    )(func)
+    return click.option(
+        "--agent-id", type=int, required=True, help="Director's agent ID"
+    )(func)
 
 
 def _require_fleet_id(ctx: click.Context) -> None:
-    if not ctx.obj["fleet_id"]:
+    if ctx.obj["fleet_id"] is None:
         raise click.ClickException(
-            "--fleet-id <uuid> is required for this subcommand. "
+            "--fleet-id <int> is required for this subcommand. "
             "Create a fleet with 'cafleet fleet create' and pass its id."
         )
 
@@ -153,8 +155,9 @@ def _sync_db_url() -> str:
 @click.option(
     "--fleet-id",
     "fleet_id",
+    type=int,
     default=None,
-    help="Fleet ID (UUID); required for client subcommands.",
+    help="Fleet ID (integer); required for client subcommands.",
 )
 @click.pass_context
 def cli(ctx, json_output, fleet_id):
@@ -309,10 +312,10 @@ def fleet_list(ctx: click.Context, as_json: bool) -> None:
 
 
 @fleet.command("show")
-@click.argument("fleet_id")
+@click.argument("fleet_id", type=int)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
-def fleet_show(ctx: click.Context, fleet_id: str, as_json: bool) -> None:
+def fleet_show(ctx: click.Context, fleet_id: int, as_json: bool) -> None:
     """Show details of a single fleet."""
     result = broker.get_fleet(fleet_id)
     if result is None:
@@ -332,8 +335,8 @@ def fleet_show(ctx: click.Context, fleet_id: str, as_json: bool) -> None:
 
 
 @fleet.command("delete")
-@click.argument("fleet_id")
-def fleet_delete(fleet_id: str) -> None:
+@click.argument("fleet_id", type=int)
+def fleet_delete(fleet_id: int) -> None:
     """Soft-delete a fleet and deregister every active agent (idempotent)."""
     result = broker.delete_fleet(fleet_id)
     n = result["deregistered_count"]
@@ -432,8 +435,8 @@ def agent_register(ctx, name, description, skills):
 
 
 @message.command("send")
-@click.option("--agent-id", required=True, help="Agent ID")
-@click.option("--to", required=True, help="Recipient agent ID")
+@click.option("--agent-id", type=int, required=True, help="Agent ID")
+@click.option("--to", type=int, required=True, help="Recipient agent ID")
 @click.option("--text", required=True, help="Message text")
 @_full_flag
 @_quiet_flag
@@ -441,7 +444,7 @@ def agent_register(ctx, name, description, skills):
 @_client_command(
     requires_agent_fleet=True,
     text_formatter=lambda r, *, full, quiet: (
-        r["task"]["task_id"][:8]
+        str(r["task"]["task_id"])
         if quiet
         else "Message sent.\n" + output.format_task(r, full=full)
     ),
@@ -450,7 +453,6 @@ def agent_register(ctx, name, description, skills):
 def message_send(ctx, agent_id, to, text, full, quiet):
     """Send a unicast message to another agent."""
     fleet_id = ctx.obj["fleet_id"]
-    to = broker.resolve_agent_ref(fleet_id, to)
     return broker.send_message(
         fleet_id,
         agent_id,
@@ -460,7 +462,7 @@ def message_send(ctx, agent_id, to, text, full, quiet):
 
 
 @message.command("broadcast")
-@click.option("--agent-id", required=True, help="Agent ID")
+@click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option("--text", required=True, help="Message text")
 @_full_flag
 @click.pass_context
@@ -468,7 +470,7 @@ def message_send(ctx, agent_id, to, text, full, quiet):
     text_formatter=lambda r, *, full: (
         output.format_task(r[0]["task"], full=True)
         if full
-        else f"broadcast id={r[0]['task']['task_id'][:8]} "
+        else f"broadcast id={r[0]['task']['task_id']} "
         f"recipients={r[0]['notifications_sent_count']}"
     ),
     truncates_task_text=True,
@@ -483,7 +485,7 @@ def message_broadcast(ctx, agent_id, text, full):
 
 
 @message.command("poll")
-@click.option("--agent-id", required=True, help="Agent ID")
+@click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option("--since", default=None, hidden=True)
 @click.option("--page-size", default=None, type=int, hidden=True)
 @_full_flag_with_help("Disable body truncation.")
@@ -505,15 +507,15 @@ def message_poll(ctx, agent_id, since, page_size, full):
 
 
 @message.command("ack")
-@click.option("--agent-id", required=True, help="Agent ID")
-@click.option("--task-id", required=True, help="Task ID to acknowledge")
+@click.option("--agent-id", type=int, required=True, help="Agent ID")
+@click.option("--task-id", type=int, required=True, help="Task ID to acknowledge")
 @_full_flag_with_help("Disable body truncation.")
 @_quiet_flag_with_help("Print only the task id.")
 @click.pass_context
 @_client_command(
     requires_agent_fleet=True,
     text_formatter=lambda r, *, full, quiet: (
-        r["task"]["task_id"][:8]
+        str(r["task"]["task_id"])
         if quiet
         else "Message acknowledged.\n" + output.format_task(r, full=full)
     ),
@@ -521,13 +523,12 @@ def message_poll(ctx, agent_id, since, page_size, full):
 )
 def message_ack(ctx, agent_id, task_id, full, quiet):
     """Acknowledge receipt of a message."""
-    task_id = broker.resolve_task_ref(ctx.obj["fleet_id"], task_id)
     return broker.ack_task(agent_id, task_id)
 
 
 @message.command("cancel")
-@click.option("--agent-id", required=True, help="Agent ID")
-@click.option("--task-id", required=True, help="Task ID to cancel")
+@click.option("--agent-id", type=int, required=True, help="Agent ID")
+@click.option("--task-id", type=int, required=True, help="Task ID to cancel")
 @_full_flag_with_help("Disable body truncation.")
 @click.pass_context
 @_client_command(
@@ -539,13 +540,12 @@ def message_ack(ctx, agent_id, task_id, full, quiet):
 )
 def message_cancel(ctx, agent_id, task_id, full):
     """Cancel (retract) a sent message."""
-    task_id = broker.resolve_task_ref(ctx.obj["fleet_id"], task_id)
     return broker.cancel_task(agent_id, task_id)
 
 
 @message.command("show")
-@click.option("--agent-id", required=True, help="Agent ID")
-@click.option("--task-id", required=True, help="Task ID to retrieve")
+@click.option("--agent-id", type=int, required=True, help="Agent ID")
+@click.option("--task-id", type=int, required=True, help="Task ID to retrieve")
 @_full_flag_with_help("Disable body truncation.")
 @click.pass_context
 @_client_command(
@@ -556,12 +556,11 @@ def message_cancel(ctx, agent_id, task_id, full):
 def message_show(ctx, agent_id, task_id, full):
     """Get details of a specific task."""
     fleet_id = ctx.obj["fleet_id"]
-    task_id = broker.resolve_task_ref(fleet_id, task_id)
     return broker.get_task(fleet_id, task_id)
 
 
 @agent.command("list")
-@click.option("--agent-id", required=True, help="Agent ID")
+@click.option("--agent-id", type=int, required=True, help="Agent ID")
 @_full_flag
 @click.pass_context
 @_client_command(
@@ -577,8 +576,10 @@ def agent_list(ctx, agent_id, full):
 
 
 @agent.command("show")
-@click.option("--agent-id", required=True, help="Agent ID")
-@click.option("--id", "target_agent_id", required=True, help="Target agent ID")
+@click.option("--agent-id", type=int, required=True, help="Agent ID")
+@click.option(
+    "--id", "target_agent_id", type=int, required=True, help="Target agent ID"
+)
 @_full_flag
 @click.pass_context
 @_client_command(
@@ -589,7 +590,6 @@ def agent_list(ctx, agent_id, full):
 def agent_show(ctx, agent_id, target_agent_id, full):
     """Show detail for a specific agent."""
     fleet_id = ctx.obj["fleet_id"]
-    target_agent_id = broker.resolve_agent_ref(fleet_id, target_agent_id)
     result = broker.get_agent(target_agent_id, fleet_id)
     if result is None:
         raise click.ClickException(f"Agent {target_agent_id} not found")
@@ -597,7 +597,7 @@ def agent_show(ctx, agent_id, target_agent_id, full):
 
 
 @agent.command("deregister")
-@click.option("--agent-id", required=True, help="Agent ID")
+@click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.pass_context
 @_client_command(
     requires_agent_fleet=True,
@@ -624,7 +624,7 @@ _PLACEMENT_MISSING_DEFAULT = (
 )
 
 
-def _require_member_pane(placement: dict, member_id: str, action: str) -> str:
+def _require_member_pane(placement: dict, member_id: int, action: str) -> str:
     pane_id = placement["tmux_pane_id"]
     if pane_id is None:
         raise click.ClickException(
@@ -635,9 +635,9 @@ def _require_member_pane(placement: dict, member_id: str, action: str) -> str:
 
 
 def _load_authorized_member(
-    fleet_id: str,
-    director_agent_id: str,
-    member_id: str,
+    fleet_id: int,
+    director_agent_id: int,
+    member_id: int,
     *,
     placement_missing_template: str = _PLACEMENT_MISSING_DEFAULT,
 ) -> tuple[dict, dict]:
@@ -646,23 +646,12 @@ def _load_authorized_member(
     ``placement_missing_template`` is a ``{member_id}`` format string for the
     "no placement" path, because each caller points users at a different
     follow-up command (``cafleet member create`` by default; ``cafleet agent
-    deregister`` from delete). It is formatted with the *resolved* member id, so
-    this error echoes the same full id as the "not found" / "not a member of
-    your team" errors rather than the pasted prefix. Pane-id presence is NOT
-    checked here — delete tolerates a pending placement while the others reject
-    it.
+    deregister`` from delete). Pane-id presence is NOT checked here — delete
+    tolerates a pending placement while the others reject it.
 
-    ``member_id`` may be a full UUID or a unique prefix; it is resolved to the
-    full id first so every downstream operation runs against the real id, not
-    the pasted prefix. Callers MUST use ``target["agent_id"]`` (the resolved
-    id), since reassigning this local param does not propagate to the caller.
-    The resolver's ``ValueError`` surfaces raw (ambiguous / no-match), not via
-    the generic "failed to fetch member" wrapper.
+    Callers MUST use ``target["agent_id"]``, since reassigning the
+    ``member_id`` local param does not propagate to the caller.
     """
-    try:
-        member_id = broker.resolve_agent_ref(fleet_id, member_id)
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
     try:
         target = broker.get_agent(member_id, fleet_id)
     except Exception as exc:
@@ -739,8 +728,8 @@ def _read_prompt_file(path: str) -> str:
 
 def _resolve_prompt(
     ctx: click.Context,
-    director_agent_id: str,
-    new_agent_id: str,
+    director_agent_id: int,
+    new_agent_id: int,
     prompt_argv: tuple[str, ...],
     prompt_file: str | None = None,
 ) -> str:
@@ -777,7 +766,7 @@ def _resolve_prompt(
         ) from exc
 
 
-def _deregister_with_warning(new_agent_id: str, *, fleet_id: str) -> None:
+def _deregister_with_warning(new_agent_id: int, *, fleet_id: int) -> None:
     """Best-effort deregister; emit warning to stderr if it fails."""
     try:
         broker.deregister_agent(new_agent_id)
@@ -791,14 +780,14 @@ def _deregister_with_warning(new_agent_id: str, *, fleet_id: str) -> None:
         )
 
 
-def _rollback_register(new_agent_id: str, *, fleet_id: str, reason: str) -> NoReturn:
+def _rollback_register(new_agent_id: int, *, fleet_id: int, reason: str) -> NoReturn:
     """Best-effort deregister of a just-created agent, then raise ClickException."""
     _deregister_with_warning(new_agent_id, fleet_id=fleet_id)
     raise click.ClickException(f"{reason}. Rolled back registration of {new_agent_id}.")
 
 
 @member.command("create")
-@click.option("--agent-id", required=True, help="Director's agent ID")
+@click.option("--agent-id", type=int, required=True, help="Director's agent ID")
 @click.option("--name", required=True, help="Member name")
 @click.option("--description", required=True, help="Member description")
 @click.option(
@@ -1037,7 +1026,7 @@ def member_delete(ctx, agent_id, member_id, force):
 
 def _emit_member_delete_output(
     ctx: click.Context,
-    member_id: str,
+    member_id: int,
     pane_status: str,
     *,
     header: str,
@@ -1055,7 +1044,7 @@ def _emit_member_delete_output(
 
 
 @member.command("list")
-@click.option("--agent-id", required=True, help="Director's agent ID")
+@click.option("--agent-id", type=int, required=True, help="Director's agent ID")
 @click.option(
     "--activity",
     "activity",
@@ -1305,7 +1294,7 @@ def member_ping(ctx, agent_id, member_id, quiet):
             )
         )
     elif quiet:
-        click.echo(member_id[:8])
+        click.echo(str(member_id))
     else:
         click.echo(
             f"Pinged member {target['name']} ({pane_id}) — poll keystroke dispatched."

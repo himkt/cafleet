@@ -15,7 +15,7 @@ def _create_fleet(label: str | None = None) -> dict:
 
 
 def _register_agent(
-    fleet_id: str,
+    fleet_id: int,
     name: str = "test-agent",
     description: str = "A test agent",
     skills: list[dict] | None = None,
@@ -30,7 +30,7 @@ def _register_agent(
     )
 
 
-def _setup_two_agents() -> tuple[str, str, str]:
+def _setup_two_agents() -> tuple[int, int, int]:
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     a = _register_agent(sid, name="sender")
@@ -38,7 +38,7 @@ def _setup_two_agents() -> tuple[str, str, str]:
     return sid, a["agent_id"], b["agent_id"]
 
 
-def _setup_three_agents() -> tuple[str, str, str, str]:
+def _setup_three_agents() -> tuple[int, int, int, int]:
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     a = _register_agent(sid, name="agent-a")

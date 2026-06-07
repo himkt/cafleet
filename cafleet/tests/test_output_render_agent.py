@@ -14,14 +14,14 @@ _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0
 
 def _sample_agent_with_placement() -> dict:
     return {
-        "agent_id": "abcdef12-3456-7890-abcd-ef1234567890",
+        "agent_id": 4242,
         "name": "Worker-A",
         "description": "test agent description",
         "status": "active",
         "registered_at": "2026-05-05T10:00:00.000000+00:00",
         "kind": "user",
         "placement": {
-            "director_agent_id": "12121212-1212-1212-1212-121212121212",
+            "director_agent_id": 12,
             "tmux_session": "main",
             "tmux_window_id": "@3",
             "tmux_pane_id": "%17",
@@ -33,7 +33,7 @@ def _sample_agent_with_placement() -> dict:
 
 def _sample_agent_without_placement() -> dict:
     return {
-        "agent_id": "abcdef12-3456-7890-abcd-ef1234567890",
+        "agent_id": 4242,
         "name": "Worker-A",
         "description": "test agent description",
         "status": "active",
@@ -43,11 +43,9 @@ def _sample_agent_without_placement() -> dict:
 
 def test_render_agent_slim__shape_id_name_status_coding_agent_no_full_card_keys():
     rendered = output.render_agent(_sample_agent_with_placement(), full=False)
-    assert rendered["id"] == "abcdef12"
+    assert rendered["id"] == 4242
     assert rendered["name"] == "Worker-A"
     assert rendered["status"] == "active"
-    # Full UUID must NOT leak through any key.
-    assert "abcdef12-3456-7890-abcd-ef1234567890" not in json.dumps(rendered)
     # coding_agent is projected from placement.
     assert rendered["coding_agent"] == "claude"
     # Full-card keys absent.
@@ -87,7 +85,7 @@ def test_render_agent_full__returns_unchanged_source():
 
 @pytest.fixture
 def bootstrapped_fleet(tmp_path, monkeypatch, _reset_engine_singletons):
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -112,7 +110,7 @@ def bootstrapped_fleet(tmp_path, monkeypatch, _reset_engine_singletons):
 
 
 @pytest.mark.parametrize(
-    ("verb", "mode", "expect_slim_keys", "expect_full_uuid"),
+    ("verb", "mode", "expect_slim_keys", "expect_full_shape"),
     [
         ("show", "default", True, False),
         ("show", "full", False, True),
@@ -121,12 +119,20 @@ def bootstrapped_fleet(tmp_path, monkeypatch, _reset_engine_singletons):
     ],
 )
 def test_cli_agent_show_or_list__slim_and_full_shapes(
-    bootstrapped_fleet, verb, mode, expect_slim_keys, expect_full_uuid
+    bootstrapped_fleet, verb, mode, expect_slim_keys, expect_full_shape
 ):
     sid, director_id, runner = bootstrapped_fleet
-    args = ["--fleet-id", sid, "--json", "agent", verb, "--agent-id", director_id]
+    args = [
+        "--fleet-id",
+        str(sid),
+        "--json",
+        "agent",
+        verb,
+        "--agent-id",
+        str(director_id),
+    ]
     if verb == "show":
-        args.extend(["--id", director_id])
+        args.extend(["--id", str(director_id)])
     if mode == "full":
         args.append("--full")
     result = runner.invoke(cli, args)
@@ -135,16 +141,18 @@ def test_cli_agent_show_or_list__slim_and_full_shapes(
     rows = payload if isinstance(payload, list) else [payload]
     for row in rows:
         if expect_slim_keys:
+            # Slim projection uses the compact "id" key and drops full-card keys.
             assert "id" in row
-            assert len(row["id"]) == 8
+            assert isinstance(row["id"], int)
             assert "agent_id" not in row
             assert "registered_at" not in row
             if verb == "show":
                 assert "placement" not in row
                 assert row["coding_agent"] == "claude"
-        if expect_full_uuid:
+        if expect_full_shape:
+            # Full shape keeps the typed-column "agent_id" (a native integer).
             assert "agent_id" in row
-            assert len(row["agent_id"]) > 8
+            assert isinstance(row["agent_id"], int)
             assert "registered_at" in row
             if verb == "show":
                 assert "placement" in row

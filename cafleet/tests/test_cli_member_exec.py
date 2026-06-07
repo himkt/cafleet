@@ -1,7 +1,6 @@
 """CLI tests for ``cafleet member exec``."""
 
 import json
-import uuid
 
 import pytest
 from click.testing import CliRunner
@@ -22,19 +21,13 @@ from tests._member_cli_helpers import (
 
 @pytest.fixture
 def fleet_id():
-    return str(uuid.uuid4())
+    return 100
 
 
 @pytest.fixture(autouse=True)
 def _stub_tmux_available(monkeypatch):
     """``ensure_available`` is a no-op for every test in this module."""
     monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
-
-
-@pytest.fixture(autouse=True)
-def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 @pytest.fixture
@@ -70,13 +63,13 @@ def _invoke(runner, fleet_id, *extra_args, **invoke_kwargs):
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "member",
             "exec",
             "--agent-id",
-            DIRECTOR_ID,
+            str(DIRECTOR_ID),
             "--member-id",
-            MEMBER_ID,
+            str(MEMBER_ID),
             *extra_args,
         ],
         **invoke_kwargs,
@@ -112,14 +105,14 @@ def test_exec_dispatch__json_output_three_keys(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "--json",
             "member",
             "exec",
             "--agent-id",
-            DIRECTOR_ID,
+            str(DIRECTOR_ID),
             "--member-id",
-            MEMBER_ID,
+            str(MEMBER_ID),
             payload,
         ],
     )
@@ -175,7 +168,7 @@ def test_authorization_boundary__missing_agent_exits_one(runner, fleet_id, monke
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
     result = _invoke(runner, fleet_id, "git log -1")
     assert result.exit_code == 1, result.output
-    assert MEMBER_ID in (result.output or "")
+    assert str(MEMBER_ID) in (result.output or "")
     assert "not found" in (result.output or "").lower()
 
 
@@ -210,7 +203,7 @@ def test_authorization_boundary__cross_director_exits_one_with_exact_message(
     out = result.output or ""
     assert f"agent {MEMBER_ID}" in out
     assert "is not a member of your team" in out
-    assert OTHER_DIRECTOR_ID in out
+    assert str(OTHER_DIRECTOR_ID) in out
 
 
 def test_authorization_boundary__pending_pane_exits_one_with_exact_message(

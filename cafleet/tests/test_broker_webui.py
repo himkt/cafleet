@@ -1,7 +1,5 @@
 """Tests for ``broker`` WebUI query operations."""
 
-import uuid
-
 import pytest
 
 from cafleet import broker
@@ -221,7 +219,7 @@ def test_get_agent_names__edge_cases(scenario):
     elif scenario == "nonexistent_id_absent":
         fleet = _create_fleet()
         agent = _register_agent(fleet["fleet_id"], name="real")
-        fake = str(uuid.uuid4())
+        fake = 999999
         result = broker.get_agent_names([agent["agent_id"], fake])
         assert agent["agent_id"] in result
         assert fake not in result

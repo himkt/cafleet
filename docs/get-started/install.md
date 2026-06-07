@@ -18,12 +18,23 @@ uv tool install cafleet     # or: pip install cafleet
 cafleet db init             # apply schema migrations (idempotent; rerun after upgrades)
 ```
 
-The default database lives at `~/.local/share/cafleet/registry.db`. Override
+The default database lives at `~/.local/share/cafleet/cafleet.db`. Override
 with the `CAFLEET_DATABASE_URL` environment variable — use an absolute path,
 since SQLAlchemy does not expand `~` in SQLite URLs.
 
 `cafleet db init` is idempotent: re-run it after upgrading the package and it
 will apply any new Alembic migrations without disturbing existing data.
+
+!!! warning "Upgrading across the integer-PK rearchitecture"
+
+    There is **no data migration and no backward compatibility** across the
+    integer-PK rearchitecture. Delete any pre-existing database. The default
+    file moved from `~/.local/share/cafleet/registry.db` to
+    `~/.local/share/cafleet/cafleet.db`, so the old file is left untouched and
+    ignored — remove it manually. If you set `CAFLEET_DATABASE_URL` to a custom
+    path holding an old (UUID-era) schema, `cafleet db init` refuses to run
+    against its unknown Alembic revision; delete that file and re-run
+    `cafleet db init`.
 
 ## CAFleet skills
 

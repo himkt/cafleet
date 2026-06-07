@@ -8,7 +8,7 @@ The WebUI does not require authentication. Fleet-scoped endpoints require an `X-
 
 | Header | Purpose |
 |---|---|
-| `X-Fleet-Id: <fleet_id>` | Required on fleet-scoped endpoints (agents, inbox, sent, timeline, send). The backend verifies the fleet exists in the `fleets` table. |
+| `X-Fleet-Id: <fleet_id>` | Required on fleet-scoped endpoints (agents, inbox, sent, timeline, send). The header value is the integer fleet id (sent as a string over HTTP; the backend coerces it with `int(...)` and returns 400 if it is not an integer). The backend verifies the fleet exists in the `fleets` table. |
 
 No server-side session cookies. The SPA stores the active fleet_id client-side via hash-based routing and sends it in the X-Fleet-Id header on each request.
 
@@ -23,7 +23,7 @@ Returns all fleets with agent counts, ordered newest-first by `created_at DESC, 
 ```json
 [
   {
-    "fleet_id": "550e8400-e29b-41d4-a716-446655440000",
+    "fleet_id": 1,
     "label": "PR-42 review",
     "created_at": "2026-04-12T10:00:00+00:00",
     "agent_count": 3
@@ -43,15 +43,15 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
 {
   "agents": [
     {
-      "agent_id": "uuid",
+      "agent_id": 3,
       "name": "Administrator",
-      "description": "Built-in administrator agent for fleet 3f9a1b2c",
+      "description": "Built-in administrator agent for fleet 1",
       "status": "active",
       "registered_at": "2026-04-15T10:00:00+00:00",
       "kind": "builtin-administrator"
     },
     {
-      "agent_id": "uuid",
+      "agent_id": 4,
       "name": "Claude-B",
       "description": "Reviewer",
       "status": "active",
@@ -83,10 +83,10 @@ Returns messages received by the agent (`context_id = agent_id`), excluding `bro
 {
   "messages": [
     {
-      "task_id": "uuid",
-      "from_agent_id": "uuid",
+      "task_id": 42,
+      "from_agent_id": 4,
       "from_agent_name": "Agent A",
-      "to_agent_id": "uuid",
+      "to_agent_id": 5,
       "to_agent_name": "Agent B",
       "type": "unicast",
       "status": "input_required",
@@ -123,10 +123,10 @@ Fleet scoping is reached through the `tasks.context_id → agents.agent_id → a
 {
   "messages": [
     {
-      "task_id": "uuid",
-      "from_agent_id": "uuid",
+      "task_id": 50,
+      "from_agent_id": 4,
       "from_agent_name": "Claude-A",
-      "to_agent_id": "uuid",
+      "to_agent_id": 5,
       "to_agent_name": "reviewer-bot",
       "type": "unicast",
       "status": "input_required",
@@ -158,7 +158,7 @@ The client groups rows by `origin_task_id` (non-null rows sharing a value form o
 
 ### POST /api/messages/send — Send Message
 
-Sends a message from a same-fleet active agent. Supports both unicast (`to_agent_id=<uuid>`) and broadcast (`to_agent_id="*"`).
+Sends a message from a same-fleet active agent. Supports both unicast (`to_agent_id=<int>`) and broadcast (`to_agent_id="*"`).
 
 **Request**:
 
@@ -168,13 +168,15 @@ X-Fleet-Id: <fleet_id>
 
 ```json
 {
-  "from_agent_id": "uuid",
-  "to_agent_id": "uuid | *",
+  "from_agent_id": 3,
+  "to_agent_id": 4,
   "text": "Hello!"
 }
 ```
 
-**Unicast** (`to_agent_id` is a UUID): the server verifies both the sender and the destination belong to the caller's fleet and that the destination is active.
+`to_agent_id` accepts an integer (unicast) or the string `"*"` (broadcast). `from_agent_id` is always an integer.
+
+**Unicast** (`to_agent_id` is an integer): the server verifies both the sender and the destination belong to the caller's fleet and that the destination is active.
 
 **Broadcast** (`to_agent_id == "*"`): the server skips destination validation (no specific recipient to verify) and the WebUI route calls `broker.broadcast_message(...)`, which fans out to every active agent in the fleet (except the built-in Administrator, which is filtered out of the recipient set at the broker layer) plus a summary task. The sender is still required to be active and in the caller's fleet; the sender MAY be the Administrator. The response's `task_id` is the summary task's id.
 
@@ -184,7 +186,7 @@ X-Fleet-Id: <fleet_id>
 
 ```json
 {
-  "task_id": "uuid",
+  "task_id": 42,
   "status": "input_required"
 }
 ```

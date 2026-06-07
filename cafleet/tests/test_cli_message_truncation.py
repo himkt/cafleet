@@ -1,7 +1,6 @@
 """Per-command tests for the ``--full`` truncation flag on ``cafleet message *``."""
 
 import json
-import uuid
 
 import pytest
 from click.testing import CliRunner
@@ -16,22 +15,22 @@ SUMMARY_TEXT = "Broadcast sent to 3 recipients"
 
 @pytest.fixture
 def fleet_id():
-    return str(uuid.uuid4())
+    return 100
 
 
 @pytest.fixture
 def agent_id():
-    return str(uuid.uuid4())
+    return 200
 
 
 @pytest.fixture
 def other_agent_id():
-    return str(uuid.uuid4())
+    return 300
 
 
 @pytest.fixture
 def task_id():
-    return str(uuid.uuid4())
+    return 400
 
 
 @pytest.fixture
@@ -42,12 +41,6 @@ def runner():
 @pytest.fixture(autouse=True)
 def _stub_verify(monkeypatch):
     monkeypatch.setattr(broker, "verify_agent_fleet", lambda *_a, **_k: True)
-
-
-@pytest.fixture(autouse=True)
-def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
 
 
 def _task_payload(task_id, *, sender, recipient, text, type_="unicast"):
@@ -72,7 +65,7 @@ def _broadcast_summary_payload(task_id, *, sender, count):
                 "task_id": task_id,
                 "context_id": sender,
                 "from_agent_id": sender,
-                "to_agent_id": "",
+                "to_agent_id": 0,
                 "type": "broadcast_summary",
                 "created_at": "2026-05-01T00:00:00+00:00",
                 "status_state": "completed",
@@ -94,12 +87,10 @@ def _setup_subcommand(
             broker,
             "poll_tasks",
             lambda *_a, **_k: [
-                _task_payload(
-                    "t-1", sender="from-1", recipient=agent_id, text=LONG_BODY
-                )
+                _task_payload(1, sender=11, recipient=agent_id, text=LONG_BODY)
             ],
         )
-        return ["message", "poll", "--agent-id", agent_id], "list"
+        return ["message", "poll", "--agent-id", str(agent_id)], "list"
     if subcommand == "show":
         monkeypatch.setattr(
             broker,
@@ -114,9 +105,9 @@ def _setup_subcommand(
             "message",
             "show",
             "--agent-id",
-            agent_id,
+            str(agent_id),
             "--task-id",
-            task_id,
+            str(task_id),
         ], "envelope"
     # send
     monkeypatch.setattr(
@@ -132,9 +123,9 @@ def _setup_subcommand(
         "message",
         "send",
         "--agent-id",
-        agent_id,
+        str(agent_id),
         "--to",
-        other_agent_id,
+        str(other_agent_id),
         "--text",
         LONG_BODY,
     ], "envelope"
@@ -149,7 +140,7 @@ def test_truncation__poll_show_send_text_output(
         monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
     )
     full_args = args + (["--full"] if full else [])
-    result = runner.invoke(cli, ["--fleet-id", fleet_id, *full_args])
+    result = runner.invoke(cli, ["--fleet-id", str(fleet_id), *full_args])
     assert result.exit_code == 0, result.output
     if full:
         assert LONG_BODY in result.output
@@ -167,7 +158,7 @@ def test_truncation__poll_show_send_json_output(
         monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
     )
     full_args = args + (["--full"] if full else [])
-    result = runner.invoke(cli, ["--fleet-id", fleet_id, "--json", *full_args])
+    result = runner.invoke(cli, ["--fleet-id", str(fleet_id), "--json", *full_args])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     task = payload[0] if shape == "list" else payload["task"]
@@ -182,8 +173,10 @@ def test_truncation__non_text_fields_byte_identical_between_default_and_full(
     args, shape = _setup_subcommand(
         monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
     )
-    default_res = runner.invoke(cli, ["--fleet-id", fleet_id, "--json", *args])
-    full_res = runner.invoke(cli, ["--fleet-id", fleet_id, "--json", *args, "--full"])
+    default_res = runner.invoke(cli, ["--fleet-id", str(fleet_id), "--json", *args])
+    full_res = runner.invoke(
+        cli, ["--fleet-id", str(fleet_id), "--json", *args, "--full"]
+    )
     assert default_res.exit_code == 0, default_res.output
     assert full_res.exit_code == 0, full_res.output
     if shape == "list":
@@ -192,8 +185,8 @@ def test_truncation__non_text_fields_byte_identical_between_default_and_full(
     else:
         default_task = json.loads(default_res.output)["task"]
         full_task = json.loads(full_res.output)["task"]
-    assert default_task["id"] == full_task["task_id"][:8]
-    assert default_task["from"] == full_task["from_agent_id"][:8]
+    assert default_task["id"] == full_task["task_id"]
+    assert default_task["from"] == full_task["from_agent_id"]
     assert default_task["ts"] == full_task["status_timestamp"]
 
 
@@ -207,13 +200,13 @@ def test_truncation__broadcast_summary_emitted_verbatim(
         "broadcast_message",
         lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
     )
-    args = ["message", "broadcast", "--agent-id", agent_id, "--text", LONG_BODY]
+    args = ["message", "broadcast", "--agent-id", str(agent_id), "--text", LONG_BODY]
     if full:
         args.append("--full")
     if output_mode == "json":
-        result = runner.invoke(cli, ["--fleet-id", fleet_id, "--json", *args])
+        result = runner.invoke(cli, ["--fleet-id", str(fleet_id), "--json", *args])
     else:
-        result = runner.invoke(cli, ["--fleet-id", fleet_id, *args])
+        result = runner.invoke(cli, ["--fleet-id", str(fleet_id), *args])
     assert result.exit_code == 0, result.output
     if output_mode == "json":
         payload = json.loads(result.output)
@@ -253,12 +246,12 @@ def test_truncation__poll_list_of_three_tasks_each_truncated(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "--json",
             "message",
             "poll",
             "--agent-id",
-            agent_id,
+            str(agent_id),
         ],
     )
     assert result.exit_code == 0, result.output

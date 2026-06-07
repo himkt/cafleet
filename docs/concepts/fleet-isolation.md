@@ -103,9 +103,8 @@ tmux push notifications.
 fleet in the same transaction as the fleet row. The Administrator is an
 ordinary `agents` row distinguished only by `agent_card_json.cafleet.kind ==
 "builtin-administrator"` — no schema change, no separate table. Every fleet
-has exactly one Administrator, and Alembic revision
-`0006_seed_administrator_agent.py` seeds it (idempotent via a `json_extract`
-probe).
+has exactly one Administrator, seeded at runtime by `broker.create_fleet` in
+the same bootstrap transaction — no migration seeds it.
 
 The Admin WebUI Send control always submits messages with
 `from_agent_id = administrator.agent_id`, so there is no sender dropdown.

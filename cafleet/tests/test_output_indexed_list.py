@@ -22,10 +22,10 @@ def test_format_indexed_list__empty_and_non_empty_join_behaviour():
 
 def test_format_indexed_list__byte_identical_for_task_and_agent_shapes():
     task = {
-        "task_id": "tid-1",
-        "context_id": "a2",
-        "from_agent_id": "a1",
-        "to_agent_id": "a2",
+        "task_id": 1,
+        "context_id": 2,
+        "from_agent_id": 11,
+        "to_agent_id": 2,
         "type": "unicast",
         "created_at": "2026-05-05T12:00:00.000000+00:00",
         "status_state": "input_required",
@@ -33,18 +33,18 @@ def test_format_indexed_list__byte_identical_for_task_and_agent_shapes():
         "origin_task_id": None,
         "text": "hello world",
     }
-    expected_task = "[tid-1 | from:a1 | 2026-05-05T12:00:00.000000+00:00]\nhello world"
+    expected_task = "[1 | from:11 | 2026-05-05T12:00:00.000000+00:00]\nhello world"
     assert (
         format_indexed_list([task], format_task, "No messages found.") == expected_task
     )
 
     agent = {
-        "agent_id": "a1",
+        "agent_id": 11,
         "name": "alpha",
         "description": "A test agent",
         "status": "active",
     }
     assert (
         format_indexed_list([agent], format_agent, "No agents found.")
-        == "a1 alpha active"
+        == "11 alpha active"
     )

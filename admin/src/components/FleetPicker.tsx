@@ -4,7 +4,7 @@ import { listFleets } from "../api";
 import { usePolling, POLL_INTERVAL_MS } from "../hooks/usePolling";
 
 interface FleetPickerProps {
-  onSelect: (fleetId: string) => void;
+  onSelect: (fleetId: number) => void;
 }
 
 export default function FleetPicker({ onSelect }: FleetPickerProps) {
@@ -82,7 +82,7 @@ export default function FleetPicker({ onSelect }: FleetPickerProps) {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <code className="text-sm font-mono text-gray-900">
-                        {s.fleet_id.slice(0, 8)}
+                        {s.fleet_id}
                       </code>
                       {s.label && (
                         <span className="text-sm text-gray-600 truncate">

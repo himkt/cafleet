@@ -42,7 +42,7 @@ uv tool install cafleet     # or: pip install cafleet
 cafleet db init             # apply schema migrations (idempotent; rerun after upgrades)
 ```
 
-The default database is `~/.local/share/cafleet/registry.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
+The default database is `~/.local/share/cafleet/cafleet.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
 
 ## 2. Recommended settings
 

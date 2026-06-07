@@ -2,7 +2,6 @@
 
 import json
 import sqlite3
-import uuid
 
 import pytest
 from click.testing import CliRunner
@@ -35,7 +34,7 @@ def _init_db(runner: CliRunner) -> None:
     assert result.exit_code == 0, result.output
 
 
-def _seed_fleet(db_path, fleet_id: str, label: str | None = None) -> None:
+def _seed_fleet(db_path, fleet_id: int, label: str | None = None) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
@@ -48,7 +47,7 @@ def _seed_fleet(db_path, fleet_id: str, label: str | None = None) -> None:
 
 
 def _seed_agent(
-    db_path, agent_id: str, fleet_id: str, *, status: str = "active"
+    db_path, agent_id: int, fleet_id: int, *, status: str = "active"
 ) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
@@ -60,7 +59,7 @@ def _seed_agent(
             (
                 agent_id,
                 fleet_id,
-                f"agent-{agent_id[:8]}",
+                f"agent-{agent_id}",
                 "test agent",
                 status,
                 "2026-01-01T00:00:00+00:00",
@@ -80,7 +79,7 @@ def _fleet_rows(db_path):
         conn.close()
 
 
-def _fleet_deleted_at(db_path, fleet_id: str) -> str | None:
+def _fleet_deleted_at(db_path, fleet_id: int) -> str | None:
     conn = sqlite3.connect(str(db_path))
     try:
         row = conn.execute(
@@ -93,7 +92,7 @@ def _fleet_deleted_at(db_path, fleet_id: str) -> str | None:
 
 @pytest.fixture
 def fresh_db(tmp_path, monkeypatch):
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -115,24 +114,13 @@ def test_fleet_create__happy_path(fresh_db, output_mode):
     if output_mode == "json":
         data = json.loads(result.output)
         assert "fleet_id" in data
-        uuid.UUID(data["fleet_id"])
+        assert isinstance(data["fleet_id"], int)
     else:
-        # Find a UUID in the text output.
-        found = next(
-            (w for w in result.output.split() if _is_uuid(w)),
-            None,
-        )
-        assert found is not None
+        # The compact text output leads with the integer fleet id.
+        first = result.output.split()[0]
+        assert first.isdigit()
     rows = _fleet_rows(db_file)
     assert len(rows) == 1
-
-
-def _is_uuid(word: str) -> bool:
-    try:
-        uuid.UUID(word)
-        return True
-    except ValueError:
-        return False
 
 
 def test_fleet_create__label_round_trip_and_default_none(fresh_db):
@@ -164,7 +152,7 @@ def test_fleet_create__bootstraps_administrator_recorded_in_db(fresh_db):
     data = json.loads(result.output)
     sid = data["fleet_id"]
     admin_id = data["administrator_agent_id"]
-    uuid.UUID(admin_id)
+    assert isinstance(admin_id, int)
 
     conn = sqlite3.connect(str(db_file))
     try:
@@ -187,11 +175,11 @@ def test_fleet_create__bootstraps_administrator_recorded_in_db(fresh_db):
 @pytest.mark.parametrize("output_mode", ["text", "json"])
 def test_fleet_list__shape_and_agent_count(fresh_db, output_mode):
     db_file, runner = fresh_db
-    sid = str(uuid.uuid4())
+    sid = 1
     _seed_fleet(db_file, sid, label="test-fleet")
-    _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
-    _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
-    _seed_agent(db_file, str(uuid.uuid4()), sid, status="deregistered")
+    _seed_agent(db_file, 2, sid, status="active")
+    _seed_agent(db_file, 3, sid, status="active")
+    _seed_agent(db_file, 4, sid, status="deregistered")
 
     args = ["fleet", "list"]
     if output_mode == "json":
@@ -205,7 +193,7 @@ def test_fleet_list__shape_and_agent_count(fresh_db, output_mode):
         assert data[0]["label"] == "test-fleet"
         assert data[0]["agent_count"] == 2  # active only
     else:
-        assert sid in result.output
+        assert str(sid) in result.output
         assert "test-fleet" in result.output
 
 
@@ -227,13 +215,13 @@ def test_fleet_show__shape_and_branches(
 ):
     db_file, runner = fresh_db
     if scenario == "existing_active":
-        sid = str(uuid.uuid4())
+        sid = 1
         _seed_fleet(db_file, sid, label="show-test")
         target = sid
     elif scenario == "missing":
-        target = str(uuid.uuid4())
+        target = 999
     else:
-        sid = str(uuid.uuid4())
+        sid = 1
         _seed_fleet(db_file, sid, label="audit-me")
         conn = sqlite3.connect(str(db_file))
         try:
@@ -246,7 +234,7 @@ def test_fleet_show__shape_and_branches(
             conn.close()
         target = sid
 
-    result = runner.invoke(cli, ["fleet", "show", target])
+    result = runner.invoke(cli, ["fleet", "show", str(target)])
     assert result.exit_code == expected_exit, result.output
     out = result.output.lower() if scenario == "missing" else result.output
     for needle in expected_in:
@@ -258,12 +246,12 @@ def test_fleet_show__shape_and_branches(
 
 def test_fleet_delete__soft_deletes_and_marks_row(fresh_db):
     db_file, runner = fresh_db
-    sid = str(uuid.uuid4())
+    sid = 1
     _seed_fleet(db_file, sid)
-    _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
-    _seed_agent(db_file, str(uuid.uuid4()), sid, status="active")
+    _seed_agent(db_file, 2, sid, status="active")
+    _seed_agent(db_file, 3, sid, status="active")
 
-    result = runner.invoke(cli, ["fleet", "delete", sid])
+    result = runner.invoke(cli, ["fleet", "delete", str(sid)])
     assert result.exit_code == 0, result.output
     # Row persists, deleted_at set.
     assert sid in [r[0] for r in _fleet_rows(db_file)]
@@ -273,8 +261,8 @@ def test_fleet_delete__soft_deletes_and_marks_row(fresh_db):
 
 def test_fleet_delete__nonexistent_fleet_handles_gracefully(fresh_db):
     _db_file, runner = fresh_db
-    fake_id = str(uuid.uuid4())
-    result = runner.invoke(cli, ["fleet", "delete", fake_id])
+    fake_id = 999
+    result = runner.invoke(cli, ["fleet", "delete", str(fake_id)])
     # Either exits non-zero or returns SystemExit — never crashes uncleanly.
     assert result.exception is None or isinstance(result.exception, SystemExit)
 

@@ -4,9 +4,9 @@ import type {
   FleetListItem,
 } from "./types";
 
-let fleetId: string | null = null;
+let fleetId: number | null = null;
 
-export function setFleetId(id: string | null): void {
+export function setFleetId(id: number | null): void {
   fleetId = id;
 }
 
@@ -18,8 +18,8 @@ async function request<T>(
     ...(options.headers as Record<string, string>),
   };
 
-  if (fleetId) {
-    headers["X-Fleet-Id"] = fleetId;
+  if (fleetId !== null) {
+    headers["X-Fleet-Id"] = String(fleetId);
   }
 
   if (options.body && typeof options.body === "string") {
@@ -53,8 +53,8 @@ export async function fetchTimeline(): Promise<TimelineResponse> {
 }
 
 export async function sendMessage(
-  fromAgentId: string,
-  toAgentId: string,
+  fromAgentId: number,
+  toAgentId: number | "*",
   text: string,
 ): Promise<void> {
   await request<unknown>("/messages/send", {

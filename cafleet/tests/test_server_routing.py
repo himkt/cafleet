@@ -69,3 +69,12 @@ def test_create_app__known_api_route_reaches_router_returns_json_400(client):
     assert response.status_code == 400
     assert response.headers["content-type"].startswith("application/json")
     assert response.json() == {"detail": "X-Fleet-Id header required"}
+
+
+def test_create_app__non_integer_fleet_id_header_returns_json_400(client):
+    # get_webui_fleet int-coerces X-Fleet-Id; a non-integer header is rejected
+    # with 400 before any DB access, so no broker fixture is needed.
+    response = client.get("/api/agents", headers={"X-Fleet-Id": "not-an-int"})
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {"detail": "X-Fleet-Id must be an integer"}

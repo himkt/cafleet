@@ -1,7 +1,5 @@
 """Tests for ``broker.list_members_with_activity``."""
 
-import uuid
-
 import pytest
 
 from cafleet import broker
@@ -131,4 +129,4 @@ def test_list_members_with_activity__scoping_excludes_other_directors_and_deregi
     assert broker.list_members_with_activity(sid2, director_id2) == []
 
     # Unknown fleet-id returns [].
-    assert broker.list_members_with_activity(str(uuid.uuid4()), str(uuid.uuid4())) == []
+    assert broker.list_members_with_activity(999999, 999998) == []

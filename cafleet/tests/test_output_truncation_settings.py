@@ -116,7 +116,7 @@ def test_format_agent_full__description_truncated_at_60(
     scenario, description, expected_present_in_render, expected_absent_in_render
 ):
     agent = {
-        "agent_id": "abcdef0123456789-tail",
+        "agent_id": 123,
         "name": "Claude-B",
         "description": description,
         "status": "active",
@@ -131,10 +131,10 @@ def test_truncate_task_text__full_true_bypasses_and_default_uses_settings(monkey
     # full=True bypasses regardless of settings.
     monkeypatch.setattr("cafleet.config.settings.max_text_len", 10)
     task = {
-        "task_id": "tid",
-        "context_id": "ctx",
-        "from_agent_id": "fid",
-        "to_agent_id": "tid",
+        "task_id": 1,
+        "context_id": 20,
+        "from_agent_id": 10,
+        "to_agent_id": 20,
         "type": "unicast",
         "created_at": "2026-05-05T12:00:00.000000+00:00",
         "status_state": "input_required",

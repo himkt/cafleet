@@ -5,7 +5,7 @@ from cafleet import output
 
 def _agent(
     *,
-    agent_id="abcdef0123456789-tail",
+    agent_id=12345,
     name="Claude-B",
     description="Reviewer for PR #42",
     status="active",
@@ -20,10 +20,10 @@ def _agent(
 
 def _fleet_create_data(
     *,
-    fleet_id="550e8400-e29b-41d4-a716-446655440000",
-    director_agent_id="7ba91234-5678-90ab-cdef-112233445566",
+    fleet_id=7000,
+    director_agent_id=8000,
     label="my-project",
-    administrator_agent_id="3c4d5e6f-7890-1234-5678-90abcdef1234",
+    administrator_agent_id=9000,
 ) -> dict:
     return {
         "fleet_id": fleet_id,
@@ -45,7 +45,7 @@ def _fleet_create_data(
 
 def _member_data(
     *,
-    agent_id="abcdef0123456789-tail",
+    agent_id=12345,
     name="Claude-B",
     pane_id="%7",
     window_id="@3",
@@ -64,14 +64,14 @@ def _member_data(
 
 def test_format_agent__compact_shape_and_default_kwarg():
     agent = _agent(
-        agent_id="abcdef0123456789-tail",
+        agent_id=12345,
         name="Claude-B",
         status="active",
         description="A very wordy description we don't want in lists",
     )
     rendered = output.format_agent(agent, full=False)
     assert "\n" not in rendered
-    assert "abcdef01" in rendered
+    assert "12345" in rendered
     assert "Claude-B" in rendered
     assert "active" in rendered
     # Description is dropped in compact form.
@@ -91,8 +91,10 @@ def test_format_agent__full_layout_has_labels_and_more_lines():
 def test_format_fleet_create__compact_shape_and_default_kwarg():
     rendered = output.format_fleet_create(_fleet_create_data(), full=False)
     assert "\n" not in rendered
-    sid = "550e8400-e29b-41d4-a716-446655440000"
-    assert sid in rendered or sid[:8] in rendered
+    # Compact form renders the full integer ids (no prefix slicing).
+    assert "7000" in rendered
+    assert "director=8000" in rendered
+    assert "admin=9000" in rendered
     data = _fleet_create_data()
     assert output.format_fleet_create(data) == output.format_fleet_create(
         data, full=False
@@ -110,11 +112,11 @@ def test_format_fleet_create__full_layout_has_labels_and_more_lines():
 
 def test_format_member__compact_shape_and_default_kwarg():
     rendered = output.format_member(
-        _member_data(agent_id="abcdef0123456789-tail", name="Claude-B"),
+        _member_data(agent_id=12345, name="Claude-B"),
         full=False,
     )
     assert "\n" not in rendered
-    assert "abcdef01" in rendered
+    assert "12345" in rendered
     assert "Claude-B" in rendered
     data = _member_data()
     assert output.format_member(data) == output.format_member(data, full=False)

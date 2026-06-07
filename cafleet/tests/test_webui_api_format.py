@@ -44,10 +44,10 @@ def _two_agents():
 
 def _typed_column_row(**overrides) -> dict:
     base = {
-        "task_id": "tid-1",
-        "context_id": "a2",
-        "from_agent_id": "a1",
-        "to_agent_id": "a2",
+        "task_id": 1,
+        "context_id": 22,
+        "from_agent_id": 11,
+        "to_agent_id": 22,
         "type": "unicast",
         "status_state": "input_required",
         "created_at": "2026-04-30T01:00:00+00:00",
@@ -74,41 +74,41 @@ def test_format_messages__empty_rows_skips_lookup(monkeypatch):
 def test_format_messages__shape_field_mapping_and_batched_lookup(monkeypatch):
     rows = [
         _typed_column_row(
-            task_id="tid-2",
-            from_agent_id="b1",
-            to_agent_id="b2",
+            task_id=2,
+            from_agent_id=101,
+            to_agent_id=102,
             status_state="completed",
-            origin_task_id="origin-1",
+            origin_task_id=999,
             text="timeline body",
         ),
-        _typed_column_row(task_id="tid-3", from_agent_id="b1", to_agent_id="b3"),
+        _typed_column_row(task_id=3, from_agent_id=101, to_agent_id=103),
     ]
     lookup_calls = []
 
     def fake_get_agent_names(ids):
         lookup_calls.append(set(ids))
-        return {"b1": "alpha", "b2": "beta", "b3": "gamma"}
+        return {101: "alpha", 102: "beta", 103: "gamma"}
 
     monkeypatch.setattr(webui_api.broker, "get_agent_names", fake_get_agent_names)
 
     result = _format_messages(rows)
     # Batched: one lookup with the full id set.
     assert len(lookup_calls) == 1
-    assert lookup_calls[0] == {"b1", "b2", "b3"}
+    assert lookup_calls[0] == {101, 102, 103}
     # Shape contract.
     assert len(result) == 2
     for msg in result:
         assert set(msg.keys()) == _EXPECTED_KEYS
     # Field mapping.
     first = result[0]
-    assert first["task_id"] == "tid-2"
-    assert first["from_agent_id"] == "b1"
+    assert first["task_id"] == 2
+    assert first["from_agent_id"] == 101
     assert first["from_agent_name"] == "alpha"
-    assert first["to_agent_id"] == "b2"
+    assert first["to_agent_id"] == 102
     assert first["to_agent_name"] == "beta"
     assert first["type"] == "unicast"
     assert first["status"] == "completed"
-    assert first["origin_task_id"] == "origin-1"
+    assert first["origin_task_id"] == 999
     assert first["body"] == "timeline body"
     assert result[1]["to_agent_name"] == "gamma"
 
@@ -135,7 +135,7 @@ def test_format_messages__end_to_end_against_real_broker(source, expected_body):
     assert msg["type"] == "unicast"
     assert msg["status"] == "input_required"
     assert msg["body"] == expected_body
-    assert isinstance(msg["task_id"], str)
+    assert isinstance(msg["task_id"], int)
     assert msg["task_id"]
     assert isinstance(msg["created_at"], str)
     assert msg["created_at"]

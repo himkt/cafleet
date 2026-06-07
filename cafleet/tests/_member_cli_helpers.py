@@ -1,8 +1,8 @@
 """Shared constants + factories for member-CLI tests."""
 
-DIRECTOR_ID = "11111111-1111-1111-1111-111111111111"
-MEMBER_ID = "22222222-2222-2222-2222-222222222222"
-OTHER_DIRECTOR_ID = "33333333-3333-3333-3333-333333333333"
+DIRECTOR_ID = 11
+MEMBER_ID = 22
+OTHER_DIRECTOR_ID = 33
 PANE_ID = "%7"
 MEMBER_NAME = "Claude-B"
 
@@ -15,7 +15,7 @@ _UNSET: object = object()
 
 def _placement(
     *,
-    director_agent_id: str = DIRECTOR_ID,
+    director_agent_id: int = DIRECTOR_ID,
     tmux_pane_id: str | None = PANE_ID,
     coding_agent: str = "claude",
 ) -> dict:
@@ -31,7 +31,7 @@ def _placement(
 
 def _agent(
     *,
-    agent_id: str = MEMBER_ID,
+    agent_id: int = MEMBER_ID,
     name: str = MEMBER_NAME,
     placement: dict | None | object = _UNSET,
 ) -> dict:

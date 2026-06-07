@@ -1,6 +1,6 @@
 """FastAPI endpoints backing the admin WebUI (``/api/*``)."""
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -10,11 +10,18 @@ from cafleet import broker
 webui_router = APIRouter(prefix="/api")
 
 
-def get_webui_fleet(request: Request) -> str:
-    """Return ``X-Fleet-Id``; 400 if missing, 404 if the row is gone."""
-    fleet_id = request.headers.get("x-fleet-id")
-    if not fleet_id:
+def get_webui_fleet(request: Request) -> int:
+    """Return the integer ``X-Fleet-Id``; 400 if missing/non-integer, 404 if gone."""
+    raw = request.headers.get("x-fleet-id")
+    if not raw:
         raise HTTPException(status_code=400, detail="X-Fleet-Id header required")
+
+    try:
+        fleet_id = int(raw)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="X-Fleet-Id must be an integer"
+        ) from None
 
     result = broker.get_fleet(fleet_id)
     if result is None:
@@ -49,8 +56,8 @@ def _format_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 class SendMessageRequest(BaseModel):
-    from_agent_id: str
-    to_agent_id: str
+    from_agent_id: int
+    to_agent_id: int | Literal["*"]
     text: str
 
 
@@ -60,15 +67,15 @@ def list_fleets():
 
 
 @webui_router.get("/agents")
-def list_agents(fleet_id: str = Depends(get_webui_fleet)):
+def list_agents(fleet_id: int = Depends(get_webui_fleet)):
     agents = broker.list_fleet_agents(fleet_id)
     return {"agents": agents}
 
 
 @webui_router.get("/agents/{agent_id}/inbox")
 def get_inbox(
-    agent_id: str,
-    fleet_id: str = Depends(get_webui_fleet),
+    agent_id: int,
+    fleet_id: int = Depends(get_webui_fleet),
 ):
     if not broker.verify_agent_fleet(agent_id, fleet_id):
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -79,8 +86,8 @@ def get_inbox(
 
 @webui_router.get("/agents/{agent_id}/sent")
 def get_sent(
-    agent_id: str,
-    fleet_id: str = Depends(get_webui_fleet),
+    agent_id: int,
+    fleet_id: int = Depends(get_webui_fleet),
 ):
     if not broker.verify_agent_fleet(agent_id, fleet_id):
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -91,7 +98,7 @@ def get_sent(
 
 @webui_router.get("/timeline")
 def get_timeline(
-    fleet_id: str = Depends(get_webui_fleet),
+    fleet_id: int = Depends(get_webui_fleet),
 ):
     rows = broker.list_timeline(fleet_id)
     return {"messages": _format_messages(rows)}
@@ -100,7 +107,7 @@ def get_timeline(
 @webui_router.post("/messages/send")
 def send_message(
     body: SendMessageRequest,
-    fleet_id: str = Depends(get_webui_fleet),
+    fleet_id: int = Depends(get_webui_fleet),
 ):
     if broker.get_agent(body.from_agent_id, fleet_id) is None:
         raise HTTPException(status_code=400, detail="from_agent not in fleet")

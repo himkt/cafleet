@@ -142,7 +142,7 @@ class TmuxMultiplexer:
         )
 
     def send_poll_trigger(
-        self, *, target_pane_id: str, fleet_id: str, agent_id: str
+        self, *, target_pane_id: str, fleet_id: int, agent_id: int
     ) -> bool:
         """Best-effort ``cafleet ... message poll`` keystroke for the recipient's pane."""
         if shutil.which("tmux") is None:
@@ -160,8 +160,8 @@ class TmuxMultiplexer:
         self,
         *,
         target_pane_id: str,
-        task_id_8: str,
-        sender_8: str,
+        task_id: int,
+        sender_id: int,
         ts: str,
         text: str,
     ) -> bool:
@@ -173,7 +173,7 @@ class TmuxMultiplexer:
         # in the f-string below is the contract between envelope and body and is
         # intentionally not sanitized.
         sanitized_text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
-        payload = f"[cafleet msg {task_id_8} from {sender_8} {ts}]\n{sanitized_text}"
+        payload = f"[cafleet msg {task_id} from {sender_id} {ts}]\n{sanitized_text}"
         try:
             _send_literal_then_enter(
                 target_pane_id=target_pane_id, payload=payload, timeout=5

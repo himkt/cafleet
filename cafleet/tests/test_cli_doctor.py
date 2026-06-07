@@ -76,7 +76,7 @@ def test_doctor_fleet_id_silently_ignored__fleet_id_flag_silently_ignored(
         cli,
         [
             "--fleet-id",
-            "00000000-0000-0000-0000-000000000000",
+            "100",
             "doctor",
         ],
     )

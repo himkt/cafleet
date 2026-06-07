@@ -68,24 +68,23 @@ def truncate_task_text(result: Any, *, full: bool, limit: int | None = None) -> 
 def render_task(task: dict, *, full: bool = False) -> dict:
     """Project a typed-column task dict to the compact rendered shape.
 
-    ``full=True`` returns the typed-column dict unchanged (no projection,
-    no UUID prefix-rendering). ``full=False`` (default) returns a new dict
-    with ``id`` (8-char prefix), ``from`` (8-char prefix), ``ts``, ``text``,
-    plus optional ``kind`` (when ``type`` ≠ ``"unicast"``) and ``origin``
-    (8-char prefix; only when ``origin_task_id`` is non-NULL).
+    ``full=True`` returns the typed-column dict unchanged (no projection).
+    ``full=False`` (default) returns a new dict with ``id``, ``from``,
+    ``ts``, ``text``, plus optional ``kind`` (when ``type`` ≠ ``"unicast"``)
+    and ``origin`` (only when ``origin_task_id`` is non-NULL).
     """
     if full:
         return task
     out: dict = {
-        "id": task["task_id"][:8],
-        "from": task["from_agent_id"][:8],
+        "id": task["task_id"],
+        "from": task["from_agent_id"],
         "ts": task["status_timestamp"],
         "text": task["text"],
     }
     if task["type"] != "unicast":
         out["kind"] = task["type"]
     if task.get("origin_task_id"):
-        out["origin"] = task["origin_task_id"][:8]
+        out["origin"] = task["origin_task_id"]
     return out
 
 
@@ -118,7 +117,7 @@ def _render_item(item: Any) -> Any:
 def render_agent(agent: dict, *, full: bool = False) -> dict:
     """Project a broker agent dict to the slim wire shape.
 
-    Slim shape (default): ``id`` (8-char prefix of ``agent_id``), ``name``,
+    Slim shape (default): ``id`` (the ``agent_id``), ``name``,
     ``description`` (truncated to 60 codepoints + ``…`` suffix), ``status``,
     plus ``coding_agent`` when the source dict carries a ``placement`` with
     that key. ``full=True`` returns ``agent`` unchanged.
@@ -126,7 +125,7 @@ def render_agent(agent: dict, *, full: bool = False) -> dict:
     if full:
         return agent
     out: dict = {
-        "id": agent["agent_id"][:8],
+        "id": agent["agent_id"],
         "name": agent["name"],
         "description": truncate_text(agent["description"], full=False, limit=60),
         "status": agent["status"],
@@ -169,8 +168,8 @@ def format_task(task: dict, *, full: bool = False) -> str:
     """Render a task as text.
 
     ``full=False`` (default): 2-line compact render —
-    line 1 is ``[<id8> | from:<from8> | <ts>]`` (with optional
-    ``| kind:<kind>`` and ``| origin:<id8>`` segments), line 2 is the body.
+    line 1 is ``[<id> | from:<from> | <ts>]`` (with optional
+    ``| kind:<kind>`` and ``| origin:<id>`` segments), line 2 is the body.
 
     ``full=True``: 6-line verbose layout that exposes every typed column
     (``id``, ``state``, ``from``, ``to``, ``type``, ``text``).
@@ -210,9 +209,9 @@ def format_indexed_list(
 ) -> str:
     """Join formatted items with a single blank line between them.
 
-    Items are not numbered — agents reference tasks by ``task_id`` (8-char
-    prefix), not list index, so index markers would cost tokens without
-    surfacing useful information.
+    Items are not numbered — agents reference tasks by ``task_id``, not list
+    index, so index markers would cost tokens without surfacing useful
+    information.
     """
     if not items:
         return empty_msg
@@ -222,12 +221,12 @@ def format_indexed_list(
 def format_agent(agent: dict, *, full: bool = False) -> str:
     """Render an agent as text.
 
-    ``full=False`` (default): 1-line compact ``<id8> <name> <status>``.
+    ``full=False`` (default): 1-line compact ``<id> <name> <status>``.
     ``full=True``: 4-line block exposing the full ``agent_id``, ``name``,
     truncated ``description`` (60 codepoints + ``…``), and ``status``.
     """
     if not full:
-        return f"{agent['agent_id'][:8]} {agent['name']} {agent['status']}"
+        return f"{agent['agent_id']} {agent['name']} {agent['status']}"
     description = truncate_text(agent["description"], full=False, limit=60)
     lines = [
         f"  agent_id:    {agent['agent_id']}",
@@ -242,7 +241,7 @@ def format_fleet_create(data: dict, *, full: bool = False) -> str:
     """Render the fleet-create result as text.
 
     ``full=False`` (default): 1-line compact form
-    ``<fleet_id> director=<id8> admin=<id8>``.
+    ``<fleet_id> director=<id> admin=<id>``.
     ``full=True``: 7-line block (fleet_id + director_agent_id on
     their own lines, plus ``label``, ``created_at``, ``director_name``,
     ``pane``, ``administrator``).
@@ -251,13 +250,13 @@ def format_fleet_create(data: dict, *, full: bool = False) -> str:
     if not full:
         return (
             f"{data['fleet_id']} "
-            f"director={director['agent_id'][:8]} "
-            f"admin={data['administrator_agent_id'][:8]}"
+            f"director={director['agent_id']} "
+            f"admin={data['administrator_agent_id']}"
         )
     placement = director["placement"]
     lines = [
-        data["fleet_id"],
-        director["agent_id"],
+        str(data["fleet_id"]),
+        str(director["agent_id"]),
         f"label:            {data['label'] or ''}",
         f"created_at:       {data['created_at']}",
         f"director_name:    {director['name']}",
@@ -271,14 +270,14 @@ def format_member(data: dict, *, full: bool = False) -> str:
     """Render a member-create result as text.
 
     ``full=False`` (default): 1-line compact form
-    ``<id8> <name> backend=<coding_agent> pane=<pane_id>``.
+    ``<id> <name> backend=<coding_agent> pane=<pane_id>``.
     ``full=True``: 6-line block.
     """
     placement = data["placement"]
     if not full:
         pane = placement["tmux_pane_id"] or "(pending)"
         return (
-            f"{data['agent_id'][:8]} {data['name']} "
+            f"{data['agent_id']} {data['name']} "
             f"backend={placement['coding_agent']} pane={pane}"
         )
     lines = [
@@ -295,10 +294,8 @@ def format_member(data: dict, *, full: bool = False) -> str:
 _AGENT_ID_COLUMN_WIDTH = 14
 
 
-def _agent_id_for_column(agent_id: str) -> str:
-    if len(agent_id) > _AGENT_ID_COLUMN_WIDTH:
-        return agent_id[: _AGENT_ID_COLUMN_WIDTH - 2] + "…"
-    return agent_id
+def _agent_id_for_column(agent_id: int) -> str:
+    return str(agent_id)
 
 
 def format_member_list_activity(members: list) -> str:

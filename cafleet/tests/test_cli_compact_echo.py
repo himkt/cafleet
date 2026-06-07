@@ -1,7 +1,5 @@
 """Slim broadcast echo and ``--quiet`` writes."""
 
-import uuid
-
 import pytest
 from click.testing import CliRunner
 
@@ -9,8 +7,8 @@ from cafleet import broker
 from cafleet.cli import cli
 from cafleet.multiplexer.tmux import TmuxMultiplexer
 
-DIRECTOR_ID = "11111111-1111-1111-1111-111111111111"
-MEMBER_ID = "22222222-2222-2222-2222-222222222222"
+DIRECTOR_ID = 11
+MEMBER_ID = 22
 PANE_ID = "%7"
 
 
@@ -21,12 +19,12 @@ def runner():
 
 @pytest.fixture
 def fleet_id():
-    return str(uuid.uuid4())
+    return 100
 
 
 @pytest.fixture
 def agent_id():
-    return str(uuid.uuid4())
+    return 200
 
 
 @pytest.fixture(autouse=True)
@@ -34,20 +32,14 @@ def _stub_verify(monkeypatch):
     monkeypatch.setattr(broker, "verify_agent_fleet", lambda *_a, **_k: True)
 
 
-@pytest.fixture(autouse=True)
-def _stub_id_resolvers(monkeypatch):
-    monkeypatch.setattr(broker, "resolve_agent_ref", lambda fleet_id, ref: ref)
-    monkeypatch.setattr(broker, "resolve_task_ref", lambda fleet_id, ref: ref)
-
-
 def _typed_task(
     *,
-    task_id: str = "abcdef0123456789-tail",
-    sender: str = "ffffffff11112222-tail",
-    recipient: str = "rrrrrrrr11112222-tail",
+    task_id: int = 5000,
+    sender: int = 111,
+    recipient: int = 222,
     text: str = "short body",
     type_: str = "unicast",
-    origin_task_id: str | None = None,
+    origin_task_id: int | None = None,
     status_state: str = "input_required",
 ) -> dict:
     return {
@@ -64,11 +56,11 @@ def _typed_task(
     }
 
 
-def _broadcast_summary_result(*, summary_id="abcdef0123456789-tail", recipient_count=3):
+def _broadcast_summary_result(*, summary_id=7000, recipient_count=3):
     summary = _typed_task(
         task_id=summary_id,
-        sender="ffffffff11112222-tail",
-        recipient="",
+        sender=111,
+        recipient=0,
         text=f"Broadcast sent to {recipient_count} recipients",
         type_="broadcast_summary",
         origin_task_id=summary_id,
@@ -109,7 +101,7 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
             "broadcast_message",
             lambda *_a, **_k: _broadcast_summary_result(recipient_count=3),
         )
-        return ["message", "broadcast", "--agent-id", agent_id, "--text", "hello"]
+        return ["message", "broadcast", "--agent-id", str(agent_id), "--text", "hello"]
     if command == "send":
         monkeypatch.setattr(
             broker,
@@ -123,9 +115,9 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
             "message",
             "send",
             "--agent-id",
-            agent_id,
+            str(agent_id),
             "--to",
-            str(uuid.uuid4()),
+            "999",
             "--text",
             "hello",
         ]
@@ -141,13 +133,20 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
             "message",
             "ack",
             "--agent-id",
-            agent_id,
+            str(agent_id),
             "--task-id",
-            "abcdef0123456789-tail",
+            "5000",
         ]
     # ping
     _ping_setup(monkeypatch)
-    return ["member", "ping", "--agent-id", DIRECTOR_ID, "--member-id", MEMBER_ID]
+    return [
+        "member",
+        "ping",
+        "--agent-id",
+        str(DIRECTOR_ID),
+        "--member-id",
+        str(MEMBER_ID),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -180,14 +179,14 @@ def test_command_echo__one_line_vs_multi_line_shape(
         args.append("--quiet")
     elif mode == "full":
         args.append("--full")
-    result = runner.invoke(cli, ["--fleet-id", fleet_id, *args])
+    result = runner.invoke(cli, ["--fleet-id", str(fleet_id), *args])
     assert result.exit_code == 0, result.output
     out = result.output.strip()
     if expect_oneline:
         assert "\n" not in out, f"expected one-line echo; got:\n{result.output}"
     else:
-        # Default verbose echoes contain meaningful content beyond an 8-char id.
-        assert out != "abcdef01"
+        # Default verbose echoes contain meaningful content beyond the bare id.
+        assert out != "5000"
     for forbidden in must_not_contain:
         assert forbidden not in out
 
@@ -198,19 +197,17 @@ def test_broadcast_default__canonical_summary_pattern(
     monkeypatch.setattr(
         broker,
         "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_result(
-            summary_id="abcdef0123456789-tail", recipient_count=3
-        ),
+        lambda *_a, **_k: _broadcast_summary_result(summary_id=7000, recipient_count=3),
     )
     result = runner.invoke(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "message",
             "broadcast",
             "--agent-id",
-            agent_id,
+            str(agent_id),
             "--text",
             "hello",
         ],
@@ -218,7 +215,7 @@ def test_broadcast_default__canonical_summary_pattern(
     assert result.exit_code == 0, result.output
     out = result.output.strip()
     assert "broadcast" in out
-    assert "id=abcdef01" in out
+    assert "id=7000" in out
     assert "recipients=3" in out
 
 
@@ -234,11 +231,11 @@ def test_broadcast_full__multi_line_per_recipient_envelopes(
         cli,
         [
             "--fleet-id",
-            fleet_id,
+            str(fleet_id),
             "message",
             "broadcast",
             "--agent-id",
-            agent_id,
+            str(agent_id),
             "--text",
             "hello",
             "--full",
@@ -250,8 +247,8 @@ def test_broadcast_full__multi_line_per_recipient_envelopes(
 
 
 @pytest.mark.parametrize("command", ["send", "ack"])
-def test_quiet__emits_only_task_id_8(runner, fleet_id, agent_id, monkeypatch, command):
+def test_quiet__emits_only_task_id(runner, fleet_id, agent_id, monkeypatch, command):
     args = _setup_command(monkeypatch, command, fleet_id, agent_id) + ["--quiet"]
-    result = runner.invoke(cli, ["--fleet-id", fleet_id, *args])
+    result = runner.invoke(cli, ["--fleet-id", str(fleet_id), *args])
     assert result.exit_code == 0, result.output
-    assert result.output.strip() == "abcdef01"
+    assert result.output.strip() == "5000"

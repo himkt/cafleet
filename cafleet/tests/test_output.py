@@ -18,7 +18,7 @@ def _member(**placement_overrides) -> dict:
     }
     placement.update(placement_overrides)
     return {
-        "agent_id": "agent-001",
+        "agent_id": 1,
         "name": "Claude-B",
         "placement": placement,
     }
@@ -31,7 +31,7 @@ def _list_entry(*, agent_id, name, coding_agent, pane_id):
         "status": "active",
         "registered_at": "2026-04-12T10:15:00Z",
         "placement": {
-            "director_agent_id": "dir-001",
+            "director_agent_id": 9,
             "tmux_session": "main",
             "tmux_window_id": "@3",
             "tmux_pane_id": pane_id,
@@ -43,10 +43,10 @@ def _list_entry(*, agent_id, name, coding_agent, pane_id):
 
 def _task(text="the body of the message") -> dict:
     base: dict = {
-        "task_id": "task-001",
-        "context_id": "agent-to",
-        "from_agent_id": "agent-from",
-        "to_agent_id": "agent-to",
+        "task_id": 1,
+        "context_id": 20,
+        "from_agent_id": 10,
+        "to_agent_id": 20,
         "type": "unicast",
         "created_at": "2026-05-05T12:00:00.000000+00:00",
         "status_state": "input_required",
@@ -68,7 +68,7 @@ def test_format_member_list__header_and_row_shape_and_empty_message():
     result = format_member_list(
         [
             _list_entry(
-                agent_id="agent-001",
+                agent_id=1,
                 name="Claude-B",
                 coding_agent="claude",
                 pane_id="%7",
@@ -164,8 +164,8 @@ def test_truncate_task_text__full_true_does_not_mutate():
 
 def test_truncate_task_text__missing_text_key_is_noop_and_siblings_unchanged():
     no_text_task: dict = {
-        "task_id": "task-001",
-        "context_id": "ctx",
+        "task_id": 1,
+        "context_id": 20,
         "status_state": "input_required",
     }
     result = truncate_task_text(no_text_task, full=False, limit=10)
@@ -174,8 +174,8 @@ def test_truncate_task_text__missing_text_key_is_noop_and_siblings_unchanged():
 
     task = _task("abcdefghijklmnop")
     truncate_task_text(task, full=False, limit=10)
-    assert task["task_id"] == "task-001"
+    assert task["task_id"] == 1
     assert task["status_state"] == "input_required"
-    assert task["from_agent_id"] == "agent-from"
-    assert task["to_agent_id"] == "agent-to"
+    assert task["from_agent_id"] == 10
+    assert task["to_agent_id"] == 20
     assert task["type"] == "unicast"

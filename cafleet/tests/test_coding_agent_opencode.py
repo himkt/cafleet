@@ -123,11 +123,7 @@ def test_build_spawn_argv_preserves_prompt_with_special_chars():
     """Mirrors the existing claude / codex tests: special characters in the
     prompt survive intact as a single argv element."""
     impl = OpencodeAgent()
-    prompt = (
-        "Review PR #42.\n"
-        "Use --agent-id 7ba91234-5678-90ab-cdef-112233445566.\n"
-        'Quote: "hello" and {literal_braces}.'
-    )
+    prompt = 'Review PR #42.\nUse --agent-id 42.\nQuote: "hello" and {literal_braces}.'
     argv = impl.build_spawn_argv(prompt, display_name="ignored")
     # The prompt is the last element (value of --prompt) and unmodified.
     assert argv[-1] == prompt

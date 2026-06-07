@@ -86,11 +86,7 @@ def test_claude_build_spawn_argv__preserves_display_name_with_spaces():
 
 def test_claude_build_spawn_argv__preserves_prompt_with_special_chars():
     impl = CODING_AGENTS["claude"]
-    prompt = (
-        "Review PR #42.\n"
-        "Use --agent-id 7ba91234-5678-90ab-cdef-112233445566.\n"
-        'Quote: "hello" and {literal_braces}.'
-    )
+    prompt = 'Review PR #42.\nUse --agent-id 42.\nQuote: "hello" and {literal_braces}.'
     argv = impl.build_spawn_argv(prompt, display_name="Drafter")
     assert argv[-1] == prompt
     assert argv[0] == "claude"
@@ -123,11 +119,7 @@ def test_codex_build_spawn_argv__permission_tokens_precede_prompt():
 
 def test_codex_build_spawn_argv__preserves_prompt_with_special_chars():
     impl = CODING_AGENTS["codex"]
-    prompt = (
-        "Review PR #42.\n"
-        "Use --agent-id 7ba91234-5678-90ab-cdef-112233445566.\n"
-        'Quote: "hello" and {literal_braces}.'
-    )
+    prompt = 'Review PR #42.\nUse --agent-id 42.\nQuote: "hello" and {literal_braces}.'
     argv = impl.build_spawn_argv(prompt, display_name="ignored")
     assert argv[-1] == prompt
     assert argv[0] == "codex"

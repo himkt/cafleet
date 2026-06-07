@@ -4,19 +4,21 @@ The `Task` payload is fully relational: every routing field plus the message bod
 
 The model is **predominantly relational**: every queried field on `tasks` is a typed column, and the only opaque payload is the `agent_card_json` document on `agents`.
 
-Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver (see `cafleet/src/cafleet/db/engine.py`'s `get_sync_engine` / `get_sync_sessionmaker`). Operators apply migrations once via `cafleet db init` before starting the server.
+Schema management is handled by Alembic (`cafleet/src/cafleet/alembic/`); the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver (see `cafleet/src/cafleet/db/engine.py`'s `get_sync_engine` / `get_sync_sessionmaker`). The schema is created by a single initial migration (`0001_initial_schema.py`, `down_revision=None`); operators apply it once via `cafleet db init` before starting the server.
 
 ## SQL Schema
+
+All four tables key on `INTEGER` columns. The three minted-id tables (`fleets`, `agents`, `tasks`) use `INTEGER PRIMARY KEY AUTOINCREMENT`, emitted by SQLAlchemy via `__table_args__ = (..., {"sqlite_autoincrement": True})`. AUTOINCREMENT creates a per-table `sqlite_sequence` row that tracks the high-water mark, so **ids are never reused** — even after the highest row is (hypothetically) deleted. The first AUTOINCREMENT value is `1`, so real ids are always `>= 1`; this leaves `0` free as a sentinel (see `tasks.to_agent_id`). `agent_placements.agent_id` is the **only** integer PK without AUTOINCREMENT: it reuses the parent `agents.agent_id` value as a 1:1 PK rather than minting a fresh sequence.
 
 ### `fleets`
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `fleet_id` | `TEXT` | `PRIMARY KEY` | Opaque string. New fleets receive a UUIDv4. |
+| `fleet_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer (first value `1`, monotonically increasing). The `sqlite_sequence` row guarantees ids are never reused. |
 | `label` | `TEXT` | nullable | Optional free-form text for human bookkeeping (e.g. `"PR-42 review"`). |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
 | `deleted_at` | `TEXT` | nullable | `NULL` = active; non-NULL ISO-8601 timestamp = soft-deleted. Written by `broker.delete_fleet`; never cleared. |
-| `director_agent_id` | `TEXT` | nullable (DB), app-enforced NOT NULL after bootstrap; `REFERENCES agents(agent_id) ON DELETE RESTRICT` | Points at the fleet's root Director (the agent auto-registered by `cafleet fleet create`). DB-nullable so the 4-step bootstrap can INSERT `fleets` before the Director's `agents` row exists; post-bootstrap every non-deleted fleet has a non-NULL value. |
+| `director_agent_id` | `INTEGER` | nullable (DB), app-enforced NOT NULL after bootstrap; `REFERENCES agents(agent_id) ON DELETE RESTRICT` | Points at the fleet's root Director (the agent auto-registered by `cafleet fleet create`). DB-nullable so the 4-step bootstrap can INSERT `fleets` before the Director's `agents` row exists; post-bootstrap every non-deleted fleet has a non-NULL value. |
 
 Fleet deletion is a **soft-delete**: `broker.delete_fleet` sets `deleted_at=now`, then deregisters every active agent in the fleet (including the root Director) and physically deletes their `agent_placements` rows in the same transaction. Tasks are preserved. Re-running `fleet delete` on an already-soft-deleted fleet is a no-op that reports `Deregistered 0 agents.` because the initial `UPDATE` guard `WHERE deleted_at IS NULL` short-circuits the cascade.
 
@@ -40,8 +42,8 @@ The `tmux` context (`session`, `window_id`, `pane_id`) is read **before** the tr
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `agent_id` | `TEXT` | `PRIMARY KEY` | UUID v4. |
-| `fleet_id` | `TEXT` | `NOT NULL`, `REFERENCES fleets(fleet_id) ON DELETE RESTRICT` | The owning fleet. SQLite enforces the FK once `PRAGMA foreign_keys=ON` is set. |
+| `agent_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer; never reused. |
+| `fleet_id` | `INTEGER` | `NOT NULL`, `REFERENCES fleets(fleet_id) ON DELETE RESTRICT` | The owning fleet. SQLite enforces the FK once `PRAGMA foreign_keys=ON` is set. |
 | `name` | `TEXT` | `NOT NULL` | |
 | `description` | `TEXT` | `NOT NULL` | |
 | `status` | `TEXT` | `NOT NULL` | `'active'` or `'deregistered'`. |
@@ -64,7 +66,7 @@ Each fleet owns exactly one built-in `Administrator` agent, marked by a flag ins
 ```json
 {
   "name": "Administrator",
-  "description": "Built-in administrator agent for fleet <short-id>",
+  "description": "Built-in administrator agent for fleet <fleet_id>",
   "skills": [],
   "cafleet": {
     "kind": "builtin-administrator"
@@ -74,10 +76,9 @@ Each fleet owns exactly one built-in `Administrator` agent, marked by a flag ins
 
 The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned flags. `broker.register_agent` always builds the card itself from `(name, description, skills)`, so callers cannot smuggle `cafleet.kind` through any current public path. A module-level constant `ADMINISTRATOR_KIND = "builtin-administrator"` in `broker.py` plus a single `_is_administrator(agent_card_json)` predicate centralize Python-side predicate checks for this flag (the Administrator's `agent_card_json` is built inline at fleet-create time); some hot read paths (e.g. `broker.list_fleet_agents`, `broker.broadcast_message`) also probe `agent_card_json.cafleet.kind` directly in SQL via `json_extract(...)` to avoid shipping the full blob into Python.
 
-**Creation paths**:
+**Creation path**:
 
-- `broker.create_fleet(label, director_context)` inserts the Administrator row as the final operation of the 5-step root-Director bootstrap transaction (see "Root Director bootstrap" under the `fleets` table above); `registered_at` matches `fleets.created_at` exactly. The result dict exposes `administrator_agent_id` alongside the `director` sub-object for the caller.
-- Alembic revision `0006_seed_administrator_agent.py` is the migration that seeds the Administrator. The migration generates `agent_id = str(uuid.uuid4())` in Python (matching the broker's idiom — no SQL-side `gen_random_uuid()`), probes for an existing Administrator via `json_extract(agent_card_json, '$.cafleet.kind') = 'builtin-administrator'`, and is idempotent by construction (a second `upgrade` finds the existing row and skips the INSERT). Downgrade is provided for empty fleets only and is forward-only in practice — `tasks.context_id` uses `ON DELETE RESTRICT`, so downgrading a fleet that has tasks addressed to or from the Administrator raises `IntegrityError`. (`agent_placements.agent_id` uses `ON DELETE CASCADE`, but Administrators never receive a placement anyway.)
+- `broker.create_fleet(label, director_context)` inserts the Administrator row as the final operation of the 5-step root-Director bootstrap transaction (see "Root Director bootstrap" under the `fleets` table above); `registered_at` matches `fleets.created_at` exactly. The result dict exposes `administrator_agent_id` alongside the `director` sub-object for the caller. The Administrator is seeded **only at runtime** by `create_fleet` — no migration seeds it. The single initial migration is schema-only and carries no seed INSERTs.
 
 **Invariant**: Every fleet has exactly one active `Administrator` agent. Both `broker.list_fleet_agents` and `broker.get_agent` surface a derived `kind` field (`"builtin-administrator"` | `"user"`) so the WebUI can locate the Administrator without matching on the name. `list_fleet_agents` derives the discriminator in SQL via `json_extract(agent_card_json, '$.cafleet.kind')` and never fetches the full card blob; `get_agent` already loads the full ORM row and computes the discriminator via `_is_administrator`.
 
@@ -94,16 +95,16 @@ A future `rename_agent` broker function MUST apply the same guard. `broker.broad
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `task_id` | `TEXT` | `PRIMARY KEY` | UUID v4. |
-| `context_id` | `TEXT` | `NOT NULL`, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The recipient agent for unicast/broadcast deliveries; the broadcaster for `broadcast_summary`; the preserved original `context_id` for ACK/cancel. Always a registered `agent_id`. |
-| `from_agent_id` | `TEXT` | `NOT NULL` | Sender agent. **Not** a foreign key — historical tasks may outlive their sender. |
-| `to_agent_id` | `TEXT` | `NOT NULL` | Recipient agent. Empty string `''` for `broadcast_summary` rows. |
+| `task_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer; never reused. Identifies a single delivery (unicast row, broadcast delivery row, or broadcast summary row). |
+| `context_id` | `INTEGER` | `NOT NULL`, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The recipient agent for unicast/broadcast deliveries; the broadcaster for `broadcast_summary`; the preserved original `context_id` for ACK/cancel. Always a registered `agent_id`. |
+| `from_agent_id` | `INTEGER` | `NOT NULL` | Sender agent. **Not** a foreign key — historical tasks may outlive their sender. |
+| `to_agent_id` | `INTEGER` | `NOT NULL` | Recipient agent. **`0`** for `broadcast_summary` rows (the "no single recipient" sentinel; real ids are `>= 1` so `0` never collides). |
 | `type` | `TEXT` | `NOT NULL` | `'unicast'` or `'broadcast_summary'`. |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; first-write only, preserved across UPSERT. |
 | `status_state` | `TEXT` | `NOT NULL` | TaskState enum value (e.g., `TASK_STATE_INPUT_REQUIRED`). |
 | `status_timestamp` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; updated on every state change. Used for `ORDER BY DESC`. |
-| `origin_task_id` | `TEXT` | nullable | Broadcast grouping link. `NULL` on unicast deliveries. On broadcast delivery rows, holds the summary task's `task_id`, shared across every delivery row in the same broadcast. On the broadcast summary row itself, holds its own `task_id` (self-reference) so the delivery rows and the summary row all share a single grouping value. |
-| `text` | `TEXT` | `NOT NULL` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time. Added by Alembic revision `0009_drop_task_json_add_text`. |
+| `origin_task_id` | `INTEGER` | nullable | Broadcast grouping link. `NULL` on unicast deliveries. On broadcast delivery rows, holds the summary task's `task_id`, shared across every delivery row in the same broadcast. On the broadcast summary row itself, holds its own `task_id` (self-reference) so the delivery rows and the summary row all share a single grouping value. **Not** a foreign key — it is a nullable self-link. |
+| `text` | `TEXT` | `NOT NULL` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time. |
 
 Indexes:
 
@@ -118,12 +119,12 @@ Indexes:
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `agent_id` | `TEXT` | `PRIMARY KEY`, `REFERENCES agents(agent_id) ON DELETE CASCADE` | The member agent. CASCADE ensures hard-delete of an agent (if any future path adds one) also removes the placement. |
-| `director_agent_id` | `TEXT` | nullable, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The Director that spawned this member. RESTRICT prevents hard-deleting a Director with live placements. **NULL** for the fleet's root Director (it has no parent), set by `broker.create_fleet` at bootstrap time. Member placements always have a non-NULL value. |
+| `agent_id` | `INTEGER` | `PRIMARY KEY` (no AUTOINCREMENT), `REFERENCES agents(agent_id) ON DELETE CASCADE` | The member agent. This is the parent `agents.agent_id` value reused as a 1:1 PK — it is **not** a freshly minted sequence, so AUTOINCREMENT is deliberately excluded. CASCADE ensures hard-delete of an agent (if any future path adds one) also removes the placement. |
+| `director_agent_id` | `INTEGER` | nullable, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The Director that spawned this member. RESTRICT prevents hard-deleting a Director with live placements. **NULL** for the fleet's root Director (it has no parent), set by `broker.create_fleet` at bootstrap time. Member placements always have a non-NULL value. |
 | `tmux_session` | `TEXT` | `NOT NULL` | e.g. `'main'`, from `tmux display-message '#{session_name}'`. |
 | `tmux_window_id` | `TEXT` | `NOT NULL` | e.g. `'@3'`, from `#{window_id}`. |
 | `tmux_pane_id` | `TEXT` | nullable | e.g. `'%7'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set via `PATCH /api/v1/agents/{id}/placement` after `tmux split-window` succeeds. |
-| `coding_agent` | `TEXT` | `NOT NULL`, `DEFAULT 'claude'` | Free-form coding-agent identifier. Current known values are `"claude"` (the server default for normal registrations) and `"codex"` / `"opencode"` when chosen at create time. The SQL default ensures existing rows are backfilled on migration. |
+| `coding_agent` | `TEXT` | `NOT NULL`, `DEFAULT 'claude'` | Free-form coding-agent identifier. Current known values are `"claude"` (the server default for normal registrations) and `"codex"` / `"opencode"` when chosen at create time. The `server_default='claude'` applies when a placement is inserted without an explicit value. |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp, set server-side to match `agents.registered_at`. |
 
 Indexes:
@@ -212,7 +213,7 @@ Broadcast fan-out in `BrokerExecutor._handle_broadcast` produces N+1 rows per `S
 | Broadcast delivery row (one per recipient) | The summary task's `task_id` (shared across all N delivery rows in the same broadcast) |
 | Broadcast summary row | Its own `task_id` (self-reference) |
 
-The column is populated by pre-allocating the summary task's UUID **before** the delivery loop in `_handle_broadcast`, then threading that UUID into every delivery task's metadata as `originTaskId`. `TaskStore.save` reads `metadata.get("originTaskId")` and writes it into the column on both `INSERT` and `ON CONFLICT DO UPDATE` so idempotent re-saves preserve the value. `_handle_unicast` is NOT touched — the absence of `originTaskId` in its metadata writes the column as `NULL`.
+Because ids are DB-assigned, the summary row is inserted **first** with `origin_task_id` temporarily `NULL`; the broker reads back its DB-assigned `task_id`, `UPDATE`s that row's `origin_task_id` to itself (self-reference), then inserts each delivery row with `origin_task_id = summary_task_id`. Unicast deliveries are inserted with `origin_task_id` left `NULL`.
 
 The grouping predicate on the wire is `origin_task_id IS NOT NULL`, which cleanly partitions the timeline into "standalone unicast entry" vs "part of a broadcast group". The summary task's `metadata["recipientIds"]` is extended from the existing `recipientCount` to carry the full recipient list so readers that need sender-side fan-out introspection (not the timeline itself) can reconstruct the recipient set.
 

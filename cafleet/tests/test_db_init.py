@@ -19,13 +19,19 @@ def _table_names(db_path) -> set[str]:
         conn.close()
 
 
+def test_default_database_url_points_at_cafleet_db():
+    """The default registry file is ``~/.local/share/cafleet/cafleet.db``."""
+    url = config._default_database_url()
+    assert url.endswith("cafleet/cafleet.db")
+
+
 def test_db_init_creates_schema(tmp_path, monkeypatch):
     """Verifies design-doc state #1: DB file does not exist.
 
     DB path is placed under a not-yet-existing ``data/`` subdir so the
     ``Path.parent.mkdir(parents=True, exist_ok=True)`` path is exercised.
     """
-    db_file = tmp_path / "data" / "registry.db"
+    db_file = tmp_path / "data" / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -52,7 +58,7 @@ def test_db_init_creates_schema(tmp_path, monkeypatch):
 
 def test_db_init_idempotent(tmp_path, monkeypatch):
     """Verifies design-doc idempotency: second run is a no-op at state #3."""
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -100,7 +106,7 @@ def test_db_init_errors_on_unversioned_db(tmp_path, monkeypatch):
     auto-stamped -- silently stamping would lie about the revision and could
     mask schema mismatches at runtime.
     """
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",
@@ -133,7 +139,7 @@ def test_db_init_ahead_errors(tmp_path, monkeypatch):
     Uses a fictional ``9999_future_revision`` that is unknown to the
     local Alembic script directory, triggering the ahead-of-head branch.
     """
-    db_file = tmp_path / "registry.db"
+    db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
         "database_url",

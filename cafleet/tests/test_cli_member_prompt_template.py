@@ -13,10 +13,10 @@ def _cli():
 
 
 _STANDARD_KWARGS = {
-    "fleet_id": "550e8400-e29b-41d4-a716-446655440000",
-    "agent_id": "7ba91234-5678-90ab-cdef-112233445566",
+    "fleet_id": 100,
+    "agent_id": 200,
     "director_name": "Alice",
-    "director_agent_id": "dir-001",
+    "director_agent_id": 300,
 }
 
 
@@ -51,9 +51,9 @@ def test_member_prompt_template__format_succeeds_with_standard_kwargs():
     template = cli._MEMBER_PROMPT_TEMPLATE
     kwargs = {k: v for k, v in _STANDARD_KWARGS.items() if k != "director_name"}
     result = template.format(**kwargs)
-    assert "550e8400-e29b-41d4-a716-446655440000" in result
-    assert "7ba91234-5678-90ab-cdef-112233445566" in result
-    assert "dir-001" in result
+    assert "100" in result
+    assert "200" in result
+    assert "300" in result
     # Substitution is total: no raw placeholders survive the .format() call.
     assert "{fleet_id}" not in result
     assert "{agent_id}" not in result
