@@ -10,15 +10,15 @@ The `cafleet-base-dir` skill writes a `.cafleet-base-dir.json` "anchor" file to 
 
 ## Success Criteria
 
-- [ ] `skills/cafleet-base-dir/SKILL.md` contains zero mentions of `.cafleet-base-dir.json`, the anchor, the `version: 1` validation, the `source` field, `source: anchor` reporting, `resolved_at`, the "Anchor file" schema section, or the "Gitignore handling" section.
-- [ ] The skill's four "deterministic guarantees" are reduced to two: guarantee 1 (repo-root inference) and guarantee 2 (traversal-escape + repo-root-degenerate rejection) survive, folded inline into Step 0's numbered steps; guarantees 3 and 4 are gone; no standalone "Deterministic guarantees" preamble remains.
-- [ ] Step 0, Step 1, and Step 2 perform no anchor read or write; Step 2 (`AskUserQuestion`) is retained but no longer persists the chosen answer.
-- [ ] The `<unset>` sentinel contract and the no-bypass write protocol survive (trimmed, semantics intact); every consuming skill and `skills/cafleet/reference/director.md` remain accurate against them.
-- [ ] `.gitignore` no longer contains the `.cafleet-base-dir.json` entry or its comment; the `/prompts/` and per-role audit entries stay.
-- [ ] The five blast-radius docs/skills are trimmed of anchor wording: `member-lifecycle.md`, `cafleet-research-report`, `cafleet-design-doc-execute`, `cafleet-research-presentation`, `.claude/skills/skill-author`.
-- [ ] No Python source change: `cafleet/src/cafleet/cli.py` is untouched (its only base-dir reference, the `--prompt-file` error string at `cli.py:694`, names the *skill*, not the anchor, and stays).
-- [ ] A repo-wide search for `.cafleet-base-dir.json` and for "anchor" in the base-dir-file sense returns zero hits outside `design-docs/` and git history (legitimate non-base-dir "anchor" uses are enumerated in the Sweep note's do-not-touch list).
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass (sanity gate — no code change is expected).
+- [x] `skills/cafleet-base-dir/SKILL.md` contains zero mentions of `.cafleet-base-dir.json`, the anchor, the `version: 1` validation, the `source` field, `source: anchor` reporting, `resolved_at`, the "Anchor file" schema section, or the "Gitignore handling" section.
+- [x] The skill's four "deterministic guarantees" are reduced to two: guarantee 1 (repo-root inference) and guarantee 2 (traversal-escape + repo-root-degenerate rejection) survive, folded inline into Step 0's numbered steps; guarantees 3 and 4 are gone; no standalone "Deterministic guarantees" preamble remains.
+- [x] Step 0, Step 1, and Step 2 perform no anchor read or write; Step 2 (`AskUserQuestion`) is retained but no longer persists the chosen answer.
+- [x] The `<unset>` sentinel contract and the no-bypass write protocol survive (trimmed, semantics intact); every consuming skill and `skills/cafleet/reference/director.md` remain accurate against them.
+- [x] `.gitignore` no longer contains the `.cafleet-base-dir.json` entry or its comment; the `/prompts/` and per-role audit entries stay.
+- [x] The five blast-radius docs/skills are trimmed of anchor wording: `member-lifecycle.md`, `cafleet-research-report`, `cafleet-design-doc-execute`, `cafleet-research-presentation`, `.claude/skills/skill-author`.
+- [x] No Python source change: `cafleet/src/cafleet/cli.py` is untouched (its only base-dir reference, the `--prompt-file` error string at `cli.py:694`, names the *skill*, not the anchor, and stays).
+- [x] A repo-wide search for `.cafleet-base-dir.json` and for "anchor" in the base-dir-file sense returns zero hits outside `design-docs/` and git history (legitimate non-base-dir "anchor" uses are enumerated in the Sweep note's do-not-touch list).
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass (sanity gate — no code change is expected).
 
 ---
 
