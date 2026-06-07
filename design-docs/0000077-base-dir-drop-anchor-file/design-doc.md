@@ -174,3 +174,4 @@ Per the project documentation-first rule, the skill and docs land before any oth
 | 2026-06-07 | Initial draft |
 | 2026-06-07 | Addressed Reviewer markers: corrected the WRITE-bullet branch list (Step 1 branch 2, not 2 & 3); added skill-author:75 + the literal `.gitignore` header; enumerated the legitimate non-base-dir "anchor" do-not-touch set; added resolver-skill residual rewords (SKILL.md:16/49/110) and the on-disk anchor-artifact cleanup task |
 | 2026-06-07 | User approved; Status → Approved. Spec frozen; ready for implementation (0/18 tasks) |
+| 2026-06-07 | Implementation complete (18/18 tasks); all success criteria verified; lint/typecheck/662 tests green |
