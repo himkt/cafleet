@@ -196,33 +196,25 @@ def test_poll_tasks__empty_and_non_empty_shape():
         assert key in task
 
 
-@pytest.mark.parametrize(
-    "filter_kind",
-    ["status", "page_size", "since", "broadcast_summary_excluded"],
-)
-def test_poll_tasks__filters(filter_kind):
+def test_poll_tasks__returns_only_unacked_deliveries():
+    """``poll_tasks`` returns only un-acked (``input_required``) deliveries;
+    acked / completed tasks are excluded."""
     sid, sender, recipient = _setup_two_agents()
     sent_first = broker.send_message(sid, sender, recipient, "first")
     broker.send_message(sid, sender, recipient, "second")
-    if filter_kind == "status":
-        broker.send_message(sid, sender, recipient, "third")
-        broker.ack_task(recipient, sent_first["task"]["task_id"])
-        pending = broker.poll_tasks(recipient, status="input_required")
-        completed = broker.poll_tasks(recipient, status="completed")
-        assert len(pending) == 2
-        assert len(completed) == 1
-    elif filter_kind == "page_size":
-        broker.send_message(sid, sender, recipient, "third")
-        assert len(broker.poll_tasks(recipient, page_size=2)) == 2
-    elif filter_kind == "since":
-        cutoff = sent_first["task"]["status_timestamp"]
-        later = broker.poll_tasks(recipient, since=cutoff)
-        assert "second" in {t["text"] for t in later}
-    else:
-        sid2, sender2, _b, _c = _setup_three_agents()
-        broker.broadcast_message(sid2, sender2, "broadcast")
-        sender_tasks = broker.poll_tasks(sender2)
-        assert "broadcast_summary" not in [t["type"] for t in sender_tasks]
+    broker.send_message(sid, sender, recipient, "third")
+    broker.ack_task(recipient, sent_first["task"]["task_id"])
+
+    rows = broker.poll_tasks(recipient)
+    assert {t["text"] for t in rows} == {"second", "third"}
+    assert all(t["status_state"] == "input_required" for t in rows)
+
+
+def test_poll_tasks__broadcast_summary_excluded():
+    sid2, sender2, _b, _c = _setup_three_agents()
+    broker.broadcast_message(sid2, sender2, "broadcast")
+    sender_tasks = broker.poll_tasks(sender2)
+    assert "broadcast_summary" not in [t["type"] for t in sender_tasks]
 
 
 def test_poll_tasks__ordering_recent_first():
@@ -261,9 +253,10 @@ def test_ack_cancel__state_transition_and_round_trip(
         call = broker.cancel_task
     result = call(actor, tid)
     assert result["task"]["status_state"] == expected_state
-    # Persist + round-trip via poll.
-    [task] = broker.poll_tasks(recipient, status=expected_state)
-    assert task["text"] == f"round trip {action}"
+    # Persist + round-trip via get_task (poll now returns only un-acked).
+    persisted = broker.get_task(sid, tid)["task"]
+    assert persisted["status_state"] == expected_state
+    assert persisted["text"] == f"round trip {action}"
 
 
 @pytest.mark.parametrize(

@@ -107,9 +107,9 @@ def test_broadcast_message__delivery_task_shape_and_origin_link():
     assert delivered["origin_task_id"] == summary_id
 
 
-def test_poll_tasks__returns_flat_typed_task_dicts_with_filters():
+def test_poll_tasks__returns_flat_typed_task_dicts():
     sid, sender, recipient = _setup_two_agents()
-    sent_first = broker.send_message(sid, sender, recipient, "first")
+    broker.send_message(sid, sender, recipient, "first")
     broker.send_message(sid, sender, recipient, "second")
 
     rows = broker.poll_tasks(recipient)
@@ -117,11 +117,6 @@ def test_poll_tasks__returns_flat_typed_task_dicts_with_filters():
     for row in rows:
         _assert_flat_typed_shape(row, expect_type="unicast")
     assert {r["text"] for r in rows} == {"first", "second"}
-
-    cutoff = sent_first["task"]["status_timestamp"]
-    later = broker.poll_tasks(recipient, since=cutoff)
-    later_texts = {t["text"] for t in later}
-    assert "second" in later_texts
 
     sid2, sender2, _b, _c = _setup_three_agents()
     broker.broadcast_message(sid2, sender2, "broadcast body")
@@ -150,9 +145,10 @@ def test_ack_and_cancel__transition_and_round_trip(action, expected_state):
     _assert_flat_typed_shape(result["task"], expect_type="unicast")
     assert result["task"]["status_state"] == expected_state
 
-    [task] = broker.poll_tasks(recipient, status=expected_state)
-    assert task["text"] == f"round trip {action}"
-    assert task["status_state"] == expected_state
+    # poll now returns only un-acked deliveries; verify persistence via get_task.
+    persisted = broker.get_task(sid, tid)["task"]
+    assert persisted["text"] == f"round trip {action}"
+    assert persisted["status_state"] == expected_state
 
     sent2 = broker.send_message(sid, sender, recipient, "unauthorized check")
     with pytest.raises(PermissionError):

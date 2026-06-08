@@ -9,10 +9,8 @@ from cafleet import broker
 from cafleet.cli import cli
 from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
 from tests._member_cli_helpers import (
-    DIRECTOR_ID,
     MEMBER_ID,
     MEMBER_NAME,
-    OTHER_DIRECTOR_ID,
     PANE_ID,
     _agent,
     _placement,
@@ -69,8 +67,6 @@ def _invoke(runner, fleet_id, **invoke_kwargs):
             str(fleet_id),
             "member",
             "ping",
-            "--agent-id",
-            str(DIRECTOR_ID),
             "--member-id",
             str(MEMBER_ID),
         ],
@@ -111,8 +107,6 @@ def test_ping_dispatch__json_output_two_keys(
             "--json",
             "member",
             "ping",
-            "--agent-id",
-            str(DIRECTOR_ID),
             "--member-id",
             str(MEMBER_ID),
         ],
@@ -174,24 +168,6 @@ def test_authorization_boundary__placement_none_exits_one_with_exact_message(
     assert "cafleet member create" in out
 
 
-def test_authorization_boundary__cross_director_exits_one_with_exact_message(
-    runner, fleet_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "get_agent",
-        lambda *_a, **_kw: _agent(
-            placement=_placement(director_agent_id=OTHER_DIRECTOR_ID)
-        ),
-    )
-    result = _invoke(runner, fleet_id)
-    assert result.exit_code == 1, result.output
-    out = result.output or ""
-    assert f"agent {MEMBER_ID}" in out
-    assert "is not a member of your team" in out
-    assert str(OTHER_DIRECTOR_ID) in out
-
-
 def test_authorization_boundary__pending_pane_exits_one_with_exact_message(
     runner, fleet_id, monkeypatch
 ):
@@ -222,7 +198,9 @@ def test_tmux_unavailable__tmux_not_available_exits_one(
     )
 
 
-def test_input_validation__missing_agent_id_exits_two(runner, fleet_id):
+def test_input_validation__agent_id_flag_removed(runner, fleet_id):
+    """``member ping`` no longer accepts ``--agent-id`` — Click rejects it with
+    its standard 'no such option' error (exit 2)."""
     result = runner.invoke(
         cli,
         [
@@ -230,14 +208,14 @@ def test_input_validation__missing_agent_id_exits_two(runner, fleet_id):
             str(fleet_id),
             "member",
             "ping",
+            "--agent-id",
+            "999",
             "--member-id",
             str(MEMBER_ID),
         ],
     )
     assert result.exit_code == 2, result.output
-    out = result.output or ""
-    assert "Missing option" in out
-    assert "--agent-id" in out
+    assert "no such option" in (result.output or "").lower()
 
 
 def test_input_validation__missing_member_id_exits_two(runner, fleet_id):
@@ -248,8 +226,6 @@ def test_input_validation__missing_member_id_exits_two(runner, fleet_id):
             str(fleet_id),
             "member",
             "ping",
-            "--agent-id",
-            str(DIRECTOR_ID),
         ],
     )
     assert result.exit_code == 2, result.output
@@ -266,8 +242,6 @@ def test_input_validation__unexpected_positional_argument_exits_two(runner, flee
             str(fleet_id),
             "member",
             "ping",
-            "--agent-id",
-            str(DIRECTOR_ID),
             "--member-id",
             str(MEMBER_ID),
             "extra",

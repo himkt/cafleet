@@ -212,14 +212,32 @@ def test_register_agent__validation_failures(scenario, expected_match):
             _register_agent(sid, name="late-member", placement=placement)
 
 
+def test_register_agent__member_under_non_root_director_rejected():
+    """Single-Director invariant: a member placement whose ``director_agent_id``
+    is not the fleet root is rejected (nested teams are forbidden)."""
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    # An active, non-admin agent that is NOT the fleet root Director.
+    non_root = _register_agent(sid, name="not-the-root")
+    placement = {
+        "director_agent_id": non_root["agent_id"],
+        "tmux_session": "main",
+        "tmux_window_id": "@1",
+        "tmux_pane_id": None,
+        "coding_agent": "claude",
+    }
+    with pytest.raises(click.UsageError):
+        _register_agent(sid, name="nested-member", placement=placement)
+
+
 @pytest.mark.parametrize("with_placement", [True, False])
 def test_register_agent__placement_stored_or_absent(with_placement):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
+    director_id = fleet["director"]["agent_id"]
     if with_placement:
-        director = _register_agent(sid, name="director")
         placement = {
-            "director_agent_id": director["agent_id"],
+            "director_agent_id": director_id,
             "tmux_session": "main",
             "tmux_window_id": "@1",
             "tmux_pane_id": None,
@@ -228,7 +246,7 @@ def test_register_agent__placement_stored_or_absent(with_placement):
         member = _register_agent(sid, name="member", placement=placement)
         fetched = broker.get_agent(member["agent_id"], sid)
         assert fetched["placement"] is not None
-        assert fetched["placement"]["director_agent_id"] == director["agent_id"]
+        assert fetched["placement"]["director_agent_id"] == director_id
         assert fetched["placement"]["tmux_session"] == "main"
     else:
         agent = _register_agent(sid, name="standalone")
@@ -367,9 +385,9 @@ def test_deregister_agent__idempotent_and_missing(scenario, expected):
 def test_deregister_agent__deletes_placement():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    director = _register_agent(sid, name="director")
+    director_id = fleet["director"]["agent_id"]
     placement = {
-        "director_agent_id": director["agent_id"],
+        "director_agent_id": director_id,
         "tmux_session": "main",
         "tmux_window_id": "@1",
         "tmux_pane_id": None,
@@ -386,9 +404,9 @@ def test_deregister_agent__deletes_placement():
 def test_update_placement_pane_id__updates_and_persists():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    director = _register_agent(sid, name="director")
+    director_id = fleet["director"]["agent_id"]
     placement = {
-        "director_agent_id": director["agent_id"],
+        "director_agent_id": director_id,
         "tmux_session": "main",
         "tmux_window_id": "@1",
         "tmux_pane_id": None,
@@ -417,8 +435,7 @@ def test_update_placement_pane_id__returns_none_for_missing(scenario):
 def test_list_members__returns_members_with_placement_info():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    director = _register_agent(sid, name="director")
-    did = director["agent_id"]
+    did = fleet["director"]["agent_id"]
     placement = {
         "director_agent_id": did,
         "tmux_session": "main",
@@ -429,7 +446,7 @@ def test_list_members__returns_members_with_placement_info():
     _register_agent(sid, name="member-1", placement=placement)
     _register_agent(sid, name="member-2", placement=placement)
 
-    result = broker.list_members(sid, did)
+    result = broker.list_members(sid)
     assert len(result) == 2
     assert {m["name"] for m in result} == {"member-1", "member-2"}
     member = result[0]
@@ -439,30 +456,27 @@ def test_list_members__returns_members_with_placement_info():
     assert member["status"] == "active"
 
 
-def test_list_members__per_director_isolation_and_empty_case():
+def test_list_members__flat_listing_excludes_root_and_empty_case():
+    """Flat model: ``list_members(fleet_id)`` returns every member of the fleet
+    and never surfaces the root Director itself."""
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    dir1 = _register_agent(sid, name="director-1")
-    dir2 = _register_agent(sid, name="director-2")
-    lonely = _register_agent(sid, name="lonely-director")
-    placement1 = {
-        "director_agent_id": dir1["agent_id"],
+    did = fleet["director"]["agent_id"]
+    placement = {
+        "director_agent_id": did,
         "tmux_session": "main",
         "tmux_window_id": "@1",
         "tmux_pane_id": None,
         "coding_agent": "claude",
     }
-    placement2 = {
-        "director_agent_id": dir2["agent_id"],
-        "tmux_session": "main",
-        "tmux_window_id": "@2",
-        "tmux_pane_id": None,
-        "coding_agent": "claude",
-    }
-    _register_agent(sid, name="m1-of-d1", placement=placement1)
-    _register_agent(sid, name="m2-of-d2", placement=placement2)
+    _register_agent(sid, name="member-1", placement=placement)
+    _register_agent(sid, name="member-2", placement=placement)
 
-    result = broker.list_members(sid, dir1["agent_id"])
-    assert len(result) == 1
-    assert result[0]["name"] == "m1-of-d1"
-    assert broker.list_members(sid, lonely["agent_id"]) == []
+    result = broker.list_members(sid)
+    assert {m["name"] for m in result} == {"member-1", "member-2"}
+    # The root Director (placement.director_agent_id IS NULL) is excluded.
+    assert did not in {m["agent_id"] for m in result}
+
+    # Bootstrap-only fleet → no members.
+    empty = _create_fleet()
+    assert broker.list_members(empty["fleet_id"]) == []
