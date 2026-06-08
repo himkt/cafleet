@@ -906,6 +906,12 @@ def member_delete(ctx, member_id, force):
     _require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
 
+    fleet = broker.get_fleet(fleet_id)
+    if fleet is not None and member_id == fleet["director_agent_id"]:
+        raise click.ClickException(
+            "cannot deregister the root Director; use 'cafleet fleet delete' instead"
+        )
+
     _ensure_tmux_or_die()
 
     target, placement = _load_authorized_member(

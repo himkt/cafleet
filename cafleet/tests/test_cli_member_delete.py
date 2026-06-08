@@ -523,3 +523,53 @@ def test_tmux_error_on_send_exit__send_exit_failure_now_exits_one_with_recovery_
     assert "tmux kill-pane" not in combined
 
     assert deregister_recorder == []
+
+
+@pytest.mark.parametrize("extra_args", [[], ["--force"]])
+def test_root_director__rejected_before_any_tmux_pane_mutation(
+    runner,
+    fleet_id,
+    monkeypatch,
+    call_log,
+    deregister_recorder,
+    send_exit_recorder,
+    kill_pane_recorder,
+    extra_args,
+):
+    """``member delete --member-id <root-director-id>`` is rejected with the
+    root-Director error BEFORE any tmux pane mutation.
+
+    The downstream ``broker.deregister_agent`` root-guard fires only AFTER
+    ``send_exit`` / ``kill_pane``, so without the early guard a root delete
+    would inject ``/exit`` into (or kill) the Director's own pane before
+    failing. This regression pins the early guard: no ``send_exit`` /
+    ``kill_pane`` / deregister on either the default or ``--force`` path.
+    """
+    # The targeted member IS the fleet root Director.
+    monkeypatch.setattr(
+        broker,
+        "get_fleet",
+        lambda _sid: {
+            "fleet_id": fleet_id,
+            "label": None,
+            "created_at": "2026-05-05T00:00:00+00:00",
+            "deleted_at": None,
+            "director_agent_id": MEMBER_ID,
+        },
+    )
+    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+
+    result = _invoke(runner, fleet_id, *extra_args)
+    assert result.exit_code != 0, result.output
+    out = result.output or ""
+    assert "root Director" in out
+    assert "fleet delete" in out
+
+    # No pane mutation, no deregister — the guard short-circuits first.
+    assert send_exit_recorder == []
+    assert kill_pane_recorder == []
+    assert deregister_recorder == []
+    names = [name for (name, *_) in call_log]
+    assert "send_exit" not in names
+    assert "kill_pane" not in names
+    assert "deregister_agent" not in names
