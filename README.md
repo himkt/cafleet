@@ -140,26 +140,10 @@ See your coding-agent's skill documentation for the literal invocation syntax (C
 
 You can see the existing design docs on [`design-docs/`](design-docs/), which are actually created by the skills.
 
-## 4. CLI cheatsheet
-
-| Command group | One-line purpose |
-|---|---|
-| `cafleet db init` | Apply schema migrations (idempotent; rerun after upgrades) |
-| `cafleet fleet create [--coding-agent {claude,codex,opencode}]` | Create a fleet; declare the root Director's coding-agent backend (default `claude`) |
-| `cafleet fleet *` | List / show / delete fleets |
-| `cafleet agent *` | Register / deregister / list / show agents |
-| `cafleet message *` | Send / broadcast / poll / ack / cancel / show messages |
-| `cafleet member create [--coding-agent {claude,codex,opencode}]` | Spawn a member pane running `claude` (default), `codex`, or `opencode` |
-| `cafleet member *` | Delete / list / capture / send-input / exec / ping member panes (Director only) |
-| `cafleet server` | Start the admin WebUI on `127.0.0.1:8000` |
-| `cafleet doctor` | Print the calling pane's tmux identifiers |
-
-> CLI reference (per-command sections for `fleet`, `member`, `doctor`, `server`; `agent` / `message` / `db init` covered via the option-source table and `cafleet <cmd> --help`): [CLI options](https://himkt.github.io/cafleet/spec/cli-options/). Message envelope shape (compact rendered + `--full` typed-column) and message body truncation rules (`CAFLEET_MAX_TEXT_LEN`, `--full`, `--quiet`): [CLI options](https://himkt.github.io/cafleet/spec/cli-options/) § Message Body Truncation and [Message envelope](https://himkt.github.io/cafleet/spec/message-envelope/).
-
-## 5. Architecture
+## 4. Architecture
 
 CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Fleets partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. Full architecture documentation is published at <https://himkt.github.io/cafleet/concepts/overview/>.
 
-## 6. Contributing
+## 5. Contributing
 
 Build, test, and project-structure instructions, plus the design-doc-driven contribution flow, are published at <https://himkt.github.io/cafleet/get-started/contributing/>.
