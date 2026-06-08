@@ -383,7 +383,7 @@ The spawn always invokes `tmux split-window` with `-d` so the Director's pane an
 | `--member-id` | yes | Target member's agent ID |
 | `--force` / `-f` | no | Skip the `/exit` wait. Immediately kill-pane the target, then deregister, then rebalance layout. Exit 0 even if the pane was already gone. |
 
-The only boundary is fleet isolation: a `--member-id` that does not belong to `--fleet-id` resolves to `None` and exits 1 with `Error: Agent <member-id> not found`. There is no caller-auth check. (Deleting the root Director stays blocked downstream by `broker.deregister_agent`'s root-Director guard.)
+The only boundary is fleet isolation: a `--member-id` that does not belong to `--fleet-id` resolves to `None` and exits 1 with `Error: Agent <member-id> not found`. There is no caller-auth check. Targeting the root Director is rejected **early — before any tmux pane mutation** — with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1); this prevents `member delete --member-id <root-director-id>` from injecting `/exit` into (or killing) the Director's own pane. Use `cafleet fleet delete` to tear down the fleet.
 
 #### Polling contract (default path)
 
