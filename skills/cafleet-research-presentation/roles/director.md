@@ -142,7 +142,7 @@ Follow the `cafleet-agent-team-monitoring` skill for the health-check sequence (
 Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*:
 
 1. Cancel every active `/loop` monitor via `CronDelete <job-id>` BEFORE deleting any member.
-2. Delete each member — Presentation, Transcript, and any active VR batch. The `--member-id` flag takes the target member's `agent_id` UUID (the value `cafleet member create` printed at spawn — the same identifier you use as `--to [member-agent-id]` in `cafleet message send`). For any active VR batch, run the explicit close handshake first per the VR role contract: send a `CLOSE:` message via `cafleet message send`, wait for the VR's `closed` reply, then run `cafleet member delete`. Do not rely on `/exit` to trigger any post-shutdown action — once `/exit` arrives, additional commands are not guaranteed to run.
+2. Delete each member — Presentation, Transcript, and any active VR batch. The `--member-id` flag takes the target member's integer `agent_id` (the value `cafleet member create` printed at spawn — the same identifier you use as `--to [member-agent-id]` in `cafleet message send`). For any active VR batch, run the explicit close handshake first per the VR role contract: send a `CLOSE:` message via `cafleet message send`, wait for the VR's `closed` reply, then run `cafleet member delete`. Do not rely on `/exit` to trigger any post-shutdown action — once `/exit` arrives, additional commands are not guaranteed to run.
    ```bash
    cafleet --fleet-id [fleet-id] member delete --member-id [presentation-agent-id]
    cafleet --fleet-id [fleet-id] member delete --member-id [transcript-agent-id]

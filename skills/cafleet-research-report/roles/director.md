@@ -127,7 +127,7 @@ A member is a candidate stall only if their task is `in_progress` AND their expe
 Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*:
 
 1. Cancel every active `/loop` monitor via `CronDelete <job-id>` BEFORE deleting any member.
-2. Delete each member in dependency order — Researchers first, then any active Scout, then the Manager. The `--member-id` flag takes the target member's `agent_id` UUID (the value `cafleet member create` printed at spawn — the same identifier you use as `--to [member-agent-id]` in `cafleet message send`):
+2. Delete each member in dependency order — Researchers first, then any active Scout, then the Manager. The `--member-id` flag takes the target member's integer `agent_id` (the value `cafleet member create` printed at spawn — the same identifier you use as `--to [member-agent-id]` in `cafleet message send`):
    ```bash
    cafleet --fleet-id [fleet-id] member delete --member-id [researcher-agent-id]
    cafleet --fleet-id [fleet-id] member delete --member-id [scout-agent-id]
