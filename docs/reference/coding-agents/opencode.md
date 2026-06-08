@@ -102,7 +102,7 @@ Opencode's TUI input box honors a leading-`!` shell shortcut — typing `! <comm
 `claude --name <member-name>` sets the tmux pane title via Claude Code's internal title-emit. **Neither `codex` nor `opencode` has an equivalent flag.** Opencode panes display whatever default title the binary emits. Pane discovery for all three backends goes through `cafleet member list`:
 
 ```bash
-cafleet --fleet-id <fleet-id> member list --agent-id <director-agent-id>
+cafleet --fleet-id <fleet-id> member list
 ```
 
 The `pane_id` column is ground truth. For mixed-backend teams in particular, do NOT rely on tmux pane titles to find a specific member's pane.
@@ -145,25 +145,25 @@ cafleet --fleet-id $FLEET member create --agent-id $DIRECTOR \
 # Expect: ~/.opencode/agents/cafleet.md is materialized with the
 # CAFLEET_AGENT preset (cat it and verify the JSON frontmatter).
 
-cafleet --fleet-id $FLEET member list --agent-id $DIRECTOR
+cafleet --fleet-id $FLEET member list
 # Expect: backend column shows 'opencode' for the smoke member.
 
 cafleet --fleet-id $FLEET message send --agent-id $DIRECTOR \
   --to <opencode-member-id> --text "ping"
 # Expect: opencode pane receives the inline preview and the member ack-loops.
 
-cafleet --fleet-id $FLEET member exec --agent-id $DIRECTOR \
+cafleet --fleet-id $FLEET member exec \
   --member-id <opencode-member-id> "git status --short"
 # Expect: '! git status --short' lands in the opencode pane and the
 # command runs.
 
-cafleet --fleet-id $FLEET member exec --agent-id $DIRECTOR \
+cafleet --fleet-id $FLEET member exec \
   --member-id <opencode-member-id> "curl https://example.com"
 # Expect: the deny-list blocks the curl command. If it does NOT, the
 # safety floor is broken — STOP and re-run the agent-load smoke from
 # the design doc's Step 0 GATE.
 
-cafleet --fleet-id $FLEET member delete --agent-id $DIRECTOR --member-id <opencode-member-id>
+cafleet --fleet-id $FLEET member delete --member-id <opencode-member-id>
 cafleet fleet delete $FLEET
 ```
 

@@ -204,7 +204,7 @@ User
 | `SendMessage(to="Programmer")` | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from member) | `cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
 | `cafleet-agent-team-supervision` `/loop` | Load the `cafleet-agent-team-monitoring` skill (mechanism + `/loop`) and the `cafleet-agent-team-supervision` skill (governance), then run `/loop` from the `cafleet-agent-team-monitoring` skill |
-| `TeamDelete` | `cafleet --fleet-id <fleet-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet and sweeps the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
+| `TeamDelete` | `cafleet --fleet-id <fleet-id> member delete --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet and sweeps the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
 ## Process
@@ -522,7 +522,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 #### 3f. Verify members are live
 
 ```bash
-cafleet --fleet-id <fleet-id> member list --agent-id <director-agent-id>
+cafleet --fleet-id <fleet-id> member list
 ```
 
 All spawned members must show `status: active` with a non-null `pane_id`. If any is missing or pending, retry the spawn before proceeding.
@@ -672,7 +672,7 @@ Once the PR exists and Copilot has been invited, the Director runs a cron-driven
 
 #### PR Review Loop State
 
-The Director holds three **PR-review-specific** in-context variables across loop firings (separate from the team-health `--since` timestamp tracked by the `cafleet-agent-team-monitoring` skill for `cafleet message poll`). They are NOT persisted to disk — the Director carries them in its own working memory.
+The Director holds three **PR-review-specific** in-context variables across loop firings (separate from the team-health inbox poll the `cafleet-agent-team-monitoring` skill runs via `cafleet message poll`, which returns only un-acked deliveries and tracks no timestamp). They are NOT persisted to disk — the Director carries them in its own working memory.
 
 | Variable | Meaning | Update rule |
 |:--|:--|:--|
@@ -761,9 +761,9 @@ Use this as the `/loop` prompt for Step 7. Substitute the literal UUIDs and the 
 Monitor team health AND PR review state (interval: 1 minute).
 
 TEAM HEALTH:
-1. Run `cafleet --fleet-id <fleet-id> --json member list --agent-id <director-agent-id>`.
-2. Run `cafleet --fleet-id <fleet-id> --json message poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check>"`. ACK progress reports.
-3. For each member that has not sent a message since last check, run `cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id> --lines 200`.
+1. Run `cafleet --fleet-id <fleet-id> --json member list`.
+2. Run `cafleet --fleet-id <fleet-id> --json message poll --agent-id <director-agent-id>` (un-acked deliveries). ACK progress reports — ACKing consumes them, so the next tick's poll returns only what has arrived since.
+3. For each member that has not sent a message since last check, run `cafleet --fleet-id <fleet-id> member capture --member-id <member-agent-id> --lines 200`.
 4. Nudge stalled members via `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<original-pointer>)"` — re-send the same `ready (paragraph-Implementation > Step N)` or `ready (<file>:<line>)` body that was used for the original assignment. The recipient interprets a re-sent `ready (...)` contextually as a stall-nudge per [the Coordination Protocol section above](#coordination-protocol) (same target, same expected action).
 
 PR REVIEW:

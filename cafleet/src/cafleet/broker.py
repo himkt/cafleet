@@ -347,7 +347,11 @@ def register_agent(
     Rejects soft-deleted fleets with a message that differs from the
     "not found" case so callers can surface the right recovery hint. When
     ``placement`` is supplied, the named Director must be active in the
-    same fleet and must not be the Administrator.
+    same fleet, must not be the Administrator, and must be the fleet's root
+    Director (``fleets.director_agent_id``). A fleet has exactly one Director:
+    nested teams are forbidden, so every member placement's
+    ``director_agent_id`` equals the fleet root and a non-root value is
+    rejected.
 
     Args:
         fleet_id: Fleet id the new agent belongs to.
@@ -364,8 +368,9 @@ def register_agent(
         Dict with ``agent_id``, ``name``, and ``registered_at``.
 
     Raises:
-        click.UsageError: If the fleet does not exist, is soft-deleted, or
-            the named Director is not active in the same fleet.
+        click.UsageError: If the fleet does not exist, is soft-deleted, the
+            named Director is not active in the same fleet, or the placement
+            ``director_agent_id`` is not the fleet's root Director.
         click.ClickException: If the named Director is the built-in
             Administrator.
     """
@@ -400,6 +405,13 @@ def register_agent(
                 )
             if _is_administrator(director_card):
                 raise click.ClickException("Administrator cannot be a director")
+            root_director_id = sess["director_agent_id"]
+            if director_id != root_director_id:
+                raise click.UsageError(
+                    f"nested teams are not supported; placement director_agent_id "
+                    f"{director_id} must equal the fleet root "
+                    f"Director {root_director_id}."
+                )
 
         agent = Agent(
             fleet_id=fleet_id,
@@ -585,7 +597,7 @@ def update_placement_pane_id(agent_id: int, pane_id: str) -> dict | None:
     return _placement_dict(row)
 
 
-def _base_members_select(fleet_id: int, director_agent_id: int):
+def _base_members_select(fleet_id: int):
     return (
         select(
             Agent.agent_id,
@@ -604,24 +616,27 @@ def _base_members_select(fleet_id: int, director_agent_id: int):
         .where(
             Agent.fleet_id == fleet_id,
             Agent.status == "active",
-            AgentPlacement.director_agent_id == director_agent_id,
+            AgentPlacement.director_agent_id.is_not(None),
         )
     )
 
 
-def list_members(fleet_id: int, director_agent_id: int) -> list[dict]:
-    """Return active members belonging to the given director, with placements.
+def list_members(fleet_id: int) -> list[dict]:
+    """Return the fleet's active members, with placements.
+
+    A fleet has exactly one Director (the root), so every member placement's
+    ``director_agent_id`` equals the fleet root. Members are selected by
+    ``director_agent_id IS NOT NULL``, which lists all members and excludes
+    the root Director's own placement (the only row with a ``NULL`` director).
 
     Args:
         fleet_id: Fleet id to scope the query to.
-        director_agent_id: Director id; only members whose
-            ``placement.director_agent_id`` matches are returned.
 
     Returns:
         List of dicts each carrying ``agent_id``, ``name``, ``description``,
         ``status``, ``registered_at``, and ``placement``.
     """
-    stmt = _base_members_select(fleet_id, director_agent_id)
+    stmt = _base_members_select(fleet_id)
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(stmt).all()
@@ -638,8 +653,13 @@ def list_members(fleet_id: int, director_agent_id: int) -> list[dict]:
     ]
 
 
-def list_members_with_activity(fleet_id: int, director_agent_id: int) -> list[dict]:
+def list_members_with_activity(fleet_id: int) -> list[dict]:
     """``list_members`` plus per-member activity proxies sourced from ``tasks``.
+
+    Scoped by ``fleet_id`` only — the flat single-Director model means every
+    member placement's ``director_agent_id`` equals the fleet root, so the
+    ``director_agent_id IS NOT NULL`` member filter applies here too (and
+    excludes the root Director's own placement).
 
     ``last_sent`` / ``last_recv`` / ``last_ack`` aggregate ``status_timestamp``
     over the ``tasks`` table per agent. All three filter ``Task.type !=
@@ -649,7 +669,6 @@ def list_members_with_activity(fleet_id: int, director_agent_id: int) -> list[di
 
     Args:
         fleet_id: Fleet id to scope the query to.
-        director_agent_id: Director id whose members will be enumerated.
 
     Returns:
         List of dicts as in :func:`list_members`, additionally carrying
@@ -686,7 +705,7 @@ def list_members_with_activity(fleet_id: int, director_agent_id: int) -> list[di
         .correlate(Agent)
         .scalar_subquery()
     )
-    stmt = _base_members_select(fleet_id, director_agent_id).add_columns(
+    stmt = _base_members_select(fleet_id).add_columns(
         last_sent_sq.label("last_sent"),
         last_recv_sq.label("last_recv"),
         last_ack_sq.label("last_ack"),
@@ -969,34 +988,24 @@ def broadcast_message(fleet_id: int, agent_id: int, text: str) -> list[dict]:
     ]
 
 
-def poll_tasks(
-    agent_id: int,
-    since: str | None = None,
-    page_size: int | None = None,
-    status: str | None = None,
-) -> list[dict]:
-    """Return tasks addressed to ``agent_id`` in DESC timestamp order.
+def poll_tasks(agent_id: int) -> list[dict]:
+    """Return un-acked deliveries addressed to ``agent_id``, newest first.
 
-    ``broadcast_summary`` rows are filtered out — those belong to the
-    broadcaster's own context and are not deliveries.
+    Only ``input_required`` tasks are returned — once a delivery is ACKed
+    (``completed``) or canceled it no longer appears. ``broadcast_summary``
+    rows are filtered out, as those belong to the broadcaster's own context
+    and are not deliveries.
 
     Args:
         agent_id: Recipient agent id; matches ``Task.context_id``.
-        since: Optional ISO-8601 timestamp; only tasks strictly newer than
-            this value are returned (lexicographic comparison on the
-            microsecond-precision ``+00:00`` form).
-        page_size: Optional row cap applied after ordering.
-        status: Optional ``status_state`` filter (e.g. ``"input_required"``).
 
     Returns:
         List of flat task dicts (one per row) carrying every column from the
-        ``tasks`` table.
+        ``tasks`` table, in DESC ``status_timestamp`` order.
     """
     return _list_tasks_where(
         Task.context_id == agent_id,
-        since=since,
-        page_size=page_size,
-        status=status,
+        status="input_required",
     )
 
 
@@ -1132,8 +1141,6 @@ def list_fleet_agents(fleet_id: int) -> list[dict]:
 
 def _list_tasks_where(
     *filters,
-    since: str | None = None,
-    page_size: int | None = None,
     status: str | None = None,
 ) -> list[dict]:
     stmt = (
@@ -1141,12 +1148,8 @@ def _list_tasks_where(
         .where(*filters, _NOT_BROADCAST_SUMMARY)
         .order_by(Task.status_timestamp.desc())
     )
-    if since is not None:
-        stmt = stmt.where(Task.status_timestamp > since)
     if status is not None:
         stmt = stmt.where(Task.status_state == status)
-    if page_size is not None:
-        stmt = stmt.limit(page_size)
     sm = get_sync_sessionmaker()
     with sm() as session:
         rows = session.execute(stmt).all()

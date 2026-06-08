@@ -62,25 +62,28 @@ Then pass the printed id as `--fleet-id <id>` on every client + member command.
 ### Commands that require `--agent-id`
 
 - `agent deregister` — Deregister an agent
-- `agent list` — List agents in the fleet
 - `agent show` — Show detail for a specific agent
 - `message send` — Send a message to another agent
 - `message broadcast` — Broadcast a message to all agents
-- `message poll` — Poll for incoming messages
+- `message poll` — Poll for un-acked (`input_required`) incoming messages
 - `message ack` — Acknowledge a received message
 - `message cancel` — Cancel a sent message
 - `message show` — Get task details
-- `member create` — Register a new member and spawn its coding-agent pane (Director only)
-- `member delete` — Deregister a member and close its pane (Director only)
-- `member list` — List members spawned by this Director
-- `member capture` — Capture the last N lines of a member's pane (Director only)
-- `member send-input` — Forward a restricted keystroke (digit 1/2/3 or free text) to a member's pane (Director only)
-- `member exec` — Dispatch a shell command into a member's pane via the coding agent's `!` shortcut (Director only)
-- `member ping` — Inject an inbox-poll keystroke into a member's pane (Director only)
+- `member create` — Register a new member and spawn its coding-agent pane (the spawning Director's id, validated to equal the fleet root)
 
 ### Commands that do NOT require `--agent-id`
 
 - `agent register` — Register a new agent (returns an agent ID)
+- `agent list` — List agents in the fleet (scoped by the global `--fleet-id`)
+
+The director-side member subcommands identify their target by `--member-id` (scoped to the global `--fleet-id`), not `--agent-id`:
+
+- `member delete` — Deregister a member and close its pane
+- `member list` — List the fleet's members
+- `member capture` — Capture the last N lines of a member's pane
+- `member send-input` — Forward a restricted keystroke (digit 1/2/3 or free text) to a member's pane
+- `member exec` — Dispatch a shell command into a member's pane via the coding agent's `!` shortcut
+- `member ping` — Inject an inbox-poll keystroke into a member's pane
 
 ## Message Body Truncation
 
@@ -333,7 +336,7 @@ cafleet --fleet-id 1 server
 
 ## Member Commands
 
-The `cafleet member` subgroup manages tmux-backed member agents. All commands require `--agent-id` (the Director's agent ID) and must be run inside a tmux session.
+The `cafleet member` subgroup manages tmux-backed member agents and must be run inside a tmux session. `member create` takes `--agent-id` (the spawning Director's agent ID, validated to equal the fleet root); the other subcommands identify their target by `--member-id`, scoped to the global `--fleet-id`.
 
 ### `member create`
 
@@ -377,11 +380,10 @@ The spawn always invokes `tmux split-window` with `-d` so the Director's pane an
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | Target member's agent ID |
 | `--force` / `-f` | no | Skip the `/exit` wait. Immediately kill-pane the target, then deregister, then rebalance layout. Exit 0 even if the pane was already gone. |
 
-Cross-Director delete is rejected: the CLI verifies `placement.director_agent_id` matches `--agent-id` before calling `broker.deregister_agent` or sending `/exit` to the pane. An attempt to delete another Director's member in the same fleet exits 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other-director>).` (mirrors `member capture` / `member send-input`).
+The only boundary is fleet isolation: a `--member-id` that does not belong to `--fleet-id` resolves to `None` and exits 1 with `Error: Agent <member-id> not found`. There is no caller-auth check. Targeting the root Director is rejected **early — before any tmux pane mutation** — with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1); this prevents `member delete --member-id <root-director-id>` from injecting `/exit` into (or killing) the Director's own pane. Use `cafleet fleet delete` to tear down the fleet.
 
 #### Polling contract (default path)
 
@@ -400,20 +402,21 @@ Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet
 | Exit | When |
 |---|---|
 | `0` | Success — default path pane-gone confirmed, `--force` pane killed, or pending-placement deregister. |
-| `1` | Any non-timeout failure: auth rejection, missing fleet, unknown member-id, `broker.deregister_agent` failure, `send_exit` tmux failure (pre-poll), `MULTIPLEXERS.tmux.wait_for_pane_gone` raising TmuxError (server crash mid-poll). |
+| `1` | Any non-timeout failure: missing fleet, unknown member-id (including cross-fleet), `broker.deregister_agent` failure (e.g. root-Director guard), `send_exit` tmux failure (pre-poll), `MULTIPLEXERS.tmux.wait_for_pane_gone` raising TmuxError (server crash mid-poll). |
 | `2` | Default-path timeout — `/exit` was sent, the pane did not disappear within 15.0 s, buffer tail has been printed on stderr. |
 
 ### `member list`
 
+Lists every member of the fleet identified by the global `--fleet-id`. The root Director is never surfaced in the output.
+
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Director's agent ID |
 | `--activity` | no | Aggregate per-member activity timestamps from the `tasks` table and render `last_sent`, `last_recv`, `last_ack`, and `idle` columns alongside the default member columns. The aggregation filters `Task.type != 'broadcast_summary'` for the `last_ack` proxy (mirrors `poll_tasks`). Primary inputs to the Director's `/loop` monitoring tick. |
 
 #### `member list --activity` output
 
 ```
-$ cafleet --fleet-id <s> member list --agent-id <d> --activity
+$ cafleet --fleet-id <s> member list --activity
 3 members:
   agent_id  name      state   last_sent    last_recv    last_ack     idle
   --------  --------  ------  -----------  -----------  -----------  -----
@@ -428,7 +431,6 @@ $ cafleet --fleet-id <s> member list --agent-id <d> --activity
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Director's agent ID |
 | `--member-id` | yes | Target member's agent ID |
 | `--lines` | no | Number of trailing lines to capture (default: **30**). |
 | `--tail` | no | Alias for `--lines`, for muscle-memory consistency with `tail -n`. |
@@ -444,7 +446,6 @@ Exactly one of the two flags must be supplied.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | Target member's agent ID |
 | `--choice` | one-of | Integer `1`, `2`, or `3`. Sends the matching digit key to the pane (no Enter). Validated via `click.IntRange(1, 3)`. |
 | `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. AskUserQuestion-only. Rejected if the first non-whitespace character is `!` (use `member exec` for shell dispatch). |
@@ -474,16 +475,15 @@ Three separate tmux invocations for `--freetext` because tmux's `-l` (literal) f
 | `--freetext` containing `\n` or `\r` | Exit 2 with `Error: free text may not contain newlines.` (single-action contract — one prompt submission per call) |
 | Any input with tmux unavailable | Exit 1 via `MULTIPLEXERS.tmux.ensure_available()` (same surface as `member capture`) |
 
-#### Authorization boundary
+#### Member resolution
 
 Mirrors `cafleet member capture` step-for-step:
 
-1. Load the target via `broker.get_agent(member_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+1. Load the target via `broker.get_agent(member_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found` — a `--member-id` outside `--fleet-id` resolves to `None`, so cross-fleet access is the only rejection.
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
-3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
-4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
+3. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
 
-Cross-Director write attempts are rejected before any tmux call is made. The error message shapes are reused verbatim from `member capture` so operator muscle memory transfers.
+The only boundary is fleet isolation — any **active** in-fleet agent **with a placement row** (the root Director included) is a valid `--member-id`, and there is no caller-auth check. Per steps 1–2 above, a cross-fleet / unknown / inactive `--member-id` resolves to "not found" and an in-fleet agent without a placement row is rejected. The error message shapes are reused verbatim from `member capture` so operator muscle memory transfers.
 
 #### Output format
 
@@ -523,13 +523,12 @@ The canonical Director-side workflow is three-beat and AskUserQuestion-delegated
 Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane so the coding agent's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). All three backends (`claude`, `codex`, and `opencode`) honor the leading-`!` shortcut on their input line, so `member exec` works against any backend without modification. The fallback path for the bash-via-Director protocol — see [Bash routing](../concepts/bash-routing.md).
 
 ```bash
-cafleet --fleet-id <fleet-id> member exec --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member exec \
   --member-id <member-agent-id> "git log -1 --oneline"
 ```
 
 | Flag / argument | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | Target member's agent ID |
 | *(positional `COMMAND`)* | yes | Single shell command. Leading and trailing whitespace are stripped before dispatch to `MULTIPLEXERS.tmux.send_bash_command` (the JSON `command` field and the text echo both reflect the trimmed form). Otherwise pipes, `&&`, `;`, `$(...)`, and backticks are not special-cased — the command is forwarded opaquely. |
 
@@ -551,16 +550,15 @@ Two separate tmux invocations because tmux's `-l` (literal) flag is per-invocati
 | Outside a tmux session (`TMUX` env var unset) | Exit 1 with `Error: cafleet member commands must be run inside a tmux session` (raised from `MULTIPLEXERS.tmux.ensure_available()` and wrapped as a `ClickException`). |
 | `tmux` binary not on `PATH` | Exit 1 with the corresponding "binary not found" error from `MULTIPLEXERS.tmux.ensure_available()`, wrapped as a `ClickException`. |
 
-#### Authorization boundary
+#### Member resolution
 
 Mirrors `cafleet member send-input` step-for-step:
 
-1. Load the target via `broker.get_agent(member_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+1. Load the target via `broker.get_agent(member_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found` — a `--member-id` outside `--fleet-id` resolves to `None`, so cross-fleet access is the only rejection.
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
-3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
-4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to exec.`.
+3. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to exec.`.
 
-Cross-Director write attempts are rejected before any tmux call is made. Wording reuses the existing `_load_authorized_member` strings verbatim.
+The only boundary is fleet isolation — any **active** in-fleet agent **with a placement row** (the root Director included) is a valid `--member-id`, and there is no caller-auth check. Per steps 1–2 above, a cross-fleet / unknown / inactive `--member-id` resolves to "not found" and an in-fleet agent without a placement row is rejected. Wording reuses the existing `_load_authorized_member` strings verbatim.
 
 #### Output format
 
@@ -591,9 +589,8 @@ Three keys: `member_agent_id`, `pane_id`, `command`. No `action` field — the s
 | `command` empty / whitespace-only | `2` | `click.UsageError` raised by handler |
 | `command` contains `\n` or `\r` | `2` | `click.UsageError` raised by handler |
 | `tmux` unavailable / `TMUX` env var missing | `1` | `MULTIPLEXERS.tmux.ensure_available()` → wrapped `ClickException` |
-| Agent not found | `1` | `_load_authorized_member` → wrapped `ClickException` |
+| Agent not found (including cross-fleet `--member-id`) | `1` | `_load_authorized_member` → wrapped `ClickException` |
 | Missing placement row | `1` | `_load_authorized_member` (existing wording) |
-| Cross-Director (placement.director_agent_id mismatch) | `1` | `_load_authorized_member` (existing wording) |
 | Pending placement (tmux_pane_id is None) | `1` | dedicated check in handler (existing wording) |
 | `tmux send-keys` subprocess error | `1` | wrapped `ClickException` (`send failed: ...`) |
 
@@ -602,13 +599,12 @@ Three keys: `member_agent_id`, `pane_id`, `command`. No `action` field — the s
 Director-only manual inbox-poll nudge. Keystrokes the same `cafleet --fleet-id <s> message poll --agent-id <m>` + `Enter` sequence that `broker._try_notify_recipient` auto-fires today, but as an operator-driven entry-point: failures surface as exit 1 (the auto-fire path swallows `False` silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
 
 ```bash
-cafleet --fleet-id <fleet-id> member ping --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member ping \
   --member-id <member-agent-id>
 ```
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Director's agent ID (used for the cross-Director authorization check) |
 | `--member-id` | yes | Target member's agent ID |
 
 #### Key sequence sent to the pane
@@ -621,23 +617,21 @@ cafleet --fleet-id <fleet-id> member ping --agent-id <director-agent-id> \
 
 | Input | Result |
 |---|---|
-| Missing `--agent-id` | Click built-in `Error: Missing option '--agent-id'.` (exit 2). |
 | Missing `--member-id` | Click built-in `Error: Missing option '--member-id'.` (exit 2). |
 | Outside a tmux session (`TMUX` env var unset) | Exit 1 with `Error: cafleet member commands must be run inside a tmux session` (raised from `MULTIPLEXERS.tmux.ensure_available()` and wrapped as a `ClickException`). |
 | `tmux` binary not on `PATH` | Exit 1 with the corresponding "binary not found" error from `MULTIPLEXERS.tmux.ensure_available()`, wrapped as a `ClickException`. |
 
 The subcommand has no positional argument and no other flags. There is no operator-controlled keystroke body to validate.
 
-#### Authorization boundary
+#### Member resolution
 
 Mirrors `cafleet member exec` step-for-step:
 
-1. Load the target via `broker.get_agent(member_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found`.
+1. Load the target via `broker.get_agent(member_id, fleet_id)`. If `None`, exit 1 with `Error: Agent <member_id> not found` — a `--member-id` outside `--fleet-id` resolves to `None`, so cross-fleet access is the only rejection.
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
-3. If `placement.director_agent_id != --agent-id`, exit 1 with `Error: agent <member_id> is not a member of your team (director_agent_id=<actual>).`.
-4. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to ping.`.
+3. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to ping.`.
 
-Cross-Director write attempts are rejected before any tmux call is made. Wording reuses the existing `_load_authorized_member` strings verbatim.
+The only boundary is fleet isolation — any **active** in-fleet agent **with a placement row** (the root Director included) is a valid `--member-id`, and there is no caller-auth check. Per steps 1–2 above, a cross-fleet / unknown / inactive `--member-id` resolves to "not found" and an in-fleet agent without a placement row is rejected. Wording reuses the existing `_load_authorized_member` strings verbatim.
 
 #### Output format
 
@@ -663,11 +657,10 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | Outcome | Exit | Source |
 |---|---|---|
 | Dispatch success | `0` | normal return |
-| Missing `--agent-id` or `--member-id` | `2` | Click built-in `Missing option` |
+| Missing `--member-id` | `2` | Click built-in `Missing option` |
 | `tmux` unavailable / `TMUX` env var missing | `1` | `MULTIPLEXERS.tmux.ensure_available()` → wrapped `ClickException` |
-| Agent not found | `1` | `_load_authorized_member` → wrapped `ClickException` |
+| Agent not found (including cross-fleet `--member-id`) | `1` | `_load_authorized_member` → wrapped `ClickException` |
 | Missing placement row | `1` | `_load_authorized_member` (existing wording) |
-| Cross-Director (placement.director_agent_id mismatch) | `1` | `_load_authorized_member` (existing wording) |
 | Pending placement (tmux_pane_id is None) | `1` | dedicated check in handler (existing wording) |
 | `tmux send-keys` subprocess error | `1` | wrapped `ClickException` (`send failed: ...`) — covers both the `TmuxError` branch and the `send_poll_trigger` returning `False` branch |
 
@@ -680,22 +673,19 @@ Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name I
 | `fleet create` run outside a tmux session | `Error: cafleet fleet create must be run inside a tmux session` (exit 1; no DB writes) |
 | `fleet delete` on unknown fleet_id | `Error: fleet 'X' not found.` (exit 1) |
 | `agent register` into a soft-deleted fleet | `Error: fleet X is deleted` (exit 1) |
-| `agent deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` (exit 1) |
+| `agent deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 2; raised as `click.UsageError`) |
 | `agent deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
-| `agent list` / `agent show` / `agent deregister` / `message send` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--fleet-id` | `Error: agent <id> is not a member of fleet <sid>.` (exit 1) — gate is `broker.verify_agent_fleet` and runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different fleet" apart and treats both as not-a-member). |
+| `agent show` / `agent deregister` / `message send` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--fleet-id` | `Error: agent <id> is not a member of fleet <sid>.` (exit 1) — gate is `broker.verify_agent_fleet` and runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different fleet" apart and treats both as not-a-member). |
 | `member send-input` with zero or both of `--choice` / `--freetext` | `Error: --choice and --freetext are mutually exclusive; supply exactly one.` (exit 2) |
 | `member send-input --choice` outside `1..3` | Click `IntRange(1, 3)` built-in (exit 2) |
 | `member send-input --freetext` whose first non-whitespace character is `!` | `Error: --freetext may not start with '!' — that triggers the coding agent's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` (exit 2) |
 | `member send-input --freetext` with `\n` or `\r` | `Error: free text may not contain newlines.` (exit 2) |
 | `member send-input` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
-| `member send-input` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
 | `member exec` with missing positional `COMMAND` | Click built-in `Error: Missing argument 'COMMAND'.` (exit 2) |
 | `member exec ""` (empty / whitespace-only) | `Error: command may not be empty.` (exit 2) |
 | `member exec` with `\n` or `\r` | `Error: command may not contain newlines.` (exit 2) |
 | `member exec` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to exec.` (exit 1) |
-| `member exec` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
 | `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to ping.` (exit 1) |
-| `member ping` across Directors | `Error: agent <id> is not a member of your team (director_agent_id=<actual>).` (exit 1) |
 | `member ping` when `tmux send-keys` fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
 | `member create` with both `--prompt-file` and positional `prompt_argv` | `Error: --prompt-file and the positional prompt argument are mutually exclusive.` (exit 2; `click.UsageError`) |
 | `member create --prompt-file` with a relative path | ``Error: --prompt-file requires an absolute path (got '<input>'). Resolve relative paths against your BASE first — see the `cafleet-base-dir` skill.`` (exit 2; `click.UsageError`) |

@@ -54,11 +54,8 @@ def _quiet_flag_with_help(help_text: str):
 
 
 def _director_member_options(func):
-    func = click.option(
-        "--member-id", type=int, required=True, help="Target member's agent ID"
-    )(func)
     return click.option(
-        "--agent-id", type=int, required=True, help="Director's agent ID"
+        "--member-id", type=int, required=True, help="Target member's agent ID"
     )(func)
 
 
@@ -486,8 +483,6 @@ def message_broadcast(ctx, agent_id, text, full):
 
 @message.command("poll")
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
-@click.option("--since", default=None, hidden=True)
-@click.option("--page-size", default=None, type=int, hidden=True)
 @_full_flag_with_help("Disable body truncation.")
 @click.pass_context
 @_client_command(
@@ -497,13 +492,9 @@ def message_broadcast(ctx, agent_id, text, full):
     ),
     truncates_task_text=True,
 )
-def message_poll(ctx, agent_id, since, page_size, full):
-    """Poll inbox for messages."""
-    return broker.poll_tasks(
-        agent_id,
-        since=since,
-        page_size=page_size,
-    )
+def message_poll(ctx, agent_id, full):
+    """Poll inbox for un-acked messages."""
+    return broker.poll_tasks(agent_id)
 
 
 @message.command("ack")
@@ -560,17 +551,15 @@ def message_show(ctx, agent_id, task_id, full):
 
 
 @agent.command("list")
-@click.option("--agent-id", type=int, required=True, help="Agent ID")
 @_full_flag
 @click.pass_context
 @_client_command(
-    requires_agent_fleet=True,
     text_formatter=lambda agents, *, full: output.format_indexed_list(
         agents, lambda a: output.format_agent(a, full=full), "No agents found."
     ),
     renders_agent_card=True,
 )
-def agent_list(ctx, agent_id, full):
+def agent_list(ctx, full):
     """List registered agents in the fleet."""
     return broker.list_agents(ctx.obj["fleet_id"])
 
@@ -636,12 +625,18 @@ def _require_member_pane(placement: dict, member_id: int, action: str) -> str:
 
 def _load_authorized_member(
     fleet_id: int,
-    director_agent_id: int,
     member_id: int,
     *,
     placement_missing_template: str = _PLACEMENT_MISSING_DEFAULT,
 ) -> tuple[dict, dict]:
-    """Load a member's agent + placement, enforcing the cross-Director boundary.
+    """Resolve a fleet-scoped member's agent + placement.
+
+    The only boundary is fleet isolation: ``broker.get_agent(member_id,
+    fleet_id)`` returns ``None`` for a ``member_id`` that is not an active agent
+    of ``fleet_id``, so a cross-fleet / unknown / inactive target raises "not
+    found". There is no caller-auth check — any active in-fleet agent with a
+    placement row (the root Director included) is a valid target; an in-fleet
+    agent without a placement row raises the placement-missing error below.
 
     ``placement_missing_template`` is a ``{member_id}`` format string for the
     "no placement" path, because each caller points users at a different
@@ -662,11 +657,6 @@ def _load_authorized_member(
     if placement is None:
         raise click.ClickException(
             placement_missing_template.format(member_id=member_id)
-        )
-    if placement["director_agent_id"] != director_agent_id:
-        raise click.ClickException(
-            f"agent {member_id} is not a member of your team "
-            f"(director_agent_id={placement['director_agent_id']})."
         )
     return target, placement
 
@@ -913,16 +903,21 @@ def member_create(
     help="Skip /exit; kill-pane immediately.",
 )
 @click.pass_context
-def member_delete(ctx, agent_id, member_id, force):
+def member_delete(ctx, member_id, force):
     """Deregister a member agent and close its tmux pane."""
     _require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
 
     _ensure_tmux_or_die()
 
+    fleet = broker.get_fleet(fleet_id)
+    if fleet is not None and member_id == fleet["director_agent_id"]:
+        raise click.ClickException(
+            "cannot deregister the root Director; use 'cafleet fleet delete' instead"
+        )
+
     target, placement = _load_authorized_member(
         fleet_id,
-        agent_id,
         member_id,
         placement_missing_template=(
             "agent {member_id} has no placement; use `cafleet agent deregister` instead"
@@ -1044,7 +1039,6 @@ def _emit_member_delete_output(
 
 
 @member.command("list")
-@click.option("--agent-id", type=int, required=True, help="Director's agent ID")
 @click.option(
     "--activity",
     "activity",
@@ -1053,15 +1047,15 @@ def _emit_member_delete_output(
     hidden=True,
 )
 @click.pass_context
-def member_list(ctx, agent_id, activity):
-    """List member agents managed by this Director."""
+def member_list(ctx, activity):
+    """List every member of the fleet (the root Director is excluded)."""
     _require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
     try:
         if activity:
-            rows = broker.list_members_with_activity(fleet_id, agent_id)
+            rows = broker.list_members_with_activity(fleet_id)
         else:
-            rows = broker.list_members(fleet_id, agent_id)
+            rows = broker.list_members(fleet_id)
     except click.ClickException:
         raise
     except Exception as exc:
@@ -1091,7 +1085,7 @@ def member_list(ctx, agent_id, activity):
     hidden=True,
 )
 @click.pass_context
-def member_capture(ctx, agent_id, member_id, lines, ansi):
+def member_capture(ctx, member_id, lines, ansi):
     """Capture the last N lines of a member pane's terminal buffer."""
     _require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
@@ -1100,7 +1094,6 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
 
     target, placement = _load_authorized_member(
         fleet_id,
-        agent_id,
         member_id,
     )
     member_id = target["agent_id"]
@@ -1147,7 +1140,7 @@ def member_capture(ctx, agent_id, member_id, lines, ansi):
     hidden=True,
 )
 @click.pass_context
-def member_send_input(ctx, agent_id, member_id, choice, freetext):
+def member_send_input(ctx, member_id, choice, freetext):
     """Safely forward a restricted keystroke to a member pane."""
     _require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
@@ -1171,7 +1164,6 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
 
     target, placement = _load_authorized_member(
         fleet_id,
-        agent_id,
         member_id,
     )
     member_id = target["agent_id"]
@@ -1209,7 +1201,7 @@ def member_send_input(ctx, agent_id, member_id, choice, freetext):
 @_director_member_options
 @click.argument("command")
 @click.pass_context
-def member_exec(ctx, agent_id, member_id, command):
+def member_exec(ctx, member_id, command):
     """Dispatch a shell command via the coding agent's `!` shortcut."""
     _require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
@@ -1224,7 +1216,6 @@ def member_exec(ctx, agent_id, member_id, command):
 
     target, placement = _load_authorized_member(
         fleet_id,
-        agent_id,
         member_id,
     )
     member_id = target["agent_id"]
@@ -1255,7 +1246,7 @@ def member_exec(ctx, agent_id, member_id, command):
 @_director_member_options
 @_quiet_flag
 @click.pass_context
-def member_ping(ctx, agent_id, member_id, quiet):
+def member_ping(ctx, member_id, quiet):
     """Inject an inbox-poll keystroke into a member's pane (Director-only)."""
     _require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
@@ -1264,7 +1255,6 @@ def member_ping(ctx, agent_id, member_id, quiet):
 
     target, placement = _load_authorized_member(
         fleet_id,
-        agent_id,
         member_id,
     )
     member_id = target["agent_id"]

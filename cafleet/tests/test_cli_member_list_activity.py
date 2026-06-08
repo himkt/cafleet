@@ -84,7 +84,7 @@ def test_member_list_no_activity_flag__omits_activity_keys(bootstrapped_team):
     """Default ``cafleet member list`` MUST keep the baseline JSON shape — no
     ``last_sent`` / ``last_recv`` / ``last_ack`` / ``idle`` keys. This guards
     against accidental wire-shape regressions for downstream JSON consumers."""
-    sid, director_id, _members, runner = bootstrapped_team
+    sid, _director_id, _members, runner = bootstrapped_team
 
     result = runner.invoke(
         cli,
@@ -94,8 +94,6 @@ def test_member_list_no_activity_flag__omits_activity_keys(bootstrapped_team):
             "--json",
             "member",
             "list",
-            "--agent-id",
-            str(director_id),
         ],
     )
     assert result.exit_code == 0, result.output
@@ -108,11 +106,10 @@ def test_member_list_no_activity_flag__omits_activity_keys(bootstrapped_team):
         assert "idle" not in row
 
 
-# --- with --activity ---
-
-
-def test_member_list_activity_flag__json_emits_activity_keys(bootstrapped_team):
-    sid, director_id, _members, runner = bootstrapped_team
+def test_member_list__scoped_by_fleet_id_lists_members_excludes_root(bootstrapped_team):
+    """``member list`` takes only the global ``--fleet-id`` (no ``--agent-id``):
+    it lists every member of the fleet and never surfaces the root Director."""
+    sid, director_id, members, runner = bootstrapped_team
 
     result = runner.invoke(
         cli,
@@ -122,8 +119,49 @@ def test_member_list_activity_flag__json_emits_activity_keys(bootstrapped_team):
             "--json",
             "member",
             "list",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    rows = json.loads(result.output)
+    listed_ids = {row["agent_id"] for row in rows}
+    assert listed_ids == set(members)
+    assert director_id not in listed_ids
+
+
+def test_member_list__agent_id_flag_removed(bootstrapped_team):
+    """``member list`` no longer accepts ``--agent-id`` — Click rejects it with
+    its standard 'no such option' error (exit 2)."""
+    sid, _director_id, _members, runner = bootstrapped_team
+
+    result = runner.invoke(
+        cli,
+        [
+            "--fleet-id",
+            str(sid),
+            "member",
+            "list",
             "--agent-id",
-            str(director_id),
+            "999",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    assert "no such option" in (result.output or "").lower()
+
+
+# --- with --activity ---
+
+
+def test_member_list_activity_flag__json_emits_activity_keys(bootstrapped_team):
+    sid, _director_id, _members, runner = bootstrapped_team
+
+    result = runner.invoke(
+        cli,
+        [
+            "--fleet-id",
+            str(sid),
+            "--json",
+            "member",
+            "list",
             "--activity",
         ],
     )
@@ -142,7 +180,7 @@ def test_member_list_activity_flag__none_for_silent_members(bootstrapped_team):
     """A member with zero send/receive history MUST have all four activity
     fields rendered as ``null`` in JSON mode (not omitted, not the empty
     string) so downstream parsers can apply uniform null-checks."""
-    sid, director_id, _members, runner = bootstrapped_team
+    sid, _director_id, _members, runner = bootstrapped_team
 
     result = runner.invoke(
         cli,
@@ -152,8 +190,6 @@ def test_member_list_activity_flag__none_for_silent_members(bootstrapped_team):
             "--json",
             "member",
             "list",
-            "--agent-id",
-            str(director_id),
             "--activity",
         ],
     )
@@ -172,7 +208,7 @@ def test_member_list_activity_flag__activity_visible_after_send(bootstrapped_tea
     transition from null to a non-null timestamp string. The exact value is
     derived from ``status_timestamp`` (broker-controlled) so we only assert
     presence + non-null."""
-    sid, director_id, members, runner = bootstrapped_team
+    sid, _director_id, members, runner = bootstrapped_team
     alice, bob, _carol = members
 
     sent = broker.send_message(sid, alice, bob, "hello")
@@ -185,8 +221,6 @@ def test_member_list_activity_flag__activity_visible_after_send(bootstrapped_tea
             "--json",
             "member",
             "list",
-            "--agent-id",
-            str(director_id),
             "--activity",
         ],
     )
@@ -205,7 +239,7 @@ def test_member_list_activity_flag__text_mode_includes_activity_columns(
     """Text-mode rendering with ``--activity`` MUST advertise the four
     activity columns in the header so an operator scanning ``cafleet member
     list --activity`` immediately understands what they're looking at."""
-    sid, director_id, _members, runner = bootstrapped_team
+    sid, _director_id, _members, runner = bootstrapped_team
 
     result = runner.invoke(
         cli,
@@ -214,8 +248,6 @@ def test_member_list_activity_flag__text_mode_includes_activity_columns(
             str(sid),
             "member",
             "list",
-            "--agent-id",
-            str(director_id),
             "--activity",
         ],
     )
@@ -234,7 +266,7 @@ def test_member_list_activity_flag__text_mode_default_omits_activity_columns(
     """Text-mode rendering WITHOUT ``--activity`` MUST keep the existing
     column set — no ``last_sent`` / ``last_recv`` / ``last_ack`` / ``idle``
     headers. This guards against the formatter being switched globally."""
-    sid, director_id, _members, runner = bootstrapped_team
+    sid, _director_id, _members, runner = bootstrapped_team
 
     result = runner.invoke(
         cli,
@@ -243,8 +275,6 @@ def test_member_list_activity_flag__text_mode_default_omits_activity_columns(
             str(sid),
             "member",
             "list",
-            "--agent-id",
-            str(director_id),
         ],
     )
     assert result.exit_code == 0, result.output

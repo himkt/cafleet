@@ -179,14 +179,16 @@ def test_message_poll_auth_check__accepts_valid_agent(
     runner, fleet_id, agent_id, monkeypatch
 ):
     verify_calls: list[tuple] = []
-    poll_calls: list[tuple] = []
+    poll_calls: list[int] = []
 
     def fake_verify(aid, sid):
         verify_calls.append((aid, sid))
         return True
 
-    def fake_poll_tasks(aid, **kwargs):
-        poll_calls.append((aid, kwargs))
+    # No-kwargs signature: the reshaped CLI calls ``broker.poll_tasks(agent_id)``
+    # with no ``--since`` / ``--page-size`` to forward.
+    def fake_poll_tasks(aid):
+        poll_calls.append(aid)
         return []
 
     monkeypatch.setattr(broker, "verify_agent_fleet", fake_verify)
@@ -206,8 +208,28 @@ def test_message_poll_auth_check__accepts_valid_agent(
     )
     assert result.exit_code == 0, result.output
     assert verify_calls == [(agent_id, fleet_id)]
-    assert len(poll_calls) == 1
-    assert poll_calls[0][0] == agent_id
+    assert poll_calls == [agent_id]
+
+
+@pytest.mark.parametrize("removed_flag", ["--since", "--page-size"])
+def test_message_poll__removed_flags_rejected(runner, fleet_id, agent_id, removed_flag):
+    """``message poll`` no longer accepts ``--since`` / ``--page-size`` —
+    Click rejects them with its standard 'no such option' error (exit 2)."""
+    result = runner.invoke(
+        cli,
+        [
+            "--fleet-id",
+            str(fleet_id),
+            "message",
+            "poll",
+            "--agent-id",
+            str(agent_id),
+            removed_flag,
+            "2026-01-01T00:00:00+00:00",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    assert "no such option" in (result.output or "").lower()
 
 
 # --- message_ack_auth_check: ``message ack`` must gate its ``broker.ack_task``

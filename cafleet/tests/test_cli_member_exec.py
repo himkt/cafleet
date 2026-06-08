@@ -9,10 +9,8 @@ from cafleet import broker
 from cafleet.cli import cli
 from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
 from tests._member_cli_helpers import (
-    DIRECTOR_ID,
     MEMBER_ID,
     MEMBER_NAME,
-    OTHER_DIRECTOR_ID,
     PANE_ID,
     _agent,
     _placement,
@@ -66,8 +64,6 @@ def _invoke(runner, fleet_id, *extra_args, **invoke_kwargs):
             str(fleet_id),
             "member",
             "exec",
-            "--agent-id",
-            str(DIRECTOR_ID),
             "--member-id",
             str(MEMBER_ID),
             *extra_args,
@@ -109,8 +105,6 @@ def test_exec_dispatch__json_output_three_keys(
             "--json",
             "member",
             "exec",
-            "--agent-id",
-            str(DIRECTOR_ID),
             "--member-id",
             str(MEMBER_ID),
             payload,
@@ -188,22 +182,26 @@ def test_authorization_boundary__placement_none_exits_one_with_exact_message(
     assert "cafleet member create" in out
 
 
-def test_authorization_boundary__cross_director_exits_one_with_exact_message(
-    runner, fleet_id, monkeypatch
-):
-    monkeypatch.setattr(
-        broker,
-        "get_agent",
-        lambda *_a, **_kw: _agent(
-            placement=_placement(director_agent_id=OTHER_DIRECTOR_ID)
-        ),
+def test_flag_removed__agent_id_no_longer_accepted(runner, fleet_id):
+    """``member exec`` no longer accepts ``--agent-id`` — the only boundary is
+    fleet isolation, so the caller carries no identity. Click rejects the flag
+    with its standard 'no such option' error (exit 2)."""
+    result = runner.invoke(
+        cli,
+        [
+            "--fleet-id",
+            str(fleet_id),
+            "member",
+            "exec",
+            "--agent-id",
+            "999",
+            "--member-id",
+            str(MEMBER_ID),
+            "git log -1",
+        ],
     )
-    result = _invoke(runner, fleet_id, "git log -1")
-    assert result.exit_code == 1, result.output
-    out = result.output or ""
-    assert f"agent {MEMBER_ID}" in out
-    assert "is not a member of your team" in out
-    assert str(OTHER_DIRECTOR_ID) in out
+    assert result.exit_code == 2, result.output
+    assert "no such option" in (result.output or "").lower()
 
 
 def test_authorization_boundary__pending_pane_exits_one_with_exact_message(

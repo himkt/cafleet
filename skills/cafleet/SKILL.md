@@ -12,7 +12,7 @@ This file (the core) covers the identity / poll / send / ack / cancel / show lif
 
 - For Director-only commands (`member create`, `member delete`, `member list --activity`, `member capture`, `member send-input`, `member exec`, `member ping`, plus the AskUserQuestion three-beat workflow), Read [`reference/director.md`](reference/director.md).
 - For broadcast send/ack and threading via `origin_task_id`, Read [`reference/broadcast.md`](reference/broadcast.md).
-- For the bash-via-Director fallback protocol (member-side reconsider-then-route, Director-side `member exec` dispatch, serialization, cross-Director boundary), Read [`reference/exec-routing.md`](reference/exec-routing.md).
+- For the bash-via-Director fallback protocol (member-side reconsider-then-route, Director-side `member exec` dispatch, serialization, cross-fleet boundary), Read [`reference/exec-routing.md`](reference/exec-routing.md).
 - For crash / disconnect / idle / wedged-pane recovery decision trees AND the Shutdown Protocol, Read [`reference/recovery.md`](reference/recovery.md).
 - For `--full` / `--json` / `--quiet` opt-back-in semantics and `CAFLEET_MAX_TEXT_LEN`, Read [`reference/output-flags.md`](reference/output-flags.md).
 
@@ -67,7 +67,7 @@ Only `--json`, `--fleet-id`, and `--version` are global (before the subcommand).
 
 ```bash
 cafleet --fleet-id <fleet-id> --json agent register --name "My Agent" --description "..."
-cafleet --fleet-id <fleet-id> --json agent list --agent-id <my-agent-id>
+cafleet --fleet-id <fleet-id> --json agent list
 cafleet --fleet-id <fleet-id> --json message poll --agent-id <my-agent-id>
 ```
 
@@ -132,22 +132,16 @@ The recipient's coding agent processes the keystroked text as a fresh user-turn 
 
 ## Poll (Check Inbox)
 
-Poll for incoming messages. Returns tasks addressed to this agent.
+Poll for incoming messages. Returns only un-acked (`input_required`) deliveries addressed to this agent, newest first — once a task is ACKed it no longer appears in `poll` output.
 
 ```bash
 cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
-cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --since "2026-03-28T12:00:00+00:00"
-cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --page-size 10
 cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --full
 ```
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--since <iso8601>` | no | Filter tasks at or after this `status_timestamp`. |
-| `--page-size <int>` | no | Cap the number of returned tasks. |
 | `--full` | no | Disable body truncation; emit the full typed-column envelope for every task. |
-
-`--since` accepts an ISO 8601 timestamp. The broker stores `status_timestamp` via `datetime.now(UTC).isoformat(timespec='microseconds')`, which renders as `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` (microsecond precision, `+00:00` suffix — **not** `Z`). The filter is applied as a raw SQLite TEXT comparison, so pass timestamps in the same `+00:00` form for correct lexicographic ordering.
 
 ## Acknowledge (ACK)
 
@@ -195,7 +189,7 @@ cafleet --fleet-id <fleet-id> message show --agent-id <my-agent-id> --task-id <t
 `agent list` returns all registered agents in the fleet. To fetch detail for a single agent, use `agent show --id <target-agent-id>`.
 
 ```bash
-cafleet --fleet-id <fleet-id> agent list --agent-id <my-agent-id>
+cafleet --fleet-id <fleet-id> agent list
 cafleet --fleet-id <fleet-id> agent show --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
@@ -268,7 +262,7 @@ After soft-delete, the fleet is hidden from `cafleet fleet list` and further `ca
 
 3. **Discover** other agents:
    ```bash
-   cafleet --fleet-id <fleet-id> agent list --agent-id <my-agent-id>
+   cafleet --fleet-id <fleet-id> agent list
    ```
 
 4. **Send** a message:

@@ -81,7 +81,7 @@ def _record_run(monkeypatch, *, returns: str = "") -> list[list[str]]:
 def test_member_capture__default_lines_and_flag_aliases(
     bootstrapped_member, monkeypatch, scenario, extra_args, expected_argv_suffix
 ):
-    sid, director_id, member_id, _pane_id, runner = bootstrapped_member
+    sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
     calls = _record_run(monkeypatch)
     result = runner.invoke(
         cli,
@@ -90,8 +90,6 @@ def test_member_capture__default_lines_and_flag_aliases(
             sid,
             "member",
             "capture",
-            "--agent-id",
-            director_id,
             "--member-id",
             member_id,
             *extra_args,
@@ -137,15 +135,13 @@ def test_member_capture__ansi_handling(
     expect_in,
     expect_not_in,
 ):
-    sid, director_id, member_id, _pane_id, runner = bootstrapped_member
+    sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
         "--fleet-id",
         sid,
         "member",
         "capture",
-        "--agent-id",
-        director_id,
         "--member-id",
         member_id,
     ]
@@ -194,15 +190,13 @@ def test_member_capture__cr_defragmentation(
     expect_in,
     expect_not_in,
 ):
-    sid, director_id, member_id, _pane_id, runner = bootstrapped_member
+    sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
         "--fleet-id",
         sid,
         "member",
         "capture",
-        "--agent-id",
-        director_id,
         "--member-id",
         member_id,
     ]
@@ -219,7 +213,7 @@ def test_member_capture__cr_defragmentation(
 def test_member_capture__json_envelope_post_processed_and_lines_default(
     bootstrapped_member, monkeypatch
 ):
-    sid, director_id, member_id, _pane_id, runner = bootstrapped_member
+    sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
     raw = "\x1b[32mhello\x1b[0m\rworld\n"
     _record_run(monkeypatch, returns=raw)
     result = runner.invoke(
@@ -230,8 +224,6 @@ def test_member_capture__json_envelope_post_processed_and_lines_default(
             "--json",
             "member",
             "capture",
-            "--agent-id",
-            director_id,
             "--member-id",
             member_id,
         ],

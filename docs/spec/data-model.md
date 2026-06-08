@@ -120,7 +120,7 @@ Indexes:
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `agent_id` | `INTEGER` | `PRIMARY KEY` (no AUTOINCREMENT), `REFERENCES agents(agent_id) ON DELETE CASCADE` | The member agent. This is the parent `agents.agent_id` value reused as a 1:1 PK — it is **not** a freshly minted sequence, so AUTOINCREMENT is deliberately excluded. CASCADE ensures hard-delete of an agent (if any future path adds one) also removes the placement. |
-| `director_agent_id` | `INTEGER` | nullable, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The Director that spawned this member. RESTRICT prevents hard-deleting a Director with live placements. **NULL** for the fleet's root Director (it has no parent), set by `broker.create_fleet` at bootstrap time. Member placements always have a non-NULL value. |
+| `director_agent_id` | `INTEGER` | nullable, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The fleet's root Director — the single Director that owns every member. RESTRICT prevents hard-deleting a Director with live placements. For every member placement this always equals `fleets.director_agent_id` (the fleet root); it is **NULL** only for the root Director's own placement (it has no parent), set by `broker.create_fleet` at bootstrap time. Nested teams are forbidden — `broker.register_agent` rejects any member placement whose `director_agent_id` is not the fleet root. |
 | `tmux_session` | `TEXT` | `NOT NULL` | e.g. `'main'`, from `tmux display-message '#{session_name}'`. |
 | `tmux_window_id` | `TEXT` | `NOT NULL` | e.g. `'@3'`, from `#{window_id}`. |
 | `tmux_pane_id` | `TEXT` | nullable | e.g. `'%7'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set via `PATCH /api/v1/agents/{id}/placement` after `tmux split-window` succeeds. |
@@ -131,7 +131,7 @@ Indexes:
 
 | Name | Columns | Purpose |
 |---|---|---|
-| `idx_placements_director` | `(director_agent_id)` | List all members spawned by a specific Director. |
+| `idx_placements_director` | `(director_agent_id)` | List the fleet's members; every member placement's `director_agent_id` is the fleet root. |
 
 Placement rows are hard-deleted (not soft-deleted) when the agent is deregistered through any path. They have no historical value and must not outlive the agent they describe. Deregistration is handled in `RegistryStore.deregister_agent`.
 
@@ -164,7 +164,7 @@ Every storage operation is implemented as a single SQL statement (or, where atom
 | `create_agent_with_placement(…, placement)` | Single transaction: `INSERT INTO agents (…)` + optional `INSERT INTO agent_placements (…)`. Superset of `create_agent` (which delegates with `placement=None`). |
 | `get_placement(agent_id)` | `SELECT * FROM agent_placements WHERE agent_id = ?`. |
 | `update_placement_pane_id(agent_id, pane_id)` | `UPDATE agent_placements SET tmux_pane_id = ? WHERE agent_id = ?`. |
-| `list_placements_for_director(fleet_id, director_agent_id)` | `SELECT a.*, p.* FROM agents a JOIN agent_placements p ON a.agent_id = p.agent_id WHERE a.fleet_id = ? AND p.director_agent_id = ? AND a.status = 'active'`. |
+| `list_members(fleet_id)` | `SELECT a.*, p.* FROM agents a JOIN agent_placements p ON a.agent_id = p.agent_id WHERE a.fleet_id = ? AND p.director_agent_id IS NOT NULL AND a.status = 'active'` — `director_agent_id IS NOT NULL` selects every member and excludes the root Director's own placement. |
 
 ### `TaskStore`
 

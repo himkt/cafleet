@@ -9,10 +9,8 @@ from cafleet import broker
 from cafleet.cli import cli
 from cafleet.multiplexer.tmux import TmuxMultiplexer
 from tests._member_cli_helpers import (
-    DIRECTOR_ID,
     MEMBER_ID,
     MEMBER_NAME,
-    OTHER_DIRECTOR_ID,
     PANE_ID,
     _agent,
     _placement,
@@ -71,8 +69,6 @@ def _invoke(runner, fleet_id, *extra_args, json_output=False):
         [
             "member",
             "send-input",
-            "--agent-id",
-            str(DIRECTOR_ID),
             "--member-id",
             str(MEMBER_ID),
             *extra_args,
@@ -130,15 +126,6 @@ def test_flag_validation(
             [f"agent {MEMBER_ID}", "has no placement row", "cafleet member create"],
         ),
         (
-            "cross_director",
-            "cross_director_sentinel",
-            [
-                f"agent {MEMBER_ID}",
-                "is not a member of your team",
-                str(OTHER_DIRECTOR_ID),
-            ],
-        ),
-        (
             "pending_pane",
             "pending_pane_sentinel",
             [f"member {MEMBER_ID}", "has no pane yet", "pending placement"],
@@ -153,14 +140,6 @@ def test_authorization_boundary(
     elif agent_return == "placement_none_sentinel":
         monkeypatch.setattr(
             broker, "get_agent", lambda *_a, **_kw: _agent(placement=None)
-        )
-    elif agent_return == "cross_director_sentinel":
-        monkeypatch.setattr(
-            broker,
-            "get_agent",
-            lambda *_a, **_kw: _agent(
-                placement=_placement(director_agent_id=OTHER_DIRECTOR_ID)
-            ),
         )
     else:  # pending_pane
         monkeypatch.setattr(

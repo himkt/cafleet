@@ -147,7 +147,9 @@ def test_register_agent_placement__administrator_cannot_be_director(broker_sessi
     assert names == {"Director", "Administrator"}
 
 
-def test_register_agent_placement__user_director_path_still_works(broker_session):
+def test_register_agent_placement__non_root_user_director_rejected(broker_session):
+    """D1: a member placement naming a user-registered (non-root) director is
+    rejected — nested teams are forbidden; only the fleet root may own members."""
     fleet = _create_fleet_with_ctx()
     sid = fleet["fleet_id"]
     director = broker.register_agent(
@@ -160,11 +162,14 @@ def test_register_agent_placement__user_director_path_still_works(broker_session
         "tmux_pane_id": None,
         "coding_agent": "claude",
     }
-    member = broker.register_agent(
-        fleet_id=sid,
-        name="member",
-        description="member of a user director",
-        placement=placement,
-    )
-    fetched = broker.get_agent(member["agent_id"], sid)
-    assert fetched["placement"]["director_agent_id"] == director["agent_id"]
+    with pytest.raises(click.UsageError):
+        broker.register_agent(
+            fleet_id=sid,
+            name="member",
+            description="member of a non-root director",
+            placement=placement,
+        )
+
+    # The rejection MUST be transactional: no orphan member row remains.
+    names = {a["name"] for a in broker.list_agents(sid)}
+    assert "member" not in names

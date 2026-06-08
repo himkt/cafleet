@@ -57,13 +57,13 @@ When a Director receives a member's denial-fallback request:
 3. Dispatch via [`cafleet member exec`](director.md#member-exec):
    ```bash
    cafleet --fleet-id <fleet-id> member exec \
-     --agent-id <director-agent-id> --member-id <member-agent-id> \
+     --member-id <member-agent-id> \
      "<command>"
    ```
 4. **Immediately follow up with `cafleet member ping`** so the member's TUI advances its turn and consumes the bang-output as fresh context (see `member exec` § Required follow-up in `reference/director.md`):
    ```bash
    cafleet --fleet-id <fleet-id> member ping \
-     --agent-id <director-agent-id> --member-id <member-agent-id>
+     --member-id <member-agent-id>
    ```
 5. ACK the member's request message via `cafleet message ack --task-id <task-id>` so it does not re-fire on the next poll.
 
@@ -71,9 +71,9 @@ When a Director receives a member's denial-fallback request:
 
 Process member denial-fallback requests in **poll order, one at a time**. Two `member exec` dispatches firing concurrently against the same pane race the keystroke sequence and corrupt output. If you have multiple denial-fallback requests outstanding from different members, dispatch them sequentially: exec → ping → ack → next request. Inside a single member, exec → ping → exec → ping; never exec → exec.
 
-### Cross-Director boundary
+### Cross-fleet boundary
 
-`cafleet member exec` enforces `placement.director_agent_id == --agent-id` before any tmux call. A Director cannot dispatch into another Director's member — the CLI exits 1 with `Error: agent <member-id> is not a member of your team (director_agent_id=<other-director>).` (mirrors `member capture` / `member send-input` / `member delete`). If a denial-fallback request arrives from a member that is not on your team, do NOT forward it to the owning Director through your own `member exec` — the boundary check will reject. Instead reply to the member with a plain `cafleet message send` explaining that they messaged the wrong Director.
+`cafleet member exec` reaches any member of the same `--fleet-id` — there is no caller-auth check. The only boundary is fleet isolation: a `--member-id` that does not belong to `--fleet-id` exits 1 with `Error: Agent <member-id> not found`. A denial-fallback request from a member of your own fleet is always dispatchable; a request that names a member outside your fleet cannot be served (the `member exec` will return "not found"), so reply to the sender with a plain `cafleet message send` explaining the mismatch instead.
 
 ## Why no operator-prompts-for-routing
 
@@ -84,4 +84,4 @@ When a member offers the operator a list of options ("(1) you run it via `!`, (2
 The fallback has two perspectives. Read **only the file matching your role**:
 
 - **If you are a member** (spawned by `cafleet member create`) → read [`roles/member.md`](../roles/member.md). Covers the default "run it yourself via Bash" path, the reconsider-then-route protocol when Bash is denied, and forbidden behaviors.
-- **If you are a Director** → read [`roles/director.md`](../roles/director.md). Covers how to recognize a member's denial-fallback request, the `cafleet member exec` dispatch, the ping follow-up, and the cross-Director boundary.
+- **If you are a Director** → read [`roles/director.md`](../roles/director.md). Covers how to recognize a member's denial-fallback request, the `cafleet member exec` dispatch, the ping follow-up, and the cross-fleet boundary.

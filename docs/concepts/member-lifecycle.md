@@ -14,6 +14,14 @@ table.
 specific tmux pane, window, and session. The Director itself is NOT a member
 — it registers with plain `cafleet agent register`.
 
+**Single-Director invariant**: A fleet has exactly one Director — the root
+Director recorded in `fleets.director_agent_id` at `fleet create` time. Only
+that root Director may own members, so every member's
+`agent_placements.director_agent_id` equals the fleet root. A member can never
+be another member's Director: `broker.register_agent` rejects any member
+placement whose `director_agent_id` is not the fleet root. The team model is a
+single flat tier; there is no team nesting.
+
 ## Lifecycle state diagram
 
 ```mermaid
@@ -108,8 +116,11 @@ the lifetime of a `claude` pane.
 
 `member create`, `member delete`, `member list` (with `--activity` for
 per-member `last_sent` / `last_recv` / `last_ack` / `idle` aggregation),
-`member capture`, `member send-input`, `member exec`, `member ping`. All
-require `--agent-id` (the Director's ID). The `cafleet.multiplexer`
+`member capture`, `member send-input`, `member exec`, `member ping`.
+`member create` takes `--agent-id` (the spawning Director's ID, which must
+equal the fleet root); the others identify their target by `--member-id`,
+scoped to the global `--fleet-id` — a `--member-id` outside the fleet returns
+"not found". The `cafleet.multiplexer`
 subpackage isolates all subprocess interaction with the terminal
 multiplexer behind the `Multiplexer` Protocol; the `TmuxMultiplexer`
 concrete impl wraps every `tmux` invocation. Primitives for pane lifecycle
@@ -121,12 +132,13 @@ directly.
 `cafleet member exec` is the bash-routing primitive — see
 [Bash routing](bash-routing.md).
 
-## Write-path authorization
+## Write-path member resolution
 
 `cafleet member send-input` — a safe `tmux send-keys` wrapper for answering
-an `AskUserQuestion` prompt — reuses the exact `member capture`
-authorization boundary (`placement.director_agent_id == --agent-id`,
-non-null `tmux_pane_id`, placement row present). The CLI accepts exactly
+an `AskUserQuestion` prompt — reuses the exact `member capture` fleet-scoped
+member resolution (the target `--member-id` must belong to the global
+`--fleet-id`, with a non-null `tmux_pane_id` and a placement row present; a
+`--member-id` outside the fleet returns "not found"). The CLI accepts exactly
 one of `--choice {1,2,3}` (sends the matching digit key) or `--freetext
 "<text>"` (sends `4`, the literal text via tmux's `-l` flag, then `Enter` —
 `4` selects the "Type something" option). Both modes are AskUserQuestion-
@@ -140,11 +152,11 @@ and multi-byte characters pass through as literal input.
 
 `cafleet member exec <command>` is the Director-only shell-dispatch
 subcommand. It accepts a single required positional `CMD` argument, reuses
-the same authorization boundary as `member send-input`, and keystrokes
+the same fleet-scoped member resolution as `member send-input`, and keystrokes
 `! <command>` + `Enter` into the member's pane via
 `MULTIPLEXERS["tmux"].send_bash_command` so Claude Code's `!` shortcut runs
 the command natively. Empty / whitespace-only / newline-containing
-commands are rejected at the CLI handler with exit 2; cross-Director,
+commands are rejected at the CLI handler with exit 2; cross-fleet,
 missing-placement, and pending-placement rejections share their wording
 with `member send-input`.
 
