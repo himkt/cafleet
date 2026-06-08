@@ -128,11 +128,10 @@ def test_cli_agent_show_or_list__slim_and_full_shapes(
         "--json",
         "agent",
         verb,
-        "--agent-id",
-        str(director_id),
     ]
+    # ``agent show`` retains ``--agent-id``; ``agent list`` no longer accepts it.
     if verb == "show":
-        args.extend(["--id", str(director_id)])
+        args.extend(["--agent-id", str(director_id), "--id", str(director_id)])
     if mode == "full":
         args.append("--full")
     result = runner.invoke(cli, args)

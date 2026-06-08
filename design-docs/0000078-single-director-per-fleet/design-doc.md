@@ -1,7 +1,7 @@
 # Single Director per Fleet
 
 **Status**: Approved
-**Progress**: 26/49 tasks complete
+**Progress**: 49/49 tasks complete
 **Last Updated**: 2026-06-08
 
 ## Overview
@@ -227,49 +227,47 @@ Remove the `httpx` entry from `[dependency-groups].dev` in `cafleet/pyproject.to
 
 ### Step 8: broker — placement validation (D1)
 
-<!-- COMMENT(tester): The Step 13 register_agent tests keep the existing director-validation messages (director_not_found → "Director agent ... not found or not active", director_deregistered → "not active", director_cross_fleet → "Director agent") AND add a non-root-active-director → UsageError("nested teams") case. For ALL to hold, place the new root-equality check AFTER the existing director-active + Administrator checks (i.e. last in the placement-validation block), not before — a non-root id that is also missing/deregistered/cross-fleet must still surface its specific existing message. -->
-
-- [ ] In `broker.register_agent`, add the root-equality validation rejecting any member placement whose `director_agent_id != fleets.director_agent_id` (using the already-loaded `get_fleet` result), raising `click.UsageError` with the specified message. <!-- completed: -->
-- [ ] Update the `register_agent` docstring to state the single-Director invariant. <!-- completed: -->
+- [x] In `broker.register_agent`, add the root-equality validation rejecting any member placement whose `director_agent_id != fleets.director_agent_id` (using the already-loaded `get_fleet` result), raising `click.UsageError` with the specified message. <!-- completed: 2026-06-08T09:27 -->
+- [x] Update the `register_agent` docstring to state the single-Director invariant. <!-- completed: 2026-06-08T09:27 -->
 
 ### Step 9: broker — flat member listing (B1)
 
-- [ ] Drop the `director_agent_id` parameter from `_base_members_select`, `list_members`, and `list_members_with_activity`; replace the placement filter with `AgentPlacement.director_agent_id.is_not(None)` so members are listed and the root Director is excluded. <!-- completed: -->
-- [ ] Update the docstrings of all three to describe `fleet_id`-only scoping and the flat model. <!-- completed: -->
+- [x] Drop the `director_agent_id` parameter from `_base_members_select`, `list_members`, and `list_members_with_activity`; replace the placement filter with `AgentPlacement.director_agent_id.is_not(None)` so members are listed and the root Director is excluded. <!-- completed: 2026-06-08T09:27 -->
+- [x] Update the docstrings of all three to describe `fleet_id`-only scoping and the flat model. <!-- completed: 2026-06-08T09:27 -->
 
 ### Step 10: broker — poll reshape (A2)
 
-- [ ] Reshape `broker.poll_tasks` to `poll_tasks(agent_id)` returning `_list_tasks_where(Task.context_id == agent_id, status="input_required")`. <!-- completed: -->
-- [ ] Grep `broker.py` + tests for other callers of `poll_tasks` and `_list_tasks_where`; remove the now-dead `since` / `page_size` kwargs from `_list_tasks_where` if `poll_tasks` was their only consumer. <!-- completed: -->
+- [x] Reshape `broker.poll_tasks` to `poll_tasks(agent_id)` returning `_list_tasks_where(Task.context_id == agent_id, status="input_required")`. <!-- completed: 2026-06-08T09:27 -->
+- [x] Grep `broker.py` + tests for other callers of `poll_tasks` and `_list_tasks_where`; remove the now-dead `since` / `page_size` kwargs from `_list_tasks_where` if `poll_tasks` was their only consumer. <!-- completed: 2026-06-08T09:27 -->
 
 ### Step 11: cli — member list / authorization / poll / agent list
 
-- [ ] `member_list`: remove the `--agent-id` option entirely; call `broker.list_members(fleet_id)` / `list_members_with_activity(fleet_id)` scoped only by the global `--fleet-id`. <!-- completed: -->
-- [ ] `_load_authorized_member`: drop the `director_agent_id` parameter and BOTH former auth checks (caller-root and membership-assertion); resolve only the fleet-scoped member — raise "not found" when `get_agent` returns `None`, the placement-missing error when placement is `None` — then return `(target, placement)`. Update the docstring. <!-- completed: -->
-- [ ] Drop the `--agent-id` option and the `requires_agent_fleet` gate from `member_capture` / `member_send_input` / `member_exec` / `member_ping` / `member_delete`; each takes only `--member-id` (plus its own args). Update all five call sites to the new `_load_authorized_member(fleet_id, member_id)` signature. (`member_create` is unchanged — it keeps `--agent-id`.) <!-- completed: -->
-- [ ] `message_poll`: remove `--since` and `--page-size` options and params; call `broker.poll_tasks(agent_id)`. <!-- completed: -->
-- [ ] `agent_list`: remove the required `--agent-id` option and the `requires_agent_fleet` gate. <!-- completed: -->
+- [x] `member_list`: remove the `--agent-id` option entirely; call `broker.list_members(fleet_id)` / `list_members_with_activity(fleet_id)` scoped only by the global `--fleet-id`. <!-- completed: 2026-06-08T09:27 -->
+- [x] `_load_authorized_member`: drop the `director_agent_id` parameter and BOTH former auth checks (caller-root and membership-assertion); resolve only the fleet-scoped member — raise "not found" when `get_agent` returns `None`, the placement-missing error when placement is `None` — then return `(target, placement)`. Update the docstring. <!-- completed: 2026-06-08T09:27 -->
+- [x] Drop the `--agent-id` option and the `requires_agent_fleet` gate from `member_capture` / `member_send_input` / `member_exec` / `member_ping` / `member_delete`; each takes only `--member-id` (plus its own args). Update all five call sites to the new `_load_authorized_member(fleet_id, member_id)` signature. (`member_create` is unchanged — it keeps `--agent-id`.) <!-- completed: 2026-06-08T09:27 -->
+- [x] `message_poll`: remove `--since` and `--page-size` options and params; call `broker.poll_tasks(agent_id)`. <!-- completed: 2026-06-08T09:27 -->
+- [x] `agent_list`: remove the required `--agent-id` option and the `requires_agent_fleet` gate. <!-- completed: 2026-06-08T09:27 -->
 
 ### Step 12: Dependencies (A4)
 
-- [ ] Remove `httpx` from `[dependency-groups].dev` in `cafleet/pyproject.toml`; run `mise //:uv-sync`. <!-- completed: -->
+- [x] Remove `httpx` from `[dependency-groups].dev` in `cafleet/pyproject.toml`; run `mise //:uv-sync`. <!-- completed: 2026-06-08T09:27 -->
 
 ### Step 13: Tests
 
-- [ ] `test_broker_member_activity.py`: invert `test_..._scoping_excludes_other_directors_...` so registering a member under a non-root `director_agent_id` is **rejected** by `register_agent`; add positive coverage that a member under the root succeeds and appears in `list_members`. Update all `list_members` / `list_members_with_activity` call sites and helpers to the new `fleet_id`-only signatures. <!-- completed: -->
-- [ ] Add a `broker.register_agent` test asserting a non-root placement `director_agent_id` raises `click.UsageError`. <!-- completed: -->
-- [ ] `poll_tasks` tests: remove the `--since` / `--page-size` (and broker `since` / `page_size`) coverage; add a test that `poll_tasks` returns only `input_required` tasks (acked/completed tasks excluded). <!-- completed: -->
-- [ ] `message poll` CLI tests: assert `--since` / `--page-size` are no longer accepted and that poll returns only un-acked deliveries. <!-- completed: -->
-- [ ] `member list` CLI tests: assert `member list --fleet-id <id>` (no `--agent-id`) lists members and excludes the root Director; drop any "non-root `--agent-id` rejected" assertion. <!-- completed: -->
-- [ ] `member capture` / `exec` / `ping` / `send-input` / `delete` CLI tests: drop `--agent-id` from every invocation; assert a cross-fleet `--member-id` returns "Agent {id} not found"; REMOVE every "non-root caller rejected" / cross-Director-rejection assertion (no caller-auth check remains). <!-- completed: -->
-- [ ] `agent list` CLI tests: drop `--agent-id` usage; assert the command lists fleet agents without it. <!-- completed: -->
+- [x] `test_broker_member_activity.py`: invert `test_..._scoping_excludes_other_directors_...` so registering a member under a non-root `director_agent_id` is **rejected** by `register_agent`; add positive coverage that a member under the root succeeds and appears in `list_members`. Update all `list_members` / `list_members_with_activity` call sites and helpers to the new `fleet_id`-only signatures. <!-- completed: 2026-06-08T09:00 -->
+- [x] Add a `broker.register_agent` test asserting a non-root placement `director_agent_id` raises `click.UsageError`. <!-- completed: 2026-06-08T09:00 -->
+- [x] `poll_tasks` tests: remove the `--since` / `--page-size` (and broker `since` / `page_size`) coverage; add a test that `poll_tasks` returns only `input_required` tasks (acked/completed tasks excluded). <!-- completed: 2026-06-08T09:00 -->
+- [x] `message poll` CLI tests: assert `--since` / `--page-size` are no longer accepted and that poll returns only un-acked deliveries. <!-- completed: 2026-06-08T09:00 -->
+- [x] `member list` CLI tests: assert `member list --fleet-id <id>` (no `--agent-id`) lists members and excludes the root Director; drop any "non-root `--agent-id` rejected" assertion. <!-- completed: 2026-06-08T09:00 -->
+- [x] `member capture` / `exec` / `ping` / `send-input` / `delete` CLI tests: drop `--agent-id` from every invocation; assert a cross-fleet `--member-id` returns "Agent {id} not found"; REMOVE every "non-root caller rejected" / cross-Director-rejection assertion (no caller-auth check remains). <!-- completed: 2026-06-08T09:00 -->
+- [x] `agent list` CLI tests: drop `--agent-id` usage; assert the command lists fleet agents without it. <!-- completed: 2026-06-08T09:00 -->
 
 ### Step 14: Verify
 
-- [ ] `mise //cafleet:lint` passes. <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` passes. <!-- completed: -->
-- [ ] `mise //cafleet:test` passes. <!-- completed: -->
-- [ ] Final grep sweep across `docs/`, `skills/`, `README.md`, `.claude/rules/`, `cafleet/src/`, and `cafleet/tests/` for "nested", "sub-team", "second-level", "cross-Director", "another Director", "multiple Director", "is not a member of your team", "--since", "--page-size", and `member (capture|send-input|exec|ping|delete) .*--agent-id` confirms no stale mentions remain — source code, comments, and docstrings included. <!-- completed: -->
+- [x] `mise //cafleet:lint` passes. <!-- completed: 2026-06-08T09:34 -->
+- [x] `mise //cafleet:typecheck` passes. <!-- completed: 2026-06-08T09:34 -->
+- [x] `mise //cafleet:test` passes. <!-- completed: 2026-06-08T09:34 -->
+- [x] Final grep sweep across `docs/`, `skills/`, `README.md`, `.claude/rules/`, `cafleet/src/`, and `cafleet/tests/` for "nested", "sub-team", "second-level", "cross-Director", "another Director", "multiple Director", "is not a member of your team", "--since", "--page-size", and `member (capture|send-input|exec|ping|delete) .*--agent-id` confirms no stale mentions remain — source code, comments, and docstrings included. The only `nested` mentions are the intentional D1 enforcement (broker rejection message/docstring) and the Tester's regression-guard tests asserting nested teams are rejected — both permitted by the Removal Rule. <!-- completed: 2026-06-08T09:34 -->
 
 ---
 

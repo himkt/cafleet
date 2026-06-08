@@ -142,8 +142,6 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
     return [
         "member",
         "ping",
-        "--agent-id",
-        str(DIRECTOR_ID),
         "--member-id",
         str(MEMBER_ID),
     ]
