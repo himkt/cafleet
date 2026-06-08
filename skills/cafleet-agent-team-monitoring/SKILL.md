@@ -59,7 +59,7 @@ The fallback in use must be documented in the session's launch instructions. The
 
 On every supervision tick — whether fired by `/loop` (Claude Code) or by a fallback (codex or opencode), or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
 
-1. **Poll inbox.** `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>` (optionally with `--since <iso8601>` to filter to messages received since the last tick).
+1. **Poll inbox.** `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>` returns only the un-acked (`input_required`) deliveries; ACKing each one (step 2) consumes it, so the next tick's poll surfaces only what has arrived since.
 2. **ACK every message** that requires no further action: `cafleet --fleet-id <fleet-id> message ack --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.
 3. **Dispatch queued work.** If a member is idle and inputs are available (review comments to route, the next implementation step in a design doc, reviewer feedback waiting at the Drafter, a teammate reply waiting to be acted on), send the instruction immediately via `cafleet message send`. **Do not wait for a fresh "go" from the user** — the user's original authorization persists across ticks; see the `cafleet-agent-team-supervision` skill § Authorization-Scope Guard.
 4. **Run the health-check sequence** below for any member that has not reported recent progress.
@@ -71,9 +71,9 @@ Run this sequence once per supervision tick. Order matters — cheapest non-intr
 
 | Step | Command | Purpose |
 |---|---|---|
-| 1 | `cafleet --fleet-id <fleet-id> member list --agent-id <director-agent-id>` | Enumerate all live members and their pane status |
+| 1 | `cafleet --fleet-id <fleet-id> member list` | Enumerate all live members and their pane status |
 | 2 | `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>` | Check inbox for progress reports or help requests from members |
-| 3 | For each member with no recent message: `cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id>` | Terminal capture fallback — inspect what the member is doing when it has not reported in. If the capture shows an `AskUserQuestion`-style prompt, see Stall Response below for the `member send-input` escape hatch. |
+| 3 | For each member with no recent message: `cafleet --fleet-id <fleet-id> member capture --member-id <member-agent-id>` | Terminal capture fallback — inspect what the member is doing when it has not reported in. If the capture shows an `AskUserQuestion`-style prompt, see Stall Response below for the `member send-input` escape hatch. |
 | 4 | Based on findings, `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` to any stalled or idle member with a specific instruction | Drive the team forward |
 | 5 | When all members have reported completion (via messages or visible in terminal output), report to the user: "All deliverables are ready for review." | Signal completion to user |
 
@@ -86,11 +86,11 @@ Substitute the literal UUIDs into every `<fleet-id>`, `<director-agent-id>`, and
 ```
 Monitor team health (interval: 1 minute). For each member spawned via `cafleet member create`:
 
-1. Run `cafleet --fleet-id <fleet-id> --json member list --agent-id <director-agent-id>` to enumerate members.
-2. Run `cafleet --fleet-id <fleet-id> --json message poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check, with +00:00 suffix — not Z>"` to check incoming. ACK any progress reports.
-3. For each member that has NOT sent a message since last check, run `cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> --member-id <member-agent-id> --lines 200` to inspect their terminal.
+1. Run `cafleet --fleet-id <fleet-id> --json member list` to enumerate members.
+2. Run `cafleet --fleet-id <fleet-id> --json message poll --agent-id <director-agent-id>` to check incoming un-acked messages. ACK any progress reports — ACKing consumes them, so the next tick's poll returns only what has arrived since.
+3. For each member that has NOT sent a message since last check, run `cafleet --fleet-id <fleet-id> member capture --member-id <member-agent-id> --lines 200` to inspect their terminal.
 4. If a member's terminal shows no forward progress, send a specific instruction via `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Report your progress now. If blocked, state what is blocking you."`.
-5. If a member appears stalled despite a recent `message send` (auto-fire missed or pane was busy), re-poke its inbox via `cafleet --fleet-id <fleet-id> member ping --agent-id <director-agent-id> --member-id <member-agent-id>`.
+5. If a member appears stalled despite a recent `message send` (auto-fire missed or pane was busy), re-poke its inbox via `cafleet --fleet-id <fleet-id> member ping --member-id <member-agent-id>`.
 6. If all members have reported completion, report to the user: "All deliverables are ready for review."
 7. If a member has been nudged 2 times with no progress, escalate to the user.
 ```
@@ -115,16 +115,15 @@ When you receive any signal that a member may be stalled (loop check, idle notif
 ### Stage 1 — Message-based check (`cafleet message poll`)
 
 ```bash
-cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id> \
-  --since "2026-04-12T10:00:00+00:00"
+cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>
 ```
 
-The `--since` flag accepts an ISO 8601 timestamp. The broker stores `status_timestamp` via `datetime.now(UTC).isoformat()`, which renders as `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` (microsecond precision, `+00:00` suffix — **not** `Z`), and the `--since` filter is applied as a raw SQLite TEXT comparison, so pass timestamps in the same `+00:00` form to get correct ordering. If the member has sent a progress report or help request via `cafleet message send`, you can act on it immediately without interrupting the member's work. This is non-intrusive and preferred.
+`cafleet message poll` returns only the un-acked (`input_required`) deliveries addressed to the Director, newest first. ACKing a delivery consumes it, so a later poll surfaces only what has arrived since the last ACK — there is no last-tick timestamp to track. If the member has sent a progress report or help request via `cafleet message send`, you can act on it immediately without interrupting the member's work. This is non-intrusive and preferred.
 
 ### Stage 2 — Terminal capture fallback (`cafleet member capture`)
 
 ```bash
-cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member capture \
   --member-id <member-agent-id> --lines 120
 ```
 
@@ -143,11 +142,11 @@ If a member is still unresponsive after 2 nudges via `cafleet message send` AND 
 | Channel | Type | When to use |
 |---|---|---|
 | `cafleet ... message poll --agent-id <director-agent-id>` | Non-intrusive, message-based | First — check if the member has reported in |
-| `cafleet ... member capture --agent-id <director-agent-id>` | Non-intrusive, terminal snapshot | Second — when no messages, inspect what the member is doing |
+| `cafleet ... member capture --member-id <member-agent-id>` | Non-intrusive, terminal snapshot | Second — when no messages, inspect what the member is doing |
 | `cafleet ... message send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` | Interactive, authoritative | Third — send a specific instruction to unstick the member (broker keystrokes a 2-line inline preview of the message into the member's pane via `tmux.send_inline_preview` after persisting; no `cafleet message poll` invocation is in the auto-fire path) |
-| `cafleet ... member ping --agent-id <director-agent-id> --member-id <member-agent-id>` | Interactive, fixed-action keystroke | Director's pre-approved manual inbox-poll nudge — keystrokes `cafleet message poll` into the member's pane as a manual re-poke for the case where the broker's inline preview was missed. Two use cases: **(a)** a member appears stalled despite a recent `cafleet message send` (the inline preview was missed or the pane was busy when it arrived), or after a long idle window with a queued message still unread; **(b)** post-`member exec` chain — the Director MUST follow every successful `cafleet member exec` with this ping so the member's next turn fires immediately (see the `cafleet` skill § Member Exec for the chain definition; do not duplicate the wording). No positional argument, pre-approved in `permissions.allow`. Same authorization boundary as `capture` / `send-input` / `exec`. Failures surface as exit 1 (the auto-fire path swallows them silently). |
-| `cafleet ... member send-input --agent-id <director-agent-id> --member-id <member-agent-id> (--choice N \| --freetext "<text>")` | Interactive, restricted keystroke | `--choice` / `--freetext` answer an `AskUserQuestion`-shaped prompt — delegate the decision to the user via the Director's own `AskUserQuestion` tool call FIRST, then invoke the resolved command via the Director's Bash tool (the coding agent's native per-call permission prompt is the consent surface; never print a fenced `bash` block for the user to paste). See the cafleet skill's "Answer a member's AskUserQuestion prompt" section for the canonical three-beat workflow + pane-shapes table. Same authorization boundary as `capture`. |
-| `cafleet ... member exec --agent-id <director-agent-id> --member-id <member-agent-id> "<cmd>"` | Interactive, keystroke dispatch | Director-only shell-dispatch primitive — keystrokes `! <cmd>` + Enter into the member's pane via the coding agent's `!` shortcut (honored by both `claude` and `codex`). Shell-dispatch only — for inbox-poll-only nudges use `member ping`. See ping row for the required follow-up after every successful exec. Same authorization boundary as `capture` / `send-input`. See the `cafleet` skill § Routing Bash via the Director. |
-| `cafleet ... member delete --agent-id <director-agent-id> --member-id <member-agent-id> --force` | Interactive, destructive | When `member delete` has already exited 2 and `capture` + `send-input` have failed to unblock the pane — forces an atomic `kill_pane` + deregister + layout rebalance. Never fall back to raw `tmux kill-pane`. |
+| `cafleet ... member ping --member-id <member-agent-id>` | Interactive, fixed-action keystroke | Director's pre-approved manual inbox-poll nudge — keystrokes `cafleet message poll` into the member's pane as a manual re-poke for the case where the broker's inline preview was missed. Two use cases: **(a)** a member appears stalled despite a recent `cafleet message send` (the inline preview was missed or the pane was busy when it arrived), or after a long idle window with a queued message still unread; **(b)** post-`member exec` chain — the Director MUST follow every successful `cafleet member exec` with this ping so the member's next turn fires immediately (see the `cafleet` skill § Member Exec for the chain definition; do not duplicate the wording). No positional argument, pre-approved in `permissions.allow`. The only boundary is fleet isolation (cross-fleet `--member-id` → not found; no caller check), shared with `capture` / `send-input` / `exec`. Failures surface as exit 1 (the auto-fire path swallows them silently). |
+| `cafleet ... member send-input --member-id <member-agent-id> (--choice N \| --freetext "<text>")` | Interactive, restricted keystroke | `--choice` / `--freetext` answer an `AskUserQuestion`-shaped prompt — delegate the decision to the user via the Director's own `AskUserQuestion` tool call FIRST, then invoke the resolved command via the Director's Bash tool (the coding agent's native per-call permission prompt is the consent surface; never print a fenced `bash` block for the user to paste). See the cafleet skill's "Answer a member's AskUserQuestion prompt" section for the canonical three-beat workflow + pane-shapes table. The only boundary is fleet isolation, shared with `capture`. |
+| `cafleet ... member exec --member-id <member-agent-id> "<cmd>"` | Interactive, keystroke dispatch | Director-only shell-dispatch primitive — keystrokes `! <cmd>` + Enter into the member's pane via the coding agent's `!` shortcut (honored by both `claude` and `codex`). Shell-dispatch only — for inbox-poll-only nudges use `member ping`. See ping row for the required follow-up after every successful exec. The only boundary is fleet isolation, shared with `capture` / `send-input`. See the `cafleet` skill § Routing Bash via the Director. |
+| `cafleet ... member delete --member-id <member-agent-id> --force` | Interactive, destructive | When `member delete` has already exited 2 and `capture` + `send-input` have failed to unblock the pane — forces an atomic `kill_pane` + deregister + layout rebalance. Never fall back to raw `tmux kill-pane`. |
 | Process pending shell-command request from member | Blocking on member side | Dispatch via `cafleet member exec "<cmd>"` per the `cafleet` skill § Routing Bash via the Director. Don't skip past a member's request — the member sits idle until the keystroke lands. |
 | Escalate to user | Last resort | After 2 nudges + no progress in terminal |

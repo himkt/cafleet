@@ -87,7 +87,7 @@ If the best tool for a verification task is unavailable:
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet --fleet-id <fleet-id> member delete --agent-id <director-agent-id> --member-id <my-agent-id>`. The CLI sends `/exit` to your pane and waits up to 15 s for it to disappear.
+You are terminated by the Director via `cafleet --fleet-id <fleet-id> member delete --member-id <my-agent-id>`. The CLI sends `/exit` to your pane and waits up to 15 s for it to disappear.
 
 You do NOT need to handle any `shutdown_request` JSON message — that is the in-process Agent Teams primitive. The CAFleet equivalent is `/exit`, dispatched by the Director through the tmux push primitive. When you receive `/exit`, your `claude` process terminates immediately; nothing is required of you.
 

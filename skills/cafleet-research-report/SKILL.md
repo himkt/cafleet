@@ -315,14 +315,14 @@ Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Orde
 1. **Cancel the `/loop` monitor** with `CronDelete <job-id>`. The cron must stop firing BEFORE any member is deleted; a cron that keeps polling a tearing-down fleet spams `Error: fleet is deleted` and races with member-delete.
 2. **Delete every member** in dependency order — Researchers first, then any active Scout, then the Manager:
    ```bash
-   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [researcher-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [scout-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [manager-agent-id]
+   cafleet --fleet-id [fleet-id] member delete --member-id [researcher-agent-id]
+   cafleet --fleet-id [fleet-id] member delete --member-id [scout-agent-id]
+   cafleet --fleet-id [fleet-id] member delete --member-id [manager-agent-id]
    ```
    Each call sends `/exit` to the pane and waits up to 15 s for it to close. On exit 2 (timeout), the pane buffer tail is printed on stderr — inspect with `cafleet member capture`, answer any prompt with `cafleet member send-input`, then re-run. As a last resort, rerun with `--force` to skip the wait and kill-pane immediately.
 3. **Verify the roster is empty**:
    ```bash
-   cafleet --fleet-id [fleet-id] member list --agent-id [director-agent-id]
+   cafleet --fleet-id [fleet-id] member list
    ```
    If anyone remains, repeat step 2 for that member.
 4. **Delete the fleet**:

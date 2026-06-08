@@ -73,7 +73,7 @@ Codex CLI honors a leading-`!` shell shortcut on its input line — typing `! <c
 `claude --name <member-name>` sets the tmux pane title via Claude Code's internal title-emit. **Neither `codex` nor `opencode` has an equivalent flag.** Codex panes display whatever default title `codex` emits (typically the binary name). This is intentional — pane discovery for all three backends goes through `cafleet member list`:
 
 ```bash
-cafleet --fleet-id <fleet-id> member list --agent-id <director-agent-id>
+cafleet --fleet-id <fleet-id> member list
 ```
 
 The `pane_id` column is ground truth. For mixed-backend teams in particular, do NOT rely on tmux pane titles to find a specific member's pane.
@@ -91,19 +91,19 @@ cafleet --fleet-id $FLEET member create --agent-id $DIRECTOR \
 cafleet --fleet-id $FLEET member create --agent-id $DIRECTOR \
   --name Codex-Smoke --description "codex smoke member" --coding-agent codex
 
-cafleet --fleet-id $FLEET member list --agent-id $DIRECTOR
+cafleet --fleet-id $FLEET member list
 # Expect: two rows, backend column shows 'claude' and 'codex' respectively.
 
 cafleet --fleet-id $FLEET message send --agent-id $DIRECTOR \
   --to <codex-member-id> --text "ping"
 # Expect: codex pane receives the poll trigger and the member ack-loops correctly.
 
-cafleet --fleet-id $FLEET member exec --agent-id $DIRECTOR \
+cafleet --fleet-id $FLEET member exec \
   --member-id <codex-member-id> "git status --short"
 # Expect: '! git status --short' lands in the codex pane and the command runs.
 
-cafleet --fleet-id $FLEET member delete --agent-id $DIRECTOR --member-id <codex-member-id>
-cafleet --fleet-id $FLEET member delete --agent-id $DIRECTOR --member-id <claude-member-id>
+cafleet --fleet-id $FLEET member delete --member-id <codex-member-id>
+cafleet --fleet-id $FLEET member delete --member-id <claude-member-id>
 cafleet fleet delete $FLEET
 ```
 

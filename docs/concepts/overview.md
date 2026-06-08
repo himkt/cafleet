@@ -67,9 +67,9 @@ is involved for CLI commands.
 | `agent list` | `broker.list_agents()` → SELECT agents WHERE active |
 | `agent show --id <x>` | `broker.get_agent()` → SELECT agent + placement |
 | `agent deregister` | `broker.deregister_agent()` → UPDATE status + DELETE placement |
-| `member send-input` | `broker.get_agent()` → authorization check + `MULTIPLEXERS["tmux"].send_choice_key` / `send_freetext_and_submit`. |
-| `member exec` | `broker.get_agent()` → authorization check + `MULTIPLEXERS["tmux"].send_bash_command`. Director-only shell-dispatch primitive. See [Bash routing](bash-routing.md). |
-| `member ping` | `broker.get_agent()` → authorization check + `MULTIPLEXERS["tmux"].send_poll_trigger`. Director-only manual inbox-poll nudge. |
+| `member send-input` | `broker.get_agent()` → fleet-scoped member lookup + `MULTIPLEXERS["tmux"].send_choice_key` / `send_freetext_and_submit`. |
+| `member exec` | `broker.get_agent()` → fleet-scoped member lookup + `MULTIPLEXERS["tmux"].send_bash_command`. Director-only shell-dispatch primitive. See [Bash routing](bash-routing.md). |
+| `member ping` | `broker.get_agent()` → fleet-scoped member lookup + `MULTIPLEXERS["tmux"].send_poll_trigger`. Director-only manual inbox-poll nudge. |
 | `db init` | Alembic `upgrade head` |
 
 ## CLI option sources

@@ -71,15 +71,15 @@ For the **inbox-poll-only nudge case** (the monitoring loop wants the member to 
 
 ```bash
 cafleet --fleet-id <fleet-id> member ping \
-  --agent-id <director-agent-id> --member-id <member-agent-id>
+  --member-id <member-agent-id>
 ```
 
 For the **shell-dispatch fallback** (a member auto-routed a denied command and needs the Director to dispatch arbitrary shell on its behalf), the Director's primitive is `cafleet member exec`. This subcommand carries the operator-controlled command as a positional argument, so it remains under `permissions.ask` for per-call confirmation:
 
 ```bash
 cafleet --fleet-id <fleet-id> member exec \
-  --agent-id <director-agent-id> --member-id <member-agent-id> \
+  --member-id <member-agent-id> \
   "<command>"
 ```
 
-See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full shell-dispatch protocol, serialization rules, and cross-Director boundary.
+See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full shell-dispatch protocol, serialization rules, and the cross-fleet boundary (a `--member-id` outside `--fleet-id` returns "not found"; there is no caller-auth check — any agent in the fleet is a valid target).

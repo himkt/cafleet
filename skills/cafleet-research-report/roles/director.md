@@ -129,11 +129,11 @@ Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*:
 1. Cancel every active `/loop` monitor via `CronDelete <job-id>` BEFORE deleting any member.
 2. Delete each member in dependency order — Researchers first, then any active Scout, then the Manager. The `--member-id` flag takes the target member's `agent_id` UUID (the value `cafleet member create` printed at spawn — the same identifier you use as `--to [member-agent-id]` in `cafleet message send`):
    ```bash
-   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [researcher-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [scout-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [manager-agent-id]
+   cafleet --fleet-id [fleet-id] member delete --member-id [researcher-agent-id]
+   cafleet --fleet-id [fleet-id] member delete --member-id [scout-agent-id]
+   cafleet --fleet-id [fleet-id] member delete --member-id [manager-agent-id]
    ```
    Each call sends `/exit` and waits 15 s. On exit 2 (timeout), inspect with `cafleet member capture`, answer prompts via `cafleet member send-input`, then re-run — or escalate to `--force` to skip the wait.
-3. Verify the roster is empty: `cafleet --fleet-id [fleet-id] member list --agent-id [director-agent-id]` must return zero members.
+3. Verify the roster is empty: `cafleet --fleet-id [fleet-id] member list` must return zero members.
 4. Run `cafleet fleet delete [fleet-id]` (positional, no `--fleet-id` flag) to soft-delete the fleet and deregister the root Director and Administrator atomically.
 5. Confirm with `cafleet fleet list` — the current fleet must not appear.

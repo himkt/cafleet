@@ -29,4 +29,4 @@ Members must first reconsider whether the rejected command is correct and
 necessary — most denials are caused by a wrong command, not a missing
 privilege. The full convention, including the member-side reconsider step,
 the Director-side `member exec` dispatch, the serialization rules, and the
-cross-Director boundary, lives in `skills/cafleet/reference/exec-routing.md`.
+cross-fleet boundary, lives in `skills/cafleet/reference/exec-routing.md`.

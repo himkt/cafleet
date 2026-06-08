@@ -66,9 +66,9 @@ delay so all three backends (`claude`, `codex`, `opencode`) see the
 preview as a single user-turn message.
 
 If the recipient's TUI is in a non-input state, the keystroked preview
-lands wherever the cursor is (the same failure mode any pane keystroke has). The fallback chain is `cafleet member list --agent-id <d>
+lands wherever the cursor is (the same failure mode any pane keystroke has). The fallback chain is `cafleet member list
 --activity` (Director observes the recipient's `last_recv` column went
-stale), then `cafleet member ping --agent-id <d> --member-id <r>` (manual
+stale), then `cafleet member ping --member-id <r>` (manual
 re-poke that injects the `cafleet message poll` command + Enter so the recipient
 catches up via a normal `message poll` round-trip).
 

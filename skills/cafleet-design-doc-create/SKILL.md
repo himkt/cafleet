@@ -195,7 +195,7 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 | `SendMessage(to="Drafter")` | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from member) | `cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
 | `cafleet-agent-team-supervision` `/loop` | Load the `cafleet-agent-team-monitoring` skill (mechanism + `/loop`) and the `cafleet-agent-team-supervision` skill (governance), then run `/loop` from the `cafleet-agent-team-monitoring` skill |
-| `TeamDelete` | `cafleet --fleet-id <fleet-id> member delete --agent-id <director-agent-id> --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
+| `TeamDelete` | `cafleet --fleet-id <fleet-id> member delete --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
 ## Process
@@ -392,7 +392,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 #### 1f. Verify members are live
 
 ```bash
-cafleet --fleet-id <fleet-id> member list --agent-id <director-agent-id>
+cafleet --fleet-id <fleet-id> member list
 ```
 
 Both members must show `status: active` with a non-null `pane_id`. If either is missing or pending, retry the spawn before proceeding.

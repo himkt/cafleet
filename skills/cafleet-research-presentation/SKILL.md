@@ -275,7 +275,7 @@ while start <= total_slides:
     cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
         --to [vr-batch-agent-id] --text "CLOSE: run `bun run agent-browser --session vr-batch-<start> close`, then reply 'closed'."
     wait for the VR's "closed" confirmation via cafleet message poll
-    cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [vr-batch-agent-id]
+    cafleet --fleet-id [fleet-id] member delete --member-id [vr-batch-agent-id]
     start = end + 1
 ```
 
@@ -348,12 +348,12 @@ Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Orde
 1. **Cancel the `/loop` monitor** with `CronDelete <job-id>`. The cron must stop firing BEFORE any member is deleted; a cron that keeps polling a tearing-down fleet spams `Error: fleet is deleted`.
 2. **Delete every member** — Presentation, Transcript, and any active VR batch. For any active VR batch, run the explicit close handshake first (Director sends `CLOSE:` via `cafleet message send`, VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`), THEN run `cafleet member delete`. Once all VR browser sessions are closed:
    ```bash
-   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [presentation-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [transcript-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --agent-id [director-agent-id] --member-id [vr-batch-agent-id]   # if still alive — only after the close handshake
+   cafleet --fleet-id [fleet-id] member delete --member-id [presentation-agent-id]
+   cafleet --fleet-id [fleet-id] member delete --member-id [transcript-agent-id]
+   cafleet --fleet-id [fleet-id] member delete --member-id [vr-batch-agent-id]   # if still alive — only after the close handshake
    ```
    Each call sends `/exit` and waits up to 15 s for the pane's `claude` process to exit. Do not rely on `/exit` to trigger any post-shutdown action — additional commands are not guaranteed to run after `/exit` arrives.
-3. **Verify the roster is empty**: `cafleet --fleet-id [fleet-id] member list --agent-id [director-agent-id]` must return zero members.
+3. **Verify the roster is empty**: `cafleet --fleet-id [fleet-id] member list` must return zero members.
 4. **Run the agent-browser safety net** to close any orphan browser sessions left behind:
    ```bash
    bun run agent-browser close --all

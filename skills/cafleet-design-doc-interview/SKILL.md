@@ -98,7 +98,7 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 | `SendMessage(to="Analyzer")` | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <analyzer-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from Analyzer) | `cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
 | `cafleet-agent-team-supervision` `/loop` | Load the `cafleet-agent-team-monitoring` skill (mechanism + `/loop`) and the `cafleet-agent-team-supervision` skill (governance), then run `/loop` from the `cafleet-agent-team-monitoring` skill |
-| `TeamDelete` | `cafleet --fleet-id <fleet-id> member delete --agent-id <director-agent-id> --member-id <analyzer-agent-id>`, then `cafleet fleet delete <fleet-id>` |
+| `TeamDelete` | `cafleet --fleet-id <fleet-id> member delete --member-id <analyzer-agent-id>`, then `cafleet fleet delete <fleet-id>` |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
 ## Process
@@ -200,8 +200,8 @@ The reply must be a flat numbered list following the format specified in [roles/
 The Analyzer is stateless — keeping it alive through the Q&A rounds wastes a pane and a monitor. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received:
 
 1. `CronDelete` the `/loop` monitor (cron ID recorded at Step 2b).
-2. `cafleet --fleet-id <fleet-id> member delete --agent-id <director-agent-id> --member-id <analyzer-agent-id>`. The call blocks until the pane is gone (15 s timeout); on exit 2, follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
-3. `cafleet --fleet-id <fleet-id> member list --agent-id <director-agent-id>` — the team's roster MUST be empty.
+2. `cafleet --fleet-id <fleet-id> member delete --member-id <analyzer-agent-id>`. The call blocks until the pane is gone (15 s timeout); on exit 2, follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
+3. `cafleet --fleet-id <fleet-id> member list` — the team's roster MUST be empty.
 4. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).
 5. `cafleet fleet list` — the fleet MUST not appear.
 

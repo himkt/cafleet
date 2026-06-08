@@ -1,8 +1,8 @@
 # Single Director per Fleet
 
 **Status**: Approved
-**Progress**: 0/49 tasks complete
-**Last Updated**: 2026-06-07
+**Progress**: 26/49 tasks complete
+**Last Updated**: 2026-06-08
 
 ## Overview
 
@@ -180,52 +180,54 @@ Remove the `httpx` entry from `[dependency-groups].dev` in `cafleet/pyproject.to
 
 ### Step 1: Concepts documentation
 
-- [ ] Update the team-model concept page(s) under `docs/concepts/` (e.g. `overview.md`, `member-lifecycle.md`) to state the single-Director-per-fleet invariant and that nested teams are forbidden; delete any "sub-team" / "multiple Directors" / "second-level Director" / nested-hierarchy language. <!-- completed: -->
-- [ ] In `docs/concepts/bash-routing.md`, reword the "cross-Director boundary" reference (~line 32) so it describes the bash-via-Director protocol and the cross-*fleet* boundary; remove the within-fleet cross-Director framing. <!-- completed: -->
-- [ ] Grep `docs/concepts/` for "nested", "sub-team", "multiple Director", "second-level", "cross-Director" and scrub each remaining hit. <!-- completed: -->
+- [x] Update the team-model concept page(s) under `docs/concepts/` (e.g. `overview.md`, `member-lifecycle.md`) to state the single-Director-per-fleet invariant and that nested teams are forbidden; delete any "sub-team" / "multiple Directors" / "second-level Director" / nested-hierarchy language. <!-- completed: 2026-06-08T08:52 -->
+- [x] In `docs/concepts/bash-routing.md`, reword the "cross-Director boundary" reference (~line 32) so it describes the bash-via-Director protocol and the cross-*fleet* boundary; remove the within-fleet cross-Director framing. <!-- completed: 2026-06-08T08:52 -->
+- [x] Grep `docs/concepts/` for "nested", "sub-team", "multiple Director", "second-level", "cross-Director" and scrub each remaining hit. <!-- completed: 2026-06-08T08:52 -->
 
 ### Step 2: Spec — data model
 
-- [ ] In `docs/spec/data-model.md`, rewrite the `agent_placements.director_agent_id` row (~line 123): it always equals `fleets.director_agent_id` (the fleet root) for members, and is `NULL` only for the root Director itself. State that nested teams are forbidden. <!-- completed: -->
-- [ ] Reword the `idx_placements_director` index purpose (~line 134) and the `list_placements_for_director` operation-mapping row (~line 167) to reflect the flat model (list the fleet's members; `director_agent_id` is the root). Align the operation-mapping signature with the new `list_members(fleet_id)`. <!-- completed: -->
+- [x] In `docs/spec/data-model.md`, rewrite the `agent_placements.director_agent_id` row (~line 123): it always equals `fleets.director_agent_id` (the fleet root) for members, and is `NULL` only for the root Director itself. State that nested teams are forbidden. <!-- completed: 2026-06-08T08:54 -->
+- [x] Reword the `idx_placements_director` index purpose (~line 134) and the `list_placements_for_director` operation-mapping row (~line 167) to reflect the flat model (list the fleet's members; `director_agent_id` is the root). Align the operation-mapping signature with the new `list_members(fleet_id)`. <!-- completed: 2026-06-08T08:54 -->
 
 ### Step 3: Spec — CLI options
 
-- [ ] In `docs/spec/cli-options.md`, confirm there are no `message poll --since` / `--page-size` rows to remove (those flags are documented in the skill files, not here — scrubbed in Step 6); ensure the `message poll` entry states it returns only un-acked (`input_required`) deliveries. <!-- completed: -->
-- [ ] Remove the `member list --agent-id` documentation entirely — the flag is dropped (like `agent list`); document `member list` as taking only the global `--fleet-id`. <!-- completed: -->
-- [ ] Remove the `--agent-id` row from the `agent list` documentation, and scrub the `agent list ... --agent-id ... not a member of --fleet-id` error-table line (`docs/spec/cli-options.md:685`). <!-- completed: -->
-- [ ] In `docs/spec/cli-options.md`, drop the `--agent-id` rows for all five director-side member subcommands (`capture` / `send-input` / `exec` / `ping` / `delete`); document each as taking only `--fleet-id` + `--member-id` (plus its own args), where `--member-id` may be any agent in the fleet (including the root Director) and a cross-fleet `--member-id` returns "Agent {id} not found". Remove the "across Directors" / "cross-Director" error-table rows for these commands (the only boundary is fleet isolation — there is no caller-auth error). <!-- completed: -->
+- [x] In `docs/spec/cli-options.md`, confirm there are no `message poll --since` / `--page-size` rows to remove (those flags are documented in the skill files, not here — scrubbed in Step 6); ensure the `message poll` entry states it returns only un-acked (`input_required`) deliveries. <!-- completed: 2026-06-08T09:05 -->
+- [x] Remove the `member list --agent-id` documentation entirely — the flag is dropped (like `agent list`); document `member list` as taking only the global `--fleet-id`. <!-- completed: 2026-06-08T09:05 -->
+- [x] Remove the `--agent-id` row from the `agent list` documentation, and scrub the `agent list ... --agent-id ... not a member of --fleet-id` error-table line (`docs/spec/cli-options.md:685`). <!-- completed: 2026-06-08T09:05 -->
+- [x] In `docs/spec/cli-options.md`, drop the `--agent-id` rows for all five director-side member subcommands (`capture` / `send-input` / `exec` / `ping` / `delete`); document each as taking only `--fleet-id` + `--member-id` (plus its own args), where `--member-id` may be any agent in the fleet (including the root Director) and a cross-fleet `--member-id` returns "Agent {id} not found". Remove the "across Directors" / "cross-Director" error-table rows for these commands (the only boundary is fleet isolation — there is no caller-auth error). <!-- completed: 2026-06-08T09:05 -->
 
 ### Step 4: Spec — WebUI API (A3)
 
-- [ ] Add a `docs/spec/webui-api.md` (or equivalent reference page) documenting every endpoint in `webui_api.py` — path, method, response shape, fleet-scoping — including `GET /agents/{id}/inbox` and `GET /agents/{id}/sent`. Link it from the docs index / nav if one exists. <!-- completed: -->
+- [x] Add a `docs/spec/webui-api.md` (or equivalent reference page) documenting every endpoint in `webui_api.py` — path, method, response shape, fleet-scoping — including `GET /agents/{id}/inbox` and `GET /agents/{id}/sent`. Link it from the docs index / nav if one exists. <!-- completed: 2026-06-08T09:08 -->
 
 ### Step 5: README & get-started guides
 
-- [ ] Scrub `README.md` of any multiple-Directors / nested-teams / sub-team / team-hierarchy language so it reflects the single-Director model. <!-- completed: -->
-- [ ] README documents neither `message poll --since`/`--page-size` nor `agent list --agent-id` (verified — only codex/opencode mentions, which stay) — no change needed there beyond the nested-teams scrub above. <!-- completed: -->
-- [ ] Update `docs/get-started/quickstart.md` (e.g. line 64, `cafleet ... agent list --agent-id ...`) to the new `agent list` surface (drop `--agent-id`). <!-- completed: -->
-- [ ] Audit `docs/get-started/configure.md` and the rest of `docs/get-started/` for `agent list --agent-id` and `message poll --since`/`--page-size` usage and scrub each hit. <!-- completed: -->
+- [x] Scrub `README.md` of any multiple-Directors / nested-teams / sub-team / team-hierarchy language so it reflects the single-Director model. <!-- completed: 2026-06-08T09:12 -->
+- [x] README documents neither `message poll --since`/`--page-size` nor `agent list --agent-id` (verified — only codex/opencode mentions, which stay) — no change needed there beyond the nested-teams scrub above. <!-- completed: 2026-06-08T09:12 -->
+- [x] Update `docs/get-started/quickstart.md` (e.g. line 64, `cafleet ... agent list --agent-id ...`) to the new `agent list` surface (drop `--agent-id`). <!-- completed: 2026-06-08T09:12 -->
+- [x] Audit `docs/get-started/configure.md` and the rest of `docs/get-started/` for `agent list --agent-id` and `message poll --since`/`--page-size` usage and scrub each hit. <!-- completed: 2026-06-08T09:12 -->
 
 ### Step 6: Skills
 
-- [ ] Repo-wide skills sweep: grep all of `skills/` for `member (capture|send-input|exec|ping|delete) .*--agent-id` and drop `--agent-id` from every hit so each shows only `--fleet-id` + `--member-id` (plus its own args) — **preserving every `member create --agent-id`** (unchanged). This MUST cover the core cafleet skill (`skills/cafleet/SKILL.md`, `reference/director.md`, `reference/exec-routing.md`, `reference/recovery.md`, `roles/director.md`, `roles/member.md`) AND every orchestration skill that drives a team: `cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision`, `cafleet-design-doc-create`, `cafleet-design-doc-execute`, `cafleet-design-doc-interview`, `cafleet-research-report`, `cafleet-research-presentation` (each including its `SKILL.md` and any `roles/director.md`). Reword every caller-auth / "cross-Director" boundary note to plain fleet isolation: a `--member-id` outside `--fleet-id` returns "Agent {id} not found", any in-fleet agent (including the root Director) is a valid target, and there is no caller validation. <!-- completed: -->
-- [ ] In `skills/cafleet/SKILL.md`, update the `agent list` example to drop `--agent-id`; reword the "cross-Director boundary" reference to the cross-fleet framing. <!-- completed: -->
-- [ ] In `skills/cafleet/SKILL.md`, delete every `--since` / `--page-size` mention — the `message poll` examples, the flag-table rows, and the `--since` ISO-8601 prose (~L139-150) — and update the "Poll (Check Inbox)" section to state poll now returns only un-acked (`input_required`) deliveries. <!-- completed: -->
-- [ ] In `skills/cafleet-agent-team-monitoring/SKILL.md`, rewrite the delta-polling health-check recipe (~L62, L90, L119, L122): because poll now returns only un-acked deliveries, the monitoring tick no longer tracks a last-tick `--since` timestamp — re-describe the loop as plain `message poll` → ACK consumes, deleting every `--since` reference rather than leaving a broken loop description. <!-- completed: -->
-- [ ] Delete the `--since` / `--page-size` mentions in `skills/cafleet-design-doc-create/roles/director.md` (~L59), `skills/cafleet-design-doc-execute/roles/director.md` (~L69), and `skills/cafleet-design-doc-execute/SKILL.md` (~L675, L765); update the `cafleet-design-doc-execute/SKILL.md:675` "team-health --since timestamp" cross-reference so it matches the rewritten monitoring recipe. <!-- completed: -->
-- [ ] In `skills/cafleet/reference/exec-routing.md`, rewrite the "Cross-Director boundary" section: there is no caller-auth boundary anymore — `member exec` reaches any member of the same `--fleet-id`, and a cross-fleet `--member-id` returns "not found". Remove the "another Director's member" framing. <!-- completed: -->
-- [ ] In `skills/cafleet/reference/director.md`, remove the `--agent-id` "(cross-Director authorization check)" note and the "Cross-Director delete" section entirely; document the member subcommands as `--member-id`-only with cross-fleet→not-found as the sole boundary. <!-- completed: -->
-- [ ] In `skills/cafleet/reference/recovery.md`, reword "cross-Director authorization boundary" to "cross-fleet authorization boundary" (fleet isolation; no caller check). <!-- completed: -->
-- [ ] In `skills/cafleet/roles/director.md` and `roles/member.md`, remove the within-fleet cross-Director-boundary references. <!-- completed: -->
-- [ ] In `skills/cafleet-agent-team-supervision/SKILL.md` and `skills/cafleet-agent-team-monitoring/SKILL.md`, scrub any "spawn sub-team" / nested-hierarchy / multi-Director language (do **not** touch the by-backend sections). <!-- completed: -->
-- [ ] Grep all of `skills/` for "nested", "sub-team", "second-level", "cross-Director", "another Director", "--since", "--page-size", and `member (capture|send-input|exec|ping|delete) .*--agent-id` and scrub each remaining hit. <!-- completed: -->
+- [x] Repo-wide skills sweep: grep all of `skills/` for `member (capture|send-input|exec|ping|delete) .*--agent-id` and drop `--agent-id` from every hit so each shows only `--fleet-id` + `--member-id` (plus its own args) — **preserving every `member create --agent-id`** (unchanged). This MUST cover the core cafleet skill (`skills/cafleet/SKILL.md`, `reference/director.md`, `reference/exec-routing.md`, `reference/recovery.md`, `roles/director.md`, `roles/member.md`) AND every orchestration skill that drives a team: `cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision`, `cafleet-design-doc-create`, `cafleet-design-doc-execute`, `cafleet-design-doc-interview`, `cafleet-research-report`, `cafleet-research-presentation` (each including its `SKILL.md` and any `roles/director.md`). Reword every caller-auth / "cross-Director" boundary note to plain fleet isolation: a `--member-id` outside `--fleet-id` returns "Agent {id} not found", any in-fleet agent (including the root Director) is a valid target, and there is no caller validation. <!-- completed: 2026-06-08T09:15 -->
+- [x] In `skills/cafleet/SKILL.md`, update the `agent list` example to drop `--agent-id`; reword the "cross-Director boundary" reference to the cross-fleet framing. <!-- completed: 2026-06-08T09:15 -->
+- [x] In `skills/cafleet/SKILL.md`, delete every `--since` / `--page-size` mention — the `message poll` examples, the flag-table rows, and the `--since` ISO-8601 prose (~L139-150) — and update the "Poll (Check Inbox)" section to state poll now returns only un-acked (`input_required`) deliveries. <!-- completed: 2026-06-08T09:15 -->
+- [x] In `skills/cafleet-agent-team-monitoring/SKILL.md`, rewrite the delta-polling health-check recipe (~L62, L90, L119, L122): because poll now returns only un-acked deliveries, the monitoring tick no longer tracks a last-tick `--since` timestamp — re-describe the loop as plain `message poll` → ACK consumes, deleting every `--since` reference rather than leaving a broken loop description. <!-- completed: 2026-06-08T09:15 -->
+- [x] Delete the `--since` / `--page-size` mentions in `skills/cafleet-design-doc-create/roles/director.md` (~L59), `skills/cafleet-design-doc-execute/roles/director.md` (~L69), and `skills/cafleet-design-doc-execute/SKILL.md` (~L675, L765); update the `cafleet-design-doc-execute/SKILL.md:675` "team-health --since timestamp" cross-reference so it matches the rewritten monitoring recipe. <!-- completed: 2026-06-08T09:15 -->
+- [x] In `skills/cafleet/reference/exec-routing.md`, rewrite the "Cross-Director boundary" section: there is no caller-auth boundary anymore — `member exec` reaches any member of the same `--fleet-id`, and a cross-fleet `--member-id` returns "not found". Remove the "another Director's member" framing. <!-- completed: 2026-06-08T09:15 -->
+- [x] In `skills/cafleet/reference/director.md`, remove the `--agent-id` "(cross-Director authorization check)" note and the "Cross-Director delete" section entirely; document the member subcommands as `--member-id`-only with cross-fleet→not-found as the sole boundary. <!-- completed: 2026-06-08T09:15 -->
+- [x] In `skills/cafleet/reference/recovery.md`, reword "cross-Director authorization boundary" to "cross-fleet authorization boundary" (fleet isolation; no caller check). <!-- completed: 2026-06-08T09:15 -->
+- [x] In `skills/cafleet/roles/director.md` and `roles/member.md`, remove the within-fleet cross-Director-boundary references. <!-- completed: 2026-06-08T09:15 -->
+- [x] In `skills/cafleet-agent-team-supervision/SKILL.md` and `skills/cafleet-agent-team-monitoring/SKILL.md`, scrub any "spawn sub-team" / nested-hierarchy / multi-Director language (do **not** touch the by-backend sections). <!-- completed: 2026-06-08T09:15 -->
+- [x] Grep all of `skills/` for "nested", "sub-team", "second-level", "cross-Director", "another Director", "--since", "--page-size", and `member (capture|send-input|exec|ping|delete) .*--agent-id` and scrub each remaining hit. <!-- completed: 2026-06-08T09:15 -->
 
 ### Step 7: Project rules
 
-- [ ] In `.claude/rules/bash-tool.md`, drop `--agent-id` from the `member exec` and `member ping` examples (showing `--member-id`-only) and reword the "cross-Director boundary" reference (~line 85) to plain fleet isolation (no caller check). <!-- completed: -->
+- [x] In `.claude/rules/bash-tool.md`, drop `--agent-id` from the `member exec` and `member ping` examples (showing `--member-id`-only) and reword the "cross-Director boundary" reference (~line 85) to plain fleet isolation (no caller check). <!-- completed: 2026-06-08T09:16 (Director-applied: members cannot Edit .claude/ under dontAsk) -->
 
 ### Step 8: broker — placement validation (D1)
+
+<!-- COMMENT(tester): The Step 13 register_agent tests keep the existing director-validation messages (director_not_found → "Director agent ... not found or not active", director_deregistered → "not active", director_cross_fleet → "Director agent") AND add a non-root-active-director → UsageError("nested teams") case. For ALL to hold, place the new root-equality check AFTER the existing director-active + Administrator checks (i.e. last in the placement-validation block), not before — a non-root id that is also missing/deregistered/cross-fleet must still surface its specific existing message. -->
 
 - [ ] In `broker.register_agent`, add the root-equality validation rejecting any member placement whose `director_agent_id != fleets.director_agent_id` (using the already-loaded `get_fleet` result), raising `click.UsageError` with the specified message. <!-- completed: -->
 - [ ] Update the `register_agent` docstring to state the single-Director invariant. <!-- completed: -->

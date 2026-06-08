@@ -56,7 +56,6 @@ A push notification automatically keystrokes a 2-line inline preview (`[cafleet 
 **Checking for incoming messages from members:**
 ```bash
 cafleet --fleet-id <fleet-id> --json message poll --agent-id <director-agent-id>
-cafleet --fleet-id <fleet-id> --json message poll --agent-id <director-agent-id> --since "<ISO 8601 timestamp of last check>"
 ```
 Acknowledge each message after reading:
 ```bash
@@ -65,7 +64,7 @@ cafleet --fleet-id <fleet-id> message ack --agent-id <director-agent-id> --task-
 
 **Inspecting a stalled member's terminal (2-stage fallback):**
 ```bash
-cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member capture \
   --member-id <member-agent-id> --lines 200
 ```
 

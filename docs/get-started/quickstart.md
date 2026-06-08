@@ -61,7 +61,7 @@ cafleet --fleet-id "$FLEET_ID" member create \
   -- "You are demo-member. Reply hello when polled."
 
 # 3. The Director sends a message to the new member.
-cafleet --fleet-id "$FLEET_ID" agent list --agent-id "$DIRECTOR_ID"
+cafleet --fleet-id "$FLEET_ID" agent list
 # Pick the demo-member agent_id from the output and replace <member-id> below.
 cafleet --fleet-id "$FLEET_ID" message send --agent-id "$DIRECTOR_ID" \
   --to "<member-id>" --text "hi"
@@ -75,7 +75,7 @@ once it has consumed the message.
 When you are done, tear the fleet down:
 
 ```bash
-cafleet --fleet-id "$FLEET_ID" member delete --agent-id "$DIRECTOR_ID" \
+cafleet --fleet-id "$FLEET_ID" member delete \
   --member-id "<member-id>"
 cafleet fleet delete "$FLEET_ID"
 ```

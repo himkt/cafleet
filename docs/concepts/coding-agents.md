@@ -55,9 +55,8 @@ argv AND is recorded as placement metadata.
 
 - **Pane title.** Only the `claude` spawn argv carries `--name`, so `codex`
   and `opencode` panes do not display the member name in their pane title.
-  Use `cafleet member list --agent-id <director>` to find a specific
-  member's pane id; the `pane_id` column is ground truth for all three
-  backends.
+  Use `cafleet member list` to find a specific member's pane id; the
+  `pane_id` column is ground truth for all three backends.
 - **Bash-disable parity.** Neither codex nor opencode has a
   `--disallowedTools` analog. The bash-via-Director protocol is a fallback
   for harness-deny-listed destructive commands (e.g. `git push`), not a

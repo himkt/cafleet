@@ -11,7 +11,7 @@ Before assuming a member is stalled, run the cheap check first:
 
 ```bash
 cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>
-cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> \
+cafleet --fleet-id <fleet-id> member capture \
   --member-id <member-agent-id>
 ```
 
@@ -20,7 +20,7 @@ cafleet --fleet-id <fleet-id> member capture --agent-id <director-agent-id> \
 The `--activity` flag aggregates per-member `last_sent` / `last_recv` / `last_ack` / `idle` columns so a routine `/loop` tick can decide which members need a capture WITHOUT capturing every member every minute. See [`reference/director.md`](director.md#member-list-with-activity).
 
 ```
-$ cafleet --fleet-id <s> member list --agent-id <d> --activity
+$ cafleet --fleet-id <s> member list --activity
 3 members:
   agent_id        name      state   last_sent    last_recv    last_ack     idle
   --------------  --------  ------  -----------  -----------  -----------  -----
@@ -50,7 +50,7 @@ If `cafleet member capture` exits with a tmux subprocess error (the tmux server 
 
 1. Run `cafleet doctor` to confirm your own pane's tmux state. If `cafleet doctor` exits 1 with `Error: cafleet member commands must be run inside a tmux session`, your `TMUX` env var is unset — you are no longer attached to a tmux session and recovery is impossible from your current shell. Re-attach (`tmux attach -t <session>`) and re-run.
 2. If `cafleet doctor` succeeds but `cafleet member capture` still fails, the target pane is gone (the tmux server killed it, or the user closed it manually). Treat as "Pane crashed" above — `cafleet member delete --force` then re-spawn.
-3. Never invoke raw `tmux send-keys`, `tmux kill-pane`, `tmux list-panes`, `tmux capture-pane`, or `tmux display-message` directly. Cafleet's primitives encapsulate the cross-Director authorization boundary; raw tmux bypasses it.
+3. Never invoke raw `tmux send-keys`, `tmux kill-pane`, `tmux list-panes`, `tmux capture-pane`, or `tmux display-message` directly. Cafleet's primitives encapsulate the cross-fleet authorization boundary (fleet isolation); raw tmux bypasses it.
 
 ## Recovering from a wedged `/exit`
 
@@ -69,7 +69,7 @@ The teardown MUST run in this exact order. Skipping any step leaves crons firing
 
 1. **Stop every background `/loop` monitor FIRST.** Any `/loop` cron the Director started during the fleet must be cancelled with `CronDelete <job-id>` **before** members are deleted. A cron that keeps firing after members are gone will issue `cafleet member list` / `poll` against a tearing-down fleet, spam `Error: fleet is deleted`, and (worse) race with the member-delete path and nudge agents that are mid-`/exit`. Fixed-cadence `/loop`s (e.g. the team-health monitor from the `cafleet-agent-team-monitoring` skill) and any augmented loops you created (PR review loops, verifier loops, etc.) all fall under this rule. Stop them all.
 2. **Delete every member** via `cafleet member delete`. This call blocks until the target pane is actually gone (15 s default timeout). On timeout follow the wedged-`/exit` decision tree above. Do this per member, not via `fleet delete` alone — `fleet delete` deregisters agents in the DB but does NOT send `/exit` to panes.
-3. **Verify every member is gone via cafleet.** Run `cafleet member list --agent-id <director-agent-id>`. The team's member roster should be empty. Any agent still present means step 2 failed — re-run `cafleet member delete` on that member, capture if needed, and report to the user if it still refuses to leave. Do NOT use raw tmux to "check" or "force" anything.
+3. **Verify every member is gone via cafleet.** Run `cafleet member list`. The team's member roster should be empty. Any agent still present means step 2 failed — re-run `cafleet member delete` on that member, capture if needed, and report to the user if it still refuses to leave. Do NOT use raw tmux to "check" or "force" anything.
 4. **Run `cafleet fleet delete <fleet-id>`** (positional, no `--fleet-id` flag). This deregisters the root Director, deregisters the Administrator, sweeps any agent rows that survived step 2, and physically deletes every `agent_placements` row. Plain `cafleet --fleet-id <fleet-id> agent deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` — always use `fleet delete` for the final teardown step.
 5. **Confirm the fleet is closed.** Run `cafleet fleet list`; the current fleet should not appear (soft-deleted fleets are hidden). If it still appears with `active` agents, repeat steps 2–4 for that fleet. Any cross-conversation orphan fleet surfaced by this final check is also cleaned up via `cafleet fleet delete <its-fleet-id>` — never via tmux.
 
