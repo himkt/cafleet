@@ -43,8 +43,8 @@ def _stub_get_fleet(monkeypatch):
     monkeypatch.setattr(
         broker,
         "get_fleet",
-        lambda _sid: {
-            "fleet_id": 100,
+        lambda sid: {
+            "fleet_id": sid,
             "label": None,
             "created_at": "2026-05-05T00:00:00+00:00",
             "deleted_at": None,
