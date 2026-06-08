@@ -35,6 +35,25 @@ def call_log() -> list[tuple]:
 
 
 @pytest.fixture(autouse=True)
+def _stub_get_fleet(monkeypatch):
+    """``member_delete``'s early root-guard calls ``broker.get_fleet``; stub it so
+    the guard passes through (``director_agent_id`` != ``MEMBER_ID``) without
+    touching the real DB. The root-delete-guard tests override this to make the
+    guard fire."""
+    monkeypatch.setattr(
+        broker,
+        "get_fleet",
+        lambda _sid: {
+            "fleet_id": 100,
+            "label": None,
+            "created_at": "2026-05-05T00:00:00+00:00",
+            "deleted_at": None,
+            "director_agent_id": 11,
+        },
+    )
+
+
+@pytest.fixture(autouse=True)
 def _stub_tmux_entrypoints(monkeypatch):
     monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
     monkeypatch.setattr(
