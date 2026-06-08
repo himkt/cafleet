@@ -1,6 +1,6 @@
 # Single Director per Fleet
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 49/49 tasks complete
 **Last Updated**: 2026-06-08
 
@@ -276,4 +276,5 @@ A4's premise — that `httpx` is declared but never imported — was **incorrect
 | Date | Changes |
 |------|---------|
 | 2026-06-07 | Initial draft |
-| 2026-06-08 | Implemented. A4 (`httpx` removal) reverted: CI revealed `httpx` is a required transitive dependency of `starlette.testclient` (`test_server_routing.py`); the "unused" premise was false (local test passed only on a stale venv). `httpx` retained. Copilot review caught a real bug — `member delete` could `send_exit`/`kill_pane` the root Director's own pane before the deregister guard — fixed with an early root-guard + regression test. |
+| 2026-06-08 | Implemented. A4 (`httpx` removal) reverted: CI revealed `httpx` is a required transitive dependency of `starlette.testclient` (`test_server_routing.py`); the "unused" premise was false (local test passed only on a stale venv). `httpx` retained. Copilot review caught a real bug — `member delete` could `send_exit`/`kill_pane` the root Director's own pane before the deregister guard — fixed with an early root-guard (run after the tmux fail-fast check) + regression test. |
+| 2026-06-08 | Status → Complete. PR #101 opened, CI green (lint/typecheck/668 tests), Copilot review converged with no remaining comments. |
