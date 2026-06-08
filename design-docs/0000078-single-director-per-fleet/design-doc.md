@@ -24,17 +24,17 @@ The one nuance: the within-fleet "cross-Director boundary" is **reworded to cros
 
 ## Success Criteria
 
-- [ ] `broker.register_agent` rejects any member placement whose `director_agent_id` is not the fleet's root Director.
-- [ ] `broker.list_members` / `list_members_with_activity` take only `fleet_id` (no `director_agent_id` param) and never surface the root Director itself.
-- [ ] `cafleet member list` no longer accepts `--agent-id` (dropped, like `agent list`); it lists every member of the fleet given by `--fleet-id`.
-- [ ] The director-side member subcommands (`capture`, `send-input`, `exec`, `ping`, `delete`) drop `--agent-id` entirely (like `member list`); they take only `--member-id` (plus command-specific args) and reject only cross-fleet access — a `--member-id` not in `--fleet-id` returns "not found". There is no caller-is-root check.
+- [x] `broker.register_agent` rejects any member placement whose `director_agent_id` is not the fleet's root Director.
+- [x] `broker.list_members` / `list_members_with_activity` take only `fleet_id` (no `director_agent_id` param) and never surface the root Director itself.
+- [x] `cafleet member list` no longer accepts `--agent-id` (dropped, like `agent list`); it lists every member of the fleet given by `--fleet-id`.
+- [x] The director-side member subcommands (`capture`, `send-input`, `exec`, `ping`, `delete`) drop `--agent-id` entirely (like `member list`); they take only `--member-id` (plus command-specific args) and reject only cross-fleet access — a `--member-id` not in `--fleet-id` returns "not found". There is no caller-is-root check.
 
-- [ ] `cafleet message poll` returns only un-acked (`input_required`) deliveries and no longer accepts `--since` / `--page-size`; the now-dead broker params are removed.
-- [ ] `cafleet agent list` no longer requires `--agent-id`.
-- [ ] The unused `httpx` dev dependency is removed.
-- [ ] The WebUI HTTP API surface (`webui_api.py`, including `/inbox` and `/sent`) is documented.
-- [ ] Per the binding Removal Rule, every removed concept (nested teams, "multiple Directors per fleet", the within-fleet "cross-Director boundary", member-subcommand & `member list` `--agent-id`, `agent list --agent-id`, `poll --since`/`--page-size`) is DELETED from all surfaces — README, `docs/concepts`, `docs/spec`, every `SKILL.md`, `.claude/rules`, source + code comments — with no deprecation/restoration notices; the repo reads as if they never existed.
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` all pass.
+- [x] `cafleet message poll` returns only un-acked (`input_required`) deliveries and no longer accepts `--since` / `--page-size`; the now-dead broker params are removed.
+- [x] `cafleet agent list` no longer requires `--agent-id`.
+- [x] The unused `httpx` dev dependency is removed.
+- [x] The WebUI HTTP API surface (`webui_api.py`, including `/inbox` and `/sent`) is documented.
+- [x] Per the binding Removal Rule, every removed concept (nested teams, "multiple Directors per fleet", the within-fleet "cross-Director boundary", member-subcommand & `member list` `--agent-id`, `agent list --agent-id`, `poll --since`/`--page-size`) is DELETED from all surfaces — README, `docs/concepts`, `docs/spec`, every `SKILL.md`, `.claude/rules`, source + code comments — with no deprecation/restoration notices; the repo reads as if they never existed.
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` all pass.
 
 ---
 
