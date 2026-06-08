@@ -632,9 +632,11 @@ def _load_authorized_member(
     """Resolve a fleet-scoped member's agent + placement.
 
     The only boundary is fleet isolation: ``broker.get_agent(member_id,
-    fleet_id)`` returns ``None`` for a ``member_id`` outside ``fleet_id``, so a
-    cross-fleet target raises "not found". There is no caller-auth check — any
-    agent in the fleet (including the root Director) is a valid target.
+    fleet_id)`` returns ``None`` for a ``member_id`` that is not an active agent
+    of ``fleet_id``, so a cross-fleet / unknown / inactive target raises "not
+    found". There is no caller-auth check — any active in-fleet agent with a
+    placement row (the root Director included) is a valid target; an in-fleet
+    agent without a placement row raises the placement-missing error below.
 
     ``placement_missing_template`` is a ``{member_id}`` format string for the
     "no placement" path, because each caller points users at a different

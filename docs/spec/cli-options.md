@@ -483,7 +483,7 @@ Mirrors `cafleet member capture` step-for-step:
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to send.`.
 
-The only boundary is fleet isolation — any agent in `--fleet-id` (including the root Director) is a valid `--member-id`, and there is no caller-auth check. The error message shapes are reused verbatim from `member capture` so operator muscle memory transfers.
+The only boundary is fleet isolation — any **active** in-fleet agent **with a placement row** (the root Director included) is a valid `--member-id`, and there is no caller-auth check. Per steps 1–2 above, a cross-fleet / unknown / inactive `--member-id` resolves to "not found" and an in-fleet agent without a placement row is rejected. The error message shapes are reused verbatim from `member capture` so operator muscle memory transfers.
 
 #### Output format
 
@@ -558,7 +558,7 @@ Mirrors `cafleet member send-input` step-for-step:
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to exec.`.
 
-The only boundary is fleet isolation — any agent in `--fleet-id` (including the root Director) is a valid `--member-id`, and there is no caller-auth check. Wording reuses the existing `_load_authorized_member` strings verbatim.
+The only boundary is fleet isolation — any **active** in-fleet agent **with a placement row** (the root Director included) is a valid `--member-id`, and there is no caller-auth check. Per steps 1–2 above, a cross-fleet / unknown / inactive `--member-id` resolves to "not found" and an in-fleet agent without a placement row is rejected. Wording reuses the existing `_load_authorized_member` strings verbatim.
 
 #### Output format
 
@@ -631,7 +631,7 @@ Mirrors `cafleet member exec` step-for-step:
 2. If `target.placement` is `None`, exit 1 with `Error: agent <member_id> has no placement row; it was not spawned via \`cafleet member create\`.`.
 3. If `placement.tmux_pane_id` is `None` (pending placement), exit 1 with `Error: member <member_id> has no pane yet (pending placement) — nothing to ping.`.
 
-The only boundary is fleet isolation — any agent in `--fleet-id` (including the root Director) is a valid `--member-id`, and there is no caller-auth check. Wording reuses the existing `_load_authorized_member` strings verbatim.
+The only boundary is fleet isolation — any **active** in-fleet agent **with a placement row** (the root Director included) is a valid `--member-id`, and there is no caller-auth check. Per steps 1–2 above, a cross-fleet / unknown / inactive `--member-id` resolves to "not found" and an in-fleet agent without a placement row is rejected. Wording reuses the existing `_load_authorized_member` strings verbatim.
 
 #### Output format
 
