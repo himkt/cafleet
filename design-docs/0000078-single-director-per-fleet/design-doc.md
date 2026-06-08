@@ -31,7 +31,7 @@ The one nuance: the within-fleet "cross-Director boundary" is **reworded to cros
 
 - [x] `cafleet message poll` returns only un-acked (`input_required`) deliveries and no longer accepts `--since` / `--page-size`; the now-dead broker params are removed.
 - [x] `cafleet agent list` no longer requires `--agent-id`.
-- [x] The unused `httpx` dev dependency is removed.
+- [x] ~~The unused `httpx` dev dependency is removed.~~ Reverted — CI showed `httpx` is required by `starlette.testclient` (`test_server_routing.py`); it is retained. No dependency change.
 - [x] The WebUI HTTP API surface (`webui_api.py`, including `/inbox` and `/sent`) is documented.
 - [x] Per the binding Removal Rule, every removed concept (nested teams, "multiple Directors per fleet", the within-fleet "cross-Director boundary", member-subcommand & `member list` `--agent-id`, `agent list --agent-id`, `poll --since`/`--page-size`) is DELETED from all surfaces — README, `docs/concepts`, `docs/spec`, every `SKILL.md`, `.claude/rules`, source + code comments — with no deprecation/restoration notices; the repo reads as if they never existed.
 - [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` all pass.
@@ -49,7 +49,7 @@ The change is scoped to coexist with several independent simplifications that sh
 - `cafleet agent list --agent-id` is a required flag used only as an auth gate, never read in the handler body.
 - `cafleet message poll` accepts hidden `--since` / `--page-size` flags — absent from `docs/spec/cli-options.md`, but documented in `skills/cafleet/SKILL.md` and woven into the `cafleet-agent-team-monitoring` delta-polling health-check recipe — and returns *all* tasks (including already-acked ones) because `poll_tasks` defaults its `status` filter to `None` and the CLI never passes it.
 - The WebUI `GET /api/agents/{id}/inbox` and `/sent` endpoints are undocumented.
-- `httpx` is declared as a dev dependency but never imported.
+- `httpx` is declared as a dev dependency and was assumed unused. (This assumption proved **incorrect** — see A4: `httpx` is a required transitive dependency of `starlette.testclient`, so the proposed removal was reverted.)
 
 ### Coding-agent backends are explicitly out of scope
 
@@ -168,9 +168,9 @@ def poll_tasks(agent_id: int) -> list[dict]:
 
 The WebUI HTTP API in `cafleet/src/cafleet/webui_api.py` is undocumented. Add a reference page documenting the full surface — `GET /fleets`, `GET /agents`, `GET /agents/{id}/inbox`, `GET /agents/{id}/sent`, `GET /timeline`, `POST /messages/send`, and any others present — each with path, method, response shape, and fleet-scoping behavior. `/inbox` and `/sent` are **documented, not removed**.
 
-### `httpx` removal (A4)
+### `httpx` removal (A4) — REVERTED (CI finding)
 
-Remove the `httpx` entry from `[dependency-groups].dev` in `cafleet/pyproject.toml` (line ~36). It is declared but never imported in source or tests. Re-sync the lockfile with `mise //:uv-sync`.
+A4's premise — that `httpx` is declared but never imported — was **incorrect**. `httpx` is a required transitive dependency of `starlette.testclient` (reached via `fastapi.testclient.TestClient` in `tests/test_server_routing.py`); removing it broke test collection in CI's fresh venv with `ModuleNotFoundError: No module named 'httpx'`. The removal passed local testing only because the developer venv retained a stale `httpx`. `httpx` is therefore **retained** in `[dependency-groups].dev` and the lockfile — there is no dependency change in this design.
 
 ---
 
@@ -248,9 +248,9 @@ Remove the `httpx` entry from `[dependency-groups].dev` in `cafleet/pyproject.to
 - [x] `message_poll`: remove `--since` and `--page-size` options and params; call `broker.poll_tasks(agent_id)`. <!-- completed: 2026-06-08T09:27 -->
 - [x] `agent_list`: remove the required `--agent-id` option and the `requires_agent_fleet` gate. <!-- completed: 2026-06-08T09:27 -->
 
-### Step 12: Dependencies (A4)
+### Step 12: Dependencies (A4) — REVERTED
 
-- [x] Remove `httpx` from `[dependency-groups].dev` in `cafleet/pyproject.toml`; run `mise //:uv-sync`. <!-- completed: 2026-06-08T09:27 -->
+- [x] ~~Remove `httpx` from `[dependency-groups].dev`~~ — reverted after CI revealed `httpx` is required by `starlette.testclient` (`fastapi.testclient.TestClient` in `tests/test_server_routing.py`). `httpx` is retained in the dev group and lockfile; no dependency change. <!-- completed: 2026-06-08T10:57 -->
 
 ### Step 13: Tests
 
@@ -276,3 +276,4 @@ Remove the `httpx` entry from `[dependency-groups].dev` in `cafleet/pyproject.to
 | Date | Changes |
 |------|---------|
 | 2026-06-07 | Initial draft |
+| 2026-06-08 | Implemented. A4 (`httpx` removal) reverted: CI revealed `httpx` is a required transitive dependency of `starlette.testclient` (`test_server_routing.py`); the "unused" premise was false (local test passed only on a stale venv). `httpx` retained. Copilot review caught a real bug — `member delete` could `send_exit`/`kill_pane` the root Director's own pane before the deregister guard — fixed with an early root-guard + regression test. |
