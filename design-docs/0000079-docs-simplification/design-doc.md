@@ -1,7 +1,7 @@
 # Documentation Simplification (docs/ + README.md)
 
 **Status**: Approved
-**Progress**: 12/24 tasks complete
+**Progress**: 14/24 tasks complete
 **Last Updated**: 2026-06-08
 
 ## Overview
@@ -261,8 +261,8 @@ This is the canonical CLI reference and the new canonical home for fleet bootstr
 
 ### Step 3: Reference (per-backend) pages
 
-- [ ] `docs/reference/coding-agents/codex.md` — keep operational essentials + verification recipe; collapse `!`-shortcut and pane-title to links; strip symbols. <!-- completed: -->
-- [ ] `docs/reference/coding-agents/opencode.md` — cut the `--dangerously-skip-permissions` rationale + `findLast`/preset-dataclass internals; trim safety-floor caveats to the operational point; keep MCP MUST-NOT, version pin, refresh recipe, verification recipe; collapse `!`-shortcut and pane-title to links. <!-- completed: -->
+- [x] `docs/reference/coding-agents/codex.md` — keep operational essentials + verification recipe; collapse `!`-shortcut and pane-title to links; strip symbols. <!-- completed: 2026-06-09T11:29 -->
+- [x] `docs/reference/coding-agents/opencode.md` — cut the `--dangerously-skip-permissions` rationale + `findLast`/preset-dataclass internals; trim safety-floor caveats to the operational point; keep MCP MUST-NOT, version pin, refresh recipe, verification recipe; collapse `!`-shortcut and pane-title to links. <!-- completed: 2026-06-09T11:29 -->
 
 ### Step 4: Get-started + landing + README
 

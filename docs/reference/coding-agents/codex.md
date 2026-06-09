@@ -63,20 +63,11 @@ For the full broker CLI reference (register, send, broadcast, poll, ack, cancel,
 
 ## The `!` shell-shortcut convention
 
-Codex CLI honors a leading-`!` shell shortcut on its input line — typing `! <command>` runs the command natively, the same way Claude Code's `!` shortcut works. cafleet's bash-via-Director fallback uses this convention:
-
-- When your Bash tool denies a destructive command, send a plain CAFleet message to your Director asking for the command. The Director dispatches it via `cafleet member exec "<command>"`, which keystrokes `! <command>` + Enter into your pane. The command runs natively; its stdout/stderr lands in your next-turn context.
-- You yourself never type `!`-prefixed commands manually. The shortcut is the dispatch mechanism the Director uses on your behalf.
+Codex CLI honors a leading-`!` shell shortcut on its input line, which cafleet's bash-via-Director fallback uses — see [Bash routing](../../concepts/bash-routing.md).
 
 ## Pane-title asymmetry
 
-`claude --name <member-name>` sets the tmux pane title via Claude Code's internal title-emit. **Neither `codex` nor `opencode` has an equivalent flag.** Codex panes display whatever default title `codex` emits (typically the binary name). This is intentional — pane discovery for all three backends goes through `cafleet member list`:
-
-```bash
-cafleet --fleet-id <fleet-id> member list
-```
-
-The `pane_id` column is ground truth. For mixed-backend teams in particular, do NOT rely on tmux pane titles to find a specific member's pane.
+Only `claude` sets the pane title to the member name; locate `codex` panes via `cafleet member list` (the `pane_id` column is ground truth) — see [Coding agents](../../concepts/coding-agents.md).
 
 ## Verification recipe (manual smoke test)
 
