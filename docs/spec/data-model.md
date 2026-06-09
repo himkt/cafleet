@@ -118,7 +118,7 @@ If a user kills a pane manually without going through `cafleet member delete`, t
 
 SQLite ignores foreign key declarations unless `PRAGMA foreign_keys=ON` is issued on every connection. A SQLAlchemy engine `connect` event listener runs the PRAGMA on every new connection.
 
-The two foreign keys (`agents.fleet_id → fleets.fleet_id`, `tasks.context_id → agents.agent_id`) both use `ON DELETE RESTRICT`. There is no path that physically deletes an agent — deregistration is a soft-status flip — so RESTRICT is the safest default. The added `fleets.director_agent_id → agents.agent_id` FK also uses `ON DELETE RESTRICT` for the same reason: it should never point at a row that can vanish. Fleet deletion uses a soft-delete (`deleted_at`) — it never physically removes rows, so the RESTRICTs are never triggered by the delete path.
+The foreign keys on `agents.fleet_id`, `tasks.context_id`, `fleets.director_agent_id`, and `agent_placements.director_agent_id` all use `ON DELETE RESTRICT` (agents are only soft-deregistered today, so RESTRICT is the safest default). `agent_placements.agent_id → agents.agent_id` uses `ON DELETE CASCADE` so a hard-deleted agent (if any future path adds one) cannot leave a dangling placement row. Fleet deletion uses a soft-delete (`deleted_at`) — it never physically removes rows, so the RESTRICTs are not triggered by the normal delete path.
 
 ## Task Visibility Rules
 
