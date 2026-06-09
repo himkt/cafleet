@@ -15,7 +15,7 @@ below.
 
 | Technique | Architectural touch-points |
 |---|---|
-| Compact rendered envelope | Default JSON output is compact (no whitespace). Default text-mode envelope is 2 lines per task (the `--full` form is 6). Ids are full integers — short by construction (typically 1–4 digits), so they paste straight into `--to` / `--id` / `--member-id` / `--task-id` with no prefix resolution. |
+| Compact rendered envelope | Default JSON output is compact (no whitespace). Default text-mode envelope is 2 lines per task (the `--full` form is a variable-length labeled block). Ids are full integers — short by construction (typically 1–4 digits), so they paste straight into `--to` / `--id` / `--member-id` / `--task-id` with no prefix resolution. |
 | Slim member spawn prompt | The default spawn-prompt template is ~60 tokens (single sentence + identity + skill-load directive + poll command), with no Director-name placeholder. |
 | Skill-file split | `skills/cafleet/SKILL.md` core is ≤ 350 lines (identity + poll/send/ack + minimal codex/claude branch); director-only, broadcast, exec-routing, recovery, and output-flag content lives in `skills/cafleet/reference/*.md` files loaded on demand. Codex and Claude Code agents both load the core SKILL the same way; reference files are pulled only when the workflow needs them. |
 | `cafleet member list --activity` | Aggregates per-member message timestamps into `last_sent` / `last_recv` / `last_ack` / `idle` columns (the `last_ack` proxy filters out broadcast-summary rows). Existing task indexes cover the join. |
@@ -24,6 +24,8 @@ below.
 | Agent render slim | Each agent renders to the minimum-required fields by default (`id`, `name`, `description` truncated, `status`, and `coding_agent` from placement); `--full` returns the agent dict unchanged. The agent surfaces never emit `agent_card_json` in either mode. |
 
 In short, what keeps cafleet's output small: a compact 2-line default message
-envelope (6 lines under `--full`), a slim member spawn prompt, the core skill
-split with reference files loaded on demand, `member capture` defaulting to
-30 lines, and the flat typed-column task shape (no JSON blob).
+envelope (a variable-length labeled block under `--full`), a slim member spawn
+prompt, the core skill split with reference files loaded on demand,
+`member capture` defaulting to 30 lines, and the flat typed-column task shape
+(no JSON blob).
+

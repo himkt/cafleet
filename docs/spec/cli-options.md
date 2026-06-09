@@ -91,7 +91,7 @@ The five subcommands that emit a user-supplied delivery body — `cafleet messag
 
 | Variable | Settings field | Default | Notes |
 |---|---|---|---|
-| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Maximum codepoint length of the rendered `text` body before the `…` suffix is appended. Follows the `CAFLEET_`-prefixed convention already used by `CAFLEET_DATABASE_URL`, `CAFLEET_BROKER_HOST`, and `CAFLEET_BROKER_PORT`. Also used by `agent.description` truncation (limit `60`, hard-coded) and metadata-string truncation (limit `80`, hard-coded). |
+| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Maximum codepoint length of the rendered `text` body before the `…` suffix is appended. Follows the `CAFLEET_`-prefixed convention already used by `CAFLEET_DATABASE_URL`, `CAFLEET_BROKER_HOST`, and `CAFLEET_BROKER_PORT`. It also bounds the broker's inline-preview truncation before the preview is keystroked into a recipient's tmux pane. (`agent.description` truncation uses a separate hard-coded 60-codepoint limit, independent of this env var.) |
 
 The suffix is the single Unicode codepoint `…` (U+2026 HORIZONTAL ELLIPSIS) — exactly one codepoint with no count and no companion `text_length` field.
 

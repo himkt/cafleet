@@ -53,7 +53,7 @@ CLI JSON output is governed by the `--json` flag:
 | Mode | Output |
 |---|---|
 | `--json` | Compact JSON: `json.dumps(data, separators=(",",":"), ensure_ascii=False)` — no whitespace; non-ASCII (e.g. the `…` suffix) emitted as UTF-8. |
-| (text mode) | Two lines per task in the compact rendered shape; six lines per task in `--full`. |
+| (text mode) | Two lines per task in the compact rendered shape; a variable-length labeled block per task in `--full`. |
 
 #### Examples
 
@@ -99,7 +99,7 @@ build OK
 
 Optional segments `| kind:<kind>` and `| origin:<id>` are appended to line 1 when the task is a broadcast summary (`type != "unicast"`) or has a non-NULL `origin_task_id`, respectively. The body line is omitted entirely when the resulting body is the empty string.
 
-`--full` switches to a six-line block that mirrors the `--full` JSON keys one-per-line. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. Body truncation (the `…` suffix at `CAFLEET_MAX_TEXT_LEN` codepoints) is documented in [cli-options.md](cli-options.md#message-body-truncation).
+`--full` switches to a variable-length labeled block — one field per line (`id`, `state`, `from`, `to`, `type`, `text`), with the `to:` line omitted for broadcast-summary rows (`to_agent_id == 0`) and the `text:` line omitted when the body is empty. So a fresh unicast delivery prints six lines, while a broadcast-summary row with no recipient prints fewer. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. Body truncation (the `…` suffix at `CAFLEET_MAX_TEXT_LEN` codepoints) is documented in [cli-options.md](cli-options.md#message-body-truncation).
 
 ## Flag cross-reference
 
