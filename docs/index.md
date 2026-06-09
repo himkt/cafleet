@@ -13,17 +13,6 @@ database. Fleets partition agents into isolated namespaces; the CLI accesses
 SQLite directly through a shared `broker` module, so no HTTP server is required
 for agent operations.
 
-## Component overview
-
-```mermaid
-flowchart LR
-    CLI["CLI (click)"] --> Broker["broker.py<br/>(sync SQLAlchemy)"]
-    WebUI["Admin WebUI"] --> Server["server.py<br/>(FastAPI)"]
-    Server --> WebUIAPI["webui_api.py"]
-    WebUIAPI --> Broker
-    Broker --> DB[(SQLite)]
-```
-
 CAFleet works with three coding-agent backends — `claude` (Claude Code), `codex`
 (OpenAI Codex CLI), and `opencode` — and members from different backends can
 coexist in the same fleet.

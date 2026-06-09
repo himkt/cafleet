@@ -117,13 +117,13 @@ prompting even with the broader allow in place.
     Opencode's `cafleet` agent definition lives at `~/.opencode/agents/cafleet.md`.
 
 No manual configuration is required. On the first `cafleet member create
---coding-agent opencode` call, `OpencodeAgent.ensure_available()` materializes
-the `CAFLEET_AGENT` preset to `~/.opencode/agents/cafleet.md` (skip-if-exists)
-— the preset embeds the catch-all-allow + specific-deny ruleset that mirrors
-Claude Code's `dontAsk` safety floor. To refresh the preset after a CAFleet
-release (e.g. after `pip install -U cafleet`), delete the existing file and
-re-run `cafleet member create --coding-agent opencode` so the next spawn
-materializes the current bundled preset. See
+--coding-agent opencode` call, cafleet writes the `cafleet` agent definition
+to `~/.opencode/agents/cafleet.md` if it does not already exist — the preset
+embeds the catch-all-allow + specific-deny ruleset that mirrors Claude Code's
+`dontAsk` safety floor. To refresh the preset after a CAFleet release (e.g.
+after `pip install -U cafleet`), delete the existing file and re-run
+`cafleet member create --coding-agent opencode` so the next spawn writes the
+current bundled preset. See
 [Opencode members](../reference/coding-agents/opencode.md) for the full
 materialization protocol, refresh recipe, and the operator MUST-NOT rule on
 MCP servers (MCP-contributed tools bypass the deny-list).

@@ -1,7 +1,7 @@
 # Documentation Simplification (docs/ + README.md)
 
 **Status**: Approved
-**Progress**: 14/24 tasks complete
+**Progress**: 21/24 tasks complete
 **Last Updated**: 2026-06-08
 
 ## Overview
@@ -266,13 +266,13 @@ This is the canonical CLI reference and the new canonical home for fleet bootstr
 
 ### Step 4: Get-started + landing + README
 
-- [ ] `docs/get-started/configure.md` — strip the opencode symbol references to prose; keep all config blocks (canonical config home). <!-- completed: -->
-- [ ] `docs/get-started/install.md` — confirm it remains the canonical integer-PK upgrade-warning home (no cut). <!-- completed: -->
-- [ ] `docs/get-started/quickstart.md` — light symbol strip only; keep the walkthrough. <!-- completed: -->
-- [ ] `docs/get-started/contributing.md` — keep as the canonical project-structure / dev-loop home (no cut). <!-- completed: -->
-- [ ] `docs/get-started/index.md` — confirm no change needed. <!-- completed: -->
-- [ ] `docs/index.md` — cut the duplicate component-overview mermaid; keep intro + browse links. <!-- completed: -->
-- [ ] `README.md` — collapse Section 2 to a Configure-page pointer; keep Install, Examples, Architecture blurb, Contributing pointer, video; renumber sections. <!-- completed: -->
+- [x] `docs/get-started/configure.md` — strip the opencode symbol references to prose; keep all config blocks (canonical config home). <!-- completed: 2026-06-09T11:35 -->
+- [x] `docs/get-started/install.md` — confirm it remains the canonical integer-PK upgrade-warning home (no cut). <!-- completed: 2026-06-09T11:35 -->
+- [x] `docs/get-started/quickstart.md` — light symbol strip only; keep the walkthrough. <!-- completed: 2026-06-09T11:35 -->
+- [x] `docs/get-started/contributing.md` — keep as the canonical project-structure / dev-loop home (no cut). <!-- completed: 2026-06-09T11:35 -->
+- [x] `docs/get-started/index.md` — confirm no change needed. <!-- completed: 2026-06-09T11:35 -->
+- [x] `docs/index.md` — cut the duplicate component-overview mermaid; keep intro + browse links. <!-- completed: 2026-06-09T11:35 -->
+- [x] `README.md` — collapse Section 2 to a Configure-page pointer; keep Install, Examples, Architecture blurb, Contributing pointer, video; renumber sections. <!-- completed: 2026-06-09T11:35 -->
 
 ### Step 5: Nav verification + build
 
