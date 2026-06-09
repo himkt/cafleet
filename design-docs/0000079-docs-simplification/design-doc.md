@@ -1,7 +1,7 @@
 # Documentation Simplification (docs/ + README.md)
 
 **Status**: Approved
-**Progress**: 4/24 tasks complete
+**Progress**: 12/24 tasks complete
 **Last Updated**: 2026-06-08
 
 ## Overview
@@ -250,14 +250,14 @@ This is the canonical CLI reference and the new canonical home for fleet bootstr
 
 ### Step 2: Concepts pages (necessity-test trims + SSOT cross-refs)
 
-- [ ] `docs/concepts/overview.md` — cut Component layout, Operation mapping, CLI option sources, Package structure, Plugin packaging; trim WebUI + orchestration-skills to short concept paragraphs; keep the architecture diagram; strip symbols. <!-- completed: -->
-- [ ] `docs/concepts/fleet-isolation.md` — cut the bootstrap + soft-delete + Administrator sections (→ links to canonical homes); keep the isolation concept; trim Root Director protection to one sentence; strip symbols. <!-- completed: -->
-- [ ] `docs/concepts/storage.md` — cut the duplicate ER diagram + column/index tables (→ `data-model.md`), the integer-PK upgrade section (→ `install.md`), and the Task lifecycle table (→ `message-envelope.md`); trim Schema management; cut Session ownership; strip symbols. <!-- completed: -->
-- [ ] `docs/concepts/member-lifecycle.md` — keep the concept + state diagram; trim Atomic create flow to prose; cut Spawn-prompt modes / Pane display-name / Write-path resolution / Operator diagnostics / Base-dir / Supervision to one-line pointers; strip symbols. <!-- completed: -->
-- [ ] `docs/concepts/coding-agents.md` — keep as pane-title canonical; trim the bash-disable bullet to a bash-routing link; strip symbols. <!-- completed: -->
-- [ ] `docs/concepts/bash-routing.md` — keep as canonical; strip symbols; keep the exec-routing skill pointer. <!-- completed: -->
-- [ ] `docs/concepts/tmux-push.md` — cut the CLI truncation section (→ `cli-options.md`) and the implementation/test asides; trim Response annotations; strip symbols; keep the concept + diagram + design principles. <!-- completed: -->
-- [ ] `docs/concepts/token-reduction.md` — strip the per-row symbol from each technique row (keep the technique coverage, do not gut); keep in nav. <!-- completed: -->
+- [x] `docs/concepts/overview.md` — cut Component layout, Operation mapping, CLI option sources, Package structure, Plugin packaging; trim WebUI + orchestration-skills to short concept paragraphs; keep the architecture diagram; strip symbols. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/fleet-isolation.md` — cut the bootstrap + soft-delete + Administrator sections (→ links to canonical homes); keep the isolation concept; trim Root Director protection to one sentence; strip symbols. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/storage.md` — cut the duplicate ER diagram + column/index tables (→ `data-model.md`), the integer-PK upgrade section (→ `install.md`), and the Task lifecycle table (→ `message-envelope.md`); trim Schema management; cut Session ownership; strip symbols. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/member-lifecycle.md` — keep the concept + state diagram; trim Atomic create flow to prose; cut Spawn-prompt modes / Pane display-name / Write-path resolution / Operator diagnostics / Base-dir / Supervision to one-line pointers; strip symbols. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/coding-agents.md` — keep as pane-title canonical; trim the bash-disable bullet to a bash-routing link; strip symbols. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/bash-routing.md` — keep as canonical; strip symbols; keep the exec-routing skill pointer. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/tmux-push.md` — cut the CLI truncation section (→ `cli-options.md`) and the implementation/test asides; trim Response annotations; strip symbols; keep the concept + diagram + design principles. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/token-reduction.md` — strip the per-row symbol from each technique row (keep the technique coverage, do not gut); keep in nav. <!-- completed: 2026-06-09T11:17 -->
 
 ### Step 3: Reference (per-backend) pages
 
