@@ -199,10 +199,10 @@ X-Fleet-Id: <fleet_id>
 
 ## Error Format
 
-WebUI API errors use a simple JSON format:
+WebUI API errors use FastAPI's default error shape. `HTTPException` responses (400 / 404) carry a `detail` string:
 
 ```json
-{"error": "Error message"}
+{"detail": "Error message"}
 ```
 
-Or FastAPI's default validation error format for 422 responses.
+Request-body validation failures (422) use FastAPI's default validation error format — a `detail` array of per-field error objects.
