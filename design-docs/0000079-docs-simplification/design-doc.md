@@ -1,8 +1,8 @@
 # Documentation Simplification (docs/ + README.md)
 
 **Status**: Approved
-**Progress**: 21/24 tasks complete
-**Last Updated**: 2026-06-08
+**Progress**: 24/24 tasks complete
+**Last Updated**: 2026-06-09
 
 ## Overview
 
@@ -10,13 +10,13 @@ The `docs/` tree (~3095 lines across 24 files) and the duplicated parts of `READ
 
 ## Success Criteria
 
-- [ ] Every necessary fact (install, configure, CLI surface, data model, message envelope, WebUI API contracts, architecture concepts) survives, stated **once** in one canonical place; other mentions become a one-line cross-reference or are deleted.
-- [ ] A strict **necessity test** is applied to every fact: if a user or operator does not need it to install, configure, use, or understand cafleet, it is **deleted** (not relocated).
-- [ ] All **bare code symbol names** are removed from user docs — including public `broker.*` / `MULTIPLEXERS.*` / `CODING_AGENTS.*` dotted references — and replaced with plain-prose behavior descriptions. (Bare module/file names like `broker.py`, `cli.py` may remain only where they orient the reader.)
-- [ ] All **stale content** describing the old async architecture is deleted (verified against `cafleet/src/cafleet/`): `RegistryStore`, `TaskStore`, `BrokerExecutor`, `async_sessionmaker`/`AsyncSession`, the `task_json` column, the `PATCH /api/v1/agents/<id>/placement` endpoint, and `metadata["recipientIds"]`.
-- [ ] No reference material is lost: the CLI surface, all flags, the Error Messages table, the data-model column tables, the message-envelope schema, and the WebUI API request/response contracts remain intact.
-- [ ] `zensical.toml` nav still resolves: no page is removed, so the nav is unchanged. Anchors that survive cross-references (`#full-semantics`, `#message-body-truncation`) are preserved.
-- [ ] After the edit, the repository reads as if the removed/duplicated content never existed — no "see design NNNN for the old behavior" deprecation notices (per `config/claude/rules/removal.md`).
+- [x] Every necessary fact (install, configure, CLI surface, data model, message envelope, WebUI API contracts, architecture concepts) survives, stated **once** in one canonical place; other mentions become a one-line cross-reference or are deleted.
+- [x] A strict **necessity test** is applied to every fact: if a user or operator does not need it to install, configure, use, or understand cafleet, it is **deleted** (not relocated).
+- [x] All **bare code symbol names** are removed from user docs — including public `broker.*` / `MULTIPLEXERS.*` / `CODING_AGENTS.*` dotted references — and replaced with plain-prose behavior descriptions. (Bare module/file names like `broker.py`, `cli.py` may remain only where they orient the reader.)
+- [x] All **stale content** describing the old async architecture is deleted (verified against `cafleet/src/cafleet/`): `RegistryStore`, `TaskStore`, `BrokerExecutor`, `async_sessionmaker`/`AsyncSession`, the `task_json` column, the `PATCH /api/v1/agents/<id>/placement` endpoint, and `metadata["recipientIds"]`.
+- [x] No reference material is lost: the CLI surface, all flags, the Error Messages table, the data-model column tables, the message-envelope schema, and the WebUI API request/response contracts remain intact.
+- [x] `zensical.toml` nav still resolves: no page is removed, so the nav is unchanged. Anchors that survive cross-references (`#full-semantics`, `#message-body-truncation`) are preserved.
+- [x] After the edit, the repository reads as if the removed/duplicated content never existed — no "see design NNNN for the old behavior" deprecation notices (per `config/claude/rules/removal.md`).
 
 ---
 
@@ -276,9 +276,9 @@ This is the canonical CLI reference and the new canonical home for fleet bootstr
 
 ### Step 5: Nav verification + build
 
-- [ ] `docs/api/*.md` — confirm the four mkdocstrings stubs (`broker.md`, `config.md`, `coding-agent.md`, `multiplexer.md`) need no change and are left as-is. <!-- completed: -->
-- [ ] `zensical.toml` — verify no nav edit is required (no page removed) and that surviving anchors (`#full-semantics`, `#message-body-truncation`) are intact. <!-- completed: -->
-- [ ] Run `mise //:docs-build` and confirm a clean build with all internal cross-references resolving; spot-check that no stale symbol / stale-architecture phrase and no deprecation notice remains (grep for `RegistryStore`, `TaskStore`, `BrokerExecutor`, `async_sessionmaker`, `task_json`, `PATCH /api/v1/agents`, `recipientIds`). <!-- completed: -->
+- [x] `docs/api/*.md` — confirm the four mkdocstrings stubs (`broker.md`, `config.md`, `coding-agent.md`, `multiplexer.md`) need no change and are left as-is. <!-- completed: 2026-06-09T11:43 -->
+- [x] `zensical.toml` — verify no nav edit is required (no page removed) and that surviving anchors (`#full-semantics`, `#message-body-truncation`) are intact. <!-- completed: 2026-06-09T11:43 -->
+- [x] Run `mise //:docs-build` and confirm a clean build with all internal cross-references resolving; spot-check that no stale symbol / stale-architecture phrase and no deprecation notice remains (grep for `RegistryStore`, `TaskStore`, `BrokerExecutor`, `async_sessionmaker`, `task_json`, `PATCH /api/v1/agents`, `recipientIds`). <!-- completed: 2026-06-09T11:43 -->
 
 ---
 
@@ -287,3 +287,4 @@ This is the canonical CLI reference and the new canonical home for fleet bootstr
 | Date | Changes |
 |------|---------|
 | 2026-06-08 | Initial draft |
+| 2026-06-09 | Implementation complete — all 24 tasks across the 5 steps; clean `mise //:docs-build`, stale-term grep empty. |
