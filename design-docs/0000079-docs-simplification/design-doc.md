@@ -1,8 +1,8 @@
 # Documentation Simplification (docs/ + README.md)
 
 **Status**: Approved
-**Progress**: 0/24 tasks complete
-**Last Updated**: 2026-06-08
+**Progress**: 24/24 tasks complete
+**Last Updated**: 2026-06-09
 
 ## Overview
 
@@ -10,13 +10,13 @@ The `docs/` tree (~3095 lines across 24 files) and the duplicated parts of `READ
 
 ## Success Criteria
 
-- [ ] Every necessary fact (install, configure, CLI surface, data model, message envelope, WebUI API contracts, architecture concepts) survives, stated **once** in one canonical place; other mentions become a one-line cross-reference or are deleted.
-- [ ] A strict **necessity test** is applied to every fact: if a user or operator does not need it to install, configure, use, or understand cafleet, it is **deleted** (not relocated).
-- [ ] All **bare code symbol names** are removed from user docs — including public `broker.*` / `MULTIPLEXERS.*` / `CODING_AGENTS.*` dotted references — and replaced with plain-prose behavior descriptions. (Bare module/file names like `broker.py`, `cli.py` may remain only where they orient the reader.)
-- [ ] All **stale content** describing the old async architecture is deleted (verified against `cafleet/src/cafleet/`): `RegistryStore`, `TaskStore`, `BrokerExecutor`, `async_sessionmaker`/`AsyncSession`, the `task_json` column, the `PATCH /api/v1/agents/<id>/placement` endpoint, and `metadata["recipientIds"]`.
-- [ ] No reference material is lost: the CLI surface, all flags, the Error Messages table, the data-model column tables, the message-envelope schema, and the WebUI API request/response contracts remain intact.
-- [ ] `zensical.toml` nav still resolves: no page is removed, so the nav is unchanged. Anchors that survive cross-references (`#full-semantics`, `#message-body-truncation`) are preserved.
-- [ ] After the edit, the repository reads as if the removed/duplicated content never existed — no "see design NNNN for the old behavior" deprecation notices (per `config/claude/rules/removal.md`).
+- [x] Every necessary fact (install, configure, CLI surface, data model, message envelope, WebUI API contracts, architecture concepts) survives, stated **once** in one canonical place; other mentions become a one-line cross-reference or are deleted.
+- [x] A strict **necessity test** is applied to every fact: if a user or operator does not need it to install, configure, use, or understand cafleet, it is **deleted** (not relocated).
+- [x] All **bare code symbol names** are removed from user docs — including public `broker.*` / `MULTIPLEXERS.*` / `CODING_AGENTS.*` dotted references — and replaced with plain-prose behavior descriptions. (Bare module/file names like `broker.py`, `cli.py` may remain only where they orient the reader.)
+- [x] All **stale content** describing the old async architecture is deleted (verified against `cafleet/src/cafleet/`): `RegistryStore`, `TaskStore`, `BrokerExecutor`, `async_sessionmaker`/`AsyncSession`, the `task_json` column, the `PATCH /api/v1/agents/<id>/placement` endpoint, and `metadata["recipientIds"]`.
+- [x] No reference material is lost: the CLI surface, all flags, the Error Messages table, the data-model column tables, the message-envelope schema, and the WebUI API request/response contracts remain intact.
+- [x] `zensical.toml` nav still resolves: no page is removed, so the nav is unchanged. Anchors that survive cross-references (`#full-semantics`, `#message-body-truncation`) are preserved.
+- [x] After the edit, the repository reads as if the removed/duplicated content never existed — no "see design NNNN for the old behavior" deprecation notices (per `config/claude/rules/removal.md`).
 
 ---
 
@@ -243,42 +243,42 @@ This is the canonical CLI reference and the new canonical home for fleet bootstr
 
 ### Step 1: Spec pages (largest cuts + canonical homes)
 
-- [ ] `docs/spec/data-model.md` — delete stale Operation mapping + Session ownership sections; cut Fleet Lifecycle (verify-before-cut: confirm coverage at `cli-options.md` `fleet delete` first); reduce bootstrap + soft-delete to observable minimums; trim Administrator to essentials (canonical home) and strip the stale `AdministratorProtectedError` reference; fix the `PATCH …/placement` phrase; fix Broadcast Grouping (drop `recipientIds`, drop `BrokerExecutor`); rename Task Visibility verbs to CLI verbs; cut ACK-timestamp-debt + `db purge` example; strip all dotted symbols. <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — make `fleet create` (observable bootstrap) and `fleet delete` (observable soft-delete) the canonical homes; cut their SQL-step narratives; factor the shared "Member targeting and key delivery" subsection out of `send-input`/`exec`/`ping`; strip all dotted symbols; keep all flag tables, output shapes, and the Error Messages table. <!-- completed: -->
-- [ ] `docs/spec/message-envelope.md` — cut the `render_task` code block; defer `--full`/truncation to `cli-options.md` (keep the Flag cross-reference); strip symbols; keep the schema + examples. <!-- completed: -->
-- [ ] `docs/spec/webui-api.md` — drop `recipientIds` wording; trim Administrator to a link; strip the `kind`-derivation symbols; keep all endpoint contracts. <!-- completed: -->
+- [x] `docs/spec/data-model.md` — delete stale Operation mapping + Session ownership sections; cut Fleet Lifecycle (verify-before-cut: confirm coverage at `cli-options.md` `fleet delete` first); reduce bootstrap + soft-delete to observable minimums; trim Administrator to essentials (canonical home) and strip the stale `AdministratorProtectedError` reference; fix the `PATCH …/placement` phrase; fix Broadcast Grouping (drop `recipientIds`, drop `BrokerExecutor`); rename Task Visibility verbs to CLI verbs; cut ACK-timestamp-debt + `db purge` example; strip all dotted symbols. <!-- completed: 2026-06-09T11:03 -->
+- [x] `docs/spec/cli-options.md` — make `fleet create` (observable bootstrap) and `fleet delete` (observable soft-delete) the canonical homes; cut their SQL-step narratives; factor the shared "Member targeting and key delivery" subsection out of `send-input`/`exec`/`ping`; strip all dotted symbols; keep all flag tables, output shapes, and the Error Messages table. <!-- completed: 2026-06-09T11:03 -->
+- [x] `docs/spec/message-envelope.md` — cut the `render_task` code block; defer `--full`/truncation to `cli-options.md` (keep the Flag cross-reference); strip symbols; keep the schema + examples. <!-- completed: 2026-06-09T11:03 -->
+- [x] `docs/spec/webui-api.md` — drop `recipientIds` wording; trim Administrator to a link; strip the `kind`-derivation symbols; keep all endpoint contracts. <!-- completed: 2026-06-09T11:03 -->
 
 ### Step 2: Concepts pages (necessity-test trims + SSOT cross-refs)
 
-- [ ] `docs/concepts/overview.md` — cut Component layout, Operation mapping, CLI option sources, Package structure, Plugin packaging; trim WebUI + orchestration-skills to short concept paragraphs; keep the architecture diagram; strip symbols. <!-- completed: -->
-- [ ] `docs/concepts/fleet-isolation.md` — cut the bootstrap + soft-delete + Administrator sections (→ links to canonical homes); keep the isolation concept; trim Root Director protection to one sentence; strip symbols. <!-- completed: -->
-- [ ] `docs/concepts/storage.md` — cut the duplicate ER diagram + column/index tables (→ `data-model.md`), the integer-PK upgrade section (→ `install.md`), and the Task lifecycle table (→ `message-envelope.md`); trim Schema management; cut Session ownership; strip symbols. <!-- completed: -->
-- [ ] `docs/concepts/member-lifecycle.md` — keep the concept + state diagram; trim Atomic create flow to prose; cut Spawn-prompt modes / Pane display-name / Write-path resolution / Operator diagnostics / Base-dir / Supervision to one-line pointers; strip symbols. <!-- completed: -->
-- [ ] `docs/concepts/coding-agents.md` — keep as pane-title canonical; trim the bash-disable bullet to a bash-routing link; strip symbols. <!-- completed: -->
-- [ ] `docs/concepts/bash-routing.md` — keep as canonical; strip symbols; keep the exec-routing skill pointer. <!-- completed: -->
-- [ ] `docs/concepts/tmux-push.md` — cut the CLI truncation section (→ `cli-options.md`) and the implementation/test asides; trim Response annotations; strip symbols; keep the concept + diagram + design principles. <!-- completed: -->
-- [ ] `docs/concepts/token-reduction.md` — strip the per-row symbol from each technique row (keep the technique coverage, do not gut); keep in nav. <!-- completed: -->
+- [x] `docs/concepts/overview.md` — cut Component layout, Operation mapping, CLI option sources, Package structure, Plugin packaging; trim WebUI + orchestration-skills to short concept paragraphs; keep the architecture diagram; strip symbols. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/fleet-isolation.md` — cut the bootstrap + soft-delete + Administrator sections (→ links to canonical homes); keep the isolation concept; trim Root Director protection to one sentence; strip symbols. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/storage.md` — cut the duplicate ER diagram + column/index tables (→ `data-model.md`), the integer-PK upgrade section (→ `install.md`), and the Task lifecycle table (→ `message-envelope.md`); trim Schema management; cut Session ownership; strip symbols. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/member-lifecycle.md` — keep the concept + state diagram; trim Atomic create flow to prose; cut Spawn-prompt modes / Pane display-name / Write-path resolution / Operator diagnostics / Base-dir / Supervision to one-line pointers; strip symbols. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/coding-agents.md` — keep as pane-title canonical; trim the bash-disable bullet to a bash-routing link; strip symbols. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/bash-routing.md` — keep as canonical; strip symbols; keep the exec-routing skill pointer. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/tmux-push.md` — cut the CLI truncation section (→ `cli-options.md`) and the implementation/test asides; trim Response annotations; strip symbols; keep the concept + diagram + design principles. <!-- completed: 2026-06-09T11:17 -->
+- [x] `docs/concepts/token-reduction.md` — strip the per-row symbol from each technique row (keep the technique coverage, do not gut); keep in nav. <!-- completed: 2026-06-09T11:17 -->
 
 ### Step 3: Reference (per-backend) pages
 
-- [ ] `docs/reference/coding-agents/codex.md` — keep operational essentials + verification recipe; collapse `!`-shortcut and pane-title to links; strip symbols. <!-- completed: -->
-- [ ] `docs/reference/coding-agents/opencode.md` — cut the `--dangerously-skip-permissions` rationale + `findLast`/preset-dataclass internals; trim safety-floor caveats to the operational point; keep MCP MUST-NOT, version pin, refresh recipe, verification recipe; collapse `!`-shortcut and pane-title to links. <!-- completed: -->
+- [x] `docs/reference/coding-agents/codex.md` — keep operational essentials + verification recipe; collapse `!`-shortcut and pane-title to links; strip symbols. <!-- completed: 2026-06-09T11:29 -->
+- [x] `docs/reference/coding-agents/opencode.md` — cut the `--dangerously-skip-permissions` rationale + `findLast`/preset-dataclass internals; trim safety-floor caveats to the operational point; keep MCP MUST-NOT, version pin, refresh recipe, verification recipe; collapse `!`-shortcut and pane-title to links. <!-- completed: 2026-06-09T11:29 -->
 
 ### Step 4: Get-started + landing + README
 
-- [ ] `docs/get-started/configure.md` — strip the opencode symbol references to prose; keep all config blocks (canonical config home). <!-- completed: -->
-- [ ] `docs/get-started/install.md` — confirm it remains the canonical integer-PK upgrade-warning home (no cut). <!-- completed: -->
-- [ ] `docs/get-started/quickstart.md` — light symbol strip only; keep the walkthrough. <!-- completed: -->
-- [ ] `docs/get-started/contributing.md` — keep as the canonical project-structure / dev-loop home (no cut). <!-- completed: -->
-- [ ] `docs/get-started/index.md` — confirm no change needed. <!-- completed: -->
-- [ ] `docs/index.md` — cut the duplicate component-overview mermaid; keep intro + browse links. <!-- completed: -->
-- [ ] `README.md` — collapse Section 2 to a Configure-page pointer; keep Install, Examples, Architecture blurb, Contributing pointer, video; renumber sections. <!-- completed: -->
+- [x] `docs/get-started/configure.md` — strip the opencode symbol references to prose; keep all config blocks (canonical config home). <!-- completed: 2026-06-09T11:35 -->
+- [x] `docs/get-started/install.md` — confirm it remains the canonical integer-PK upgrade-warning home (no cut). <!-- completed: 2026-06-09T11:35 -->
+- [x] `docs/get-started/quickstart.md` — light symbol strip only; keep the walkthrough. <!-- completed: 2026-06-09T11:35 -->
+- [x] `docs/get-started/contributing.md` — keep as the canonical project-structure / dev-loop home (no cut). <!-- completed: 2026-06-09T11:35 -->
+- [x] `docs/get-started/index.md` — confirm no change needed. <!-- completed: 2026-06-09T11:35 -->
+- [x] `docs/index.md` — cut the duplicate component-overview mermaid; keep intro + browse links. <!-- completed: 2026-06-09T11:35 -->
+- [x] `README.md` — collapse Section 2 to a Configure-page pointer; keep Install, Examples, Architecture blurb, Contributing pointer, video; renumber sections. <!-- completed: 2026-06-09T11:35 -->
 
 ### Step 5: Nav verification + build
 
-- [ ] `docs/api/*.md` — confirm the four mkdocstrings stubs (`broker.md`, `config.md`, `coding-agent.md`, `multiplexer.md`) need no change and are left as-is. <!-- completed: -->
-- [ ] `zensical.toml` — verify no nav edit is required (no page removed) and that surviving anchors (`#full-semantics`, `#message-body-truncation`) are intact. <!-- completed: -->
-- [ ] Run `mise //:docs-build` and confirm a clean build with all internal cross-references resolving; spot-check that no stale symbol / stale-architecture phrase and no deprecation notice remains (grep for `RegistryStore`, `TaskStore`, `BrokerExecutor`, `async_sessionmaker`, `task_json`, `PATCH /api/v1/agents`, `recipientIds`). <!-- completed: -->
+- [x] `docs/api/*.md` — confirm the four mkdocstrings stubs (`broker.md`, `config.md`, `coding-agent.md`, `multiplexer.md`) need no change and are left as-is. <!-- completed: 2026-06-09T11:43 -->
+- [x] `zensical.toml` — verify no nav edit is required (no page removed) and that surviving anchors (`#full-semantics`, `#message-body-truncation`) are intact. <!-- completed: 2026-06-09T11:43 -->
+- [x] Run `mise //:docs-build` and confirm a clean build with all internal cross-references resolving; spot-check that no stale symbol / stale-architecture phrase and no deprecation notice remains (grep for `RegistryStore`, `TaskStore`, `BrokerExecutor`, `async_sessionmaker`, `task_json`, `PATCH /api/v1/agents`, `recipientIds`). <!-- completed: 2026-06-09T11:43 -->
 
 ---
 
@@ -287,3 +287,4 @@ This is the canonical CLI reference and the new canonical home for fleet bootstr
 | Date | Changes |
 |------|---------|
 | 2026-06-08 | Initial draft |
+| 2026-06-09 | Implementation complete — all 24 tasks across the 5 steps; clean `mise //:docs-build`, stale-term grep empty. |

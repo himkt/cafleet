@@ -44,79 +44,11 @@ cafleet db init             # apply schema migrations (idempotent; rerun after u
 
 The default database is `~/.local/share/cafleet/cafleet.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
 
-## 2. Recommended settings
+Per-coding-agent config (Claude `permissions.allow`, Codex `config.toml` + rules, opencode) lives on the Configure page: <https://himkt.github.io/cafleet/get-started/configure/>.
 
-### 2.1. Claude Code
+## 2. Examples
 
-> [!TIP]
->
-> Typically, the config entries like following would be written in `~/.claude/settings.json`:
->
-> ```json
-> {
->   "permissions": {
->     "allow": [
->       "Bash(cafleet *)",
->       "Skill(cafleet:cafleet)",
->       "Skill(cafleet:cafleet-agent-team-monitoring)",
->       "Skill(cafleet:cafleet-agent-team-supervision)",
->       "Skill(cafleet:cafleet-base-dir)",
->       "Skill(cafleet:cafleet-create-figure)",
->       "Skill(cafleet:cafleet-design-doc)",
->       "Skill(cafleet:cafleet-design-doc-create)",
->       "Skill(cafleet:cafleet-design-doc-execute)",
->       "Skill(cafleet:cafleet-design-doc-interview)",
->       "Skill(cafleet:cafleet-my-slidev)",
->       "Skill(cafleet:cafleet-research-presentation)",
->       "Skill(cafleet:cafleet-research-report)"
->     ],
->     "ask": [
->       "Bash(cafleet * member exec *)"
->     ]
->   }
-> }
-> ```
->
-
-### 2.2. Codex
-
-> [!TIP]
->
-> Typically, the config entries like following would be written in `~/.codex/config.toml`:
->
-> ```toml
-> [marketplaces.cafleet]
-> last_updated = "2026-05-16T11:56:51Z"
-> last_revision = "03a8caa66c8a7981345d74fe3aec9a6e498792a1"
-> source_type = "git"
-> source = "https://github.com/himkt/cafleet.git"
->
-> [plugins."cafleet@cafleet"]
-> enabled = true
->
-> [sandbox_workspace_write]
-> writable_roots = ["/home/<you>/.local/share/cafleet"]
-> ```
-> 
-> Recommended Codex rules for `cafleet` commands on `~/.codex/rules/cafleet.rules`:
-> 
-> ```
-> prefix_rule(
->     pattern = ["cafleet"],
->     decision = "allow",
->     justification = "All cafleet subcommands are allowed by default",
-> )
-> 
-> prefix_rule(
->     pattern = ["cafleet", "member", "exec"],
->     decision = "prompt",
->     justification = "cafleet member exec runs arbitrary commands on a member",
-> )
-> ```
-
-## 3. Examples
-
-### 3.1. Simple example to use CAFleet
+### 2.1. Simple example to use CAFleet
 
 Provide the following prompt to Claude Code or Codex to see how it works.
 
@@ -126,7 +58,7 @@ Please create a new team with two members using cafleet and let them ping-pong e
 After the demonstration, please shutdown the team.
 ```
 
-### 3.2. Real world usage; Design-doc-driven development
+### 2.2. Real world usage; Design-doc-driven development
 
 CAFleet provides the builtin skills for Spec Driven Development (SDD). **We're using CAFleet to develop CAFleet!**
 
@@ -140,10 +72,10 @@ See your coding-agent's skill documentation for the literal invocation syntax (C
 
 You can see the existing design docs on [`design-docs/`](design-docs/), which are actually created by the skills.
 
-## 4. Architecture
+## 3. Architecture
 
 CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Fleets partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. Full architecture documentation is published at <https://himkt.github.io/cafleet/concepts/overview/>.
 
-## 5. Contributing
+## 4. Contributing
 
 Build, test, and project-structure instructions, plus the design-doc-driven contribution flow, are published at <https://himkt.github.io/cafleet/get-started/contributing/>.

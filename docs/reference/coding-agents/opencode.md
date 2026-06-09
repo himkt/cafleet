@@ -28,28 +28,13 @@ opencode --agent cafleet --prompt <prompt>
 - `--agent cafleet` binds the spawn to the `cafleet` agent definition at `~/.opencode/agents/cafleet.md`. The definition carries an inline permission ruleset (catch-all `"*": "allow"` first, then specific `"deny"` patterns) that resolves every permission check to `allow` or `deny` — nothing falls through to opencode's `ask` state. This is the safety floor.
 - `--prompt <prompt>` passes the initial prompt to the TUI. Per <https://opencode.ai/docs/cli/>, bare `opencode` takes `[project]` (an optional project-path positional), NOT `[message..]`. Passing the prompt as a positional would silently misinterpret it as a project path; `--prompt` is the documented flag for the initial-prompt path.
 
-Explicit non-flags: cafleet does **not** pass `--interactive` (an internal `opencode run` flag, not a stable public surface) and does **not** pass `--dangerously-skip-permissions` (see below).
-
-## Why we don't pass `--dangerously-skip-permissions`
-
-`--dangerously-skip-permissions` is documented at <https://opencode.ai/docs/cli/> only as a flag of the `opencode run` subcommand, not as a bare-`opencode` flag. Passing it to the bare command would either be rejected by yargs `.strict()` parsing or silently ignored.
-
-Independently, the flag is only consumed inside the non-interactive `execute()` path in opencode's source — the interactive code paths (which the cafleet pane uses) do not subscribe a `permission.asked` event handler that consults the flag. Even when accepted, the flag has no effect in any interactive code path.
-
-The CAFleet pane is operated by a Director (an agent), not a human — the Director cannot drive a focus-based Allow-once / Allow-always / Reject UI reliably. The safety floor therefore pre-empts the `ask` state across the entire permission surface, so the TUI never shows a permission prompt in normal operation. This is the function of the `cafleet` agent definition's catch-all-allow + specific-deny ruleset: every permission check resolves to `allow` (catch-all) or `deny` (specific), and the auto-approve-once handler `--dangerously-skip-permissions` would provide is not needed.
+Explicit non-flags: cafleet does **not** pass `--interactive` (an internal `opencode run` flag) and does **not** pass `--dangerously-skip-permissions` — the bare-`opencode` TUI takes no skip-permissions flag, and the safety floor pre-empts the `ask` state instead.
 
 ## The `cafleet` agent preset
 
-The `cafleet` agent definition is owned in CAFleet source as a frozen Python dataclass:
+`--agent cafleet` binds the member to the `cafleet` agent definition at `~/.opencode/agents/cafleet.md`. cafleet writes this file on first spawn with **skip-if-exists semantics**: it is written once, and subsequent spawns are a cheap no-op. Operators who customize the file (editing the deny-list, adding tools, changing the body) keep their edits — cafleet never overwrites it once it exists.
 
-- **Module**: `cafleet/src/cafleet/coding_agent/opencode_preset.py`
-- **Dataclasses**: `PermissionRuleset` (per-permission rules) and `OpencodeAgentDefinition` (frontmatter + body).
-- **Preset constant**: `CAFLEET_AGENT` — the canonical CAFleet-spawned-member definition, with a catch-all `"*": "allow"` first for `bash` / `read` / `edit`, then specific dangerous patterns denied (`bash -c*`, `sudo*`, `rm -rf*`, `curl*`, `git push*`, `**/.env`, etc.), and Action-shorthand `"deny"` for `external_directory`, `webfetch`, `websearch`, `repo_clone`, `question`, `plan_enter`, `plan_exit`.
-- **Rendering**: `OpencodeAgentDefinition.to_markdown()` emits a JSON-shaped frontmatter inside the `---` block followed by the markdown body. JSON is a strict subset of YAML 1.2, so opencode's frontmatter parser reads it correctly.
-
-`OpencodeAgent.ensure_available()` calls `materialize_cafleet_agent(CAFLEET_AGENT)` on every spawn, which writes the rendered markdown to `~/.opencode/agents/cafleet.md` with **skip-if-exists semantics**: the file is written once on first spawn, and subsequent spawns are a cheap stat-then-no-op. Operators who customize the file (editing the deny-list, adding tools, changing the body) keep their edits — CAFleet never overwrites the file once it exists.
-
-The catch-all + deny discipline matters because opencode's permission evaluator (`permission/evaluate.ts`) uses `findLast` to select the matching rule, so the order is "catch-all `*` FIRST, specific denies LATER" — the deny wins for dangerous patterns and the catch-all allow covers everything else. Re-ordering the rules breaks the safety floor.
+The definition's ruleset lists a catch-all `"*": "allow"` first, then specific dangerous patterns denied (`bash -c*`, `sudo*`, `rm -rf*`, `curl*`, `git push*`, `**/.env`, and the like) plus a `deny` for categories such as external-directory access, web fetch, and web search. opencode selects the **last** matching rule, so the order — catch-all allow first, specific denies later — is what makes the deny win for dangerous patterns while everything else is allowed. Re-ordering the rules breaks the safety floor.
 
 ## Refreshing the preset after a CAFleet upgrade
 
@@ -61,7 +46,7 @@ cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
   --name Opencode-Refresh --description "preset refresh" --coding-agent opencode
 ```
 
-The next `OpencodeAgent.ensure_available()` call re-materializes the file from the current `CAFLEET_AGENT` constant. If you have local customizations you want to preserve, diff the current file against the new rendered output before deleting.
+The next spawn re-materializes the file from the current preset. If you have local customizations you want to preserve, diff the current file against the new rendered output before deleting.
 
 This trade-off favors respecting user customization over auto-applying upstream changes. The auto-refresh path is intentionally out of scope.
 
@@ -73,7 +58,7 @@ If `opencode --version` reports an older version that lacks any of these afforda
 
 If the `opencode` binary is not on `PATH`, `cafleet member create --coding-agent opencode` exits 1 with `Error: binary opencode not found on PATH`. Install `opencode`, confirm with `opencode --version`, and retry.
 
-If `~/.opencode/agents/cafleet.md` cannot be written (e.g. `$HOME` is read-only, `~/.opencode/` is owned by another user, or the disk is full), `materialize_cafleet_agent` wraps the underlying `OSError` / `PermissionError` as a `RuntimeError` (chained from the original) so `cafleet member create --coding-agent opencode` surfaces it via the existing spawn-failure path and aborts cleanly with no orphaned placement. Resolve the filesystem condition and retry.
+If `~/.opencode/agents/cafleet.md` cannot be written (e.g. `$HOME` is read-only, `~/.opencode/` is owned by another user, or the disk is full), `cafleet member create --coding-agent opencode` surfaces the error via the spawn-failure path and aborts cleanly with no orphaned placement. Resolve the filesystem condition and retry.
 
 ## cafleet usage from inside an opencode pane
 
@@ -92,43 +77,28 @@ For the full broker CLI reference (register, send, broadcast, poll, ack, cancel,
 
 ## The `!` shell-shortcut convention
 
-Opencode's TUI input box honors a leading-`!` shell shortcut — typing `! <command>` runs the command natively, the same way Claude Code's and Codex CLI's `!` shortcuts work. cafleet's bash-via-Director fallback uses this convention:
-
-- When your Bash tool denies a destructive command, send a plain CAFleet message to your Director asking for the command. The Director dispatches it via `cafleet member exec "<command>"`, which keystrokes `! <command>` + Enter into your pane. The command runs natively; its stdout/stderr lands in your next-turn context.
-- You yourself never type `!`-prefixed commands manually. The shortcut is the dispatch mechanism the Director uses on your behalf.
+Opencode's TUI input box honors a leading-`!` shell shortcut, which cafleet's bash-via-Director fallback uses — see [Bash routing](../../concepts/bash-routing.md).
 
 ## Pane-title asymmetry
 
-`claude --name <member-name>` sets the tmux pane title via Claude Code's internal title-emit. **Neither `codex` nor `opencode` has an equivalent flag.** Opencode panes display whatever default title the binary emits. Pane discovery for all three backends goes through `cafleet member list`:
-
-```bash
-cafleet --fleet-id <fleet-id> member list
-```
-
-The `pane_id` column is ground truth. For mixed-backend teams in particular, do NOT rely on tmux pane titles to find a specific member's pane.
+Only `claude` sets the pane title to the member name; locate `opencode` panes via `cafleet member list` (the `pane_id` column is ground truth) — see [Coding agents](../../concepts/coding-agents.md).
 
 ## Permission-popup recovery posture
 
-In normal operation the TUI never shows a permission popup — the catch-all-allow + specific-deny ruleset means every check resolves without `ask`. If a popup ever appears, it is a regression escape from the safety floor (e.g. opencode added a new tool category in a future release that uses `ask` semantics and the `cafleet` agent definition does not yet cover it), NOT a runtime decision-point.
-
-The Director MUST escalate back to the user, capture pane state via `cafleet --fleet-id <s> member capture --member-id <opencode-member>` for diagnosis, and re-run Step 0-style empirical verification to extend the deny-list (which means updating `CAFLEET_AGENT` in source, shipping a new CAFleet release, and refreshing the preset per the recipe above). The Director MUST NOT wire `send_choice_key` against an opencode placement as an ad-hoc workaround — that defeats the safety floor invariant.
+In normal operation the TUI never shows a permission popup — every check resolves to `allow` or `deny` without `ask`. If a popup ever appears, it is a regression escape from the safety floor, not a runtime decision-point: the Director MUST escalate to the user and capture pane state via `cafleet member capture --member-id <opencode-member>` for diagnosis, then extend the deny-list (a source change + new release + preset refresh). The Director MUST NOT answer the popup as an ad-hoc workaround — that defeats the safety-floor invariant.
 
 ## Safety floor caveats
 
-The opencode backend matches Claude Code's `dontAsk` posture: deny-list only, no OS-level sandbox. This is explicit user policy. The deny-list does NOT cover:
+The opencode backend matches Claude Code's `dontAsk` posture: deny-list only, no OS-level sandbox. This is explicit user policy. The deny-list cannot cover everything:
 
-- **MCP-contributed tools.** Opencode's MCP integration does not route tool calls through the permission evaluator. CAFleet ships zero MCP stanzas, but a user-level `~/.config/opencode/opencode.json` that loads MCP servers will leak them into the cafleet spawn. **Operators MUST NOT add MCP servers to any opencode config their machine loads.**
-- **Shell wrappers not enumerated in the deny-list.** The wrapper deny list covers `bash -c`, `sh -c`, `zsh -c`, `python -c`, `python3 -c`, `perl -e`, `node -e`, `node --eval`, `ruby -e`, `eval`, `exec`, and `osascript`. Any wrapper not on this list (`fish -c`, `dash -c`, `tclsh`, `lua`, etc.) bypasses the wrapper check. cafleet targets Linux/macOS workstations; the list is sized accordingly.
-- **Language-specific eval bypasses.** `python script.py` where `script.py` calls `os.system(...)` passes the wrapper check (it is not `python -c`) and runs whatever the script wants. This is the fundamental limit of any allow-list-of-binaries permission model.
-- **Side-channel egress.** DNS lookups, ICMP, kernel-level networking via `/proc`, NTP — none of these go through `bash` and are not gated. Codex's kernel sandbox WOULD block these; CAFleet's opencode backend does NOT.
+- **MCP-contributed tools.** opencode's MCP integration does not route tool calls through the permission evaluator. cafleet ships zero MCP stanzas, but a user-level opencode config that loads MCP servers will leak them into the cafleet spawn. **Operators MUST NOT add MCP servers to any opencode config their machine loads.**
+- **Un-enumerated shell wrappers, in-language eval, and side-channel egress.** A shell wrapper not on the deny-list, a script that calls `os.system(...)`, or network egress that does not go through `bash` all bypass the deny-list. Codex's kernel sandbox WOULD block these; the opencode backend does NOT.
 
 Operators who need kernel-enforced isolation should use the `codex` backend with its `workspace-write` sandbox. This is the documented trade-off, not a bug.
 
 ## CAFleet writes one file under `$HOME`
 
-The opencode backend introduces a new install-footprint behavior compared to `claude` and `codex`: CAFleet writes one file at `~/.opencode/agents/cafleet.md` from `OpencodeAgent.ensure_available()` on first spawn. Neither `claude` nor `codex` writes anywhere under `$HOME` from CAFleet code.
-
-The write is scoped to that single well-known opencode path. CAFleet never writes anywhere else under `$HOME`. Skip-if-exists limits the risk of a malformed write to first spawn — if the file is somehow corrupted, delete it to recover and the next `OpencodeAgent.ensure_available()` call re-renders it from the in-source preset.
+The opencode backend writes exactly one file — `~/.opencode/agents/cafleet.md` — on first spawn. Neither `claude` nor `codex` writes anywhere under `$HOME` from cafleet code. cafleet never writes anywhere else under `$HOME`; if the file is somehow corrupted, delete it and the next spawn re-renders it from the in-source preset.
 
 ## Verification recipe (manual smoke test)
 
@@ -143,7 +113,7 @@ cafleet fleet create --label opencode-smoke --coding-agent claude
 cafleet --fleet-id $FLEET member create --agent-id $DIRECTOR \
   --name Opencode-Smoke --description "opencode smoke member" --coding-agent opencode
 # Expect: ~/.opencode/agents/cafleet.md is materialized with the
-# CAFLEET_AGENT preset (cat it and verify the JSON frontmatter).
+# cafleet preset (cat it and verify the JSON frontmatter).
 
 cafleet --fleet-id $FLEET member list
 # Expect: backend column shows 'opencode' for the smoke member.
