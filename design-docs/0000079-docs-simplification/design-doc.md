@@ -1,7 +1,7 @@
 # Documentation Simplification (docs/ + README.md)
 
 **Status**: Approved
-**Progress**: 0/24 tasks complete
+**Progress**: 4/24 tasks complete
 **Last Updated**: 2026-06-08
 
 ## Overview
@@ -243,10 +243,10 @@ This is the canonical CLI reference and the new canonical home for fleet bootstr
 
 ### Step 1: Spec pages (largest cuts + canonical homes)
 
-- [ ] `docs/spec/data-model.md` — delete stale Operation mapping + Session ownership sections; cut Fleet Lifecycle (verify-before-cut: confirm coverage at `cli-options.md` `fleet delete` first); reduce bootstrap + soft-delete to observable minimums; trim Administrator to essentials (canonical home) and strip the stale `AdministratorProtectedError` reference; fix the `PATCH …/placement` phrase; fix Broadcast Grouping (drop `recipientIds`, drop `BrokerExecutor`); rename Task Visibility verbs to CLI verbs; cut ACK-timestamp-debt + `db purge` example; strip all dotted symbols. <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — make `fleet create` (observable bootstrap) and `fleet delete` (observable soft-delete) the canonical homes; cut their SQL-step narratives; factor the shared "Member targeting and key delivery" subsection out of `send-input`/`exec`/`ping`; strip all dotted symbols; keep all flag tables, output shapes, and the Error Messages table. <!-- completed: -->
-- [ ] `docs/spec/message-envelope.md` — cut the `render_task` code block; defer `--full`/truncation to `cli-options.md` (keep the Flag cross-reference); strip symbols; keep the schema + examples. <!-- completed: -->
-- [ ] `docs/spec/webui-api.md` — drop `recipientIds` wording; trim Administrator to a link; strip the `kind`-derivation symbols; keep all endpoint contracts. <!-- completed: -->
+- [x] `docs/spec/data-model.md` — delete stale Operation mapping + Session ownership sections; cut Fleet Lifecycle (verify-before-cut: confirm coverage at `cli-options.md` `fleet delete` first); reduce bootstrap + soft-delete to observable minimums; trim Administrator to essentials (canonical home) and strip the stale `AdministratorProtectedError` reference; fix the `PATCH …/placement` phrase; fix Broadcast Grouping (drop `recipientIds`, drop `BrokerExecutor`); rename Task Visibility verbs to CLI verbs; cut ACK-timestamp-debt + `db purge` example; strip all dotted symbols. <!-- completed: 2026-06-09T11:03 -->
+- [x] `docs/spec/cli-options.md` — make `fleet create` (observable bootstrap) and `fleet delete` (observable soft-delete) the canonical homes; cut their SQL-step narratives; factor the shared "Member targeting and key delivery" subsection out of `send-input`/`exec`/`ping`; strip all dotted symbols; keep all flag tables, output shapes, and the Error Messages table. <!-- completed: 2026-06-09T11:03 -->
+- [x] `docs/spec/message-envelope.md` — cut the `render_task` code block; defer `--full`/truncation to `cli-options.md` (keep the Flag cross-reference); strip symbols; keep the schema + examples. <!-- completed: 2026-06-09T11:03 -->
+- [x] `docs/spec/webui-api.md` — drop `recipientIds` wording; trim Administrator to a link; strip the `kind`-derivation symbols; keep all endpoint contracts. <!-- completed: 2026-06-09T11:03 -->
 
 ### Step 2: Concepts pages (necessity-test trims + SSOT cross-refs)
 

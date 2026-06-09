@@ -19,7 +19,7 @@ Every message lives in `tasks` as a flat row of typed columns. There is no JSON 
 | `status_state` | `TEXT` | TaskState enum value: `input_required` (queued), `completed` (acked), `canceled` (retracted), `failed` (routing error). |
 | `status_timestamp` | `TEXT` (ISO-8601, microsecond precision) | Updated on every state change. Used for `ORDER BY DESC` and the `since` filter on `cafleet message poll`. |
 | `origin_task_id` | `INTEGER` (nullable) | Broadcast grouping link. `NULL` on unicast deliveries; on broadcast delivery rows holds the summary task's `task_id`; on the broadcast summary row itself self-references its own `task_id`. |
-| `text` | `TEXT` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` (computed in `broker.broadcast_message` at insert time). |
+| `text` | `TEXT` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` (computed at insert time). |
 
 The persisted shape is the canonical source of truth. Every render the broker produces is a projection of these columns.
 
@@ -27,26 +27,9 @@ See [data-model.md](data-model.md) for the full SQL schema (including indexes an
 
 ## Rendered shape
 
-The broker's Python read paths return the persisted columns as a flat dict (the typed-column dict), and the CLI projects that dict into a compact rendered envelope via `output.render_task` — by default the rendered envelope omits the columns whose values are constant or recoverable from context. The `--full` flag returns the typed-column dict unmodified.
+The broker's read paths return the persisted columns as a flat dict (the typed-column dict), and the CLI projects that dict into a compact rendered envelope — by default the rendered envelope omits the columns whose values are constant or recoverable from context. The `--full` flag returns the typed-column dict unmodified.
 
 ### Compact rendered envelope (default)
-
-```python
-def render_task(task: dict, *, full: bool = False) -> dict:
-    if full:
-        return task  # the typed-column dict
-    out = {
-        "id": task["task_id"],
-        "from": task["from_agent_id"],
-        "ts": task["status_timestamp"],
-        "text": task["text"],
-    }
-    if task["type"] != "unicast":
-        out["kind"] = task["type"]
-    if task.get("origin_task_id"):
-        out["origin"] = task["origin_task_id"]
-    return out
-```
 
 Field decisions:
 
@@ -107,7 +90,7 @@ A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--ful
 
 ### Text mode
 
-Text mode renders each task as two lines (line 1 is the bracketed envelope produced by `cafleet.output.format_task`, line 2 is the body):
+Text mode renders each task as two lines (line 1 is the bracketed envelope, line 2 is the body):
 
 ```
 [42 | from:7 | 2026-05-05T05:42:11.123456+00:00]
@@ -116,7 +99,7 @@ build OK
 
 Optional segments `| kind:<kind>` and `| origin:<id>` are appended to line 1 when the task is a broadcast summary (`type != "unicast"`) or has a non-NULL `origin_task_id`, respectively. The body line is omitted entirely when the resulting body is the empty string.
 
-`--full` switches to a six-line block that mirrors the `--full` JSON keys one-per-line. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. The truncation suffix is the single Unicode codepoint `…` (U+2026), applied at the configured `CAFLEET_MAX_TEXT_LEN` codepoint count (default 200).
+`--full` switches to a six-line block that mirrors the `--full` JSON keys one-per-line. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. Body truncation (the `…` suffix at `CAFLEET_MAX_TEXT_LEN` codepoints) is documented in [cli-options.md](cli-options.md#message-body-truncation).
 
 ## Flag cross-reference
 

@@ -69,7 +69,7 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
 | `"builtin-administrator"` | The fleet's built-in Administrator agent. Exactly one per fleet. Derived from `agent_card_json.cafleet.kind == "builtin-administrator"`. |
 | `"user"` | Any other agent (human-registered, spawned member, etc.). |
 
-The discriminator is derived at read time from the stored `agent_card_json` blob — there is no dedicated column. `broker.list_fleet_agents` reads it in SQL via `json_extract(agent_card_json, '$.cafleet.kind')`, while `broker.get_agent` (which already loads the full ORM row) computes it via the `_is_administrator` helper.
+The discriminator is derived at read time from the stored agent card; there is no dedicated column. See [data-model.md](./data-model.md) for the Administrator's full definition.
 
 ### GET /api/agents/{agent_id}/inbox — Inbox Messages
 
@@ -143,7 +143,7 @@ Fleet scoping is reached through the `tasks.context_id → agents.agent_id → a
 
 **Row cap**: Hard-capped at 200 rows; no pagination.
 
-**Exclusions**: Rows with `type == "broadcast_summary"` are filtered out of the response. The summary row's metadata (`recipientIds`) is not needed for the UI; the grouping convention below lets the frontend reconstruct broadcasts from their delivery rows alone.
+**Exclusions**: Rows with `type == "broadcast_summary"` are filtered out of the response. The summary row is not needed for the UI; the grouping convention below lets the frontend reconstruct broadcasts from their delivery rows alone.
 
 **Broadcast grouping**: Every row carries an `origin_task_id` field:
 
@@ -178,7 +178,7 @@ X-Fleet-Id: <fleet_id>
 
 **Unicast** (`to_agent_id` is an integer): the server verifies both the sender and the destination belong to the caller's fleet and that the destination is active.
 
-**Broadcast** (`to_agent_id == "*"`): the server skips destination validation (no specific recipient to verify) and the WebUI route calls `broker.broadcast_message(...)`, which fans out to every active agent in the fleet (except the built-in Administrator, which is filtered out of the recipient set at the broker layer) plus a summary task. The sender is still required to be active and in the caller's fleet; the sender MAY be the Administrator. The response's `task_id` is the summary task's id.
+**Broadcast** (`to_agent_id == "*"`): the server skips destination validation (no specific recipient to verify) and fans out to every active agent in the fleet (except the built-in Administrator, which is filtered out of the recipient set at the broker layer) plus a summary task. The sender is still required to be active and in the caller's fleet; the sender MAY be the Administrator. The response's `task_id` is the summary task's id.
 
 **Sender identity**: The Admin WebUI always submits `from_agent_id = administrator.agent_id` (the fleet's built-in Administrator). The endpoint itself is sender-agnostic — it accepts any active agent in the fleet — but no UI path lets the operator pick a different sender.
 
@@ -194,7 +194,7 @@ X-Fleet-Id: <fleet_id>
 **Errors**:
 - 400: Missing fields, `from_agent` not in fleet, destination is deregistered
 - 404: Agent not found or cross-fleet
-- 409 (reserved for future deregister endpoint): for any future endpoint that attempts to deregister or otherwise modify the built-in Administrator, the broker's `AdministratorProtectedError` must be translated to `raise HTTPException(status_code=409, detail=...)`. This 409 is not currently reachable through `POST /api/messages/send` and the WebUI router does not yet register an exception handler for `AdministratorProtectedError`; this entry documents the required mapping for the future endpoint.
+- 409 (reserved for future deregister endpoint): for any future endpoint that attempts to deregister or otherwise modify the built-in Administrator, the broker's protection error (`Administrator cannot be deregistered`) must be translated to a 409 response. This 409 is not currently reachable through `POST /api/messages/send`; this entry documents the required mapping for the future endpoint.
 
 ## Error Format
 
