@@ -194,7 +194,7 @@ X-Fleet-Id: <fleet_id>
 **Errors**:
 - 422: Missing or invalid request-body fields (`from_agent_id`, `to_agent_id`, or `text`) — FastAPI/Pydantic validation on the request model.
 - 400: `from_agent_id` is not an active agent in the caller's fleet (`from_agent not in fleet`). A missing or non-integer `X-Fleet-Id` header is also 400 — see [Request Headers](#request-headers).
-- 404: the destination `to_agent_id` does not resolve to an active agent in the fleet — unknown, cross-fleet, or deregistered — returned as `Agent not found`. An unknown fleet in `X-Fleet-Id` is also 404.
+- 404 — two cases, each with its own `detail` string: the destination `to_agent_id` does not resolve to an active agent in the fleet (unknown, cross-fleet, or deregistered) → `Agent not found`; an unknown `X-Fleet-Id` fleet → `Fleet not found`.
 - 409 (reserved for future deregister endpoint): for any future endpoint that attempts to deregister or otherwise modify the built-in Administrator, the broker's protection error (`Administrator cannot be deregistered`) must be translated to a 409 response. This 409 is not currently reachable through `POST /api/messages/send`; this entry documents the required mapping for the future endpoint.
 
 ## Error Format
