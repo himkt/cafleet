@@ -583,7 +583,7 @@ See [Member targeting and key delivery](#member-targeting-and-key-delivery) for 
 
 ### `member ping`
 
-Director-only manual inbox-poll nudge. Keystrokes the same `cafleet --fleet-id <s> message poll --agent-id <m>` + `Enter` sequence that the broker auto-fires on message delivery, but as an operator-driven entry-point: failures surface as exit 1 (the auto-fire path swallows failures silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
+Director-only manual inbox-poll nudge. Keystrokes `cafleet --fleet-id <s> message poll --agent-id <m>` + `Enter` into the member's pane so the member drains its inbox via a normal poll. This is the manual re-poke for a pane that missed the broker's automatic on-delivery notification — which keystrokes a 2-line inline preview (not a poll command) — so the two keystroke paths are distinct. As an operator-driven entry-point, failures surface as exit 1 (the auto-fire path swallows failures silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
 
 ```bash
 cafleet --fleet-id <fleet-id> member ping \
