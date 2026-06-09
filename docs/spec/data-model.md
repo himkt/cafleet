@@ -122,12 +122,16 @@ The two foreign keys (`agents.fleet_id → fleets.fleet_id`, `tasks.context_id �
 
 ## Task Visibility Rules
 
-| Caller | Can Access |
-|---|---|
-| Recipient (same-fleet agent matching `to_agent_id`) | `message poll` by contextId (= their agent_id), `message show`, `message send` (ACK) |
-| Sender (same-fleet agent matching `from_agent_id`) | `message show` by known taskId, `message cancel` |
+Read access is **fleet-scoped**; per-agent identity is enforced only on state transitions:
 
-`message poll` enforces that `contextId` must equal the caller's `agent_id`. If a different `contextId` is provided, the broker returns an error. This prevents inbox snooping — even within the same fleet. `message show` verifies that the task's `from_agent_id` or `to_agent_id` belongs to the caller's fleet; cross-fleet lookups return "not found".
+| Operation | Enforcement |
+|---|---|
+| `message poll` | Returns the `input_required` deliveries whose `context_id` equals the passed `--agent-id`. The CLI gates only that `--agent-id` belongs to `--fleet-id`, so any in-fleet caller can poll any in-fleet agent's inbox by id — there is no per-caller snoop guard. |
+| `message show` | Returns the task iff at least one of its endpoints (`from_agent_id` / `to_agent_id`) belongs to `--fleet-id`. No per-caller check; cross-fleet lookups return "not found". |
+| `message ack` | Only the recipient may ACK — the caller's `agent_id` must equal the task's `context_id`, otherwise `Only the recipient can ACK a task`. |
+| `message cancel` | Only the sender may cancel — the caller's `agent_id` must equal the task's `from_agent_id`, otherwise `Only the sender can cancel a task`. |
+
+The only cross-fleet boundary is fleet membership; within a fleet, reads are not partitioned per agent. Recipient/sender identity is enforced only when transitioning a task's state (ack / cancel).
 
 ## Broadcast Grouping
 

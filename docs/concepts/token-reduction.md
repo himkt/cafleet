@@ -21,7 +21,7 @@ below.
 | `cafleet member list --activity` | Aggregates per-member message timestamps into `last_sent` / `last_recv` / `last_ack` / `idle` columns (the `last_ack` proxy filters out broadcast-summary rows). Existing task indexes cover the join. |
 | Persisted-shape simplification | Every `Task` field is a flat typed column; the message body lives in `Task.text` and there is no opaque per-task JSON blob. WebUI consumers use the same typed-column flat shape. |
 | Inline message preview | The broker keystrokes a 2-line `[cafleet msg <task_id> from <sender_id> <ts>]` + body preview directly into the recipient's pane. Documented in [tmux push notifications](tmux-push.md); a separate poll-trigger keystroke backs the `cafleet member ping` re-poke. |
-| Agent render slim | Each agent renders to the minimum-required fields by default (`id`, `name`, `description` truncated, `status`, and `coding_agent` from placement); `--full` returns the agent dict unchanged. The agent surfaces never load `agent_card_json`, so it is not emitted in either mode. |
+| Agent render slim | Each agent renders to the minimum-required fields by default (`id`, `name`, `description` truncated, `status`, and `coding_agent` from placement); `--full` returns the agent dict unchanged. The agent surfaces never emit `agent_card_json` in either mode. |
 
 In short, what keeps cafleet's output small: a compact 2-line default message
 envelope (6 lines under `--full`), a slim member spawn prompt, the core skill
