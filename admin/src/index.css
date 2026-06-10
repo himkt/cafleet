@@ -1,1 +1,145 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+
+  --surface: #f9f9fb;
+  --surface-raised: #ffffff;
+  --surface-hover: #f1f0f5;
+  --border: #e4e2ec;
+  --text: #1b182b;
+  --text-muted: #5b5772;
+  --text-faint: #928fa6;
+  --accent: #7e14ff;
+  --accent-hover: #6c0fe0;
+  --accent-soft: #f3ebff;
+  --accent-fg: #ffffff;
+  --success: #15803d;
+  --success-soft: #dcfce7;
+  --danger: #b91c1c;
+  --danger-soft: #fee2e2;
+
+  --avatar-1: #be123c;
+  --avatar-2: #c2410c;
+  --avatar-3: #a16207;
+  --avatar-4: #4d7c0f;
+  --avatar-5: #15803d;
+  --avatar-6: #0f766e;
+  --avatar-7: #0e7490;
+  --avatar-8: #1d4ed8;
+  --avatar-9: #4338ca;
+  --avatar-10: #6d28d9;
+  --avatar-11: #a21caf;
+  --avatar-12: #be185d;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --surface: #131120;
+  --surface-raised: #1c1a2e;
+  --surface-hover: #262339;
+  --border: #2f2c45;
+  --text: #ededf4;
+  --text-muted: #a8a5bd;
+  --text-faint: #6f6c85;
+  --accent: #a78bfa;
+  --accent-hover: #b9a3fc;
+  --accent-soft: #2d2350;
+  --accent-fg: #17122b;
+  --success: #4ade80;
+  --success-soft: #16331f;
+  --danger: #f87171;
+  --danger-soft: #43201f;
+
+  --avatar-1: #e11d48;
+  --avatar-2: #ea580c;
+  --avatar-3: #d97706;
+  --avatar-4: #65a30d;
+  --avatar-5: #16a34a;
+  --avatar-6: #0d9488;
+  --avatar-7: #0891b2;
+  --avatar-8: #2563eb;
+  --avatar-9: #6366f1;
+  --avatar-10: #7c3aed;
+  --avatar-11: #c026d3;
+  --avatar-12: #db2777;
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  --color-avatar-1: var(--avatar-1);
+  --color-avatar-2: var(--avatar-2);
+  --color-avatar-3: var(--avatar-3);
+  --color-avatar-4: var(--avatar-4);
+  --color-avatar-5: var(--avatar-5);
+  --color-avatar-6: var(--avatar-6);
+  --color-avatar-7: var(--avatar-7);
+  --color-avatar-8: var(--avatar-8);
+  --color-avatar-9: var(--avatar-9);
+  --color-avatar-10: var(--avatar-10);
+  --color-avatar-11: var(--avatar-11);
+  --color-avatar-12: var(--avatar-12);
+
+  --font-sans: "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --animate-rise-in: rise-in 200ms ease-out both;
+  --animate-pulse-dot: pulse-dot 2s ease-in-out infinite;
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-surface font-sans text-text antialiased;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    *,
+    ::before,
+    ::after {
+      transition-property: background-color, border-color, color, fill, stroke;
+      transition-duration: 150ms;
+      transition-timing-function: ease;
+    }
+  }
+}

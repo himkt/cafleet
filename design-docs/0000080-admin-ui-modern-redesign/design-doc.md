@@ -1,7 +1,7 @@
 # Admin WebUI Modern Redesign
 
 **Status**: Approved
-**Progress**: 3/24 tasks complete
+**Progress**: 8/24 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -211,11 +211,11 @@ The one deliberate behavior change (allowed by the approved UX-restructure scope
 
 ### Step 2: Foundation — dependencies, tokens, theme
 
-- [ ] Add `lucide-react`, `radix-ui`, `@fontsource-variable/inter`, `@fontsource-variable/jetbrains-mono` to `admin/package.json`; regenerate `bun.lock` <!-- completed: -->
-- [ ] Rewrite `admin/src/index.css`: semantic token custom properties for `:root` and `.dark`, `@custom-variant dark`, `@theme inline` registration, font imports, motion keyframes <!-- completed: -->
-- [ ] Add `useTheme.ts` (localStorage + matchMedia + html class) and `ThemeToggle.tsx` <!-- completed: -->
-- [ ] Add FOUC-prevention inline script and `color-scheme` meta to `admin/index.html` <!-- completed: -->
-- [ ] Add shared primitives: `Skeleton.tsx`, `EmptyState.tsx`, `AgentAvatar.tsx` (deterministic 12-color palette) <!-- completed: -->
+- [x] Add `lucide-react`, `radix-ui`, `@fontsource-variable/inter`, `@fontsource-variable/jetbrains-mono` to `admin/package.json`; regenerate `bun.lock` <!-- completed: 2026-06-10T09:38 -->
+- [x] Rewrite `admin/src/index.css`: semantic token custom properties for `:root` and `.dark`, `@custom-variant dark`, `@theme inline` registration, font imports, motion keyframes <!-- completed: 2026-06-10T09:38 -->
+- [x] Add `useTheme.ts` (localStorage + matchMedia + html class) and `ThemeToggle.tsx` <!-- completed: 2026-06-10T09:38 -->
+- [x] Add FOUC-prevention inline script and `color-scheme` meta to `admin/index.html` <!-- completed: 2026-06-10T09:38 -->
+- [x] Add shared primitives: `Skeleton.tsx`, `EmptyState.tsx`, `AgentAvatar.tsx` (deterministic 12-color palette) <!-- completed: 2026-06-10T09:38 -->
 
 ### Step 3: App shell and FleetPicker
 
