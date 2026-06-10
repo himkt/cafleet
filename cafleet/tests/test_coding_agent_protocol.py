@@ -123,3 +123,115 @@ def test_codex_build_spawn_argv__preserves_prompt_with_special_chars():
     argv = impl.build_spawn_argv(prompt, display_name="ignored")
     assert argv[-1] == prompt
     assert argv[0] == "codex"
+
+
+# --- ``model`` keyword: validate_model + argv emission ---
+
+
+_PINNED_ARGV_WITHOUT_MODEL = {
+    "claude": [
+        "claude",
+        "--permission-mode",
+        "dontAsk",
+        "--name",
+        "Bob",
+        "PROMPT_TEXT",
+    ],
+    "codex": [
+        "codex",
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "workspace-write",
+        "PROMPT_TEXT",
+    ],
+    "opencode": [
+        "opencode",
+        "--agent",
+        "cafleet",
+        "--prompt",
+        "PROMPT_TEXT",
+    ],
+}
+
+
+@pytest.mark.parametrize("name", list(CODING_AGENTS))
+def test_build_spawn_argv__model_omitted_is_byte_identical_to_pinned(name):
+    """Omitting ``model`` keeps the spawn argv byte-identical to the pinned list."""
+    argv = CODING_AGENTS[name].build_spawn_argv("PROMPT_TEXT", display_name="Bob")
+    assert argv == _PINNED_ARGV_WITHOUT_MODEL[name]
+
+
+@pytest.mark.parametrize("name", list(CODING_AGENTS))
+def test_build_spawn_argv__model_none_explicit_is_byte_identical_to_pinned(name):
+    """``model=None`` emits no model tokens — same argv as omitting the keyword."""
+    argv = CODING_AGENTS[name].build_spawn_argv(
+        "PROMPT_TEXT", display_name="Bob", model=None
+    )
+    assert argv == _PINNED_ARGV_WITHOUT_MODEL[name]
+
+
+def test_claude_build_spawn_argv__model_set_byte_exact():
+    """``--model <m>`` lands between ``--name <display>`` and the prompt."""
+    impl = CODING_AGENTS["claude"]
+    assert impl.build_spawn_argv("PROMPT_TEXT", display_name="Bob", model="sonnet") == [
+        "claude",
+        "--permission-mode",
+        "dontAsk",
+        "--name",
+        "Bob",
+        "--model",
+        "sonnet",
+        "PROMPT_TEXT",
+    ]
+
+
+def test_codex_build_spawn_argv__model_set_byte_exact():
+    """``--model <m>`` lands between ``workspace-write`` and the prompt."""
+    impl = CODING_AGENTS["codex"]
+    assert impl.build_spawn_argv(
+        "PROMPT_TEXT", display_name="ignored", model="gpt-5.4-mini"
+    ) == [
+        "codex",
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "workspace-write",
+        "--model",
+        "gpt-5.4-mini",
+        "PROMPT_TEXT",
+    ]
+
+
+def test_opencode_build_spawn_argv__model_set_byte_exact():
+    """``--model <m>`` lands between ``cafleet`` and the ``--prompt`` pair."""
+    impl = CODING_AGENTS["opencode"]
+    assert impl.build_spawn_argv(
+        "PROMPT_TEXT", display_name="ignored", model="anthropic/claude-sonnet-4-6"
+    ) == [
+        "opencode",
+        "--agent",
+        "cafleet",
+        "--model",
+        "anthropic/claude-sonnet-4-6",
+        "--prompt",
+        "PROMPT_TEXT",
+    ]
+
+
+@pytest.mark.parametrize("name", ["claude", "codex"])
+@pytest.mark.parametrize(
+    "model",
+    ["sonnet", "gpt-5.4-mini", "", "   ", "anthropic/claude-sonnet-4-6", "no-such"],
+)
+def test_validate_model__claude_codex_accept_any_string(name, model):
+    """Pass-through policy: the backend binary itself rejects unknown models,
+    so newly released models work without a cafleet release. Empty and
+    whitespace-only strings pass too — no CLI-level emptiness check."""
+    assert CODING_AGENTS[name].validate_model(model) is None
+
+
+@pytest.mark.parametrize("name", list(CODING_AGENTS))
+def test_validate_model__none_is_always_valid(name):
+    """``None`` (flag omitted) is valid for every backend."""
+    assert CODING_AGENTS[name].validate_model(None) is None
