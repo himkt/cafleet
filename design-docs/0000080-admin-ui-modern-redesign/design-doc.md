@@ -1,7 +1,7 @@
 # Admin WebUI Modern Redesign
 
 **Status**: Approved
-**Progress**: 8/24 tasks complete
+**Progress**: 10/24 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -219,8 +219,8 @@ The one deliberate behavior change (allowed by the approved UX-restructure scope
 
 ### Step 3: App shell and FleetPicker
 
-- [ ] Build `AppHeader.tsx` (brand mark + wordmark, breadcrumb, Live indicator, Refresh, ThemeToggle) and wire into both screens <!-- completed: -->
-- [ ] Restyle `FleetPicker.tsx`: fleet cards, skeleton loading, restyled empty/error states with preserved copy <!-- completed: -->
+- [x] Build `AppHeader.tsx` (brand mark + wordmark, breadcrumb, Live indicator, Refresh, ThemeToggle) and wire into both screens <!-- completed: 2026-06-10T09:42 -->
+- [x] Restyle `FleetPicker.tsx`: fleet cards, skeleton loading, restyled empty/error states with preserved copy <!-- completed: 2026-06-10T09:42 -->
 
 ### Step 4: Dashboard restyle
 

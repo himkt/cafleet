@@ -3,6 +3,7 @@ import type { Agent } from "./types";
 import { setFleetId, getAgents, listFleets } from "./api";
 import FleetPicker from "./components/FleetPicker";
 import Dashboard from "./components/Dashboard";
+import Skeleton from "./components/Skeleton";
 
 interface Route {
   kind: "fleets" | "dashboard";
@@ -25,6 +26,7 @@ function navigate(hash: string): void {
 export default function App() {
   const [route, setRoute] = useState<Route>(parseHash);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [fleetLabel, setFleetLabel] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -46,11 +48,12 @@ export default function App() {
         const fleets = await listFleets();
         if (cancelled) return;
 
-        const found = fleets.some((s) => s.fleet_id === Number(route.fleetId));
-        if (!found) {
+        const fleet = fleets.find((s) => s.fleet_id === Number(route.fleetId));
+        if (!fleet) {
           navigate("/fleets");
           return;
         }
+        setFleetLabel(fleet.label);
 
         setFleetId(Number(route.fleetId));
         const data = await getAgents();
@@ -91,8 +94,20 @@ export default function App() {
 
   if (loading && route.kind === "dashboard") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-400">Loading...</p>
+      <div className="flex h-screen flex-col bg-surface">
+        <div className="border-b border-border bg-surface-raised px-4 py-3">
+          <Skeleton className="h-5 w-40" />
+        </div>
+        <div className="flex flex-1">
+          <div className="w-60 shrink-0 border-r border-border p-3">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="mt-3 h-4 w-28" />
+          </div>
+          <div className="flex-1 p-4">
+            <Skeleton className="h-4 w-64" />
+            <Skeleton className="mt-3 h-4 w-48" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -101,6 +116,7 @@ export default function App() {
     return (
       <Dashboard
         fleetId={Number(route.fleetId)}
+        fleetLabel={fleetLabel}
         initialAgents={agents}
         onBack={handleBack}
       />
