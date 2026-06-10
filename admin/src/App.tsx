@@ -87,7 +87,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [route]);
+  }, [route.kind, route.fleetId]);
 
   const handleSelectFleet = useCallback(
     async (sid: number, label: string | null) => {
