@@ -73,7 +73,7 @@ The discriminator is derived at read time from the stored agent card; there is n
 
 ### GET /api/agents/{agent_id}/inbox — Inbox Messages
 
-Returns messages received by the agent (`context_id = agent_id`), excluding `broadcast_summary` type tasks. Ordered newest first.
+Returns messages received by the agent (`context_id = agent_id`), excluding `broadcast_summary` type tasks. Ordered newest first. Consumed by the agent detail view's **Inbox** tab in the admin WebUI.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -91,23 +91,29 @@ Returns messages received by the agent (`context_id = agent_id`), excluding `bro
       "type": "unicast",
       "status": "input_required",
       "created_at": "2026-03-29T10:00:00+00:00",
+      "status_timestamp": "2026-03-29T10:00:00+00:00",
+      "origin_task_id": null,
       "body": "Hello, Agent B!"
     }
   ]
 }
 ```
 
+All message endpoints (inbox, sent, timeline) share the same row formatter, so the field set is identical to `GET /api/timeline` — including `status_timestamp` and `origin_task_id` (see the timeline section below for their semantics).
+
 The `body` field is extracted from the task's first artifact's first text part. If no text part exists, `body` is `""`.
+
+**Row cap**: none — the endpoint returns every matching row. The agent detail view truncates client-side to the 200 most recent rows per tab.
 
 **Status values**: `input_required` (Pending), `completed` (Acknowledged), `canceled` (Canceled).
 
 ### GET /api/agents/{agent_id}/sent — Sent Messages
 
-Returns messages sent by the agent (single SQL query against `tasks` filtered by `from_agent_id` and ordered by `status_timestamp DESC`, served by `idx_tasks_from_agent_status_ts`), excluding `broadcast_summary` type tasks. Ordered newest first.
+Returns messages sent by the agent (single SQL query against `tasks` filtered by `from_agent_id` and ordered by `status_timestamp DESC`, served by `idx_tasks_from_agent_status_ts`), excluding `broadcast_summary` type tasks. Ordered newest first. Consumed by the agent detail view's **Sent** tab in the admin WebUI.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
-Same response format as inbox.
+Same response format (and row-cap behavior) as inbox.
 
 ### GET /api/timeline — Unified Fleet Timeline
 

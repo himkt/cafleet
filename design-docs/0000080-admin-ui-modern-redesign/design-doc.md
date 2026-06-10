@@ -1,7 +1,7 @@
 # Admin WebUI Modern Redesign
 
 **Status**: Approved
-**Progress**: 0/24 tasks complete
+**Progress**: 3/24 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -205,9 +205,9 @@ The one deliberate behavior change (allowed by the approved UX-restructure scope
 
 ### Step 1: Documentation (project rule: docs before code)
 
-- [ ] Update `docs/concepts/overview.md` § WebUI: light/dark theme toggle, agent detail view (Inbox/Sent), violet brand styling <!-- completed: -->
-- [ ] Update `docs/spec/webui-api.md`: mark inbox/sent as consumed by the agent detail view; align their response examples with the shared `_format_messages` field set <!-- completed: -->
-- [ ] Verify `README.md` and `skills/*/SKILL.md` need no changes (no CLI/API surface change); update `docs/get-started/contributing.md` only if a lockfile-regeneration note is warranted <!-- completed: -->
+- [x] Update `docs/concepts/overview.md` § WebUI: light/dark theme toggle, agent detail view (Inbox/Sent), violet brand styling <!-- completed: 2026-06-10T09:31 -->
+- [x] Update `docs/spec/webui-api.md`: mark inbox/sent as consumed by the agent detail view; align their response examples with the shared `_format_messages` field set <!-- completed: 2026-06-10T09:31 -->
+- [x] Verify `README.md` and `skills/*/SKILL.md` need no changes (no CLI/API surface change); update `docs/get-started/contributing.md` only if a lockfile-regeneration note is warranted <!-- completed: 2026-06-10T09:31 -->
 
 ### Step 2: Foundation — dependencies, tokens, theme
 
