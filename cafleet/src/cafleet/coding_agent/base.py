@@ -41,7 +41,20 @@ class CodingAgent(Protocol):
         """
         ...
 
-    def build_spawn_argv(self, prompt: str, *, display_name: str) -> list[str]:
+    def validate_model(self, model: str | None) -> None:
+        """Raise ValueError if ``model`` is not acceptable to this backend.
+
+        ``None`` (flag omitted) is always valid. Called by ``member create``
+        before any registration or tmux side effect.
+
+        Raises:
+            ValueError: If ``model`` violates the backend's format rules.
+        """
+        ...
+
+    def build_spawn_argv(
+        self, prompt: str, *, display_name: str, model: str | None = None
+    ) -> list[str]:
         """Return the argv list passed to the multiplexer's ``split_window``.
 
         Args:
@@ -52,6 +65,10 @@ class CodingAgent(Protocol):
                 and silently ignored by every other backend (``codex``,
                 ``opencode``) because neither has a pane-title-equivalent
                 flag.
+            model: Model forwarded to the binary via its ``--model`` flag,
+                emitted immediately before the prompt tokens. ``None`` (flag
+                omitted) emits no model tokens, keeping the argv byte-identical
+                to the no-model form so the binary uses its own default model.
 
         Returns:
             argv list ready to hand to ``Multiplexer.split_window``.

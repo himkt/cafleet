@@ -1,7 +1,7 @@
 # `--model` Option for `member create` and the `CodingAgent` Spawn Protocol
 
 **Status**: Approved
-**Progress**: 0/21 tasks complete
+**Progress**: 21/21 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -10,11 +10,11 @@ Add an optional `--model <string>` flag to `cafleet member create` and a `model`
 
 ## Success Criteria
 
-- [ ] `cafleet member create --model <m>` forwards `<m>` to the spawned backend binary via that binary's `--model` flag; omitting `--model` produces a spawn argv byte-identical to the pre-change argv for all three backends.
-- [ ] `--model` values violating the opencode `<provider-id>/<model-id>` format fail at create time with exit 2 and the documented error message, before any agent registration or tmux side effect.
-- [ ] claude and codex accept any string (pass-through; the binary itself rejects unknown models, so newly released models work without a cafleet release).
-- [ ] All listed docs and skills document `--model`, and `skills/cafleet/reference/director.md` carries the model-name-to-backend inference table so a Director can resolve "create a member with sonnet" to `--coding-agent claude --model sonnet`.
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass with the new tests in place.
+- [x] `cafleet member create --model <m>` forwards `<m>` to the spawned backend binary via that binary's `--model` flag; omitting `--model` produces a spawn argv byte-identical to the pre-change argv for all three backends.
+- [x] `--model` values violating the opencode `<provider-id>/<model-id>` format fail at create time with exit 2 and the documented error message, before any agent registration or tmux side effect.
+- [x] claude and codex accept any string (pass-through; the binary itself rejects unknown models, so newly released models work without a cafleet release).
+- [x] All listed docs and skills document `--model`, and `skills/cafleet/reference/director.md` carries the model-name-to-backend inference table so a Director can resolve "create a member with sonnet" to `--coding-agent claude --model sonnet`.
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass with the new tests in place.
 
 ---
 
@@ -198,39 +198,39 @@ The global `~/.claude/skills/cafleet-agent-team-supervision` mirror is outside t
 
 ### Step 1: Documentation and skills (first, per `.claude/rules/design-doc-numbering.md`)
 
-- [ ] Update `docs/concepts/coding-agents.md` with the model-selection paragraph <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md`: flag table row, spawn-command table variants, error-messages row <!-- completed: -->
-- [ ] Update `docs/reference/coding-agents/codex.md` § Spawn flags with `--model` + example catalog <!-- completed: -->
-- [ ] Update `docs/reference/coding-agents/opencode.md` § Spawn flags with `--model` + format rule <!-- completed: -->
-- [ ] Update `docs/get-started/quickstart.md` with the optional `--model` mention <!-- completed: -->
-- [ ] Update `README.md` to stay consistent with the docs changes <!-- completed: -->
-- [ ] Update `skills/cafleet/SKILL.md` (§ Coding-agent backends mention + pointer) <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/director.md` (flag row + with-model variants in its "Spawn command per backend" table + inference table) <!-- completed: -->
-- [ ] Update `skills/cafleet-agent-team-supervision/SKILL.md` (spawn-protocol mention) <!-- completed: -->
+- [x] Update `docs/concepts/coding-agents.md` with the model-selection paragraph <!-- completed: 2026-06-10T13:43 -->
+- [x] Update `docs/spec/cli-options.md`: flag table row, spawn-command table variants, error-messages row <!-- completed: 2026-06-10T13:44 -->
+- [x] Update `docs/reference/coding-agents/codex.md` § Spawn flags with `--model` + example catalog <!-- completed: 2026-06-10T13:45 -->
+- [x] Update `docs/reference/coding-agents/opencode.md` § Spawn flags with `--model` + format rule <!-- completed: 2026-06-10T13:45 -->
+- [x] Update `docs/get-started/quickstart.md` with the optional `--model` mention <!-- completed: 2026-06-10T13:46 -->
+- [x] Update `README.md` to stay consistent with the docs changes <!-- completed: 2026-06-10T13:47 -->
+- [x] Update `skills/cafleet/SKILL.md` (§ Coding-agent backends mention + pointer) <!-- completed: 2026-06-10T13:48 -->
+- [x] Update `skills/cafleet/reference/director.md` (flag row + with-model variants in its "Spawn command per backend" table + inference table) <!-- completed: 2026-06-10T13:49 -->
+- [x] Update `skills/cafleet-agent-team-supervision/SKILL.md` (spawn-protocol mention) <!-- completed: 2026-06-10T13:50 -->
 
 ### Step 2: Protocol and backends
 
-- [ ] `base.py`: add `model: str | None = None` keyword to `build_spawn_argv` and the new `validate_model` method to the `CodingAgent` Protocol, with docstrings covering the None-omits-tokens and None-is-always-valid contracts <!-- completed: -->
-- [ ] `claude.py`: `validate_model` no-op; emit `--model <m>` between `--name <display>` and the prompt when set <!-- completed: -->
-- [ ] `codex.py`: `validate_model` no-op; emit `--model <m>` between `workspace-write` and the prompt when set <!-- completed: -->
-- [ ] `opencode.py`: `validate_model` first-slash format check with the exact error message; emit `--model <m>` between `cafleet` and `--prompt` when set <!-- completed: -->
+- [x] `base.py`: add `model: str | None = None` keyword to `build_spawn_argv` and the new `validate_model` method to the `CodingAgent` Protocol, with docstrings covering the None-omits-tokens and None-is-always-valid contracts <!-- completed: 2026-06-10T13:52 -->
+- [x] `claude.py`: `validate_model` no-op; emit `--model <m>` between `--name <display>` and the prompt when set <!-- completed: 2026-06-10T13:52 -->
+- [x] `codex.py`: `validate_model` no-op; emit `--model <m>` between `workspace-write` and the prompt when set <!-- completed: 2026-06-10T13:52 -->
+- [x] `opencode.py`: `validate_model` first-slash format check with the exact error message; emit `--model <m>` between `cafleet` and `--prompt` when set <!-- completed: 2026-06-10T13:52 -->
 
 ### Step 3: CLI wiring
 
-- [ ] `cli.py` `member_create`: add the `--model` option, call `agent.validate_model(model)` (wrapping `ValueError` in `click.UsageError`) before `ensure_available()` / registration, and pass `model=model` to `build_spawn_argv` <!-- completed: -->
+- [x] `cli.py` `member_create`: add the `--model` option, call `agent.validate_model(model)` (wrapping `ValueError` in `click.UsageError`) before `ensure_available()` / registration, and pass `model=model` to `build_spawn_argv` <!-- completed: 2026-06-10T13:52 -->
 
 ### Step 4: Tests
 
-- [ ] `tests/test_coding_agent_protocol.py`: per backend, byte-exact argv with `model` set; byte-exact argv with `model` omitted AND `model=None` explicit (both equal to the current pinned list); claude/codex `validate_model` accepts arbitrary strings including `""` <!-- completed: -->
-- [ ] `tests/test_coding_agent_opencode.py`: `validate_model` accept/reject matrix from the Specification table (incl. `a/b/c` accept and `""` reject); byte-exact argv with `model` set <!-- completed: -->
-- [ ] `tests/test_cli_member.py`: `--model` wiring per backend (tokens present at the specified position); no `--model` → no `--model` token in the spawn argv; opencode invalid value → exit 2, exact message, and no agent registered (validation precedes registration); claude/codex empty-string pass-through <!-- completed: -->
-- [ ] `tests/test_cli_help_budget.py`: bump `("member", "create")` line budget 13 → 14 and raise the aggregate byte budget from 4620 to the re-measured total (rounded up to the next multiple of 10) <!-- completed: -->
+- [x] `tests/test_coding_agent_protocol.py`: per backend, byte-exact argv with `model` set; byte-exact argv with `model` omitted AND `model=None` explicit (both equal to the current pinned list); claude/codex `validate_model` accepts arbitrary strings including `""` <!-- completed: 2026-06-10T13:48 -->
+- [x] `tests/test_coding_agent_opencode.py`: `validate_model` accept/reject matrix from the Specification table (incl. `a/b/c` accept and `""` reject); byte-exact argv with `model` set <!-- completed: 2026-06-10T13:48 -->
+- [x] `tests/test_cli_member.py`: `--model` wiring per backend (tokens present at the specified position); no `--model` → no `--model` token in the spawn argv; opencode invalid value → exit 2, exact message, and no agent registered (validation precedes registration); claude/codex empty-string pass-through <!-- completed: 2026-06-10T13:48 -->
+- [x] `tests/test_cli_help_budget.py`: bump `("member", "create")` line budget 13 → 14 and re-measure the aggregate byte budget (4620 → 4320, the measured total rounded up to the next multiple of 10) <!-- completed: 2026-06-10T13:48 -->
 
 ### Step 5: Quality gates and manual verification
 
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass <!-- completed: -->
-- [ ] Manual smoke (inside tmux, with a fleet created via `cafleet fleet create`): run the quickstart-derived spawn `cafleet --fleet-id <fleet-id> member create --agent-id <director-id> --name "demo-member" --description "Demo member" --model sonnet -- "You are demo-member. Reply hello when polled."`. Pass: the member pane is running `claude --permission-mode dontAsk --name demo-member --model sonnet <prompt>` (verify the argv via the pane's process, e.g. `ps -o args= -t <pane-tty>`, or by observing the model name in the spawned session's status line via `cafleet member capture`). Clean up with `cafleet member delete` <!-- completed: -->
-- [ ] Natural-language Director test: start a fresh Claude Code session at the repo root AFTER the Step 1 skill updates land, so the updated `skills/cafleet/SKILL.md` and `skills/cafleet/reference/director.md` are what load; create a fleet, then tell the Director "please create a member with sonnet". Pass: the `member create` Bash invocation the Director constructs — observed in the session transcript / pane history at or before execution — targets the claude backend (explicit `--coding-agent claude` or omitted default) AND contains `--model sonnet`. Fail: any other backend, a missing `--model sonnet`, or the Director asking which backend to use (sonnet matches the claude row of the inference table, so no fallback question is warranted) <!-- completed: -->
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass <!-- completed: 2026-06-10T13:52 -->
+- [x] Manual smoke (inside tmux, with a fleet created via `cafleet fleet create`): run the quickstart-derived spawn `cafleet --fleet-id <fleet-id> member create --agent-id <director-id> --name "demo-member" --description "Demo member" --model sonnet -- "You are demo-member. Reply hello when polled."`. Pass: the member pane is running `claude --permission-mode dontAsk --name demo-member --model sonnet <prompt>` (verify the argv via the pane's process, e.g. `ps -o args= -t <pane-tty>`, or by observing the model name in the spawned session's status line via `cafleet member capture`). Clean up with `cafleet member delete` <!-- completed: 2026-06-10T14:00 -->
+- [x] Natural-language Director test: start a fresh Claude Code session at the repo root AFTER the Step 1 skill updates land, so the updated `skills/cafleet/SKILL.md` and `skills/cafleet/reference/director.md` are what load; create a fleet, then tell the Director "please create a member with sonnet". Pass: the `member create` Bash invocation the Director constructs — observed in the session transcript / pane history at or before execution — targets the claude backend (explicit `--coding-agent claude` or omitted default) AND contains `--model sonnet`. Fail: any other backend, a missing `--model sonnet`, or the Director asking which backend to use (sonnet matches the claude row of the inference table, so no fallback question is warranted) <!-- completed: 2026-06-10T14:14 -->
 
 ---
 

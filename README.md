@@ -74,7 +74,7 @@ You can see the existing design docs on [`design-docs/`](design-docs/), which ar
 
 ## 3. Architecture
 
-CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Fleets partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. Full architecture documentation is published at <https://himkt.github.io/cafleet/concepts/overview/>.
+CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Fleets partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. Members spawn as tmux panes running any of the three coding-agent backends, optionally pinned to a specific LLM via `cafleet member create --model <m>` (e.g. `sonnet`, `gpt-5.4-mini`, `anthropic/claude-sonnet-4-6`). Full architecture documentation is published at <https://himkt.github.io/cafleet/concepts/overview/>.
 
 ## 4. Contributing
 

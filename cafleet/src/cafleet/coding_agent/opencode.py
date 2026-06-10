@@ -13,12 +13,22 @@ class OpencodeAgent:
         ensure_binary_on_path(self.binary_name)
         materialize_cafleet_agent(CAFLEET_AGENT)
 
-    def build_spawn_argv(self, prompt: str, *, display_name: str) -> list[str]:
+    def validate_model(self, model: str | None) -> None:
+        if model is None:
+            return
+        provider, sep, model_id = model.partition("/")
+        if not sep or not provider or not model_id:
+            raise ValueError(
+                "--model for the opencode backend must be "
+                f"'<provider-id>/<model-id>' (got '{model}')."
+            )
+
+    def build_spawn_argv(
+        self, prompt: str, *, display_name: str, model: str | None = None
+    ) -> list[str]:
         del display_name
-        return [
-            self.binary_name,
-            "--agent",
-            "cafleet",
-            "--prompt",
-            prompt,
-        ]
+        argv = [self.binary_name, "--agent", "cafleet"]
+        if model is not None:
+            argv.extend(["--model", model])
+        argv.extend(["--prompt", prompt])
+        return argv

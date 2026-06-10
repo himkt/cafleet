@@ -119,6 +119,7 @@ def _invoke_member_create(
     inline_prompt: str | None = None,
     name: str = "Member",
     json_output: bool = False,
+    model: str | None = None,
 ):
     args = ["--fleet-id", str(fleet_id)]
     if json_output:
@@ -137,6 +138,8 @@ def _invoke_member_create(
     )
     if coding_agent != "claude":
         args.extend(["--coding-agent", coding_agent])
+    if model is not None:
+        args.extend(["--model", model])
     if prompt_file is not None:
         args.extend(["--prompt-file", prompt_file])
     if inline_prompt is not None:
@@ -498,6 +501,189 @@ def test_member_create__binary_missing_exits_with_backend_specific_message(
     )
     assert result.exit_code == 1, result.output
     assert f"binary {coding_agent} not found on PATH" in (result.output or "")
+    assert split_window_recorder == []
+
+
+def test_member_create__model_claude_tokens_between_name_and_prompt(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        inline_prompt="hello",
+        name="Drafter",
+        model="sonnet",
+    )
+    assert result.exit_code == 0, result.output
+    assert split_window_recorder[0]["command"] == [
+        "claude",
+        "--permission-mode",
+        "dontAsk",
+        "--name",
+        "Drafter",
+        "--model",
+        "sonnet",
+        "hello",
+    ]
+
+
+def test_member_create__model_codex_tokens_between_sandbox_and_prompt(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        coding_agent="codex",
+        inline_prompt="hello",
+        name="Codex-Member",
+        model="gpt-5.4-mini",
+    )
+    assert result.exit_code == 0, result.output
+    assert split_window_recorder[0]["command"] == [
+        "codex",
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "workspace-write",
+        "--model",
+        "gpt-5.4-mini",
+        "hello",
+    ]
+
+
+def test_member_create__model_opencode_tokens_before_prompt_pair(
+    tmp_path,
+    monkeypatch,
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # OpencodeAgent.ensure_available materializes ~/.opencode/agents/cafleet.md;
+    # redirect HOME so the write stays inside tmp_path.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        coding_agent="opencode",
+        inline_prompt="hello",
+        name="OC-Member",
+        model="anthropic/claude-sonnet-4-6",
+    )
+    assert result.exit_code == 0, result.output
+    assert split_window_recorder[0]["command"] == [
+        "opencode",
+        "--agent",
+        "cafleet",
+        "--model",
+        "anthropic/claude-sonnet-4-6",
+        "--prompt",
+        "hello",
+    ]
+
+
+@pytest.mark.parametrize("coding_agent", ["claude", "codex", "opencode"])
+def test_member_create__no_model_flag_emits_no_model_token(
+    tmp_path,
+    monkeypatch,
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    coding_agent,
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        coding_agent=coding_agent,
+        inline_prompt="hello",
+        name="Plain-Member",
+    )
+    assert result.exit_code == 0, result.output
+    assert "--model" not in split_window_recorder[0]["command"]
+
+
+@pytest.mark.parametrize("coding_agent", ["claude", "codex"])
+def test_member_create__claude_codex_empty_model_passes_through(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    coding_agent,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        coding_agent=coding_agent,
+        inline_prompt="hello",
+        name="Empty-Model",
+        model="",
+    )
+    assert result.exit_code == 0, result.output
+    command = split_window_recorder[0]["command"]
+    model_index = command.index("--model")
+    assert command[model_index + 1] == ""
+
+
+def test_member_create__opencode_invalid_model_exits_2_with_no_side_effects(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        coding_agent="opencode",
+        inline_prompt="hello",
+        name="Rejected-Member",
+        model="no-slash",
+    )
+    assert result.exit_code == 2, result.output
+    assert (
+        "Error: --model for the opencode backend must be "
+        "'<provider-id>/<model-id>' (got 'no-slash')." in result.output
+    )
+    # Validation precedes registration and any tmux call: nothing to roll back.
+    assert split_window_recorder == []
+    names = [agent["name"] for agent in broker.list_agents(fleet_id)]
+    assert "Rejected-Member" not in names
+
+
+def test_member_create__opencode_invalid_model_wins_over_missing_binary(
+    bootstrapped_fleet,
+    split_window_recorder,
+    monkeypatch,
+):
+    # validate_model runs before ensure_available: with the binary absent AND
+    # the model malformed, the model error (exit 2) is the one reported.
+    monkeypatch.setattr("cafleet.coding_agent.base.shutil.which", lambda _: None)
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        coding_agent="opencode",
+        inline_prompt="hello",
+        name="Rejected-Member",
+        model="no-slash",
+    )
+    assert result.exit_code == 2, result.output
+    assert "--model for the opencode backend must be" in result.output
+    assert "not found on PATH" not in result.output
     assert split_window_recorder == []
 
 

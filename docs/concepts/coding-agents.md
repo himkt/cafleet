@@ -33,6 +33,25 @@ process and cannot auto-detect what is already running, so the operator
 declares which binary is in the pane. For `cafleet member create`, the flag
 both selects which backend is spawned AND is recorded as placement metadata.
 
+## Model selection
+
+`cafleet member create` accepts an optional `--model <string>` that is
+forwarded to the spawned backend binary via that binary's `--model` flag
+(e.g. `--model sonnet` for `claude`, `--model gpt-5.4-mini` for `codex`,
+`--model anthropic/claude-sonnet-4-6` for `opencode`). When the flag is
+omitted, no model tokens are emitted and each binary uses its own default
+model.
+
+Validation is per-backend: `claude` and `codex` pass any string through
+verbatim — the binary itself rejects unknown models, so newly released
+models work without a cafleet release. `opencode` requires the
+`<provider-id>/<model-id>` format and rejects anything else at create time
+with exit 2, before any agent registration or tmux side effect.
+
+The value is spawn-time only: it is NOT recorded in `agent_placements`,
+requires no migration, and does not appear in `cafleet member list`
+output.
+
 ## Known asymmetries (intentional non-goals)
 
 - **Pane title.** Only the `claude` spawn argv carries `--name`, so `codex`

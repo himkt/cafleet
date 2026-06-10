@@ -39,7 +39,7 @@ _PER_SUBCOMMAND_BUDGETS: dict[tuple[str, ...], int] = {
     ("message", "ack"): 9,
     ("message", "cancel"): 9,
     ("message", "show"): 8,
-    ("member", "create"): 13,
+    ("member", "create"): 14,
     ("member", "list"): 7,
     ("member", "capture"): 9,
     ("member", "send-input"): 9,
@@ -85,8 +85,8 @@ def test_aggregate_help_under_byte_budget():
         len("\n".join(_help_lines(*subcommand)).encode("utf-8"))
         for subcommand in _PER_SUBCOMMAND_BUDGETS
     )
-    assert total_bytes <= 4620, (
-        f"aggregate --help bytes = {total_bytes} (budget 4620). "
+    assert total_bytes <= 4320, (
+        f"aggregate --help bytes = {total_bytes} (budget 4320). "
         f"Trim multi-sentence option helps in cli.py to fit."
     )
 

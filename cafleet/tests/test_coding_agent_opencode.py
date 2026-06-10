@@ -6,6 +6,8 @@ registry wiring, and the ``ensure_available`` integration with
 ``materialize_cafleet_agent``.
 """
 
+import re
+
 import pytest
 
 from cafleet.coding_agent import (
@@ -136,6 +138,59 @@ def test_build_spawn_argv_returns_list_of_strings():
     argv = impl.build_spawn_argv("p", display_name="x")
     assert isinstance(argv, list)
     assert all(isinstance(token, str) for token in argv)
+
+
+# ---------------------------------------------------------------------------
+# validate_model — <provider-id>/<model-id> first-slash format rule
+# ---------------------------------------------------------------------------
+
+
+def test_validate_model_accepts_none():
+    """``None`` (flag omitted) skips validation entirely."""
+    assert OpencodeAgent().validate_model(None) is None
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "anthropic/claude-sonnet-4-6",
+        "openai/gpt-5.5",
+        "a/b/c",
+    ],
+)
+def test_validate_model_accepts_provider_slash_model(model):
+    """First-slash split into two non-empty segments. ``a/b/c`` is accepted as
+    provider ``a`` + model id ``b/c`` — model ids may themselves contain
+    slashes."""
+    assert OpencodeAgent().validate_model(model) is None
+
+
+@pytest.mark.parametrize("model", ["no-slash", "/x", "x/", ""])
+def test_validate_model_rejects_malformed_with_exact_message(model):
+    """No ``/``, empty provider segment, empty model-id segment, and the empty
+    string are all rejected with the documented error message."""
+    expected = (
+        "--model for the opencode backend must be "
+        f"'<provider-id>/<model-id>' (got '{model}')."
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(expected)}$"):
+        OpencodeAgent().validate_model(model)
+
+
+def test_build_spawn_argv_with_model_byte_exact():
+    """``--model <m>`` lands between ``cafleet`` and the ``--prompt`` pair."""
+    argv = OpencodeAgent().build_spawn_argv(
+        "PROMPT_TEXT", display_name="ignored", model="anthropic/claude-sonnet-4-6"
+    )
+    assert argv == [
+        "opencode",
+        "--agent",
+        "cafleet",
+        "--model",
+        "anthropic/claude-sonnet-4-6",
+        "--prompt",
+        "PROMPT_TEXT",
+    ]
 
 
 # ---------------------------------------------------------------------------

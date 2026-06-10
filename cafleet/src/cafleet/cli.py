@@ -789,6 +789,13 @@ def _rollback_register(new_agent_id: int, *, fleet_id: int, reason: str) -> NoRe
     help="Coding-agent binary to spawn / declare for the placement.",
 )
 @click.option(
+    "--model",
+    "model",
+    type=str,
+    default=None,
+    help="Model passed to the backend binary.",
+)
+@click.option(
     "--prompt-file",
     "prompt_file",
     type=str,
@@ -799,7 +806,15 @@ def _rollback_register(new_agent_id: int, *, fleet_id: int, reason: str) -> NoRe
 @click.argument("prompt_argv", nargs=-1)
 @click.pass_context
 def member_create(
-    ctx, agent_id, name, description, coding_agent, prompt_file, full, prompt_argv
+    ctx,
+    agent_id,
+    name,
+    description,
+    coding_agent,
+    model,
+    prompt_file,
+    full,
+    prompt_argv,
 ):
     """Register a new member and spawn its pane."""
     if prompt_file is not None and prompt_argv:
@@ -810,6 +825,11 @@ def member_create(
     fleet_id = ctx.obj["fleet_id"]
 
     agent = CODING_AGENTS[coding_agent]
+
+    try:
+        agent.validate_model(model)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
 
     try:
         MULTIPLEXERS["tmux"].ensure_available()
@@ -847,7 +867,7 @@ def member_create(
         _deregister_with_warning(new_agent_id, fleet_id=fleet_id)
         raise
 
-    spawn_command = agent.build_spawn_argv(prompt, display_name=name)
+    spawn_command = agent.build_spawn_argv(prompt, display_name=name, model=model)
 
     try:
         db_url = os.environ.get("CAFLEET_DATABASE_URL")

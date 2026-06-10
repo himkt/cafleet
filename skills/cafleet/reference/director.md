@@ -32,18 +32,34 @@ cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. The flag both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex", "opencode"]`) so adding a future backend is one entry in `cafleet.coding_agent.CODING_AGENTS`. Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. For the `opencode` backend, the spawn-precondition step also materializes `~/.opencode/agents/cafleet.md` from the in-source `CAFLEET_AGENT` preset on first spawn (skip-if-exists) — see [`docs/reference/coding-agents/opencode.md`](../../../docs/reference/coding-agents/opencode.md). |
+| `--model` | no | Model passed to the backend binary via its `--model` flag, appended immediately before the prompt tokens (for `opencode`, before the `--prompt <prompt>` pair). Omitted → no model tokens in the spawn argv; the binary uses its own default model. `claude` and `codex` accept any string (pass-through — the binary itself rejects unknown models, so newly released models work without a cafleet release). `opencode` requires the `<provider-id>/<model-id>` format (split on the **first** `/` into two non-empty segments; model ids may themselves contain slashes) and rejects violations at create time with exit 2 — `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` — before any agent registration or tmux side effect. Spawn-time only: not recorded in `agent_placements`, not shown in `member list`. Example models (not enforced by cafleet): `claude` → `fable` / `opus` / `sonnet`; `codex` → `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` / `gpt-5.3-codex-spark`; `opencode` → `anthropic/claude-sonnet-4-6` / `openai/gpt-5.5`. |
 | `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are the spawn prompt. Mutually exclusive with the positional prompt argument. Read verbatim (no stripping); passes through the same `str.format()` substitution as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all error non-zero with the messages catalogued in [`docs/spec/cli-options.md`](../../../docs/spec/cli-options.md) § Error Messages. The canonical input mode for every CAFleet-native team-skill spawn — see § *Member Create — Scratch and audit files* below. |
 | *(positional, after `--`)* | no | Prompt for the spawned coding-agent process. Mutually exclusive with `--prompt-file`. If both are omitted the default prompt template is used. The default template and any custom prompt go through `str.format()` with `fleet_id` / `agent_id` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal ids substituted in. |
 
 The spawn argv depends on the chosen backend:
 
-| Backend | Spawn command |
-|---|---|
-| `claude` (default) | `claude --permission-mode dontAsk --name <member-name> <prompt>` |
-| `codex` | `codex --ask-for-approval never --sandbox workspace-write <prompt>` |
-| `opencode` | `opencode --agent cafleet --prompt <prompt>` |
+| Backend | Spawn command (`--model` omitted) | Spawn command (`--model <m>`) |
+|---|---|---|
+| `claude` (default) | `claude --permission-mode dontAsk --name <member-name> <prompt>` | `claude --permission-mode dontAsk --name <member-name> --model <m> <prompt>` |
+| `codex` | `codex --ask-for-approval never --sandbox workspace-write <prompt>` | `codex --ask-for-approval never --sandbox workspace-write --model <m> <prompt>` |
+| `opencode` | `opencode --agent cafleet --prompt <prompt>` | `opencode --agent cafleet --model <m> --prompt <prompt>` |
 
 In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve silently. Members run cafleet (and any shell command) directly via the Bash tool. See [`reference/exec-routing.md`](exec-routing.md) for the fallback path that fires when the harness deny-list (destructive operations such as `git push`) rejects a Bash invocation. Operational details for codex members live in [`docs/reference/coding-agents/codex.md`](../../../docs/reference/coding-agents/codex.md); the opencode equivalent (`CAFLEET_AGENT` preset, refresh recipe, MCP caveats) lives in [`docs/reference/coding-agents/opencode.md`](../../../docs/reference/coding-agents/opencode.md).
+
+### Model-name-to-backend inference
+
+When the operator names a model rather than a backend ("please create a member with sonnet"), resolve the backend from the model-name shape:
+
+| User says (model name shape) | Inferred backend | Flags to pass |
+|---|---|---|
+| `fable`, `opus`, `sonnet`, or a `claude-*` full name | `claude` | `--coding-agent claude --model <name>` (`--coding-agent claude` may be omitted — it is the default) |
+| `gpt-*` (e.g. `gpt-5.5`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`) | `codex` | `--coding-agent codex --model <name>` |
+| Any name containing a `/` (e.g. `anthropic/claude-sonnet-4-6`, `openai/gpt-5.5`) | `opencode` | `--coding-agent opencode --model <provider-id>/<model-id>` |
+| Anything else — no shape match (e.g. `gemini-2.5-pro`, `o3-mini`, any unfamiliar bare name) | none — do NOT infer | Ask the operator which backend to use (or for the explicit `--coding-agent` + `--model` pair) before spawning |
+
+Examples: "please create a member with sonnet" → `--coding-agent claude --model sonnet`; "with gpt-5.4-mini" → `--coding-agent codex --model gpt-5.4-mini`; "with anthropic/claude-sonnet-4-6" → `--coding-agent opencode --model anthropic/claude-sonnet-4-6`.
+
+The model names in this table are examples, not a catalog cafleet enforces — `claude` / `codex` forward any string verbatim, and `opencode` validates only the `<provider-id>/<model-id>` format, not catalog membership.
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`).
 
