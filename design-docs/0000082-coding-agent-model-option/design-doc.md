@@ -1,7 +1,7 @@
 # `--model` Option for `member create` and the `CodingAgent` Spawn Protocol
 
 **Status**: Approved
-**Progress**: 0/21 tasks complete
+**Progress**: 9/21 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -198,15 +198,15 @@ The global `~/.claude/skills/cafleet-agent-team-supervision` mirror is outside t
 
 ### Step 1: Documentation and skills (first, per `.claude/rules/design-doc-numbering.md`)
 
-- [ ] Update `docs/concepts/coding-agents.md` with the model-selection paragraph <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md`: flag table row, spawn-command table variants, error-messages row <!-- completed: -->
-- [ ] Update `docs/reference/coding-agents/codex.md` § Spawn flags with `--model` + example catalog <!-- completed: -->
-- [ ] Update `docs/reference/coding-agents/opencode.md` § Spawn flags with `--model` + format rule <!-- completed: -->
-- [ ] Update `docs/get-started/quickstart.md` with the optional `--model` mention <!-- completed: -->
-- [ ] Update `README.md` to stay consistent with the docs changes <!-- completed: -->
-- [ ] Update `skills/cafleet/SKILL.md` (§ Coding-agent backends mention + pointer) <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/director.md` (flag row + with-model variants in its "Spawn command per backend" table + inference table) <!-- completed: -->
-- [ ] Update `skills/cafleet-agent-team-supervision/SKILL.md` (spawn-protocol mention) <!-- completed: -->
+- [x] Update `docs/concepts/coding-agents.md` with the model-selection paragraph <!-- completed: 2026-06-10T13:43 -->
+- [x] Update `docs/spec/cli-options.md`: flag table row, spawn-command table variants, error-messages row <!-- completed: 2026-06-10T13:44 -->
+- [x] Update `docs/reference/coding-agents/codex.md` § Spawn flags with `--model` + example catalog <!-- completed: 2026-06-10T13:45 -->
+- [x] Update `docs/reference/coding-agents/opencode.md` § Spawn flags with `--model` + format rule <!-- completed: 2026-06-10T13:45 -->
+- [x] Update `docs/get-started/quickstart.md` with the optional `--model` mention <!-- completed: 2026-06-10T13:46 -->
+- [x] Update `README.md` to stay consistent with the docs changes <!-- completed: 2026-06-10T13:47 -->
+- [x] Update `skills/cafleet/SKILL.md` (§ Coding-agent backends mention + pointer) <!-- completed: 2026-06-10T13:48 -->
+- [x] Update `skills/cafleet/reference/director.md` (flag row + with-model variants in its "Spawn command per backend" table + inference table) <!-- completed: 2026-06-10T13:49 -->
+- [x] Update `skills/cafleet-agent-team-supervision/SKILL.md` (spawn-protocol mention) <!-- completed: 2026-06-10T13:50 -->
 
 ### Step 2: Protocol and backends
 

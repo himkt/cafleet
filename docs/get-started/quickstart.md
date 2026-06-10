@@ -54,6 +54,8 @@ export FLEET_ID="<paste from the first output line>"
 export DIRECTOR_ID="<paste from the second output line>"
 
 # 2. Spawn a member pane. The member's prompt is just a one-line greeting.
+#    Optional: add --model <m> (e.g. --model sonnet) to pin the member's LLM;
+#    omitted, the backend binary uses its own default model.
 cafleet --fleet-id "$FLEET_ID" member create \
   --agent-id "$DIRECTOR_ID" \
   --name "demo-member" \

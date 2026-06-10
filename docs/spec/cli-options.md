@@ -332,16 +332,17 @@ The `cafleet member` subgroup manages tmux-backed member agents and must be run 
 | `--name` | yes | Display name of the new member. Forwarded to the spawned `claude` process as `claude --name <member-name> <prompt>` so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. Neither codex nor opencode has a `--name` analog — operators discover those panes via `cafleet member list`. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. The flag both selects which backend binary is spawned AND is recorded as the placement's `coding_agent`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically.) Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. For the `opencode` backend, cafleet also writes the `cafleet` agent definition to `~/.opencode/agents/cafleet.md` on first spawn if it does not already exist — see [Opencode members](../reference/coding-agents/opencode.md) for operational detail. |
+| `--model` | no | Model passed to the backend binary via its `--model` flag, appended immediately before the prompt tokens (for `opencode`, before the `--prompt <prompt>` pair). Default: omitted — no model tokens in the spawn argv; the binary uses its own default model. `claude` and `codex` accept any string (pass-through; the binary itself rejects unknown models, so newly released models work without a cafleet release). `opencode` requires the `<provider-id>/<model-id>` format — split on the **first** `/` into two non-empty segments (model ids may themselves contain slashes) — and rejects violations at create time with exit 2, before any agent registration or tmux side effect (see [Error Messages](#error-messages)). Spawn-time only: not recorded in `agent_placements`, no migration, not shown in `member list` output. |
 | `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are used as the spawn prompt. Mutually exclusive with the positional prompt argument. The file is read verbatim (no stripping) and passes through the same `str.format()` substitution (`fleet_id` / `agent_id` / `director_agent_id`) as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. |
 | *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. All three backends receive the same prompt; the prompt template is backend-neutral. Mutually exclusive with `--prompt-file`. |
 
 #### Spawn command per backend
 
-| Backend | Spawn command |
-|---|---|
-| `claude` | `claude --permission-mode dontAsk --name <member-name> <prompt>` |
-| `codex`  | `codex --ask-for-approval never --sandbox workspace-write <prompt>` |
-| `opencode` | `opencode --agent cafleet --prompt <prompt>` |
+| Backend | Spawn command (`--model` omitted) | Spawn command (`--model <m>`) |
+|---|---|---|
+| `claude` | `claude --permission-mode dontAsk --name <member-name> <prompt>` | `claude --permission-mode dontAsk --name <member-name> --model <m> <prompt>` |
+| `codex`  | `codex --ask-for-approval never --sandbox workspace-write <prompt>` | `codex --ask-for-approval never --sandbox workspace-write --model <m> <prompt>` |
+| `opencode` | `opencode --agent cafleet --prompt <prompt>` | `opencode --agent cafleet --model <m> --prompt <prompt>` |
 
 The `claude` spawn carries `--permission-mode dontAsk`; the `codex` spawn carries `--ask-for-approval never --sandbox workspace-write`; the `opencode` spawn carries `--agent cafleet` which binds the `cafleet` agent's permission ruleset (catch-all-allow + specific-deny — every permission check resolves to `allow` or `deny`, never `ask`). In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no Director routing required by default. The bash-via-Director protocol fires as a fallback when the harness deny-list rejects a Bash invocation (see [Bash routing](../concepts/bash-routing.md)). Operational details for codex members live in [Codex members](../reference/coding-agents/codex.md); the opencode equivalent (including the preset materialization and refresh recipe) lives in [Opencode members](../reference/coding-agents/opencode.md).
 
@@ -666,4 +667,5 @@ See [Member targeting and key delivery](#member-targeting-and-key-delivery) for 
 | `member create --prompt-file` to an unreadable file | `Error: --prompt-file <path>: file is not readable.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to a file containing invalid UTF-8 | `Error: --prompt-file <path>: file is not valid UTF-8.` (exit 1; `click.ClickException`) |
 | `member create --prompt-file` to a zero-byte or whitespace-only file | `Error: --prompt-file <path>: file is empty.` (exit 1; `click.ClickException`) |
+| `member create --coding-agent opencode --model` with a value violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` (exit 2; `click.UsageError`; fires before any agent registration or tmux side effect) |
 
