@@ -1,10 +1,59 @@
 import { useState, useEffect, useCallback } from "react";
+import { Boxes, ChevronRight, TriangleAlert } from "lucide-react";
 import type { FleetListItem } from "../types";
 import { listFleets } from "../api";
 import { usePolling, POLL_INTERVAL_MS } from "../hooks/usePolling";
+import AppHeader from "./AppHeader";
+import EmptyState from "./EmptyState";
+import Skeleton from "./Skeleton";
 
 interface FleetPickerProps {
-  onSelect: (fleetId: number) => void;
+  onSelect: (fleetId: number, label: string | null) => void;
+}
+
+function FleetCard({
+  fleet,
+  onSelect,
+}: {
+  fleet: FleetListItem;
+  onSelect: (fleetId: number, label: string | null) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(fleet.fleet_id, fleet.label)}
+      className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-surface-raised px-4 py-3.5 text-left shadow-sm hover:border-accent/40 hover:shadow-md hover:ring-2 hover:ring-accent/20 focus-visible:outline-2 focus-visible:outline-accent motion-safe:transition"
+    >
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-semibold">
+            {fleet.label ?? `Fleet ${fleet.fleet_id}`}
+          </span>
+          <code className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 font-mono text-xs text-text-muted">
+            #{fleet.fleet_id}
+          </code>
+        </div>
+        <p className="mt-1 text-xs text-text-muted">
+          {fleet.agent_count} agent{fleet.agent_count !== 1 ? "s" : ""} ·
+          created {new Date(fleet.created_at).toLocaleDateString()}
+        </p>
+      </div>
+      <ChevronRight
+        size={16}
+        className="shrink-0 text-text-faint group-hover:translate-x-0.5 group-hover:text-accent motion-safe:transition-transform"
+        aria-hidden="true"
+      />
+    </button>
+  );
+}
+
+function FleetCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-border bg-surface-raised px-4 py-3.5 shadow-sm">
+      <Skeleton className="h-4 w-40" />
+      <Skeleton className="mt-2 h-3 w-56" />
+    </div>
+  );
 }
 
 export default function FleetPicker({ onSelect }: FleetPickerProps) {
@@ -34,75 +83,45 @@ export default function FleetPicker({ onSelect }: FleetPickerProps) {
   }, [trigger]);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b border-gray-200 px-4 py-3">
-        <h1 className="text-lg font-semibold text-gray-900">
-          CAFleet — Fleets
-        </h1>
-      </header>
+    <div className="flex min-h-screen flex-col bg-surface">
+      <AppHeader isPolling={isPolling} onRefresh={() => void trigger()} />
 
-      <div className="flex-1 max-w-2xl w-full mx-auto mt-4 px-4">
+      <main className="mx-auto mt-8 w-full max-w-2xl flex-1 px-4 pb-8">
+        <h1 className="text-xl font-semibold tracking-tight">Select a Fleet</h1>
+
         {error && (
-          <div className="bg-red-50 text-red-700 text-sm rounded-md px-4 py-2 mb-4">
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+            <TriangleAlert size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
             {error}
           </div>
         )}
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-medium text-gray-700">
-              Select a Fleet
-            </h2>
-            {isPolling && (
-              <span className="text-xs text-gray-400 italic">Updating…</span>
-            )}
+        {loading ? (
+          <div className="mt-4 flex flex-col gap-3">
+            <FleetCardSkeleton />
+            <FleetCardSkeleton />
+            <FleetCardSkeleton />
           </div>
-
-          {loading ? (
-            <p className="text-center text-gray-400 py-8">Loading...</p>
-          ) : fleets.length === 0 ? (
-            <div className="text-center py-8 px-4">
-              <p className="text-gray-400 text-sm">No fleets found.</p>
-              <p className="text-gray-400 text-xs mt-2">
-                Run{" "}
-                <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
-                  cafleet fleet create
-                </code>{" "}
-                to create one.
-              </p>
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-200">
-              {fleets.map((s) => (
-                <button
-                  key={s.fleet_id}
-                  onClick={() => onSelect(s.fleet_id)}
-                  className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-gray-50 text-left"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <code className="text-sm font-mono text-gray-900">
-                        {s.fleet_id}
-                      </code>
-                      {s.label && (
-                        <span className="text-sm text-gray-600 truncate">
-                          {s.label}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {s.agent_count} agent{s.agent_count !== 1 ? "s" : ""} |
-                      Created{" "}
-                      {new Date(s.created_at).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <span className="text-gray-400 text-sm shrink-0">&rarr;</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+        ) : fleets.length === 0 ? (
+          <EmptyState icon={Boxes} title="No fleets found.">
+            <p className="text-xs text-text-muted">
+              Run{" "}
+              <code className="rounded bg-surface-hover px-1.5 py-0.5 font-mono text-text">
+                cafleet fleet create
+              </code>{" "}
+              to create one.
+            </p>
+          </EmptyState>
+        ) : (
+          <ul className="mt-4 flex flex-col gap-3">
+            {fleets.map((fleet) => (
+              <li key={fleet.fleet_id}>
+                <FleetCard fleet={fleet} onSelect={onSelect} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </main>
     </div>
   );
 }

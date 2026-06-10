@@ -1,3 +1,4 @@
+import { Tooltip } from "radix-ui";
 import type { TimelineEntry, Agent, TimelineMessage } from "../types";
 
 interface ReactionBarProps {
@@ -29,18 +30,29 @@ export default function ReactionBar({ entry, agents }: ReactionBarProps) {
   if (completedRows.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap gap-1 mt-1">
-      {completedRows.map((row) => (
-        <span key={row.task_id} className="group relative inline-flex">
-          <span className="inline-block px-1.5 py-0.5 text-xs rounded bg-green-100 text-green-700">
-            [ack]
-          </span>
-          <span className="absolute bottom-full left-0 mb-1 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-xs text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-            {agentLabel(row.to_agent_id, agents)} —{" "}
-            {formatIso(row.status_timestamp)}
-          </span>
-        </span>
-      ))}
-    </div>
+    <Tooltip.Provider delayDuration={200}>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {completedRows.map((row) => (
+          <Tooltip.Root key={row.task_id}>
+            <Tooltip.Trigger className="cursor-default rounded-full bg-success-soft px-2 py-0.5 text-xs font-medium text-success focus-visible:outline-2 focus-visible:outline-accent">
+              [ack]
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content
+                side="top"
+                align="start"
+                sideOffset={4}
+                className="z-10 rounded-md bg-text px-2 py-1 text-xs text-surface shadow-md"
+              >
+                {agentLabel(row.to_agent_id, agents)} —{" "}
+                <span className="font-mono">
+                  {formatIso(row.status_timestamp)}
+                </span>
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+        ))}
+      </div>
+    </Tooltip.Provider>
   );
 }

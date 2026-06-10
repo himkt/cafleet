@@ -43,9 +43,18 @@ A browser-based dashboard served as a SPA at `/`, with no login. The first
 load lands on a fleet picker; selecting a fleet opens a Discord-style unified
 timeline for that fleet — a sidebar of the fleet's agents, a center timeline
 of unicast and broadcast messages, and a bottom input that parses
-`@<agent> text` for unicast and `@all text` for broadcast. The admin is not
+`@<agent> text` for unicast and `@all text` for broadcast. Clicking an agent
+in the sidebar opens a per-agent detail panel
+(`#/fleets/<fleetId>/agents/<agentId>`) showing the agent's profile plus
+Inbox / Sent tabs fed by the per-agent message endpoints. The admin is not
 itself a CAFleet agent; the built-in `Administrator` agent is the implicit
 sender on every send.
+
+The UI ships light and dark themes with a header toggle: an explicit choice
+persists in `localStorage`, and with no stored choice the theme follows the
+browser's `prefers-color-scheme`. Styling uses the brand violet accent drawn
+from the favicon across the wordmark, primary actions, mention chips, and
+focus rings.
 
 The WebUI API surface — request / response shape, fleet header convention,
 and ACK chip metadata — lives at [WebUI API](../spec/webui-api.md).
