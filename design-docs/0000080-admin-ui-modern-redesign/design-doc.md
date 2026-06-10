@@ -1,6 +1,6 @@
 # Admin WebUI Modern Redesign
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 24/24 tasks complete
 **Last Updated**: 2026-06-10
 
@@ -253,3 +253,4 @@ The one deliberate behavior change (allowed by the approved UX-restructure scope
 |------|---------|
 | 2026-06-10 | Initial draft |
 | 2026-06-10 | Reviewer round 1: fixed lockfile-regeneration procedure; distinct raw/theme token names to avoid circular `var()`; Escape precedence (popover before panel); detail tabs render broadcast rows ungrouped with a client-side 200-row cap; agent-existence check via `agents`-list membership instead of 404 inspection |
+| 2026-06-10 | Implementation complete (24/24 tasks, Phase D verified). PR #103 opened; two Copilot review rounds addressed (storage guards, state truncation, fleet-switch reset, effect-dep scoping, prompt artifact paths); radix-ui umbrella and refreshKey refetch kept as spec'd. User approved; status set to Complete |
