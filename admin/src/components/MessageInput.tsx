@@ -329,7 +329,7 @@ export default function MessageInput({
                   textareaRef.current?.focus();
                 }}
                 onMouseEnter={() => setSelectedIndex(idx)}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent ${
                   selected ? "bg-accent-soft" : ""
                 }`}
               >
@@ -373,7 +373,7 @@ export default function MessageInput({
           disabled={disabled || sending || !input.trim()}
           aria-label="Send"
           title="Send"
-          className="rounded-lg bg-accent p-2 text-accent-fg hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg bg-accent p-2 text-accent-fg hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
         >
           {sending ? (
             <LoaderCircle

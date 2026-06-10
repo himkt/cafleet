@@ -1,7 +1,7 @@
 # Admin WebUI Modern Redesign
 
 **Status**: Approved
-**Progress**: 19/24 tasks complete
+**Progress**: 21/24 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -239,8 +239,8 @@ The one deliberate behavior change (allowed by the approved UX-restructure scope
 
 ### Step 6: Polish and verification
 
-- [ ] Pass over all interactive elements: focus-visible rings (accent), `motion-safe:` guards, AA contrast check on both themes <!-- completed: -->
-- [ ] Run `mise //admin:lint` and `mise //admin:build`; fix all findings <!-- completed: -->
+- [x] Pass over all interactive elements: focus-visible rings (accent), `motion-safe:` guards, AA contrast check on both themes <!-- completed: 2026-06-10T09:58 -->
+- [x] Run `mise //admin:lint` and `mise //admin:build`; fix all findings <!-- completed: 2026-06-10T09:58 -->
 - [ ] Manual verification of every row in the *Preserved behaviors* table against a seeded local fleet <!-- completed: -->
 - [ ] Capture light + dark screenshots: fleet picker, dashboard (with messages incl. a broadcast + acks), agent detail (inbox + sent) <!-- completed: -->
 - [ ] Rebuild via `mise //admin:build` and smoke-test `cafleet server` serving the new bundle at `/` <!-- completed: -->

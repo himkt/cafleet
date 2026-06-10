@@ -22,7 +22,7 @@ function FleetCard({
     <button
       type="button"
       onClick={() => onSelect(fleet.fleet_id)}
-      className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-surface-raised px-4 py-3.5 text-left shadow-sm transition hover:border-accent/40 hover:shadow-md hover:ring-2 hover:ring-accent/20 focus-visible:outline-2 focus-visible:outline-accent"
+      className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-surface-raised px-4 py-3.5 text-left shadow-sm hover:border-accent/40 hover:shadow-md hover:ring-2 hover:ring-accent/20 focus-visible:outline-2 focus-visible:outline-accent motion-safe:transition"
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
@@ -40,7 +40,7 @@ function FleetCard({
       </div>
       <ChevronRight
         size={16}
-        className="shrink-0 text-text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-accent"
+        className="shrink-0 text-text-faint group-hover:translate-x-0.5 group-hover:text-accent motion-safe:transition-transform"
         aria-hidden="true"
       />
     </button>

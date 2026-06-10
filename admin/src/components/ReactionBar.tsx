@@ -34,7 +34,7 @@ export default function ReactionBar({ entry, agents }: ReactionBarProps) {
       <div className="mt-1 flex flex-wrap gap-1">
         {completedRows.map((row) => (
           <Tooltip.Root key={row.task_id}>
-            <Tooltip.Trigger className="cursor-default rounded-full bg-success-soft px-2 py-0.5 text-xs font-medium text-success">
+            <Tooltip.Trigger className="cursor-default rounded-full bg-success-soft px-2 py-0.5 text-xs font-medium text-success focus-visible:outline-2 focus-visible:outline-accent">
               [ack]
             </Tooltip.Trigger>
             <Tooltip.Portal>
