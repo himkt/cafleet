@@ -1,7 +1,7 @@
 # Admin WebUI Modern Redesign
 
 **Status**: Approved
-**Progress**: 21/24 tasks complete
+**Progress**: 24/24 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -10,12 +10,12 @@ Redesign the admin WebUI (`admin/` — React 19 + Vite 8 + Tailwind CSS 4, serve
 
 ## Success Criteria
 
-- [ ] Light and dark themes with a header toggle: explicit choice persisted in `localStorage`, default follows `prefers-color-scheme`, no flash of wrong theme on load
-- [ ] Brand violet accent (derived from `admin/public/favicon.svg`) applied consistently: header wordmark, primary button, mention chips, focus rings, active states
-- [ ] New agent detail view at `#/fleets/<fleetId>/agents/<agentId>` showing agent profile plus Inbox / Sent tabs fed by `GET /api/agents/{agent_id}/inbox` and `/sent`
-- [ ] Every behavior in the *Preserved behaviors* table works exactly as before (verified manually)
-- [ ] `mise //admin:lint` and `mise //admin:build` (which runs `tsc -b`) pass; light + dark screenshots captured for fleet picker, dashboard, and agent detail views
-- [ ] Documentation updated in the same cycle: `docs/concepts/overview.md` § WebUI, `docs/spec/webui-api.md`, `docs/get-started/contributing.md` (only if commands/deps workflow changes)
+- [x] Light and dark themes with a header toggle: explicit choice persisted in `localStorage`, default follows `prefers-color-scheme`, no flash of wrong theme on load
+- [x] Brand violet accent (derived from `admin/public/favicon.svg`) applied consistently: header wordmark, primary button, mention chips, focus rings, active states
+- [x] New agent detail view at `#/fleets/<fleetId>/agents/<agentId>` showing agent profile plus Inbox / Sent tabs fed by `GET /api/agents/{agent_id}/inbox` and `/sent`
+- [x] Every behavior in the *Preserved behaviors* table works exactly as before (verified manually)
+- [x] `mise //admin:lint` and `mise //admin:build` (which runs `tsc -b`) pass; light + dark screenshots captured for fleet picker, dashboard, and agent detail views
+- [x] Documentation updated in the same cycle: `docs/concepts/overview.md` § WebUI, `docs/spec/webui-api.md`, `docs/get-started/contributing.md` (only if commands/deps workflow changes)
 
 ---
 
@@ -241,9 +241,9 @@ The one deliberate behavior change (allowed by the approved UX-restructure scope
 
 - [x] Pass over all interactive elements: focus-visible rings (accent), `motion-safe:` guards, AA contrast check on both themes <!-- completed: 2026-06-10T09:58 -->
 - [x] Run `mise //admin:lint` and `mise //admin:build`; fix all findings <!-- completed: 2026-06-10T09:58 -->
-- [ ] Manual verification of every row in the *Preserved behaviors* table against a seeded local fleet <!-- completed: -->
-- [ ] Capture light + dark screenshots: fleet picker, dashboard (with messages incl. a broadcast + acks), agent detail (inbox + sent) <!-- completed: -->
-- [ ] Rebuild via `mise //admin:build` and smoke-test `cafleet server` serving the new bundle at `/` <!-- completed: -->
+- [x] Manual verification of every row in the *Preserved behaviors* table against a seeded local fleet <!-- completed: 2026-06-10T10:13 -->
+- [x] Capture light + dark screenshots: fleet picker, dashboard (with messages incl. a broadcast + acks), agent detail (inbox + sent) <!-- completed: 2026-06-10T10:13 -->
+- [x] Rebuild via `mise //admin:build` and smoke-test `cafleet server` serving the new bundle at `/` <!-- completed: 2026-06-10T10:13 -->
 
 ---
 
