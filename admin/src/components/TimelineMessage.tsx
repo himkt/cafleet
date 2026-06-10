@@ -1,5 +1,6 @@
 import type { TimelineEntry, Agent } from "../types";
 import { entrySortKey } from "../timeline";
+import AgentAvatar from "./AgentAvatar";
 import ReactionBar from "./ReactionBar";
 
 interface TimelineMessageProps {
@@ -9,7 +10,7 @@ interface TimelineMessageProps {
 
 function MentionChip({ name }: { name: string }) {
   return (
-    <span className="inline-block px-1.5 py-0.5 text-xs rounded bg-blue-100 text-blue-700 font-medium">
+    <span className="inline-block rounded bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent">
       @{name}
     </span>
   );
@@ -17,10 +18,6 @@ function MentionChip({ name }: { name: string }) {
 
 function firstRow(entry: TimelineEntry) {
   return entry.kind === "unicast" ? entry.message : entry.rows[0];
-}
-
-function senderName(entry: TimelineEntry): string {
-  return firstRow(entry).from_agent_name;
 }
 
 function body(entry: TimelineEntry): string {
@@ -50,33 +47,42 @@ export default function TimelineMessageComponent({
   agents,
 }: TimelineMessageProps) {
   const canceled = isCanceled(entry);
+  const row = firstRow(entry);
+  const sender = agents.find((a) => a.agent_id === row.from_agent_id) ?? {
+    agent_id: row.from_agent_id,
+    name: row.from_agent_name,
+    kind: "user" as const,
+  };
 
   return (
-    <div className="px-4 py-2 hover:bg-gray-50">
-      <div className="flex items-baseline gap-1.5">
-        <span className="text-xs text-gray-400 shrink-0">
-          {formatTime(entrySortKey(entry))}
-        </span>
-        <span className="font-medium text-sm text-gray-900">
-          {senderName(entry)}
-        </span>
-        <span className="text-xs text-gray-400">&rarr;</span>
-        {recipientNames(entry).map((name, i) => (
-          <MentionChip key={i} name={name} />
-        ))}
-      </div>
-      {canceled ? (
-        <p className="mt-0.5 text-sm opacity-60 whitespace-pre-wrap break-words">
-          <s>{body(entry)}</s>
-        </p>
-      ) : (
-        <>
-          <p className="mt-0.5 text-sm text-gray-700 whitespace-pre-wrap break-words">
-            {body(entry)}
+    <div className="flex gap-3 px-4 py-2 hover:bg-surface-hover motion-safe:animate-rise-in">
+      <AgentAvatar agent={sender} size="md" />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-1.5">
+          <span className="text-sm font-semibold">{row.from_agent_name}</span>
+          <span className="text-xs text-text-faint" aria-hidden="true">
+            &rarr;
+          </span>
+          {recipientNames(entry).map((name, i) => (
+            <MentionChip key={i} name={name} />
+          ))}
+          <span className="text-xs text-text-faint">
+            {formatTime(entrySortKey(entry))}
+          </span>
+        </div>
+        {canceled ? (
+          <p className="mt-0.5 whitespace-pre-wrap break-words text-sm opacity-60">
+            <s>{body(entry)}</s>
           </p>
-          <ReactionBar entry={entry} agents={agents} />
-        </>
-      )}
+        ) : (
+          <>
+            <p className="mt-0.5 whitespace-pre-wrap break-words text-sm">
+              {body(entry)}
+            </p>
+            <ReactionBar entry={entry} agents={agents} />
+          </>
+        )}
+      </div>
     </div>
   );
 }

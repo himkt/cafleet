@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
+import { LoaderCircle, Send, Users } from "lucide-react";
 import type { Agent } from "../types";
 import { sendMessage } from "../api";
+import AgentAvatar from "./AgentAvatar";
 
 interface MessageInputProps {
   senderId: number | null;
@@ -304,10 +306,10 @@ export default function MessageInput({
   return (
     <form
       onSubmit={handleSubmit}
-      className="border-t border-gray-200 p-3 bg-gray-50 relative"
+      className="relative shrink-0 border-t border-border bg-surface-raised p-3"
     >
       {popoverOpen && (
-        <div className="absolute bottom-full left-3 right-3 mb-1 bg-white border border-gray-200 rounded-md shadow-lg overflow-hidden z-10">
+        <div className="absolute bottom-full left-3 right-3 z-10 mb-1 overflow-hidden rounded-lg border border-border bg-surface-raised shadow-lg">
           {candidates.map((candidate, idx) => {
             const key =
               candidate.kind === "virtual"
@@ -327,18 +329,30 @@ export default function MessageInput({
                   textareaRef.current?.focus();
                 }}
                 onMouseEnter={() => setSelectedIndex(idx)}
-                className={`w-full text-left px-3 py-1.5 text-sm ${
-                  selected ? "bg-blue-50" : ""
+                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+                  selected ? "bg-accent-soft" : ""
                 }`}
               >
-                <span className="font-mono text-gray-500 mr-2">@{slug}</span>
-                <span className="text-gray-900">{display}</span>
+                {candidate.kind === "agent" ? (
+                  <AgentAvatar agent={candidate.agent} size="sm" />
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent"
+                  >
+                    <Users size={12} />
+                  </span>
+                )}
+                <span className="shrink-0 font-mono text-xs text-text-muted">
+                  @{slug}
+                </span>
+                <span className="truncate">{display}</span>
               </button>
             );
           })}
         </div>
       )}
-      <div className="flex gap-2 items-end">
+      <div className="flex items-end gap-2 rounded-xl border border-border bg-surface px-3 py-2 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/30">
         <textarea
           ref={textareaRef}
           rows={1}
@@ -352,17 +366,37 @@ export default function MessageInput({
               : "@agent or @all message..."
           }
           disabled={disabled || sending}
-          className="flex-1 border border-gray-300 rounded-md px-3 py-1.5 text-sm disabled:opacity-50 resize-none whitespace-pre-wrap max-h-36 overflow-y-auto"
+          className="max-h-36 flex-1 resize-none overflow-y-auto whitespace-pre-wrap bg-transparent text-sm outline-none placeholder:text-text-faint disabled:opacity-50"
         />
         <button
           type="submit"
           disabled={disabled || sending || !input.trim()}
-          className="bg-blue-600 text-white px-4 py-1.5 rounded-md text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          aria-label="Send"
+          title="Send"
+          className="rounded-lg bg-accent p-2 text-accent-fg hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {sending ? "..." : "Send"}
+          {sending ? (
+            <LoaderCircle
+              size={16}
+              className="motion-safe:animate-spin"
+              aria-hidden="true"
+            />
+          ) : (
+            <Send size={16} aria-hidden="true" />
+          )}
         </button>
       </div>
-      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+      <p className="mt-1.5 text-[11px] text-text-faint">
+        <kbd className="rounded border border-border bg-surface-hover px-1 font-mono">
+          Enter
+        </kbd>{" "}
+        to send ·{" "}
+        <kbd className="rounded border border-border bg-surface-hover px-1 font-mono">
+          Shift+Enter
+        </kbd>{" "}
+        for newline
+      </p>
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
     </form>
   );
 }

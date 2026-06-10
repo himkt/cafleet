@@ -1,7 +1,7 @@
 # Admin WebUI Modern Redesign
 
 **Status**: Approved
-**Progress**: 10/24 tasks complete
+**Progress**: 15/24 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -224,11 +224,11 @@ The one deliberate behavior change (allowed by the approved UX-restructure scope
 
 ### Step 4: Dashboard restyle
 
-- [ ] Restyle `Sidebar.tsx`: avatar rows, status dots, Admin badge, clickable rows (incl. deregistered) navigating to the detail route <!-- completed: -->
-- [ ] Restyle `Timeline.tsx` + `TimelineMessage.tsx`: avatars, mention chips, day dividers, entry mount animation, skeleton loading; grouping/scroll logic untouched <!-- completed: -->
-- [ ] Migrate `ReactionBar.tsx` tooltip to radix Tooltip with identical content <!-- completed: -->
-- [ ] Restyle `MessageInput.tsx`: composer container, icon send button, kbd hint, restyled mention popover with avatars; parsing/keyboard logic untouched <!-- completed: -->
-- [ ] Restyle the Administrator-missing banner and "Sending as Administrator" note <!-- completed: -->
+- [x] Restyle `Sidebar.tsx`: avatar rows, status dots, Admin badge, clickable rows (incl. deregistered) navigating to the detail route <!-- completed: 2026-06-10T09:48 -->
+- [x] Restyle `Timeline.tsx` + `TimelineMessage.tsx`: avatars, mention chips, day dividers, entry mount animation, skeleton loading; grouping/scroll logic untouched <!-- completed: 2026-06-10T09:48 -->
+- [x] Migrate `ReactionBar.tsx` tooltip to radix Tooltip with identical content <!-- completed: 2026-06-10T09:48 -->
+- [x] Restyle `MessageInput.tsx`: composer container, icon send button, kbd hint, restyled mention popover with avatars; parsing/keyboard logic untouched <!-- completed: 2026-06-10T09:48 -->
+- [x] Restyle the Administrator-missing banner and "Sending as Administrator" note <!-- completed: 2026-06-10T09:48 -->
 
 ### Step 5: Agent detail view
 
