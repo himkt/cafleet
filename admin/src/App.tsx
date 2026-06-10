@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { Agent } from "./types";
 import { setFleetId, getAgents, listFleets } from "./api";
 import FleetPicker from "./components/FleetPicker";
@@ -29,6 +29,7 @@ export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [fleetLabel, setFleetLabel] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const loadedFleetIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const onHashChange = () => setRoute(parseHash());
@@ -38,8 +39,19 @@ export default function App() {
 
   useEffect(() => {
     if (route.kind !== "dashboard" || !route.fleetId) {
+      loadedFleetIdRef.current = null;
       setLoading(false);
       return;
+    }
+
+    // Entering a different fleet's dashboard: drop the previous fleet's
+    // state before any network await so it can never render against the new
+    // fleet id. Same-fleet route changes (e.g. opening the agent detail
+    // panel) keep their data and skip the skeleton.
+    if (loadedFleetIdRef.current !== route.fleetId) {
+      setAgents([]);
+      setFleetLabel(null);
+      setLoading(true);
     }
 
     let cancelled = false;
@@ -60,6 +72,7 @@ export default function App() {
         const data = await getAgents();
         if (cancelled) return;
         setAgents(data.agents);
+        loadedFleetIdRef.current = route.fleetId ?? null;
       } catch {
         if (!cancelled) {
           navigate("/fleets");
@@ -76,16 +89,21 @@ export default function App() {
     };
   }, [route]);
 
-  const handleSelectFleet = useCallback(async (sid: number) => {
-    setFleetId(sid);
-    try {
-      const data = await getAgents();
-      setAgents(data.agents);
-      navigate(`/fleets/${sid}/agents`);
-    } catch {
-      setFleetId(null);
-    }
-  }, []);
+  const handleSelectFleet = useCallback(
+    async (sid: number, label: string | null) => {
+      setFleetId(sid);
+      try {
+        const data = await getAgents();
+        setAgents(data.agents);
+        setFleetLabel(label);
+        loadedFleetIdRef.current = String(sid);
+        navigate(`/fleets/${sid}/agents`);
+      } catch {
+        setFleetId(null);
+      }
+    },
+    [],
+  );
 
   const handleBack = useCallback(() => {
     setFleetId(null);

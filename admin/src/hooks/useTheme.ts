@@ -5,8 +5,12 @@ const STORAGE_KEY = "cafleet-admin-theme";
 export type Theme = "light" | "dark";
 
 function storedTheme(): Theme | null {
-  const value = localStorage.getItem(STORAGE_KEY);
-  return value === "light" || value === "dark" ? value : null;
+  try {
+    const value = localStorage.getItem(STORAGE_KEY);
+    return value === "light" || value === "dark" ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 function systemTheme(): Theme {
@@ -42,7 +46,11 @@ export function useTheme(): { theme: Theme; toggle: () => void } {
   const toggle = useCallback(() => {
     setTheme((current) => {
       const next: Theme = current === "dark" ? "light" : "dark";
-      localStorage.setItem(STORAGE_KEY, next);
+      try {
+        localStorage.setItem(STORAGE_KEY, next);
+      } catch {
+        /* storage unavailable — theme still applies for this session */
+      }
       return next;
     });
   }, []);
