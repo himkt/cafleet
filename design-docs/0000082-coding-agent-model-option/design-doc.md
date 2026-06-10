@@ -1,7 +1,7 @@
 # `--model` Option for `member create` and the `CodingAgent` Spawn Protocol
 
 **Status**: Approved
-**Progress**: 9/21 tasks complete
+**Progress**: 19/21 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -210,25 +210,25 @@ The global `~/.claude/skills/cafleet-agent-team-supervision` mirror is outside t
 
 ### Step 2: Protocol and backends
 
-- [ ] `base.py`: add `model: str | None = None` keyword to `build_spawn_argv` and the new `validate_model` method to the `CodingAgent` Protocol, with docstrings covering the None-omits-tokens and None-is-always-valid contracts <!-- completed: -->
-- [ ] `claude.py`: `validate_model` no-op; emit `--model <m>` between `--name <display>` and the prompt when set <!-- completed: -->
-- [ ] `codex.py`: `validate_model` no-op; emit `--model <m>` between `workspace-write` and the prompt when set <!-- completed: -->
-- [ ] `opencode.py`: `validate_model` first-slash format check with the exact error message; emit `--model <m>` between `cafleet` and `--prompt` when set <!-- completed: -->
+- [x] `base.py`: add `model: str | None = None` keyword to `build_spawn_argv` and the new `validate_model` method to the `CodingAgent` Protocol, with docstrings covering the None-omits-tokens and None-is-always-valid contracts <!-- completed: 2026-06-10T13:52 -->
+- [x] `claude.py`: `validate_model` no-op; emit `--model <m>` between `--name <display>` and the prompt when set <!-- completed: 2026-06-10T13:52 -->
+- [x] `codex.py`: `validate_model` no-op; emit `--model <m>` between `workspace-write` and the prompt when set <!-- completed: 2026-06-10T13:52 -->
+- [x] `opencode.py`: `validate_model` first-slash format check with the exact error message; emit `--model <m>` between `cafleet` and `--prompt` when set <!-- completed: 2026-06-10T13:52 -->
 
 ### Step 3: CLI wiring
 
-- [ ] `cli.py` `member_create`: add the `--model` option, call `agent.validate_model(model)` (wrapping `ValueError` in `click.UsageError`) before `ensure_available()` / registration, and pass `model=model` to `build_spawn_argv` <!-- completed: -->
+- [x] `cli.py` `member_create`: add the `--model` option, call `agent.validate_model(model)` (wrapping `ValueError` in `click.UsageError`) before `ensure_available()` / registration, and pass `model=model` to `build_spawn_argv` <!-- completed: 2026-06-10T13:52 -->
 
 ### Step 4: Tests
 
-- [ ] `tests/test_coding_agent_protocol.py`: per backend, byte-exact argv with `model` set; byte-exact argv with `model` omitted AND `model=None` explicit (both equal to the current pinned list); claude/codex `validate_model` accepts arbitrary strings including `""` <!-- completed: -->
-- [ ] `tests/test_coding_agent_opencode.py`: `validate_model` accept/reject matrix from the Specification table (incl. `a/b/c` accept and `""` reject); byte-exact argv with `model` set <!-- completed: -->
-- [ ] `tests/test_cli_member.py`: `--model` wiring per backend (tokens present at the specified position); no `--model` → no `--model` token in the spawn argv; opencode invalid value → exit 2, exact message, and no agent registered (validation precedes registration); claude/codex empty-string pass-through <!-- completed: -->
-- [ ] `tests/test_cli_help_budget.py`: bump `("member", "create")` line budget 13 → 14 and raise the aggregate byte budget from 4620 to the re-measured total (rounded up to the next multiple of 10) <!-- completed: -->
+- [x] `tests/test_coding_agent_protocol.py`: per backend, byte-exact argv with `model` set; byte-exact argv with `model` omitted AND `model=None` explicit (both equal to the current pinned list); claude/codex `validate_model` accepts arbitrary strings including `""` <!-- completed: 2026-06-10T13:48 -->
+- [x] `tests/test_coding_agent_opencode.py`: `validate_model` accept/reject matrix from the Specification table (incl. `a/b/c` accept and `""` reject); byte-exact argv with `model` set <!-- completed: 2026-06-10T13:48 -->
+- [x] `tests/test_cli_member.py`: `--model` wiring per backend (tokens present at the specified position); no `--model` → no `--model` token in the spawn argv; opencode invalid value → exit 2, exact message, and no agent registered (validation precedes registration); claude/codex empty-string pass-through <!-- completed: 2026-06-10T13:48 -->
+- [x] `tests/test_cli_help_budget.py`: bump `("member", "create")` line budget 13 → 14 and re-measure the aggregate byte budget (4620 → 4320, the measured total rounded up to the next multiple of 10) <!-- completed: 2026-06-10T13:48 -->
 
 ### Step 5: Quality gates and manual verification
 
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass <!-- completed: -->
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass <!-- completed: 2026-06-10T13:52 -->
 - [ ] Manual smoke (inside tmux, with a fleet created via `cafleet fleet create`): run the quickstart-derived spawn `cafleet --fleet-id <fleet-id> member create --agent-id <director-id> --name "demo-member" --description "Demo member" --model sonnet -- "You are demo-member. Reply hello when polled."`. Pass: the member pane is running `claude --permission-mode dontAsk --name demo-member --model sonnet <prompt>` (verify the argv via the pane's process, e.g. `ps -o args= -t <pane-tty>`, or by observing the model name in the spawned session's status line via `cafleet member capture`). Clean up with `cafleet member delete` <!-- completed: -->
 - [ ] Natural-language Director test: start a fresh Claude Code session at the repo root AFTER the Step 1 skill updates land, so the updated `skills/cafleet/SKILL.md` and `skills/cafleet/reference/director.md` are what load; create a fleet, then tell the Director "please create a member with sonnet". Pass: the `member create` Bash invocation the Director constructs — observed in the session transcript / pane history at or before execution — targets the claude backend (explicit `--coding-agent claude` or omitted default) AND contains `--model sonnet`. Fail: any other backend, a missing `--model sonnet`, or the Director asking which backend to use (sonnet matches the claude row of the inference table, so no fallback question is warranted) <!-- completed: -->
 
