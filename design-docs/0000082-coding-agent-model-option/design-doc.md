@@ -1,7 +1,7 @@
 # `--model` Option for `member create` and the `CodingAgent` Spawn Protocol
 
 **Status**: Approved
-**Progress**: 19/21 tasks complete
+**Progress**: 21/21 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -10,11 +10,11 @@ Add an optional `--model <string>` flag to `cafleet member create` and a `model`
 
 ## Success Criteria
 
-- [ ] `cafleet member create --model <m>` forwards `<m>` to the spawned backend binary via that binary's `--model` flag; omitting `--model` produces a spawn argv byte-identical to the pre-change argv for all three backends.
-- [ ] `--model` values violating the opencode `<provider-id>/<model-id>` format fail at create time with exit 2 and the documented error message, before any agent registration or tmux side effect.
-- [ ] claude and codex accept any string (pass-through; the binary itself rejects unknown models, so newly released models work without a cafleet release).
-- [ ] All listed docs and skills document `--model`, and `skills/cafleet/reference/director.md` carries the model-name-to-backend inference table so a Director can resolve "create a member with sonnet" to `--coding-agent claude --model sonnet`.
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass with the new tests in place.
+- [x] `cafleet member create --model <m>` forwards `<m>` to the spawned backend binary via that binary's `--model` flag; omitting `--model` produces a spawn argv byte-identical to the pre-change argv for all three backends.
+- [x] `--model` values violating the opencode `<provider-id>/<model-id>` format fail at create time with exit 2 and the documented error message, before any agent registration or tmux side effect.
+- [x] claude and codex accept any string (pass-through; the binary itself rejects unknown models, so newly released models work without a cafleet release).
+- [x] All listed docs and skills document `--model`, and `skills/cafleet/reference/director.md` carries the model-name-to-backend inference table so a Director can resolve "create a member with sonnet" to `--coding-agent claude --model sonnet`.
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass with the new tests in place.
 
 ---
 
@@ -229,8 +229,8 @@ The global `~/.claude/skills/cafleet-agent-team-supervision` mirror is outside t
 ### Step 5: Quality gates and manual verification
 
 - [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass <!-- completed: 2026-06-10T13:52 -->
-- [ ] Manual smoke (inside tmux, with a fleet created via `cafleet fleet create`): run the quickstart-derived spawn `cafleet --fleet-id <fleet-id> member create --agent-id <director-id> --name "demo-member" --description "Demo member" --model sonnet -- "You are demo-member. Reply hello when polled."`. Pass: the member pane is running `claude --permission-mode dontAsk --name demo-member --model sonnet <prompt>` (verify the argv via the pane's process, e.g. `ps -o args= -t <pane-tty>`, or by observing the model name in the spawned session's status line via `cafleet member capture`). Clean up with `cafleet member delete` <!-- completed: -->
-- [ ] Natural-language Director test: start a fresh Claude Code session at the repo root AFTER the Step 1 skill updates land, so the updated `skills/cafleet/SKILL.md` and `skills/cafleet/reference/director.md` are what load; create a fleet, then tell the Director "please create a member with sonnet". Pass: the `member create` Bash invocation the Director constructs — observed in the session transcript / pane history at or before execution — targets the claude backend (explicit `--coding-agent claude` or omitted default) AND contains `--model sonnet`. Fail: any other backend, a missing `--model sonnet`, or the Director asking which backend to use (sonnet matches the claude row of the inference table, so no fallback question is warranted) <!-- completed: -->
+- [x] Manual smoke (inside tmux, with a fleet created via `cafleet fleet create`): run the quickstart-derived spawn `cafleet --fleet-id <fleet-id> member create --agent-id <director-id> --name "demo-member" --description "Demo member" --model sonnet -- "You are demo-member. Reply hello when polled."`. Pass: the member pane is running `claude --permission-mode dontAsk --name demo-member --model sonnet <prompt>` (verify the argv via the pane's process, e.g. `ps -o args= -t <pane-tty>`, or by observing the model name in the spawned session's status line via `cafleet member capture`). Clean up with `cafleet member delete` <!-- completed: 2026-06-10T14:00 -->
+- [x] Natural-language Director test: start a fresh Claude Code session at the repo root AFTER the Step 1 skill updates land, so the updated `skills/cafleet/SKILL.md` and `skills/cafleet/reference/director.md` are what load; create a fleet, then tell the Director "please create a member with sonnet". Pass: the `member create` Bash invocation the Director constructs — observed in the session transcript / pane history at or before execution — targets the claude backend (explicit `--coding-agent claude` or omitted default) AND contains `--model sonnet`. Fail: any other backend, a missing `--model sonnet`, or the Director asking which backend to use (sonnet matches the claude row of the inference table, so no fallback question is warranted) <!-- completed: 2026-06-10T14:14 -->
 
 ---
 
