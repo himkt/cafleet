@@ -52,6 +52,14 @@ export async function fetchTimeline(): Promise<TimelineResponse> {
   return request<TimelineResponse>("/timeline");
 }
 
+export async function fetchInbox(agentId: number): Promise<TimelineResponse> {
+  return request<TimelineResponse>(`/agents/${agentId}/inbox`);
+}
+
+export async function fetchSent(agentId: number): Promise<TimelineResponse> {
+  return request<TimelineResponse>(`/agents/${agentId}/sent`);
+}
+
 export async function sendMessage(
   fromAgentId: number,
   toAgentId: number | "*",

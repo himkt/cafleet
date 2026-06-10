@@ -8,13 +8,14 @@ import Skeleton from "./components/Skeleton";
 interface Route {
   kind: "fleets" | "dashboard";
   fleetId?: string;
+  agentId?: string;
 }
 
 function parseHash(): Route {
   const hash = window.location.hash.replace(/^#\/?/, "");
-  const match = hash.match(/^fleets\/([^/]+)\/agents/);
+  const match = hash.match(/^fleets\/([^/]+)\/agents(?:\/([^/]+))?/);
   if (match) {
-    return { kind: "dashboard", fleetId: match[1] };
+    return { kind: "dashboard", fleetId: match[1], agentId: match[2] };
   }
   return { kind: "fleets" };
 }
@@ -117,6 +118,7 @@ export default function App() {
       <Dashboard
         fleetId={Number(route.fleetId)}
         fleetLabel={fleetLabel}
+        agentId={route.agentId}
         initialAgents={agents}
         onBack={handleBack}
       />

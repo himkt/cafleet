@@ -1,8 +1,9 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { TriangleAlert, Users } from "lucide-react";
 import type { Agent } from "../types";
 import { getAgents } from "../api";
 import { usePolling, POLL_INTERVAL_MS } from "../hooks/usePolling";
+import AgentDetail from "./AgentDetail";
 import AppHeader from "./AppHeader";
 import EmptyState from "./EmptyState";
 import Sidebar from "./Sidebar";
@@ -12,6 +13,7 @@ import MessageInput from "./MessageInput";
 interface DashboardProps {
   fleetId: number;
   fleetLabel: string | null;
+  agentId?: string;
   initialAgents: Agent[];
   onBack: () => void;
 }
@@ -19,6 +21,7 @@ interface DashboardProps {
 export default function Dashboard({
   fleetId,
   fleetLabel,
+  agentId,
   initialAgents,
   onBack,
 }: DashboardProps) {
@@ -42,11 +45,29 @@ export default function Dashboard({
   const trigger = usePolling(refreshAll, POLL_INTERVAL_MS);
 
   const handleSelectAgent = useCallback(
-    (agentId: number) => {
-      window.location.hash = `/fleets/${fleetId}/agents/${agentId}`;
+    (selectedId: number) => {
+      window.location.hash = `/fleets/${fleetId}/agents/${selectedId}`;
     },
     [fleetId],
   );
+
+  const closeDetail = useCallback(() => {
+    window.location.hash = `/fleets/${fleetId}/agents`;
+  }, [fleetId]);
+
+  const detailAgent =
+    agentId !== undefined
+      ? (agents.find((a) => a.agent_id === Number(agentId)) ?? null)
+      : null;
+
+  // Unknown / cross-fleet agentId: the membership check against the loaded
+  // agents list covers both — redirect to the dashboard route before any
+  // detail fetch happens (AgentDetail only mounts when detailAgent resolves).
+  useEffect(() => {
+    if (agentId !== undefined && detailAgent === null) {
+      closeDetail();
+    }
+  }, [agentId, detailAgent, closeDetail]);
 
   const administrator =
     agents.find((a) => a.kind === "builtin-administrator") ?? null;
@@ -110,6 +131,13 @@ export default function Dashboard({
             }}
           />
         </div>
+        {detailAgent !== null && (
+          <AgentDetail
+            agent={detailAgent}
+            refreshKey={refreshKey}
+            onClose={closeDetail}
+          />
+        )}
       </div>
     </div>
   );

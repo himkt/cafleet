@@ -1,7 +1,7 @@
 # Admin WebUI Modern Redesign
 
 **Status**: Approved
-**Progress**: 15/24 tasks complete
+**Progress**: 19/24 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -232,10 +232,10 @@ The one deliberate behavior change (allowed by the approved UX-restructure scope
 
 ### Step 5: Agent detail view
 
-- [ ] Extend `App.tsx` route parsing for `#/fleets/<id>/agents/<agentId>` (existing routes byte-compatible) <!-- completed: -->
-- [ ] Add `fetchInbox` / `fetchSent` to `api.ts` <!-- completed: -->
-- [ ] Build `AgentDetail.tsx`: profile header, Inbox/Sent radix Tabs, status chips, empty states, Esc/close navigation, refreshKey-driven refetch with in-flight guard <!-- completed: -->
-- [ ] Handle edge cases: unknown/cross-fleet agentId → redirect to dashboard route; fetch-failure keeps last-known data <!-- completed: -->
+- [x] Extend `App.tsx` route parsing for `#/fleets/<id>/agents/<agentId>` (existing routes byte-compatible) <!-- completed: 2026-06-10T09:53 -->
+- [x] Add `fetchInbox` / `fetchSent` to `api.ts` <!-- completed: 2026-06-10T09:53 -->
+- [x] Build `AgentDetail.tsx`: profile header, Inbox/Sent radix Tabs, status chips, empty states, Esc/close navigation, refreshKey-driven refetch with in-flight guard <!-- completed: 2026-06-10T09:53 -->
+- [x] Handle edge cases: unknown/cross-fleet agentId → redirect to dashboard route; fetch-failure keeps last-known data <!-- completed: 2026-06-10T09:53 -->
 
 ### Step 6: Polish and verification
 
