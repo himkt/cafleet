@@ -1,6 +1,6 @@
 # `--model` Option for `member create` and the `CodingAgent` Spawn Protocol
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 21/21 tasks complete
 **Last Updated**: 2026-06-10
 
@@ -240,3 +240,4 @@ The global `~/.claude/skills/cafleet-agent-team-supervision` mirror is outside t
 |------|---------|
 | 2026-06-10 | Initial draft |
 | 2026-06-10 | Reviewer round 1: single-phrase `--model` help string + help-budget bump task; inference-table fallback row (no shape match → ask the operator); with-model variants in `director.md`'s spawn-command table; concrete procedure and pass criterion for both manual verification tasks |
+| 2026-06-10 | Implementation complete: docs/skills (cc985f9), tests (1758bb0), implementation (98a3b0b), manual verification recorded (d3243c2); PR #104 reviewed by Copilot with zero comments; Status → Complete |
