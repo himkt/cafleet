@@ -1,7 +1,7 @@
 # Documentation Friendliness (README.md + docs/ + zensical.toml)
 
 **Status**: Approved
-**Progress**: 14/20 tasks complete
+**Progress**: 17/20 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -292,9 +292,9 @@ The `navigation.indexes` feature is already enabled, so `how-to/index.md` and `a
 
 ### Step 6: Landing surfaces
 
-- [ ] `README.md` — add "Who is CAFleet for" + the condensed "See it work" example with output; fix the §1.1 unclosed parenthesis; add How-to / Troubleshooting links; keep and renumber existing sections. <!-- completed: -->
-- [ ] `docs/index.md` — add the who-for sentence, extend the Browse list with How-to guides and Troubleshooting, and re-point the API Reference entry to `api/index.md`. <!-- completed: -->
-- [ ] `CONTRIBUTING.md` (root) — verify the pointer needs no change. <!-- completed: -->
+- [x] `README.md` — add "Who is CAFleet for" + the condensed "See it work" example with output; fix the §1.1 unclosed parenthesis; add How-to / Troubleshooting links; keep and renumber existing sections. <!-- completed: 2026-06-11T09:20 -->
+- [x] `docs/index.md` — add the who-for sentence, extend the Browse list with How-to guides and Troubleshooting, and re-point the API Reference entry to `api/index.md`. <!-- completed: 2026-06-11T09:20 -->
+- [x] `CONTRIBUTING.md` (root) — verify the pointer needs no change. <!-- completed: 2026-06-11T09:20 -->
 
 ### Step 7: Nav + verification
 

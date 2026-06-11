@@ -15,13 +15,18 @@ for agent operations.
 
 CAFleet works with three coding-agent backends — `claude` (Claude Code), `codex`
 (OpenAI Codex CLI), and `opencode` — and members from different backends can
-coexist in the same fleet.
+coexist in the same fleet. It is built for developers running multi-agent
+coding teams in tmux who want every inter-agent message persisted and
+auditable, and for operators who want a single-file SQLite broker with no
+server to run.
 
 [Get started :material-arrow-right:](get-started/){ .md-button .md-button--primary }
 
 ## Browse the docs
 
 - [Get Started](get-started/) — install, configure, and quickstart walkthroughs.
+- [How-to guides](how-to/) — task-oriented walkthroughs: mixed-backend teams, monitoring and recovery, the admin WebUI, design-doc-driven development.
+- [Troubleshooting](get-started/troubleshooting.md) — `cafleet doctor` plus a symptom→fix table for the most common errors.
 - [Concepts](concepts/overview.md) — architecture overview, fleet isolation, storage, member lifecycle, coding agents, bash routing, tmux push notifications, token reduction.
 - [Specification](spec/data-model.md) — data model, message envelope, CLI options, WebUI API, plus per-backend operational pages.
-- [API Reference](api/broker.md) — Python API documentation generated from source for `cafleet.broker`, `cafleet.config`, `cafleet.coding_agent.base`, and `cafleet.multiplexer.base`.
+- [API Reference](api/) — Python API documentation generated from source for `cafleet.broker`, `cafleet.config`, `cafleet.coding_agent.base`, and `cafleet.multiplexer.base`.
