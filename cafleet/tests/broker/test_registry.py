@@ -9,7 +9,7 @@ from cafleet import broker
 from cafleet.broker import ADMINISTRATOR_KIND, _shared
 from cafleet.db.models import Agent
 from cafleet.db.models import Fleet as FleetModel
-from tests._broker_helpers import _create_fleet, _register_agent
+from tests.broker._helpers import _create_fleet, _register_agent
 
 
 @pytest.fixture(autouse=True)

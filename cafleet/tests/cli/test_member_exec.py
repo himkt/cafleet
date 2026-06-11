@@ -8,7 +8,7 @@ from click.testing import CliRunner
 from cafleet import broker
 from cafleet.cli import cli
 from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
-from tests._member_cli_helpers import (
+from tests.cli._member_helpers import (
     MEMBER_ID,
     MEMBER_NAME,
     PANE_ID,

@@ -9,7 +9,7 @@ from cafleet import broker
 from cafleet.cli import cli
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
-from tests._member_cli_helpers import (
+from tests.cli._member_helpers import (
     MEMBER_ID,
     PANE_ID,
     _agent,

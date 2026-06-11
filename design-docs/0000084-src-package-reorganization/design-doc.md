@@ -1,7 +1,7 @@
 # Reorganize the cafleet Python Package Layout
 
 **Status**: Approved
-**Progress**: 20/27 tasks complete
+**Progress**: 23/27 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -285,9 +285,9 @@ Each new subdirectory gets an `__init__.py` (the tests tree is already a package
 
 ### Step 6: tests mirror
 
-- [ ] Create `tests/{broker,cli,output,webui,multiplexer,coding_agent,db}/__init__.py` and move/rename every test file per the mapping table (`git mv`) <!-- completed: -->
-- [ ] Update intra-test imports (`tests._broker_helpers` → `tests.broker._helpers`, `tests._member_cli_helpers` → `tests.cli._member_helpers`) <!-- completed: -->
-- [ ] Run `mise //cafleet:test` to confirm the full suite passes from the new layout <!-- completed: -->
+- [x] Create `tests/{broker,cli,output,webui,multiplexer,coding_agent,db}/__init__.py` and move/rename every test file per the mapping table (`git mv`) <!-- completed: 2026-06-11T13:42 -->
+- [x] Update intra-test imports (`tests._broker_helpers` → `tests.broker._helpers`, `tests._member_cli_helpers` → `tests.cli._member_helpers`) <!-- completed: 2026-06-11T13:43 -->
+- [x] Run `mise //cafleet:test` to confirm the full suite passes from the new layout <!-- completed: 2026-06-11T13:44 -->
 
 ### Step 7: Verification
 

@@ -12,7 +12,7 @@ from click.testing import CliRunner
 
 from cafleet import broker
 from cafleet.cli import cli
-from tests._broker_helpers import _create_fleet
+from tests.broker._helpers import _create_fleet
 
 
 @pytest.fixture(autouse=True)
