@@ -136,7 +136,7 @@ Each submodule defines its own standalone `@click.group()` (or `@click.command()
 | New module | Contents (from `cli.py`) |
 |---|---|
 | `cli/__init__.py` | root `cli` group; `add_command` registrations for `db`, `fleet`, `agent`, `message`, `member`, `server`, `doctor` |
-| `cli/_helpers.py` | renamed shared helpers: `ensure_tmux_or_die`, `full_flag`, `quiet_flag`, `full_flag_with_help`, `quiet_flag_with_help`, `director_member_options`, `require_fleet_id`, `client_command` (← their `_`-prefixed forms) |
+| `cli/_helpers.py` | renamed shared helpers: `ensure_tmux_or_die`, `full_flag`, `quiet_flag`, `director_member_options`, `require_fleet_id`, `client_command` (← their `_`-prefixed forms). The flat module's `_full_flag_with_help` / `_quiet_flag_with_help` variants were dropped during Copilot review — Click never renders help for hidden options, so the bare flags are equivalent |
 | `cli/db.py` | `db` group, `init` command, `_sync_db_url` (only used by `db init`) |
 | `cli/fleet.py` | `fleet` group: `fleet_create`, `fleet_list`, `fleet_show`, `fleet_delete` |
 | `cli/agent.py` | `agent` group: `agent_register`, `agent_list`, `agent_show`, `agent_deregister` |

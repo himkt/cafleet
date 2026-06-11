@@ -20,18 +20,6 @@ full_flag = click.option("--full", "full", is_flag=True, default=False, hidden=T
 quiet_flag = click.option("--quiet", "quiet", is_flag=True, default=False, hidden=True)
 
 
-def full_flag_with_help(help_text: str):
-    return click.option(
-        "--full", "full", is_flag=True, default=False, hidden=True, help=help_text
-    )
-
-
-def quiet_flag_with_help(help_text: str):
-    return click.option(
-        "--quiet", "quiet", is_flag=True, default=False, hidden=True, help=help_text
-    )
-
-
 def director_member_options(func):
     return click.option(
         "--member-id", type=int, required=True, help="Target member's agent ID"

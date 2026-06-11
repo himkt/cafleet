@@ -3,13 +3,7 @@
 import click
 
 from cafleet import broker, output
-from cafleet.cli._helpers import (
-    client_command,
-    full_flag,
-    full_flag_with_help,
-    quiet_flag,
-    quiet_flag_with_help,
-)
+from cafleet.cli._helpers import client_command, full_flag, quiet_flag
 
 
 @click.group()
@@ -69,7 +63,7 @@ def message_broadcast(ctx, agent_id, text, full):
 
 @message.command("poll")
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
-@full_flag_with_help("Disable body truncation.")
+@full_flag
 @click.pass_context
 @client_command(
     requires_agent_fleet=True,
@@ -86,8 +80,8 @@ def message_poll(ctx, agent_id, full):
 @message.command("ack")
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option("--task-id", type=int, required=True, help="Task ID to acknowledge")
-@full_flag_with_help("Disable body truncation.")
-@quiet_flag_with_help("Print only the task id.")
+@full_flag
+@quiet_flag
 @click.pass_context
 @client_command(
     requires_agent_fleet=True,
@@ -106,7 +100,7 @@ def message_ack(ctx, agent_id, task_id, full, quiet):
 @message.command("cancel")
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option("--task-id", type=int, required=True, help="Task ID to cancel")
-@full_flag_with_help("Disable body truncation.")
+@full_flag
 @click.pass_context
 @client_command(
     requires_agent_fleet=True,
@@ -123,7 +117,7 @@ def message_cancel(ctx, agent_id, task_id, full):
 @message.command("show")
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option("--task-id", type=int, required=True, help="Task ID to retrieve")
-@full_flag_with_help("Disable body truncation.")
+@full_flag
 @click.pass_context
 @client_command(
     requires_agent_fleet=True,
