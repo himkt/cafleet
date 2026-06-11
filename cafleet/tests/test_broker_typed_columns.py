@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from cafleet import broker
-from cafleet.broker import messaging
+from cafleet.broker import _shared, messaging
 from cafleet.db.models import Base, Task
 from tests._broker_helpers import (
     _create_fleet,
@@ -200,7 +200,7 @@ def test_task_table_and_model__text_column_present_task_json_absent():
 
     sid, sender, recipient = _setup_two_agents()
     sent = broker.send_message(sid, sender, recipient, "via send_message body")
-    sm = broker.get_sync_sessionmaker()
+    sm = _shared.get_sync_sessionmaker()
     with sm() as s:
         row = s.execute(
             text("SELECT text FROM tasks WHERE task_id = :tid"),
