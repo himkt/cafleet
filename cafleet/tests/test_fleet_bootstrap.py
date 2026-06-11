@@ -6,7 +6,8 @@ import click
 import pytest
 
 from cafleet import broker
-from cafleet.broker import _is_administrator
+from cafleet.broker import fleets
+from cafleet.broker._shared import is_administrator
 from cafleet.db.models import (
     Agent,
     AgentPlacement,
@@ -91,8 +92,8 @@ def test_bootstrap__db_rows_for_fleet_director_administrator_placement(
     assert by_name["Administrator"].status == "active"
     assert by_name["Director"].agent_id == result["director"]["agent_id"]
     assert by_name["Administrator"].agent_id == result["administrator_agent_id"]
-    assert _is_administrator(by_name["Administrator"].agent_card_json)
-    assert not _is_administrator(by_name["Director"].agent_card_json)
+    assert is_administrator(by_name["Administrator"].agent_card_json)
+    assert not is_administrator(by_name["Director"].agent_card_json)
 
     assert len(placement_rows) == 1
     placement = placement_rows[0]
@@ -121,7 +122,7 @@ def test_bootstrap__atomic_rollback_on_failure(
         def __init__(self, *args, **kwargs):
             raise RuntimeError("injected failure after INSERT agents")
 
-    monkeypatch.setattr(broker, "AgentPlacement", _BoomPlacement)
+    monkeypatch.setattr(fleets, "AgentPlacement", _BoomPlacement)
     with pytest.raises(RuntimeError, match="injected failure"):
         broker.create_fleet(
             label="rollback",

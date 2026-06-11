@@ -3,7 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
-from cafleet import broker
+from cafleet.broker import _shared
 from cafleet.db.models import Base
 from cafleet.multiplexer import tmux as multiplexer_tmux
 
@@ -24,8 +24,8 @@ def sync_sessionmaker():
 
 @pytest.fixture
 def _patch_broker(sync_sessionmaker, monkeypatch):
-    """Redirect ``broker.get_sync_sessionmaker`` at the in-memory sessionmaker."""
-    monkeypatch.setattr(broker, "get_sync_sessionmaker", lambda: sync_sessionmaker)
+    """Redirect ``cafleet.broker._shared.get_sync_sessionmaker`` at the in-memory sessionmaker."""
+    monkeypatch.setattr(_shared, "get_sync_sessionmaker", lambda: sync_sessionmaker)
 
 
 @pytest.fixture

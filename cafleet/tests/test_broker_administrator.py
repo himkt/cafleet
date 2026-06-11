@@ -6,10 +6,8 @@ import click
 import pytest
 
 from cafleet import broker
-from cafleet.broker import (
-    ADMINISTRATOR_KIND,
-    _is_administrator,
-)
+from cafleet.broker import ADMINISTRATOR_KIND
+from cafleet.broker._shared import is_administrator
 from cafleet.db.models import Agent
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
@@ -84,7 +82,7 @@ def test_administrator_kind_constant__value_and_type():
     ],
 )
 def test_is_administrator__matrix(scenario, card_payload, expected):
-    assert _is_administrator(json.dumps(card_payload)) is expected
+    assert is_administrator(json.dumps(card_payload)) is expected
 
 
 @pytest.mark.parametrize(
@@ -96,7 +94,7 @@ def test_is_administrator__matrix(scenario, card_payload, expected):
     ],
 )
 def test_is_administrator__invalid_inputs(scenario, payload):
-    assert _is_administrator(payload) is False
+    assert is_administrator(payload) is False
 
 
 def test_deregister_administrator__protected_and_user_dereg_still_works(broker_session):

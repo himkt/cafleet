@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from cafleet import broker
+from cafleet.broker import messaging
 from cafleet.db.models import Base, Task
 from tests._broker_helpers import (
     _create_fleet,
@@ -70,7 +71,7 @@ def test_send_message__unicast_returns_flat_typed_envelope():
 def test_send_message__origin_task_id_default_and_propagate(origin_in, origin_out):
     now = "2026-05-05T12:00:00.000000+00:00"
     kwargs = {"origin_task_id": origin_in} if origin_in is not None else {}
-    result = broker._unicast_task_dict(
+    result = messaging._unicast_task_dict(
         recipient_id=2,
         sender_id=1,
         text="Hello",

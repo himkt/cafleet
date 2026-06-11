@@ -6,7 +6,7 @@ import click
 import pytest
 
 from cafleet import broker
-from cafleet.broker import ADMINISTRATOR_KIND
+from cafleet.broker import ADMINISTRATOR_KIND, _shared
 from cafleet.db.models import Agent
 from cafleet.db.models import Fleet as FleetModel
 from tests._broker_helpers import _create_fleet, _register_agent
@@ -112,7 +112,7 @@ def test_list_fleets__newest_first_by_created_at_desc(monkeypatch):
             "2026-05-23T00:00:03.000000+00:00",
         ]
     )
-    monkeypatch.setattr(broker, "_now_iso", lambda: next(timestamps))
+    monkeypatch.setattr(_shared, "now_iso", lambda: next(timestamps))
 
     _create_fleet(label="a")  # 00:00:01
     _create_fleet(label="b")  # 00:00:02
