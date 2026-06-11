@@ -359,7 +359,7 @@ def server(host: str, port: int) -> None:
     import uvicorn
 
     uvicorn.run(
-        "cafleet.server:app",
+        "cafleet.webui.app:app",
         host=host,
         port=port,
     )

@@ -7,11 +7,11 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from cafleet.webui_api import webui_router
+from cafleet.webui.api import webui_router
 
 
 def default_webui_dist_dir() -> Path:
-    return Path(__file__).resolve().parent / "webui"
+    return Path(__file__).resolve().parent / "dist"
 
 
 class SPAStaticFiles(StaticFiles):

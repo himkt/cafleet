@@ -25,7 +25,7 @@ packages = ["src/cafleet"]
 include = [
   "src/cafleet/db/alembic.ini",
   "src/cafleet/db/alembic/**/*",
-  "src/cafleet/webui/**/*",
+  "src/cafleet/webui/dist/**/*",
 ]
 
 [dependency-groups]

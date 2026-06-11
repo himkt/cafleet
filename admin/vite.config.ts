@@ -12,7 +12,7 @@ export default defineConfig({
     tailwindcss(),
   ],
   build: {
-    outDir: '../cafleet/src/cafleet/webui',
+    outDir: '../cafleet/src/cafleet/webui/dist',
     emptyOutDir: true,
   },
   server: {

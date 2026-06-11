@@ -1,7 +1,7 @@
 # Reorganize the cafleet Python Package Layout
 
 **Status**: Approved
-**Progress**: 13/27 tasks complete
+**Progress**: 16/27 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -272,9 +272,9 @@ Each new subdirectory gets an `__init__.py` (the tests tree is already a package
 
 ### Step 4: webui/ package and asset pipeline
 
-- [ ] Create `webui/app.py` (from `server.py`, `default_webui_dist_dir` → `parent / "dist"`) and `webui/api.py` (from `webui_api.py`); delete `server.py` and `webui_api.py` <!-- completed: -->
-- [ ] Update `admin/vite.config.ts` `outDir`, `.gitignore`, `cafleet/pyproject.toml` wheel include, `cafleet/mise.toml` dev task, and the `server` command's uvicorn target (still in flat `cli.py` at this step); remove the stale untracked assets at `src/cafleet/webui/{index.html,favicon.svg,assets/}` <!-- completed: -->
-- [ ] Update `tests/test_server_cli.py` / `tests/test_server_routing.py` / `tests/test_webui_api_format.py` imports and the asserted uvicorn target; run `mise //cafleet:test` and `mise //admin:build` to confirm assets land in `webui/dist/` <!-- completed: -->
+- [x] Create `webui/app.py` (from `server.py`, `default_webui_dist_dir` → `parent / "dist"`) and `webui/api.py` (from `webui_api.py`); delete `server.py` and `webui_api.py` (deletions dispatched by the Director — `rm` denied in the Programmer harness) <!-- completed: 2026-06-11T13:13 -->
+- [x] Update `admin/vite.config.ts` `outDir`, `.gitignore`, `cafleet/pyproject.toml` wheel include, `cafleet/mise.toml` dev task, and the `server` command's uvicorn target (still in flat `cli.py` at this step); remove the stale untracked assets at `src/cafleet/webui/{index.html,favicon.svg,assets/}` <!-- completed: 2026-06-11T13:13 -->
+- [x] Update `tests/test_server_cli.py` / `tests/test_server_routing.py` / `tests/test_webui_api_format.py` imports and the asserted uvicorn target (Tester commit 2a364dc); run `mise //cafleet:test` and `mise //admin:build` to confirm assets land in `webui/dist/` — 711 passed, assets in `webui/dist/` <!-- completed: 2026-06-11T13:13 -->
 
 ### Step 5: cli/ package
 
