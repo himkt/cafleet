@@ -1,7 +1,7 @@
 # Reorganize the cafleet Python Package Layout
 
 **Status**: Approved
-**Progress**: 6/27 tasks complete
+**Progress**: 11/27 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -259,11 +259,11 @@ Each new subdirectory gets an `__init__.py` (the tests tree is already a package
 
 ### Step 2: broker/ package
 
-- [ ] Create `broker/_shared.py` with the renamed helpers and the `read_session` / `write_session` context managers <!-- completed: -->
-- [ ] Create `broker/fleets.py`, `broker/agents.py`, `broker/members.py`, `broker/messaging.py`, `broker/queries.py` per the placement table, converting all session boilerplate to `_shared` context managers <!-- completed: -->
-- [ ] Create `broker/__init__.py` re-exporting the full public API with `__all__`; delete `broker.py` <!-- completed: -->
-- [ ] Update test references to relocated/renamed private broker names: `tests/test_fleet_bootstrap.py:9` and `tests/test_broker_administrator.py:11` import `is_administrator` from `cafleet.broker._shared` (← `_is_administrator` from `cafleet.broker`); `tests/test_broker_typed_columns.py:73` calls `_unicast_task_dict` via `cafleet.broker.messaging` (← `broker._unicast_task_dict`); `tests/test_broker_registry.py:115` patches `cafleet.broker._shared.now_iso` (← `broker._now_iso`); `tests/test_fleet_bootstrap.py:124` patches `cafleet.broker.fleets.AgentPlacement` (← `broker.AgentPlacement`) — per the Patch-seam contract <!-- completed: -->
-- [ ] Update `tests/conftest.py` `_patch_broker` to target `cafleet.broker._shared` and run `mise //cafleet:test` to confirm the suite is green before proceeding <!-- completed: -->
+- [x] Create `broker/_shared.py` with the renamed helpers and the `read_session` / `write_session` context managers <!-- completed: 2026-06-11T12:44 -->
+- [x] Create `broker/fleets.py`, `broker/agents.py`, `broker/members.py`, `broker/messaging.py`, `broker/queries.py` per the placement table, converting all session boilerplate to `_shared` context managers <!-- completed: 2026-06-11T12:44 -->
+- [x] Create `broker/__init__.py` re-exporting the full public API with `__all__`; delete `broker.py` (deletion dispatched by the Director — `rm` denied in the Programmer harness) <!-- completed: 2026-06-11T12:46 -->
+- [x] Update test references to relocated/renamed private broker names: `tests/test_fleet_bootstrap.py:9` and `tests/test_broker_administrator.py:11` import `is_administrator` from `cafleet.broker._shared` (← `_is_administrator` from `cafleet.broker`); `tests/test_broker_typed_columns.py:73` calls `_unicast_task_dict` via `cafleet.broker.messaging` (← `broker._unicast_task_dict`); `tests/test_broker_registry.py:115` patches `cafleet.broker._shared.now_iso` (← `broker._now_iso`); `tests/test_fleet_bootstrap.py:124` patches `cafleet.broker.fleets.AgentPlacement` (← `broker.AgentPlacement`) — per the Patch-seam contract (Tester commits 4b94509 + 6dd2166) <!-- completed: 2026-06-11T12:44 -->
+- [x] Update `tests/conftest.py` `_patch_broker` to target `cafleet.broker._shared` and run `mise //cafleet:test` to confirm the suite is green before proceeding — 711 passed (Tester commit 4b94509) <!-- completed: 2026-06-11T12:44 -->
 
 ### Step 3: output/ package
 
