@@ -45,8 +45,8 @@ mirror what the skill does internally. Run them inside a tmux session — the
 `fleet create` and `member create` commands require one.
 
 The walkthrough pastes literal integer ids: fleet `1`, root Director `2`,
-member `4`, task `10`. Your ids will differ — substitute the integers your
-own commands print.
+members `4` and `5`, task `10`. Your ids will differ — substitute the
+integers your own commands print.
 
 Create a fleet. This records your current pane as the root Director's pane:
 
@@ -63,8 +63,8 @@ the built-in Administrator's agent id (`3`). If it scrolls away, run
 `cafleet fleet list` — it re-prints the fleet id and the Director id (the
 `DIRECTOR` column).
 
-Spawn a member pane. The member's prompt is just a one-line greeting.
-Optional: add `--model <m>` (e.g. `--model sonnet`) to pin the member's LLM;
+Spawn two member panes. Each member's prompt is just a one-line greeting.
+Optional: add `--model <m>` (e.g. `--model sonnet`) to pin a member's LLM;
 omitted, the backend binary uses its own default model:
 
 ```bash
@@ -79,8 +79,20 @@ cafleet --fleet-id 1 member create \
 4 demo-member backend=claude pane=%7
 ```
 
-List the fleet's agents — the new member's id (`4`) appears alongside the
-Director and the Administrator:
+```bash
+cafleet --fleet-id 1 member create \
+  --agent-id 2 \
+  --name "reviewer" \
+  --description "Reviewer member" \
+  -- "You are reviewer. Reply hello when polled."
+```
+
+```
+5 reviewer backend=claude pane=%8
+```
+
+List the fleet's agents — the new members' ids (`4` and `5`) appear
+alongside the Director and the Administrator:
 
 ```bash
 cafleet --fleet-id 1 agent list
@@ -92,21 +104,24 @@ cafleet --fleet-id 1 agent list
 3 Administrator active
 
 4 demo-member active
+
+5 reviewer active
 ```
 
-The Director sends a message to the new member:
+Send a message between the members — `demo-member` (`4`) messages
+`reviewer` (`5`):
 
 ```bash
-cafleet --fleet-id 1 message send --agent-id 2 --to 4 --text "hi"
+cafleet --fleet-id 1 message send --agent-id 4 --to 5 --text "hi"
 ```
 
 ```
 Message sent.
-[10 | from:2 | 2026-06-11T09:00:00.123456+00:00]
+[10 | from:4 | 2026-06-11T09:00:00.123456+00:00]
 hi
 ```
 
-The member receives the message as a 2-line inline preview pushed into its
+`reviewer` receives the message as a 2-line inline preview pushed into its
 tmux pane and the message lands in the broker queue. From here, the typical
 flow is `cafleet message poll` from the recipient and `cafleet message ack`
 once it has consumed the message.
@@ -115,6 +130,7 @@ When you are done, tear the fleet down:
 
 ```bash
 cafleet --fleet-id 1 member delete --member-id 4
+cafleet --fleet-id 1 member delete --member-id 5
 cafleet fleet delete 1
 ```
 

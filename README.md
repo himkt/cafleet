@@ -12,7 +12,7 @@ Agent Teams reinvented for collaborative coding across multiple coding-agent bac
 
 ## 2. See it work
 
-Create a fleet, spawn a member pane, message it, and tear everything down — four commands inside a tmux session. The ids below (`1`, `2`, `4`, `10`) are samples; substitute the integers your own commands print.
+Create a fleet, spawn a member pane, message it, and tear everything down — five commands inside a tmux session. The ids below (`1`, `2`, `4`, `10`) are samples; substitute the integers your own commands print.
 
 ```bash
 cafleet fleet create --label "demo"
