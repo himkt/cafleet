@@ -620,11 +620,11 @@ Lists every member of the fleet identified by the global `--fleet-id`. The root 
 ```
 $ cafleet --fleet-id <s> member list --activity
 3 members:
-  agent_id  name      state   last_sent    last_recv    last_ack     idle
-  --------  --------  ------  -----------  -----------  -----------  -----
-  5         alice     active  12:34:56     12:34:50     12:34:50     6s
-  6         bob       active  12:30:11     12:33:02     12:33:02     2m
-  7         carol     idle    -            12:20:00     12:20:00     14m
+  agent_id        name      status  last_sent  last_recv  last_ack   idle
+  --------------  --------  ------  ---------  ---------  ---------  -----
+  4               alice     active  -          12:20:00   12:20:00   14m
+  5               bob       active  12:30:11   12:33:02   12:33:02   2m
+  6               carol     active  12:34:56   12:34:50   12:34:50   6s
 ```
 
 `last_sent` / `last_recv` come from `MAX(tasks.status_timestamp)` filtered by `from_agent_id` / `context_id`; `last_ack` is `MAX(tasks.status_timestamp WHERE status_state='completed' AND type != 'broadcast_summary')`. `idle` is wall-time minus `MAX(last_sent, last_recv)`. Existing indexes `idx_tasks_context_status_ts` and `idx_tasks_from_agent_status_ts` cover the aggregation joins; benchmark target is < 100 ms at 1k messages.

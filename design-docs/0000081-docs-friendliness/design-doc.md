@@ -1,7 +1,7 @@
 # Documentation Friendliness (README.md + docs/ + zensical.toml)
 
 **Status**: Approved
-**Progress**: 5/20 tasks complete
+**Progress**: 10/20 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -274,11 +274,11 @@ The `navigation.indexes` feature is already enabled, so `how-to/index.md` and `a
 
 ### Step 3: How-to guides
 
-- [ ] `docs/how-to/index.md` — section index page. <!-- completed: -->
-- [ ] `docs/how-to/mixed-backend-team.md` — per the outline (prereqs → fleet create → three member creates → pane discovery → cross-backend round-trip → teardown). <!-- completed: -->
-- [ ] `docs/how-to/monitor-and-recover.md` — per the outline (`member list --activity` → `capture` → recovery ladder ping/send-input/exec/delete[-f]). <!-- completed: -->
-- [ ] `docs/how-to/use-the-webui.md` — per the outline (`cafleet server` → fleet picker → timeline → @-send → history; webui-api link; 404/build note). <!-- completed: -->
-- [ ] `docs/how-to/design-doc-development.md` — per the outline (three skills → output location → WebUI audit trail → invocation pointer). <!-- completed: -->
+- [x] `docs/how-to/index.md` — section index page. <!-- completed: 2026-06-11T09:12 -->
+- [x] `docs/how-to/mixed-backend-team.md` — per the outline (prereqs → fleet create → three member creates → pane discovery → cross-backend round-trip → teardown). <!-- completed: 2026-06-11T09:12 -->
+- [x] `docs/how-to/monitor-and-recover.md` — per the outline (`member list --activity` → `capture` → recovery ladder ping/send-input/exec/delete[-f]). <!-- completed: 2026-06-11T09:12 -->
+- [x] `docs/how-to/use-the-webui.md` — per the outline (`cafleet server` → fleet picker → timeline → @-send → history; webui-api link; 404/build note). <!-- completed: 2026-06-11T09:12 -->
+- [x] `docs/how-to/design-doc-development.md` — per the outline (three skills → output location → WebUI audit trail → invocation pointer). <!-- completed: 2026-06-11T09:12 -->
 
 ### Step 4: Troubleshooting
 
