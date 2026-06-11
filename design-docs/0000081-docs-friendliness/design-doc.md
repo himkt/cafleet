@@ -1,7 +1,7 @@
 # Documentation Friendliness (README.md + docs/ + zensical.toml)
 
 **Status**: Approved
-**Progress**: 10/20 tasks complete
+**Progress**: 12/20 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -282,8 +282,8 @@ The `navigation.indexes` feature is already enabled, so `how-to/index.md` and `a
 
 ### Step 4: Troubleshooting
 
-- [ ] `docs/get-started/troubleshooting.md` — `cafleet doctor` lead + the ≥ 12-row symptom→fix table + Error Messages pointer. <!-- completed: -->
-- [ ] `docs/get-started/index.md` — add the Troubleshooting bullet. <!-- completed: -->
+- [x] `docs/get-started/troubleshooting.md` — `cafleet doctor` lead + the ≥ 12-row symptom→fix table + Error Messages pointer. <!-- completed: 2026-06-11T09:15 -->
+- [x] `docs/get-started/index.md` — add the Troubleshooting bullet. <!-- completed: 2026-06-11T09:15 -->
 
 ### Step 5: API Reference orientation
 

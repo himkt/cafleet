@@ -15,5 +15,7 @@ your machine.
   per-coding-agent settings.
 - [Quickstart](quickstart.md) — one-screen walkthrough that creates a fleet,
   spawns two members, and sends a message between them.
+- [Troubleshooting](troubleshooting.md) — `cafleet doctor` plus a
+  symptom→fix table for the most common errors.
 - [Contributing](contributing.md) — project layout, local development loop, and
   the design-doc-driven contribution flow.
