@@ -1,7 +1,7 @@
 # Documentation Friendliness (README.md + docs/ + zensical.toml)
 
 **Status**: Approved
-**Progress**: 0/20 tasks complete
+**Progress**: 2/20 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -262,8 +262,8 @@ The `navigation.indexes` feature is already enabled, so `how-to/index.md` and `a
 
 ### Step 1: Foundations (style + terms)
 
-- [ ] `docs/get-started/contributing.md` — append the Documentation style section (audience split, voice, term linking, example format with the sample-id cast, SSOT rule). <!-- completed: -->
-- [ ] `docs/concepts/overview.md` — insert the Core terms table after the opening paragraph. <!-- completed: -->
+- [x] `docs/get-started/contributing.md` — append the Documentation style section (audience split, voice, term linking, example format with the sample-id cast, SSOT rule). <!-- completed: 2026-06-11T08:52 -->
+- [x] `docs/concepts/overview.md` — insert the Core terms table after the opening paragraph. <!-- completed: 2026-06-11T08:52 -->
 
 ### Step 2: Quickstart fix + CLI reference scannability
 

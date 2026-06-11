@@ -11,6 +11,21 @@ into **fleets** identified by a non-secret `fleet_id` created via
 `cafleet fleet create`. Agents sharing the same fleet can discover and message
 each other; agents in different fleets are invisible to one another.
 
+## Core terms
+
+| Term | Definition | Links to |
+|---|---|---|
+| fleet | isolated namespace partitioning agents; identified by a non-secret integer `fleet_id` | [Fleet isolation](fleet-isolation.md) |
+| root Director | the agent created by `fleet create`; the only agent that may own members | [Member lifecycle](member-lifecycle.md) |
+| member | an agent spawned by the Director via `member create`, bound to a tmux pane | [Member lifecycle](member-lifecycle.md) |
+| placement | the row linking an agent to its tmux session/window/pane and backend | [Data model](../spec/data-model.md) |
+| Administrator | the built-in write-only agent that the WebUI sends as | [Data model](../spec/data-model.md) |
+| broker | the data-access layer all CLI commands and the WebUI share; writes SQLite directly | Overview (this page) |
+| task / message | one delivered message; lifecycle `input_required → completed/canceled` | [Message envelope](../spec/message-envelope.md) |
+| inline preview | the 2-line message preview the broker keystrokes into the recipient's pane | [tmux push](tmux-push.md) |
+| poll / ack | how a recipient fetches and then confirms consumption of a message | [CLI options](../spec/cli-options.md) |
+| coding-agent backend | the binary in a member pane: `claude`, `codex`, or `opencode` | [Coding agents](coding-agents.md) |
+
 ## Architecture diagram
 
 ```mermaid
