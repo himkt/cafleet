@@ -1,3 +1,7 @@
+---
+icon: lucide/code
+---
+
 # broker
 
 The data-access layer every CLI command and the WebUI share: all agent,

@@ -65,12 +65,6 @@ Inbox / Sent tabs fed by the per-agent message endpoints. The admin is not
 itself a CAFleet agent; the built-in `Administrator` agent is the implicit
 sender on every send.
 
-The UI ships light and dark themes with a header toggle: an explicit choice
-persists in `localStorage`, and with no stored choice the theme follows the
-browser's `prefers-color-scheme`. Styling uses the brand violet accent drawn
-from the favicon across the wordmark, primary actions, mention chips, and
-focus rings.
-
 The WebUI API surface — request / response shape, fleet header convention,
 and ACK chip metadata — lives at [WebUI API](../spec/webui-api.md).
 

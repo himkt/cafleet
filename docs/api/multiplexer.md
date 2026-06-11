@@ -1,3 +1,7 @@
+---
+icon: lucide/code
+---
+
 # multiplexer
 
 The tmux abstraction: pane discovery, window splitting, keystroke delivery,

@@ -2,7 +2,7 @@
 icon: lucide/heart-handshake
 ---
 
-# Contributing to CAFleet
+# Contributing
 
 CAFleet is developed using its own CAFleet-orchestrated skills — the
 repository dogfoods the spec-driven-development flow it ships. This document

@@ -1,10 +1,14 @@
-# CLI Option Specification
+---
+icon: lucide/square-terminal
+---
+
+# CLI options
 
 How the unified CAFleet CLI (`cafleet`) accepts configuration parameters.
 
 ## Subcommand summary
 
-One row per subcommand. "Identity flag" is the per-subcommand option naming the acting agent (`--agent-id`) or the target member (`--member-id`); the Agent ID section below documents the split.
+One row per subcommand. "Identity flag" is the per-subcommand option naming the acting agent (`--agent-id`) or the target member (`--member-id`).
 
 | Subcommand | Purpose | `--fleet-id` | Identity flag | Section |
 |---|---|---|---|---|
@@ -46,37 +50,6 @@ Each parameter has exactly one input source:
 
 > **Why `--fleet-id` is a literal CLI flag, not an environment variable.** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --fleet-id <int> ...` invocation matches a single `permissions.allow` pattern of the same shape across every subcommand for that fleet. Shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts that interrupt agent work. Substitute the literal integer ids printed by `cafleet fleet create` and `cafleet agent register` — do not use shell variables to hold them.
 
-## Global Options
-
-Placed **before** the subcommand:
-
-| Flag | Required | Notes |
-|---|---|---|
-| `--json` | no | Emit JSON output. JSON encoding is compact (`json.dumps(..., separators=(",",":"), ensure_ascii=False)` — non-ASCII like the `…` truncation suffix is emitted as UTF-8, not `\uXXXX`). |
-| `--fleet-id <int>` | yes for `agent *`, `message *`, `member create/delete/list/capture/send-input/exec/ping` subcommands; no for `db *`, `fleet *`, `server`, `doctor` | Fleet identifier (integer, typed `int`; new fleets receive a DB-assigned id). Also called the namespace identifier. Passing a non-integer fails with Click's standard `Error: Invalid value for '--fleet-id': '<x>' is not a valid integer.` (exit 2). Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --fleet-id <literal-id> *` works for every subcommand. |
-| `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--fleet-id` requirement. Sourced from the installed package metadata via `importlib.metadata`. |
-
-### `--full` semantics (cross-subcommand escape hatch) {#full-semantics}
-
-`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch. A single flag covers four overloaded surfaces — deliberately one flag rather than `--full-envelope` / `--full-recipients` / `--full-card` / `--full-body` variants:
-
-| Subcommand | Default behavior | `--full` behavior |
-|---|---|---|
-| `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix (see [Message Body Truncation](#message-body-truncation)). Compact rendered envelope: `id`, `from`, `ts`, `text`, plus `kind`/`origin` only when present (ids are full integers). | Untruncated `text`. In `--json`, emits the full typed-column task dict (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text`); in text mode, switches to the verbose labeled block (see [Message envelope](./message-envelope.md#text-mode)). |
-| `message broadcast` | One-line summary (`broadcast id=<id> recipients=<count>`). The broker only ever returns the single `broadcast_summary` task plus the top-level `notifications_sent_count` wrapper — there are no per-recipient envelopes or `recipient_ids` list in the response. | Renders the single `broadcast_summary` task as the full verbose envelope (typed-column dict in `--json`) instead of the one-line summary. It never adds per-recipient envelopes or a `recipient_ids` list — the response is always that one summary task plus `notifications_sent_count`. |
-| `agent list` / `agent show` | One row per agent (`<id> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status`. `agent show` additionally emits `coding_agent` when the agent has a placement; `agent list` never does — it does not load placement data. | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never emit it. |
-| `member capture` | Default `--lines 30` (down from 80); ANSI escape sequences stripped in post-process unless `--ansi` is supplied. | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
-
-### Subcommands that require `--fleet-id`
-
-`agent register`, `agent deregister`, `agent list`, `agent show`, `message send`, `message broadcast`, `message poll`, `message ack`, `message cancel`, `message show`, `member create`, `member delete`, `member list`, `member capture`, `member send-input`, `member exec`, `member ping`.
-
-### Subcommands that do NOT require `--fleet-id`
-
-`db init`, `db *`, `fleet create`, `fleet list`, `fleet show`, `fleet delete`, `server`, `doctor`.
-
-The top-level `--version` flag also short-circuits this check: it is an eager Click option whose callback runs during option parsing and exits before any subcommand (and the fleet-id guard) is reached, so `cafleet --version` succeeds with no `--fleet-id`.
-
 Create a fleet first if you don't have one:
 
 ```bash
@@ -86,35 +59,30 @@ cafleet fleet create --label "my-project"
 
 Then pass the printed id as `--fleet-id <id>` on every client + member command.
 
+## Global Options
+
+Placed **before** the subcommand:
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--json` | no | Emit JSON output. JSON encoding is compact single-line JSON; non-ASCII (like the `…` truncation suffix) is emitted as UTF-8, not escaped. |
+| `--fleet-id <int>` | see the [Subcommand summary](#subcommand-summary) | Fleet identifier (integer, typed `int`; new fleets receive a DB-assigned id). Also called the namespace identifier. Passing a non-integer fails with Click's standard `Error: Invalid value for '--fleet-id': '<x>' is not a valid integer.` (exit 2). Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --fleet-id <literal-id> *` works for every subcommand. |
+| `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--fleet-id` requirement. |
+
+### `--full` semantics (cross-subcommand escape hatch) {#full-semantics}
+
+`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch. A single flag covers four overloaded surfaces:
+
+| Subcommand | Default behavior | `--full` behavior |
+|---|---|---|
+| `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix (see [Message Body Truncation](#message-body-truncation)). Compact rendered envelope: `id`, `from`, `ts`, `text`, plus `kind`/`origin` only when present (ids are full integers). | Untruncated `text`. In `--json`, emits the full typed-column task dict (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text`); in text mode, switches to the verbose labeled block (see [Message envelope](./message-envelope.md#text-mode)). |
+| `message broadcast` | One-line summary (`broadcast id=<id> recipients=<count>`). | Renders the single `broadcast_summary` task as the full verbose envelope (typed-column dict in `--json`) instead of the one-line summary. It never adds per-recipient envelopes or a `recipient_ids` list — the response is always that one summary task plus `notifications_sent_count`. |
+| `agent list` / `agent show` | One row per agent (`<id> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status`. `agent show` additionally emits `coding_agent` when the agent has a placement; `agent list` never does — it does not load placement data. | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never emit it. |
+| `member capture` | Default `--lines 30`; ANSI escape sequences stripped in post-process unless `--ansi` is supplied. | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
+
 ## Agent ID (`--agent-id`)
 
-`--agent-id` is a **per-subcommand option** (not a global option). It identifies which agent is acting and must be specified on each invocation. It is typed `int`; a non-integer fails with Click's standard `Error: Invalid value for '--agent-id': '<x>' is not a valid integer.` (exit 2). The same `type=int` applies to every id option — `--to`, `--id` (`agent show`), `--member-id`, and `--task-id` — so each rejects a non-integer the same way. Ids are short by construction (DB-assigned integers, typically 1–4 digits), so they are pasted in full; there is no prefix resolution.
-
-### Commands that require `--agent-id`
-
-- `agent deregister` — Deregister an agent
-- `agent show` — Show detail for a specific agent
-- `message send` — Send a message to another agent
-- `message broadcast` — Broadcast a message to all agents
-- `message poll` — Poll for un-acked (`input_required`) incoming messages
-- `message ack` — Acknowledge a received message
-- `message cancel` — Cancel a sent message
-- `message show` — Get task details
-- `member create` — Register a new member and spawn its coding-agent pane (the spawning Director's id, validated to equal the fleet root)
-
-### Commands that do NOT require `--agent-id`
-
-- `agent register` — Register a new agent (returns an agent ID)
-- `agent list` — List agents in the fleet (scoped by the global `--fleet-id`)
-
-The director-side member subcommands identify their target by `--member-id` (scoped to the global `--fleet-id`), not `--agent-id`:
-
-- `member delete` — Deregister a member and close its pane
-- `member list` — List the fleet's members
-- `member capture` — Capture the last N lines of a member's pane
-- `member send-input` — Forward a restricted keystroke (digit 1/2/3 or free text) to a member's pane
-- `member exec` — Dispatch a shell command into a member's pane via the coding agent's `!` shortcut
-- `member ping` — Inject an inbox-poll keystroke into a member's pane
+`--agent-id` is a **per-subcommand option** (not a global option). It identifies which agent is acting and must be specified on each invocation. It is typed `int`; a non-integer fails with Click's standard `Error: Invalid value for '--agent-id': '<x>' is not a valid integer.` (exit 2). The same `type=int` applies to every id option — `--to`, `--id` (`agent show`), `--member-id`, and `--task-id` — so each rejects a non-integer the same way. Ids are short by construction (DB-assigned integers, typically 1–4 digits), so they are pasted in full; there is no prefix resolution. Which subcommand takes which identity flag is in the [Subcommand summary](#subcommand-summary).
 
 ## Message Body Truncation
 
@@ -122,11 +90,11 @@ The five subcommands that emit a user-supplied delivery body — `cafleet messag
 
 | Variable | Settings field | Default | Notes |
 |---|---|---|---|
-| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Maximum codepoint length of the rendered `text` body before the `…` suffix is appended. Follows the `CAFLEET_`-prefixed convention already used by `CAFLEET_DATABASE_URL`, `CAFLEET_BROKER_HOST`, and `CAFLEET_BROKER_PORT`. It also bounds the broker's inline-preview truncation before the preview is keystroked into a recipient's tmux pane. (`agent.description` truncation uses a separate hard-coded 60-codepoint limit, independent of this env var.) |
+| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Maximum codepoint length of the rendered `text` body before the `…` suffix is appended. It also bounds the broker's inline-preview truncation before the preview is keystroked into a recipient's tmux pane. (`agent.description` truncation uses a separate hard-coded 60-codepoint limit, independent of this env var.) |
 
 The suffix is the single Unicode codepoint `…` (U+2026 HORIZONTAL ELLIPSIS) — exactly one codepoint with no count and no companion `text_length` field.
 
-`cafleet message broadcast` is different — the broker returns a `broadcast_summary` task whose top-level `text` column is a broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. By default the summary renders as the one-line `broadcast id=<id> recipients=<count>`, while `--full` renders the single `broadcast_summary` task as the full typed-column envelope. The default summary string is short, so compact truncation only applies if `CAFLEET_MAX_TEXT_LEN` is set below its length. `--full` never adds per-recipient envelopes or a `recipient_ids` list. The task envelope is a flat typed-column dict with no `metadata` / `artifacts` wrappers; see [message-envelope.md](./message-envelope.md) for the canonical schema.
+`cafleet message broadcast` is different — the broker returns a `broadcast_summary` task whose top-level `text` column is a broker-generated summary string (e.g. `Broadcast sent to N recipients`), not the original body. By default the summary renders as the one-line `broadcast id=<id> recipients=<count>` — see the [`--full` semantics](#full-semantics) `message broadcast` row.
 
 The table describes the resulting `text` value AFTER truncation. Text mode omits the `text:` line entirely when the resulting value is empty, while `--json` always includes it.
 
@@ -140,7 +108,7 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 | Flag | Required | Notes |
 |---|---|---|
 | `--full` | no | Per-subcommand option (placed after the subcommand name, like `--agent-id` and `--task-id`). Disables truncation; emits the full message body and the full typed-column envelope. Composes orthogonally with `--json`. See [`--full` semantics](#full-semantics) for the cross-subcommand summary. |
-| `--quiet` | no | On `message send`, `message ack`, and `member ping`: emit only the new task id on stdout, nothing else. Mutually exclusive with `--full`; the two are not expected to be combined. |
+| `--quiet` | no | On `message send`, `message ack`, and `member ping`: emit only the new task id on stdout, nothing else. Mutually exclusive with `--full`. |
 
 Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split.
 
@@ -149,7 +117,7 @@ cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>          # d
 cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --full   # full body
 ```
 
-This applies to CLI emit sites only. FastAPI `/api/*` responses (see [webui-api.md](./webui-api.md)) are unchanged — the WebUI is human-facing and renders full bodies. `agent.description`, `skills[].description`, `agent_card_json` sub-fields, and `member capture` content are also untouched in this release.
+This applies to CLI emit sites only. FastAPI `/api/*` responses (see [webui-api.md](./webui-api.md)) are unchanged — the WebUI is human-facing and renders full bodies. `agent.description`, `skills[].description`, `agent_card_json` sub-fields, and `member capture` content are also untouched.
 
 ## `cafleet db` — Schema Management
 
@@ -170,7 +138,7 @@ The `cafleet fleet` subgroup manages fleets. These commands write directly to SQ
 | Flag | Required | Notes |
 |---|---|---|
 | `--label` | no | Free-form text label for the fleet |
-| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. Operator-declared metadata only — `fleet create` does not spawn the root Director's coding-agent process and cannot auto-detect the binary running in the calling pane. The value is recorded as the root Director's placement `coding_agent`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically.) |
+| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`, recorded as the root Director's placement `coding_agent` — see [Coding agents](../concepts/coding-agents.md). |
 | `--json` | no | Output as JSON |
 | `--full` | no | Hidden flag (accepted but not shown in `--help`): switches the non-JSON output from the compact one-line form to the 7-line block below. |
 
@@ -184,7 +152,7 @@ Creates a new fleet with a DB-assigned integer identifier. **Must be run inside 
 <fleet_id> director=<director_agent_id> admin=<administrator_agent_id>
 ```
 
-**Non-JSON output (hidden `--full` flag)** — line 1 is `fleet_id` (preserves backward-compatible scripts that parse only the first line), line 2 is the root Director's `agent_id`:
+**Non-JSON output (hidden `--full` flag)** — line 1 is `fleet_id`, line 2 is the root Director's `agent_id`:
 
 ```
 <fleet_id>
@@ -236,7 +204,8 @@ Lists all **non-soft-deleted** fleets with their `director_agent_id`, label, cre
 Each row exposes the fleet's root `director_agent_id` so the Director's ID can be recovered from a list after `fleet create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (integer). Text output renders it as a `DIRECTOR` column placed immediately after `FLEET_ID`:
 
 ```
-FLEET_ID                               DIRECTOR                                 LABEL                AGENTS   CREATED_AT
+FLEET_ID  DIRECTOR  LABEL       AGENTS  CREATED_AT
+1         2         my-project  3       2026-04-15T10:00:00+00:00
 ```
 
 ### `fleet show`
@@ -279,7 +248,7 @@ Member tmux panes spawned by `cafleet member create` are **not** automatically c
 
 ## `cafleet doctor` — Placement Diagnostics {#cafleet-doctor}
 
-Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE`) for operators diagnosing placement issues without reaching for raw tmux commands. Intended as the home for future health checks (DB connectivity, orphan-placement scans, etc.); today it covers tmux metadata only.
+Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE`) for operators diagnosing placement issues without reaching for raw tmux commands.
 
 | Flag | Required | Notes |
 |---|---|---|
@@ -332,21 +301,20 @@ Starts the admin WebUI FastAPI app (the same app served by `mise //cafleet:dev`)
 | `--host` | `settings.broker_host` (default `127.0.0.1`) | Bind address. Overrides `CAFLEET_BROKER_HOST` when both are set. |
 | `--port` | `settings.broker_port` (default `8000`) | Bind port. Overrides `CAFLEET_BROKER_PORT` when both are set. |
 
-Environment variables (read by `cafleet.config.Settings` via explicit `validation_alias`, consistent with `CAFLEET_DATABASE_URL`):
+Environment variables:
 
-| Variable | Settings field | Notes |
+| Variable | Settings field | Default |
 |---|---|---|
-| `CAFLEET_BROKER_HOST` | `broker_host` | Wired via `Field(validation_alias="CAFLEET_BROKER_HOST")` on `Settings`. |
-| `CAFLEET_BROKER_PORT` | `broker_port` | Wired via `Field(validation_alias="CAFLEET_BROKER_PORT")` on `Settings`. |
+| `CAFLEET_BROKER_HOST` | `broker_host` | `127.0.0.1` |
+| `CAFLEET_BROKER_PORT` | `broker_port` | `8000` |
 
 The CLI flag wins when both a flag and the matching env var are set; the env var wins when only it is set; the hardcoded default (`127.0.0.1` / `8000`) applies otherwise.
 
 ### Behavior
 
-- Calls `uvicorn.run("cafleet.server:app", host=<resolved>, port=<resolved>)` with no `reload`, no custom `workers`, and no custom `log_level` — uvicorn defaults apply.
+- Runs uvicorn with its defaults — no reload, no custom workers, no custom log level.
 - On startup, if the bundled WebUI dist directory does not exist, the app emits a one-line warning to stderr: `warning: admin WebUI is not built. / will return 404. Run 'mise //admin:build'.`. The warning fires from the app factory, so `cafleet server`, `mise //cafleet:dev`, and any direct uvicorn invocation all see it identically.
-- Port-in-use errors are NOT wrapped — uvicorn's native `OSError: [Errno 98] Address already in use` (or the corresponding click/uvicorn traceback) propagates to the terminal.
-- The `cafleet server` handler does not perform any disk check itself; the dist-directory warning is entirely owned by the app factory.
+- Port-in-use errors are NOT wrapped — uvicorn's native `OSError: [Errno 98] Address already in use` (or the corresponding uvicorn traceback) propagates to the terminal.
 
 ### No other flags
 
@@ -518,11 +486,11 @@ The `cafleet member` subgroup manages tmux-backed member agents and must be run 
 | Flag | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | Director's agent ID |
-| `--name` | yes | Display name of the new member. Forwarded to the spawned `claude` process as `claude --name <member-name> <prompt>` so the resulting tmux pane title (`#{pane_title}`) shows the member name for the lifetime of the pane. Neither codex nor opencode has a `--name` analog — operators discover those panes via `cafleet member list`. |
+| `--name` | yes | Display name of the new member — see [Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals) for pane-title behavior. |
 | `--description` | yes | One-sentence purpose |
-| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. The flag both selects which backend binary is spawned AND is recorded as the placement's `coding_agent`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically.) Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. For the `opencode` backend, cafleet also writes the `cafleet` agent definition to `~/.opencode/agents/cafleet.md` on first spawn if it does not already exist — see [Opencode members](../reference/coding-agents/opencode.md) for operational detail. |
-| `--model` | no | Model passed to the backend binary via its `--model` flag, appended immediately before the prompt tokens (for `opencode`, before the `--prompt <prompt>` pair). Default: omitted — no model tokens in the spawn argv; the binary uses its own default model. `claude` and `codex` accept any string (pass-through; the binary itself rejects unknown models, so newly released models work without a cafleet release). `opencode` requires the `<provider-id>/<model-id>` format — split on the **first** `/` into two non-empty segments (model ids may themselves contain slashes) — and rejects violations at create time with exit 2, before any agent registration or tmux side effect (see [Error Messages](#error-messages)). Spawn-time only: not recorded in `agent_placements`, no migration, not shown in `member list` output. |
-| `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are used as the spawn prompt. Mutually exclusive with the positional prompt argument. The file is read verbatim (no stripping) and passes through the same `str.format()` substitution (`fleet_id` / `agent_id` / `director_agent_id`) as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. |
+| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`; exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH` — see [Opencode members](../reference/coding-agents/opencode.md) for the preset note. |
+| `--model` | no | Model forwarded to the backend binary's `--model` flag; omitted by default — see [Model selection](../concepts/coding-agents.md#model-selection). |
+| `--prompt-file` | no | Absolute path to a UTF-8 file used as the spawn prompt; mutually exclusive with the positional prompt. |
 | *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. All three backends receive the same prompt; the prompt template is backend-neutral. Mutually exclusive with `--prompt-file`. |
 
 #### Spawn command per backend
@@ -533,7 +501,7 @@ The `cafleet member` subgroup manages tmux-backed member agents and must be run 
 | `codex`  | `codex --ask-for-approval never --sandbox workspace-write <prompt>` | `codex --ask-for-approval never --sandbox workspace-write --model <m> <prompt>` |
 | `opencode` | `opencode --agent cafleet --prompt <prompt>` | `opencode --agent cafleet --model <m> --prompt <prompt>` |
 
-The `claude` spawn carries `--permission-mode dontAsk`; the `codex` spawn carries `--ask-for-approval never --sandbox workspace-write`; the `opencode` spawn carries `--agent cafleet` which binds the `cafleet` agent's permission ruleset (catch-all-allow + specific-deny — every permission check resolves to `allow` or `deny`, never `ask`). In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve silently. Members run cafleet and any other shell command directly via the Bash tool — no Director routing required by default. The bash-via-Director protocol fires as a fallback when the harness deny-list rejects a Bash invocation (see [Bash routing](../concepts/bash-routing.md)). Operational details for codex members live in [Codex members](../reference/coding-agents/codex.md); the opencode equivalent (including the preset materialization and refresh recipe) lives in [Opencode members](../reference/coding-agents/opencode.md).
+In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve — see [Bash routing](../concepts/bash-routing.md) for the fallback protocol, and [Codex members](../reference/coding-agents/codex.md) / [Opencode members](../reference/coding-agents/opencode.md) for backend-specific detail.
 
 #### Spawn-prompt input modes
 
@@ -544,9 +512,9 @@ The `claude` spawn carries `--permission-mode dontAsk`; the `codex` spawn carrie
 | Neither `--prompt-file` nor positional prompt | The built-in default prompt template, with `{fleet_id}` / `{agent_id}` / `{director_agent_id}` substituted. |
 | Positional prompt only | The positional argument(s) joined by spaces, after the same `str.format()` substitution. |
 | `--prompt-file PATH` only | The file contents, byte-for-byte, after the same `str.format()` substitution. Surrounding whitespace and trailing newlines are preserved verbatim. |
-| Both a positional prompt and `--prompt-file` | `click.UsageError` (exit 2) — see [Error Messages](#error-messages). |
+| Both a positional prompt and `--prompt-file` | Error (exit 2) — see [Error Messages](#error-messages). |
 
-The `--prompt-file` path is BOTH the spawn input AND the permanent audit artifact. CAFleet-native team skills render the prompt to `<BASE>/prompts/<role>-<UTC-compact>.md` before invoking `member create --prompt-file`, so the on-disk file is the source of truth for what was spawned. Inline `-- "<prompt>"` invocation remains supported for trivial one-line ad-hoc spawns; long, templated identity blocks must use `--prompt-file` because the rendered text otherwise exceeds the documented `tmux split-window` argv ceiling (`tmux command failed: command too long` rolls back the agent registration once the shell-quoted prompt grows past a few KB).
+The substituted placeholders are `fleet_id` / `agent_id` / `director_agent_id`. For `--prompt-file`, relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. Inline prompts beyond a few KB exceed tmux's argv ceiling (`tmux command failed: command too long` rolls back the registration) — use `--prompt-file` for long prompts.
 
 #### Focus behavior
 
@@ -613,12 +581,12 @@ Lists every member of the fleet identified by the global `--fleet-id`. The root 
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--activity` | no | Aggregate per-member activity timestamps from the `tasks` table and render `last_sent`, `last_recv`, `last_ack`, and `idle` columns alongside the default member columns. The aggregation filters `Task.type != 'broadcast_summary'` for the `last_ack` proxy (mirrors `poll_tasks`). Primary inputs to the Director's `/loop` monitoring tick. |
+| `--activity` | no | Aggregate per-member activity timestamps from the `tasks` table and render `last_sent`, `last_recv`, `last_ack`, and `idle` columns alongside the default member columns; broadcast summary rows are excluded from `last_ack`. |
 
 #### `member list --activity` output {#member-list-activity-output}
 
 ```
-$ cafleet --fleet-id <s> member list --activity
+cafleet --fleet-id 1 member list --activity
 3 members:
   agent_id        name      status  last_sent  last_recv  last_ack   idle
   --------------  --------  ------  ---------  ---------  ---------  -----
@@ -627,7 +595,7 @@ $ cafleet --fleet-id <s> member list --activity
   6               carol     active  12:34:56   12:34:50   12:34:50   6s
 ```
 
-`last_sent` / `last_recv` come from `MAX(tasks.status_timestamp)` filtered by `from_agent_id` / `context_id`; `last_ack` is `MAX(tasks.status_timestamp WHERE status_state='completed' AND type != 'broadcast_summary')`. `idle` is wall-time minus `MAX(last_sent, last_recv)`. Existing indexes `idx_tasks_context_status_ts` and `idx_tasks_from_agent_status_ts` cover the aggregation joins; benchmark target is < 100 ms at 1k messages.
+`last_sent` is the member's most recent outgoing message; `last_recv` is its most recent delivery; `last_ack` is the most recent delivery it acknowledged (broadcast summaries excluded); `idle` is wall-time since the latest of `last_sent` / `last_recv`.
 
 ### `member capture`
 
@@ -636,9 +604,7 @@ $ cafleet --fleet-id <s> member list --activity
 | `--member-id` | yes | Target member's agent ID |
 | `--lines` | no | Number of trailing lines to capture (default: **30**). |
 | `--tail` | no | Alias for `--lines`, for muscle-memory consistency with `tail -n`. |
-| `--ansi` / `--no-ansi` | no | Default `--no-ansi`: ANSI escape sequences are stripped via `re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)` and carriage-return fragments are de-fragmented for TUI redraws. Pass `--ansi` to disable post-processing and emit the raw tmux capture. |
-
-The default is calibrated against per-tick cost — a raw 200-line capture per member would dominate Director token cost. `--lines 30` keeps stalled `AskUserQuestion` prompt headers visible; if a stalled-prompt fixture truncates the prompt header, the default is bumped to 50.
+| `--ansi` / `--no-ansi` | no | Default `--no-ansi`: ANSI escape sequences are stripped and carriage-return redraw fragments cleaned up. Pass `--ansi` to disable post-processing and emit the raw tmux capture. |
 
 ### Member targeting and key delivery
 
@@ -654,7 +620,7 @@ The only boundary is fleet isolation: any **active** in-fleet agent **with a pla
 
 #### Literal key delivery
 
-Each subcommand issues its key sequence as two or more separate tmux `send-keys` invocations because tmux's `-l` (literal) flag is per-invocation: every key in a single `send-keys` call is either literal or key-name interpreted, never a mix. Splitting the sequence guarantees shell meta (`$VAR`, backticks, `$(...)`), key names (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters are delivered as plain characters. The CLI runs each `send-keys` with `shell=False`, so no shell ever evaluates the text.
+Each key sequence is delivered literally — shell meta (`$VAR`, backticks, `$(...)`), key names (`Enter`, `C-c`, `Esc`), backslash-escapes, and multi-byte characters all arrive as plain characters. The CLI runs each `send-keys` with `shell=False`, so no shell ever evaluates the text.
 
 #### Common exit codes
 
@@ -673,7 +639,7 @@ Exactly one of the two flags must be supplied.
 | Flag | Required | Notes |
 |---|---|---|
 | `--member-id` | yes | Target member's agent ID |
-| `--choice` | one-of | Integer `1`, `2`, or `3`. Sends the matching digit key to the pane (no Enter). Validated via `click.IntRange(1, 3)`. |
+| `--choice` | one-of | Integer `1`, `2`, or `3`. Sends the matching digit key to the pane (no Enter). Values outside 1–3 are rejected (exit 2). |
 | `--freetext` | one-of | Free-text string to type into the "Type something" field. Sends `4`, then the literal text via `tmux send-keys -l`, then `Enter`. AskUserQuestion-only. Rejected if the first non-whitespace character is `!` (use `member exec` for shell dispatch). |
 
 Exactly one of `--choice` / `--freetext` must appear. Supplying zero or both exits 2 with `Error: --choice and --freetext are mutually exclusive; supply exactly one.`.
@@ -687,14 +653,12 @@ Exactly one of `--choice` / `--freetext` must appear. Supplying zero or both exi
 | `--choice 3` | `tmux send-keys -t <pane> 3` |
 | `--freetext "X"` | `tmux send-keys -t <pane> 4` → `tmux send-keys -t <pane> -l "X"` → `tmux send-keys -t <pane> Enter` |
 
-The `--freetext` sequence is three separate invocations — see [Member targeting and key delivery](#member-targeting-and-key-delivery) for the per-invocation `-l` rationale.
-
 #### Validation rules
 
 | Input | Result |
 |---|---|
 | Zero or both of `--choice` / `--freetext` | Exit 2 with `Error: --choice and --freetext are mutually exclusive; supply exactly one.` |
-| `--choice 0` / `--choice 4` / `--choice a` | Exit 2 via click's built-in `IntRange(1, 3)` validator |
+| `--choice 0` / `--choice 4` / `--choice a` | Exit 2 — values outside 1–3 are rejected |
 | `--freetext ""` (empty) | Allowed — sends `4` + empty literal + `Enter` (submits an empty answer; AskUserQuestion's own UI decides whether to accept it) |
 | `--freetext "   "` (whitespace-only) | Allowed — `lstrip()` empties the string before the `startswith("!")` check, so the bang-prefix guard does not fire. |
 | `--freetext` whose first non-whitespace character is `!` | Exit 2 with `Error: --freetext may not start with '!' — that triggers the coding agent's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` |
@@ -735,7 +699,7 @@ JSON (`cafleet --json ... member send-input ...`):
 
 #### Director-side usage pattern
 
-The canonical Director-side workflow is three-beat and AskUserQuestion-delegated: (1) `cafleet member capture` to inspect the pane, (2) the Director's own `AskUserQuestion` tool call — with shape-matched options per the pane-shapes table — to put the decision in front of the user, (3) the Director invokes the resolved `cafleet member send-input` via its Bash tool, where Claude Code's native per-call permission prompt is the user-consent surface (never a fenced `bash` block for the user to paste). The canonical three-beat workflow, pane-shapes table (choice-routing / open-ended / other shapes), AskUserQuestion constraints (1–4 questions, 2–4 options, built-in "Other"), and "MUST NOT do" rules live in `skills/cafleet/SKILL.md` under "Answer a member's AskUserQuestion prompt" — that is canonical, and this CLI spec does not duplicate the table.
+The canonical three-beat workflow (`member capture` → AskUserQuestion → `member send-input`) lives in `skills/cafleet/SKILL.md` under "Answer a member's AskUserQuestion prompt". This page documents only the CLI surface.
 
 ### `member exec`
 
@@ -757,15 +721,13 @@ cafleet --fleet-id <fleet-id> member exec \
 |---|---|
 | `member exec "X"` | `tmux send-keys -t <pane> -l "! X"` → `tmux send-keys -t <pane> Enter` |
 
-Two separate invocations — see [Member targeting and key delivery](#member-targeting-and-key-delivery) for the per-invocation `-l` rationale.
-
 #### Validation rules
 
 | Input | Result |
 |---|---|
-| Missing positional `COMMAND` | Click built-in `Error: Missing argument 'COMMAND'.` (exit 2). |
-| `command` empty after `.strip()` (`""` or whitespace-only) | `Error: command may not be empty.` (exit 2; `click.UsageError`). |
-| `command` containing `\n` or `\r` | `Error: command may not contain newlines.` (exit 2; `click.UsageError`). |
+| Missing positional `COMMAND` | `Error: Missing argument 'COMMAND'.` (exit 2). |
+| `command` empty after `.strip()` (`""` or whitespace-only) | `Error: command may not be empty.` (exit 2). |
+| `command` containing `\n` or `\r` | `Error: command may not contain newlines.` (exit 2). |
 
 (tmux-unavailable and binary-not-found errors are common — see [Member targeting and key delivery](#member-targeting-and-key-delivery).)
 
@@ -791,15 +753,15 @@ JSON (`cafleet --json ... member exec ...`):
 }
 ```
 
-Three keys: `member_agent_id`, `pane_id`, `command`. No `action` field — the subcommand name IS the action.
+Three keys: `member_agent_id`, `pane_id`, `command`.
 
 #### Exit code summary
 
-See [Member targeting and key delivery](#member-targeting-and-key-delivery) for the common exit codes. The argument errors unique to `member exec` exit 2: missing positional `COMMAND` (Click built-in), `command` empty / whitespace-only, and `command` containing `\n` or `\r`.
+See [Member targeting and key delivery](#member-targeting-and-key-delivery) for the common exit codes. The argument errors unique to `member exec` exit 2: missing positional `COMMAND`, `command` empty / whitespace-only, and `command` containing `\n` or `\r`.
 
 ### `member ping`
 
-Director-only manual inbox-poll nudge. Keystrokes `cafleet --fleet-id <s> message poll --agent-id <m>` + `Enter` into the member's pane so the member drains its inbox via a normal poll. This is the manual re-poke for a pane that missed the broker's automatic on-delivery notification — which keystrokes a 2-line inline preview (not a poll command) — so the two keystroke paths are distinct. As an operator-driven entry-point, failures surface as exit 1 (the auto-fire path swallows failures silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
+Director-only manual inbox-poll nudge. Keystrokes `cafleet --fleet-id <fleet-id> message poll --agent-id <member-id>` + `Enter` into the member's pane so the member drains its inbox via a normal poll. This is the manual re-poke for a pane that missed the broker's automatic on-delivery notification — which keystrokes a 2-line inline preview (not a poll command) — so the two keystroke paths are distinct. As an operator-driven entry-point, failures surface as exit 1 (the auto-fire path swallows failures silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
 
 ```bash
 cafleet --fleet-id <fleet-id> member ping \
@@ -814,17 +776,17 @@ cafleet --fleet-id <fleet-id> member ping \
 
 | Invocation | tmux calls issued in order |
 |---|---|
-| `member ping` | Types `cafleet --fleet-id <sid> message poll --agent-id <member_id>` + `Enter` into the pane. |
+| `member ping` | Types `cafleet --fleet-id <fleet-id> message poll --agent-id <member-id>` + `Enter` into the pane. |
 
 #### Validation rules
 
 | Input | Result |
 |---|---|
-| Missing `--member-id` | Click built-in `Error: Missing option '--member-id'.` (exit 2). |
+| Missing `--member-id` | `Error: Missing option '--member-id'.` (exit 2). |
 
 (tmux-unavailable and binary-not-found errors are common — see [Member targeting and key delivery](#member-targeting-and-key-delivery).)
 
-The subcommand has no positional argument and no other flags. There is no operator-controlled keystroke body to validate.
+The subcommand has no positional argument and no other flags.
 
 #### Member resolution
 
@@ -847,40 +809,40 @@ JSON (`cafleet --json ... member ping ...`):
 }
 ```
 
-Two keys: `member_agent_id`, `pane_id`. No `action` field (the subcommand name IS the action). No `polled` field — failures surface via exit 1, not via a `polled: false` field.
+Two keys: `member_agent_id`, `pane_id`. Failures surface via exit 1.
 
 #### Exit code summary
 
-See [Member targeting and key delivery](#member-targeting-and-key-delivery) for the common exit codes. Unique to `member ping`: a missing `--member-id` exits 2 (Click built-in), and a `tmux send-keys` failure exits 1 with `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.`.
+See [Member targeting and key delivery](#member-targeting-and-key-delivery) for the common exit codes. Unique to `member ping`: a missing `--member-id` exits 2, and a `tmux send-keys` failure exits 1 with `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.`.
 
 ## Error Messages
 
 | Situation | Error Message |
 |---|---|
 | Missing `--fleet-id` on a client/member subcommand | `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` |
-| Missing `--agent-id` | `Error: Missing option '--agent-id'.` (Click built-in) |
+| Missing `--agent-id` | `Error: Missing option '--agent-id'.` (exit 2) |
 | `fleet create` run outside a tmux session | `Error: cafleet fleet create must be run inside a tmux session` (exit 1; no DB writes) |
 | `fleet delete` on unknown fleet_id | `Error: fleet 'X' not found.` (exit 1) |
 | `agent register` into a soft-deleted fleet | `Error: fleet X is deleted` (exit 1) |
-| `agent deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 2; raised as `click.UsageError`) |
+| `agent deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 2) |
 | `agent deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
-| `agent show` / `agent deregister` / `message send` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--fleet-id` | `Error: agent <id> is not a member of fleet <sid>.` (exit 1) — the fleet-membership gate runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different fleet" apart and treats both as not-a-member). |
+| `agent show` / `agent deregister` / `message send` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--fleet-id` | `Error: agent <id> is not a member of fleet <fleet-id>.` (exit 1) — the fleet-membership gate runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different fleet" apart and treats both as not-a-member). |
 | `member send-input` with zero or both of `--choice` / `--freetext` | `Error: --choice and --freetext are mutually exclusive; supply exactly one.` (exit 2) |
-| `member send-input --choice` outside `1..3` | Click `IntRange(1, 3)` built-in (exit 2) |
+| `member send-input --choice` outside `1..3` | Values outside 1–3 are rejected (exit 2) |
 | `member send-input --freetext` whose first non-whitespace character is `!` | `Error: --freetext may not start with '!' — that triggers the coding agent's shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead.` (exit 2) |
 | `member send-input --freetext` with `\n` or `\r` | `Error: free text may not contain newlines.` (exit 2) |
 | `member send-input` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to send.` (exit 1) |
-| `member exec` with missing positional `COMMAND` | Click built-in `Error: Missing argument 'COMMAND'.` (exit 2) |
+| `member exec` with missing positional `COMMAND` | `Error: Missing argument 'COMMAND'.` (exit 2) |
 | `member exec ""` (empty / whitespace-only) | `Error: command may not be empty.` (exit 2) |
 | `member exec` with `\n` or `\r` | `Error: command may not contain newlines.` (exit 2) |
 | `member exec` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to exec.` (exit 1) |
 | `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to ping.` (exit 1) |
 | `member ping` when `tmux send-keys` fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
-| `member create` with both `--prompt-file` and a positional prompt argument | `Error: --prompt-file and the positional prompt argument are mutually exclusive.` (exit 2; `click.UsageError`) |
-| `member create --prompt-file` with a relative path | ``Error: --prompt-file requires an absolute path (got '<input>'). Resolve relative paths against your BASE first — see the `cafleet-base-dir` skill.`` (exit 2; `click.UsageError`) |
-| `member create --prompt-file` to a non-existent path or non-regular file (e.g. directory) | `Error: --prompt-file <path>: file does not exist or is not a regular file.` (exit 1; `click.ClickException`) |
-| `member create --prompt-file` to an unreadable file | `Error: --prompt-file <path>: file is not readable.` (exit 1; `click.ClickException`) |
-| `member create --prompt-file` to a file containing invalid UTF-8 | `Error: --prompt-file <path>: file is not valid UTF-8.` (exit 1; `click.ClickException`) |
-| `member create --prompt-file` to a zero-byte or whitespace-only file | `Error: --prompt-file <path>: file is empty.` (exit 1; `click.ClickException`) |
-| `member create --coding-agent opencode --model` with a value violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` (exit 2; `click.UsageError`; fires before any agent registration or tmux side effect) |
+| `member create` with both `--prompt-file` and a positional prompt argument | `Error: --prompt-file and the positional prompt argument are mutually exclusive.` (exit 2) |
+| `member create --prompt-file` with a relative path | ``Error: --prompt-file requires an absolute path (got '<input>'). Resolve relative paths against your BASE first — see the `cafleet-base-dir` skill.`` (exit 2) |
+| `member create --prompt-file` to a non-existent path or non-regular file (e.g. directory) | `Error: --prompt-file <path>: file does not exist or is not a regular file.` (exit 1) |
+| `member create --prompt-file` to an unreadable file | `Error: --prompt-file <path>: file is not readable.` (exit 1) |
+| `member create --prompt-file` to a file containing invalid UTF-8 | `Error: --prompt-file <path>: file is not valid UTF-8.` (exit 1) |
+| `member create --prompt-file` to a zero-byte or whitespace-only file | `Error: --prompt-file <path>: file is empty.` (exit 1) |
+| `member create --coding-agent opencode --model` with a value violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` (exit 2; fires before any agent registration or tmux side effect) |
 

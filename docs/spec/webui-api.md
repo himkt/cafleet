@@ -1,4 +1,8 @@
-# WebUI API Specification
+---
+icon: lucide/globe
+---
+
+# WebUI API
 
 Base path: `/api`
 
@@ -101,7 +105,7 @@ Returns messages received by the agent (`context_id = agent_id`), excluding `bro
 
 All message endpoints (inbox, sent, timeline) share the same row formatter, so the field set is identical to `GET /api/timeline` — including `status_timestamp` and `origin_task_id` (see the timeline section below for their semantics).
 
-The `body` field is extracted from the task's first artifact's first text part. If no text part exists, `body` is `""`.
+The `body` field is the task's `text` column.
 
 **Row cap**: none — the endpoint returns every matching row. The agent detail view truncates client-side to the 200 most recent rows per tab.
 
@@ -160,7 +164,7 @@ Fleet scoping is reached through the `tasks.context_id → agents.agent_id → a
 
 The client groups rows by `origin_task_id` (non-null rows sharing a value form one broadcast entry; null rows are standalone unicast entries). Each broadcast entry's sort key is the `MIN(created_at)` of its rows — stable, so a broadcast never drifts when a lagging recipient ACKs.
 
-**ACK timestamps**: Per-recipient ACK time is read from the `status_timestamp` of a `completed` delivery row. Delivery tasks make exactly one state transition over their lifetime (`input_required → completed` on ACK), so for `status == "completed"` rows `status_timestamp` IS the ACK moment. If this invariant is ever broken by a future change, the timeline will silently show wrong ACK times until a dedicated `acknowledged_at` column is added. See `docs/spec/data-model.md` for the accompanying design-debt note.
+**ACK timestamps**: Per-recipient ACK time is read from the `status_timestamp` of a `completed` delivery row. Delivery tasks make exactly one state transition over their lifetime (`input_required → completed` on ACK), so for `status == "completed"` rows `status_timestamp` IS the ACK moment. If this invariant is ever broken by a future change, the timeline will silently show wrong ACK times until a dedicated `acknowledged_at` column is added. See [Data model](data-model.md) § ACK timestamp inference.
 
 ### POST /api/messages/send — Send Message
 

@@ -76,10 +76,10 @@ cafleet --fleet-id 1 member list
 
 ```
 3 members:
-  agent_id        name      status  backend  session  window_id  pane_id  created_at
-  --------------  --------  ------  -------  -------  ---------  -------  --------------------
-  4               alice     active  claude   main     @1         %7       2026-06-11T09:01:00.000000+00:00
-  5               bob       active  codex    main     @1         %8       2026-06-11T09:02:00.000000+00:00
+  agent_id        name      status  backend   session  window_id  pane_id  created_at
+  --------------  --------  ------  --------  -------  ---------  -------  --------------------
+  4               alice     active  claude    main     @1         %7       2026-06-11T09:01:00.000000+00:00
+  5               bob       active  codex     main     @1         %8       2026-06-11T09:02:00.000000+00:00
   6               carol     active  opencode  main     @1         %9       2026-06-11T09:03:00.000000+00:00
 ```
 
