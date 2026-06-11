@@ -113,7 +113,8 @@ Gated on local install of `opencode`. Run from inside a tmux session. The recipe
 rm -f ~/.opencode/agents/cafleet.md
 
 cafleet fleet create --label opencode-smoke --coding-agent claude
-# Expect: fleet 1 with root Director 2.
+# Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
+# Note the fleet and Director ids — the steps below use 1 and 2.
 
 cafleet --fleet-id 1 member create --agent-id 2 \
   --name Opencode-Smoke --description "opencode smoke member" --coding-agent opencode
