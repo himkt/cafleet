@@ -44,32 +44,84 @@ If you would rather drive CAFleet from the shell directly, the commands below
 mirror what the skill does internally. Run them inside a tmux session — the
 `fleet create` and `member create` commands require one.
 
+The walkthrough pastes literal integer ids: fleet `1`, root Director `2`,
+members `4` and `5`, task `10`. Your ids will differ — substitute the
+integers your own commands print.
+
+Create a fleet. This records your current pane as the root Director's pane:
+
 ```bash
-# 1. Create a fleet. Records this pane as the root Director's pane.
-cafleet fleet create --label "demo" --full
+cafleet fleet create --label "demo"
+```
 
-# The output prints the fleet id and the root Director's agent id on the
-# first two lines. Export them as shell vars for the snippets below.
-export FLEET_ID="<paste from the first output line>"
-export DIRECTOR_ID="<paste from the second output line>"
+```
+1 director=2 admin=3
+```
 
-# 2. Spawn a member pane. The member's prompt is just a one-line greeting.
-#    Optional: add --model <m> (e.g. --model sonnet) to pin the member's LLM;
-#    omitted, the backend binary uses its own default model.
-cafleet --fleet-id "$FLEET_ID" member create \
-  --agent-id "$DIRECTOR_ID" \
+The line carries the fleet id (`1`), the root Director's agent id (`2`), and
+the built-in Administrator's agent id (`3`). If it scrolls away, run
+`cafleet fleet list` — it re-prints the fleet id and the Director id (the
+`DIRECTOR` column).
+
+Spawn two member panes. Each member's prompt is just a one-line greeting.
+Optional: add `--model <m>` (e.g. `--model sonnet`) to pin a member's LLM;
+omitted, the backend binary uses its own default model:
+
+```bash
+cafleet --fleet-id 1 member create \
+  --agent-id 2 \
   --name "demo-member" \
   --description "Demo member" \
   -- "You are demo-member. Reply hello when polled."
-
-# 3. The Director sends a message to the new member.
-cafleet --fleet-id "$FLEET_ID" agent list
-# Pick the demo-member agent_id from the output and replace <member-id> below.
-cafleet --fleet-id "$FLEET_ID" message send --agent-id "$DIRECTOR_ID" \
-  --to "<member-id>" --text "hi"
 ```
 
-The member receives the message as a 2-line inline preview pushed into its
+```
+4 demo-member backend=claude pane=%7
+```
+
+```bash
+cafleet --fleet-id 1 member create \
+  --agent-id 2 \
+  --name "reviewer" \
+  --description "Reviewer member" \
+  -- "You are reviewer. Reply hello when polled."
+```
+
+```
+5 reviewer backend=claude pane=%8
+```
+
+List the fleet's agents — the new members' ids (`4` and `5`) appear
+alongside the Director and the Administrator:
+
+```bash
+cafleet --fleet-id 1 agent list
+```
+
+```
+2 Director active
+
+3 Administrator active
+
+4 demo-member active
+
+5 reviewer active
+```
+
+Send a message between the members — `demo-member` (`4`) messages
+`reviewer` (`5`):
+
+```bash
+cafleet --fleet-id 1 message send --agent-id 4 --to 5 --text "hi"
+```
+
+```
+Message sent.
+[10 | from:4 | 2026-06-11T09:00:00.123456+00:00]
+hi
+```
+
+`reviewer` receives the message as a 2-line inline preview pushed into its
 tmux pane and the message lands in the broker queue. From here, the typical
 flow is `cafleet message poll` from the recipient and `cafleet message ack`
 once it has consumed the message.
@@ -77,10 +129,18 @@ once it has consumed the message.
 When you are done, tear the fleet down:
 
 ```bash
-cafleet --fleet-id "$FLEET_ID" member delete \
-  --member-id "<member-id>"
-cafleet fleet delete "$FLEET_ID"
+cafleet --fleet-id 1 member delete --member-id 4
+cafleet --fleet-id 1 member delete --member-id 5
+cafleet fleet delete 1
 ```
 
-See the [CLI options](../spec/cli-options.md) reference for every subcommand
-and flag.
+```
+Deleted fleet 1. Deregistered 2 agents.
+```
+
+Where to go next:
+
+- [CLI options](../spec/cli-options.md) — every subcommand and flag.
+- [How-to guides](../how-to/index.md) — task-oriented walkthroughs.
+- [Troubleshooting](troubleshooting.md) — symptom→fix table when something
+  does not behave.
