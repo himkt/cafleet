@@ -1,6 +1,6 @@
-"""Tests for the ``_client_command`` decorator.
+"""Tests for the ``client_command`` decorator.
 
-The Programmer adds a private decorator ``_client_command`` to ``cli.py``
+``cli/_helpers.py`` provides a shared decorator ``client_command``
 that subsumes the ``--fleet-id`` guard, optional ``--agent-id``-belongs-to-fleet
 validation, broker-error wrapping, and JSON-vs-text output branching.
 
@@ -16,7 +16,7 @@ import pytest
 from click.testing import CliRunner
 
 from cafleet import broker
-from cafleet.cli import _client_command
+from cafleet.cli._helpers import client_command
 
 
 @click.group()
@@ -31,7 +31,7 @@ def _test_cli(ctx, json_output, fleet_id):
 
 @_test_cli.command("simple")
 @click.pass_context
-@_client_command(text_formatter=lambda r: f"TEXT:{r}")
+@client_command(text_formatter=lambda r: f"TEXT:{r}")
 def _simple(ctx):
     return {"hello": "world"}
 
@@ -39,7 +39,7 @@ def _simple(ctx):
 @_test_cli.command("agent-bound")
 @click.option("--agent-id", required=True)
 @click.pass_context
-@_client_command(
+@client_command(
     requires_agent_fleet=True,
     text_formatter=lambda r: f"TEXT:{r}",
 )
@@ -49,7 +49,7 @@ def _agent_bound(ctx, agent_id):
 
 @_test_cli.command("raises")
 @click.pass_context
-@_client_command()
+@client_command()
 def _raises(ctx):
     raise RuntimeError("boom!")
 

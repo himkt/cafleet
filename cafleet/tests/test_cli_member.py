@@ -1,4 +1,4 @@
-"""Tests for ``_resolve_prompt`` and ``cafleet member create``.
+"""Tests for ``resolve_prompt`` and ``cafleet member create``.
 
 Covers placeholder substitution (default + custom + doubled brace + error
 branches), `--prompt-file` validation matrix, spawn-argv shape per backend,
@@ -14,7 +14,8 @@ import pytest
 from click.testing import CliRunner
 
 from cafleet import broker, config
-from cafleet.cli import _resolve_prompt, cli
+from cafleet.cli import cli
+from cafleet.cli._prompt import resolve_prompt
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
@@ -178,7 +179,7 @@ def test_resolve_prompt__substitution_matrix(
     prompt_argv,
     asserts,
 ):
-    result = _resolve_prompt(
+    result = resolve_prompt(
         ctx,
         director_agent_id=director_agent_id,
         new_agent_id=new_agent_id,
@@ -222,7 +223,7 @@ def test_resolve_prompt__malformed_raises_usage_error(
     expect_message_contains,
 ):
     with pytest.raises(click.UsageError) as exc_info:
-        _resolve_prompt(
+        resolve_prompt(
             ctx,
             director_agent_id=director_agent_id,
             new_agent_id=new_agent_id,
@@ -370,7 +371,7 @@ def test_prompt_file__parity_with_positional_form(tmp_path):
     ctx = click.Context(command)
     ctx.obj = {"fleet_id": fleet_id, "json_output": False}
 
-    inline_result = _resolve_prompt(
+    inline_result = resolve_prompt(
         ctx,
         director_agent_id=director_id,
         new_agent_id=new_agent_id,
@@ -379,7 +380,7 @@ def test_prompt_file__parity_with_positional_form(tmp_path):
     )
     prompt_path = tmp_path / "prompt.md"
     prompt_path.write_text(template, encoding="utf-8")
-    file_result = _resolve_prompt(
+    file_result = resolve_prompt(
         ctx,
         director_agent_id=director_id,
         new_agent_id=new_agent_id,
