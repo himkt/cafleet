@@ -8,13 +8,13 @@ Schema management is handled by Alembic; the runtime engine is SQLAlchemy 2.x wi
 
 ## SQL Schema
 
-All four tables key on `INTEGER` columns. The three minted-id tables (`fleets`, `agents`, `tasks`) use `INTEGER PRIMARY KEY AUTOINCREMENT`. AUTOINCREMENT creates a per-table `sqlite_sequence` row that tracks the high-water mark, so **ids are never reused** — even after the highest row is (hypothetically) deleted. The first AUTOINCREMENT value is `1`, so real ids are always `>= 1`; this leaves `0` free as a sentinel (see `tasks.to_agent_id`). `agent_placements.agent_id` is the **only** integer PK without AUTOINCREMENT: it reuses the parent `agents.agent_id` value as a 1:1 PK rather than minting a fresh sequence.
+All four tables key on `INTEGER` columns. The three minted-id tables (`fleets`, `agents`, `tasks`) use `INTEGER PRIMARY KEY AUTOINCREMENT`. AUTOINCREMENT creates a per-table `sqlite_sequence` row that tracks the high-water mark, so **ids are never reused** — even after the highest row is deleted. The first AUTOINCREMENT value is `1`, so real ids are always `>= 1`; this leaves `0` free as a sentinel (see `tasks.to_agent_id`). `agent_placements.agent_id` is the **only** integer PK without AUTOINCREMENT: it reuses the parent `agents.agent_id` value as a 1:1 PK rather than minting a fresh sequence.
 
 ### `fleets`
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `fleet_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer (first value `1`, monotonically increasing). The `sqlite_sequence` row guarantees ids are never reused. |
+| `fleet_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer (first value `1`, monotonically increasing). |
 | `label` | `TEXT` | nullable | Optional free-form text for human bookkeeping (e.g. `"PR-42 review"`). |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
 | `deleted_at` | `TEXT` | nullable | `NULL` = active; non-NULL ISO-8601 timestamp = soft-deleted. Written on fleet delete; never cleared. |
@@ -30,7 +30,7 @@ Fleet deletion is a **soft-delete** keyed on `deleted_at`. See [cli-options.md](
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `agent_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer; never reused. |
+| `agent_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer. |
 | `fleet_id` | `INTEGER` | `NOT NULL`, `REFERENCES fleets(fleet_id) ON DELETE RESTRICT` | The owning fleet. SQLite enforces the FK once `PRAGMA foreign_keys=ON` is set. |
 | `name` | `TEXT` | `NOT NULL` | |
 | `description` | `TEXT` | `NOT NULL` | |
@@ -72,7 +72,7 @@ The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned 
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `task_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer; never reused. Identifies a single delivery (unicast row, broadcast delivery row, or broadcast summary row). |
+| `task_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer. Identifies a single delivery (unicast row, broadcast delivery row, or broadcast summary row). |
 | `context_id` | `INTEGER` | `NOT NULL`, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The recipient agent for unicast/broadcast deliveries; the broadcaster for `broadcast_summary`; the preserved original `context_id` for ACK/cancel. Always a registered `agent_id`. |
 | `from_agent_id` | `INTEGER` | `NOT NULL` | Sender agent. **Not** a foreign key — historical tasks may outlive their sender. |
 | `to_agent_id` | `INTEGER` | `NOT NULL` | Recipient agent. **`0`** for `broadcast_summary` rows (the "no single recipient" sentinel; real ids are `>= 1` so `0` never collides). |
@@ -89,8 +89,6 @@ Indexes:
 |---|---|---|
 | `idx_tasks_context_status_ts` | `(context_id, status_timestamp DESC)` | Inbox listing: `WHERE context_id = ? ORDER BY status_timestamp DESC`. |
 | `idx_tasks_from_agent_status_ts` | `(from_agent_id, status_timestamp DESC)` | WebUI sender outbox: `WHERE from_agent_id = ? ORDER BY status_timestamp DESC`. |
-
-`status_state` and `status_timestamp` are promoted to columns so filtering and ordering execute on the database, not in Python after fetching every blob. The two task indexes serve the inbox listing query (`WHERE context_id = ? ORDER BY status_timestamp DESC`) and the WebUI sender outbox query (`WHERE from_agent_id = ? ORDER BY status_timestamp DESC`) directly from the index.
 
 ### `agent_placements`
 

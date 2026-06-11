@@ -26,7 +26,7 @@ sequenceDiagram
     participant Pane
     participant Recipient
 
-    Sender->>Broker: cafleet message send --to <r> --text <body>
+    Sender->>Broker: cafleet message send --to <recipient-id> --text <body>
     Broker->>DB: INSERT tasks (status=input_required)
     Broker->>DB: SELECT placement.tmux_pane_id
     DB-->>Broker: pane_id
@@ -59,7 +59,7 @@ If the recipient's TUI is in a non-input state, the keystroked preview lands
 wherever the cursor is (the same failure mode any pane keystroke has). The
 fallback chain is `cafleet member list --activity` (the Director observes the
 recipient's `last_recv` column went stale), then
-`cafleet member ping --member-id <r>` (a manual re-poke that injects the
+`cafleet member ping --member-id <recipient-id>` (a manual re-poke that injects the
 `cafleet message poll` command + Enter so the recipient catches up via a
 normal `message poll` round-trip).
 

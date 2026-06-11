@@ -52,20 +52,20 @@ CLI JSON output is governed by the `--json` flag:
 
 | Mode | Output |
 |---|---|
-| `--json` | Compact JSON: `json.dumps(data, separators=(",",":"), ensure_ascii=False)` — no whitespace; non-ASCII (e.g. the `…` suffix) emitted as UTF-8. |
+| `--json` | Compact single-line JSON — no whitespace; non-ASCII (e.g. the `…` suffix) is emitted as UTF-8, not escaped. |
 | (text mode) | Two lines per task in the compact rendered shape; a variable-length labeled block per task in `--full`. |
 
 #### Examples
 
 A poll result with one unicast delivery (id `42`, from `7`, body `"build OK"`).
 
-**Default (`cafleet --json message poll --agent-id <r>`)**:
+**Default (`cafleet --json message poll --agent-id <my-agent-id>`)**:
 
 ```json
 [{"id":42,"from":7,"ts":"2026-05-05T05:42:11.123456+00:00","text":"build OK"}]
 ```
 
-**`--full` (`cafleet --json message poll --agent-id <r> --full`)**:
+**`--full` (`cafleet --json message poll --agent-id <my-agent-id> --full`)**:
 
 ```json
 [

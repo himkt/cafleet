@@ -1,7 +1,7 @@
 # Documentation Readability (docs/ + README.md + zensical.toml)
 
 **Status**: Approved
-**Progress**: 10/24 tasks complete
+**Progress**: 16/24 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -195,12 +195,12 @@ Everything not listed below is kept verbatim. The Error Messages table, every fl
 
 ### Step 3: Adjacent trims
 
-- [ ] `docs/spec/data-model.md` — dedupe the never-reused/`sqlite_sequence` fact to the intro; delete the post-index restatement paragraph. <!-- completed: -->
-- [ ] `docs/spec/message-envelope.md` — drop the `json.dumps` signature from the JSON-output table; replace `<r>` with `<my-agent-id>` in the two poll example headers. <!-- completed: -->
-- [ ] `docs/concepts/overview.md` — delete the WebUI theming paragraph. <!-- completed: -->
-- [ ] `docs/concepts/token-reduction.md` — delete the "In short" paragraph; strip the three remaining in-row internals; rewrite the "Skill-file split" row without literal skill paths. <!-- completed: -->
-- [ ] `docs/concepts/tmux-push.md` — standardize `<r>` → `<recipient-id>` (prose + diagram). <!-- completed: -->
-- [ ] `docs/how-to/mixed-backend-team.md` — align the `backend` column in the `member list` sample block. <!-- completed: -->
+- [x] `docs/spec/data-model.md` — dedupe the never-reused/`sqlite_sequence` fact to the intro; delete the post-index restatement paragraph. <!-- completed: 2026-06-11T11:48 -->
+- [x] `docs/spec/message-envelope.md` — drop the `json.dumps` signature from the JSON-output table; replace `<r>` with `<my-agent-id>` in the two poll example headers. <!-- completed: 2026-06-11T11:48 -->
+- [x] `docs/concepts/overview.md` — delete the WebUI theming paragraph. <!-- completed: 2026-06-11T11:48 -->
+- [x] `docs/concepts/token-reduction.md` — delete the "In short" paragraph; strip the three remaining in-row internals; rewrite the "Skill-file split" row without literal skill paths. <!-- completed: 2026-06-11T11:48 -->
+- [x] `docs/concepts/tmux-push.md` — standardize `<r>` → `<recipient-id>` (prose + diagram). <!-- completed: 2026-06-11T11:48 -->
+- [x] `docs/how-to/mixed-backend-team.md` — align the `backend` column in the `member list` sample block. <!-- completed: 2026-06-11T11:48 -->
 
 ### Step 4: Titles, icons, nav, README
 
