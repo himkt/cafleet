@@ -1,7 +1,7 @@
 # Reorganize the cafleet Python Package Layout
 
 **Status**: Approved
-**Progress**: 11/27 tasks complete
+**Progress**: 13/27 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -267,8 +267,8 @@ Each new subdirectory gets an `__init__.py` (the tests tree is already a package
 
 ### Step 3: output/ package
 
-- [ ] Create `output/render.py` and `output/formatters.py` per the placement table; `output/__init__.py` re-exports with `__all__`; delete `output.py` <!-- completed: -->
-- [ ] Run `mise //cafleet:test` to confirm green <!-- completed: -->
+- [x] Create `output/render.py` and `output/formatters.py` per the placement table; `output/__init__.py` re-exports with `__all__`; delete `output.py` (deletion dispatched by the Director — `rm` denied in the Programmer harness) <!-- completed: 2026-06-11T13:04 -->
+- [x] Run `mise //cafleet:test` to confirm green — 711 passed <!-- completed: 2026-06-11T13:04 -->
 
 ### Step 4: webui/ package and asset pipeline
 
