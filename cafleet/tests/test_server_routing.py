@@ -13,7 +13,7 @@ Guards the following behaviors:
 import pytest
 from fastapi.testclient import TestClient
 
-from cafleet import server as server_mod
+from cafleet.webui import app as webui_app
 
 
 @pytest.fixture
@@ -28,8 +28,8 @@ def webui_dist(tmp_path):
 
 @pytest.fixture
 def client(webui_dist, monkeypatch):
-    monkeypatch.setattr(server_mod, "default_webui_dist_dir", lambda: webui_dist)
-    app = server_mod.create_app()
+    monkeypatch.setattr(webui_app, "default_webui_dist_dir", lambda: webui_dist)
+    app = webui_app.create_app()
     return TestClient(app)
 
 

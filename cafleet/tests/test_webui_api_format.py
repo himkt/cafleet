@@ -1,10 +1,11 @@
-"""Tests for the ``webui_api`` message formatter."""
+"""Tests for the ``webui.api`` message formatter."""
 
 import pytest
 
-from cafleet import broker, webui_api
+from cafleet import broker
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
-from cafleet.webui_api import _format_messages
+from cafleet.webui import api as webui_api
+from cafleet.webui.api import _format_messages
 
 
 @pytest.fixture(autouse=True)

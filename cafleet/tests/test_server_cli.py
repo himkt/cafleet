@@ -4,9 +4,9 @@ import pytest
 import uvicorn
 from click.testing import CliRunner
 
-from cafleet import server as server_mod
 from cafleet.cli import cli
 from cafleet.config import Settings, settings
+from cafleet.webui import app as webui_app
 
 
 @pytest.fixture
@@ -78,7 +78,7 @@ def test_server_command__app_string_first_positional_and_handler_reached(
     assert result.exit_code == 0, result.output
     args = uvicorn_recorder["args"]
     assert args
-    assert args[0] == "cafleet.server:app"
+    assert args[0] == "cafleet.webui.app:app"
 
 
 @pytest.mark.parametrize(
@@ -102,20 +102,20 @@ def test_webui_dist_warning__matrix(
     if default_dir_exists:
         built = tmp_path / "dist"
         built.mkdir()
-        monkeypatch.setattr(server_mod, "default_webui_dist_dir", lambda: built)
-        server_mod.create_app()
+        monkeypatch.setattr(webui_app, "default_webui_dist_dir", lambda: built)
+        webui_app.create_app()
     elif explicit_override:
         explicit_path = tmp_path / "never_built"
         monkeypatch.setattr(
-            server_mod,
+            webui_app,
             "default_webui_dist_dir",
             lambda: tmp_path / "default_also_missing",
         )
-        server_mod.create_app(webui_dist_dir=str(explicit_path))
+        webui_app.create_app(webui_dist_dir=str(explicit_path))
     else:
         nonexistent = tmp_path / "never_built"
-        monkeypatch.setattr(server_mod, "default_webui_dist_dir", lambda: nonexistent)
-        server_mod.create_app()
+        monkeypatch.setattr(webui_app, "default_webui_dist_dir", lambda: nonexistent)
+        webui_app.create_app()
 
     captured = capsys.readouterr()
     if expect_warning:
