@@ -1,7 +1,7 @@
 # Documentation Friendliness (README.md + docs/ + zensical.toml)
 
 **Status**: Approved
-**Progress**: 12/20 tasks complete
+**Progress**: 14/20 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -287,8 +287,8 @@ The `navigation.indexes` feature is already enabled, so `how-to/index.md` and `a
 
 ### Step 5: API Reference orientation
 
-- [ ] `docs/api/index.md` — landing page (who needs the Python API; one line per module). <!-- completed: -->
-- [ ] `docs/api/{broker,config,coding-agent,multiplexer}.md` — one orienting paragraph above each `:::` directive. <!-- completed: -->
+- [x] `docs/api/index.md` — landing page (who needs the Python API; one line per module). <!-- completed: 2026-06-11T09:17 -->
+- [x] `docs/api/{broker,config,coding-agent,multiplexer}.md` — one orienting paragraph above each `:::` directive. <!-- completed: 2026-06-11T09:17 -->
 
 ### Step 6: Landing surfaces
 
