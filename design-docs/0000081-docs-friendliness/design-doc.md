@@ -1,8 +1,8 @@
 # Documentation Friendliness (README.md + docs/ + zensical.toml)
 
 **Status**: Approved
-**Progress**: 17/20 tasks complete
-**Last Updated**: 2026-06-10
+**Progress**: 20/20 tasks complete
+**Last Updated**: 2026-06-11
 
 ## Overview
 
@@ -298,9 +298,9 @@ The `navigation.indexes` feature is already enabled, so `how-to/index.md` and `a
 
 ### Step 7: Nav + verification
 
-- [ ] `zensical.toml` — apply the nav additions (Troubleshooting entry, How-to guides section, `api/index.md` section index). <!-- completed: -->
-- [ ] Run `mise //:docs-build`; confirm a clean build with all nav entries and cross-references resolving. <!-- completed: -->
-- [ ] Consistency greps: `grep -rE "export (FLEET|DIRECTOR)_ID" docs/ README.md` empty; `grep -rn '\-\-full' docs/get-started/quickstart.md` shows no `fleet create --full`; spot-check that the sample-id cast (`--fleet-id 1`, `--agent-id 2`) is used consistently across README, quickstart, and how-to pages. <!-- completed: -->
+- [x] `zensical.toml` — apply the nav additions (Troubleshooting entry, How-to guides section, `api/index.md` section index). <!-- completed: 2026-06-11T09:23 -->
+- [x] Run `mise //:docs-build`; confirm a clean build with all nav entries and cross-references resolving. <!-- completed: 2026-06-11T09:23 -->
+- [x] Consistency greps: `grep -rE "export (FLEET|DIRECTOR)_ID" docs/ README.md` empty; `grep -rn '\-\-full' docs/get-started/quickstart.md` shows no `fleet create --full`; spot-check that the sample-id cast (`--fleet-id 1`, `--agent-id 2`) is used consistently across README, quickstart, and how-to pages. <!-- completed: 2026-06-11T09:23 -->
 
 ---
 
