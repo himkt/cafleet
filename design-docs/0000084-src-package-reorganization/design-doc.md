@@ -1,7 +1,7 @@
 # Reorganize the cafleet Python Package Layout
 
 **Status**: Approved
-**Progress**: 26/27 tasks complete
+**Progress**: 27/27 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -10,13 +10,13 @@ Reorganize `cafleet/src/cafleet` from a layout dominated by two fat modules (`cl
 
 ## Success Criteria
 
-- [ ] `broker.py`, `cli.py`, `output.py`, `server.py`, and `webui_api.py` no longer exist as flat modules; their contents live in the `broker/`, `cli/`, `output/`, and `webui/` subpackages per the placement tables below
-- [ ] No module under `src/cafleet` exceeds ~650 lines (largest expected: `cli/member.py`)
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:format` all pass
-- [ ] `cafleet --version` and `cafleet server` work after `mise //cafleet:install`; `mise //admin:build` emits assets into `src/cafleet/webui/dist/` and `mise //cafleet:build` packages them into the wheel
-- [ ] The console entry point `cafleet = "cafleet.cli:cli"` is unchanged (the `cli` group is exposed from `cli/__init__.py`)
-- [ ] A repo-wide grep finds no stale references to `cafleet.server:app`, `webui_api`, or the removed flat module paths in source, tests, docs, skills, rules, or mise tasks
-- [ ] `cafleet/tests/` mirrors the source layout (`tests/broker/`, `tests/cli/`, `tests/output/`, `tests/webui/`, `tests/multiplexer/`, `tests/coding_agent/`, `tests/db/`) per the mapping table below
+- [x] `broker.py`, `cli.py`, `output.py`, `server.py`, and `webui_api.py` no longer exist as flat modules; their contents live in the `broker/`, `cli/`, `output/`, and `webui/` subpackages per the placement tables below
+- [x] No module under `src/cafleet` exceeds ~650 lines (largest expected: `cli/member.py`) — largest is `cli/member.py` at 633
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:format` all pass
+- [x] `cafleet --version` and `cafleet server` work after `mise //cafleet:install`; `mise //admin:build` emits assets into `src/cafleet/webui/dist/` and `mise //cafleet:build` packages them into the wheel
+- [x] The console entry point `cafleet = "cafleet.cli:cli"` is unchanged (the `cli` group is exposed from `cli/__init__.py`)
+- [x] A repo-wide grep finds no stale references to `cafleet.server:app`, `webui_api`, or the removed flat module paths in source, tests, docs, skills, rules, or mise tasks
+- [x] `cafleet/tests/` mirrors the source layout (`tests/broker/`, `tests/cli/`, `tests/output/`, `tests/webui/`, `tests/multiplexer/`, `tests/coding_agent/`, `tests/db/`) per the mapping table below
 
 ---
 
@@ -292,7 +292,7 @@ Each new subdirectory gets an `__init__.py` (the tests tree is already a package
 ### Step 7: Verification
 
 - [x] Run `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` — all green (711 passed) <!-- completed: 2026-06-11T14:01 -->
-- [ ] Run `mise //admin:build`, then `mise //cafleet:build`; inspect the wheel to confirm `webui/dist/` assets and all new subpackages are included <!-- completed: -->
+- [x] Run `mise //admin:build`, then `mise //cafleet:build`; inspect the wheel to confirm `webui/dist/` assets and all new subpackages are included — first wheel lacked the gitignored dist assets (hatchling skips VCS-ignored files in `include`); fixed via hatchling `artifacts` (commit 07c5ba0); rebuilt wheel re-inspected: 61 files, all `webui/dist/` assets + every new subpackage present <!-- completed: 2026-06-11T14:10 -->
 - [x] Run `mise //cafleet:install` (editable reinstall), then smoke-test `cafleet --version`. For the server: start `cafleet server` in the background, `sleep 2`, then confirm `/` renders via `bun run agent-browser open http://127.0.0.1:8000/` from the repo root (retry with `sleep N` + `open` if the server is not up yet — the `agent-browser wait` family is off-limits per `.claude/rules/commands.md`), then stop the background server — `cafleet 0.12.0`; agent-browser (Director-dispatched) reported `✓ CAFleet Admin` at `/`; server stopped <!-- completed: 2026-06-11T14:01 -->
 - [x] Repo-wide grep for stale references (`broker.py`, `cli.py` as module paths, `output.py`, `server.py`, `webui_api`, `cafleet.server:app`, old test paths) across source, tests, docs, skills, rules, mise tasks — zero hits (re-run after fix commit 48f6bae) <!-- completed: 2026-06-11T14:01 -->
 
