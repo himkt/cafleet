@@ -1,7 +1,7 @@
 # Reorganize the cafleet Python Package Layout
 
 **Status**: Approved
-**Progress**: 23/27 tasks complete
+**Progress**: 26/27 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -291,10 +291,10 @@ Each new subdirectory gets an `__init__.py` (the tests tree is already a package
 
 ### Step 7: Verification
 
-- [ ] Run `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` — all green <!-- completed: -->
+- [x] Run `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` — all green (711 passed) <!-- completed: 2026-06-11T14:01 -->
 - [ ] Run `mise //admin:build`, then `mise //cafleet:build`; inspect the wheel to confirm `webui/dist/` assets and all new subpackages are included <!-- completed: -->
-- [ ] Run `mise //cafleet:install` (editable reinstall), then smoke-test `cafleet --version`. For the server: start `cafleet server` in the background, `sleep 2`, then confirm `/` renders via `bun run agent-browser open http://127.0.0.1:8000/` from the repo root (retry with `sleep N` + `open` if the server is not up yet — the `agent-browser wait` family is off-limits per `.claude/rules/commands.md`), then stop the background server <!-- completed: -->
-- [ ] Repo-wide grep for stale references (`broker.py`, `cli.py` as module paths, `output.py`, `server.py`, `webui_api`, `cafleet.server:app`, old test paths) across source, tests, docs, skills, rules, mise tasks — zero hits <!-- completed: -->
+- [x] Run `mise //cafleet:install` (editable reinstall), then smoke-test `cafleet --version`. For the server: start `cafleet server` in the background, `sleep 2`, then confirm `/` renders via `bun run agent-browser open http://127.0.0.1:8000/` from the repo root (retry with `sleep N` + `open` if the server is not up yet — the `agent-browser wait` family is off-limits per `.claude/rules/commands.md`), then stop the background server — `cafleet 0.12.0`; agent-browser (Director-dispatched) reported `✓ CAFleet Admin` at `/`; server stopped <!-- completed: 2026-06-11T14:01 -->
+- [x] Repo-wide grep for stale references (`broker.py`, `cli.py` as module paths, `output.py`, `server.py`, `webui_api`, `cafleet.server:app`, old test paths) across source, tests, docs, skills, rules, mise tasks — zero hits (re-run after fix commit 48f6bae) <!-- completed: 2026-06-11T14:01 -->
 
 ---
 
