@@ -1,7 +1,7 @@
 # Documentation Readability (docs/ + README.md + zensical.toml)
 
 **Status**: Approved
-**Progress**: 20/24 tasks complete
+**Progress**: 24/24 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -10,16 +10,16 @@ Designs 0000079 (SSOT map, necessity test, symbol strip) and 0000081 (how-to lay
 
 ## Success Criteria
 
-- [ ] All six stale facts are fixed and verified by greps: `grep -rn "TASK_STATE" docs/` empty; `grep -rni "upsert" docs/` empty; `grep -rn "artifact" docs/spec/webui-api.md` empty; `docs/spec/message-envelope.md` lists exactly three `status_state` values (`input_required`, `completed`, `canceled`); `grep -rnE '\$FLEET|\$DIRECTOR' docs/` empty; the phrase "poll trigger" no longer appears in `docs/reference/coding-agents/codex.md`'s verification recipe.
-- [ ] No agent-addressed register remains in `docs/`: `grep -rn "You read this file directly" docs/` empty and `grep -rn "skills/cafleet/SKILL.md" docs/` returns exactly one hit — the intentional pointer in `spec/cli-options.md` § `member send-input` (the canonical three-beat workflow reference); the "Skill-file split" row in `concepts/token-reduction.md` is rewritten without literal skill paths (see Adjacent trims). The codex/opencode pages read as operator documentation throughout. File paths are unchanged. (The `skills/cafleet/reference/exec-routing.md` pointer in `concepts/bash-routing.md`, kept by 0000079, does not match this grep and stays.)
-- [ ] `spec/cli-options.md`: the `--fleet-id` / identity-flag requirements are stated **only** in the Subcommand summary table (the two "Subcommands that (do NOT) require --fleet-id" lists and the three per-command lists under "Agent ID" are gone); no Click exception class names, no `json.dumps` signature, no regex, no SQL expressions, no index names, and no benchmark targets remain; every flag table, output shape, error string, and exit code survives, including the full Error Messages table.
-- [ ] Every page in `docs/` carries an `icon:` frontmatter, and every page that has its own nav label carries an H1 matching that label (sentence case) — including the two extra retitles (`get-started/contributing.md`, `concepts/bash-routing.md`); `docs/index.md` has no nav label and is exempt from the title rule; no two nav labels are identical (the Specification sub-section is renamed so "Coding agents" appears once, on the Concepts page).
-- [ ] `zensical.toml` contains no starter-template tutorial comments, no "Read more:" link comments, and no commented-out template options; the effective configuration is unchanged except the one nav-label rename.
-- [ ] Leftover placeholders are standardized: `grep -rn '<s>\|<sid>\|<r>' docs/` empty; no `$`-prefixed prompt lines remain in command examples.
-- [ ] The WebUI theming paragraph (light/dark themes, `localStorage`, brand violet accent) is removed from `concepts/overview.md`.
-- [ ] Sample output blocks are cosmetically clean (aligned columns) even where the real CLI output mis-aligns — per the user's "docs-only, hide ugly output" decision. Field names and values still match the shapes in `spec/cli-options.md`.
-- [ ] `mise //:docs-build` passes with every nav entry and cross-reference resolving.
-- [ ] Per `removal.md`: the repository reads as if the removed content never existed — no deprecation notices, no "previously…" phrasing, no design-doc back-pointers in user docs.
+- [x] All six stale facts are fixed and verified by greps: `grep -rn "TASK_STATE" docs/` empty; `grep -rni "upsert" docs/` empty; `grep -rn "artifact" docs/spec/webui-api.md` empty; `docs/spec/message-envelope.md` lists exactly three `status_state` values (`input_required`, `completed`, `canceled`); `grep -rnE '\$FLEET|\$DIRECTOR' docs/` empty; the phrase "poll trigger" no longer appears in `docs/reference/coding-agents/codex.md`'s verification recipe.
+- [x] No agent-addressed register remains in `docs/`: `grep -rn "You read this file directly" docs/` empty and `grep -rn "skills/cafleet/SKILL.md" docs/` returns exactly one hit — the intentional pointer in `spec/cli-options.md` § `member send-input` (the canonical three-beat workflow reference); the "Skill-file split" row in `concepts/token-reduction.md` is rewritten without literal skill paths (see Adjacent trims). The codex/opencode pages read as operator documentation throughout. File paths are unchanged. (The `skills/cafleet/reference/exec-routing.md` pointer in `concepts/bash-routing.md`, kept by 0000079, does not match this grep and stays.)
+- [x] `spec/cli-options.md`: the `--fleet-id` / identity-flag requirements are stated **only** in the Subcommand summary table (the two "Subcommands that (do NOT) require --fleet-id" lists and the three per-command lists under "Agent ID" are gone); no Click exception class names, no `json.dumps` signature, no regex, no SQL expressions, no index names, and no benchmark targets remain; every flag table, output shape, error string, and exit code survives, including the full Error Messages table.
+- [x] Every page in `docs/` carries an `icon:` frontmatter, and every page that has its own nav label carries an H1 matching that label (sentence case) — including the two extra retitles (`get-started/contributing.md`, `concepts/bash-routing.md`); `docs/index.md` has no nav label and is exempt from the title rule; no two nav labels are identical (the Specification sub-section is renamed so "Coding agents" appears once, on the Concepts page).
+- [x] `zensical.toml` contains no starter-template tutorial comments, no "Read more:" link comments, and no commented-out template options; the effective configuration is unchanged except the one nav-label rename.
+- [x] Leftover placeholders are standardized: `grep -rn '<s>\|<sid>\|<r>' docs/` empty; no `$`-prefixed prompt lines remain in command examples.
+- [x] The WebUI theming paragraph (light/dark themes, `localStorage`, brand violet accent) is removed from `concepts/overview.md`.
+- [x] Sample output blocks are cosmetically clean (aligned columns) even where the real CLI output mis-aligns — per the user's "docs-only, hide ugly output" decision. Field names and values still match the shapes in `spec/cli-options.md`.
+- [x] `mise //:docs-build` passes with every nav entry and cross-reference resolving.
+- [x] Per `removal.md`: the repository reads as if the removed content never existed — no deprecation notices, no "previously…" phrasing, no design-doc back-pointers in user docs.
 
 ---
 
@@ -211,10 +211,10 @@ Everything not listed below is kept verbatim. The Error Messages table, every fl
 
 ### Step 5: Verification
 
-- [ ] Run `mise //:docs-build`; confirm a clean build with every nav entry and cross-reference resolving. <!-- completed: -->
-- [ ] Stale-fact greps: `grep -rn "TASK_STATE" docs/`, `grep -rni "upsert" docs/`, `grep -rn "artifact" docs/spec/webui-api.md`, `grep -rnE '\$FLEET|\$DIRECTOR' docs/` all empty; `message-envelope.md` lists exactly three states; no "poll trigger" in codex.md's recipe. <!-- completed: -->
-- [ ] Register + placeholder greps: `grep -rn "You read this file directly" docs/` empty; `grep -rn "skills/cafleet/SKILL.md" docs/` shows only the cli-options send-input pointer; `grep -rn '<s>\|<sid>\|<r>' docs/` empty. <!-- completed: -->
-- [ ] Spot-check cli-options.md: requirements stated only in the Subcommand summary; no `click.`, `Click built-in`, `IntRange`, `json.dumps`, `re.sub`, `MAX(`, `idx_tasks`, or benchmark-target strings remain (`grep -nE 'click\.|Click built-in|IntRange|json\.dumps|re\.sub|MAX\(|idx_tasks|100 ms' docs/spec/cli-options.md` empty); Error Messages table and all flag tables intact. <!-- completed: -->
+- [x] Run `mise //:docs-build`; confirm a clean build with every nav entry and cross-reference resolving. <!-- completed: 2026-06-11T11:56 -->
+- [x] Stale-fact greps: `grep -rn "TASK_STATE" docs/`, `grep -rni "upsert" docs/`, `grep -rn "artifact" docs/spec/webui-api.md`, `grep -rnE '\$FLEET|\$DIRECTOR' docs/` all empty; `message-envelope.md` lists exactly three states; no "poll trigger" in codex.md's recipe. <!-- completed: 2026-06-11T11:56 -->
+- [x] Register + placeholder greps: `grep -rn "You read this file directly" docs/` empty; `grep -rn "skills/cafleet/SKILL.md" docs/` shows only the cli-options send-input pointer; `grep -rn '<s>\|<sid>\|<r>' docs/` empty. <!-- completed: 2026-06-11T11:56 -->
+- [x] Spot-check cli-options.md: requirements stated only in the Subcommand summary; no `click.`, `Click built-in`, `IntRange`, `json.dumps`, `re.sub`, `MAX(`, `idx_tasks`, or benchmark-target strings remain (`grep -nE 'click\.|Click built-in|IntRange|json\.dumps|re\.sub|MAX\(|idx_tasks|100 ms' docs/spec/cli-options.md` empty); Error Messages table and all flag tables intact. <!-- completed: 2026-06-11T11:56 -->
 
 ---
 
