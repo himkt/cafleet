@@ -56,6 +56,11 @@ def client_command(
     The two ``renders_*`` flags are mutually exclusive — a command renders
     tasks OR agent cards, never both.
     """
+    if truncates_task_text and renders_agent_card:
+        raise ValueError(
+            "client_command: truncates_task_text and renders_agent_card "
+            "are mutually exclusive."
+        )
 
     def decorator(func):
         @functools.wraps(func)
