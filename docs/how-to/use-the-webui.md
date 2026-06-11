@@ -38,7 +38,8 @@ broadcast messages, and a bottom input.
 
 The bottom input parses `@<agent> text` for unicast and `@all text` for
 broadcast. Every send goes out as the fleet's built-in Administrator agent —
-the admin is not itself a CAFleet agent.
+a write-only registry identity with no tmux pane — so you never register
+yourself as an agent to use the dashboard.
 
 ## Inspect history
 

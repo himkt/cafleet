@@ -615,7 +615,7 @@ Lists every member of the fleet identified by the global `--fleet-id`. The root 
 |---|---|---|
 | `--activity` | no | Aggregate per-member activity timestamps from the `tasks` table and render `last_sent`, `last_recv`, `last_ack`, and `idle` columns alongside the default member columns. The aggregation filters `Task.type != 'broadcast_summary'` for the `last_ack` proxy (mirrors `poll_tasks`). Primary inputs to the Director's `/loop` monitoring tick. |
 
-#### `member list --activity` output
+#### `member list --activity` output {#member-list-activity-output}
 
 ```
 $ cafleet --fleet-id <s> member list --activity
