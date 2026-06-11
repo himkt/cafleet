@@ -49,7 +49,7 @@ If the `codex` binary is not on `PATH`, `cafleet member create --coding-agent co
 
 ## cafleet usage from inside a codex pane
 
-Codex does not load Claude Code's `Skill()` tool. **You read this file directly** instead — the spawn prompt tells you to. The same cafleet CLI surface works from a codex pane unchanged:
+Codex members cannot load Claude Code skills, so their spawn prompt points them at this page instead. The same cafleet CLI surface works from a codex pane unchanged:
 
 ```bash
 cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
@@ -58,9 +58,9 @@ cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
 cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 
-Substitute the literal ids handed to you in your spawn prompt. There is no env-var fallback.
+Members substitute the literal ids from their spawn prompt; there is no env-var fallback.
 
-For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see `skills/cafleet/SKILL.md`.
+For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see [CLI options](../../spec/cli-options.md).
 
 ## The `!` shell-shortcut convention
 
@@ -72,31 +72,31 @@ Only `claude` sets the pane title to the member name; locate `codex` panes via `
 
 ## Verification recipe (manual smoke test)
 
-Gated on local install of both `claude` and `codex` binaries. Run from inside a tmux session:
+Gated on local install of both `claude` and `codex` binaries. Run from inside a tmux session. The recipe pastes literal ids: fleet `1`, Director `2`, members `4` (claude) / `5` (codex) — your ids will differ.
 
 ```bash
 cafleet fleet create --label codex-smoke --coding-agent claude
-# Capture: FLEET=<id>, DIRECTOR=<id> from the output.
+# Expect: fleet 1 with root Director 2.
 
-cafleet --fleet-id $FLEET member create --agent-id $DIRECTOR \
+cafleet --fleet-id 1 member create --agent-id 2 \
   --name Claude-Smoke --description "claude smoke member" --coding-agent claude
-cafleet --fleet-id $FLEET member create --agent-id $DIRECTOR \
+cafleet --fleet-id 1 member create --agent-id 2 \
   --name Codex-Smoke --description "codex smoke member" --coding-agent codex
 
-cafleet --fleet-id $FLEET member list
+cafleet --fleet-id 1 member list
 # Expect: two rows, backend column shows 'claude' and 'codex' respectively.
 
-cafleet --fleet-id $FLEET message send --agent-id $DIRECTOR \
-  --to <codex-member-id> --text "ping"
-# Expect: codex pane receives the poll trigger and the member ack-loops correctly.
+cafleet --fleet-id 1 message send --agent-id 2 \
+  --to 5 --text "ping"
+# Expect: the codex pane receives the 2-line inline preview and the member ack-loops correctly.
 
-cafleet --fleet-id $FLEET member exec \
-  --member-id <codex-member-id> "git status --short"
+cafleet --fleet-id 1 member exec \
+  --member-id 5 "git status --short"
 # Expect: '! git status --short' lands in the codex pane and the command runs.
 
-cafleet --fleet-id $FLEET member delete --member-id <codex-member-id>
-cafleet --fleet-id $FLEET member delete --member-id <claude-member-id>
-cafleet fleet delete $FLEET
+cafleet --fleet-id 1 member delete --member-id 5
+cafleet --fleet-id 1 member delete --member-id 4
+cafleet fleet delete 1
 ```
 
 This recipe is not part of the automated test suite — it is the manual verification path before shipping changes that touch the codex backend.

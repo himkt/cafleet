@@ -15,8 +15,8 @@ Every message lives in `tasks` as a flat row of typed columns. There is no JSON 
 | `from_agent_id` | `INTEGER` (agent_id) | Sender. Not a foreign key — historical tasks may outlive their sender. |
 | `to_agent_id` | `INTEGER` (agent_id) | Recipient. `0` for `broadcast_summary` rows (real ids are `>= 1`, so `0` never collides). |
 | `type` | `TEXT` | `"unicast"` or `"broadcast_summary"`. Drives render-time decisions (e.g. summary tasks always emit in full; unicast tasks honor `CAFLEET_MAX_TEXT_LEN` truncation). |
-| `created_at` | `TEXT` (ISO-8601, microsecond precision) | First-write timestamp; preserved across UPSERT. |
-| `status_state` | `TEXT` | TaskState enum value: `input_required` (queued), `completed` (acked), `canceled` (retracted), `failed` (routing error). |
+| `created_at` | `TEXT` (ISO-8601, microsecond precision) | Set at insert time, never updated. |
+| `status_state` | `TEXT` | `input_required` (queued), `completed` (acked), `canceled` (retracted). |
 | `status_timestamp` | `TEXT` (ISO-8601, microsecond precision) | Updated on every state change. Used for `ORDER BY DESC` and for `member list --activity` aggregation. |
 | `origin_task_id` | `INTEGER` (nullable) | Broadcast grouping link. `NULL` on unicast deliveries; on broadcast delivery rows holds the summary task's `task_id`; on the broadcast summary row itself self-references its own `task_id`. |
 | `text` | `TEXT` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` (computed at insert time). |

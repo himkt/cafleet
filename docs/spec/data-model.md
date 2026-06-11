@@ -77,8 +77,8 @@ The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned 
 | `from_agent_id` | `INTEGER` | `NOT NULL` | Sender agent. **Not** a foreign key — historical tasks may outlive their sender. |
 | `to_agent_id` | `INTEGER` | `NOT NULL` | Recipient agent. **`0`** for `broadcast_summary` rows (the "no single recipient" sentinel; real ids are `>= 1` so `0` never collides). |
 | `type` | `TEXT` | `NOT NULL` | `'unicast'` or `'broadcast_summary'`. |
-| `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; first-write only, preserved across UPSERT. |
-| `status_state` | `TEXT` | `NOT NULL` | TaskState enum value (e.g., `TASK_STATE_INPUT_REQUIRED`). |
+| `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; set at insert time, never updated. |
+| `status_state` | `TEXT` | `NOT NULL` | `input_required`, `completed`, or `canceled`. |
 | `status_timestamp` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; updated on every state change. Used for `ORDER BY DESC`. |
 | `origin_task_id` | `INTEGER` | nullable | Broadcast grouping link. `NULL` on unicast deliveries. On broadcast delivery rows, holds the summary task's `task_id`, shared across every delivery row in the same broadcast. On the broadcast summary row itself, holds its own `task_id` (self-reference) so the delivery rows and the summary row all share a single grouping value. **Not** a foreign key — it is a nullable self-link. |
 | `text` | `TEXT` | `NOT NULL` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time. |

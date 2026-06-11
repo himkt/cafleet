@@ -1,7 +1,7 @@
 # Documentation Readability (docs/ + README.md + zensical.toml)
 
 **Status**: Approved
-**Progress**: 0/24 tasks complete
+**Progress**: 5/24 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -179,11 +179,11 @@ Everything not listed below is kept verbatim. The Error Messages table, every fl
 
 ### Step 1: Stale facts + register rewrite
 
-- [ ] `docs/spec/data-model.md` — fix the `status_state` enum example (fact 1) and the `created_at` UPSERT wording (fact 4). <!-- completed: -->
-- [ ] `docs/spec/message-envelope.md` — drop the nonexistent `failed` state (fact 2) and the UPSERT wording (fact 4). <!-- completed: -->
-- [ ] `docs/spec/webui-api.md` — replace the artifact/text-part sentence with the `text`-column fact (fact 3); fix the design-debt cross-reference. <!-- completed: -->
-- [ ] `docs/reference/coding-agents/codex.md` — fix the poll-trigger expectation (fact 5); rewrite the verification recipe with literal sample ids (fact 6); rewrite the "cafleet usage from inside a codex pane" section in operator register and re-point the SKILL.md reference to CLI options. <!-- completed: -->
-- [ ] `docs/reference/coding-agents/opencode.md` — rewrite the verification recipe with literal sample ids (fact 6); rewrite the "cafleet usage from inside an opencode pane" section in operator register and re-point the SKILL.md reference to CLI options. <!-- completed: -->
+- [x] `docs/spec/data-model.md` — fix the `status_state` enum example (fact 1) and the `created_at` UPSERT wording (fact 4). <!-- completed: 2026-06-11T11:33 -->
+- [x] `docs/spec/message-envelope.md` — drop the nonexistent `failed` state (fact 2) and the UPSERT wording (fact 4). <!-- completed: 2026-06-11T11:33 -->
+- [x] `docs/spec/webui-api.md` — replace the artifact/text-part sentence with the `text`-column fact (fact 3); fix the design-debt cross-reference. <!-- completed: 2026-06-11T11:33 -->
+- [x] `docs/reference/coding-agents/codex.md` — fix the poll-trigger expectation (fact 5); rewrite the verification recipe with literal sample ids (fact 6); rewrite the "cafleet usage from inside a codex pane" section in operator register and re-point the SKILL.md reference to CLI options. <!-- completed: 2026-06-11T11:33 -->
+- [x] `docs/reference/coding-agents/opencode.md` — rewrite the verification recipe with literal sample ids (fact 6); rewrite the "cafleet usage from inside an opencode pane" section in operator register and re-point the SKILL.md reference to CLI options. <!-- completed: 2026-06-11T11:33 -->
 
 ### Step 2: `spec/cli-options.md` aggressive trim
 

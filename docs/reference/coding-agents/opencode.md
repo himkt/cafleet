@@ -63,7 +63,7 @@ If `~/.opencode/agents/cafleet.md` cannot be written (e.g. `$HOME` is read-only,
 
 ## cafleet usage from inside an opencode pane
 
-Opencode does not load Claude Code's `Skill()` tool. **You read this file directly** instead — the spawn prompt tells you to. The same cafleet CLI surface works from an opencode pane unchanged:
+Opencode members cannot load Claude Code skills, so their spawn prompt points them at this page instead. The same cafleet CLI surface works from an opencode pane unchanged:
 
 ```bash
 cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
@@ -72,9 +72,9 @@ cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
 cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
 
-Substitute the literal ids handed to you in your spawn prompt. There is no env-var fallback.
+Members substitute the literal ids from their spawn prompt; there is no env-var fallback.
 
-For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see `skills/cafleet/SKILL.md`.
+For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see [CLI options](../../spec/cli-options.md).
 
 ## The `!` shell-shortcut convention
 
@@ -103,39 +103,39 @@ The opencode backend writes exactly one file — `~/.opencode/agents/cafleet.md`
 
 ## Verification recipe (manual smoke test)
 
-Gated on local install of `opencode`. Run from inside a tmux session:
+Gated on local install of `opencode`. Run from inside a tmux session. The recipe pastes literal ids: fleet `1`, Director `2`, member `4` — your ids will differ.
 
 ```bash
 rm -f ~/.opencode/agents/cafleet.md
 
 cafleet fleet create --label opencode-smoke --coding-agent claude
-# Capture: FLEET=<id>, DIRECTOR=<id> from the output.
+# Expect: fleet 1 with root Director 2.
 
-cafleet --fleet-id $FLEET member create --agent-id $DIRECTOR \
+cafleet --fleet-id 1 member create --agent-id 2 \
   --name Opencode-Smoke --description "opencode smoke member" --coding-agent opencode
 # Expect: ~/.opencode/agents/cafleet.md is materialized with the
 # cafleet preset (cat it and verify the JSON frontmatter).
 
-cafleet --fleet-id $FLEET member list
+cafleet --fleet-id 1 member list
 # Expect: backend column shows 'opencode' for the smoke member.
 
-cafleet --fleet-id $FLEET message send --agent-id $DIRECTOR \
-  --to <opencode-member-id> --text "ping"
-# Expect: opencode pane receives the inline preview and the member ack-loops.
+cafleet --fleet-id 1 message send --agent-id 2 \
+  --to 4 --text "ping"
+# Expect: the opencode pane receives the inline preview and the member ack-loops.
 
-cafleet --fleet-id $FLEET member exec \
-  --member-id <opencode-member-id> "git status --short"
+cafleet --fleet-id 1 member exec \
+  --member-id 4 "git status --short"
 # Expect: '! git status --short' lands in the opencode pane and the
 # command runs.
 
-cafleet --fleet-id $FLEET member exec \
-  --member-id <opencode-member-id> "curl https://example.com"
+cafleet --fleet-id 1 member exec \
+  --member-id 4 "curl https://example.com"
 # Expect: the deny-list blocks the curl command. If it does NOT, the
 # safety floor is broken — STOP and re-run the agent-load smoke from
 # the design doc's Step 0 GATE.
 
-cafleet --fleet-id $FLEET member delete --member-id <opencode-member-id>
-cafleet fleet delete $FLEET
+cafleet --fleet-id 1 member delete --member-id 4
+cafleet fleet delete 1
 ```
 
 A second `cafleet member create --coding-agent opencode` invocation with the preset file already in place should leave the file unchanged (verify by capturing `stat --format=%Y ~/.opencode/agents/cafleet.md` before and after).
