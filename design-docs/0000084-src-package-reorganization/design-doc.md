@@ -1,7 +1,7 @@
 # Reorganize the cafleet Python Package Layout
 
 **Status**: Approved
-**Progress**: 16/27 tasks complete
+**Progress**: 20/27 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -278,10 +278,10 @@ Each new subdirectory gets an `__init__.py` (the tests tree is already a package
 
 ### Step 5: cli/ package
 
-- [ ] Create `cli/_helpers.py` and `cli/_prompt.py` with the renamed helpers per the placement tables <!-- completed: -->
-- [ ] Create `cli/db.py`, `cli/fleet.py`, `cli/agent.py`, `cli/message.py`, `cli/member.py`, `cli/server.py`, `cli/doctor.py` per the placement table <!-- completed: -->
-- [ ] Create `cli/__init__.py` with the root group and `add_command` registrations; delete `cli.py`. Do NOT smoke-test via `uv run cafleet --version` (`.claude/rules/commands.md` forbids direct `uv run cafleet` invocations); verify group wiring via `mise //cafleet:test` — CliRunner covers entry-point resolution <!-- completed: -->
-- [ ] Update test imports that reference `cafleet.cli` internals (helpers, prompt machinery) to the new submodule paths; run `mise //cafleet:test` <!-- completed: -->
+- [x] Create `cli/_helpers.py` and `cli/_prompt.py` with the renamed helpers per the placement tables <!-- completed: 2026-06-11T13:31 -->
+- [x] Create `cli/db.py`, `cli/fleet.py`, `cli/agent.py`, `cli/message.py`, `cli/member.py`, `cli/server.py`, `cli/doctor.py` per the placement table — `member.py` 633 lines, all others < 250 <!-- completed: 2026-06-11T13:31 -->
+- [x] Create `cli/__init__.py` with the root group and `add_command` registrations; delete `cli.py` (deletion dispatched by the Director — `rm` denied in the Programmer harness). Do NOT smoke-test via `uv run cafleet --version` (`.claude/rules/commands.md` forbids direct `uv run cafleet` invocations); verify group wiring via `mise //cafleet:test` — CliRunner covers entry-point resolution <!-- completed: 2026-06-11T13:31 -->
+- [x] Update test imports that reference `cafleet.cli` internals (helpers, prompt machinery) to the new submodule paths (Tester commit 450029b); run `mise //cafleet:test` — 711 passed <!-- completed: 2026-06-11T13:31 -->
 
 ### Step 6: tests mirror
 
