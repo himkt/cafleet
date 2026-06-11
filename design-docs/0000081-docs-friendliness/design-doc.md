@@ -1,7 +1,7 @@
 # Documentation Friendliness (README.md + docs/ + zensical.toml)
 
 **Status**: Approved
-**Progress**: 2/20 tasks complete
+**Progress**: 5/20 tasks complete
 **Last Updated**: 2026-06-10
 
 ## Overview
@@ -29,7 +29,7 @@ Design doc 0000079 made the docs lean (SSOT map, necessity test, symbol strip); 
 
 Verified gaps in the current tree (each confirmed against the files on 2026-06-10):
 
-1. **Shell-var contradiction**: `docs/get-started/quickstart.md` tells readers to `export FLEET_ID` / `export DIRECTOR_ID`, while `docs/spec/cli-options.md` § Option Source Matrix explicitly forbids shell variables (permission-pattern matching). The quickstart also passes `--full` to `fleet create`, which takes no such flag (its flags are `--label`, `--coding-agent`, `--json`) — the walkthrough as written fails.
+1. **Shell-var contradiction**: `docs/get-started/quickstart.md` tells readers to `export FLEET_ID` / `export DIRECTOR_ID`, while `docs/spec/cli-options.md` § Option Source Matrix explicitly forbids shell variables (permission-pattern matching). The quickstart also passes `--full` to `fleet create` — a hidden flag (`hidden=True`, absent from `--help`) that does work but selects the verbose 7-line output; the default non-JSON output is the compact `<fleet_id> director=<id> admin=<id>` line, and `spec/cli-options.md` § `cafleet fleet create` is stale in presenting the 7-line block as the default shape.
 2. **No task-oriented layer** between the one-screen quickstart and the exhaustive spec pages.
 3. **`spec/cli-options.md` (669 lines)** has no scannable subcommand summary up front; moreover the `agent` and `message` subcommand groups have **no reference sections at all** on the page that `concepts/overview.md` calls "the canonical CLI surface".
 4. **No glossary**: concepts pages assume fleet/member/Director/placement/broker/inline-preview terminology.
@@ -172,7 +172,7 @@ One short page: the Python API matters to **contributors** changing cafleet and 
 
 #### `docs/get-started/quickstart.md`
 
-- **Rewrite the "Raw CLI walkthrough"** with literal ids: run `cafleet fleet create --label "demo"` (drop the invalid `--full` flag), show the non-JSON output block (`1` / `2` / `label:` … per the shape in `spec/cli-options.md`), then paste the literal ids into every subsequent command — `--fleet-id 1` on all of them, plus `--agent-id 2` only on the commands that take an identity flag (`member create`, `message send`); `agent list` takes only `--fleet-id`. Include the one-time "your ids will differ" note.
+- **Rewrite the "Raw CLI walkthrough"** with literal ids: run `cafleet fleet create --label "demo"` (drop the hidden `--full` flag), show the default compact output line (`1 director=2 admin=3`, per the corrected shape in `spec/cli-options.md`), then paste the literal ids into every subsequent command — `--fleet-id 1` on all of them, plus `--agent-id 2` only on the commands that take an identity flag (`member create`, `message send`); `agent list` takes only `--fleet-id`. Include the one-time "your ids will differ" note.
 - Show expected output for `member create`, `agent list` (member id `4` appears), and `message send` (compact envelope, task id `10`).
 - Add one recovery tip: if the `fleet create` output scrolled away, `cafleet fleet list` re-prints the fleet id and the DIRECTOR column.
 - End with next-step links: How-to guides and Troubleshooting (alongside the existing CLI-options link).
@@ -182,6 +182,7 @@ One short page: the Python API matters to **contributors** changing cafleet and 
 
 - **Add a `## Subcommand summary` table** directly after the page intro (before the Option Source Matrix): one row per subcommand — `db init`, `fleet create/list/show/delete`, `doctor`, `server`, `agent register/deregister/list/show`, `message send/broadcast/poll/ack/cancel/show`, `member create/delete/list/capture/send-input/exec/ping` (24 rows) — with a one-line purpose, whether `--fleet-id` is required, the identity flag (`--agent-id` / `--member-id` / none), and a link to the subcommand's section on this page.
 - **Add the two missing reference sections** so every summary row has a target: a compact `## cafleet agent` section (register / deregister / list / show: flag tables and output shapes) and a compact `## cafleet message` section (send / broadcast / poll / ack / cancel / show: flag tables; link `spec/message-envelope.md` for the envelope schema and the existing § Message Body Truncation for `--full`/truncation instead of restating either). This closes the gap where the page `concepts/overview.md` calls "the canonical CLI surface" had no agent/message sections at all.
+- **Correct the § `cafleet fleet create` output documentation**: the default non-JSON output is the compact `<fleet_id> director=<id> admin=<id>` line; the 7-line block currently presented as the default is the hidden `--full` shape. Content correction only, no restructuring.
 - **Document the `member create` output shape** in its existing section: the observable text (and `--json`) output as emitted by the current CLI, verified against the implementation while editing. Guiding principle 3 makes this page the arbiter of every shown output block, and both the quickstart rewrite and the mixed-backend how-to need `member create` expected-output blocks — the canonical shape must exist here first.
 - No restructuring otherwise; the page stays one page and all existing anchors (`#full-semantics`, `#message-body-truncation`, `#error-messages`) are preserved.
 
@@ -267,9 +268,9 @@ The `navigation.indexes` feature is already enabled, so `how-to/index.md` and `a
 
 ### Step 2: Quickstart fix + CLI reference scannability
 
-- [ ] `docs/get-started/quickstart.md` — rewrite the raw CLI walkthrough with literal ids (no shell vars), drop the invalid `--full` on `fleet create`, add expected-output blocks, the "your ids will differ" note, the `fleet list` recovery tip, and next-step links. <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — add the Subcommand summary table (24 rows with section links) after the page intro. <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — add the compact `cafleet agent` and `cafleet message` reference sections (flag tables + output shapes; link message-envelope.md and § Message Body Truncation instead of restating), and document the `member create` output shape in its existing section (verified against the implementation). <!-- completed: -->
+- [x] `docs/get-started/quickstart.md` — rewrite the raw CLI walkthrough with literal ids (no shell vars), drop the hidden `--full` on `fleet create`, add expected-output blocks, the "your ids will differ" note, the `fleet list` recovery tip, and next-step links. <!-- completed: 2026-06-11T09:05 -->
+- [x] `docs/spec/cli-options.md` — add the Subcommand summary table (24 rows with section links) after the page intro. <!-- completed: 2026-06-11T09:05 -->
+- [x] `docs/spec/cli-options.md` — add the compact `cafleet agent` and `cafleet message` reference sections (flag tables + output shapes; link message-envelope.md and § Message Body Truncation instead of restating), and document the `member create` output shape in its existing section (verified against the implementation). <!-- completed: 2026-06-11T09:05 -->
 
 ### Step 3: How-to guides
 
@@ -309,3 +310,4 @@ The `navigation.indexes` feature is already enabled, so `how-to/index.md` and `a
 |------|---------|
 | 2026-06-10 | Initial draft |
 | 2026-06-10 | Reviewer round 1: broadened the shell-var acceptance grep to cover DIRECTOR_ID; unified the troubleshooting row threshold at ≥ 12; made the member-id cast open-ended; scoped the quickstart literal-id instruction to commands that take an identity flag; added a directive to document the `member create` output shape in cli-options; corrected the README §1.1 verbatim quote; re-pointed the docs/index.md API Reference link to `api/index.md`. |
+| 2026-06-11 | Director arbitration (Step 2): `fleet create` accepts a hidden `--full` flag and its default output is the compact `<fleet_id> director=<id> admin=<id>` line — corrected Background §1, the quickstart directive (compact default output), and added a cli-options directive to fix the stale § fleet create output shape. |

@@ -2,6 +2,37 @@
 
 How the unified CAFleet CLI (`cafleet`) accepts configuration parameters.
 
+## Subcommand summary
+
+One row per subcommand. "Identity flag" is the per-subcommand option naming the acting agent (`--agent-id`) or the target member (`--member-id`); the Agent ID section below documents the split.
+
+| Subcommand | Purpose | `--fleet-id` | Identity flag | Section |
+|---|---|---|---|---|
+| `db init` | Create or migrate the SQLite schema to head | no | none | [db init](#db-init) |
+| `fleet create` | Create a fleet with its root Director and Administrator | no | none | [fleet create](#fleet-create) |
+| `fleet list` | List non-deleted fleets | no | none | [fleet list](#fleet-list) |
+| `fleet show` | Show one fleet (soft-deleted included) | no | none | [fleet show](#fleet-show) |
+| `fleet delete` | Soft-delete a fleet and deregister its agents | no | none | [fleet delete](#fleet-delete) |
+| `doctor` | Print the calling pane's tmux identifiers | no | none | [doctor](#cafleet-doctor) |
+| `server` | Start the admin WebUI server | no | none | [server](#cafleet-server) |
+| `agent register` | Register a new agent | yes | none | [agent register](#agent-register) |
+| `agent deregister` | Deregister an agent | yes | `--agent-id` | [agent deregister](#agent-deregister) |
+| `agent list` | List the fleet's agents | yes | none | [agent list](#agent-list) |
+| `agent show` | Show one agent's detail | yes | `--agent-id` | [agent show](#agent-show) |
+| `message send` | Send a unicast message | yes | `--agent-id` | [message send](#message-send) |
+| `message broadcast` | Broadcast a message to all fleet agents | yes | `--agent-id` | [message broadcast](#message-broadcast) |
+| `message poll` | Fetch un-acked incoming messages | yes | `--agent-id` | [message poll](#message-poll) |
+| `message ack` | Acknowledge a received message | yes | `--agent-id` | [message ack](#message-ack) |
+| `message cancel` | Retract an un-acked sent message | yes | `--agent-id` | [message cancel](#message-cancel) |
+| `message show` | Show one task | yes | `--agent-id` | [message show](#message-show) |
+| `member create` | Register a member and spawn its coding-agent pane | yes | `--agent-id` | [member create](#member-create) |
+| `member delete` | Close a member's pane and deregister it | yes | `--member-id` | [member delete](#member-delete) |
+| `member list` | List the fleet's members | yes | none | [member list](#member-list) |
+| `member capture` | Capture the tail of a member's pane | yes | `--member-id` | [member capture](#member-capture) |
+| `member send-input` | Forward a restricted keystroke to a member's pane | yes | `--member-id` | [member send-input](#member-send-input) |
+| `member exec` | Dispatch a shell command into a member's pane | yes | `--member-id` | [member exec](#member-exec) |
+| `member ping` | Inject an inbox-poll keystroke into a member's pane | yes | `--member-id` | [member ping](#member-ping) |
+
 ## Option Source Matrix
 
 Each parameter has exactly one input source:
@@ -120,6 +151,16 @@ cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --full   # f
 
 This applies to CLI emit sites only. FastAPI `/api/*` responses (see [webui-api.md](./webui-api.md)) are unchanged — the WebUI is human-facing and renders full bodies. `agent.description`, `skills[].description`, `agent_card_json` sub-fields, and `member capture` content are also untouched in this release.
 
+## `cafleet db` — Schema Management
+
+### `db init`
+
+No flags. Creates the database file if missing and applies Alembic migrations
+to the head revision; idempotent, so re-run it after every package upgrade.
+Prints which action was taken (created, upgraded, or already at head).
+Install-time usage and the upgrade warning for pre-integer-PK databases are
+canonical on the [Install](../get-started/install.md) page.
+
 ## `cafleet fleet` — Fleet Management
 
 The `cafleet fleet` subgroup manages fleets. These commands write directly to SQLite — the broker server does not need to be running.
@@ -131,12 +172,19 @@ The `cafleet fleet` subgroup manages fleets. These commands write directly to SQ
 | `--label` | no | Free-form text label for the fleet |
 | `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. Operator-declared metadata only — `fleet create` does not spawn the root Director's coding-agent process and cannot auto-detect the binary running in the calling pane. The value is recorded as the root Director's placement `coding_agent`. Help text: `Coding-agent binary to spawn / declare for the placement.` (Click appends `[default: claude]` automatically.) |
 | `--json` | no | Output as JSON |
+| `--full` | no | Hidden flag (accepted but not shown in `--help`): switches the non-JSON output from the compact one-line form to the 7-line block below. |
 
 There are no `--name` / `--description` flags. The root Director's name and description are hardcoded (`name="Director"`, `description="Root Director for this fleet"`).
 
 Creates a new fleet with a DB-assigned integer identifier. **Must be run inside a tmux session** — outside tmux the command exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing to the DB. It creates the fleet, its root Director (and placement), and the built-in Administrator atomically (all-or-nothing) — see [data-model.md](./data-model.md) for the Administrator's distinguishing `agent_card_json.cafleet.kind` flag.
 
-**Non-JSON output** — line 1 is `fleet_id` (preserves backward-compatible scripts that parse only the first line), line 2 is the root Director's `agent_id`:
+**Non-JSON output (default)** — one compact line carrying the new `fleet_id`, the root Director's `agent_id`, and the built-in Administrator's `agent_id`:
+
+```
+<fleet_id> director=<director_agent_id> admin=<administrator_agent_id>
+```
+
+**Non-JSON output (hidden `--full` flag)** — line 1 is `fleet_id` (preserves backward-compatible scripts that parse only the first line), line 2 is the root Director's `agent_id`:
 
 ```
 <fleet_id>
@@ -229,7 +277,7 @@ There is no `--force` flag. Calling `fleet delete` on an unknown `fleet_id` exit
 
 Member tmux panes spawned by `cafleet member create` are **not** automatically closed by `fleet delete`. For a clean teardown, call `cafleet member delete` per member first (which sends `/exit` to the pane). If a member pane refuses to close (e.g. blocked on a confirmation prompt), rerun `cafleet member delete` with `--force`, which kill-panes the target, sweeps the placement, and rebalances the layout.
 
-## `cafleet doctor` — Placement Diagnostics
+## `cafleet doctor` — Placement Diagnostics {#cafleet-doctor}
 
 Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE`) for operators diagnosing placement issues without reaching for raw tmux commands. Intended as the home for future health checks (DB connectivity, orphan-placement scans, etc.); today it covers tmux metadata only.
 
@@ -273,7 +321,7 @@ Exit codes:
 | `0` | Success — all four fields printed. |
 | `1` | Any tmux or environment failure: `TMUX` env var unset, `tmux` binary not on PATH, `TMUX_PANE` env var unset, or a tmux subprocess (e.g. `display-message`) failure. |
 
-## `cafleet server` — Admin WebUI Server
+## `cafleet server` — Admin WebUI Server {#cafleet-server}
 
 Starts the admin WebUI FastAPI app (the same app served by `mise //cafleet:dev`) via uvicorn. CLI commands do not require this server to be running — it is only needed when a user wants to view the WebUI at `/` or hit the `/api/*` endpoints from a browser.
 
@@ -320,6 +368,147 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 cafleet --fleet-id 1 server
 ```
 
+## `cafleet agent` — Agent Registry
+
+All four subcommands require the global `--fleet-id`. The default-vs-`--full`
+output projection shared by `agent list` and `agent show` is documented in
+[`--full` semantics](#full-semantics) and is not restated per subcommand.
+
+### `agent register`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--name` | yes | Short human-identifiable label. |
+| `--description` | yes | One-sentence purpose statement. |
+| `--skills` | no | Skill descriptors as a JSON array string, persisted into the agent's `agent_card_json`. Invalid JSON exits 1 with `Error: Invalid JSON in --skills: <detail>`. |
+
+No identity flag — registering is how an agent obtains its id. Text output:
+
+```
+Agent registered successfully!
+  agent_id:  <agent_id>
+  name:      <name>
+```
+
+`--json` returns `{"agent_id":<id>,"name":"<name>","registered_at":"<iso8601>"}`.
+
+### `agent deregister`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The agent to deregister. |
+
+Text output: `Agent deregistered successfully.`; `--json` returns
+`{"status":"deregistered"}`. The root Director and the Administrator are
+protected — see [Error Messages](#error-messages).
+
+### `agent list`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--full` | no | See [`--full` semantics](#full-semantics). |
+
+No identity flag — the listing is scoped by the global `--fleet-id` alone.
+Default text output is one `<agent_id> <name> <status>` line per agent,
+blank-line separated; an empty fleet prints `No agents found.`:
+
+```
+2 Director active
+
+3 Administrator active
+
+4 demo-member active
+```
+
+### `agent show`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The acting agent (fleet-membership gate). |
+| `--id` | yes | The target agent to show. |
+| `--full` | no | See [`--full` semantics](#full-semantics). |
+
+Default text output is the same one-line `<agent_id> <name> <status>` row as
+`agent list`; the default `--json` projection additionally carries
+`coding_agent` when the target has a placement (see
+[`--full` semantics](#full-semantics)).
+
+## `cafleet message` — Message Broker
+
+All six subcommands require the global `--fleet-id` and act as `--agent-id`.
+The task envelope schema is canonical in
+[Message envelope](./message-envelope.md); body truncation and the
+`--full` / `--quiet` flags are canonical in
+[Message Body Truncation](#message-body-truncation) — neither is restated
+per subcommand. The compact text render is `[<id> | from:<from> | <ts>]` on
+line 1 (plus `kind` / `origin` segments only when present) and the body on
+line 2.
+
+### `message send`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | Sender. |
+| `--to` | yes | Recipient agent id. |
+| `--text` | yes | Message body. |
+| `--full` / `--quiet` | no | See [Message Body Truncation](#message-body-truncation). |
+
+Text output is `Message sent.` followed by the compact rendered envelope;
+`--quiet` prints only the new task id.
+
+### `message broadcast`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | Broadcaster. |
+| `--text` | yes | Message body. |
+| `--full` | no | See [`--full` semantics](#full-semantics). |
+
+Default text output is the one-line summary
+`broadcast id=<task_id> recipients=<count>`.
+
+### `message poll`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | Recipient whose inbox is fetched. |
+| `--full` | no | See [Message Body Truncation](#message-body-truncation). |
+
+Returns only un-acked (`input_required`) deliveries addressed to the agent.
+Text output is the compact envelopes blank-line separated; an empty inbox
+prints `No messages found.`.
+
+### `message ack`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | Recipient acknowledging the message. |
+| `--task-id` | yes | Task to acknowledge. |
+| `--full` / `--quiet` | no | See [Message Body Truncation](#message-body-truncation). |
+
+Text output is `Message acknowledged.` followed by the compact envelope;
+`--quiet` prints only the task id.
+
+### `message cancel`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | Sender retracting the message (sender-only). |
+| `--task-id` | yes | Task to cancel. |
+| `--full` | no | See [Message Body Truncation](#message-body-truncation). |
+
+Text output is `Task canceled.` followed by the compact envelope.
+
+### `message show`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The acting agent (fleet-membership gate). |
+| `--task-id` | yes | Task to fetch. |
+| `--full` | no | See [Message Body Truncation](#message-body-truncation). |
+
+Text output is the compact envelope alone.
+
 ## Member Commands
 
 The `cafleet member` subgroup manages tmux-backed member agents and must be run inside a tmux session. `member create` takes `--agent-id` (the spawning Director's agent ID, validated to equal the fleet root); the other subcommands identify their target by `--member-id`, scoped to the global `--fleet-id`.
@@ -362,6 +551,32 @@ The `--prompt-file` path is BOTH the spawn input AND the permanent audit artifac
 #### Focus behavior
 
 The spawn always invokes `tmux split-window` with `-d` so the Director's pane and active window keep focus — the new member pane is created in the Director's window but is not made active.
+
+#### Output format
+
+Text (default) — one compact line; `pane` renders `(pending)` when the pane
+id has not been patched onto the placement yet:
+
+```
+<agent_id> <name> backend=<coding_agent> pane=<pane_id>
+```
+
+Text (hidden `--full` flag, accepted but not shown in `--help`) — 6-line block:
+
+```
+Member registered and spawned.
+  agent_id:  <agent_id>
+  name:      <name>
+  backend:   <coding_agent>
+  pane_id:   <pane_id>
+  window_id: <window_id>
+```
+
+`--json` returns
+`{"agent_id":<id>,"name":"<name>","registered_at":"<iso8601>","placement":{...}}`
+where `placement` carries `director_agent_id`, `tmux_session`,
+`tmux_window_id`, `tmux_pane_id`, `coding_agent`, and `created_at` (the same
+shape as `fleet create`'s `director.placement`).
 
 ### `member delete`
 
