@@ -1,7 +1,7 @@
 # Documentation Readability (docs/ + README.md + zensical.toml)
 
 **Status**: Approved
-**Progress**: 5/24 tasks complete
+**Progress**: 10/24 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -187,11 +187,11 @@ Everything not listed below is kept verbatim. The Error Messages table, every fl
 
 ### Step 2: `spec/cli-options.md` aggressive trim
 
-- [ ] Deduplicate the requirement statements: delete the two `--fleet-id` list sections and the three "Agent ID" lists; re-point the Global Options `--fleet-id` row at the Subcommand summary; fold the "Create a fleet first" snippet into the Option Source Matrix section. <!-- completed: -->
-- [ ] Strip internals: `json.dumps` signature, `importlib.metadata`, ANSI regex, `--activity` SQL/index/benchmark paragraph and cell, server `validation_alias` cells and `uvicorn.run` bullet, every Click class-name mention (error strings and exit codes preserved), both "Help text: …" sentences. <!-- completed: -->
-- [ ] Cut rationale / negative-space assertions per the Specification list (the `--full` variants aside, the triple-stated broadcast negative kept once, hidden-`--full` backward-compat note, doctor future-health-checks, capture calibration, exec/ping "No X field" notes, truncation-section rationale, literal-key-delivery `-l` mechanics). <!-- completed: -->
-- [ ] Restructure the `member create` flag table to one-line cells (`--name`, `--coding-agent`, `--model`, `--prompt-file`); move unique `--prompt-file` facts into Spawn-prompt input modes; replace the audit-artifact paragraph with the argv-ceiling fact; shrink the post-spawn-table paragraph and the Director-side usage pattern to the specified lengths. <!-- completed: -->
-- [ ] Placeholder + output cleanup on this page: the `--activity` example to the sample cast (`<s>` → `1`, drop the `$ ` prefix), the `member ping` prose and key-sequence table to `<fleet-id>` / `<member-id>`, the Error Messages `fleet <sid>` → `fleet <fleet-id>`, compact `fleet list` header + sample row. <!-- completed: -->
+- [x] Deduplicate the requirement statements: delete the two `--fleet-id` list sections and the three "Agent ID" lists; re-point the Global Options `--fleet-id` row at the Subcommand summary; fold the "Create a fleet first" snippet into the Option Source Matrix section. <!-- completed: 2026-06-11T11:45 -->
+- [x] Strip internals: `json.dumps` signature, `importlib.metadata`, ANSI regex, `--activity` SQL/index/benchmark paragraph and cell, server `validation_alias` cells and `uvicorn.run` bullet, every Click class-name mention (error strings and exit codes preserved), both "Help text: …" sentences. <!-- completed: 2026-06-11T11:45 -->
+- [x] Cut rationale / negative-space assertions per the Specification list (the `--full` variants aside, the triple-stated broadcast negative kept once, hidden-`--full` backward-compat note, doctor future-health-checks, capture calibration, exec/ping "No X field" notes, truncation-section rationale, literal-key-delivery `-l` mechanics). <!-- completed: 2026-06-11T11:45 -->
+- [x] Restructure the `member create` flag table to one-line cells (`--name`, `--coding-agent`, `--model`, `--prompt-file`); move unique `--prompt-file` facts into Spawn-prompt input modes; replace the audit-artifact paragraph with the argv-ceiling fact; shrink the post-spawn-table paragraph and the Director-side usage pattern to the specified lengths. <!-- completed: 2026-06-11T11:45 -->
+- [x] Placeholder + output cleanup on this page: the `--activity` example to the sample cast (`<s>` → `1`, drop the `$ ` prefix), the `member ping` prose and key-sequence table to `<fleet-id>` / `<member-id>`, the Error Messages `fleet <sid>` → `fleet <fleet-id>`, compact `fleet list` header + sample row. <!-- completed: 2026-06-11T11:45 -->
 
 ### Step 3: Adjacent trims
 
