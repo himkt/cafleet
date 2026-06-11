@@ -60,7 +60,7 @@ cafleet --fleet-id 1 member ping --member-id 4
 ```
 
 ```
-Pinged member alice (%4) — poll keystroke dispatched.
+Pinged member alice (%7) — poll keystroke dispatched.
 ```
 
 Injects a `cafleet message poll` keystroke into the pane so the member
@@ -73,7 +73,7 @@ cafleet --fleet-id 1 member send-input --member-id 4 --choice 1
 ```
 
 ```
-Sent choice 1 to member alice (%4).
+Sent choice 1 to member alice (%7).
 ```
 
 `--choice 1..3` answers an AskUserQuestion option; `--freetext "<text>"`
@@ -86,7 +86,7 @@ cafleet --fleet-id 1 member exec --member-id 4 "git status"
 ```
 
 ```
-Sent bash command 'git status' to member alice (%4).
+Sent bash command 'git status' to member alice (%7).
 ```
 
 Keystrokes `! git status` into the pane so the coding agent runs it natively
@@ -102,7 +102,7 @@ cafleet --fleet-id 1 member delete --member-id 4
 ```
 Member deleted.
   agent_id:  4
-  pane_id:   %4 (closed)
+  pane_id:   %7 (closed)
 ```
 
 The default path sends `/exit` and waits up to 15 s for the pane to close.
@@ -110,8 +110,8 @@ A pane that refuses to close makes the command exit 2 with the pane tail and
 a built-in recovery hint:
 
 ```
-Error: pane %4 did not close within 15.0s after /exit.
---- pane %4 tail (last 80 lines) ---
+Error: pane %7 did not close within 15.0s after /exit.
+--- pane %7 tail (last 80 lines) ---
 <captured terminal buffer>
 ---
 Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet member send-input`, then re-run `cafleet member delete`. Or re-run with `--force` to skip the wait and kill the pane.

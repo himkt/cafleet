@@ -45,7 +45,7 @@ cafleet --fleet-id 1 member create --agent-id 2 \
 ```
 
 ```
-4 alice backend=claude pane=%4
+4 alice backend=claude pane=%7
 ```
 
 ```bash
@@ -55,7 +55,7 @@ cafleet --fleet-id 1 member create --agent-id 2 \
 ```
 
 ```
-5 bob backend=codex pane=%5
+5 bob backend=codex pane=%8
 ```
 
 ```bash
@@ -65,7 +65,7 @@ cafleet --fleet-id 1 member create --agent-id 2 \
 ```
 
 ```
-6 carol backend=opencode pane=%6
+6 carol backend=opencode pane=%9
 ```
 
 ## Find the panes
@@ -78,9 +78,9 @@ cafleet --fleet-id 1 member list
 3 members:
   agent_id        name      status  backend  session  window_id  pane_id  created_at
   --------------  --------  ------  -------  -------  ---------  -------  --------------------
-  4               alice     active  claude   main     @1         %4       2026-06-11T09:01:00.000000+00:00
-  5               bob       active  codex    main     @1         %5       2026-06-11T09:02:00.000000+00:00
-  6               carol     active  opencode  main     @1         %6       2026-06-11T09:03:00.000000+00:00
+  4               alice     active  claude   main     @1         %7       2026-06-11T09:01:00.000000+00:00
+  5               bob       active  codex    main     @1         %8       2026-06-11T09:02:00.000000+00:00
+  6               carol     active  opencode  main     @1         %9       2026-06-11T09:03:00.000000+00:00
 ```
 
 Only the `claude` pane shows the member name in its pane title — see
@@ -112,7 +112,7 @@ cafleet --fleet-id 1 member delete --member-id 4
 ```
 Member deleted.
   agent_id:  4
-  pane_id:   %4 (closed)
+  pane_id:   %7 (closed)
 ```
 
 Repeat for members `5` and `6`, then delete the fleet:
