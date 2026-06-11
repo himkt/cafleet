@@ -10,16 +10,16 @@ Design doc 0000079 made the docs lean (SSOT map, necessity test, symbol strip); 
 
 ## Success Criteria
 
-- [ ] No doc instructs the reader to store ids in shell variables: `grep -rE "export (FLEET|DIRECTOR)_ID" docs/ README.md` returns nothing, and every walkthrough pastes literal integer ids, consistent with the `spec/cli-options.md` Option Source Matrix rationale.
-- [ ] Every CLI walkthrough in README, quickstart, and the how-to pages shows the command **and** an expected-output block, using the standard sample-id cast (fleet `1`, root Director `2`, Administrator `3`, members `4`+).
-- [ ] A top-level **How-to guides** nav section exists with four task pages (mixed-backend team; monitor + recover members; WebUI; design-doc-driven development) plus a section index. Each page sequences existing facts and links to canonical homes — it introduces no new normative facts.
-- [ ] `docs/get-started/troubleshooting.md` exists under Get Started, maps ≥ 12 symptoms to fixes, opens with `cafleet doctor`, and links to (never duplicates) the Error Messages table in `spec/cli-options.md`.
-- [ ] `spec/cli-options.md` opens with a subcommand summary table (one row per subcommand: name, one-line purpose, needs `--fleet-id`, identity flag, link), and every row's link resolves to a section on the page — including new compact `cafleet agent` / `cafleet message` sections.
-- [ ] `concepts/overview.md` opens with a **Core terms** table defining fleet, root Director, member, placement, Administrator, broker, task/message, inline preview, poll/ack, and coding-agent backend, each with a link to its canonical page. Other pages link to it instead of re-defining terms.
-- [ ] The API Reference section has an `api/index.md` landing page stating who needs the Python API, and each of the four mkdocstrings stubs carries an orienting paragraph.
-- [ ] README.md and `docs/index.md` state who CAFleet is for, and README shows a compelling end-to-end example with expected output near the top.
-- [ ] A **Documentation style** section is published in `docs/get-started/contributing.md` (tone/voice, sample-id cast, example format, SSOT linking rule).
-- [ ] 0000079's SSOT map and necessity test are preserved: no canonical fact is restated in the new pages; `mise //:docs-build` passes with all nav entries and cross-references resolving.
+- [x] No doc instructs the reader to store ids in shell variables: `grep -rE "export (FLEET|DIRECTOR)_ID" docs/ README.md` returns nothing, and every walkthrough pastes literal integer ids, consistent with the `spec/cli-options.md` Option Source Matrix rationale.
+- [x] Every CLI walkthrough in README, quickstart, and the how-to pages shows the command **and** an expected-output block, using the standard sample-id cast (fleet `1`, root Director `2`, Administrator `3`, members `4`+).
+- [x] A top-level **How-to guides** nav section exists with four task pages (mixed-backend team; monitor + recover members; WebUI; design-doc-driven development) plus a section index. Each page sequences existing facts and links to canonical homes — it introduces no new normative facts.
+- [x] `docs/get-started/troubleshooting.md` exists under Get Started, maps ≥ 12 symptoms to fixes, opens with `cafleet doctor`, and links to (never duplicates) the Error Messages table in `spec/cli-options.md`.
+- [x] `spec/cli-options.md` opens with a subcommand summary table (one row per subcommand: name, one-line purpose, needs `--fleet-id`, identity flag, link), and every row's link resolves to a section on the page — including new compact `cafleet agent` / `cafleet message` sections.
+- [x] `concepts/overview.md` opens with a **Core terms** table defining fleet, root Director, member, placement, Administrator, broker, task/message, inline preview, poll/ack, and coding-agent backend, each with a link to its canonical page. Other pages link to it instead of re-defining terms.
+- [x] The API Reference section has an `api/index.md` landing page stating who needs the Python API, and each of the four mkdocstrings stubs carries an orienting paragraph.
+- [x] README.md and `docs/index.md` state who CAFleet is for, and README shows a compelling end-to-end example with expected output near the top.
+- [x] A **Documentation style** section is published in `docs/get-started/contributing.md` (tone/voice, sample-id cast, example format, SSOT linking rule).
+- [x] 0000079's SSOT map and necessity test are preserved: no canonical fact is restated in the new pages; `mise //:docs-build` passes with all nav entries and cross-references resolving.
 
 ---
 
