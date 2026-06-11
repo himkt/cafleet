@@ -1,6 +1,6 @@
 # Documentation Friendliness (README.md + docs/ + zensical.toml)
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 20/20 tasks complete
 **Last Updated**: 2026-06-11
 
@@ -311,3 +311,4 @@ The `navigation.indexes` feature is already enabled, so `how-to/index.md` and `a
 | 2026-06-10 | Initial draft |
 | 2026-06-10 | Reviewer round 1: broadened the shell-var acceptance grep to cover DIRECTOR_ID; unified the troubleshooting row threshold at ≥ 12; made the member-id cast open-ended; scoped the quickstart literal-id instruction to commands that take an identity flag; added a directive to document the `member create` output shape in cli-options; corrected the README §1.1 verbatim quote; re-pointed the docs/index.md API Reference link to `api/index.md`. |
 | 2026-06-11 | Director arbitration (Step 2): `fleet create` accepts a hidden `--full` flag and its default output is the compact `<fleet_id> director=<id> admin=<id>` line — corrected Background §1, the quickstart directive (compact default output), and added a cli-options directive to fix the stale § fleet create output shape. |
+| 2026-06-11 | Implementation complete — all 20 tasks and all 10 success criteria verified; two Copilot review rounds addressed on PR #107. Status flipped to Complete. |
