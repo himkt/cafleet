@@ -1,4 +1,8 @@
-# SQLite Data Model Specification
+---
+icon: lucide/table
+---
+
+# Data model
 
 The `Task` payload is fully relational: every routing field plus the message body lives in its own typed column. The only JSON `TEXT` blob is `agents.agent_card_json`, which stores an `AgentCard`-shaped document.
 

@@ -1,3 +1,7 @@
+---
+icon: lucide/code
+---
+
 # coding_agent
 
 The backend abstraction behind `--coding-agent`: the interface each spawned

@@ -1,3 +1,7 @@
+---
+icon: lucide/code
+---
+
 # API Reference
 
 The Python API matters to two audiences: **contributors** changing cafleet

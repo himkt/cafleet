@@ -1,7 +1,7 @@
 # Documentation Readability (docs/ + README.md + zensical.toml)
 
 **Status**: Approved
-**Progress**: 16/24 tasks complete
+**Progress**: 20/24 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -204,10 +204,10 @@ Everything not listed below is kept verbatim. The Error Messages table, every fl
 
 ### Step 4: Titles, icons, nav, README
 
-- [ ] Retitle the eight H1s per the titles table (four spec pages, two backend pages, contributing, bash-routing). <!-- completed: -->
-- [ ] Add `icon:` frontmatter to the 11 pages per the icons table. <!-- completed: -->
-- [ ] `zensical.toml` — rename the Specification sub-section label to "Coding-agent backends"; strip the starter-template boilerplate per the Specification (config values otherwise unchanged). <!-- completed: -->
-- [ ] `README.md` — add language hints to the five unlabeled fenced blocks (`bash` for gh-skill and codex marketplace, `text` for the Claude Code marketplace and the two prompt blocks). <!-- completed: -->
+- [x] Retitle the eight H1s per the titles table (four spec pages, two backend pages, contributing, bash-routing). <!-- completed: 2026-06-11T11:54 -->
+- [x] Add `icon:` frontmatter to the 11 pages per the icons table. <!-- completed: 2026-06-11T11:54 -->
+- [x] `zensical.toml` — rename the Specification sub-section label to "Coding-agent backends"; strip the starter-template boilerplate per the Specification (config values otherwise unchanged). <!-- completed: 2026-06-11T11:54 -->
+- [x] `README.md` — add language hints to the five unlabeled fenced blocks (`bash` for gh-skill and codex marketplace, `text` for the Claude Code marketplace and the two prompt blocks). <!-- completed: 2026-06-11T11:54 -->
 
 ### Step 5: Verification
 

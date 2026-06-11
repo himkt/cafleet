@@ -1,3 +1,7 @@
+---
+icon: lucide/code
+---
+
 # config
 
 The settings surface: every `CAFLEET_*` environment variable resolves to a

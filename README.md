@@ -63,7 +63,7 @@ Use your favorite tool to install skills (for example, GitHub CLI `gh skill`, ve
 
 #### (a) GitHub CLI (recommended)
 
-```
+```bash
 gh skill install himkt/cafleet --agent claude-code
 gh skill install himkt/cafleet --agent codex
 gh skill install himkt/cafleet --agent opencode
@@ -71,14 +71,14 @@ gh skill install himkt/cafleet --agent opencode
 
 #### (b) Claude Code marketplace (if you prefer)
 
-```
+```text
 /plugin marketplace add himkt/cafleet
 /plugin install cafleet@cafleet
 ```
 
 #### (c) Codex (if you prefer)
 
-```
+```bash
 codex plugin marketplace add himkt/cafleet
 ```
 
@@ -100,7 +100,7 @@ Per-coding-agent config (Claude `permissions.allow`, Codex `config.toml` + rules
 
 Provide the following prompt to Claude Code or Codex to see how it works.
 
-```
+```text
 I want to see how cafleet works.
 Please create a new team with two members using cafleet and let them ping-pong each other.
 After the demonstration, please shutdown the team.
@@ -112,7 +112,7 @@ CAFleet provides the builtin skills for Spec Driven Development (SDD). **We're u
 
 Invoke the `cafleet-design-doc-create` skill with a one-line request, e.g.:
 
-```
+```text
 I want to create a simple TUI calculator.
 ```
 

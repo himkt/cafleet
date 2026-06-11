@@ -1,4 +1,8 @@
-# WebUI API Specification
+---
+icon: lucide/globe
+---
+
+# WebUI API
 
 Base path: `/api`
 

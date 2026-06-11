@@ -2,7 +2,7 @@
 icon: lucide/terminal
 ---
 
-# Bash routing via Director
+# Bash routing
 
 Members spawn with workspace-scoped auto-approval enabled — `claude` uses
 `--permission-mode dontAsk`, `codex` uses `--ask-for-approval never
