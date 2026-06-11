@@ -1,8 +1,8 @@
 # Documentation Simplification (docs/ + README.md)
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 24/24 tasks complete
-**Last Updated**: 2026-06-09
+**Last Updated**: 2026-06-11
 
 ## Overview
 
@@ -288,3 +288,4 @@ This is the canonical CLI reference and the new canonical home for fleet bootstr
 |------|---------|
 | 2026-06-08 | Initial draft |
 | 2026-06-09 | Implementation complete — all 24 tasks across the 5 steps; clean `mise //:docs-build`, stale-term grep empty. |
+| 2026-06-11 | Status flipped to Complete — the field was left at Approved when implementation finished. |
