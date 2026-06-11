@@ -25,7 +25,7 @@ from cafleet.coding_agent.opencode_preset import CAFLEET_AGENT
 def test_opencode_is_registered_in_coding_agents():
     """Per §2: ``CODING_AGENTS["opencode"]`` is an ``OpencodeAgent`` instance.
     Click's ``--coding-agent`` choice list picks up ``"opencode"`` automatically
-    via ``list(CODING_AGENTS.keys())`` at ``cli.py:893`` and ``cli.py:260``."""
+    via ``list(CODING_AGENTS.keys())`` in ``cli/member.py`` and ``cli/fleet.py``."""
     assert "opencode" in CODING_AGENTS
     assert isinstance(CODING_AGENTS["opencode"], OpencodeAgent)
 

@@ -4,7 +4,7 @@ import pytest
 
 from cafleet import broker
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
-from cafleet.webui import api as webui_api
+from cafleet.webui import api
 from cafleet.webui.api import _format_messages
 
 
@@ -67,7 +67,7 @@ def test_format_messages__empty_rows_skips_lookup(monkeypatch):
         calls.append(list(ids))
         return {}
 
-    monkeypatch.setattr(webui_api.broker, "get_agent_names", fake_get_agent_names)
+    monkeypatch.setattr(api.broker, "get_agent_names", fake_get_agent_names)
     assert _format_messages([]) == []
     assert calls == []
 
@@ -90,7 +90,7 @@ def test_format_messages__shape_field_mapping_and_batched_lookup(monkeypatch):
         lookup_calls.append(set(ids))
         return {101: "alpha", 102: "beta", 103: "gamma"}
 
-    monkeypatch.setattr(webui_api.broker, "get_agent_names", fake_get_agent_names)
+    monkeypatch.setattr(api.broker, "get_agent_names", fake_get_agent_names)
 
     result = _format_messages(rows)
     # Batched: one lookup with the full id set.

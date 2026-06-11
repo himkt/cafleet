@@ -1,7 +1,7 @@
 """Per-subcommand ``--help`` line budgets.
 
-These budgets keep every ``@click.option(help=...)`` in ``cli.py`` (~80
-sites) reduced to single phrases. Narrative explanation lives in
+These budgets keep every ``@click.option(help=...)`` in the ``cli/``
+package (~80 sites) reduced to single phrases. Narrative explanation lives in
 ``docs/spec/cli-options.md`` instead. The budgets below are tight enough
 that any subcommand carrying a wrapped multi-line option help will fail.
 
@@ -87,7 +87,7 @@ def test_aggregate_help_under_byte_budget():
     )
     assert total_bytes <= 4320, (
         f"aggregate --help bytes = {total_bytes} (budget 4320). "
-        f"Trim multi-sentence option helps in cli.py to fit."
+        f"Trim multi-sentence option helps in the cli/ package to fit."
     )
 
 
