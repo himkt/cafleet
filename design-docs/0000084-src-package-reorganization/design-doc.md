@@ -1,7 +1,7 @@
 # Reorganize the cafleet Python Package Layout
 
 **Status**: Approved
-**Progress**: 0/27 tasks complete
+**Progress**: 6/27 tasks complete
 **Last Updated**: 2026-06-11
 
 ## Overview
@@ -250,12 +250,12 @@ Each new subdirectory gets an `__init__.py` (the tests tree is already a package
 
 ### Step 1: Documentation first
 
-- [ ] Update `docs/concepts/overview.md` (mermaid diagram: `broker.py` → `broker/` package, `server.py` / `webui_api.py` → `webui/app.py` + `webui/api.py`) <!-- completed: -->
-- [ ] Update `docs/api/broker.md` to describe the `broker/` package layout (submodule table + re-export contract) <!-- completed: -->
-- [ ] Sweep the rest of `docs/` (`index.md`, `spec/cli-options.md`, `get-started/`, `how-to/`, `reference/`, remaining `concepts/` pages) for references to `broker.py`, `cli.py`, `output.py`, `server.py`, `webui_api.py`, `cafleet.server:app`, or `src/cafleet/webui` asset paths, and update each <!-- completed: -->
-- [ ] Update `.claude/rules/commands.md`: `//cafleet:dev` description (`uvicorn cafleet.webui.app:app`) and the test-selector example path (`tests/test_fleet_cli.py::…` → `tests/cli/test_fleet.py::…`) <!-- completed: -->
-- [ ] Sweep `skills/*/SKILL.md` and skill reference files for module-path references and update any that name the flat modules <!-- completed: -->
-- [ ] Confirm `README.md` consistency (it currently contains no module-path references; update only if the sweep finds drift) <!-- completed: -->
+- [x] Update `docs/concepts/overview.md` (mermaid diagram: `broker.py` → `broker/` package, `server.py` / `webui_api.py` → `webui/app.py` + `webui/api.py`) <!-- completed: 2026-06-11T12:23 -->
+- [x] Update `docs/api/broker.md` to describe the `broker/` package layout (submodule table + re-export contract) <!-- completed: 2026-06-11T12:23 -->
+- [x] Sweep the rest of `docs/` (`index.md`, `spec/cli-options.md`, `get-started/`, `how-to/`, `reference/`, remaining `concepts/` pages) for references to `broker.py`, `cli.py`, `output.py`, `server.py`, `webui_api.py`, `cafleet.server:app`, or `src/cafleet/webui` asset paths, and update each <!-- completed: 2026-06-11T12:23 -->
+- [x] Update `.claude/rules/commands.md`: `//cafleet:dev` description (`uvicorn cafleet.webui.app:app`) and the test-selector example path (`tests/test_fleet_cli.py::…` → `tests/cli/test_fleet.py::…`) — applied by the Director (member harness denies writes under `.claude/`) <!-- completed: 2026-06-11T12:25 -->
+- [x] Sweep `skills/*/SKILL.md` and skill reference files for module-path references and update any that name the flat modules — sweep found zero references to the flat modules; the only `cafleet/src/cafleet/...` mentions are the fictional `cli/main.py:142` pointer-schema examples, which already read as subpackage paths and stay valid <!-- completed: 2026-06-11T12:23 -->
+- [x] Confirm `README.md` consistency (it currently contains no module-path references; update only if the sweep finds drift) — sweep confirmed zero module-path references; no change needed <!-- completed: 2026-06-11T12:23 -->
 
 ### Step 2: broker/ package
 

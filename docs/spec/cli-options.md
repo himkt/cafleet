@@ -318,7 +318,7 @@ The CLI flag wins when both a flag and the matching env var are set; the env var
 
 ### No other flags
 
-`--reload`, `--workers`, `--log-level`, and `--webui-dist-dir` are deliberately NOT exposed on `cafleet server`. Users who need them invoke uvicorn directly — which is exactly what `mise //cafleet:dev` does (it runs `uv run uvicorn cafleet.server:app --host 127.0.0.1 --port 8000` as an independent entry point, without delegating to `cafleet server`).
+`--reload`, `--workers`, `--log-level`, and `--webui-dist-dir` are deliberately NOT exposed on `cafleet server`. Users who need them invoke uvicorn directly — which is exactly what `mise //cafleet:dev` does (it runs `uv run uvicorn cafleet.webui.app:app --host 127.0.0.1 --port 8000` as an independent entry point, without delegating to `cafleet server`).
 
 ### Examples
 
