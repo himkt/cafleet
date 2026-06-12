@@ -1,7 +1,7 @@
 # Fix opencode `/exit` Keystroke Race in `TmuxMultiplexer.send_exit`
 
 **Status**: Approved
-**Progress**: 6/13 tasks complete
+**Progress**: 10/13 tasks complete
 **Last Updated**: 2026-06-12
 
 ## Overview
@@ -137,10 +137,10 @@ The `_SUBMIT_DELAY` comment is extended to name both settle cases it now covers:
 
 ### Step 3: Tests
 
-- [ ] Rework `test_send_exit__success_and_ignore_missing_semantics` in `tests/multiplexer/test_tmux.py`: assert the three-invocation argv sequence (`-l /exit`, `Enter`, `Enter`), per-invocation pane-gone tolerance with `ignore_missing=True` (including pane dying mid-sequence), propagation of non-pane-gone errors, and propagation of pane-gone with `ignore_missing=False`; monkeypatch `time.sleep` to avoid real delays <!-- completed: -->
-- [ ] Add `_send_literal_then_enter` `ignore_missing` coverage: default `False` still raises on pane-gone (existing caller behavior pinned); `True` swallows pane-gone on either invocation <!-- completed: -->
-- [ ] Confirm `tests/cli/test_member_delete.py` and `tests/cli/test_member.py` still pass — they mock `send_exit` at method level and assert kwargs only, so no changes are expected <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: -->
+- [x] Rework `test_send_exit__success_and_ignore_missing_semantics` in `tests/multiplexer/test_tmux.py`: assert the three-invocation argv sequence (`-l /exit`, `Enter`, `Enter`), per-invocation pane-gone tolerance with `ignore_missing=True` (including pane dying mid-sequence), propagation of non-pane-gone errors, and propagation of pane-gone with `ignore_missing=False`; monkeypatch `time.sleep` to avoid real delays <!-- completed: 2026-06-12T10:37 -->
+- [x] Add `_send_literal_then_enter` `ignore_missing` coverage: default `False` still raises on pane-gone (existing caller behavior pinned); `True` swallows pane-gone on either invocation <!-- completed: 2026-06-12T10:37 -->
+- [x] Confirm `tests/cli/test_member_delete.py` and `tests/cli/test_member.py` still pass — they mock `send_exit` at method level and assert kwargs only, so no changes are expected <!-- completed: 2026-06-12T10:43 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: 2026-06-12T10:43 -->
 
 ### Step 4: Live verification (one member per backend)
 
