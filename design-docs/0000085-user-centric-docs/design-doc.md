@@ -1,8 +1,8 @@
 # User-Centric Documentation Refactor
 
-**Status**: Approved
-**Progress**: 0/14 tasks complete
-**Last Updated**: 2026-06-11
+**Status**: Complete
+**Progress**: 14/14 tasks complete
+**Last Updated**: 2026-06-12
 
 ## Overview
 
@@ -10,12 +10,12 @@ Refactor the deployed docs (https://himkt.github.io/cafleet/, built from `docs/`
 
 ## Success Criteria
 
-- [ ] `docs/get-started/troubleshooting.md` is deleted and `grep -rn "troubleshooting" docs/ README.md zensical.toml` returns nothing (case-insensitive).
-- [ ] `docs/api/index.md` is deleted; no nav entry, no `(index.md)` link in `docs/api/*.md`, and `docs/index.md` links a concrete API page.
-- [ ] `mixed-backend-team.md` and `monitor-and-recover.md` each lead with a natural-language prompt block plus a one-line note naming the skills the agent loads, and end with `## Appendix: the CLI underneath` as their final section — no command blocks appear before the appendix.
-- [ ] `design-doc-development.md` gains a `## Prompts` section containing the three stage prompts, each followed by a one-line skill note.
-- [ ] `docs/how-to/index.md` frames the section as prompt-first and identifies the WebUI guide as the one human-operated exception; `use-the-webui.md` itself is unchanged.
-- [ ] `mise //:docs-build` (Zensical clean rebuild) completes without errors or broken-nav warnings.
+- [x] `docs/get-started/troubleshooting.md` is deleted and `grep -rn "troubleshooting" docs/ README.md zensical.toml` returns nothing (case-insensitive).
+- [x] `docs/api/index.md` is deleted; no nav entry, no `(index.md)` link in `docs/api/*.md`, and `docs/index.md` links a concrete API page.
+- [x] `mixed-backend-team.md` and `monitor-and-recover.md` each lead with a natural-language prompt block plus a one-line note naming the skills the agent loads, and end with `## Appendix: the CLI underneath` as their final section — no command blocks appear before the appendix.
+- [x] `design-doc-development.md` gains a `## Prompts` section containing the three stage prompts, each followed by a one-line skill note.
+- [x] `docs/how-to/index.md` frames the section as prompt-first and identifies the WebUI guide as the one human-operated exception; `use-the-webui.md` itself is unchanged.
+- [x] `mise //:docs-build` (Zensical clean rebuild) completes without errors or broken-nav warnings.
 
 ---
 
@@ -192,26 +192,35 @@ Ordering note: this change is documentation-only, so the documentation-first rul
 
 ### Step 1: Remove the Troubleshooting page
 
-- [ ] Delete `docs/get-started/troubleshooting.md` (`git rm`) <!-- completed: -->
-- [ ] Remove the Troubleshooting nav entry from `zensical.toml` <!-- completed: -->
-- [ ] Delete the Troubleshooting bullets from `docs/index.md`, `docs/get-started/index.md`, and `docs/get-started/quickstart.md` <!-- completed: -->
+- [x] Delete `docs/get-started/troubleshooting.md` (`git rm`) <!-- completed: 2026-06-12T09:02 -->
+- [x] Remove the Troubleshooting nav entry from `zensical.toml` <!-- completed: 2026-06-12T09:01 -->
+- [x] Delete the Troubleshooting bullets from `docs/index.md`, `docs/get-started/index.md`, and `docs/get-started/quickstart.md` <!-- completed: 2026-06-12T09:01 -->
 
 ### Step 2: Remove the API Reference index page
 
-- [ ] Delete `docs/api/index.md` (`git rm`) and remove `"api/index.md"` from the `zensical.toml` nav <!-- completed: -->
-- [ ] Repoint `docs/index.md` API Reference bullet to `api/broker.md` <!-- completed: -->
-- [ ] Replace the landing-page clause with the audience sentence in `docs/api/broker.md`, `docs/api/config.md`, `docs/api/coding-agent.md`, `docs/api/multiplexer.md` <!-- completed: -->
+- [x] Delete `docs/api/index.md` (`git rm`) and remove `"api/index.md"` from the `zensical.toml` nav <!-- completed: 2026-06-12T09:04 -->
+- [x] Repoint `docs/index.md` API Reference bullet to `api/broker.md` <!-- completed: 2026-06-12T09:04 -->
+- [x] Replace the landing-page clause with the audience sentence in `docs/api/broker.md`, `docs/api/config.md`, `docs/api/coding-agent.md`, `docs/api/multiplexer.md` <!-- completed: 2026-06-12T09:04 -->
 
 ### Step 3: Prompt-first how-to guides
 
-- [ ] Rewrite `docs/how-to/index.md` with the prompt-first framing and the WebUI-exception note <!-- completed: -->
-- [ ] Refactor `docs/how-to/mixed-backend-team.md` to the prompt-led skeleton (prompt + skill note + what-to-expect + CLI appendix) <!-- completed: -->
-- [ ] Refactor `docs/how-to/monitor-and-recover.md` to the prompt-led skeleton <!-- completed: -->
-- [ ] Add the three stage prompts to `docs/how-to/design-doc-development.md` <!-- completed: -->
-- [ ] Reword the How-to bullets in `docs/index.md` and `docs/get-started/quickstart.md` ("Where to go next") to "prompt-first task guides" <!-- completed: -->
+- [x] Rewrite `docs/how-to/index.md` with the prompt-first framing and the WebUI-exception note <!-- completed: 2026-06-12T09:08 -->
+- [x] Refactor `docs/how-to/mixed-backend-team.md` to the prompt-led skeleton (prompt + skill note + what-to-expect + CLI appendix) <!-- completed: 2026-06-12T09:08 -->
+- [x] Refactor `docs/how-to/monitor-and-recover.md` to the prompt-led skeleton <!-- completed: 2026-06-12T09:08 -->
+- [x] Add the three stage prompts to `docs/how-to/design-doc-development.md` <!-- completed: 2026-06-12T09:08 -->
+- [x] Reword the How-to bullets in `docs/index.md` and `docs/get-started/quickstart.md` ("Where to go next") to "prompt-first task guides" <!-- completed: 2026-06-12T09:08 -->
 
 ### Step 4: README and verification
 
-- [ ] Update `README.md:53` (drop the troubleshooting clause, reword to "Prompt-first task guides") <!-- completed: -->
-- [ ] Run `mise //:docs-build` and confirm a clean build with no missing-page or nav warnings <!-- completed: -->
-- [ ] Grep sweep: `troubleshooting` (case-insensitive) and `api/index` / `(index.md)` under `docs/`, `README.md`, `zensical.toml`, `skills/`, `.claude/rules/` return no hits <!-- completed: -->
+- [x] Update `README.md:53` (drop the troubleshooting clause, reword to "Prompt-first task guides") <!-- completed: 2026-06-12T09:10 -->
+- [x] Run `mise //:docs-build` and confirm a clean build with no missing-page or nav warnings <!-- completed: 2026-06-12T09:10 -->
+- [x] Grep sweep: `troubleshooting` (case-insensitive) and `api/index` / `(index.md)` under `docs/`, `README.md`, `zensical.toml`, `skills/`, `.claude/rules/` return no hits <!-- completed: 2026-06-12T09:10 -->
+
+---
+
+## Changelog
+
+| Date | Changes |
+|------|---------|
+| 2026-06-11 | Initial draft |
+| 2026-06-12 | Implementation complete: 14/14 tasks done, all success criteria verified, `mise //:docs-build` clean. PR #111 opened with Copilot review; Copilot reviewed all 17 files and generated no comments. Finalized on operator instruction. Status → Complete. |

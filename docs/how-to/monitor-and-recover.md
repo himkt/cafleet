@@ -4,12 +4,41 @@ icon: lucide/activity
 
 # Monitor and recover members
 
-Members run unattended in tmux panes, so the Director needs two primitives: a
-cheap roster watch and an escalation ladder for a member that stopped
-reacting. All commands run from the Director's pane. The walkthrough pastes
-literal ids: fleet `1`, members `4`/`5`/`6` — your ids will differ.
+Members run unattended in tmux panes, so the Director needs two primitives:
+a cheap roster watch and an escalation ladder for a member that stopped
+reacting. This guide checks on a running team and recovers a quiet member.
 
-## Watch the team
+## Prompt
+
+```text
+Check on my CAFleet team in fleet 1. List member activity, find any
+member that has gone quiet, inspect its pane, and recover it with the
+mildest intervention that works — only delete it as a last resort.
+```
+
+Your agent loads the `cafleet` skill plus `cafleet-agent-team-monitoring` /
+`cafleet-agent-team-supervision` (recovery ladder and idle semantics).
+
+## What to expect
+
+The agent lists the roster with per-member idle times, captures the pane of
+any member that has gone quiet, and climbs the recovery ladder from mildest
+to harshest: re-poke the inbox, answer a pending prompt, dispatch a shell
+command ([Bash routing](../concepts/bash-routing.md)), and only as a last
+resort delete the member. You see each intervention land as keystrokes in
+the member's pane ([tmux push](../concepts/tmux-push.md)).
+
+## Appendix: the CLI underneath
+
+The commands the agent runs, all from the Director's pane, with literal
+ids — fleet `1`, members `4`/`5`/`6`; your ids will differ.
+
+Watch the team — `last_sent` is the member's most recent outgoing message,
+`last_recv` its most recent delivery, `last_ack` the most recent delivery
+it acknowledged, and `idle` the wall-time since the latest of `last_sent` /
+`last_recv`; a member that receives work but never sends or acks is stalled
+— `alice` (`4`) below has been quiet for 14 minutes (aggregation rules in
+[CLI options](../spec/cli-options.md#member-list-activity-output)):
 
 ```bash
 cafleet --fleet-id 1 member list --activity
@@ -24,22 +53,13 @@ cafleet --fleet-id 1 member list --activity
   6               carol     active  12:34:56   12:34:50   12:34:50   6s
 ```
 
-`last_sent` is the member's most recent outgoing message, `last_recv` its
-most recent delivery, `last_ack` the most recent delivery it acknowledged,
-and `idle` the wall-time since the latest of `last_sent` / `last_recv`.
-A member that receives work but never sends or acks is stalled — `alice`
-(`4`) above has been quiet for 14 minutes. The exact aggregation rules live
-in [CLI options](../spec/cli-options.md#member-list-activity-output).
-
-## Inspect a quiet member
+Inspect the quiet member — prints the last 30 lines of the pane buffer with
+ANSI escapes stripped (`--lines N` for a longer tail); a stalled member
+typically shows a pending prompt:
 
 ```bash
 cafleet --fleet-id 1 member capture --member-id 4
 ```
-
-Prints the last 30 lines of the member's pane buffer with ANSI escapes
-stripped; pass `--lines N` for a longer tail. A stalled member typically
-shows a pending prompt, for example:
 
 ```
  Do you want to proceed?
@@ -47,13 +67,10 @@ shows a pending prompt, for example:
    2. No
 ```
 
-## The recovery ladder
-
-Work from the mildest intervention up. The reason panes need re-poking at
-all — inline previews are best-effort keystrokes — is explained in
-[tmux push](../concepts/tmux-push.md).
-
-### 1. `member ping` — re-poke a missed preview
+Ladder rung 1, `member ping` — injects a `cafleet message poll` keystroke
+so the member drains anything it missed; panes need re-poking at all
+because inline previews are best-effort keystrokes
+([tmux push](../concepts/tmux-push.md)):
 
 ```bash
 cafleet --fleet-id 1 member ping --member-id 4
@@ -63,10 +80,9 @@ cafleet --fleet-id 1 member ping --member-id 4
 Pinged member alice (%7) — poll keystroke dispatched.
 ```
 
-Injects a `cafleet message poll` keystroke into the pane so the member
-drains anything it missed.
-
-### 2. `member send-input` — answer a pending prompt
+Ladder rung 2, `member send-input` — `--choice 1..3` answers an
+AskUserQuestion option; `--freetext "<text>"` fills the "Type something"
+field:
 
 ```bash
 cafleet --fleet-id 1 member send-input --member-id 4 --choice 1
@@ -76,10 +92,9 @@ cafleet --fleet-id 1 member send-input --member-id 4 --choice 1
 Sent choice 1 to member alice (%7).
 ```
 
-`--choice 1..3` answers an AskUserQuestion option; `--freetext "<text>"`
-fills the "Type something" field.
-
-### 3. `member exec` — dispatch a shell command
+Ladder rung 3, `member exec` — keystrokes `! git status` into the pane so
+the coding agent runs it natively, the dispatch half of the
+bash-via-Director protocol ([Bash routing](../concepts/bash-routing.md)):
 
 ```bash
 cafleet --fleet-id 1 member exec --member-id 4 "git status"
@@ -89,11 +104,8 @@ cafleet --fleet-id 1 member exec --member-id 4 "git status"
 Sent bash command 'git status' to member alice (%7).
 ```
 
-Keystrokes `! git status` into the pane so the coding agent runs it natively
-— the dispatch half of the bash-via-Director protocol
-([Bash routing](../concepts/bash-routing.md)).
-
-### 4. `member delete` — last resort
+Ladder rung 4, `member delete` (last resort) — sends `/exit` and waits up
+to 15 s for the pane to close:
 
 ```bash
 cafleet --fleet-id 1 member delete --member-id 4
@@ -105,9 +117,10 @@ Member deleted.
   pane_id:   %7 (closed)
 ```
 
-The default path sends `/exit` and waits up to 15 s for the pane to close.
-A pane that refuses to close makes the command exit 2 with the pane tail and
-a built-in recovery hint:
+A pane that refuses to close makes the command exit 2 with the pane tail
+and a built-in recovery hint; `cafleet member delete --member-id 4 --force`
+skips the wait, kills the pane, and exits 0 even if the pane was already
+gone:
 
 ```
 Error: pane %7 did not close within 15.0s after /exit.
@@ -116,9 +129,6 @@ Error: pane %7 did not close within 15.0s after /exit.
 ---
 Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet member send-input`, then re-run `cafleet member delete`. Or re-run with `--force` to skip the wait and kill the pane.
 ```
-
-`cafleet member delete --member-id 4 --force` skips the wait, kills the
-pane, and exits 0 even if the pane was already gone.
 
 Every flag, validation rule, and exit code for the member subcommands is
 documented in [CLI options](../spec/cli-options.md#member-commands).

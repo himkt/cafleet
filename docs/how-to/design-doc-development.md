@@ -5,14 +5,31 @@ icon: lucide/file-text
 # Design-doc-driven development
 
 CAFleet ships three skills that run spec-driven development as
-CAFleet-orchestrated teams. Invoke them in order from your coding agent:
+CAFleet-orchestrated teams. Give your coding agent one prompt per stage, in
+order.
 
-1. The `cafleet-design-doc-create` skill — a Director / Drafter / Reviewer
-   team drafts the design document.
-2. The `cafleet-design-doc-interview` skill — a fine-grained Q&A pass that
-   annotates the document with your answers.
-3. The `cafleet-design-doc-execute` skill — a Director / Programmer / Tester
-   team implements the document.
+## Prompts
+
+```text
+Create a design doc for <one-line feature description>.
+```
+
+Triggers the `cafleet-design-doc-create` skill — a Director / Drafter /
+Reviewer team drafts the design document.
+
+```text
+Interview me about design-docs/NNNNNNN-<slug>.
+```
+
+Triggers the `cafleet-design-doc-interview` skill — a Director + Analyzer
+pair annotates the document with your answers.
+
+```text
+Implement design-docs/NNNNNNN-<slug>.
+```
+
+Triggers the `cafleet-design-doc-execute` skill — a Director / Programmer /
+Tester team implements the document.
 
 The contributor-facing description of this loop, including what to pass to
 each skill, lives in [Contributing](../get-started/contributing.md).

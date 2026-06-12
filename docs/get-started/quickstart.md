@@ -141,6 +141,4 @@ Deleted fleet 1. Deregistered 2 agents.
 Where to go next:
 
 - [CLI options](../spec/cli-options.md) — every subcommand and flag.
-- [How-to guides](../how-to/index.md) — task-oriented walkthroughs.
-- [Troubleshooting](troubleshooting.md) — symptom→fix table when something
-  does not behave.
+- [How-to guides](../how-to/index.md) — prompt-first task guides.

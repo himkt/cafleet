@@ -9,10 +9,6 @@ same fleet — there are no broker-level differences between the backends
 ([Coding agents](../concepts/coding-agents.md)). This guide creates a fleet
 with one member per backend and messages each of them.
 
-The walkthrough pastes literal ids: fleet `1`, root Director `2`, members
-`4`/`5`/`6`. Your ids will differ — substitute the integers your own
-commands print.
-
 ## Prerequisites
 
 - The backend binaries you want to mix (`claude`, `codex`, `opencode`) are on
@@ -22,7 +18,37 @@ commands print.
   [Configure](../get-started/configure.md), and you are inside a tmux
   session.
 
-## Create the fleet
+## Prompt
+
+```text
+Create a CAFleet team for this repo with three members — one on claude,
+one on codex, and one on opencode. Name them alice, bob, and carol.
+Once they are up, send each member a message asking it to report its
+backend, and confirm all three reply. Then tear the team down.
+```
+
+Your agent loads the `cafleet` skill plus `cafleet-agent-team-supervision`
+(which loads `cafleet-agent-team-monitoring`) before spawning members.
+
+## What to expect
+
+The agent creates a fleet, then opens three tmux panes — one per backend —
+each running its member's coding agent. Each message lands as a 2-line
+inline preview keystroked into the recipient's pane
+([tmux push](../concepts/tmux-push.md)), so you watch every member wake up
+and reply. Only the `claude` pane shows the member name in its pane title
+([Coding agents](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals)).
+When all three replies are confirmed, the agent closes the panes and
+deletes the fleet.
+
+## Appendix: the CLI underneath
+
+The commands the agent runs, with literal ids — fleet `1`, root Director
+`2`, members `4`/`5`/`6`; your ids will differ.
+
+Create the fleet — the operator declares the binary running in *your* pane
+via `--coding-agent` because cafleet cannot auto-detect it
+([Coding agents](../concepts/coding-agents.md)):
 
 ```bash
 cafleet fleet create --label "demo" --coding-agent claude
@@ -32,11 +58,7 @@ cafleet fleet create --label "demo" --coding-agent claude
 1 director=2 admin=3
 ```
 
-`--coding-agent` here declares which binary is running in *your* pane — the
-operator declares it because cafleet cannot auto-detect it
-([Coding agents](../concepts/coding-agents.md)).
-
-## Spawn one member per backend
+Spawn one member per backend:
 
 ```bash
 cafleet --fleet-id 1 member create --agent-id 2 \
@@ -68,7 +90,9 @@ cafleet --fleet-id 1 member create --agent-id 2 \
 6 carol backend=opencode pane=%9
 ```
 
-## Find the panes
+List the panes — only the `claude` pane titles itself with the member name
+([Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals)),
+so use the `pane_id` column to locate `bob` and `carol`:
 
 ```bash
 cafleet --fleet-id 1 member list
@@ -83,11 +107,9 @@ cafleet --fleet-id 1 member list
   6               carol     active  opencode  main     @1         %9       2026-06-11T09:03:00.000000+00:00
 ```
 
-Only the `claude` pane shows the member name in its pane title — see
-[Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals)
-— so use the `pane_id` column to locate `bob` and `carol`.
-
-## Message round-trip across backends
+Message each member — repeat with `--to 5` and `--to 6`; the envelope and
+the 2-line inline preview are identical for every backend
+([tmux push](../concepts/tmux-push.md)):
 
 ```bash
 cafleet --fleet-id 1 message send --agent-id 2 --to 4 --text "alice: report status"
@@ -99,11 +121,8 @@ Message sent.
 alice: report status
 ```
 
-Repeat with `--to 5` and `--to 6` — the envelope is identical for every
-backend, and each member receives the same 2-line inline preview in its pane
-([tmux push](../concepts/tmux-push.md)).
-
-## Tear down
+Tear down — repeat `member delete` for members `5` and `6`, then delete the
+fleet:
 
 ```bash
 cafleet --fleet-id 1 member delete --member-id 4
@@ -114,8 +133,6 @@ Member deleted.
   agent_id:  4
   pane_id:   %7 (closed)
 ```
-
-Repeat for members `5` and `6`, then delete the fleet:
 
 ```bash
 cafleet fleet delete 1
