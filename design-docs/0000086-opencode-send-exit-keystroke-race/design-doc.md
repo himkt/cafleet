@@ -1,7 +1,7 @@
 # Fix opencode `/exit` Keystroke Race in `TmuxMultiplexer.send_exit`
 
 **Status**: Approved
-**Progress**: 2/13 tasks complete
+**Progress**: 6/13 tasks complete
 **Last Updated**: 2026-06-12
 
 ## Overview
@@ -130,10 +130,10 @@ The `_SUBMIT_DELAY` comment is extended to name both settle cases it now covers:
 
 ### Step 2: Code
 
-- [ ] Add `timeout: float | None = None` pass-through to `_run_tolerating_pane_gone` <!-- completed: -->
-- [ ] Add `ignore_missing: bool = False` to `_send_literal_then_enter` and route both invocations through `_run_tolerating_pane_gone` <!-- completed: -->
-- [ ] Rewrite `send_exit` per the Specification (helper call + delayed trailing tolerant Enter) <!-- completed: -->
-- [ ] Extend the `_SUBMIT_DELAY` comment to cover the opencode slash-popup settle case alongside codex bracketed-paste <!-- completed: -->
+- [x] Add `timeout: float | None = None` pass-through to `_run_tolerating_pane_gone` <!-- completed: 2026-06-12T10:41 -->
+- [x] Add `ignore_missing: bool = False` to `_send_literal_then_enter` and route both invocations through `_run_tolerating_pane_gone` <!-- completed: 2026-06-12T10:41 -->
+- [x] Rewrite `send_exit` per the Specification (helper call + delayed trailing tolerant Enter) <!-- completed: 2026-06-12T10:41 -->
+- [x] Extend the `_SUBMIT_DELAY` comment to cover the opencode slash-popup settle case alongside codex bracketed-paste <!-- completed: 2026-06-12T10:41 -->
 
 ### Step 3: Tests
 
