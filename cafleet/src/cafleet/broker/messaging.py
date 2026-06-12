@@ -234,7 +234,7 @@ def broadcast_message(fleet_id: int, agent_id: int, text: str) -> list[dict]:
                 recipient_id=recipient_id,
                 sender_id=agent_id,
                 text=text,
-                now=_shared.now_iso(),
+                now=now,
                 origin_task_id=summary_task_id,
             )
             delivery_dict["task_id"] = _insert_task(session, delivery_dict)
