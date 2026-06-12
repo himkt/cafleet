@@ -11,7 +11,6 @@ nav = [
         { "Install" = "get-started/install.md" },
         { "Configure" = "get-started/configure.md" },
         { "Quickstart" = "get-started/quickstart.md" },
-        { "Troubleshooting" = "get-started/troubleshooting.md" },
         { "Contributing" = "get-started/contributing.md" },
     ] },
     { "How-to guides" = [

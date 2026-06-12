@@ -1,8 +1,8 @@
 # User-Centric Documentation Refactor
 
 **Status**: Approved
-**Progress**: 0/14 tasks complete
-**Last Updated**: 2026-06-11
+**Progress**: 3/14 tasks complete
+**Last Updated**: 2026-06-12
 
 ## Overview
 
@@ -192,9 +192,9 @@ Ordering note: this change is documentation-only, so the documentation-first rul
 
 ### Step 1: Remove the Troubleshooting page
 
-- [ ] Delete `docs/get-started/troubleshooting.md` (`git rm`) <!-- completed: -->
-- [ ] Remove the Troubleshooting nav entry from `zensical.toml` <!-- completed: -->
-- [ ] Delete the Troubleshooting bullets from `docs/index.md`, `docs/get-started/index.md`, and `docs/get-started/quickstart.md` <!-- completed: -->
+- [x] Delete `docs/get-started/troubleshooting.md` (`git rm`) <!-- completed: 2026-06-12T09:02 -->
+- [x] Remove the Troubleshooting nav entry from `zensical.toml` <!-- completed: 2026-06-12T09:01 -->
+- [x] Delete the Troubleshooting bullets from `docs/index.md`, `docs/get-started/index.md`, and `docs/get-started/quickstart.md` <!-- completed: 2026-06-12T09:01 -->
 
 ### Step 2: Remove the API Reference index page
 
