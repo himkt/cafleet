@@ -71,7 +71,7 @@ CAFleet provides the builtin skills for Spec Driven Development (SDD). **We're u
 Invoke the `cafleet-design-doc-create` skill with a one-line request, e.g.:
 
 ```text
-I want to create a simple TUI calculator. Please create design doc using cafleet skill.
+I want to create a simple TUI calculator. Please create a design doc using the CAFleet skill.
 ```
 
 See your coding-agent's skill documentation for the literal invocation syntax (Claude Code's `/skills`, codex's `/skills`, opencode's skill discovery).
