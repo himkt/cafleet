@@ -1,6 +1,6 @@
 # Fix opencode `/exit` Keystroke Race in `TmuxMultiplexer.send_exit`
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 13/13 tasks complete
 **Last Updated**: 2026-06-12
 
@@ -150,3 +150,4 @@ The `_SUBMIT_DELAY` comment is extended to name both settle cases it now covers:
 |------|---------|
 | 2026-06-12 | Initial draft |
 | 2026-06-12 | Dropped the trailing second Enter (user decision): `send_exit` is a single `_send_literal_then_enter` call; affected docs, code, test, and live-verification tasks reopened |
+| 2026-06-12 | Implementation complete: all 13 tasks and 6 success criteria verified; live-verified on claude/codex/opencode (4 opencode rounds); PR #112 reviewed clean by Copilot |
