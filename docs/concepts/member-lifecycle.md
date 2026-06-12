@@ -54,10 +54,11 @@ created without stealing focus, so the Director's active window is unchanged.
 
 ## Delete ordering
 
-Default path: send `/exit`, poll `list-panes` until the pane disappears
-(15 s timeout), then deregister. On timeout, capture the pane tail and fail
-loudly with exit code 2; the operator reruns with `--force` for an atomic
-kill+deregister.
+Default path: type `/exit` and submit it (separate keystrokes with short
+settle gaps, so every backend's input line registers the command before
+Enter), poll `list-panes` until the pane disappears (15 s timeout), then
+deregister. On timeout, capture the pane tail and fail loudly with exit
+code 2; the operator reruns with `--force` for an atomic kill+deregister.
 
 ## Spawn-prompt input modes
 
