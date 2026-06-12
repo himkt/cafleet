@@ -64,7 +64,7 @@ Please create a new team with two members using cafleet and let them ping-pong e
 After the demonstration, please shutdown the team.
 ```
 
-### 4.2. Real world usage; Design-doc-driven development
+### 3.2. Real world usage; Design-doc-driven development
 
 CAFleet provides the builtin skills for Spec Driven Development (SDD). **We're using CAFleet to develop CAFleet!**
 
