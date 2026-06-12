@@ -1,7 +1,7 @@
 # Fix opencode `/exit` Keystroke Race in `TmuxMultiplexer.send_exit`
 
 **Status**: Approved
-**Progress**: 7/13 tasks complete
+**Progress**: 13/13 tasks complete
 **Last Updated**: 2026-06-12
 
 ## Overview
@@ -10,12 +10,12 @@
 
 ## Success Criteria
 
-- [ ] A live opencode member is deletable via the default `cafleet member delete` path with exit 0 (no `--force`)
-- [ ] Live claude and codex members still delete cleanly via the default path (exit 0) with the new keystroke sequence
-- [ ] `send_exit` issues two separate `tmux send-keys` invocations — literal `/exit`, then Enter after a `_SUBMIT_DELAY` gap — each pane-gone-tolerant when `ignore_missing=True`
+- [x] A live opencode member is deletable via the default `cafleet member delete` path with exit 0 (no `--force`)
+- [x] Live claude and codex members still delete cleanly via the default path (exit 0) with the new keystroke sequence
+- [x] `send_exit` issues two separate `tmux send-keys` invocations — literal `/exit`, then Enter after a `_SUBMIT_DELAY` gap — each pane-gone-tolerant when `ignore_missing=True`
 - [x] `_send_literal_then_enter`'s new `ignore_missing` parameter defaults to `False`, leaving the four other callers (`send_poll_trigger`, `send_inline_preview`, `send_bash_command`, `send_freetext_and_submit`) behaviorally unchanged
 - [x] `_run_tolerating_pane_gone` keeps its pane-gone-marker swallowing behavior (its new `timeout` parameter is optional and backward compatible for existing callers); `kill_pane` and all three `send_exit` call sites keep their existing contracts
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass
 
 ---
 
@@ -131,16 +131,16 @@ The `_SUBMIT_DELAY` comment is extended to name both settle cases it now covers:
 
 ### Step 3: Tests
 
-- [ ] Rework `test_send_exit__success_and_ignore_missing_semantics` in `tests/multiplexer/test_tmux.py`: assert the two-invocation argv sequence (`-l /exit`, `Enter`) with a single `_SUBMIT_DELAY` sleep, per-invocation pane-gone tolerance with `ignore_missing=True` (including pane dying mid-sequence), propagation of non-pane-gone errors, and propagation of pane-gone with `ignore_missing=False`; monkeypatch `time.sleep` to avoid real delays <!-- completed: -->
+- [x] Rework `test_send_exit__success_and_ignore_missing_semantics` in `tests/multiplexer/test_tmux.py`: assert the two-invocation argv sequence (`-l /exit`, `Enter`) with a single `_SUBMIT_DELAY` sleep, per-invocation pane-gone tolerance with `ignore_missing=True` (including pane dying mid-sequence), propagation of non-pane-gone errors, and propagation of pane-gone with `ignore_missing=False`; monkeypatch `time.sleep` to avoid real delays <!-- completed: 2026-06-12T10:52 -->
 - [x] Add `_send_literal_then_enter` `ignore_missing` coverage: default `False` still raises on pane-gone (existing caller behavior pinned); `True` swallows pane-gone on either invocation <!-- completed: 2026-06-12T10:37 -->
 - [x] Confirm `tests/cli/test_member_delete.py` and `tests/cli/test_member.py` still pass — they mock `send_exit` at method level and assert kwargs only, so no changes are expected <!-- completed: 2026-06-12T10:43 -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: 2026-06-12T10:58 -->
 
 ### Step 4: Live verification (one member per backend)
 
-- [ ] claude: `cafleet member create` + default `cafleet member delete` exits 0 <!-- completed: -->
-- [ ] codex: `cafleet member create` + default `cafleet member delete` exits 0 <!-- completed: -->
-- [ ] opencode: `cafleet member create` + default `cafleet member delete` exits 0 without `--force` <!-- completed: -->
+- [x] claude: `cafleet member create` + default `cafleet member delete` exits 0 <!-- completed: 2026-06-12T10:58 -->
+- [x] codex: `cafleet member create` + default `cafleet member delete` exits 0 <!-- completed: 2026-06-12T10:59 -->
+- [x] opencode: `cafleet member create` + default `cafleet member delete` exits 0 without `--force` <!-- completed: 2026-06-12T10:57 -->
 
 ---
 
