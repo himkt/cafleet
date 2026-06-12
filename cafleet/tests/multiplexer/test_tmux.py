@@ -139,27 +139,20 @@ _NON_PANE_GONE_FAILURE = "tmux command failed: server exited unexpectedly"
         "expected_call_count",
     ),
     [
-        ("success_three_invocations", {}, False, None, 3),
+        ("success_two_invocations", {}, False, None, 2),
         (
             "ignore_missing_swallows_pane_gone_on_every_invocation",
-            {0: _PANE_GONE_FAILURE, 1: _PANE_GONE_FAILURE, 2: _PANE_GONE_FAILURE},
+            {0: _PANE_GONE_FAILURE, 1: _PANE_GONE_FAILURE},
             True,
             None,
-            3,
+            2,
         ),
         (
             "pane_dies_after_literal_send",
-            {1: _PANE_GONE_FAILURE, 2: _PANE_GONE_FAILURE},
+            {1: _PANE_GONE_FAILURE},
             True,
             None,
-            3,
-        ),
-        (
-            "pane_dies_after_first_enter",
-            {2: _PANE_GONE_FAILURE},
-            True,
-            None,
-            3,
+            2,
         ),
         (
             "non_pane_gone_error_propagates_despite_ignore_missing",
@@ -213,12 +206,8 @@ def test_send_exit__success_and_ignore_missing_semantics(
         assert captured == [
             ["tmux", "send-keys", "-t", "%7", "-l", "/exit"],
             ["tmux", "send-keys", "-t", "%7", "Enter"],
-            ["tmux", "send-keys", "-t", "%7", "Enter"],
         ]
-        assert sleeps == [
-            multiplexer_tmux._SUBMIT_DELAY,
-            multiplexer_tmux._SUBMIT_DELAY,
-        ]
+        assert sleeps == [multiplexer_tmux._SUBMIT_DELAY]
     assert len(captured) == expected_call_count
 
 
