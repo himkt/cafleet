@@ -144,15 +144,10 @@ class TmuxMultiplexer:
         _run(["tmux", "select-layout", "-t", target_window_id, layout])
 
     def send_exit(self, *, target_pane_id: str, ignore_missing: bool = False) -> None:
-        """Send literal ``/exit`` + Enter + trailing Enter, swallowing pane-gone errors when requested."""
+        """Send ``/exit`` + Enter, swallowing pane-gone errors when requested."""
         _send_literal_then_enter(
             target_pane_id=target_pane_id,
             payload="/exit",
-            ignore_missing=ignore_missing,
-        )
-        time.sleep(_SUBMIT_DELAY)
-        _run_tolerating_pane_gone(
-            ["tmux", "send-keys", "-t", target_pane_id, "Enter"],
             ignore_missing=ignore_missing,
         )
 

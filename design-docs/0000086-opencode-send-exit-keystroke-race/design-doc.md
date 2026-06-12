@@ -1,7 +1,7 @@
 # Fix opencode `/exit` Keystroke Race in `TmuxMultiplexer.send_exit`
 
 **Status**: Approved
-**Progress**: 5/13 tasks complete
+**Progress**: 7/13 tasks complete
 **Last Updated**: 2026-06-12
 
 ## Overview
@@ -119,14 +119,14 @@ The `_SUBMIT_DELAY` comment is extended to name both settle cases it now covers:
 
 ### Step 1: Documentation
 
-- [ ] Update `docs/spec/cli-options.md` § `member delete` default-path description (~line 560): replace "sends `/exit` via `tmux send-keys`" with the two-invocation sequence (literal `/exit`, 0.12 s gap, Enter) and a one-line rationale (opencode slash-popup settle) <!-- completed: -->
+- [x] Update `docs/spec/cli-options.md` § `member delete` default-path description (~line 560): replace "sends `/exit` via `tmux send-keys`" with the two-invocation sequence (literal `/exit`, 0.12 s gap, Enter) and a one-line rationale (opencode slash-popup settle) <!-- completed: 2026-06-12T10:57 -->
 - [x] Update `docs/concepts/member-lifecycle.md` default-path wording (~line 57) if it implies a single fused keystroke; keep the altitude conceptual <!-- completed: 2026-06-12T10:35 -->
 
 ### Step 2: Code
 
 - [x] Add `timeout: float | None = None` pass-through to `_run_tolerating_pane_gone` <!-- completed: 2026-06-12T10:41 -->
 - [x] Add `ignore_missing: bool = False` to `_send_literal_then_enter` and route both invocations through `_run_tolerating_pane_gone` <!-- completed: 2026-06-12T10:41 -->
-- [ ] Rewrite `send_exit` per the Specification (single `_send_literal_then_enter` call) <!-- completed: -->
+- [x] Rewrite `send_exit` per the Specification (single `_send_literal_then_enter` call) <!-- completed: 2026-06-12T10:57 -->
 - [x] Extend the `_SUBMIT_DELAY` comment to cover the opencode slash-popup settle case alongside codex bracketed-paste <!-- completed: 2026-06-12T10:41 -->
 
 ### Step 3: Tests
