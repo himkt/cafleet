@@ -557,7 +557,7 @@ The only boundary is fleet isolation: a `--member-id` that does not belong to `-
 
 #### Polling contract (default path)
 
-The default path sends `/exit` via `tmux send-keys`, then polls `tmux list-panes -a -F "#{pane_id}"` for the target pane every **500 ms** until the pane disappears or a **15.0 s** timeout elapses. A typical coding-agent `/exit` completes in 1–3 s; operators who need faster escalation pass `--force`. On timeout, the pane buffer tail (last 80 lines) is captured via `tmux capture-pane` and printed on stderr, followed by a recovery hint, and the command exits **2**. The timeout output shape:
+The default path sends `/exit` as two separate `tmux send-keys` invocations — literal `/exit` (`-l`), a 0.12 s gap, then Enter — because opencode's slash-command autocomplete popup needs the gap to settle before Enter submits. It then polls `tmux list-panes -a -F "#{pane_id}"` for the target pane every **500 ms** until the pane disappears or a **15.0 s** timeout elapses. A typical coding-agent `/exit` completes in 1–3 s; operators who need faster escalation pass `--force`. On timeout, the pane buffer tail (last 80 lines) is captured via `tmux capture-pane` and printed on stderr, followed by a recovery hint, and the command exits **2**. The timeout output shape:
 
 ```
 Error: pane %7 did not close within 15.0s after /exit.

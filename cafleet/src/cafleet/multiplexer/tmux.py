@@ -15,8 +15,9 @@ _PANE_GONE_MARKERS = ("can't find pane", "no such pane")
 
 
 # Sleep between literal-text ``send-keys -l`` and following ``send-keys Enter``
-# so the codex TUI's bracketed-paste finalises before submit (applied
-# unconditionally to keep the helpers backend-agnostic).
+# so the codex TUI's bracketed-paste finalises and opencode's slash-command
+# autocomplete popup settles before submit (applied unconditionally to keep
+# the helpers backend-agnostic).
 _SUBMIT_DELAY = 0.12
 
 
@@ -38,9 +39,11 @@ def _run(args: list[str], *, timeout: float | None = None) -> str:
     return result.stdout
 
 
-def _run_tolerating_pane_gone(args: list[str], *, ignore_missing: bool) -> None:
+def _run_tolerating_pane_gone(
+    args: list[str], *, ignore_missing: bool, timeout: float | None = None
+) -> None:
     try:
-        _run(args)
+        _run(args, timeout=timeout)
     except TmuxError as exc:
         if ignore_missing and any(m in str(exc).lower() for m in _PANE_GONE_MARKERS):
             return
@@ -48,15 +51,21 @@ def _run_tolerating_pane_gone(args: list[str], *, ignore_missing: bool) -> None:
 
 
 def _send_literal_then_enter(
-    *, target_pane_id: str, payload: str, timeout: float | None = None
+    *,
+    target_pane_id: str,
+    payload: str,
+    timeout: float | None = None,
+    ignore_missing: bool = False,
 ) -> None:
-    _run(
+    _run_tolerating_pane_gone(
         ["tmux", "send-keys", "-t", target_pane_id, "-l", payload],
+        ignore_missing=ignore_missing,
         timeout=timeout,
     )
     time.sleep(_SUBMIT_DELAY)
-    _run(
+    _run_tolerating_pane_gone(
         ["tmux", "send-keys", "-t", target_pane_id, "Enter"],
+        ignore_missing=ignore_missing,
         timeout=timeout,
     )
 
@@ -136,8 +145,9 @@ class TmuxMultiplexer:
 
     def send_exit(self, *, target_pane_id: str, ignore_missing: bool = False) -> None:
         """Send ``/exit`` + Enter, swallowing pane-gone errors when requested."""
-        _run_tolerating_pane_gone(
-            ["tmux", "send-keys", "-t", target_pane_id, "/exit", "Enter"],
+        _send_literal_then_enter(
+            target_pane_id=target_pane_id,
+            payload="/exit",
             ignore_missing=ignore_missing,
         )
 
