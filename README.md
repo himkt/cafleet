@@ -1,8 +1,8 @@
 # CAFleet
 
-https://github.com/user-attachments/assets/a66620cb-4a81-4525-95f2-1f1f22765288
+https://github.com/user-attachments/assets/bd2b195a-f3de-4fa3-bcc8-3c6ef9f1016a
 
-Agent Teams reinvented for collaborative coding across multiple coding-agent backends, with full code transparency.
+Agent Teams reinvented for collaborative coding across multiple coding-agent backends (Claude Code, Codex, and OpenCode), with full code transparency.
 
 ## 1. Who is CAFleet for
 
