@@ -1,7 +1,7 @@
 # User-Centric Documentation Refactor
 
 **Status**: Approved
-**Progress**: 11/14 tasks complete
+**Progress**: 14/14 tasks complete
 **Last Updated**: 2026-06-12
 
 ## Overview
@@ -212,6 +212,6 @@ Ordering note: this change is documentation-only, so the documentation-first rul
 
 ### Step 4: README and verification
 
-- [ ] Update `README.md:53` (drop the troubleshooting clause, reword to "Prompt-first task guides") <!-- completed: -->
-- [ ] Run `mise //:docs-build` and confirm a clean build with no missing-page or nav warnings <!-- completed: -->
-- [ ] Grep sweep: `troubleshooting` (case-insensitive) and `api/index` / `(index.md)` under `docs/`, `README.md`, `zensical.toml`, `skills/`, `.claude/rules/` return no hits <!-- completed: -->
+- [x] Update `README.md:53` (drop the troubleshooting clause, reword to "Prompt-first task guides") <!-- completed: 2026-06-12T09:10 -->
+- [x] Run `mise //:docs-build` and confirm a clean build with no missing-page or nav warnings <!-- completed: 2026-06-12T09:10 -->
+- [x] Grep sweep: `troubleshooting` (case-insensitive) and `api/index` / `(index.md)` under `docs/`, `README.md`, `zensical.toml`, `skills/`, `.claude/rules/` return no hits <!-- completed: 2026-06-12T09:10 -->

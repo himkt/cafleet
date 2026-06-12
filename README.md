@@ -50,7 +50,7 @@ cafleet fleet delete 1
 Deleted fleet 1. Deregistered 2 agents.
 ```
 
-The full walkthrough with every expected output is the quickstart: <https://himkt.github.io/cafleet/get-started/quickstart/>. Task-oriented guides live at <https://himkt.github.io/cafleet/how-to/>, and the symptom→fix table at <https://himkt.github.io/cafleet/get-started/troubleshooting/>.
+The full walkthrough with every expected output is the quickstart: <https://himkt.github.io/cafleet/get-started/quickstart/>. Prompt-first task guides live at <https://himkt.github.io/cafleet/how-to/>.
 
 ## 3. Install
 
