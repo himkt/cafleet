@@ -1,7 +1,7 @@
 # User-Centric Documentation Refactor
 
 **Status**: Approved
-**Progress**: 3/14 tasks complete
+**Progress**: 6/14 tasks complete
 **Last Updated**: 2026-06-12
 
 ## Overview
@@ -198,9 +198,9 @@ Ordering note: this change is documentation-only, so the documentation-first rul
 
 ### Step 2: Remove the API Reference index page
 
-- [ ] Delete `docs/api/index.md` (`git rm`) and remove `"api/index.md"` from the `zensical.toml` nav <!-- completed: -->
-- [ ] Repoint `docs/index.md` API Reference bullet to `api/broker.md` <!-- completed: -->
-- [ ] Replace the landing-page clause with the audience sentence in `docs/api/broker.md`, `docs/api/config.md`, `docs/api/coding-agent.md`, `docs/api/multiplexer.md` <!-- completed: -->
+- [x] Delete `docs/api/index.md` (`git rm`) and remove `"api/index.md"` from the `zensical.toml` nav <!-- completed: 2026-06-12T09:04 -->
+- [x] Repoint `docs/index.md` API Reference bullet to `api/broker.md` <!-- completed: 2026-06-12T09:04 -->
+- [x] Replace the landing-page clause with the audience sentence in `docs/api/broker.md`, `docs/api/config.md`, `docs/api/coding-agent.md`, `docs/api/multiplexer.md` <!-- completed: 2026-06-12T09:04 -->
 
 ### Step 3: Prompt-first how-to guides
 

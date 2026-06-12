@@ -41,7 +41,6 @@ nav = [
         ] },
     ] },
     { "API Reference" = [
-        "api/index.md",
         { "broker" = "api/broker.md" },
         { "config" = "api/config.md" },
         { "coding_agent" = "api/coding-agent.md" },
