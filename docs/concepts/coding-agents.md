@@ -38,7 +38,8 @@ both selects which backend is spawned AND is recorded as placement metadata.
 `cafleet member create` accepts an optional `--model <string>` that is
 forwarded to the spawned backend binary via that binary's `--model` flag
 (e.g. `--model sonnet` for `claude`, `--model gpt-5.4-mini` for `codex`,
-`--model anthropic/claude-sonnet-4-6` for `opencode`). When the flag is
+`--model anthropic/claude-sonnet-4-6` or `--model opencode/big-pickle`
+for `opencode`). When the flag is
 omitted, no model tokens are emitted and each binary uses its own default
 model.
 
