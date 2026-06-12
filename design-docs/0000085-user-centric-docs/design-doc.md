@@ -10,12 +10,12 @@ Refactor the deployed docs (https://himkt.github.io/cafleet/, built from `docs/`
 
 ## Success Criteria
 
-- [ ] `docs/get-started/troubleshooting.md` is deleted and `grep -rn "troubleshooting" docs/ README.md zensical.toml` returns nothing (case-insensitive).
-- [ ] `docs/api/index.md` is deleted; no nav entry, no `(index.md)` link in `docs/api/*.md`, and `docs/index.md` links a concrete API page.
-- [ ] `mixed-backend-team.md` and `monitor-and-recover.md` each lead with a natural-language prompt block plus a one-line note naming the skills the agent loads, and end with `## Appendix: the CLI underneath` as their final section — no command blocks appear before the appendix.
-- [ ] `design-doc-development.md` gains a `## Prompts` section containing the three stage prompts, each followed by a one-line skill note.
-- [ ] `docs/how-to/index.md` frames the section as prompt-first and identifies the WebUI guide as the one human-operated exception; `use-the-webui.md` itself is unchanged.
-- [ ] `mise //:docs-build` (Zensical clean rebuild) completes without errors or broken-nav warnings.
+- [x] `docs/get-started/troubleshooting.md` is deleted and `grep -rn "troubleshooting" docs/ README.md zensical.toml` returns nothing (case-insensitive).
+- [x] `docs/api/index.md` is deleted; no nav entry, no `(index.md)` link in `docs/api/*.md`, and `docs/index.md` links a concrete API page.
+- [x] `mixed-backend-team.md` and `monitor-and-recover.md` each lead with a natural-language prompt block plus a one-line note naming the skills the agent loads, and end with `## Appendix: the CLI underneath` as their final section — no command blocks appear before the appendix.
+- [x] `design-doc-development.md` gains a `## Prompts` section containing the three stage prompts, each followed by a one-line skill note.
+- [x] `docs/how-to/index.md` frames the section as prompt-first and identifies the WebUI guide as the one human-operated exception; `use-the-webui.md` itself is unchanged.
+- [x] `mise //:docs-build` (Zensical clean rebuild) completes without errors or broken-nav warnings.
 
 ---
 
