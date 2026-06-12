@@ -1,6 +1,6 @@
 # User-Centric Documentation Refactor
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 14/14 tasks complete
 **Last Updated**: 2026-06-12
 
@@ -215,3 +215,12 @@ Ordering note: this change is documentation-only, so the documentation-first rul
 - [x] Update `README.md:53` (drop the troubleshooting clause, reword to "Prompt-first task guides") <!-- completed: 2026-06-12T09:10 -->
 - [x] Run `mise //:docs-build` and confirm a clean build with no missing-page or nav warnings <!-- completed: 2026-06-12T09:10 -->
 - [x] Grep sweep: `troubleshooting` (case-insensitive) and `api/index` / `(index.md)` under `docs/`, `README.md`, `zensical.toml`, `skills/`, `.claude/rules/` return no hits <!-- completed: 2026-06-12T09:10 -->
+
+---
+
+## Changelog
+
+| Date | Changes |
+|------|---------|
+| 2026-06-11 | Initial draft |
+| 2026-06-12 | Implementation complete: 14/14 tasks done, all success criteria verified, `mise //:docs-build` clean. PR #111 opened with Copilot review; Copilot reviewed all 17 files and generated no comments. Finalized on operator instruction. Status → Complete. |
