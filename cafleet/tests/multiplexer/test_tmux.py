@@ -124,47 +124,206 @@ def test_split_window__argv_construction(monkeypatch, run_recorder):
     assert appended.index("-d") < appended.index("my-binary")
 
 
+_PANE_GONE_FAILURE = (
+    "tmux command failed: tmux send-keys -t %99 Enter\nstderr: can't find pane: %99"
+)
+_NON_PANE_GONE_FAILURE = "tmux command failed: server exited unexpectedly"
+
+
 @pytest.mark.parametrize(
-    ("scenario", "mock_error", "ignore_missing", "expect_raise_match"),
+    (
+        "scenario",
+        "error_by_call",
+        "ignore_missing",
+        "expect_raise_match",
+        "expected_call_count",
+    ),
     [
-        ("success", None, False, None),
+        ("success_three_invocations", {}, False, None, 3),
         (
-            "failure_raises",
-            TmuxError("tmux command failed: server exited unexpectedly"),
-            False,
-            "server exited unexpectedly",
-        ),
-        (
-            "ignore_missing_swallows_pane_gone",
-            TmuxError(
-                "tmux command failed: tmux send-keys -t %99 /exit Enter\n"
-                "stderr: can't find pane: %99"
-            ),
+            "ignore_missing_swallows_pane_gone_on_every_invocation",
+            {0: _PANE_GONE_FAILURE, 1: _PANE_GONE_FAILURE, 2: _PANE_GONE_FAILURE},
             True,
             None,
+            3,
         ),
         (
-            "ignore_missing_does_not_swallow_other_errors",
-            TmuxError("tmux command failed: server crashed"),
+            "pane_dies_after_literal_send",
+            {1: _PANE_GONE_FAILURE, 2: _PANE_GONE_FAILURE},
             True,
-            "server crashed",
+            None,
+            3,
+        ),
+        (
+            "pane_dies_after_first_enter",
+            {2: _PANE_GONE_FAILURE},
+            True,
+            None,
+            3,
+        ),
+        (
+            "non_pane_gone_error_propagates_despite_ignore_missing",
+            {0: _NON_PANE_GONE_FAILURE},
+            True,
+            "server exited unexpectedly",
+            1,
+        ),
+        (
+            "pane_gone_on_first_invocation_raises_without_ignore_missing",
+            {0: _PANE_GONE_FAILURE},
+            False,
+            "can't find pane",
+            1,
+        ),
+        (
+            "pane_gone_mid_sequence_raises_without_ignore_missing",
+            {1: _PANE_GONE_FAILURE},
+            False,
+            "can't find pane",
+            2,
         ),
     ],
 )
 def test_send_exit__success_and_ignore_missing_semantics(
-    monkeypatch, scenario, mock_error, ignore_missing, expect_raise_match
+    monkeypatch,
+    scenario,
+    error_by_call,
+    ignore_missing,
+    expect_raise_match,
+    expected_call_count,
 ):
+    captured: list[list[str]] = []
+    sleeps: list[float] = []
+
     def mock_run(args, **_kwargs):
-        if mock_error is not None:
-            raise mock_error
+        call_index = len(captured)
+        captured.append(list(args))
+        if call_index in error_by_call:
+            raise TmuxError(error_by_call[call_index])
         return ""
 
     monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
-    if expect_raise_match is None:
-        _tmux.send_exit(target_pane_id="%7", ignore_missing=ignore_missing)
-    else:
+    monkeypatch.setattr("time.sleep", lambda secs: sleeps.append(secs))
+
+    if expect_raise_match is not None:
         with pytest.raises(TmuxError, match=expect_raise_match):
             _tmux.send_exit(target_pane_id="%7", ignore_missing=ignore_missing)
+    else:
+        _tmux.send_exit(target_pane_id="%7", ignore_missing=ignore_missing)
+        assert captured == [
+            ["tmux", "send-keys", "-t", "%7", "-l", "/exit"],
+            ["tmux", "send-keys", "-t", "%7", "Enter"],
+            ["tmux", "send-keys", "-t", "%7", "Enter"],
+        ]
+        assert sleeps == [
+            multiplexer_tmux._SUBMIT_DELAY,
+            multiplexer_tmux._SUBMIT_DELAY,
+        ]
+    assert len(captured) == expected_call_count
+
+
+@pytest.mark.parametrize(
+    (
+        "scenario",
+        "error_by_call",
+        "ignore_missing_kwargs",
+        "expect_raise_match",
+        "expected_call_count",
+    ),
+    [
+        (
+            "default_false_raises_on_pane_gone_literal_send",
+            {0: _PANE_GONE_FAILURE},
+            {},
+            "can't find pane",
+            1,
+        ),
+        (
+            "default_false_raises_on_pane_gone_enter",
+            {1: _PANE_GONE_FAILURE},
+            {},
+            "can't find pane",
+            2,
+        ),
+        (
+            "explicit_false_raises_on_pane_gone",
+            {0: _PANE_GONE_FAILURE},
+            {"ignore_missing": False},
+            "can't find pane",
+            1,
+        ),
+        (
+            "true_swallows_pane_gone_on_literal_send",
+            {0: _PANE_GONE_FAILURE},
+            {"ignore_missing": True},
+            None,
+            2,
+        ),
+        (
+            "true_swallows_pane_gone_on_enter",
+            {1: _PANE_GONE_FAILURE},
+            {"ignore_missing": True},
+            None,
+            2,
+        ),
+        (
+            "true_does_not_swallow_other_errors",
+            {0: _NON_PANE_GONE_FAILURE},
+            {"ignore_missing": True},
+            "server exited unexpectedly",
+            1,
+        ),
+    ],
+)
+def test_send_literal_then_enter__ignore_missing_semantics(
+    monkeypatch,
+    scenario,
+    error_by_call,
+    ignore_missing_kwargs,
+    expect_raise_match,
+    expected_call_count,
+):
+    captured: list[list[str]] = []
+
+    def mock_run(args, **_kwargs):
+        call_index = len(captured)
+        captured.append(list(args))
+        if call_index in error_by_call:
+            raise TmuxError(error_by_call[call_index])
+        return ""
+
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+
+    if expect_raise_match is not None:
+        with pytest.raises(TmuxError, match=expect_raise_match):
+            multiplexer_tmux._send_literal_then_enter(
+                target_pane_id="%7", payload="hello", **ignore_missing_kwargs
+            )
+    else:
+        multiplexer_tmux._send_literal_then_enter(
+            target_pane_id="%7", payload="hello", **ignore_missing_kwargs
+        )
+        assert captured == [
+            ["tmux", "send-keys", "-t", "%7", "-l", "hello"],
+            ["tmux", "send-keys", "-t", "%7", "Enter"],
+        ]
+    assert len(captured) == expected_call_count
+
+
+def test_send_literal_then_enter__forwards_timeout_to_run(monkeypatch):
+    captured_timeouts: list[float | None] = []
+
+    def mock_run(args, *, timeout=None, **_kwargs):
+        captured_timeouts.append(timeout)
+        return ""
+
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+    multiplexer_tmux._send_literal_then_enter(
+        target_pane_id="%7", payload="hello", timeout=5
+    )
+    assert captured_timeouts == [5, 5]
 
 
 @pytest.mark.parametrize(
