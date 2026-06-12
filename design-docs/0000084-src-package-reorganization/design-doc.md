@@ -1,8 +1,8 @@
 # Reorganize the cafleet Python Package Layout
 
-**Status**: Approved
-**Progress**: 0/27 tasks complete
-**Last Updated**: 2026-06-11
+**Status**: Complete
+**Progress**: 27/27 tasks complete
+**Last Updated**: 2026-06-12
 
 ## Overview
 
@@ -10,13 +10,13 @@ Reorganize `cafleet/src/cafleet` from a layout dominated by two fat modules (`cl
 
 ## Success Criteria
 
-- [ ] `broker.py`, `cli.py`, `output.py`, `server.py`, and `webui_api.py` no longer exist as flat modules; their contents live in the `broker/`, `cli/`, `output/`, and `webui/` subpackages per the placement tables below
-- [ ] No module under `src/cafleet` exceeds ~650 lines (largest expected: `cli/member.py`)
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:format` all pass
-- [ ] `cafleet --version` and `cafleet server` work after `mise //cafleet:install`; `mise //admin:build` emits assets into `src/cafleet/webui/dist/` and `mise //cafleet:build` packages them into the wheel
-- [ ] The console entry point `cafleet = "cafleet.cli:cli"` is unchanged (the `cli` group is exposed from `cli/__init__.py`)
-- [ ] A repo-wide grep finds no stale references to `cafleet.server:app`, `webui_api`, or the removed flat module paths in source, tests, docs, skills, rules, or mise tasks
-- [ ] `cafleet/tests/` mirrors the source layout (`tests/broker/`, `tests/cli/`, `tests/output/`, `tests/webui/`, `tests/multiplexer/`, `tests/coding_agent/`, `tests/db/`) per the mapping table below
+- [x] `broker.py`, `cli.py`, `output.py`, `server.py`, and `webui_api.py` no longer exist as flat modules; their contents live in the `broker/`, `cli/`, `output/`, and `webui/` subpackages per the placement tables below
+- [x] No module under `src/cafleet` exceeds ~650 lines (largest expected: `cli/member.py`) — largest is `cli/member.py` at 633
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:format` all pass
+- [x] `cafleet --version` and `cafleet server` work after `mise //cafleet:install`; `mise //admin:build` emits assets into `src/cafleet/webui/dist/` and `mise //cafleet:build` packages them into the wheel
+- [x] The console entry point `cafleet = "cafleet.cli:cli"` is unchanged (the `cli` group is exposed from `cli/__init__.py`)
+- [x] A repo-wide grep finds no stale references to `cafleet.server:app`, `webui_api`, or the removed flat module paths in source, tests, docs, skills, rules, or mise tasks
+- [x] `cafleet/tests/` mirrors the source layout (`tests/broker/`, `tests/cli/`, `tests/output/`, `tests/webui/`, `tests/multiplexer/`, `tests/coding_agent/`, `tests/db/`) per the mapping table below
 
 ---
 
@@ -136,7 +136,7 @@ Each submodule defines its own standalone `@click.group()` (or `@click.command()
 | New module | Contents (from `cli.py`) |
 |---|---|
 | `cli/__init__.py` | root `cli` group; `add_command` registrations for `db`, `fleet`, `agent`, `message`, `member`, `server`, `doctor` |
-| `cli/_helpers.py` | renamed shared helpers: `ensure_tmux_or_die`, `full_flag`, `quiet_flag`, `full_flag_with_help`, `quiet_flag_with_help`, `director_member_options`, `require_fleet_id`, `client_command` (← their `_`-prefixed forms) |
+| `cli/_helpers.py` | renamed shared helpers: `ensure_tmux_or_die`, `full_flag`, `quiet_flag`, `director_member_options`, `require_fleet_id`, `client_command` (← their `_`-prefixed forms). The flat module's `_full_flag_with_help` / `_quiet_flag_with_help` variants were dropped during Copilot review — Click never renders help for hidden options, so the bare flags are equivalent |
 | `cli/db.py` | `db` group, `init` command, `_sync_db_url` (only used by `db init`) |
 | `cli/fleet.py` | `fleet` group: `fleet_create`, `fleet_list`, `fleet_show`, `fleet_delete` |
 | `cli/agent.py` | `agent` group: `agent_register`, `agent_list`, `agent_show`, `agent_deregister` |
@@ -250,51 +250,51 @@ Each new subdirectory gets an `__init__.py` (the tests tree is already a package
 
 ### Step 1: Documentation first
 
-- [ ] Update `docs/concepts/overview.md` (mermaid diagram: `broker.py` → `broker/` package, `server.py` / `webui_api.py` → `webui/app.py` + `webui/api.py`) <!-- completed: -->
-- [ ] Update `docs/api/broker.md` to describe the `broker/` package layout (submodule table + re-export contract) <!-- completed: -->
-- [ ] Sweep the rest of `docs/` (`index.md`, `spec/cli-options.md`, `get-started/`, `how-to/`, `reference/`, remaining `concepts/` pages) for references to `broker.py`, `cli.py`, `output.py`, `server.py`, `webui_api.py`, `cafleet.server:app`, or `src/cafleet/webui` asset paths, and update each <!-- completed: -->
-- [ ] Update `.claude/rules/commands.md`: `//cafleet:dev` description (`uvicorn cafleet.webui.app:app`) and the test-selector example path (`tests/test_fleet_cli.py::…` → `tests/cli/test_fleet.py::…`) <!-- completed: -->
-- [ ] Sweep `skills/*/SKILL.md` and skill reference files for module-path references and update any that name the flat modules <!-- completed: -->
-- [ ] Confirm `README.md` consistency (it currently contains no module-path references; update only if the sweep finds drift) <!-- completed: -->
+- [x] Update `docs/concepts/overview.md` (mermaid diagram: `broker.py` → `broker/` package, `server.py` / `webui_api.py` → `webui/app.py` + `webui/api.py`) <!-- completed: 2026-06-11T12:23 -->
+- [x] Update `docs/api/broker.md` to describe the `broker/` package layout (submodule table + re-export contract) <!-- completed: 2026-06-11T12:23 -->
+- [x] Sweep the rest of `docs/` (`index.md`, `spec/cli-options.md`, `get-started/`, `how-to/`, `reference/`, remaining `concepts/` pages) for references to `broker.py`, `cli.py`, `output.py`, `server.py`, `webui_api.py`, `cafleet.server:app`, or `src/cafleet/webui` asset paths, and update each <!-- completed: 2026-06-11T12:23 -->
+- [x] Update `.claude/rules/commands.md`: `//cafleet:dev` description (`uvicorn cafleet.webui.app:app`) and the test-selector example path (`tests/test_fleet_cli.py::…` → `tests/cli/test_fleet.py::…`) — applied by the Director (member harness denies writes under `.claude/`) <!-- completed: 2026-06-11T12:25 -->
+- [x] Sweep `skills/*/SKILL.md` and skill reference files for module-path references and update any that name the flat modules — sweep found zero references to the flat modules; the only `cafleet/src/cafleet/...` mentions are the fictional `cli/main.py:142` pointer-schema examples, which already read as subpackage paths and stay valid <!-- completed: 2026-06-11T12:23 -->
+- [x] Confirm `README.md` consistency (it currently contains no module-path references; update only if the sweep finds drift) — sweep confirmed zero module-path references; no change needed <!-- completed: 2026-06-11T12:23 -->
 
 ### Step 2: broker/ package
 
-- [ ] Create `broker/_shared.py` with the renamed helpers and the `read_session` / `write_session` context managers <!-- completed: -->
-- [ ] Create `broker/fleets.py`, `broker/agents.py`, `broker/members.py`, `broker/messaging.py`, `broker/queries.py` per the placement table, converting all session boilerplate to `_shared` context managers <!-- completed: -->
-- [ ] Create `broker/__init__.py` re-exporting the full public API with `__all__`; delete `broker.py` <!-- completed: -->
-- [ ] Update test references to relocated/renamed private broker names: `tests/test_fleet_bootstrap.py:9` and `tests/test_broker_administrator.py:11` import `is_administrator` from `cafleet.broker._shared` (← `_is_administrator` from `cafleet.broker`); `tests/test_broker_typed_columns.py:73` calls `_unicast_task_dict` via `cafleet.broker.messaging` (← `broker._unicast_task_dict`); `tests/test_broker_registry.py:115` patches `cafleet.broker._shared.now_iso` (← `broker._now_iso`); `tests/test_fleet_bootstrap.py:124` patches `cafleet.broker.fleets.AgentPlacement` (← `broker.AgentPlacement`) — per the Patch-seam contract <!-- completed: -->
-- [ ] Update `tests/conftest.py` `_patch_broker` to target `cafleet.broker._shared` and run `mise //cafleet:test` to confirm the suite is green before proceeding <!-- completed: -->
+- [x] Create `broker/_shared.py` with the renamed helpers and the `read_session` / `write_session` context managers <!-- completed: 2026-06-11T12:44 -->
+- [x] Create `broker/fleets.py`, `broker/agents.py`, `broker/members.py`, `broker/messaging.py`, `broker/queries.py` per the placement table, converting all session boilerplate to `_shared` context managers <!-- completed: 2026-06-11T12:44 -->
+- [x] Create `broker/__init__.py` re-exporting the full public API with `__all__`; delete `broker.py` (deletion dispatched by the Director — `rm` denied in the Programmer harness) <!-- completed: 2026-06-11T12:46 -->
+- [x] Update test references to relocated/renamed private broker names: `tests/test_fleet_bootstrap.py:9` and `tests/test_broker_administrator.py:11` import `is_administrator` from `cafleet.broker._shared` (← `_is_administrator` from `cafleet.broker`); `tests/test_broker_typed_columns.py:73` calls `_unicast_task_dict` via `cafleet.broker.messaging` (← `broker._unicast_task_dict`); `tests/test_broker_registry.py:115` patches `cafleet.broker._shared.now_iso` (← `broker._now_iso`); `tests/test_fleet_bootstrap.py:124` patches `cafleet.broker.fleets.AgentPlacement` (← `broker.AgentPlacement`) — per the Patch-seam contract (Tester commits 4b94509 + 6dd2166) <!-- completed: 2026-06-11T12:44 -->
+- [x] Update `tests/conftest.py` `_patch_broker` to target `cafleet.broker._shared` and run `mise //cafleet:test` to confirm the suite is green before proceeding — 711 passed (Tester commit 4b94509) <!-- completed: 2026-06-11T12:44 -->
 
 ### Step 3: output/ package
 
-- [ ] Create `output/render.py` and `output/formatters.py` per the placement table; `output/__init__.py` re-exports with `__all__`; delete `output.py` <!-- completed: -->
-- [ ] Run `mise //cafleet:test` to confirm green <!-- completed: -->
+- [x] Create `output/render.py` and `output/formatters.py` per the placement table; `output/__init__.py` re-exports with `__all__`; delete `output.py` (deletion dispatched by the Director — `rm` denied in the Programmer harness) <!-- completed: 2026-06-11T13:04 -->
+- [x] Run `mise //cafleet:test` to confirm green — 711 passed <!-- completed: 2026-06-11T13:04 -->
 
 ### Step 4: webui/ package and asset pipeline
 
-- [ ] Create `webui/app.py` (from `server.py`, `default_webui_dist_dir` → `parent / "dist"`) and `webui/api.py` (from `webui_api.py`); delete `server.py` and `webui_api.py` <!-- completed: -->
-- [ ] Update `admin/vite.config.ts` `outDir`, `.gitignore`, `cafleet/pyproject.toml` wheel include, `cafleet/mise.toml` dev task, and the `server` command's uvicorn target (still in flat `cli.py` at this step); remove the stale untracked assets at `src/cafleet/webui/{index.html,favicon.svg,assets/}` <!-- completed: -->
-- [ ] Update `tests/test_server_cli.py` / `tests/test_server_routing.py` / `tests/test_webui_api_format.py` imports and the asserted uvicorn target; run `mise //cafleet:test` and `mise //admin:build` to confirm assets land in `webui/dist/` <!-- completed: -->
+- [x] Create `webui/app.py` (from `server.py`, `default_webui_dist_dir` → `parent / "dist"`) and `webui/api.py` (from `webui_api.py`); delete `server.py` and `webui_api.py` (deletions dispatched by the Director — `rm` denied in the Programmer harness) <!-- completed: 2026-06-11T13:13 -->
+- [x] Update `admin/vite.config.ts` `outDir`, `.gitignore`, `cafleet/pyproject.toml` wheel include, `cafleet/mise.toml` dev task, and the `server` command's uvicorn target (still in flat `cli.py` at this step); remove the stale untracked assets at `src/cafleet/webui/{index.html,favicon.svg,assets/}` <!-- completed: 2026-06-11T13:13 -->
+- [x] Update `tests/test_server_cli.py` / `tests/test_server_routing.py` / `tests/test_webui_api_format.py` imports and the asserted uvicorn target (Tester commit 2a364dc); run `mise //cafleet:test` and `mise //admin:build` to confirm assets land in `webui/dist/` — 711 passed, assets in `webui/dist/` <!-- completed: 2026-06-11T13:13 -->
 
 ### Step 5: cli/ package
 
-- [ ] Create `cli/_helpers.py` and `cli/_prompt.py` with the renamed helpers per the placement tables <!-- completed: -->
-- [ ] Create `cli/db.py`, `cli/fleet.py`, `cli/agent.py`, `cli/message.py`, `cli/member.py`, `cli/server.py`, `cli/doctor.py` per the placement table <!-- completed: -->
-- [ ] Create `cli/__init__.py` with the root group and `add_command` registrations; delete `cli.py`. Do NOT smoke-test via `uv run cafleet --version` (`.claude/rules/commands.md` forbids direct `uv run cafleet` invocations); verify group wiring via `mise //cafleet:test` — CliRunner covers entry-point resolution <!-- completed: -->
-- [ ] Update test imports that reference `cafleet.cli` internals (helpers, prompt machinery) to the new submodule paths; run `mise //cafleet:test` <!-- completed: -->
+- [x] Create `cli/_helpers.py` and `cli/_prompt.py` with the renamed helpers per the placement tables <!-- completed: 2026-06-11T13:31 -->
+- [x] Create `cli/db.py`, `cli/fleet.py`, `cli/agent.py`, `cli/message.py`, `cli/member.py`, `cli/server.py`, `cli/doctor.py` per the placement table — `member.py` 633 lines, all others < 250 <!-- completed: 2026-06-11T13:31 -->
+- [x] Create `cli/__init__.py` with the root group and `add_command` registrations; delete `cli.py` (deletion dispatched by the Director — `rm` denied in the Programmer harness). Do NOT smoke-test via `uv run cafleet --version` (`.claude/rules/commands.md` forbids direct `uv run cafleet` invocations); verify group wiring via `mise //cafleet:test` — CliRunner covers entry-point resolution <!-- completed: 2026-06-11T13:31 -->
+- [x] Update test imports that reference `cafleet.cli` internals (helpers, prompt machinery) to the new submodule paths (Tester commit 450029b); run `mise //cafleet:test` — 711 passed <!-- completed: 2026-06-11T13:31 -->
 
 ### Step 6: tests mirror
 
-- [ ] Create `tests/{broker,cli,output,webui,multiplexer,coding_agent,db}/__init__.py` and move/rename every test file per the mapping table (`git mv`) <!-- completed: -->
-- [ ] Update intra-test imports (`tests._broker_helpers` → `tests.broker._helpers`, `tests._member_cli_helpers` → `tests.cli._member_helpers`) <!-- completed: -->
-- [ ] Run `mise //cafleet:test` to confirm the full suite passes from the new layout <!-- completed: -->
+- [x] Create `tests/{broker,cli,output,webui,multiplexer,coding_agent,db}/__init__.py` and move/rename every test file per the mapping table (`git mv`) <!-- completed: 2026-06-11T13:42 -->
+- [x] Update intra-test imports (`tests._broker_helpers` → `tests.broker._helpers`, `tests._member_cli_helpers` → `tests.cli._member_helpers`) <!-- completed: 2026-06-11T13:43 -->
+- [x] Run `mise //cafleet:test` to confirm the full suite passes from the new layout <!-- completed: 2026-06-11T13:44 -->
 
 ### Step 7: Verification
 
-- [ ] Run `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` — all green <!-- completed: -->
-- [ ] Run `mise //admin:build`, then `mise //cafleet:build`; inspect the wheel to confirm `webui/dist/` assets and all new subpackages are included <!-- completed: -->
-- [ ] Run `mise //cafleet:install` (editable reinstall), then smoke-test `cafleet --version`. For the server: start `cafleet server` in the background, `sleep 2`, then confirm `/` renders via `bun run agent-browser open http://127.0.0.1:8000/` from the repo root (retry with `sleep N` + `open` if the server is not up yet — the `agent-browser wait` family is off-limits per `.claude/rules/commands.md`), then stop the background server <!-- completed: -->
-- [ ] Repo-wide grep for stale references (`broker.py`, `cli.py` as module paths, `output.py`, `server.py`, `webui_api`, `cafleet.server:app`, old test paths) across source, tests, docs, skills, rules, mise tasks — zero hits <!-- completed: -->
+- [x] Run `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` — all green (711 passed) <!-- completed: 2026-06-11T14:01 -->
+- [x] Run `mise //admin:build`, then `mise //cafleet:build`; inspect the wheel to confirm `webui/dist/` assets and all new subpackages are included — first wheel lacked the gitignored dist assets (hatchling skips VCS-ignored files in `include`); fixed via hatchling `artifacts` (commit 07c5ba0); rebuilt wheel re-inspected: 61 files, all `webui/dist/` assets + every new subpackage present <!-- completed: 2026-06-11T14:10 -->
+- [x] Run `mise //cafleet:install` (editable reinstall), then smoke-test `cafleet --version`. For the server: start `cafleet server` in the background, `sleep 2`, then confirm `/` renders via `bun run agent-browser open http://127.0.0.1:8000/` from the repo root (retry with `sleep N` + `open` if the server is not up yet — the `agent-browser wait` family is off-limits per `.claude/rules/commands.md`), then stop the background server — `cafleet 0.12.0`; agent-browser (Director-dispatched) reported `✓ CAFleet Admin` at `/`; server stopped <!-- completed: 2026-06-11T14:01 -->
+- [x] Repo-wide grep for stale references (`broker.py`, `cli.py` as module paths, `output.py`, `server.py`, `webui_api`, `cafleet.server:app`, old test paths) across source, tests, docs, skills, rules, mise tasks — zero hits (re-run after fix commit 48f6bae) <!-- completed: 2026-06-11T14:01 -->
 
 ---
 
@@ -303,3 +303,5 @@ Each new subdirectory gets an `__init__.py` (the tests tree is already a package
 | Date | Changes |
 |------|---------|
 | 2026-06-11 | Initial draft |
+| 2026-06-11 | Implementation complete: all 27 tasks done, all success criteria verified; PR #109 opened with Copilot review |
+| 2026-06-12 | Copilot review rounds 1–4 processed (fixes: hidden-flag help variants, client_command guard, dev-task example, broadcast timestamp; wheel artifacts fix during verification); status Complete |

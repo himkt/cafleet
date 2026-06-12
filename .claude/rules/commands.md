@@ -11,7 +11,7 @@
 - Install the `cafleet` CLI (editable uv tool): `mise //cafleet:install` — run this after pulling any change under `cafleet/src/cafleet/` if the global `cafleet` binary was previously installed non-editably; the editable reinstall makes future source edits take effect without another install.
 - Build cafleet wheel: `mise //cafleet:build` — emits the wheel into `cafleet/dist/`.
 - Publish cafleet: `mise //cafleet:publish` — chained task that builds admin assets, builds the wheel, then runs `uv publish`.
-- Start admin WebUI server: either `cafleet server` (packaged launcher; `--host` / `--port` flags, defaults `127.0.0.1:8000` from `settings.broker_host` / `settings.broker_port`, also honors `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`) **or** `mise //cafleet:dev` (runs `uv run --package cafleet uvicorn cafleet.server:app --host 127.0.0.1 --port 8000` directly; does NOT delegate to `cafleet server`). Both are independent entry points for the same FastAPI app and neither runs with `--reload` — contributors restart manually between edits. WebUI-only: CLI commands do not require a running server. Serves `/` only after `mise //admin:build` has been run.
+- Start admin WebUI server: either `cafleet server` (packaged launcher; `--host` / `--port` flags, defaults `127.0.0.1:8000` from `settings.broker_host` / `settings.broker_port`, also honors `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`) **or** `mise //cafleet:dev` (runs `uv run --package cafleet uvicorn cafleet.webui.app:app --host 127.0.0.1 --port 8000` directly; does NOT delegate to `cafleet server`). Both are independent entry points for the same FastAPI app and neither runs with `--reload` — contributors restart manually between edits. WebUI-only: CLI commands do not require a running server. Serves `/` only after `mise //admin:build` has been run.
 - Start admin dev server: `mise //admin:dev`
 - Build admin: `mise //admin:build`
 
@@ -21,7 +21,7 @@
 - Do NOT use `mise run <task>` — the `run` subcommand is unnecessary.
 - Run all tasks from the project root. No `cd` required.
 - **mise tasks forward positional args to the underlying command.** When you need to pass pytest args (test selectors, `-x`, `-v`, etc.), pass them directly to the mise task — do NOT fall back to `uv run python -m pytest` to "get more control". Examples:
-  - Run one test: `mise //cafleet:test tests/test_fleet_cli.py::test_my_case`
+  - Run one test: `mise //cafleet:test tests/cli/test_fleet.py::test_my_case`
   - Stop on first failure with verbose output: `mise //cafleet:test -xvs tests/test_my.py`
   - Match a keyword: `mise //cafleet:test -k my_keyword`
   - Package-relative paths only (`tests/...`, not `cafleet/tests/...`), because the mise task's working directory is `cafleet/`.

@@ -25,8 +25,11 @@ packages = ["src/cafleet"]
 include = [
   "src/cafleet/db/alembic.ini",
   "src/cafleet/db/alembic/**/*",
-  "src/cafleet/webui/**/*",
+  "src/cafleet/webui/dist/**/*",
 ]
+# The dist assets are gitignored, and hatchling skips VCS-ignored files in
+# `include`; `artifacts` exists precisely to ship ignored build outputs.
+artifacts = ["src/cafleet/webui/dist/**/*"]
 
 [dependency-groups]
 dev = [

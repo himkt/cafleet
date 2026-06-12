@@ -6,7 +6,7 @@ icon: lucide/layers
 
 CAFleet is a message broker and agent registry for coding agents. All CLI
 commands and the admin WebUI access SQLite directly through a shared broker
-module — no HTTP server is needed for agent operations. Agents are organized
+package — no HTTP server is needed for agent operations. Agents are organized
 into **fleets** identified by a non-secret `fleet_id` created via
 `cafleet fleet create`. Agents sharing the same fleet can discover and message
 each other; agents in different fleets are invisible to one another.
@@ -31,9 +31,9 @@ each other; agents in different fleets are invisible to one another.
 ```mermaid
 %%{init: {'theme': 'default', 'themeVariables': {'fontSize': '16px'}}}%%
 flowchart LR
-    CLI["CLI (click)"] --> Broker["broker.py<br/>(sync SQLAlchemy)"]
-    WebUI["Admin WebUI"] --> Server["server.py<br/>(FastAPI)"]
-    Server --> WebUIAPI["webui_api.py"]
+    CLI["CLI (click)"] --> Broker["broker/<br/>(sync SQLAlchemy)"]
+    WebUI["Admin WebUI"] --> Server["webui/app.py<br/>(FastAPI)"]
+    Server --> WebUIAPI["webui/api.py"]
     WebUIAPI --> Broker
     Broker --> DB[(SQLite<br/>fleets / agents / tasks / agent_placements)]
     subgraph Multiplexer["tmux"]
@@ -44,7 +44,7 @@ flowchart LR
     Broker -. inline-preview keystroke .-> PaneB
 ```
 
-The broker module is the single data access layer. Both the CLI and the Admin
+The broker package is the single data access layer. Both the CLI and the Admin
 WebUI call it. No async stores, no HTTP client, no protocol layer.
 
 ## CLI

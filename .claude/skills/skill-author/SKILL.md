@@ -282,7 +282,7 @@ Three pointer shapes:
 | Pointer | When |
 |:--|:--|
 | `paragraph-<HeadingPath>` | A specific section of the document — e.g. `paragraph-Implementation > Step 5`, `paragraph-Specification > 3. Anchor schema`. Use the literal heading text from the document with `>` separators. |
-| `<file>:<line>` | A specific file location — e.g. `cafleet/src/cafleet/broker.py:142`, `docs/concepts/overview.md:178`. |
+| `<file>:<line>` | A specific file location — e.g. `cafleet/src/cafleet/broker/messaging.py:142`, `docs/concepts/overview.md:178`. |
 | `doc` | The whole document; used for top-level milestones (`complete (doc)`, `approved (doc)`) and document-wide blocks (`blocked (doc) — test framework ambiguous`). |
 
 ### 5.4 The pointer-marker pairing rule
@@ -290,7 +290,7 @@ Three pointer shapes:
 When a sender includes substantive content in a `COMMENT(role)` marker, the marker MUST live at the same pointer the cafleet body references. Examples:
 
 - `blocked (paragraph-Implementation > Step 5)` + `COMMENT(programmer): test X expects Y but design doc says Z` at `paragraph-Implementation > Step 5` in the design doc.
-- `ready (cafleet/src/cafleet/broker.py:142)` + `COMMENT(director): use pathlib.Path.mkdir(parents=True, exist_ok=True), not subprocess.run(["mkdir", ...])` at line 142 of the file.
+- `ready (cafleet/src/cafleet/broker/messaging.py:142)` + `COMMENT(director): use pathlib.Path.mkdir(parents=True, exist_ok=True), not subprocess.run(["mkdir", ...])` at line 142 of the file.
 
 The recipient reads the cafleet body, navigates to the pointer, reads the standing marker, applies the fix or arbitration, removes the marker, and replies with the next-step verb (`addressed (...)` for member-side fixes, `ready (...)` for director-side arbitration handoffs).
 

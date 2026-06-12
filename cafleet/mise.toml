@@ -1,5 +1,5 @@
 [tasks.dev]
-run = "uv run --package cafleet uvicorn cafleet.server:app --host 127.0.0.1 --port 8000"
+run = "uv run --package cafleet uvicorn cafleet.webui.app:app --host 127.0.0.1 --port 8000"
 description = "Start the admin WebUI server on 127.0.0.1:8000 (no hot-reload; restart manually between edits)"
 
 [tasks.test]
