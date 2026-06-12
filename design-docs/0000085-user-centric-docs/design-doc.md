@@ -1,7 +1,7 @@
 # User-Centric Documentation Refactor
 
 **Status**: Approved
-**Progress**: 6/14 tasks complete
+**Progress**: 11/14 tasks complete
 **Last Updated**: 2026-06-12
 
 ## Overview
@@ -204,11 +204,11 @@ Ordering note: this change is documentation-only, so the documentation-first rul
 
 ### Step 3: Prompt-first how-to guides
 
-- [ ] Rewrite `docs/how-to/index.md` with the prompt-first framing and the WebUI-exception note <!-- completed: -->
-- [ ] Refactor `docs/how-to/mixed-backend-team.md` to the prompt-led skeleton (prompt + skill note + what-to-expect + CLI appendix) <!-- completed: -->
-- [ ] Refactor `docs/how-to/monitor-and-recover.md` to the prompt-led skeleton <!-- completed: -->
-- [ ] Add the three stage prompts to `docs/how-to/design-doc-development.md` <!-- completed: -->
-- [ ] Reword the How-to bullets in `docs/index.md` and `docs/get-started/quickstart.md` ("Where to go next") to "prompt-first task guides" <!-- completed: -->
+- [x] Rewrite `docs/how-to/index.md` with the prompt-first framing and the WebUI-exception note <!-- completed: 2026-06-12T09:08 -->
+- [x] Refactor `docs/how-to/mixed-backend-team.md` to the prompt-led skeleton (prompt + skill note + what-to-expect + CLI appendix) <!-- completed: 2026-06-12T09:08 -->
+- [x] Refactor `docs/how-to/monitor-and-recover.md` to the prompt-led skeleton <!-- completed: 2026-06-12T09:08 -->
+- [x] Add the three stage prompts to `docs/how-to/design-doc-development.md` <!-- completed: 2026-06-12T09:08 -->
+- [x] Reword the How-to bullets in `docs/index.md` and `docs/get-started/quickstart.md` ("Where to go next") to "prompt-first task guides" <!-- completed: 2026-06-12T09:08 -->
 
 ### Step 4: README and verification
 
