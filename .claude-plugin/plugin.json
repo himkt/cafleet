@@ -1,6 +1,6 @@
 {
   "name": "cafleet",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "Message broker CLI and design document orchestration skills for coding agents.",
   "author": {
     "name": "himkt"
