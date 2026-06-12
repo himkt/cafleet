@@ -54,7 +54,7 @@ Per-coding-agent config (Claude `permissions.allow`, Codex `config.toml` + rules
 
 ## 3. Examples
 
-### 4.1. Simple example to use CAFleet
+### 3.1. Simple example to use CAFleet
 
 Provide the following prompt to Claude Code or Codex to see how it works.
 
