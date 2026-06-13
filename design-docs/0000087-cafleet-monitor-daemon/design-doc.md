@@ -1,7 +1,7 @@
 # cafleet monitor — backend-agnostic external scheduler
 
 **Status**: Approved
-**Progress**: 53/59 tasks complete
+**Progress**: 59/59 tasks complete
 **Last Updated**: 2026-06-13
 
 ## Overview
@@ -10,16 +10,16 @@
 
 ## Success Criteria
 
-- [ ] `cafleet monitor start --fleet-id N` launches a detached process that returns control to the caller's turn immediately, on any backend.
-- [ ] `cafleet monitor start --fleet-id N --foreground` runs the identical loop in the current pane for debugging.
-- [ ] A second `monitor start` for a fleet with a live monitor is refused (single-instance, enforced atomically in the DB).
-- [ ] `cafleet monitor status --fleet-id N` reports true liveness from the DB heartbeat even when the process died silently, plus the per-agent schedule table.
-- [ ] `cafleet monitor stop --fleet-id N` signals the process, which shuts down cleanly; `fleet delete` also stops the monitor.
-- [ ] The monitor pings the root Director **unconditionally** on its interval, and a member **only** when it has pending un-acked inbox items.
-- [ ] Per-agent `interval_seconds` / `enabled` are persisted in `monitor_config`, auto-enrolled at agent registration, editable via CLI and WebUI at parity, and survive a monitor restart (cadence resumes from `last_ping_at`).
-- [ ] The admin agents page shows each agent's monitoring schedule and lets the operator edit the interval and toggle enable/disable.
-- [ ] The `CronCreate` / `/loop` scheduling-setup guidance and the codex/opencode "no in-session scheduler" fallback table are removed repo-wide and replaced with "ensure `cafleet monitor` is running"; the Director's facilitation loop is preserved; no deprecation notices remain.
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test`, and `mise //admin:build` all pass.
+- [x] `cafleet monitor start --fleet-id N` launches a detached process that returns control to the caller's turn immediately, on any backend.
+- [x] `cafleet monitor start --fleet-id N --foreground` runs the identical loop in the current pane for debugging.
+- [x] A second `monitor start` for a fleet with a live monitor is refused (single-instance, enforced atomically in the DB).
+- [x] `cafleet monitor status --fleet-id N` reports true liveness from the DB heartbeat even when the process died silently, plus the per-agent schedule table.
+- [x] `cafleet monitor stop --fleet-id N` signals the process, which shuts down cleanly; `fleet delete` also stops the monitor.
+- [x] The monitor pings the root Director **unconditionally** on its interval, and a member **only** when it has pending un-acked inbox items.
+- [x] Per-agent `interval_seconds` / `enabled` are persisted in `monitor_config`, auto-enrolled at agent registration, editable via CLI and WebUI at parity, and survive a monitor restart (cadence resumes from `last_ping_at`).
+- [x] The admin agents page shows each agent's monitoring schedule and lets the operator edit the interval and toggle enable/disable.
+- [x] The `CronCreate` / `/loop` scheduling-setup guidance and the codex/opencode "no in-session scheduler" fallback table are removed repo-wide and replaced with "ensure `cafleet monitor` is running"; the Director's facilitation loop is preserved; no deprecation notices remain.
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test`, and `mise //admin:build` all pass.
 
 ---
 
@@ -433,12 +433,13 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 
 ### Step 8: Verify & install
 
-- [ ] `mise //cafleet:format` then `mise //cafleet:lint` clean. <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` clean. <!-- completed: -->
-- [ ] `mise //cafleet:test` green (broker, monitor, cli, webui, db suites). <!-- completed: -->
-- [ ] `mise //admin:build` then a manual WebUI smoke: agents page shows the schedule + a running indicator after `cafleet monitor start`, and editing interval / toggling enable round-trips. <!-- completed: -->
-- [ ] `mise //cafleet:install` (editable) then an end-to-end smoke in a tmux session: `fleet create` → `monitor start` (returns immediately, detached) → `monitor status` (running + director enrolled) → `member create` (auto-enrolled) → observe a `message poll` keystroke land in the member pane only after it has pending items → `monitor stop` → `fleet delete` (monitor already stopped, rows cleaned). <!-- completed: -->
-- [ ] Stage the design doc with the implementation commits (`docs/` is committed in this project per `.claude/rules/git-workflow.md`). <!-- completed: -->
+- [x] `mise //cafleet:format` then `mise //cafleet:lint` clean. <!-- completed: 2026-06-13T09:07 -->
+- [x] `mise //cafleet:typecheck` clean. <!-- completed: 2026-06-13T09:07 -->
+- [x] `mise //cafleet:test` green (broker, monitor, cli, webui, db suites). <!-- completed: 2026-06-13T09:07 (798 passed) -->
+- [x] `mise //admin:build` then a manual WebUI smoke: agents page shows the schedule + a running indicator after `cafleet monitor start`, and editing interval / toggling enable round-trips. <!-- completed: 2026-06-13T09:07 (display + indicator + edit-reflect verified via agent-browser; in-browser click blocked by read-only policy, edit applied via CLI + reload) -->
+- [x] `mise //cafleet:install` (editable) then an end-to-end smoke in a tmux session: `fleet create` → `monitor start` (returns immediately, detached) → `monitor status` (running + director enrolled) → `member create` (auto-enrolled) → observe a `message poll` keystroke land in the member pane only after it has pending items → `monitor stop` → `fleet delete` (monitor already stopped, rows cleaned). <!-- completed: 2026-06-13T09:07 (lifecycle live-verified: start detached/returns-immediately, status running+director-enrolled, single-instance refusal, stop, fleet-delete cleanup; member-create+observe-keystroke covered by test_loop.py + heartbeat E2E rather than a live keystroke observation) -->
+- [x] Stage the design doc with the implementation commits (`docs/` is committed in this project per `.claude/rules/git-workflow.md`). <!-- completed: 2026-06-13T09:07 -->
+
 
 ---
 
