@@ -1,7 +1,7 @@
 # cafleet monitor — backend-agnostic external scheduler
 
 **Status**: Approved
-**Progress**: 83/84 tasks complete (Steps 1–8 + Revision R1 done; Revision R2 in progress — E2E smoke pending)
+**Progress**: 84/84 tasks complete (Steps 1–8 + Revision R1 + Revision R2 done; awaiting user approval)
 **Last Updated**: 2026-06-13
 
 ## Overview
@@ -15,8 +15,8 @@
 - [x] A second `monitor start` for a fleet with a live monitor is refused (single-instance, enforced atomically in the DB).
 - [x] `cafleet monitor status --fleet-id N` reports true liveness from the DB heartbeat even when the process died silently, plus the per-agent schedule table.
 - [x] Stopping the monitor's background task shuts the loop down cleanly (SIGTERM clears the runtime row); `fleet delete` makes the loop self-terminate.
-- [ ] The monitor pings the root Director and every member **unconditionally** on each agent's interval (members are no longer gated on pending inbox items) — R2.
-- [ ] `cafleet monitor start` logs each dispatched ping to stdout (`<iso-ts> ping agent <id> (<name>)`), so the launching agent's background-task output shows the live heartbeat — R2.
+- [x] The monitor pings the root Director and every member **unconditionally** on each agent's interval (members are no longer gated on pending inbox items) — R2.
+- [x] `cafleet monitor start` logs each dispatched ping to stdout (`<iso-ts> ping agent <id> (<name>)`), so the launching agent's background-task output shows the live heartbeat — R2.
 - [x] Per-agent `interval_seconds` / `enabled` are persisted in `monitor_config`, auto-enrolled at agent registration, editable via CLI and WebUI at parity, and survive a monitor restart (cadence resumes from `last_ping_at`).
 - [x] The admin agents page shows each agent's monitoring schedule and lets the operator edit the interval and toggle enable/disable.
 - [x] The `CronCreate` / `/loop` scheduling-setup guidance and the codex/opencode "no in-session scheduler" fallback table are removed repo-wide and replaced with "ensure `cafleet monitor` is running"; the Director's facilitation loop is preserved; no deprecation notices remain.
@@ -485,7 +485,7 @@ Two changes requested after the R1 smoke test (where the heartbeat was invisible
 **Verify**
 
 - [x] `mise //cafleet:format` + lint + typecheck + test green; `mise //admin:build`. <!-- completed: 2026-06-13T11:12 -->
-- [ ] E2E smoke: `cafleet monitor start` as a background task → spawn an **idle** member → observe a ping-log line for that member on stdout each interval AND the `message poll` keystroke land in the member pane even with an empty inbox.
+- [x] E2E smoke: `cafleet monitor start` as a background task → spawn an **idle** member → observe a ping-log line for that member on stdout each interval AND the `message poll` keystroke land in the member pane even with an empty inbox. <!-- completed: 2026-06-13T11:18 (throwaway fleet 51: idle member 212 pinged each interval at pending=0; stdout "ping agent 212 (idle-target)" recurring; poll keystroke landed in member pane; clean teardown) -->
 
 ---
 
