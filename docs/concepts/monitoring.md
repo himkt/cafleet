@@ -108,7 +108,7 @@ flowchart LR
     Tick -. keystroke .-> PaneM["member pane"]
 ```
 
-- **Start**: a coding agent runs `cafleet monitor start --fleet-id N` as a
+- **Start**: a coding agent runs `cafleet --fleet-id N monitor start` as a
   **background task**. The loop runs in-process and inherits the launching pane's
   environment (`$TMUX`, `$CAFLEET_DATABASE_URL`); it fails fast on startup if it
   cannot reach a tmux session. There is no detached subprocess.

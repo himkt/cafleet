@@ -4,8 +4,8 @@ The pure data-access half of ``cafleet monitor`` (see
 ``docs/concepts/monitoring.md``): per-agent schedule CRUD (``monitor_config``),
 the per-tick scan, ping recording, and the single-instance runtime
 claim/heartbeat/clear (``monitor_runtime``) with an ownership-checked
-split-brain guard. No OS side effects live here — process lifecycle, signals,
-and the PID file belong to the ``cafleet.monitor`` package.
+split-brain guard. No OS side effects live here — the loop and its signal
+handling belong to the ``cafleet.monitor`` package.
 
 The ``monitor_config.enabled`` column is an ``INTEGER`` 0/1, but every read
 function casts it to a Python ``bool`` at the boundary, so the integer
@@ -282,16 +282,17 @@ def heartbeat_monitor_runtime(fleet_id: int, pid: int, when: str) -> bool:
 
 
 def clear_monitor_runtime(fleet_id: int, pid: int) -> None:
-    """Ownership-checked clear — nulls ``pid``/``last_tick_at`` iff ``pid`` owns the slot.
+    """Ownership-checked clear — nulls ``pid``/``started_at``/``last_tick_at`` iff ``pid`` owns the slot.
 
-    A non-owner clear matches zero rows and is a no-op, so a self-terminating
-    loser never wipes the winner's row on exit.
+    A cleanly-stopped monitor leaves no residual ``started_at``, so `status`/the
+    WebUI report a fully-stopped row. A non-owner clear matches zero rows and is
+    a no-op, so a self-terminating loser never wipes the winner's row on exit.
     """
     with _shared.write_session() as session:
         session.execute(
             update(MonitorRuntime)
             .where(MonitorRuntime.fleet_id == fleet_id, MonitorRuntime.pid == pid)
-            .values(pid=None, last_tick_at=None)
+            .values(pid=None, started_at=None, last_tick_at=None)
         )
 
 

@@ -880,7 +880,7 @@ With no edit flag, prints the agent's current config. With `--interval` / `--ena
 Text output:
 
 ```
-agent 4 (alice): interval 60s, enabled, last_ping 2026-06-13T04:51:00
+agent 4: interval 60s, enabled, last_ping 2026-06-13T04:51:00
 ```
 
 JSON output: `{"agent_id": 4, "interval_seconds": 60, "last_ping_at": "<iso8601>|null", "enabled": true}`.

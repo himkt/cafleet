@@ -10,10 +10,10 @@
 
 ## Success Criteria
 
-- [x] `cafleet monitor start --fleet-id N` runs the heartbeat loop in-process (a coding agent launches it as a background task), on any backend.
+- [x] `cafleet --fleet-id N monitor start` runs the heartbeat loop in-process (a coding agent launches it as a background task), on any backend.
 - [x] The same loop runs whether launched as the Director's background task or in a dedicated monitoring member.
 - [x] A second `monitor start` for a fleet with a live monitor is refused (single-instance, enforced atomically in the DB).
-- [x] `cafleet monitor status --fleet-id N` reports true liveness from the DB heartbeat even when the process died silently, plus the per-agent schedule table.
+- [x] `cafleet --fleet-id N monitor status` reports true liveness from the DB heartbeat even when the process died silently, plus the per-agent schedule table.
 - [x] Stopping the monitor's background task shuts the loop down cleanly (SIGTERM clears the runtime row); `fleet delete` makes the loop self-terminate.
 - [x] The monitor pings the root Director and every member **unconditionally** on each agent's interval (members are no longer gated on pending inbox items) — R2.
 - [x] `cafleet monitor start` logs each dispatched ping to stdout (`<iso-ts> ping agent <id> (<name>)`), so the launching agent's background-task output shows the live heartbeat — R2.
@@ -256,7 +256,7 @@ A new `monitor` group registered in `cafleet/cli/__init__.py`. `--fleet-id` is t
 Text/JSON output shapes (illustrative):
 
 ```
-$ cafleet monitor status --fleet-id 1
+$ cafleet --fleet-id 1 monitor status
 monitor: running (pid 4821, last tick 2s ago, tick 5s, started 2026-06-13T04:50:00+00:00)
   agent_id  name         role      interval  last_ping             enabled  pending
   --------  -----------  --------  --------  -------------------  -------  -------
@@ -266,7 +266,7 @@ monitor: running (pid 4821, last tick 2s ago, tick 5s, started 2026-06-13T04:50:
 ```
 
 ```json
-// cafleet --json monitor status --fleet-id 1
+// cafleet --json --fleet-id 1 monitor status
 {
   "runtime": {"running": true, "pid": 4821, "tick_seconds": 5,
               "last_tick_at": "2026-06-13T04:51:02+00:00", "last_tick_age_seconds": 2,
@@ -311,7 +311,7 @@ This keeps CLI and WebUI at parity on both axes: **viewing** every agent's sched
 
 ### 11. Removal / migration (decision 12 + `~/.claude/rules/removal.md`)
 
-Clean-cut, this same cycle. **Only the scheduling is removed.** The Director's 5-step facilitation loop (poll → ACK → dispatch → health-check → escalate) **stays** — the monitor supplies the scheduling, the skill supplies the policy. Every removed mention is replaced with "ensure `cafleet monitor` is running" / `cafleet monitor start --fleet-id <fleet-id>` / `cafleet monitor stop --fleet-id <fleet-id>`. No deprecation notices remain anywhere (the design doc and git history are the record).
+Clean-cut, this same cycle. **Only the scheduling is removed.** The Director's 5-step facilitation loop (poll → ACK → dispatch → health-check → escalate) **stays** — the monitor supplies the scheduling, the skill supplies the policy. Every removed mention is replaced with "ensure `cafleet monitor` is running" / `cafleet --fleet-id <fleet-id> monitor start`. No deprecation notices remain anywhere (the design doc and git history are the record).
 
 What is removed wherever it appears:
 

@@ -14,13 +14,13 @@ The recovery ladder below is driven by a periodic supervision tick. That tick
 comes from `cafleet monitor` — a per-fleet loop a coding agent runs as a
 background task, waking due agents by keystroking `message poll` into their
 panes. Start it once as a background task, before the team gets busy, and it
-pings the Director on its interval (and any member that has un-acked inbox
-items), which is what surfaces a quiet member in the first place
-([Monitoring](../concepts/monitoring.md)):
+pings every enrolled agent on its interval — the Director and members alike,
+regardless of whether the inbox has pending items — which is what surfaces a
+quiet member in the first place ([Monitoring](../concepts/monitoring.md)):
 
 ```bash
-cafleet monitor start --fleet-id 1    # run as a background task
-cafleet monitor status --fleet-id 1   # confirm it is running + see the schedule
+cafleet --fleet-id 1 monitor start    # run as a background task
+cafleet --fleet-id 1 monitor status   # confirm it is running + see the schedule
 ```
 
 The monitor supplies only the heartbeat; the inspect-and-recover steps below are

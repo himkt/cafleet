@@ -351,6 +351,8 @@ def test_clear_monitor_runtime__owner_clears():
     assert row is not None
     assert row["pid"] is None
     assert row["last_tick_at"] is None
+    # a cleanly-stopped monitor leaves no residual start time either
+    assert row["started_at"] is None
 
 
 def test_clear_monitor_runtime__non_owner_noop():

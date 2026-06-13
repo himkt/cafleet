@@ -10,7 +10,7 @@ applies.
 """
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -89,6 +89,23 @@ def test_get_monitor__running_after_claim(api_db, client):
     assert data["running"] is True
     assert data["pid"] == os.getpid()
     assert data["tick_seconds"] == 5
+
+
+def test_get_monitor__stale_row_reports_not_running_with_nulls(api_db, client):
+    # a runtime row exists but its heartbeat is stale (beyond STALE_AFTER): not
+    # live, so the process fields null out — no lingering pid/started_at leaks
+    sid = _create_fleet()["fleet_id"]
+    stale = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    broker.claim_monitor_runtime(sid, os.getpid(), 5, stale)
+
+    resp = client.get("/api/monitor", headers=_headers(sid))
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["running"] is False
+    assert data["pid"] is None
+    assert data["started_at"] is None
+    assert data["last_tick_at"] is None
+    assert data["tick_seconds"] == 5  # the row exists (stale, not absent)
 
 
 # --- GET /api/agents folded monitor field ----------------------------------

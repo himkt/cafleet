@@ -22,7 +22,7 @@ function MonitorIndicator({ running }: { running: boolean | null }) {
       title={
         running
           ? "cafleet monitor is running for this fleet"
-          : "No cafleet monitor running — start it with 'cafleet monitor start'"
+          : "No cafleet monitor running — start it with 'cafleet --fleet-id <id> monitor start'"
       }
     >
       <span

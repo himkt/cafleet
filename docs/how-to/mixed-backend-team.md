@@ -33,7 +33,7 @@ Your agent loads the `cafleet` skill plus `cafleet-agent-team-supervision`
 The supervision tick is supplied by `cafleet monitor` — a per-fleet loop a
 coding agent runs as a background task — so a Director on **any** backend
 (`claude`, `codex`, or `opencode`) gets the same heartbeat. Run the monitor once
-as a background task with `cafleet monitor start --fleet-id <id>` regardless of
+as a background task with `cafleet --fleet-id <id> monitor start` regardless of
 the Director's backend ([Monitoring](../concepts/monitoring.md)).
 
 ## What to expect

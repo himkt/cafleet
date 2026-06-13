@@ -9,7 +9,7 @@ convention) — the loop never actually runs.
 import json
 import os
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import click
 import pytest
@@ -57,15 +57,18 @@ def fleet(fresh_db):
     return db_file, runner, json.loads(result.output)
 
 
-def _seed_runtime(db_file, fleet_id: int, pid: int, *, tick: int = 5) -> None:
+def _seed_runtime(
+    db_file, fleet_id: int, pid: int, *, tick: int = 5, last_tick_at: str | None = None
+) -> None:
     now = datetime.now(UTC).isoformat()
+    last_tick = last_tick_at if last_tick_at is not None else now
     conn = sqlite3.connect(str(db_file))
     try:
         conn.execute(
             "INSERT INTO monitor_runtime "
             "(fleet_id, pid, started_at, last_tick_at, tick_seconds) "
             "VALUES (?, ?, ?, ?, ?)",
-            (fleet_id, pid, now, now, tick),
+            (fleet_id, pid, now, last_tick, tick),
         )
         conn.commit()
     finally:
@@ -214,6 +217,25 @@ def test_monitor_status__not_running_when_no_runtime(fleet):
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["runtime"]["running"] is False
+
+
+def test_monitor_status__stale_row_reports_not_running_with_nulls(fleet):
+    # a stale heartbeat (beyond STALE_AFTER) reads as not-live: the process
+    # fields null out even though the row (with a real pid/started_at) exists
+    db_file, runner, data = fleet
+    sid = data["fleet_id"]
+    stale = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    _seed_runtime(db_file, sid, os.getpid(), last_tick_at=stale)
+
+    result = runner.invoke(cli, ["--fleet-id", str(sid), "--json", "monitor", "status"])
+
+    assert result.exit_code == 0, result.output
+    runtime = json.loads(result.output)["runtime"]
+    assert runtime["running"] is False
+    assert runtime["pid"] is None
+    assert runtime["started_at"] is None
+    assert runtime["last_tick_at"] is None
+    assert runtime["tick_seconds"] == 5  # the row exists (stale, not absent)
 
 
 # --- monitor config --------------------------------------------------------
