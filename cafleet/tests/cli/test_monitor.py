@@ -17,8 +17,7 @@ from click.testing import CliRunner
 
 from cafleet import config
 from cafleet.cli import cli
-from cafleet.monitor import DEFAULT_TICK_SECONDS, loop, process
-from cafleet.monitor.process import StartResult, StopResult
+from cafleet.monitor import DEFAULT_TICK_SECONDS, loop
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
@@ -44,7 +43,6 @@ def fresh_db(tmp_path, monkeypatch):
     monkeypatch.setattr(
         config.settings, "database_url", f"sqlite+aiosqlite:///{db_file}"
     )
-    monkeypatch.setattr(config.settings, "monitor_state_dir", tmp_path / "monitor")
     runner = CliRunner()
     result = runner.invoke(cli, ["db", "init"])
     assert result.exit_code == 0, result.output
@@ -100,30 +98,22 @@ def _soft_delete_fleet(db_file, fleet_id: int) -> None:
 # --- monitor start ---------------------------------------------------------
 
 
-def test_monitor_start__default_spawns_detached_and_reports_started(fleet, monkeypatch):
+def test_monitor_start__runs_loop_in_process_with_default_tick(fleet, monkeypatch):
     db_file, runner, data = fleet
     sid = data["fleet_id"]
     calls = []
-
-    def fake_start(fleet_id, tick_seconds):
-        calls.append((fleet_id, tick_seconds))
-        return StartResult(
-            ok=True,
-            pid=4821,
-            tick_seconds=tick_seconds,
-            log_path=None,
-            message=f"monitor started (pid 4821, tick {tick_seconds}s)",
-        )
-
-    monkeypatch.setattr(process, "start_detached", fake_start)
+    monkeypatch.setattr(
+        loop,
+        "run_monitor_loop",
+        lambda fleet_id, tick_seconds: calls.append((fleet_id, tick_seconds)),
+    )
     result = runner.invoke(cli, ["--fleet-id", str(sid), "monitor", "start"])
 
     assert result.exit_code == 0, result.output
     assert calls == [(sid, DEFAULT_TICK_SECONDS)]
-    assert "started" in result.output.lower()
 
 
-def test_monitor_start__foreground_invokes_run_monitor_loop(fleet, monkeypatch):
+def test_monitor_start__passes_tick_through(fleet, monkeypatch):
     db_file, runner, data = fleet
     sid = data["fleet_id"]
     calls = []
@@ -133,7 +123,7 @@ def test_monitor_start__foreground_invokes_run_monitor_loop(fleet, monkeypatch):
         lambda fleet_id, tick_seconds: calls.append((fleet_id, tick_seconds)),
     )
     result = runner.invoke(
-        cli, ["--fleet-id", str(sid), "monitor", "start", "--foreground", "--tick", "3"]
+        cli, ["--fleet-id", str(sid), "monitor", "start", "--tick", "3"]
     )
 
     assert result.exit_code == 0, result.output
@@ -144,12 +134,10 @@ def test_monitor_start__already_running_exits_one(fleet, monkeypatch):
     db_file, runner, data = fleet
     sid = data["fleet_id"]
 
-    def fake_start(fleet_id, tick_seconds):
-        raise click.ClickException(
-            f"monitor already running for fleet {fleet_id} (pid 4821)"
-        )
+    def boom(fleet_id, tick_seconds):
+        raise click.ClickException(f"monitor already running for fleet {fleet_id}")
 
-    monkeypatch.setattr(process, "start_detached", fake_start)
+    monkeypatch.setattr(loop, "run_monitor_loop", boom)
     result = runner.invoke(cli, ["--fleet-id", str(sid), "monitor", "start"])
 
     assert result.exit_code == 1, result.output
@@ -159,11 +147,11 @@ def test_monitor_start__already_running_exits_one(fleet, monkeypatch):
 def test_monitor_start__unknown_fleet_exits_one(fresh_db, monkeypatch):
     db_file, runner = fresh_db
     calls = []
-    monkeypatch.setattr(process, "start_detached", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(loop, "run_monitor_loop", lambda *a, **k: calls.append(a))
     result = runner.invoke(cli, ["--fleet-id", "999999", "monitor", "start"])
 
     assert result.exit_code == 1, result.output
-    assert calls == []  # fleet validation fails before any spawn
+    assert calls == []  # fleet validation fails before the loop runs
 
 
 def test_monitor_start__soft_deleted_fleet_exits_one(fleet, monkeypatch):
@@ -171,49 +159,11 @@ def test_monitor_start__soft_deleted_fleet_exits_one(fleet, monkeypatch):
     sid = data["fleet_id"]
     _soft_delete_fleet(db_file, sid)
     calls = []
-    monkeypatch.setattr(process, "start_detached", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(loop, "run_monitor_loop", lambda *a, **k: calls.append(a))
     result = runner.invoke(cli, ["--fleet-id", str(sid), "monitor", "start"])
 
     assert result.exit_code == 1, result.output
     assert calls == []
-
-
-# --- monitor stop ----------------------------------------------------------
-
-
-def test_monitor_stop__reports_stopped(fleet, monkeypatch):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    monkeypatch.setattr(
-        process,
-        "stop_monitor",
-        lambda fleet_id: StopResult(
-            ok=True, stopped=True, pid=4821, message="monitor stopped (pid 4821)"
-        ),
-    )
-    result = runner.invoke(cli, ["--fleet-id", str(sid), "monitor", "stop"])
-
-    assert result.exit_code == 0, result.output
-    assert "stopped" in result.output.lower()
-
-
-def test_monitor_stop__reports_nothing_running(fleet, monkeypatch):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    monkeypatch.setattr(
-        process,
-        "stop_monitor",
-        lambda fleet_id: StopResult(
-            ok=True,
-            stopped=False,
-            pid=None,
-            message=f"no monitor running for fleet {fleet_id}",
-        ),
-    )
-    result = runner.invoke(cli, ["--fleet-id", str(sid), "monitor", "stop"])
-
-    assert result.exit_code == 0, result.output
-    assert "no monitor running" in result.output.lower()
 
 
 # --- monitor status --------------------------------------------------------
@@ -372,24 +322,3 @@ def test_monitor_config__not_enrolled_exits_one(fleet):
     )
 
     assert result.exit_code == 1, result.output
-
-
-# --- fleet delete teardown -------------------------------------------------
-
-
-def test_fleet_delete__calls_stop_monitor(fleet, monkeypatch):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    calls = []
-    monkeypatch.setattr(
-        process,
-        "stop_monitor",
-        lambda fleet_id: (
-            calls.append(fleet_id)
-            or StopResult(ok=True, stopped=False, pid=None, message="x")
-        ),
-    )
-    result = runner.invoke(cli, ["fleet", "delete", str(sid)])
-
-    assert result.exit_code == 0, result.output
-    assert calls == [sid]
