@@ -8,6 +8,7 @@ from cafleet.cli.doctor import doctor
 from cafleet.cli.fleet import fleet
 from cafleet.cli.member import member
 from cafleet.cli.message import message
+from cafleet.cli.monitor import monitor
 from cafleet.cli.server import server
 
 
@@ -36,5 +37,6 @@ cli.add_command(fleet)
 cli.add_command(agent)
 cli.add_command(message)
 cli.add_command(member)
+cli.add_command(monitor)
 cli.add_command(server)
 cli.add_command(doctor)

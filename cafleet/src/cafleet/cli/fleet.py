@@ -5,6 +5,7 @@ import click
 from cafleet import broker, output
 from cafleet.cli._helpers import full_flag
 from cafleet.coding_agent import CODING_AGENTS
+from cafleet.monitor import process
 from cafleet.multiplexer import MULTIPLEXERS, TmuxError
 
 
@@ -105,6 +106,9 @@ def fleet_show(ctx: click.Context, fleet_id: int, as_json: bool) -> None:
 @click.argument("fleet_id", type=int)
 def fleet_delete(fleet_id: int) -> None:
     """Soft-delete a fleet and deregister every active agent (idempotent)."""
+    # Stop the OS-level monitor process BEFORE the DB cleanup so it cannot
+    # keystroke polls into tearing-down panes or race the delete path.
+    process.stop_monitor(fleet_id)
     result = broker.delete_fleet(fleet_id)
     n = result["deregistered_count"]
     click.echo(f"Deleted fleet {fleet_id}. Deregistered {n} agents.")

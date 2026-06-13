@@ -1,7 +1,7 @@
 # cafleet monitor — backend-agnostic external scheduler
 
 **Status**: Approved
-**Progress**: 41/59 tasks complete
+**Progress**: 46/59 tasks complete
 **Last Updated**: 2026-06-13
 
 ## Overview
@@ -412,11 +412,11 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 
 ### Step 5: CLI — `cafleet monitor` group
 
-- [ ] Add `cafleet/cli/monitor.py` with the `monitor` group and `start` (`--tick IntRange(min=1)`, `--foreground`; runs `ensure_tmux_or_die()` before spawning), `stop`, `status`, `config` (`--agent-id`, `--interval IntRange(min=1)`, `--enable/--disable`) per §8; text + JSON output; exit codes (1 for already-running / detached-child-failed-to-start / unknown-or-deleted fleet / not-enrolled agent; 2 for click usage errors). <!-- completed: -->
-- [ ] Register the group in `cafleet/cli/__init__.py` (`cli.add_command(monitor)`). <!-- completed: -->
-- [ ] Integrate teardown: `cafleet/cli/fleet.py fleet_delete` calls `monitor.process.stop_monitor(fleet_id)` before `broker.delete_fleet(fleet_id)`. <!-- completed: -->
-- [ ] Add output formatters for the status table + config row in `cafleet/output.py` (matching the existing compact formatter style). <!-- completed: -->
-- [ ] Tests (`tests/cli/test_monitor.py`, CliRunner): `start` default path spawns detached and reports started (monkeypatch `start_detached`); `start --foreground` invokes `run_monitor_loop` (monkeypatch the loop to claim+return); `start` already-running exits 1; `start` unknown/deleted fleet exits 1; `stop` reports stopped / nothing-running; `status` running + per-agent table and `--json` shape; `config` show/edit (interval, enable/disable, mutual exclusion exit 2, not-enrolled exit 1); `fleet delete` calls `stop_monitor`. <!-- completed: -->
+- [x] Add `cafleet/cli/monitor.py` with the `monitor` group and `start` (`--tick IntRange(min=1)`, `--foreground`; runs `ensure_tmux_or_die()` before spawning), `stop`, `status`, `config` (`--agent-id`, `--interval IntRange(min=1)`, `--enable/--disable`) per §8; text + JSON output; exit codes (1 for already-running / detached-child-failed-to-start / unknown-or-deleted fleet / not-enrolled agent; 2 for click usage errors). <!-- completed: 2026-06-13T08:28 -->
+- [x] Register the group in `cafleet/cli/__init__.py` (`cli.add_command(monitor)`). <!-- completed: 2026-06-13T08:28 -->
+- [x] Integrate teardown: `cafleet/cli/fleet.py fleet_delete` calls `monitor.process.stop_monitor(fleet_id)` before `broker.delete_fleet(fleet_id)`. <!-- completed: 2026-06-13T08:28 -->
+- [x] Add output formatters for the status table + config row in `cafleet/output.py` (matching the existing compact formatter style). <!-- completed: 2026-06-13T08:28 -->
+- [x] Tests (`tests/cli/test_monitor.py`, CliRunner): `start` default path spawns detached and reports started (monkeypatch `start_detached`); `start --foreground` invokes `run_monitor_loop` (monkeypatch the loop to claim+return); `start` already-running exits 1; `start` unknown/deleted fleet exits 1; `stop` reports stopped / nothing-running; `status` running + per-agent table and `--json` shape; `config` show/edit (interval, enable/disable, mutual exclusion exit 2, not-enrolled exit 1); `fleet delete` calls `stop_monitor`. <!-- completed: 2026-06-13T08:30 -->
 
 ### Step 6: WebUI API
 

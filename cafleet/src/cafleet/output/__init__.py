@@ -7,6 +7,8 @@ from cafleet.output.formatters import (
     format_member,
     format_member_list,
     format_member_list_activity,
+    format_monitor_config,
+    format_monitor_status,
     format_register,
     format_task,
 )
@@ -38,4 +40,6 @@ __all__ = [
     "format_member",
     "format_member_list",
     "format_member_list_activity",
+    "format_monitor_status",
+    "format_monitor_config",
 ]
