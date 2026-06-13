@@ -1,12 +1,12 @@
 # cafleet monitor — backend-agnostic external scheduler
 
 **Status**: Approved
-**Progress**: 59/59 tasks complete
+**Progress**: 59/76 tasks complete (Steps 1–8 done; Revision R1 re-work in progress)
 **Last Updated**: 2026-06-13
 
 ## Overview
 
-`cafleet monitor` is a detached, fleet-scoped background process that externalizes the *scheduling* of CAFleet supervision into one plain Python loop driving the broker's existing tmux keystroke primitives. It replaces the Claude-only in-session scheduling (`CronCreate` / `ScheduleWakeup` / `/loop`) so a Director on **any** backend (`claude`, `codex`, `opencode`) gets the same heartbeat. The monitor decides only the *when* (who to ping, when); the *what* — the Director's 5-step facilitation loop — stays in the supervision skill.
+`cafleet monitor` is a fleet-scoped foreground loop — `scan → ping-due-agents → sleep` — that a coding agent runs as a **background task** (the Director's own background task, or a dedicated monitoring member). It externalizes the *scheduling* of CAFleet supervision into one plain Python loop driving the broker's existing tmux keystroke primitives. It replaces the Claude-only in-session scheduling (`CronCreate` / `ScheduleWakeup` / `/loop`) so a Director on **any** backend (`claude`, `codex`, `opencode`) gets the same heartbeat. The monitor decides only the *when* (who to ping, when); the *what* — the Director's 5-step facilitation loop — stays in the supervision skill. `cafleet monitor start` runs the loop in-process and logs each tick; the launching agent owns its lifetime (there is no detached subprocess and no `monitor stop` — stop the background task, or delete the monitoring member, to stop it).
 
 ## Success Criteria
 
@@ -29,7 +29,7 @@ Today a Director wakes itself up to run supervision by calling its harness's in-
 
 The waking action itself is already backend-agnostic: the broker keystrokes into a member's pane via `tmux.send_poll_trigger` (the primitive behind `cafleet member ping`) and `tmux.send_inline_preview` (the broker's auto-fire on `message send`). Both work identically for all three backends. The only Claude-specific piece is the *scheduler* that decides when to fire.
 
-This design moves that scheduler out of the coding agent into a deterministic Python process. The loop is `scan → ping-due-agents → sleep`; it is pure machinery, not agent reasoning, so it must **not** be a coding-agent member (that would burn a model on a sleep-loop and still couldn't self-schedule on codex/opencode). One detached process per fleet, startable with a single shell command from any Director's pane, gives every backend the same heartbeat.
+This design moves that scheduler out of the model's reasoning and into a deterministic Python loop — `scan → ping-due-agents → sleep` — that a coding agent runs as a **background task**. While the loop runs it spends **no model tokens** (it is a plain backgrounded shell/Python process, not agent reasoning), and because it is just a backgrounded command it works identically on every backend (`claude` / `codex` / `opencode` all run background shell commands). The loop is launched either as the Director's own background task or in a **dedicated monitoring member**; the launching agent owns its lifetime. This keeps the heartbeat backend-agnostic without a detached OS daemon, PID file, or signal-based `stop` — the agent (or harness) stops the background task, and the loop also self-terminates when its fleet is torn down.
 
 ### Heartbeat vs facilitation boundary (the load-bearing constraint)
 
@@ -51,13 +51,12 @@ The monitor never reasons about message content. It is the alarm clock; the Dire
 | DB models | `cafleet/db/models.py` | `MonitorConfig`, `MonitorRuntime` ORM classes |
 | Migration | `cafleet/db/alembic/versions/0002_monitor_tables.py` | Creates `monitor_config` + `monitor_runtime` (down_revision `0001`) |
 | Broker (DB) | `cafleet/broker/monitor.py` | Config CRUD, runtime claim/heartbeat/clear, per-tick scan, `record_ping`; enrollment helper |
-| Process/policy | `cafleet/monitor/` package | `loop.py` (loop driver, `monitor_tick`, `should_ping`), `process.py` (detach launcher, PID file, signals, `stop_monitor`), `__init__.py` (constants) |
-| Module entry | `cafleet/__main__.py` | `python -m cafleet` → CLI, the detached re-exec target |
-| CLI | `cafleet/cli/monitor.py` | `cafleet monitor start|stop|status|config` |
+| Process/policy | `cafleet/monitor/` package | `loop.py` (`run_monitor_loop` foreground driver + SIGTERM/SIGINT handling, `monitor_tick`, `should_ping`), `__init__.py` (constants) |
+| CLI | `cafleet/cli/monitor.py` | `cafleet monitor start|status|config` (`start` runs the foreground loop in-process) |
 | WebUI API | `cafleet/webui/api.py` | `GET /api/monitor`, `GET`/`PATCH /api/agents/{id}/monitor`, folded `monitor` field on `GET /api/agents` |
 | Admin SPA | `admin/src/…` | per-agent Monitoring section (view + edit) + header runtime indicator |
 
-The broker stays the pure DB layer (no OS side effects). The `cafleet/monitor/` package owns process lifecycle, signals, the PID file, and the loop, and calls the broker + `TmuxMultiplexer`. This mirrors the existing split where `broker/` is data-access and `multiplexer/` + `cli/member.py` own tmux side effects.
+The broker stays the pure DB layer (no OS side effects). The `cafleet/monitor/` package owns the loop and its signal handling and calls the broker + `TmuxMultiplexer`. `cafleet monitor start` runs `run_monitor_loop` **in-process (foreground)** — a coding agent launches it as a background task; there is no detached subprocess, no `cafleet/__main__.py` re-exec target, no PID file, and no `stop` command. This mirrors the existing split where `broker/` is data-access and `multiplexer/` + `cli/member.py` own tmux side effects.
 
 ### 2. Schema
 
@@ -184,13 +183,12 @@ def monitor_tick(fleet_id, now):                          # now: tz-aware dateti
 `run_monitor_loop(fleet_id, tick_seconds)` is the thin driver:
 
 ```
-def run_monitor_loop(fleet_id, tick_seconds):
+def run_monitor_loop(fleet_id, tick_seconds):   # runs in the foreground of the launching agent's task
     pid = os.getpid()
     if not broker.claim_monitor_runtime(
             fleet_id, pid, tick_seconds, datetime.now(UTC).isoformat()):
         raise click.ClickException(f"monitor already running for fleet {fleet_id}")
-    write_pid_file(fleet_id, pid)
-    install_signal_handlers()                  # SIGTERM/SIGINT -> stop flag
+    install_signal_handlers()                  # SIGTERM/SIGINT -> stop flag (clean shutdown when the agent stops the task)
     try:
         while not stop_requested():
             if monitor_tick(fleet_id, datetime.now(UTC)) is STOP:
@@ -198,25 +196,15 @@ def run_monitor_loop(fleet_id, tick_seconds):
             interruptible_sleep(tick_seconds)   # wakes early on signal
     finally:
         broker.clear_monitor_runtime(fleet_id, pid)  # ownership-checked; pid -> NULL
-        remove_pid_file(fleet_id)
 ```
 
 New tmux helper: `TmuxMultiplexer.list_pane_ids() -> set[str]` (`tmux list-panes -a -F '#{pane_id}'` split into a set), so pane-liveness for all agents costs one tmux call per tick. `should_ping` stays pure (liveness is passed in).
 
-The loop is robust to a fleet torn down underneath it (returns `STOP`), so an orphaned monitor self-terminates even if `fleet delete` somehow ran without stopping it first.
+The loop is robust to a fleet torn down underneath it (returns `STOP`), so the monitor self-terminates when `fleet delete` runs — no separate stop signal is needed.
 
-### 6. Single-instance, liveness, PID file (decision 2)
+### 6. Single-instance & liveness
 
-Two artifacts, with crisp, non-overlapping roles:
-
-| Artifact | Role |
-|---|---|
-| `monitor_runtime` DB row | **Authoritative coordination + liveness record.** The atomic single-instance claim and `status` liveness derive from it. `stop` reads `pid` from it. |
-| PID file `<state_dir>/<fleet_id>.pid` | **The conventional OS handle.** Written at claim, removed at clean shutdown. Primary signal source for `stop`; its presence without a fresh heartbeat marks a silently-dead monitor whose lock `start` may reclaim. |
-
-`state_dir` is `settings.monitor_state_dir` (new `Settings` field, env `CAFLEET_MONITOR_STATE_DIR`, default `~/.local/share/cafleet/monitor/`). The detached worker's stdout/stderr redirect to `<state_dir>/<fleet_id>.log`.
-
-**Environment inheritance & fail-fast.** The detached child is an ordinary `subprocess.Popen` (not a tmux pane), so it inherits the launching Director pane's environment by default — including `$TMUX` (so its `tmux` subprocesses reach the same server and its keystrokes target the right panes) and `$CAFLEET_DATABASE_URL` (so it reads the same registry DB). `monitor start` runs `ensure_tmux_or_die()` (the same guard the `member` commands use) **before** spawning, so a monitor started where it cannot reach a tmux session fails fast with a clear error instead of silently never delivering keystrokes; the foreground worker re-checks on its own startup.
+The `monitor_runtime` DB row is the **single authority** for both single-instance coordination and `status` liveness — there is no PID file and no `state_dir`. The loop runs in the foreground of the launching agent's background task (or monitoring member's pane), inheriting that pane's environment — `$TMUX` (so its `tmux` keystrokes reach the right panes) and `$CAFLEET_DATABASE_URL` (so it reads the same registry DB). `monitor start` runs `ensure_tmux_or_die()` (the same guard the `member` commands use) on startup, so a monitor launched where it cannot reach a tmux session fails fast with a clear error instead of silently never delivering keystrokes.
 
 **Atomic claim** (`broker.claim_monitor_runtime`) runs in one write transaction (SQLite's write lock serializes concurrent claims):
 
@@ -249,24 +237,22 @@ On a reclaim, the displaced (old) monitor's next `heartbeat_monitor_runtime` mat
 
 ### 7. Lifecycle integration & teardown
 
-- **`monitor stop`** and **`fleet delete`** both invoke `cafleet.monitor.process.stop_monitor(fleet_id)`, which: reads the PID file / runtime `pid`; if a live monitor exists, sends `SIGTERM`, waits up to `MONITOR_STOP_TIMEOUT` (e.g. 5 s) for the heartbeat/pid to clear, escalates to `SIGKILL` on timeout, then ensures the runtime row is cleared and the PID file removed. Idempotent: a no-monitor fleet returns a "nothing running" result.
-- **`broker.delete_fleet`** additionally deletes the `monitor_config` rows for the fleet's agents and the `monitor_runtime` row inside its transaction, mirroring the existing `agent_placements` cleanup. The CLI `fleet delete` calls `stop_monitor(fleet_id)` (the OS-signal side effect) **before** `broker.delete_fleet` (the DB cleanup), so the process stops before the fleet soft-deletes.
+- **Stopping the monitor** is the launching agent's job: stop its background task (or delete the monitoring member). There is no `cafleet monitor stop` and no signal-based stopper — `run_monitor_loop`'s SIGTERM/SIGINT handler clears the runtime row on a clean stop, and a hard kill simply lets the heartbeat go stale (`status` then reports stopped after `STALE_AFTER`).
+- **`fleet delete`** needs no stop step: `monitor_tick` returns `STOP` once the fleet is soft-deleted, so a running loop exits on its next tick. `broker.delete_fleet` deletes the `monitor_config` rows for the fleet's agents and the `monitor_runtime` row inside its transaction, mirroring the existing `agent_placements` cleanup.
 - **`broker.deregister_agent`** deletes the agent's `monitor_config` row in the same statement block that deletes its `agent_placements` row (runtime config with no historical value, same lifecycle as placement).
-
 ### 8. CLI surface — `cafleet monitor`
 
 A new `monitor` group registered in `cafleet/cli/__init__.py`. `--fleet-id` is the global flag (before the subcommand).
 
 | Command | Flags | Behavior |
 |---|---|---|
-| `monitor start` | `--tick INT` (default 5, `IntRange(min=1)`), `--foreground` | Default: `ensure_tmux_or_die()` + pre-check single-instance, then spawn `[sys.executable, "-m", "cafleet", "--fleet-id", N, "monitor", "start", "--tick", T, "--foreground"]` via `subprocess.Popen(start_new_session=True, stdin=DEVNULL, stdout/stderr=logfile, close_fds=True)`. Poll the runtime up to ~2 s for a fresh heartbeat **whose `pid` equals the spawned child's pid**; on success report `monitor started (pid M, tick Ts)` and return — freeing the caller's turn. If no matching-pid heartbeat appears in the window (import error, crash, or a lost claim race), report a failure pointing at `<state_dir>/<fleet_id>.log` and exit 1 — do **not** falsely report "started" (and never against a *different* already-running monitor's pid). `--foreground`: run `run_monitor_loop` in-process (the worker the detached path re-execs). Errors exit 1 (`monitor already running for fleet N (pid M)`; `fleet N not found`; soft-deleted fleet). |
-| `monitor stop` | — | `stop_monitor(fleet_id)`; reports `monitor stopped (pid M)` or `no monitor running for fleet N` (idempotent, exit 0). |
+| `monitor start` | `--tick INT` (default 5, `IntRange(min=1)`) | Runs the foreground loop in-process via `run_monitor_loop` — intended to be launched by a coding agent as a **background task** (the loop blocks the task, logging each tick). `ensure_tmux_or_die()` on startup, then claims the single-instance runtime row and loops `scan → ping → sleep` until signalled (SIGTERM/SIGINT) or the fleet is torn down (`monitor_tick` → STOP). Errors exit 1 (`monitor already running for fleet N (pid M)`; `fleet N not found`; soft-deleted fleet). |
 | `monitor status` | — | Runtime liveness (running/pid/last-tick-age/tick, derived from the heartbeat) **plus** the per-agent schedule table (agent_id, name, role director/member, interval, last_ping, enabled, pending). Exit 0. |
 | `monitor config` | `--agent-id INT` (required), `--interval INT` (`IntRange(min=1)`), `--enable/--disable` | No edit flags → print the agent's config. With `--interval` / `--enable` / `--disable` → update and print. `--interval` shares the WebUI PATCH lower bound (`>= 1`). `--enable`/`--disable` are mutually exclusive. Exit 1 if the agent is not in the fleet or not enrolled. |
 
-`monitor start`/`stop` are **CLI-only** (not WebUI): launching/killing a detached OS process from an unauthenticated local SPA is out of scope. WebUI/CLI parity is on the **config + runtime-view** surface (§9), which is what the feature requires.
+`monitor start` is **CLI-only** by nature — it is the long-running loop a coding agent backgrounds; the WebUI never launches or stops it. WebUI/CLI parity is on the **config + runtime-view** surface (§9), which is what the feature requires.
 
-`--json` is honored on every subcommand (the global flag), mirroring the existing member commands. The detached re-exec target is `[sys.executable, "-m", "cafleet", …]` — using `sys.executable` (not a bare `python` PATH lookup that could resolve to an interpreter/venv where `cafleet` is not importable) guarantees the child runs in the **same** environment as the launching CLI. This requires a new `cafleet/__main__.py` delegating to `cli`.
+`--json` is honored on every subcommand (the global flag), mirroring the existing member commands.
 
 Text/JSON output shapes (illustrative):
 
@@ -440,6 +426,38 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 - [x] `mise //cafleet:install` (editable) then an end-to-end smoke in a tmux session: `fleet create` → `monitor start` (returns immediately, detached) → `monitor status` (running + director enrolled) → `member create` (auto-enrolled) → observe a `message poll` keystroke land in the member pane only after it has pending items → `monitor stop` → `fleet delete` (monitor already stopped, rows cleaned). <!-- completed: 2026-06-13T09:07 (lifecycle live-verified: start detached/returns-immediately, status running+director-enrolled, single-instance refusal, stop, fleet-delete cleanup; member-create+observe-keystroke covered by test_loop.py + heartbeat E2E rather than a live keystroke observation) -->
 - [x] Stage the design doc with the implementation commits (`docs/` is committed in this project per `.claude/rules/git-workflow.md`). <!-- completed: 2026-06-13T09:07 -->
 
+### Revision R1 — agent-run foreground loop (post-approval pivot)
+
+The monitor is no longer a detached OS subprocess. `cafleet monitor start` runs the `scan → ping → sleep` loop **in-process (foreground)**; a coding agent launches it as a **background task** (the Director's own, or a dedicated monitoring member). No detached launcher, PID file, `state_dir`, `cafleet monitor stop`, or `cafleet/__main__.py`. §1/§5/§6/§7/§8 above are revised to this model; the tasks below apply the code/test/docs delta. **Unchanged:** schema + migration, broker config CRUD / scan / claim / heartbeat / `_is_live` / `monitor_is_live`, `should_ping`, `monitor_tick`, `monitor status`, `monitor config`, the WebUI endpoints, and the admin SPA.
+
+**Code**
+
+- [ ] `cafleet/monitor/loop.py`: drop the PID-file write/remove from `run_monitor_loop` (claim → signal handlers → loop → ownership-checked clear remain). <!-- completed: -->
+- [ ] Remove `cafleet/monitor/process.py` (detach launcher, PID-file helpers, `start_detached`, `stop_monitor`, `StartResult`/`StopResult`). <!-- completed: -->
+- [ ] Remove `cafleet/__main__.py` (no detached re-exec target). <!-- completed: -->
+- [ ] `cafleet/monitor/__init__.py`: drop `MONITOR_STOP_TIMEOUT`; keep `DEFAULT_PING_INTERVAL_SECONDS` / `DEFAULT_TICK_SECONDS` / `MONITOR_STALE_FACTOR` / `MONITOR_STALE_FLOOR_SECONDS`. <!-- completed: -->
+- [ ] `cafleet/config.py`: remove `monitor_state_dir` + `CAFLEET_MONITOR_STATE_DIR`. <!-- completed: -->
+- [ ] `cafleet/cli/monitor.py`: `start` runs `run_monitor_loop` in-process (remove the `--foreground` flag + the detached `start_detached` path); remove the `stop` command; keep `status` + `config`. <!-- completed: -->
+- [ ] `cafleet/cli/fleet.py`: remove the `process.stop_monitor(fleet_id)` call from `fleet_delete` (the loop self-terminates; `broker.delete_fleet` cleans the rows). <!-- completed: -->
+
+**Docs / skills**
+
+- [ ] `docs/spec/cli-options.md`: drop `monitor stop`; restate `monitor start` as the foreground loop (no `--foreground`, no detached/PID/log); drop `CAFLEET_MONITOR_STATE_DIR` from the Option Source Matrix. <!-- completed: -->
+- [ ] `docs/concepts/monitoring.md`: describe the agent-run foreground loop (background task / monitoring member) instead of the detached process + PID file; lifecycle = start as a background task → stop the task / delete the member / `fleet delete`. <!-- completed: -->
+- [ ] `docs/spec/data-model.md`: drop any PID-file / state-dir mention (keep `monitor_runtime.pid` — still recorded for liveness). <!-- completed: -->
+- [ ] `docs/how-to/monitor-and-recover.md`, `README.md`, and the skill lifecycle wording (`cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision`, design-doc-create/execute/interview, research-report/-presentation, `cafleet` reference/recovery, skill-author): replace "`cafleet monitor start`/`stop`" lifecycle with "run `cafleet monitor start` as a background task before the first member; stop it by stopping that task (or deleting the monitoring member) at teardown." No `monitor stop` usages remain. <!-- completed: -->
+
+**Tests**
+
+- [ ] Remove `tests/monitor/test_process.py`. <!-- completed: -->
+- [ ] `tests/monitor/test_loop.py`: drop PID-file assertions from `run_monitor_loop`. <!-- completed: -->
+- [ ] `tests/monitor/test_constants.py`: assert the 4 remaining constants (no `MONITOR_STOP_TIMEOUT`). <!-- completed: -->
+- [ ] `tests/cli/test_monitor.py`: `start` invokes `run_monitor_loop` (foreground, no detached path); remove the `stop` tests and the `fleet delete → stop_monitor` test; keep status/config. <!-- completed: -->
+
+**Verify**
+
+- [ ] `mise //cafleet:format` + lint + typecheck + test green; `mise //admin:build`. <!-- completed: -->
+- [ ] E2E smoke (revised): `cafleet monitor start` as a background task → `monitor status` running + director enrolled → spawn a member + give it a pending message → observe the `message poll` keystroke land in the member pane on a tick → stop the background task → `monitor status` stopped → `fleet delete` (rows cleaned). <!-- completed: -->
 
 ---
 
@@ -448,3 +466,5 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 | Date | Changes |
 |------|---------|
 | 2026-06-13 | Initial draft |
+| 2026-06-13 | Implemented Steps 1–8 (detached-process model) — committed. |
+| 2026-06-13 | **Revision R1 (post-approval pivot):** monitor is an agent-run foreground loop (`cafleet monitor start` runs in-process, launched by a coding agent as a background task), not a detached OS subprocess. Removed `start_detached`, the PID file, `state_dir`, `cafleet monitor stop`, `MONITOR_STOP_TIMEOUT`, and `cafleet/__main__.py`; `fleet delete` relies on loop self-termination. Schema/broker/`should_ping`/`monitor_tick`/status/config/WebUI/SPA unchanged. |
