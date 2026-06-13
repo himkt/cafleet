@@ -314,7 +314,9 @@ export default function AgentDetail({
         </button>
       </div>
 
-      <MonitoringSection agent={agent} onChanged={onChanged} />
+      {/* key by agent_id so switching agents remounts the section and resets
+          its transient busy/error/interval-input state (no leak across agents). */}
+      <MonitoringSection key={agent.agent_id} agent={agent} onChanged={onChanged} />
 
       <Tabs.Root defaultValue="inbox" className="flex min-h-0 flex-1 flex-col">
         <Tabs.List

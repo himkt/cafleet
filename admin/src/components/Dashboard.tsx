@@ -32,18 +32,20 @@ export default function Dashboard({
 
   const refreshAll = useCallback(async () => {
     setIsPolling(true);
-    try {
-      const [agentsData, monitorData] = await Promise.all([
-        getAgents(),
-        getMonitor(),
-      ]);
-      setAgents(agentsData.agents);
-      setMonitor(monitorData);
-    } catch {
-      /* preserve last-known agent list + monitor state */
-    } finally {
-      setIsPolling(false);
+    // Decoupled: a transient /api/monitor failure must not block the agents
+    // refresh (and vice versa). allSettled never rejects; each result is
+    // applied only when fulfilled, preserving the last-known value otherwise.
+    const [agentsResult, monitorResult] = await Promise.allSettled([
+      getAgents(),
+      getMonitor(),
+    ]);
+    if (agentsResult.status === "fulfilled") {
+      setAgents(agentsResult.value.agents);
     }
+    if (monitorResult.status === "fulfilled") {
+      setMonitor(monitorResult.value);
+    }
+    setIsPolling(false);
     setRefreshKey((k) => k + 1);
   }, []);
 
