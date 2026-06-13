@@ -1,7 +1,7 @@
 # cafleet monitor — backend-agnostic external scheduler
 
 **Status**: Approved
-**Progress**: 21/59 tasks complete
+**Progress**: 23/59 tasks complete
 **Last Updated**: 2026-06-13
 
 ## Overview
@@ -383,8 +383,8 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 
 ### Step 2: Schema — models & migration
 
-- [ ] Add `MonitorConfig` and `MonitorRuntime` to `cafleet/db/models.py` per §2 (INTEGER PKs, no AUTOINCREMENT, FK CASCADE off `agents` / RESTRICT off `fleets`, defaults `interval_seconds=60`, `enabled` default `1`/server_default `"1"`, `tick_seconds` default `5`). <!-- completed: -->
-- [ ] Add migration `cafleet/db/alembic/versions/0002_monitor_tables.py` (`down_revision="0001"`): create both tables; `downgrade()` drops `monitor_runtime` then `monitor_config`. <!-- completed: -->
+- [x] Add `MonitorConfig` and `MonitorRuntime` to `cafleet/db/models.py` per §2 (INTEGER PKs, no AUTOINCREMENT, FK CASCADE off `agents` / RESTRICT off `fleets`, defaults `interval_seconds=60`, `enabled` default `1`/server_default `"1"`, `tick_seconds` default `5`). <!-- completed: 2026-06-13T06:42 -->
+- [x] Add migration `cafleet/db/alembic/versions/0002_monitor_tables.py` (`down_revision="0001"`): create both tables; `downgrade()` drops `monitor_runtime` then `monitor_config`. <!-- completed: 2026-06-13T06:42 -->
 - [ ] Update `cafleet/tests/db/test_alembic_smoke.py`, **renaming the two tests whose names encode the old single-revision state** so the names match the new assertions (stale names are a removal blocker per `~/.claude/rules/removal.md`): `test_only_one_migration_revision_exists` → `test_two_migration_revisions_exist` (asserts two revisions, head `0002` chaining to `0001`); `test_alembic_version_table_records_collapsed_head_0001` → `test_alembic_version_table_records_head_0002` (asserts head `0002`); and update `test_alembic_upgrade_head_creates_expected_tables` to include `monitor_config`, `monitor_runtime`. <!-- completed: -->
 - [ ] Add migration-shape tests: both tables exist after `upgrade head`, INTEGER PKs, no AUTOINCREMENT, `monitor_config.enabled`/`interval_seconds` NOT NULL with defaults, `last_ping_at` nullable, `monitor_runtime.last_tick_at`/`pid` nullable. <!-- completed: -->
 

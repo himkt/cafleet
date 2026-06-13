@@ -83,3 +83,30 @@ class Task(Base):
         Index("idx_tasks_from_agent_status_ts", "from_agent_id", "status_timestamp"),
         {"sqlite_autoincrement": True},
     )
+
+
+class MonitorConfig(Base):
+    __tablename__ = "monitor_config"
+
+    agent_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("agents.agent_id", ondelete="CASCADE"), primary_key=True
+    )
+    interval_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="60"
+    )
+    last_ping_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+
+
+class MonitorRuntime(Base):
+    __tablename__ = "monitor_runtime"
+
+    fleet_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("fleets.fleet_id", ondelete="RESTRICT"), primary_key=True
+    )
+    pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_tick_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    tick_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="5"
+    )
