@@ -1,7 +1,7 @@
 # cafleet monitor — backend-agnostic external scheduler
 
 **Status**: Approved
-**Progress**: 75/76 tasks complete (Steps 1–8 done; Revision R1 re-work — only the live E2E smoke remains)
+**Progress**: 76/76 tasks complete (Steps 1–8 + Revision R1 done)
 **Last Updated**: 2026-06-13
 
 ## Overview
@@ -457,7 +457,7 @@ The monitor is no longer a detached OS subprocess. `cafleet monitor start` runs 
 **Verify**
 
 - [x] `mise //cafleet:format` + lint + typecheck + test green; `mise //admin:build`. <!-- completed: 2026-06-13T10:19 -->
-- [ ] E2E smoke (revised): `cafleet monitor start` as a background task → `monitor status` running + director enrolled → spawn a member + give it a pending message → observe the `message poll` keystroke land in the member pane on a tick → stop the background task → `monitor status` stopped → `fleet delete` (rows cleaned). <!-- completed: -->
+- [x] E2E smoke (revised): `cafleet monitor start` as a background task → `monitor status` running + director enrolled → spawn a member + give it a pending message → observe the `message poll` keystroke land in the member pane on a tick → stop the background task → `monitor status` stopped → `fleet delete` (rows cleaned). <!-- completed: 2026-06-13T10:39 (live member-ping keystroke observed in member pane; negative path — no ping while idle — also confirmed; TaskStop → status stopped; clean teardown) -->
 
 ---
 
