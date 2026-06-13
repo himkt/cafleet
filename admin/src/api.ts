@@ -2,6 +2,8 @@ import type {
   AgentsResponse,
   TimelineResponse,
   FleetListItem,
+  MonitorConfig,
+  MonitorRuntime,
 } from "./types";
 
 let fleetId: number | null = null;
@@ -72,5 +74,19 @@ export async function sendMessage(
       to_agent_id: toAgentId,
       text,
     }),
+  });
+}
+
+export async function getMonitor(): Promise<MonitorRuntime> {
+  return request<MonitorRuntime>("/monitor");
+}
+
+export async function updateAgentMonitor(
+  agentId: number,
+  patch: { interval_seconds?: number; enabled?: boolean },
+): Promise<MonitorConfig> {
+  return request<MonitorConfig>(`/agents/${agentId}/monitor`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
   });
 }

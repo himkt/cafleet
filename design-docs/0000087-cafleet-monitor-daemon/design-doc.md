@@ -1,7 +1,7 @@
 # cafleet monitor — backend-agnostic external scheduler
 
 **Status**: Approved
-**Progress**: 48/59 tasks complete
+**Progress**: 53/59 tasks complete
 **Last Updated**: 2026-06-13
 
 ## Overview
@@ -425,11 +425,11 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 
 ### Step 7: Admin SPA
 
-- [ ] `admin/src/types.ts`: add `MonitorConfig`, `MonitorRuntime`; extend `Agent` with `monitor: MonitorConfig | null`. <!-- completed: -->
-- [ ] `admin/src/api.ts`: add `getMonitor()` and `updateAgentMonitor(agentId, patch)`. <!-- completed: -->
-- [ ] `admin/src/components/AgentDetail.tsx`: add the **Monitoring** section (shown when `agent.monitor !== null`) — interval display + numeric input + Save, enable/disable toggle, last-ping display — calling `updateAgentMonitor`; reconcile on the next poll. <!-- completed: -->
-- [ ] `admin/src/components/AppHeader.tsx` (or a Dashboard banner): a monitor running/stopped indicator fed by `getMonitor()`. <!-- completed: -->
-- [ ] `mise //admin:build` succeeds; `mise //admin:lint` clean. <!-- completed: -->
+- [x] `admin/src/types.ts`: add `MonitorConfig`, `MonitorRuntime`; extend `Agent` with `monitor: MonitorConfig | null`. <!-- completed: 2026-06-13T08:47 -->
+- [x] `admin/src/api.ts`: add `getMonitor()` and `updateAgentMonitor(agentId, patch)`. <!-- completed: 2026-06-13T08:47 -->
+- [x] `admin/src/components/AgentDetail.tsx`: add the **Monitoring** section (shown when `agent.monitor !== null`) — interval display + numeric input + Save, enable/disable toggle, last-ping display — calling `updateAgentMonitor`; reconcile on the next poll. <!-- completed: 2026-06-13T08:47 -->
+- [x] `admin/src/components/AppHeader.tsx` (or a Dashboard banner): a monitor running/stopped indicator fed by `getMonitor()`. Also added the §9 per-agent schedule badge in `Sidebar.tsx`'s `AgentRow` (reads the folded `agent.monitor`). <!-- completed: 2026-06-13T08:47 -->
+- [x] `mise //admin:build` succeeds; `mise //admin:lint` clean. <!-- completed: 2026-06-13T08:47 -->
 
 ### Step 8: Verify & install
 

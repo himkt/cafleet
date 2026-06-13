@@ -14,6 +14,28 @@ function BrandMark() {
   );
 }
 
+function MonitorIndicator({ running }: { running: boolean | null }) {
+  if (running === null) return null;
+  return (
+    <span
+      className="flex items-center gap-1.5 text-xs text-text-muted"
+      title={
+        running
+          ? "cafleet monitor is running for this fleet"
+          : "No cafleet monitor running — start it with 'cafleet monitor start'"
+      }
+    >
+      <span
+        aria-hidden="true"
+        className={`size-2 rounded-full ${
+          running ? "bg-success" : "bg-text-faint"
+        }`}
+      />
+      Monitor {running ? "running" : "stopped"}
+    </span>
+  );
+}
+
 function LiveIndicator({ isPolling }: { isPolling: boolean }) {
   return (
     <span
@@ -44,6 +66,8 @@ interface AppHeaderProps {
   fleetLabel?: string;
   onBack?: () => void;
   sendingAsAdministrator?: boolean;
+  /** Monitor liveness for the fleet; `null` until the first fetch resolves. */
+  monitorRunning?: boolean | null;
 }
 
 export default function AppHeader({
@@ -52,6 +76,7 @@ export default function AppHeader({
   fleetLabel,
   onBack,
   sendingAsAdministrator = false,
+  monitorRunning = null,
 }: AppHeaderProps) {
   return (
     <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-raised px-4 py-2">
@@ -87,6 +112,7 @@ export default function AppHeader({
             Sending as <span className="font-medium text-text">Administrator</span>
           </span>
         )}
+        <MonitorIndicator running={monitorRunning} />
         <LiveIndicator isPolling={isPolling} />
         <button
           type="button"

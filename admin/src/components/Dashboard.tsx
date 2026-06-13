@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { TriangleAlert, Users } from "lucide-react";
-import type { Agent } from "../types";
-import { getAgents } from "../api";
+import type { Agent, MonitorRuntime } from "../types";
+import { getAgents, getMonitor } from "../api";
 import { usePolling, POLL_INTERVAL_MS } from "../hooks/usePolling";
 import AgentDetail from "./AgentDetail";
 import AppHeader from "./AppHeader";
@@ -26,16 +26,21 @@ export default function Dashboard({
   onBack,
 }: DashboardProps) {
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
+  const [monitor, setMonitor] = useState<MonitorRuntime | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isPolling, setIsPolling] = useState(false);
 
   const refreshAll = useCallback(async () => {
     setIsPolling(true);
     try {
-      const data = await getAgents();
-      setAgents(data.agents);
+      const [agentsData, monitorData] = await Promise.all([
+        getAgents(),
+        getMonitor(),
+      ]);
+      setAgents(agentsData.agents);
+      setMonitor(monitorData);
     } catch {
-      /* preserve last-known agent list */
+      /* preserve last-known agent list + monitor state */
     } finally {
       setIsPolling(false);
     }
@@ -43,6 +48,12 @@ export default function Dashboard({
   }, []);
 
   const trigger = usePolling(refreshAll, POLL_INTERVAL_MS);
+
+  // Seed the monitor indicator immediately (agents arrive via initialAgents);
+  // the periodic poll keeps both fresh thereafter.
+  useEffect(() => {
+    void trigger();
+  }, [trigger]);
 
   const handleSelectAgent = useCallback(
     (selectedId: number) => {
@@ -84,6 +95,7 @@ export default function Dashboard({
         fleetLabel={fleetLabel ?? String(fleetId)}
         onBack={onBack}
         sendingAsAdministrator={senderId !== null}
+        monitorRunning={monitor === null ? null : monitor.running}
       />
 
       <div className="flex flex-1 min-h-0">
@@ -136,6 +148,9 @@ export default function Dashboard({
             agent={detailAgent}
             refreshKey={refreshKey}
             onClose={closeDetail}
+            onChanged={() => {
+              void trigger();
+            }}
           />
         )}
       </div>
