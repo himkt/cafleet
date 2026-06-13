@@ -40,6 +40,11 @@ def test_protocol_declares_list_pane_ids():
     assert hasattr(Multiplexer, "list_pane_ids")
 
 
+def test_protocol_declares_send_resume_trigger():
+    """The R3 member resume-nudge keystroke is part of the Multiplexer contract."""
+    assert hasattr(Multiplexer, "send_resume_trigger")
+
+
 def test_tmux_list_pane_ids_returns_set_of_pane_ids(monkeypatch):
     """``list_pane_ids`` splits ``tmux list-panes -a`` output into a set."""
     monkeypatch.setattr(

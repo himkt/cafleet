@@ -2,7 +2,8 @@
 
 The global ``_silence_real_tmux_subprocess`` fixture already stubs the tmux
 ``_run`` subprocess; each test additionally stubs ``list_pane_ids`` (the
-per-tick liveness query) and captures ``send_poll_trigger`` keystrokes.
+per-tick liveness query) and captures the per-role keystrokes —
+``send_poll_trigger`` for the Director, ``send_resume_trigger`` for members.
 """
 
 import os
@@ -38,33 +39,42 @@ def _register_member(fleet: dict, name: str, pane_id: str) -> int:
 
 
 def _stub_tmux(monkeypatch, live_panes):
-    """Stub the per-tick pane-liveness query and capture poll-trigger keystrokes."""
+    """Stub pane liveness; capture poll-trigger (Director) and resume-trigger
+    (member) keystrokes into separate lists (R3)."""
     monkeypatch.setattr(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.list_pane_ids",
         lambda self: set(live_panes),
         raising=False,
     )
-    pings = []
+    polls = []
+    resumes = []
 
     def fake_poll(self, *, target_pane_id, fleet_id, agent_id):
-        pings.append((target_pane_id, fleet_id, agent_id))
+        polls.append((target_pane_id, fleet_id, agent_id))
+        return True
+
+    def fake_resume(self, *, target_pane_id, fleet_id, agent_id):
+        resumes.append((target_pane_id, fleet_id, agent_id))
         return True
 
     monkeypatch.setattr(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.send_poll_trigger", fake_poll
     )
-    return pings
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.send_resume_trigger",
+        fake_resume,
+        raising=False,
+    )
+    return polls, resumes
 
 
-def test_monitor_tick__pings_due_agents_records_heartbeats_and_logs(
-    capsys, monkeypatch
-):
+def test_monitor_tick__routes_poll_to_director_resume_to_members(capsys, monkeypatch):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
-    alice = _register_member(fleet, "alice", "%7")  # pending, alive  → ping
-    bob = _register_member(fleet, "bob", "%9")  # idle, alive         → ping (R2)
-    carol = _register_member(fleet, "carol", "%99")  # pending, dead  → skip
+    alice = _register_member(fleet, "alice", "%7")  # member, alive → resume
+    bob = _register_member(fleet, "bob", "%9")  # member, alive     → resume
+    carol = _register_member(fleet, "carol", "%99")  # member, dead → skip
 
     broker.send_message(sid, director_id, alice, "do x")
     broker.send_message(sid, director_id, carol, "do y")
@@ -72,19 +82,19 @@ def test_monitor_tick__pings_due_agents_records_heartbeats_and_logs(
         sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
     )
 
-    pings = _stub_tmux(monkeypatch, {"%0", "%7", "%9"})  # carol's %99 is dead
+    polls, resumes = _stub_tmux(monkeypatch, {"%0", "%7", "%9"})  # carol's %99 is dead
 
     result = monitor_tick(sid, _NOW)
 
     assert result is CONTINUE
-    # R2: every due, enabled, live-pane agent is pinged — idle members too;
-    # only carol (dead pane) is skipped
-    assert {agent_id for _, _, agent_id in pings} == {director_id, alice, bob}
-    assert ("%0", sid, director_id) in pings
-    assert ("%7", sid, alice) in pings
-    assert ("%9", sid, bob) in pings
+    # R3: the Director receives a bare poll; members receive the resume nudge
+    assert {agent_id for _, _, agent_id in polls} == {director_id}
+    assert {agent_id for _, _, agent_id in resumes} == {alice, bob}
+    assert ("%0", sid, director_id) in polls
+    assert ("%7", sid, alice) in resumes
+    assert ("%9", sid, bob) in resumes
 
-    # record_ping advanced every pinged agent; carol (skipped) stays None
+    # record_ping advanced every pinged agent (both roles); carol (dead) stays None
     assert (
         broker.get_monitor_config(sid, director_id)["last_ping_at"] == _NOW.isoformat()
     )
@@ -95,7 +105,7 @@ def test_monitor_tick__pings_due_agents_records_heartbeats_and_logs(
     # the heartbeat was written for this tick
     assert broker.read_monitor_runtime(sid)["last_tick_at"] == _NOW.isoformat()
 
-    # R2: one stdout ping-log line per dispatched ping
+    # one stdout ping-log line per dispatched ping (unchanged by R3)
     out = capsys.readouterr().out
     assert f"ping agent {director_id} (Director)" in out
     assert f"ping agent {alice} (alice)" in out
@@ -114,9 +124,10 @@ def test_monitor_tick__stop_on_soft_deleted_fleet(broker_session, monkeypatch):
         s.get(Fleet, sid).deleted_at = _NOW.isoformat()
         s.commit()
 
-    pings = _stub_tmux(monkeypatch, set())
+    polls, resumes = _stub_tmux(monkeypatch, set())
     assert monitor_tick(sid, _NOW) is STOP
-    assert pings == []
+    assert polls == []
+    assert resumes == []
 
 
 def test_monitor_tick__stop_on_missing_fleet(monkeypatch):
@@ -127,9 +138,10 @@ def test_monitor_tick__stop_on_missing_fleet(monkeypatch):
     broker.claim_monitor_runtime(sid, os.getpid(), 5, _NOW.isoformat())
     monkeypatch.setattr("cafleet.broker.get_fleet", lambda fleet_id: None)
 
-    pings = _stub_tmux(monkeypatch, set())
+    polls, resumes = _stub_tmux(monkeypatch, set())
     assert monitor_tick(sid, _NOW) is STOP
-    assert pings == []
+    assert polls == []
+    assert resumes == []
 
 
 def test_monitor_tick__stop_when_ownership_lost(monkeypatch):
@@ -139,6 +151,7 @@ def test_monitor_tick__stop_when_ownership_lost(monkeypatch):
     # heartbeat matches zero rows and the loser self-terminates without pinging
     broker.claim_monitor_runtime(sid, os.getpid() + 1, 5, _NOW.isoformat())
 
-    pings = _stub_tmux(monkeypatch, {"%0"})
+    polls, resumes = _stub_tmux(monkeypatch, {"%0"})
     assert monitor_tick(sid, _NOW) is STOP
-    assert pings == []
+    assert polls == []
+    assert resumes == []
