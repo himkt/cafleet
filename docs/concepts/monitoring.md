@@ -28,14 +28,21 @@ those require agent judgment and stay the Director's job, defined by the
 | Heartbeat (the *when*) | which agents are due; the wake keystroke | the `cafleet monitor` loop |
 | Facilitation (the *what*) | poll → ACK → dispatch → health-check → escalate | the Director, per the supervision skill |
 
-Pinging an agent keystrokes *exactly* `cafleet … message poll` into its pane
-(the fixed poll-trigger payload — the monitor cannot inject a richer prompt). A
-bare poll, on its own, performs only the first step of facilitation. The
-contract that makes a woken Director run its full facilitation loop therefore
-lives in the supervision skill, not in the keystroke: **a monitor poll-trigger
-wake is the Director's cue to run its entire facilitation loop**, not to read
-its inbox and stop. The monitor never reasons about message content — it is the
-alarm clock; the Director is the worker.
+The wake keystroke differs by role:
+
+- **The Director** gets a bare `cafleet … message poll`. That bare poll, on its
+  own, performs only the first step of facilitation, so the contract that makes
+  a woken Director run its full facilitation loop lives in the supervision
+  skill, not in the keystroke: **a monitor poll-trigger wake is the Director's
+  cue to run its entire facilitation loop**, not to read its inbox and stop.
+- **A member** gets a single-line *resume nudge* — the same poll command plus an
+  instruction to review its current task and continue working — so a member that
+  unexpectedly stopped resumes rather than going idle on an empty inbox. This is
+  the one place a monitor keystroke carries more than a bare poll, and only for
+  members; the Director's wake stays the bare poll above.
+
+The monitor never reasons about message content — it is the alarm clock; the
+Director is the worker.
 
 ## Who gets pinged
 

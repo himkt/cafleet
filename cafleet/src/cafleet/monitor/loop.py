@@ -74,7 +74,15 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
     for target in broker.list_monitor_targets(fleet_id):
         target["pane_alive"] = target["pane_id"] in live_panes
         if should_ping(target, now):
-            mux.send_poll_trigger(
+            # The Director gets a bare poll (its facilitation contract lives in
+            # the supervision skill); a member gets a resume nudge so a stopped
+            # member reviews its task and continues rather than going idle.
+            keystroke = (
+                mux.send_poll_trigger
+                if target["is_director"]
+                else mux.send_resume_trigger
+            )
+            keystroke(
                 target_pane_id=target["pane_id"],
                 fleet_id=fleet_id,
                 agent_id=target["agent_id"],

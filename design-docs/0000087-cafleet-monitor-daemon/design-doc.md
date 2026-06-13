@@ -1,7 +1,7 @@
 # cafleet monitor — backend-agnostic external scheduler
 
 **Status**: Approved
-**Progress**: 84/84 tasks complete (Steps 1–8 + Revision R1 + Revision R2 done; awaiting user approval)
+**Progress**: 92/93 tasks complete (Steps 1–8 + Revision R1 + Revision R2 done; Revision R3 in progress — E2E smoke pending)
 **Last Updated**: 2026-06-13
 
 ## Overview
@@ -17,6 +17,7 @@
 - [x] Stopping the monitor's background task shuts the loop down cleanly (SIGTERM clears the runtime row); `fleet delete` makes the loop self-terminate.
 - [x] The monitor pings the root Director and every member **unconditionally** on each agent's interval (members are no longer gated on pending inbox items) — R2.
 - [x] `cafleet monitor start` logs each dispatched ping to stdout (`<iso-ts> ping agent <id> (<name>)`), so the launching agent's background-task output shows the live heartbeat — R2.
+- [ ] The monitor's **member** ping keystrokes a resume nudge (poll inbox → review current task → continue if stopped), not a bare poll; the **Director** ping stays a bare poll — R3.
 - [x] Per-agent `interval_seconds` / `enabled` are persisted in `monitor_config`, auto-enrolled at agent registration, editable via CLI and WebUI at parity, and survive a monitor restart (cadence resumes from `last_ping_at`).
 - [x] The admin agents page shows each agent's monitoring schedule and lets the operator edit the interval and toggle enable/disable.
 - [x] The `CronCreate` / `/loop` scheduling-setup guidance and the codex/opencode "no in-session scheduler" fallback table are removed repo-wide and replaced with "ensure `cafleet monitor` is running"; the Director's facilitation loop is preserved; no deprecation notices remain.
@@ -37,7 +38,7 @@ This design moves that scheduler out of the model's reasoning and into a determi
 The monitor provides **only the heartbeat** — the *when*: which agents are due and a keystroke to wake them. It MUST NOT poll, ACK, dispatch, health-check, or escalate. Those require agent judgment and remain the Director's job, defined by the `cafleet-agent-team-supervision` skill (the *what*).
 
 - Pinging the **Director** keystrokes *exactly* `cafleet … message poll` into the Director's pane (the fixed `send_poll_trigger` payload — it cannot inject a richer prompt). That bare poll, on its own, performs only **step 1** of facilitation. The contract that makes the Director run the full 5-step loop therefore lives in the `cafleet-agent-team-supervision` skill, not in the keystroke: the skill instructs the Director to **treat a monitor poll-trigger wake as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), not to read its inbox and stop. The old `/loop` template injected that facilitation prompt directly; the monitor injects only the poll, so this cue MUST be stated explicitly in the supervision rewrite (Step 1b) — otherwise a woken Director may poll and halt without facilitating.
-- Pinging a **member** keystrokes the same `cafleet … message poll` into the member's pane, which catches a missed inline preview. For a member the bare poll is the whole job — re-draining the inbox is exactly what is wanted.
+- Pinging a **member** keystrokes a richer **resume nudge** (`send_resume_trigger`) — a single-line instruction telling the member to poll its inbox (`cafleet … message poll`), review its current task, and continue working if it had stopped (R3). This is a deliberate, scoped relaxation of the bare-poll rule for members only: a stalled member that received a bare poll with an empty inbox would just go idle ("Idle. Taking no action."), so the member ping carries the minimal facilitation needed to actually resume it. The Director ping stays a bare poll — the Director's full facilitation contract lives in the supervision skill (above), not in the keystroke.
 
 The monitor never reasons about message content. It is the alarm clock; the Director is the worker. This boundary is what keeps the loop a plain process rather than a coding agent.
 
@@ -173,8 +174,12 @@ def monitor_tick(fleet_id, now):                          # now: tz-aware dateti
     for t in broker.list_monitor_targets(fleet_id):       # active+enrolled agents
         t["pane_alive"] = t["pane_id"] in live_panes
         if should_ping(t, now):
-            TmuxMultiplexer().send_poll_trigger(
-                target_pane_id=t["pane_id"], fleet_id=fleet_id, agent_id=t["agent_id"])
+            if t["is_director"]:                          # Director: bare inbox poll
+                TmuxMultiplexer().send_poll_trigger(
+                    target_pane_id=t["pane_id"], fleet_id=fleet_id, agent_id=t["agent_id"])
+            else:                                          # R3: member resume nudge (poll + review + continue)
+                TmuxMultiplexer().send_resume_trigger(
+                    target_pane_id=t["pane_id"], fleet_id=fleet_id, agent_id=t["agent_id"])
             log(f"{now.isoformat()} ping agent {t['agent_id']} ({t['name']})")  # R2: visible heartbeat to stdout
             pinged.append(t["agent_id"])
     broker.record_pings(pinged, now.isoformat())          # one write txn for all stamps this tick (no-op if empty)
@@ -489,6 +494,41 @@ Two changes requested after the R1 smoke test (where the heartbeat was invisible
 - [x] `mise //cafleet:format` + lint + typecheck + test green; `mise //admin:build`. <!-- completed: 2026-06-13T11:12 -->
 - [x] E2E smoke: `cafleet monitor start` as a background task → spawn an **idle** member → observe a ping-log line for that member on stdout each interval AND the `message poll` keystroke land in the member pane even with an empty inbox. <!-- completed: 2026-06-13T11:18 (throwaway fleet 51: idle member 212 pinged each interval at pending=0; stdout "ping agent 212 (idle-target)" recurring; poll keystroke landed in member pane; clean teardown) -->
 
+### Revision R3 — member ping is a resume nudge, not a bare poll
+
+Requested after the R2 smoke: a member pinged with a bare `cafleet … message poll` and an empty inbox just goes idle ("Idle. Taking no action."), so the heartbeat does not actually resume a member that has unexpectedly stopped mid-task. R3 makes the **member** ping keystroke a richer single-line **resume nudge** — instructing the member to poll its inbox, review its current task/progress, and continue working if it had stopped. The **Director** ping is unchanged (still a bare `send_poll_trigger` poll; its facilitation contract lives in the supervision skill).
+
+A new multiplexer primitive `send_resume_trigger(*, target_pane_id, fleet_id, agent_id) -> bool` (best-effort, same tmux-missing / `TmuxError` contract as `send_poll_trigger`) keystrokes a single line, e.g.:
+
+```
+[monitor] resume: run `cafleet --fleet-id <fleet_id> message poll --agent-id <agent_id>` to check your inbox, then review your current task and continue working if you had stopped.
+```
+
+`monitor_tick` selects the keystroke per role: `is_director` → `send_poll_trigger`; member → `send_resume_trigger`. `should_ping` is unchanged (both roles still pinged unconditionally once due, per R2); only the keystroke payload differs.
+
+**Unchanged:** schema, broker (config/scan/runtime/enroll/record_pings), `should_ping`, the unconditional-ping policy, `monitor status`, `monitor config`, WebUI endpoints, admin SPA.
+
+**Code**
+
+- [x] `cafleet/multiplexer/base.py` + `cafleet/multiplexer/tmux.py`: add `send_resume_trigger(*, target_pane_id, fleet_id, agent_id) -> bool` — best-effort single-line resume keystroke (poll command + review-and-continue instruction), mirroring `send_poll_trigger`'s tmux-missing / `TmuxError` handling. <!-- completed: 2026-06-13T14:16 -->
+- [x] `cafleet/monitor/loop.py`: `monitor_tick` branches on `target["is_director"]` — Director → `send_poll_trigger`, member → `send_resume_trigger` (ping-log + `record_pings` batch unchanged). <!-- completed: 2026-06-13T14:16 -->
+
+**Tests**
+
+- [x] `tests/multiplexer/test_protocol.py`: `send_resume_trigger` is in the `Multiplexer` protocol. <!-- completed: 2026-06-13T14:10 -->
+- [x] tmux send-helper tests: `send_resume_trigger` keystrokes the expected single line (contains the poll command + the review/continue instruction) and honors the tmux-missing / `TmuxError` best-effort contract. <!-- completed: 2026-06-13T14:10 -->
+- [x] `tests/monitor/test_loop.py`: `monitor_tick` calls `send_poll_trigger` for the Director and `send_resume_trigger` for members (assert which primitive each role receives). <!-- completed: 2026-06-13T14:10 -->
+
+**Docs / skills**
+
+- [x] `docs/concepts/monitoring.md`: document the member resume-nudge vs Director bare-poll split (and the scoped relaxation of the bare-poll boundary for members). <!-- completed: 2026-06-13T14:16 -->
+- [x] `docs/spec/cli-options.md` and the skills that describe the member ping keystroke (`cafleet-agent-team-monitoring`, `cafleet` reference): note members receive a resume nudge, the Director a bare poll. <!-- completed: 2026-06-13T14:16 -->
+
+**Verify**
+
+- [x] `mise //cafleet:format` + lint + typecheck + test green; `mise //admin:build`. <!-- completed: 2026-06-13T14:16 -->
+- [ ] E2E smoke: monitor pings an idle member → the member's pane shows the resume nudge (not a bare poll) and the member reviews its task and continues rather than going idle; the Director still receives a bare poll.
+
 ---
 
 ## Changelog
@@ -499,3 +539,4 @@ Two changes requested after the R1 smoke test (where the heartbeat was invisible
 | 2026-06-13 | Implemented Steps 1–8 (detached-process model) — committed. |
 | 2026-06-13 | **Revision R1 (post-approval pivot):** monitor is an agent-run foreground loop (`cafleet monitor start` runs in-process, launched by a coding agent as a background task), not a detached OS subprocess. Removed `start_detached`, the PID file, `state_dir`, `cafleet monitor stop`, `MONITOR_STOP_TIMEOUT`, and `cafleet/__main__.py`; `fleet delete` relies on loop self-termination. Schema/broker/`should_ping`/`monitor_tick`/status/config/WebUI/SPA unchanged. |
 | 2026-06-13 | **Revision R2:** members are pinged unconditionally on their interval (removed the `pending_count > 0` gate in `should_ping`); `cafleet monitor start` now logs each dispatched ping to stdout (`<iso-ts> ping agent <id> (<name>)`). Motivated by the R1 smoke test, where idle members were never pinged and the heartbeat was invisible. Schema/broker/runtime/WebUI/SPA unchanged. |
+| 2026-06-13 | **Revision R3:** the monitor's member ping is now a resume nudge (`send_resume_trigger`) — poll inbox + review current task + continue if stopped — instead of a bare `message poll` that left an idle member doing nothing; the Director ping stays a bare poll. `should_ping`/unconditional-ping policy unchanged. |

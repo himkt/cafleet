@@ -150,6 +150,29 @@ class Multiplexer(Protocol):
         """
         ...
 
+    def send_resume_trigger(
+        self, *, target_pane_id: str, fleet_id: int, agent_id: int
+    ) -> bool:
+        """Keystroke a single-line *resume nudge* into a member's pane.
+
+        Unlike :meth:`send_poll_trigger` (a bare ``cafleet … message poll``),
+        this carries the poll command **plus** an instruction to review the
+        member's current task and continue working — so a member that
+        unexpectedly stopped resumes rather than going idle on an empty inbox.
+        The Director receives the bare poll-trigger; only members receive this.
+
+        Args:
+            target_pane_id: Pane id of the member to nudge.
+            fleet_id: Fleet id embedded in the keystroked poll command.
+            agent_id: Recipient agent id embedded in the keystroked poll
+                command.
+
+        Returns:
+            ``True`` if the keystroke landed; ``False`` if the pane is dead or
+            the multiplexer is unreachable.
+        """
+        ...
+
     def send_inline_preview(
         self,
         *,
