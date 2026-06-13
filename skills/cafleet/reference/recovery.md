@@ -17,7 +17,7 @@ cafleet --fleet-id <fleet-id> member capture \
 
 ## Routine monitoring via `member list --activity`
 
-The `--activity` flag aggregates per-member `last_sent` / `last_recv` / `last_ack` / `idle` columns so a routine `/loop` tick can decide which members need a capture WITHOUT capturing every member every minute. See [`reference/director.md`](director.md#member-list-with-activity).
+The `--activity` flag aggregates per-member `last_sent` / `last_recv` / `last_ack` / `idle` columns so a routine monitor tick can decide which members need a capture WITHOUT capturing every member every wake. See [`reference/director.md`](director.md#member-list-with-activity).
 
 ```
 $ cafleet --fleet-id <s> member list --activity
@@ -63,11 +63,11 @@ The default `cafleet member delete` path sends `/exit`, polls `tmux list-panes` 
 
 ## Shutdown Protocol
 
-The teardown MUST run in this exact order. Skipping any step leaves crons firing against dead agents, or orphan coding-agent processes lingering in panes.
+The teardown MUST run in this exact order. Skipping any step leaves the monitor keystroking polls against dead agents, or orphan coding-agent processes lingering in panes.
 
 **Rule: use cafleet primitives only.** All tmux interactions — write, inspect, and metadata — are encapsulated by cafleet commands. For tmux session/window/pane metadata at Director startup, use `cafleet doctor`. Never invoke raw tmux directly from the Director. If a workflow appears to need a raw tmux call, file a gap in `cafleet member *` or `cafleet doctor` — NOT a raw tmux invocation.
 
-1. **Stop every background `/loop` monitor FIRST.** Any `/loop` cron the Director started during the fleet must be cancelled with `CronDelete <job-id>` **before** members are deleted. A cron that keeps firing after members are gone will issue `cafleet member list` / `poll` against a tearing-down fleet, spam `Error: fleet is deleted`, and (worse) race with the member-delete path and nudge agents that are mid-`/exit`. Fixed-cadence `/loop`s (e.g. the team-health monitor from the `cafleet-agent-team-monitoring` skill) and any augmented loops you created (PR review loops, verifier loops, etc.) all fall under this rule. Stop them all.
+1. **Stop the monitor FIRST.** The `cafleet monitor` the Director started for the fleet must be stopped with `cafleet --fleet-id <fleet-id> monitor stop` **before** members are deleted. A monitor that keeps ticking after members are gone keystrokes `cafleet … message poll` into tearing-down panes, races with the member-delete path, and nudges agents that are mid-`/exit`. There is exactly one monitor process per fleet — stopping it stops every supervision tick at once (team-health and the Step-7 PR-review poll alike, since PR-review polling is a facilitation step the Director runs on the same heartbeat, not a separate scheduler). `cafleet fleet delete` (step 4) also stops the monitor, so this rung is belt-and-suspenders — but stop it explicitly first so no tick races the member deletions.
 2. **Delete every member** via `cafleet member delete`. This call blocks until the target pane is actually gone (15 s default timeout). On timeout follow the wedged-`/exit` decision tree above. Do this per member, not via `fleet delete` alone — `fleet delete` deregisters agents in the DB but does NOT send `/exit` to panes.
 3. **Verify every member is gone via cafleet.** Run `cafleet member list`. The team's member roster should be empty. Any agent still present means step 2 failed — re-run `cafleet member delete` on that member, capture if needed, and report to the user if it still refuses to leave. Do NOT use raw tmux to "check" or "force" anything.
 4. **Run `cafleet fleet delete <fleet-id>`** (positional, no `--fleet-id` flag). This deregisters the root Director, deregisters the Administrator, sweeps any agent rows that survived step 2, and physically deletes every `agent_placements` row. Plain `cafleet --fleet-id <fleet-id> agent deregister --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` — always use `fleet delete` for the final teardown step.

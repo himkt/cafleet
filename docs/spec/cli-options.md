@@ -36,6 +36,10 @@ One row per subcommand. "Identity flag" is the per-subcommand option naming the 
 | `member send-input` | Forward a restricted keystroke to a member's pane | yes | `--member-id` | [member send-input](#member-send-input) |
 | `member exec` | Dispatch a shell command into a member's pane | yes | `--member-id` | [member exec](#member-exec) |
 | `member ping` | Inject an inbox-poll keystroke into a member's pane | yes | `--member-id` | [member ping](#member-ping) |
+| `monitor start` | Launch the detached per-fleet scheduler process | yes | none | [monitor start](#monitor-start) |
+| `monitor stop` | Stop the fleet's scheduler process | yes | none | [monitor stop](#monitor-stop) |
+| `monitor status` | Show monitor liveness and the per-agent schedule | yes | none | [monitor status](#monitor-status) |
+| `monitor config` | Show or edit an agent's monitor schedule | yes | `--agent-id` | [monitor config](#monitor-config) |
 
 ## Option Source Matrix
 
@@ -47,6 +51,7 @@ Each parameter has exactly one input source:
 | Database URL | `CAFLEET_DATABASE_URL` env var (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/cafleet.db` with `~` expanded at load time. When setting `CAFLEET_DATABASE_URL` yourself, use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs.) |
 | Agent ID | `--agent-id <int>` subcommand option |
 | JSON output | `--json` global flag |
+| Monitor state directory | `CAFLEET_MONITOR_STATE_DIR` env var (optional; default `~/.local/share/cafleet/monitor/` with `~` expanded at load time). Holds the per-fleet PID file and detached-worker log. |
 
 > **Why `--fleet-id` is a literal CLI flag, not an environment variable.** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --fleet-id <int> ...` invocation matches a single `permissions.allow` pattern of the same shape across every subcommand for that fleet. Shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts that interrupt agent work. Substitute the literal integer ids printed by `cafleet fleet create` and `cafleet agent register` — do not use shell variables to hold them.
 
@@ -815,6 +820,90 @@ Two keys: `member_agent_id`, `pane_id`. Failures surface via exit 1.
 
 See [Member targeting and key delivery](#member-targeting-and-key-delivery) for the common exit codes. Unique to `member ping`: a missing `--member-id` exits 2, and a `tmux send-keys` failure exits 1 with `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.`.
 
+## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
+
+The `cafleet monitor` subgroup manages the detached, per-fleet scheduler process that wakes due agents on a fixed cadence — the heartbeat behind a Director's supervision loop. All four subcommands require the global `--fleet-id`. `start` and `stop` manage the OS process; `status` and `config` view and edit the schedule. The conceptual model (heartbeat-vs-facilitation boundary, the director-vs-member ping split, the tick-precision floor, single-instance via PID file + DB heartbeat) is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
+
+Process lifecycle (`start` / `stop`) is **CLI-only** — there is no WebUI control for launching or killing the process. The schedule-view and schedule-edit surfaces are at WebUI/CLI parity ([WebUI API](./webui-api.md)).
+
+### `monitor start`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--tick` | no | Scan-tick cadence in seconds (`click.IntRange(min=1)`, default **5**). Stored in `monitor_runtime.tick_seconds` so `status` can report it. The tick is the floor on per-agent interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision). |
+| `--foreground` | no | Run the loop in the current pane instead of detaching. The default path re-execs this same worker detached. |
+
+Default behavior: runs the tmux precondition guard (the same `TMUX`-env check the `member` commands use), pre-checks single-instance, then spawns the detached worker via `subprocess.Popen([sys.executable, "-m", "cafleet", "--fleet-id", N, "monitor", "start", "--tick", T, "--foreground"], start_new_session=True, stdin=DEVNULL, stdout/stderr=<state_dir>/<fleet_id>.log, close_fds=True)`. It then polls the runtime for up to ~2 s for a fresh heartbeat **whose `pid` equals the spawned child's pid**; on success it reports `monitor started (pid M, tick Ts)` and returns, freeing the caller's turn. If no matching-pid heartbeat appears in the window (import error, crash, or a lost claim race), it reports a failure pointing at the log path and exits 1 — it never falsely reports "started", and never against a different already-running monitor's pid.
+
+`--foreground` runs `run_monitor_loop` in-process: claim the runtime (exit 1 if already held), write the PID file, install `SIGTERM`/`SIGINT` handlers, then loop `scan → ping due agents → heartbeat → sleep` until signalled.
+
+Text output (detached success):
+
+```
+monitor started (pid 4821, tick 5s)
+```
+
+JSON output: `{"running": true, "pid": 4821, "tick_seconds": 5, "started_at": "<iso8601>"}`.
+
+Exit codes: `0` started (or foreground clean exit); `1` already running (`monitor already running for fleet N (pid M)`), unknown or soft-deleted fleet, tmux unreachable, or the detached child wrote no matching-pid heartbeat in the window (the message names `<state_dir>/<fleet_id>.log`); `2` click usage errors (e.g. `--tick 0`).
+
+### `monitor stop`
+
+No flags beyond the global `--fleet-id`. Signals the running worker (`SIGTERM`, escalating to `SIGKILL` on a ~5 s timeout), waits for the heartbeat/pid to clear, then ensures the runtime row is cleared and the PID file removed. Idempotent.
+
+Text output: `monitor stopped (pid M)` when a live monitor was signalled, or `no monitor running for fleet N` when nothing was running. Exit `0` in both cases (`2` for click usage errors).
+
+### `monitor status`
+
+No flags beyond the global `--fleet-id`. Reports runtime liveness derived from the DB heartbeat (true even when the process died silently) plus the per-agent schedule table.
+
+Text output:
+
+```
+monitor: running (pid 4821, last tick 2s ago, tick 5s, started 2026-06-13T04:50:00+00:00)
+  agent_id  name         role      interval  last_ping             enabled  pending
+  --------  -----------  --------  --------  -------------------  -------  -------
+  2         Director     director  60s       2026-06-13T04:51:00   yes      0
+  4         alice        member    60s       -                    yes      2
+  5         bob          member    30s       2026-06-13T04:50:30   no       0
+```
+
+When no monitor is running the first line reads `monitor: stopped`; the schedule table still renders. JSON output:
+
+```json
+{
+  "runtime": {"running": true, "pid": 4821, "tick_seconds": 5,
+              "last_tick_at": "2026-06-13T04:51:02+00:00", "last_tick_age_seconds": 2,
+              "started_at": "2026-06-13T04:50:00+00:00"},
+  "agents": [
+    {"agent_id": 4, "name": "alice", "role": "member", "interval_seconds": 60,
+     "last_ping_at": null, "enabled": true, "pending_count": 2}
+  ]
+}
+```
+
+Exit `0` (`2` for click usage errors). On an unknown or soft-deleted fleet, exit 1.
+
+### `monitor config`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The agent whose schedule is shown or edited. Must be an enrolled, in-fleet agent. |
+| `--interval` | no | New ping interval in seconds (`click.IntRange(min=1)` — the same `>= 1` lower bound the WebUI `PATCH` enforces). |
+| `--enable` / `--disable` | no | Enable or disable monitoring for the agent. Mutually exclusive. |
+
+With no edit flag, prints the agent's current config. With `--interval` / `--enable` / `--disable`, applies the update and prints the new config. Exits 1 if the agent is not in the fleet or not enrolled (the Administrator and card-only agents are never enrolled). `--enable` and `--disable` together exit 2.
+
+Text output:
+
+```
+agent 4 (alice): interval 60s, enabled, last_ping 2026-06-13T04:51:00
+```
+
+JSON output: `{"agent_id": 4, "interval_seconds": 60, "last_ping_at": "<iso8601>|null", "enabled": true}`.
+
+The detached re-exec target uses `sys.executable -m cafleet`, not a bare `python` PATH lookup, so the worker runs in the same environment (and reaches the same `cafleet` install and `CAFLEET_DATABASE_URL`) as the launching CLI.
+
 ## Error Messages
 
 | Situation | Error Message |
@@ -845,4 +934,9 @@ See [Member targeting and key delivery](#member-targeting-and-key-delivery) for 
 | `member create --prompt-file` to a file containing invalid UTF-8 | `Error: --prompt-file <path>: file is not valid UTF-8.` (exit 1) |
 | `member create --prompt-file` to a zero-byte or whitespace-only file | `Error: --prompt-file <path>: file is empty.` (exit 1) |
 | `member create --coding-agent opencode --model` with a value violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` (exit 2; fires before any agent registration or tmux side effect) |
+| `monitor start` for a fleet that already has a live monitor | `Error: monitor already running for fleet <id> (pid <pid>)` (exit 1) |
+| `monitor start` whose detached child never reports a matching-pid heartbeat | `Error: monitor failed to start; see <state_dir>/<fleet_id>.log` (exit 1) |
+| `monitor start` / `monitor status` against an unknown or soft-deleted fleet | `Error: fleet <id> not found` (exit 1) |
+| `monitor config` with both `--enable` and `--disable` | `Error: --enable and --disable are mutually exclusive.` (exit 2) |
+| `monitor config` against an agent not in the fleet or not enrolled | `Error: agent <id> is not enrolled in monitoring for fleet <fleet-id>.` (exit 1) |
 

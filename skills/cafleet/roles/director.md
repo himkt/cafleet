@@ -8,7 +8,7 @@ This file is the role-specific anchor. The actual protocols live in dedicated re
 
 1. **Before spawning your first member**, Read [`reference/director.md`](../reference/director.md). Covers `member create`, `member delete`, `member list --activity`, `member capture`, `member send-input` (with the AskUserQuestion three-beat delegation workflow), `member exec`, and `member ping`. This is the authoritative reference for every Director-only command.
 2. **Before processing a member's denial-fallback request**, Read [`reference/exec-routing.md`](../reference/exec-routing.md). Covers how to recognize a member-originated bash request, the `cafleet member exec` dispatch shape, the required `cafleet member ping` follow-up, serialization (process one request at a time in poll order), and the cross-fleet boundary.
-3. **Before tearing down a member or fleet**, Read [`reference/recovery.md`](../reference/recovery.md). Covers the 2-stage health check, stalled-member shape classification, recovery from a wedged `/exit`, and the full Shutdown Protocol (stop crons → delete members → verify → `fleet delete` → confirm).
+3. **Before tearing down a member or fleet**, Read [`reference/recovery.md`](../reference/recovery.md). Covers the 2-stage health check, stalled-member shape classification, recovery from a wedged `/exit`, and the full Shutdown Protocol (stop the monitor → delete members → verify → `fleet delete` → confirm).
 4. **Before broadcasting**, Read [`reference/broadcast.md`](../reference/broadcast.md). Covers fan-out semantics, the `broadcast_summary` envelope, and threading via `origin_task_id`.
 5. **For `--full` opt-back-in semantics**, Read [`reference/output-flags.md`](../reference/output-flags.md).
 
@@ -35,7 +35,7 @@ You own these primitives. Members do NOT call them.
 | `cafleet member exec "<cmd>"` | Shell-dispatch via the coding agent's `!` shortcut. Operator-controlled `COMMAND` argument. | `permissions.ask` |
 | `cafleet member ping` | Fixed-action inbox-poll nudge. No `COMMAND` argument. | `permissions.allow` |
 
-The asymmetry between `member exec` and `member ping` is the whole point of having two subcommands: exec carries an operator-controlled command and stays under per-call ask; ping has no operator-controlled body and is pre-approved so monitoring loops can fire it without prompts. See [`reference/exec-routing.md`](../reference/exec-routing.md) for the bash-via-Director fallback protocol that uses both.
+The asymmetry between `member exec` and `member ping` is the whole point of having two subcommands: exec carries an operator-controlled command and stays under per-call ask; ping has no operator-controlled body and is pre-approved so the Director can fire it during supervision without prompts. See [`reference/exec-routing.md`](../reference/exec-routing.md) for the bash-via-Director fallback protocol that uses both.
 
 ## When you, as Director, want to run your own command
 

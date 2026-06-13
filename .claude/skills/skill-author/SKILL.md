@@ -27,7 +27,7 @@ The shape always looks like this:
 
 ```
 User
- +-- Director (main Claude — runs cafleet fleet create / member create / drives the loop)
+ +-- Director (main Claude — runs cafleet fleet create / member create / runs the monitor)
       +-- member-1 (claude pane)
       +-- member-2 (claude pane)
       +-- ...
@@ -45,7 +45,7 @@ Do **not** use this pattern when:
 - The work is a single-shot transformation (file edit, search, summarize). A normal slash command running inside the Director's session is enough.
 - You only need the harness `TaskList` for tracking — you do not need cross-pane coordination.
 
-If you are unsure: write the simpler version first. The CAFleet team pattern is overkill for most tasks and the orchestration overhead (`cafleet doctor`, `cafleet fleet create`, `cafleet member create`, `/loop` monitor, `member delete`, `fleet delete`) costs the user real seconds and real cognitive load.
+If you are unsure: write the simpler version first. The CAFleet team pattern is overkill for most tasks and the orchestration overhead (`cafleet doctor`, `cafleet fleet create`, `cafleet member create`, `cafleet monitor`, `member delete`, `fleet delete`) costs the user real seconds and real cognitive load.
 
 ---
 
@@ -88,13 +88,13 @@ Never store these IDs in shell variables (`export FLEET=...`). The Claude Code h
 
 If the user is not inside a tmux session, `cafleet fleet create` exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing. Surface this and stop — do NOT try to start a tmux session yourself.
 
-### 2.3 Start the agent-team-monitoring `/loop`
+### 2.3 Start the `cafleet monitor` heartbeat
 
 CAFleet members do not auto-poll. The broker delivers a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview` keystroke; that preview is the trigger that wakes the recipient. If the keystroke is missed (pane buffered, recipient mid-Bash, etc.), the message just sits in `INPUT_REQUIRED` until the recipient runs `cafleet message poll` themselves.
 
-To prevent dead loops, the Director MUST run a monitoring `/loop` that polls its own inbox at a regular interval (1 minute is typical), inspects member health via `cafleet member capture`, and nudges stalled members with `cafleet member ping`. The skill `agent-team-monitoring` documents the exact `/loop` template and the cron-like primitive (Claude Code uses `CronCreate` + `/loop`; codex has no in-session scheduling and uses fallback options).
+To prevent dead waits, the Director MUST run the `cafleet monitor` heartbeat — a detached, per-fleet process that wakes due agents by keystroking `cafleet message poll` into their panes on each tick. On each monitor wake the Director polls its own inbox, inspects member health via `cafleet member capture`, and nudges stalled members with `cafleet member ping`. The skill `agent-team-monitoring` documents the monitor lifecycle and the per-wake facilitation steps; the monitor is backend-agnostic, so a Director on any backend (claude, codex, opencode) gets the same heartbeat.
 
-Start the loop **before** the first `cafleet member create` call so the first tick fires while the first member is spawning.
+Start the monitor with `cafleet --fleet-id <fleet-id> monitor start` **before** the first `cafleet member create` call so the first tick fires while the first member is spawning.
 
 ### 2.4 Spawn members with `cafleet member create --prompt-file <abs path>`
 
@@ -135,11 +135,11 @@ The spawned member opens its role file with `Read` on its first turn. The role f
 
 When the work is done, the Director MUST tear down in this exact order:
 
-1. **`cafleet member delete --member-id <id>`** for every member. This sends `/exit` to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` first.
-2. **Stop the `/loop` monitor.** Use `CronDelete` with the cron job ID returned by `/loop` at startup. A loop that fires after the fleet is deleted will keystroke against a dead pane and clutter the broker log with errors.
-3. **`cafleet fleet delete <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active agent in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved.
+1. **Stop the monitor** with `cafleet --fleet-id <fleet-id> monitor stop`. There is exactly one monitor process per fleet; stopping it ends every supervision tick at once. Stop it first so no tick keystrokes `cafleet message poll` into a pane that is mid-`/exit`.
+2. **`cafleet member delete --member-id <id>`** for every member. This sends `/exit` to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
+3. **`cafleet fleet delete <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active agent in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. `fleet delete` also stops the monitor, so step 1 is belt-and-suspenders.
 
-Order matters. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to). If you stop the `/loop` before `member delete`, the monitor cannot catch a member that fails its `/exit` shutdown.
+Order matters. Stop the monitor before deleting members so a tick cannot keystroke into a tearing-down pane or race the member-delete path. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
 
 ---
 
@@ -352,13 +352,13 @@ cafleet --json fleet create --label "summarize-pr-1234"
 
 Substitute `abc...` and `def...` literally into every subsequent call.
 
-### Loop start
+### Monitor start
 
 ```
-/loop 1m <agent-team-monitoring template with fleet-id=abc... and director-agent-id=def...>
+cafleet --fleet-id abc... monitor start
 ```
 
-Loop fires every minute starting before the first `member create`.
+The monitor ticks starting before the first `member create`.
 
 ### Render the Summarizer spawn prompt
 
@@ -422,16 +422,16 @@ cafleet --fleet-id abc... message send --agent-id def... --to jkl... \
 ### Teardown
 
 ```bash
+cafleet --fleet-id abc... monitor stop
 cafleet --fleet-id abc... member delete --member-id jkl...
-CronDelete <loop-job-id>
 cafleet fleet delete abc...
 ```
 
-Order matters. Member first, loop second, fleet last.
+Order matters. Monitor first, member second, fleet last.
 
 ### What this example demonstrates
 
-- All five integration sub-systems fire (resolve BASE → bootstrap fleet → start loop → spawn member → tear down).
+- All five integration sub-systems fire (resolve BASE → bootstrap fleet → start monitor → spawn member → tear down).
 - The audit file at `${BASE}/prompts/summarizer-<ts>.md` lives under the task folder, not the repo root.
 - The cafleet body uses the verb + pointer schema (`complete (doc)`, `ready (doc)`, `addressed (doc)`).
 - The substantive revision request rides as a `COMMENT(director)` marker in the document, not in the cafleet body.
@@ -445,7 +445,7 @@ These are the failures that have bitten earlier authors. Read them before writin
 
 ### 7.1 Forgetting to ack messages
 
-Symptom: every `cafleet message poll` returns the same message over and over, the Director's context fills with stale "ready" hops, and the loop monitor flags the recipient as not-progressing.
+Symptom: every `cafleet message poll` returns the same message over and over, the Director's context fills with stale "ready" hops, and the monitor's health check flags the recipient as not-progressing.
 
 Fix: every message you act on, ack it. Acking moves the task from `INPUT_REQUIRED` to `COMPLETED` and removes it from subsequent poll output.
 
@@ -483,13 +483,13 @@ Fix: never fall back to `/tmp` silently. The `<unset>` sentinel is a hard stop, 
 
 Symptom: orphan `claude` processes lingering in tmux panes after the skill completes. The user closes the panes manually. On the next `cafleet fleet create`, the panes are rebound and the orphan members re-emerge.
 
-Fix: tear down in this exact order — `cafleet member delete` for every member, then stop the `/loop`, then `cafleet fleet delete`. See § 2.5.
+Fix: tear down in this exact order — stop the monitor (`cafleet --fleet-id <id> monitor stop`), then `cafleet member delete` for every member, then `cafleet fleet delete`. See § 2.5.
 
-### 7.8 Not starting the `/loop` before the first `cafleet member create`
+### 7.8 Not starting the monitor before the first `cafleet member create`
 
-Symptom: the first member spawns and sits idle waiting for a Director-side ack. The `/loop` only starts after the spawn returns, so the first tick is several seconds late, and a fast member can complete its first task before the Director polls its inbox.
+Symptom: the first member spawns and sits idle waiting for a Director-side ack. The monitor only starts after the spawn returns, so the first tick is several seconds late, and a fast member can complete its first task before the Director polls its inbox.
 
-Fix: start the `/loop` BEFORE the first `cafleet member create`. The first tick fires while the first member is spawning and is the canonical no-op tick that establishes the loop is running.
+Fix: start the monitor BEFORE the first `cafleet member create`. The first tick fires while the first member is spawning and is the canonical no-op tick that establishes the monitor is running.
 
 ---
 

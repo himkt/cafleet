@@ -30,6 +30,12 @@ backend, and confirm all three reply. Then tear the team down.
 Your agent loads the `cafleet` skill plus `cafleet-agent-team-supervision`
 (which loads `cafleet-agent-team-monitoring`) before spawning members.
 
+The supervision tick is supplied by `cafleet monitor` — a detached, per-fleet
+process external to the coding agent — so a Director on **any** backend
+(`claude`, `codex`, or `opencode`) gets the same heartbeat. Start the monitor
+once with `cafleet monitor start --fleet-id <id>` regardless of the Director's
+backend ([Monitoring](../concepts/monitoring.md)).
+
 ## What to expect
 
 The agent creates a fleet, then opens three tmux panes — one per backend —

@@ -79,7 +79,7 @@ Capture `fleet_id` and `director.agent_id` from the response. Treat `fleet_id` a
 
 ### Step 1: Start Progress Monitor (Director — MANDATORY)
 
-Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill. Start a `/loop` monitor at a 1-minute interval BEFORE the first `cafleet member create` call so the first tick fires while the Manager is spawning. Use the agent-team-monitoring template with the literal `[fleet-id]` and `[director-agent-id]` UUIDs substituted in.
+Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill. Start the monitor with `cafleet --fleet-id [fleet-id] monitor start` BEFORE the first `cafleet member create` call so the heartbeat is running while the Manager is spawning (confirm with `cafleet --fleet-id [fleet-id] monitor status`).
 
 The loop must check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -310,9 +310,9 @@ After user approval, offer to create a presentation via `AskUserQuestion` (adapt
 
 ### Step 8: Finalize & Clean Up (Director)
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first, otherwise crons fire against dead members or orphan `claude` processes linger.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first, otherwise the monitor keystrokes polls against dead members or orphan `claude` processes linger.
 
-1. **Cancel the `/loop` monitor** with `CronDelete <job-id>`. The cron must stop firing BEFORE any member is deleted; a cron that keeps polling a tearing-down fleet spams `Error: fleet is deleted` and races with member-delete.
+1. **Stop the monitor** with `cafleet --fleet-id [fleet-id] monitor stop`. The monitor must stop BEFORE any member is deleted; a monitor that keeps keystroking polls into a tearing-down fleet races with member-delete.
 2. **Delete every member** in dependency order — Researchers first, then any active Scout, then the Manager:
    ```bash
    cafleet --fleet-id [fleet-id] member delete --member-id [researcher-agent-id]

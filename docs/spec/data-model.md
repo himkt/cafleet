@@ -12,7 +12,7 @@ Schema management is handled by Alembic; the runtime engine is SQLAlchemy 2.x wi
 
 ## SQL Schema
 
-All four tables key on `INTEGER` columns. The three minted-id tables (`fleets`, `agents`, `tasks`) use `INTEGER PRIMARY KEY AUTOINCREMENT`. AUTOINCREMENT creates a per-table `sqlite_sequence` row that tracks the high-water mark, so **ids are never reused** — even after the highest row is deleted. The first AUTOINCREMENT value is `1`, so real ids are always `>= 1`; this leaves `0` free as a sentinel (see `tasks.to_agent_id`). `agent_placements.agent_id` is the **only** integer PK without AUTOINCREMENT: it reuses the parent `agents.agent_id` value as a 1:1 PK rather than minting a fresh sequence.
+All tables key on `INTEGER` columns. The three minted-id tables (`fleets`, `agents`, `tasks`) use `INTEGER PRIMARY KEY AUTOINCREMENT`. AUTOINCREMENT creates a per-table `sqlite_sequence` row that tracks the high-water mark, so **ids are never reused** — even after the highest row is deleted. The first AUTOINCREMENT value is `1`, so real ids are always `>= 1`; this leaves `0` free as a sentinel (see `tasks.to_agent_id`). The other tables — `agent_placements`, `monitor_config`, and `monitor_runtime` — are the integer PKs **without** AUTOINCREMENT: each reuses a parent id (`agents.agent_id` for the first two, `fleets.fleet_id` for `monitor_runtime`) as a 1:1 PK rather than minting a fresh sequence.
 
 ### `fleets`
 
@@ -116,11 +116,40 @@ Placement rows are hard-deleted (not soft-deleted) when the agent is deregistere
 
 If a user kills a pane manually without going through `cafleet member delete`, the placement row stays until the next `member delete` resolves it; the "pane already gone" case is handled gracefully.
 
+### `monitor_config`
+
+Per-agent monitoring schedule, one row per **pane-bound** agent. The `cafleet monitor` process reads this table each tick to decide which agents are due (see [Monitoring](../concepts/monitoring.md)).
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `agent_id` | `INTEGER` | `PRIMARY KEY` (no AUTOINCREMENT), `REFERENCES agents(agent_id) ON DELETE CASCADE` | The enrolled agent. This is the parent `agents.agent_id` value reused as a 1:1 PK (mirrors `agent_placements.agent_id`) — not a freshly minted sequence, so AUTOINCREMENT is deliberately excluded. |
+| `interval_seconds` | `INTEGER` | `NOT NULL`, `DEFAULT 60` | Ping cadence for this agent. |
+| `last_ping_at` | `TEXT` | nullable | ISO-8601 of the last ping the monitor dispatched to this agent. `NULL` = never pinged ⇒ due immediately. Persisted (not in-memory) so a monitor restart resumes cadence and `monitor status` can display it. |
+| `enabled` | `INTEGER` | `NOT NULL`, `DEFAULT 1` | Boolean stored as SQLite `0`/`1`. `0` = the monitor skips this agent while preserving its interval for re-enable. Every broker read casts it to a Python `bool` at the read boundary, so the integer representation never leaks past the broker (the CLI and the WebUI/JSON contract both see `enabled: bool`). |
+
+A row is inserted automatically at registration for every agent that has a tmux pane — the root Director and every member. The write-only Administrator and card-only `agent register` calls (no placement) are **not** enrolled: only an agent with a pane can be pinged. There is no `fleet_id` column — fleet scoping is reached through the `monitor_config.agent_id → agents.agent_id → agents.fleet_id` join (the same pattern `agent_placements` uses), and director-vs-member is **derived** at scan time (`agent_id == fleets.director_agent_id`), never denormalized.
+
+The row is hard-deleted (not soft-deleted) when the agent is deregistered, alongside its `agent_placements` row — runtime config with no historical value, on the same lifecycle as the placement.
+
+### `monitor_runtime`
+
+Per-fleet process and heartbeat state, one row per fleet. A dedicated single-row-per-fleet table (rather than columns on `fleets`) keeps high-write heartbeat telemetry off the slow-changing fleet identity row, models "no monitor" cleanly as "no row", and lets single-instance claims and teardown operate independently of the `fleets` lifecycle.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `fleet_id` | `INTEGER` | `PRIMARY KEY` (no AUTOINCREMENT), `REFERENCES fleets(fleet_id) ON DELETE RESTRICT` | One row per fleet; reuses `fleets.fleet_id` as a 1:1 PK. |
+| `pid` | `INTEGER` | nullable | OS PID of the running worker. `NULL` after a clean stop. The single-instance claim records it; the ownership-checked heartbeat/clear match on it; `stop` reads it to signal. |
+| `started_at` | `TEXT` | nullable | ISO-8601 when the current worker claimed the runtime. |
+| `last_tick_at` | `TEXT` | nullable | ISO-8601 heartbeat, rewritten every tick. The **authority** for `status` liveness — a process that died silently stops updating it, so it reads as stale. |
+| `tick_seconds` | `INTEGER` | `NOT NULL`, `DEFAULT 5` | Scan-tick cadence the running monitor uses, so `status` can report it. |
+
+The `monitor_runtime` row is deleted explicitly inside the `fleet delete` transaction (along with the fleet's `monitor_config` rows). Because agents are soft-deregistered and fleets soft-deleted, neither the CASCADE off `agents` nor the RESTRICT off `fleets` fires on the normal delete paths — the rows are cleaned explicitly, mirroring how `agent_placements` is explicitly deleted today.
+
 ### Foreign key enforcement
 
 SQLite ignores foreign key declarations unless `PRAGMA foreign_keys=ON` is issued on every connection. A SQLAlchemy engine `connect` event listener runs the PRAGMA on every new connection.
 
-The foreign keys on `agents.fleet_id`, `tasks.context_id`, `fleets.director_agent_id`, and `agent_placements.director_agent_id` all use `ON DELETE RESTRICT` (agents are only soft-deregistered today, so RESTRICT is the safest default). `agent_placements.agent_id → agents.agent_id` uses `ON DELETE CASCADE` so a hard-deleted agent (if any future path adds one) cannot leave a dangling placement row. Fleet deletion uses a soft-delete (`deleted_at`) — it never physically removes rows, so the RESTRICTs are not triggered by the normal delete path.
+The foreign keys on `agents.fleet_id`, `tasks.context_id`, `fleets.director_agent_id`, `agent_placements.director_agent_id`, and `monitor_runtime.fleet_id` all use `ON DELETE RESTRICT` (agents are only soft-deregistered today, so RESTRICT is the safest default). `agent_placements.agent_id → agents.agent_id` and `monitor_config.agent_id → agents.agent_id` both use `ON DELETE CASCADE` so a hard-deleted agent (if any future path adds one) cannot leave a dangling placement or config row. Fleet deletion uses a soft-delete (`deleted_at`) — it never physically removes rows, so the RESTRICTs are not triggered by the normal delete path; the `monitor_config` and `monitor_runtime` rows are instead removed explicitly inside the `fleet delete` transaction.
 
 ## Task Visibility Rules
 

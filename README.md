@@ -82,6 +82,8 @@ You can see the existing design docs on [`design-docs/`](design-docs/), which ar
 
 CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Fleets partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. Members spawn as tmux panes running any of the three coding-agent backends, optionally pinned to a specific LLM via `cafleet member create --model <m>` (e.g. `sonnet`, `gpt-5.4-mini`, `anthropic/claude-sonnet-4-6`, `opencode/big-pickle`). Full architecture documentation is published at <https://himkt.github.io/cafleet/concepts/overview/>.
 
+A Director supervises its team on a periodic heartbeat supplied by `cafleet monitor` — a detached, per-fleet scheduler process that wakes due agents by keystroking `message poll` into their panes. Because the scheduler lives outside the coding agent, a Director on **any** backend gets the same heartbeat. Start it from the Director's pane with `cafleet monitor start --fleet-id <id>` (`monitor status` / `monitor stop` / `monitor config` round out the surface); `fleet delete` stops it automatically. See <https://himkt.github.io/cafleet/concepts/monitoring/>.
+
 ## 5. Contributing
 
 Build, test, and project-structure instructions, plus the design-doc-driven contribution flow, are published at <https://himkt.github.io/cafleet/get-started/contributing/>.
