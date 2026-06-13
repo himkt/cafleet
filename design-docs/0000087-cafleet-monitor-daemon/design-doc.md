@@ -1,7 +1,7 @@
 # cafleet monitor — backend-agnostic external scheduler
 
-**Status**: Approved
-**Progress**: 92/93 tasks complete (Steps 1–8 + Revision R1 + Revision R2 done; Revision R3 in progress — E2E smoke pending)
+**Status**: Complete
+**Progress**: 93/93 tasks complete (Steps 1–8 + Revision R1 + Revision R2 + Revision R3 done)
 **Last Updated**: 2026-06-13
 
 ## Overview
@@ -527,7 +527,7 @@ A new multiplexer primitive `send_resume_trigger(*, target_pane_id, fleet_id, ag
 **Verify**
 
 - [x] `mise //cafleet:format` + lint + typecheck + test green; `mise //admin:build`. <!-- completed: 2026-06-13T14:16 -->
-- [ ] E2E smoke: monitor pings an idle member → the member's pane shows the resume nudge (not a bare poll) and the member reviews its task and continues rather than going idle; the Director still receives a bare poll.
+- [x] E2E smoke: monitor pings an idle member → the member's pane shows the resume nudge (not a bare poll) and the member reviews its task and continues rather than going idle; the Director still receives a bare poll. <!-- completed: 2026-06-13T14:23 (throwaway fleet 54: member 225 received the `[monitor] resume:` nudge and continued working 1→5 instead of going idle; director bare-poll role split unit-covered by test_loop) -->
 
 ---
 
@@ -540,3 +540,4 @@ A new multiplexer primitive `send_resume_trigger(*, target_pane_id, fleet_id, ag
 | 2026-06-13 | **Revision R1 (post-approval pivot):** monitor is an agent-run foreground loop (`cafleet monitor start` runs in-process, launched by a coding agent as a background task), not a detached OS subprocess. Removed `start_detached`, the PID file, `state_dir`, `cafleet monitor stop`, `MONITOR_STOP_TIMEOUT`, and `cafleet/__main__.py`; `fleet delete` relies on loop self-termination. Schema/broker/`should_ping`/`monitor_tick`/status/config/WebUI/SPA unchanged. |
 | 2026-06-13 | **Revision R2:** members are pinged unconditionally on their interval (removed the `pending_count > 0` gate in `should_ping`); `cafleet monitor start` now logs each dispatched ping to stdout (`<iso-ts> ping agent <id> (<name>)`). Motivated by the R1 smoke test, where idle members were never pinged and the heartbeat was invisible. Schema/broker/runtime/WebUI/SPA unchanged. |
 | 2026-06-13 | **Revision R3:** the monitor's member ping is now a resume nudge (`send_resume_trigger`) — poll inbox + review current task + continue if stopped — instead of a bare `message poll` that left an idle member doing nothing; the Director ping stays a bare poll. `should_ping`/unconditional-ping policy unchanged. |
+| 2026-06-13 | **Complete.** Pushed to PR #116 and addressed Copilot review across several rounds: CLI flag placement (`--fleet-id` before the `monitor` group), not-live runtime nulls (`clear_monitor_runtime` + WebUI/CLI status), public `enroll_agent`, batched `record_pings`, SPA refresh decoupling + per-agent monitoring-section reset, `list_pane_ids` 5 s timeout, `PATCH /api/agents/{id}/monitor` race → 404, and doc/spec accuracy. Final suite: 799 tests green. |
