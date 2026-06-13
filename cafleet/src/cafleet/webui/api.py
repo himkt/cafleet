@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+import click
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -146,12 +147,17 @@ def patch_agent_monitor(
 ):
     if broker.get_monitor_config(fleet_id, agent_id) is None:
         raise HTTPException(status_code=404, detail="Agent not enrolled")
-    cfg = broker.update_monitor_config(
-        fleet_id,
-        agent_id,
-        interval_seconds=body.interval_seconds,
-        enabled=body.enabled,
-    )
+    try:
+        cfg = broker.update_monitor_config(
+            fleet_id,
+            agent_id,
+            interval_seconds=body.interval_seconds,
+            enabled=body.enabled,
+        )
+    except click.ClickException as exc:
+        # TOCTOU: the agent may be deregistered (its config row deleted) between
+        # the pre-check above and this update — surface as 404, not a 500.
+        raise HTTPException(status_code=404, detail="Agent not enrolled") from exc
     return _monitor_config_response(cfg)
 
 

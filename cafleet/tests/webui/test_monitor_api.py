@@ -12,6 +12,7 @@ applies.
 import os
 from datetime import UTC, datetime, timedelta
 
+import click
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -213,6 +214,34 @@ def test_patch_agent_monitor__404_on_unknown_agent(api_db, client):
     sid = _create_fleet()["fleet_id"]
     resp = client.patch(
         "/api/agents/999999/monitor",
+        headers=_headers(sid),
+        json={"interval_seconds": 30},
+    )
+    assert resp.status_code == 404, resp.text
+
+
+def test_patch_agent_monitor__404_not_500_when_update_raises(
+    api_db, tmp_path, monkeypatch
+):
+    # TOCTOU race: the agent passes the initial enrolled check, then
+    # update_monitor_config raises a ClickException (e.g. deregistered mid-call).
+    # The endpoint must surface 404, not let the ClickException become a 500.
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["agent_id"]
+
+    def boom(*args, **kwargs):
+        raise click.ClickException("agent not enrolled")
+
+    monkeypatch.setattr(broker, "update_monitor_config", boom)
+
+    # raise_server_exceptions=False so an unhandled 500 returns as a response
+    # (clean 500 != 404 assertion) rather than being re-raised before the fix.
+    client = TestClient(
+        create_app(str(tmp_path / "nodist")), raise_server_exceptions=False
+    )
+    resp = client.patch(
+        f"/api/agents/{director_id}/monitor",
         headers=_headers(sid),
         json={"interval_seconds": 30},
     )

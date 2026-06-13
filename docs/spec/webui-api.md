@@ -107,9 +107,12 @@ does not mislead. See [Monitoring](../concepts/monitoring.md).
 ```
 
 When no monitor is running (no row, or a stale/cleared heartbeat) `running` is
-`false` and `pid` / `last_tick_at` / `started_at` are `null`; `last_tick_age_seconds`
-is `null`. Process lifecycle (`start` / `stop`) is CLI-only — there is no
-`POST`/`DELETE` counterpart here by design.
+`false` and `pid` / `last_tick_at` / `started_at` / `last_tick_age_seconds` are
+`null`. `tick_seconds` is `null` only when **no runtime row has ever existed**;
+for a stale or cleared row it is **preserved** (the cadence the monitor last ran
+at). Launching the loop is CLI-only (`cafleet monitor start`, run as a
+background task); there is no `POST`/`DELETE` counterpart here and no
+`monitor stop` command — stop the background task to stop the loop.
 
 ### GET /api/agents/{agent_id}/monitor — Agent Monitor Config
 

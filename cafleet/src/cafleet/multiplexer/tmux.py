@@ -266,9 +266,12 @@ class TmuxMultiplexer:
 
         ``tmux list-panes -a -F '#{pane_id}'`` lists every pane on the server
         (all sessions), so one call resolves pane liveness for every agent in a
-        monitor tick.
+        monitor tick. The 5 s timeout (consistent with the other tmux helpers)
+        keeps a hung tmux from blocking the monitor loop indefinitely.
         """
-        return set(_run(["tmux", "list-panes", "-a", "-F", "#{pane_id}"]).split())
+        return set(
+            _run(["tmux", "list-panes", "-a", "-F", "#{pane_id}"], timeout=5).split()
+        )
 
     def kill_pane(self, *, target_pane_id: str, ignore_missing: bool = False) -> None:
         """Unconditionally kill the target pane. Swallows pane-gone errors when ignore_missing=True."""
