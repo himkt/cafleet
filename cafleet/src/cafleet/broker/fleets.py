@@ -5,7 +5,7 @@ import json
 import click
 from sqlalchemy import and_, delete, exists, func, select, update
 
-from cafleet.broker import _shared
+from cafleet.broker import _shared, monitor
 from cafleet.db.models import Agent, AgentPlacement, Fleet
 from cafleet.multiplexer import MultiplexerContext
 
@@ -78,6 +78,9 @@ def create_fleet(
         director_agent_id = director.agent_id
         session.add(AgentPlacement(agent_id=director_agent_id, **director_placement))
         session.flush()
+        # Enroll the root Director (pane-bound) in monitoring; the Administrator
+        # below has no placement and is intentionally not enrolled.
+        monitor._enroll(session, director_agent_id)
         session.execute(
             update(Fleet)
             .where(Fleet.fleet_id == fleet_id)
@@ -239,5 +242,6 @@ def delete_fleet(fleet_id: int) -> dict:
         session.execute(
             delete(AgentPlacement).where(AgentPlacement.agent_id.in_(agents_in_fleet))
         )
+        monitor.delete_fleet_monitor_rows(session, fleet_id)
 
     return {"deregistered_count": deregistered_count}

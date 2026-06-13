@@ -5,7 +5,7 @@ import json
 import click
 from sqlalchemy import and_, delete, exists, func, or_, select, update
 
-from cafleet.broker import _shared
+from cafleet.broker import _shared, monitor
 from cafleet.broker.fleets import get_fleet
 from cafleet.db.models import Agent, AgentPlacement, Fleet, Task
 
@@ -110,6 +110,9 @@ def register_agent(
                     created_at=registered_at,
                 )
             )
+            # Enroll the pane-bound agent in monitoring, atomically with its
+            # placement insert (only agents with a pane can be pinged).
+            monitor._enroll(session, agent_id)
 
     return {
         "agent_id": agent_id,
@@ -236,6 +239,9 @@ def deregister_agent(agent_id: int) -> bool:
             session.execute(
                 delete(AgentPlacement).where(AgentPlacement.agent_id == agent_id)
             )
+            # Runtime config has no historical value; drop it on the same
+            # lifecycle as the placement.
+            monitor.delete_agent_monitor_row(session, agent_id)
     return bool(deregistered)
 
 
