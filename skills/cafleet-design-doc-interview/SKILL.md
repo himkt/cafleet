@@ -141,7 +141,7 @@ Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute th
 
 #### 2b. Start the monitor
 
-BEFORE spawning the Analyzer, load both the `cafleet-agent-team-monitoring` skill and the `cafleet-agent-team-supervision` skill (in that order) and start the supervision heartbeat with `cafleet --fleet-id <fleet-id> monitor start` (it detaches and returns immediately; confirm with `cafleet --fleet-id <fleet-id> monitor status`). The monitor stays running until the Analyzer is torn down at the end of this step, when Step 2f stops it.
+BEFORE spawning the Analyzer, load both the `cafleet-agent-team-monitoring` skill and the `cafleet-agent-team-supervision` skill (in that order) and run the supervision heartbeat as a **background task** with `cafleet --fleet-id <fleet-id> monitor start` (the loop runs in-process and blocks the task; confirm with `cafleet --fleet-id <fleet-id> monitor status`). The monitor stays running until the Analyzer is torn down at the end of this step, when Step 2f stops its background task.
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
@@ -199,7 +199,7 @@ The reply must be a flat numbered list following the format specified in [roles/
 
 The Analyzer is stateless — keeping it alive through the Q&A rounds wastes a pane and a monitor. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received:
 
-1. `cafleet --fleet-id <fleet-id> monitor stop` (the heartbeat started at Step 2b).
+1. Stop the monitor's background task (the heartbeat started at Step 2b — there is no `monitor stop` command).
 2. `cafleet --fleet-id <fleet-id> member delete --member-id <analyzer-agent-id>`. The call blocks until the pane is gone (15 s timeout); on exit 2, follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
 3. `cafleet --fleet-id <fleet-id> member list` — the team's roster MUST be empty.
 4. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).

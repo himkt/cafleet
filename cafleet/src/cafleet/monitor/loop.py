@@ -3,7 +3,8 @@
 ``should_ping`` is a pure function of a scan-row dict and a tz-aware ``now``
 (unit-testable without tmux or the DB). ``monitor_tick`` performs one full scan
 pass and returns ``CONTINUE`` / ``STOP``. ``run_monitor_loop`` is the thin
-foreground driver the detached ``--foreground`` worker runs.
+foreground driver `cafleet monitor start` runs in-process — a coding agent
+launches it as a background task and owns its lifetime.
 
 Time is threaded as tz-aware ``datetime`` through the pure functions; every
 DB-storage boundary serializes with ``.isoformat()`` (the columns are TEXT).
@@ -17,7 +18,6 @@ from datetime import UTC, datetime
 import click
 
 from cafleet import broker
-from cafleet.monitor import process
 from cafleet.multiplexer.tmux import TmuxMultiplexer
 
 
@@ -104,7 +104,12 @@ def _interruptible_sleep(seconds: float) -> None:
 
 
 def run_monitor_loop(fleet_id: int, tick_seconds: int) -> None:
-    """Foreground worker: claim the slot, then loop ``scan → sleep`` until signalled.
+    """Foreground driver: claim the slot, then loop ``scan → sleep`` until signalled.
+
+    Runs in-process — a coding agent launches it as a background task. The
+    ``monitor_runtime`` row is the only coordination artifact (no PID file): a
+    clean stop (SIGTERM/SIGINT) clears it; a hard kill lets the heartbeat go
+    stale.
 
     Raises:
         click.ClickException: If a live monitor already holds the slot.
@@ -116,7 +121,6 @@ def run_monitor_loop(fleet_id: int, tick_seconds: int) -> None:
         fleet_id, pid, tick_seconds, datetime.now(UTC).isoformat()
     ):
         raise click.ClickException(f"monitor already running for fleet {fleet_id}")
-    process.write_pid_file(fleet_id, pid)
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
     try:
@@ -126,4 +130,3 @@ def run_monitor_loop(fleet_id: int, tick_seconds: int) -> None:
             _interruptible_sleep(tick_seconds)
     finally:
         broker.clear_monitor_runtime(fleet_id, pid)
-        process.remove_pid_file(fleet_id)

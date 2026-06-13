@@ -19,15 +19,15 @@ Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id
 
 ## The monitor heartbeat
 
-CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. That heartbeat is supplied by **`cafleet monitor`**, a detached, per-fleet background process external to the coding agent. Because it lives outside the coding agent, the heartbeat is **backend-agnostic** — a root Director on `claude`, `codex`, or `opencode` gets the identical tick. There is no per-backend scheduling asymmetry: the monitor is the one mechanism for every backend.
+CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. That heartbeat is supplied by **`cafleet monitor`**, a per-fleet `scan → ping → sleep` loop that a coding agent runs as a **background task** (the Director's own, or a dedicated monitoring member). Because it is just a backgrounded command, the heartbeat is **backend-agnostic** — a root Director on `claude`, `codex`, or `opencode` gets the identical tick. There is no per-backend scheduling asymmetry: the monitor is the one mechanism for every backend.
 
-Start the monitor once, from the Director's pane, before the first `cafleet member create` call:
+Run the monitor once, as a background task, before the first `cafleet member create` call:
 
 ```bash
-cafleet --fleet-id <fleet-id> monitor start
+cafleet --fleet-id <fleet-id> monitor start   # launch as a background task
 ```
 
-`monitor start` detaches and returns control immediately; confirm it with `cafleet --fleet-id <fleet-id> monitor status`. The monitor pings the root Director **unconditionally** on its interval (default 60 s) and pings a member **only** when that member has pending un-acked inbox items. See the `cafleet` skill and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy.
+`monitor start` runs the loop in-process (it blocks the background task), so launch it as a background task and confirm it with `cafleet --fleet-id <fleet-id> monitor status`. The monitor pings the root Director **unconditionally** on its interval (default 60 s) and pings a member **only** when that member has pending un-acked inbox items. See the `cafleet` skill and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy.
 
 **A monitor wake is a bare poll, so the cue to facilitate must come from the skill.** Pinging the Director keystrokes *exactly* `cafleet … message poll` into its pane — that bare poll, on its own, performs only **step 1** below. **Treat every monitor poll-trigger wake as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), not to read the inbox and stop. The monitor decides only *when*; this skill defines *what* the Director does on each wake.
 
@@ -57,12 +57,12 @@ Run this sequence once per supervision tick. Order matters — cheapest non-intr
 
 | Phase | Action |
 |---|---|
-| Spawn members | Start `cafleet --fleet-id <fleet-id> monitor start` BEFORE the first `cafleet member create` call, so the first tick fires while spawning completes. Confirm with `monitor status`. |
+| Spawn members | Run `cafleet --fleet-id <fleet-id> monitor start` as a background task BEFORE the first `cafleet member create` call, so the first tick fires while spawning completes. Confirm with `monitor status`. |
 | Run work | The monitor ticks at its configured cadence (default ping interval 60 s); do not intervene unless a wake escalates. Each Director wake is the cue to run the 5-step facilitation loop above. |
 | User review | Keep the monitor running during the review cycle — revisions and re-reviews still count as in-progress work. |
-| User approves final artifact | Stop the monitor once teardown begins (see Cleanup below). |
+| User approves final artifact | Stop the monitor's background task once teardown begins (see Cleanup below). |
 
-**Lifecycle rule:** The monitor MUST stay running from the first `member create` through every phase (research, compilation, review, revision, user approval). At teardown, **stop the monitor BEFORE deleting members** — this is step 1 of the Shutdown Protocol in the `cafleet` skill and is non-negotiable. A monitor that keeps ticking after members are deleted keystrokes polls into tearing-down panes and can race with the member-delete path. Full teardown order: `cafleet --fleet-id <fleet-id> monitor stop` → `cafleet member delete` each member → `cafleet member list` to verify the roster is empty → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check (`fleet delete` also stops the monitor, so the explicit `monitor stop` is belt-and-suspenders). See the `cafleet` skill → "Shutdown Protocol" for the authoritative procedure.
+**Lifecycle rule:** The monitor MUST stay running from the first `member create` through every phase (research, compilation, review, revision, user approval). At teardown, **stop the monitor's background task BEFORE deleting members** — this is step 1 of the Shutdown Protocol in the `cafleet` skill and is non-negotiable. A monitor that keeps ticking after members are deleted keystrokes polls into tearing-down panes and can race with the member-delete path. There is no `cafleet monitor stop` — stop the loop by stopping the background task running `cafleet monitor start` (or deleting the monitoring member). Full teardown order: stop the monitor's background task → `cafleet member delete` each member → `cafleet member list` to verify the roster is empty → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check (`fleet delete` makes any still-running loop self-terminate on its next tick, so stopping the task first is belt-and-suspenders). See the `cafleet` skill → "Shutdown Protocol" for the authoritative procedure.
 
 ## Stall Response
 

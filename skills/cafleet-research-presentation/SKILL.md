@@ -98,7 +98,7 @@ cafleet --json fleet create --label "present-[topic-slug]"
 
 #### 1b. Start the monitor BEFORE the first `cafleet member create` call
 
-Per the `cafleet-agent-team-monitoring` skill, start the monitor with `cafleet --fleet-id [fleet-id] monitor start` before spawning so the heartbeat is running while spawning completes (confirm with `cafleet --fleet-id [fleet-id] monitor status`). Expected deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
+Per the `cafleet-agent-team-monitoring` skill, run the monitor as a background task with `cafleet --fleet-id [fleet-id] monitor start` before spawning so the heartbeat is running while spawning completes (confirm with `cafleet --fleet-id [fleet-id] monitor status`). Expected deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -345,7 +345,7 @@ No round limit — loop until approved.
 
 Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first.
 
-1. **Stop the monitor** with `cafleet --fleet-id [fleet-id] monitor stop`. The monitor must stop BEFORE any member is deleted; a monitor that keeps keystroking polls into a tearing-down fleet races with member-delete.
+1. **Stop the monitor's background task** (there is no `monitor stop` command). The monitor must stop BEFORE any member is deleted; a monitor that keeps keystroking polls into a tearing-down fleet races with member-delete.
 2. **Delete every member** — Presentation, Transcript, and any active VR batch. For any active VR batch, run the explicit close handshake first (Director sends `CLOSE:` via `cafleet message send`, VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`), THEN run `cafleet member delete`. Once all VR browser sessions are closed:
    ```bash
    cafleet --fleet-id [fleet-id] member delete --member-id [presentation-agent-id]

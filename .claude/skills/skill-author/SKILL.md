@@ -92,9 +92,9 @@ If the user is not inside a tmux session, `cafleet fleet create` exits 1 with `E
 
 CAFleet members do not auto-poll. The broker delivers a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview` keystroke; that preview is the trigger that wakes the recipient. If the keystroke is missed (pane buffered, recipient mid-Bash, etc.), the message just sits in `INPUT_REQUIRED` until the recipient runs `cafleet message poll` themselves.
 
-To prevent dead waits, the Director MUST run the `cafleet monitor` heartbeat — a detached, per-fleet process that wakes due agents by keystroking `cafleet message poll` into their panes on each tick. On each monitor wake the Director polls its own inbox, inspects member health via `cafleet member capture`, and nudges stalled members with `cafleet member ping`. The skill `agent-team-monitoring` documents the monitor lifecycle and the per-wake facilitation steps; the monitor is backend-agnostic, so a Director on any backend (claude, codex, opencode) gets the same heartbeat.
+To prevent dead waits, the Director MUST run the `cafleet monitor` heartbeat — a per-fleet foreground loop the Director runs as a **background task** (or a dedicated monitoring member runs) that wakes due agents by keystroking `cafleet message poll` into their panes on each tick. On each monitor wake the Director polls its own inbox, inspects member health via `cafleet member capture`, and nudges stalled members with `cafleet member ping`. The skill `agent-team-monitoring` documents the monitor lifecycle and the per-wake facilitation steps; the loop spends no model tokens while running and is just a backgrounded command, so a Director on any backend (claude, codex, opencode) gets the same heartbeat.
 
-Start the monitor with `cafleet --fleet-id <fleet-id> monitor start` **before** the first `cafleet member create` call so the first tick fires while the first member is spawning.
+Start the monitor with `cafleet --fleet-id <fleet-id> monitor start` **as a background task** **before** the first `cafleet member create` call so the first tick fires while the first member is spawning. `monitor start` runs the loop in-process (background it) — there is no detached mode and no `monitor stop`.
 
 ### 2.4 Spawn members with `cafleet member create --prompt-file <abs path>`
 
@@ -135,9 +135,9 @@ The spawned member opens its role file with `Read` on its first turn. The role f
 
 When the work is done, the Director MUST tear down in this exact order:
 
-1. **Stop the monitor** with `cafleet --fleet-id <fleet-id> monitor stop`. There is exactly one monitor process per fleet; stopping it ends every supervision tick at once. Stop it first so no tick keystrokes `cafleet message poll` into a pane that is mid-`/exit`.
+1. **Stop the monitor's background task** — there is no `monitor stop` command; stop the background task running `cafleet monitor start` (or delete the monitoring member). There is exactly one monitor loop per fleet; stopping it ends every supervision tick at once. Stop it first so no tick keystrokes `cafleet message poll` into a pane that is mid-`/exit`.
 2. **`cafleet member delete --member-id <id>`** for every member. This sends `/exit` to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
-3. **`cafleet fleet delete <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active agent in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. `fleet delete` also stops the monitor, so step 1 is belt-and-suspenders.
+3. **`cafleet fleet delete <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active agent in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
 
 Order matters. Stop the monitor before deleting members so a tick cannot keystroke into a tearing-down pane or race the member-delete path. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
 
@@ -355,10 +355,10 @@ Substitute `abc...` and `def...` literally into every subsequent call.
 ### Monitor start
 
 ```
-cafleet --fleet-id abc... monitor start
+cafleet --fleet-id abc... monitor start   # run as a background task — the loop blocks
 ```
 
-The monitor ticks starting before the first `member create`.
+`monitor start` runs the loop in-process, so launch it as a background task. The monitor ticks starting before the first `member create`.
 
 ### Render the Summarizer spawn prompt
 
@@ -422,12 +422,12 @@ cafleet --fleet-id abc... message send --agent-id def... --to jkl... \
 ### Teardown
 
 ```bash
-cafleet --fleet-id abc... monitor stop
+# stop the monitor's background task first (no `monitor stop` command)
 cafleet --fleet-id abc... member delete --member-id jkl...
 cafleet fleet delete abc...
 ```
 
-Order matters. Monitor first, member second, fleet last.
+Order matters. Stop the monitor's background task first, then members, then the fleet.
 
 ### What this example demonstrates
 
@@ -483,7 +483,7 @@ Fix: never fall back to `/tmp` silently. The `<unset>` sentinel is a hard stop, 
 
 Symptom: orphan `claude` processes lingering in tmux panes after the skill completes. The user closes the panes manually. On the next `cafleet fleet create`, the panes are rebound and the orphan members re-emerge.
 
-Fix: tear down in this exact order — stop the monitor (`cafleet --fleet-id <id> monitor stop`), then `cafleet member delete` for every member, then `cafleet fleet delete`. See § 2.5.
+Fix: tear down in this exact order — stop the monitor's background task (there is no `monitor stop` command), then `cafleet member delete` for every member, then `cafleet fleet delete`. See § 2.5.
 
 ### 7.8 Not starting the monitor before the first `cafleet member create`
 

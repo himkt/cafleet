@@ -138,7 +138,7 @@ Per-fleet process and heartbeat state, one row per fleet. A dedicated single-row
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `fleet_id` | `INTEGER` | `PRIMARY KEY` (no AUTOINCREMENT), `REFERENCES fleets(fleet_id) ON DELETE RESTRICT` | One row per fleet; reuses `fleets.fleet_id` as a 1:1 PK. |
-| `pid` | `INTEGER` | nullable | OS PID of the running worker. `NULL` after a clean stop. The single-instance claim records it; the ownership-checked heartbeat/clear match on it; `stop` reads it to signal. |
+| `pid` | `INTEGER` | nullable | OS PID of the running monitor loop. `NULL` after a clean stop. The single-instance claim records it; the ownership-checked heartbeat/clear match on it; `_is_live` corroborates liveness with `os.kill(pid, 0)`. |
 | `started_at` | `TEXT` | nullable | ISO-8601 when the current worker claimed the runtime. |
 | `last_tick_at` | `TEXT` | nullable | ISO-8601 heartbeat, rewritten every tick. The **authority** for `status` liveness — a process that died silently stops updating it, so it reads as stale. |
 | `tick_seconds` | `INTEGER` | `NOT NULL`, `DEFAULT 5` | Scan-tick cadence the running monitor uses, so `status` can report it. |

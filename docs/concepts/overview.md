@@ -25,7 +25,7 @@ each other; agents in different fleets are invisible to one another.
 | inline preview | the 2-line message preview the broker keystrokes into the recipient's pane | [tmux push](tmux-push.md) |
 | poll / ack | how a recipient fetches and then confirms consumption of a message | [CLI options](../spec/cli-options.md) |
 | coding-agent backend | the binary in a member pane: `claude`, `codex`, or `opencode` | [Coding agents](coding-agents.md) |
-| monitor | a detached, fleet-scoped process that wakes due agents on a fixed cadence by keystroking `message poll` into their panes | [Monitoring](monitoring.md) |
+| monitor | a fleet-scoped loop a coding agent runs as a background task, waking due agents on a fixed cadence by keystroking `message poll` into their panes | [Monitoring](monitoring.md) |
 
 ## Architecture diagram
 
@@ -36,7 +36,7 @@ flowchart LR
     WebUI["Admin WebUI"] --> Server["webui/app.py<br/>(FastAPI)"]
     Server --> WebUIAPI["webui/api.py"]
     WebUIAPI --> Broker
-    Monitor["monitor process<br/>(per-fleet heartbeat)"] --> Broker
+    Monitor["monitor loop<br/>(per-fleet heartbeat, agent background task)"] --> Broker
     Broker --> DB[(SQLite<br/>fleets / agents / tasks / agent_placements<br/>monitor_config / monitor_runtime)]
     subgraph Multiplexer["tmux"]
         PaneA["coding-agent pane"]
@@ -75,11 +75,12 @@ and ACK chip metadata — lives at [WebUI API](../spec/webui-api.md).
 ## Monitoring
 
 A Director supervises its team on a periodic tick. That tick is supplied by
-`cafleet monitor` — a detached, per-fleet process that wakes due agents by
-keystroking `message poll` into their panes. It is a plain loop, not a coding
-agent, so a Director on any backend gets the same heartbeat. The monitor owns
-only the *when* (which agents are due); the Director owns the *what* (poll, ACK,
-dispatch, health-check, escalate). See [Monitoring](monitoring.md).
+`cafleet monitor` — a per-fleet loop a coding agent runs as a background task,
+waking due agents by keystroking `message poll` into their panes. It is a plain
+loop, not agent reasoning, so a Director on any backend gets the same heartbeat.
+The monitor owns only the *when* (which agents are due); the Director owns the
+*what* (poll, ACK, dispatch, health-check, escalate). See
+[Monitoring](monitoring.md).
 
 ## Design document orchestration skills
 

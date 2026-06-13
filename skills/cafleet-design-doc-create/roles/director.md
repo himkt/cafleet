@@ -10,13 +10,13 @@ Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet fleet and monitor continuously.** Load the `cafleet`, `cafleet-agent-team-monitoring`, and `cafleet-agent-team-supervision` skills (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it). Create a CAFleet fleet via `cafleet fleet create --json` (must be run inside a tmux session) — this bootstraps the fleet, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Start the monitor (`cafleet --fleet-id <fleet-id> monitor start`) BEFORE spawning any member. Keep it running until shutdown.
+- **Bootstrap the CAFleet fleet and monitor continuously.** Load the `cafleet`, `cafleet-agent-team-monitoring`, and `cafleet-agent-team-supervision` skills (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it). Create a CAFleet fleet via `cafleet fleet create --json` (must be run inside a tmux session) — this bootstraps the fleet, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Run the monitor (`cafleet --fleet-id <fleet-id> monitor start`) as a background task BEFORE spawning any member. Keep it running until shutdown.
 - **Enforce the clarification gate.** The Drafter MUST ask clarifying questions before drafting. If the Drafter sends a draft without having asked questions first, reject it via `cafleet message send` and instruct the Drafter to ask questions first.
 - **Relay communication faithfully.** Members cannot communicate with the user directly. You relay the Drafter's questions to the user via `AskUserQuestion`, and relay the user's answers back to the Drafter via `cafleet message send`.
 - **Orchestrate the internal quality loop.** After the Drafter produces a draft, route it to the Reviewer via `cafleet message send`. If the Reviewer has feedback, route it back to the Drafter for refinement via `cafleet message send`, then back to the Reviewer. Repeat until the Reviewer explicitly signals satisfaction. Do NOT present the draft to the user until the Reviewer has approved it.
 - **Present the polished draft to the user.** Only after the Reviewer is satisfied, present the draft to the user for approval via `AskUserQuestion`.
 - **Drive user feedback iterations.** Process the user's feedback selection and route revisions through the quality loop before re-presenting.
-- **Clean up when done.** Stop the monitor (`cafleet --fleet-id <fleet-id> monitor stop`), delete each member via `cafleet member delete`, and tear down the fleet via `cafleet fleet delete <fleet-id>` after the user approves (or aborts). The root Director cannot be deregistered with `cafleet agent deregister` — `fleet delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
+- **Clean up when done.** Stop the monitor's background task (there is no `monitor stop` command), delete each member via `cafleet member delete`, and tear down the fleet via `cafleet fleet delete <fleet-id>` after the user approves (or aborts). The root Director cannot be deregistered with `cafleet agent deregister` — `fleet delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
 
 ## Idle Semantics
 
@@ -87,7 +87,7 @@ When the user selects "Other" and provides free text, use LLM reasoning to deter
 
 ### Abort Detection
 
-- If abort intent is detected, trigger the Abort Flow — stop the monitor (`cafleet --fleet-id <fleet-id> monitor stop`), delete all members, and run `cafleet fleet delete <fleet-id>` to soft-delete the fleet and sweep the root Director + Administrator in one transaction.
+- If abort intent is detected, trigger the Abort Flow — stop the monitor's background task (there is no `monitor stop` command), delete all members, and run `cafleet fleet delete <fleet-id>` to soft-delete the fleet and sweep the root Director + Administrator in one transaction.
 - If non-abort intent is detected (e.g., verbal feedback), explain that feedback should be provided via COMMENT markers in the design document, then re-prompt with the same three-option pattern.
 
 ## Progress Monitoring
@@ -113,4 +113,4 @@ Drafter and Reviewer members are spawned with `--permission-mode dontAsk` (Bash 
 
 ## Shutdown Protocol
 
-Run the canonical 5-rung teardown per the `cafleet` skill § *Shutdown Protocol* (`cafleet --fleet-id <fleet-id> monitor stop` → `cafleet member delete` per member → `cafleet member list` verification → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check). The monitor stopped at the first rung is the heartbeat started at Step 1b; `cafleet fleet delete` also stops the monitor, so the explicit `monitor stop` is belt-and-suspenders.
+Run the canonical 5-rung teardown per the `cafleet` skill § *Shutdown Protocol* (stop the monitor's background task → `cafleet member delete` per member → `cafleet member list` verification → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check). The monitor stopped at the first rung is the heartbeat started at Step 1b (stop its background task — there is no `monitor stop` command); `cafleet fleet delete` makes any still-running loop self-terminate on its next tick, so stopping the task first is belt-and-suspenders.

@@ -1,9 +1,9 @@
 """CLI tests for the ``cafleet monitor`` group (§8).
 
-The process layer is mocked at the module boundary the CLI is expected to call
-through (``process.start_detached`` / ``process.stop_monitor`` /
-``loop.run_monitor_loop`` — module-attribute access, matching the established
-``broker.get_agent`` convention), so these tests never spawn a real worker.
+``monitor start`` runs the foreground loop in-process, so the tests mock
+``loop.run_monitor_loop`` at the module boundary the CLI calls through
+(module-attribute access, matching the established ``broker.get_agent``
+convention) — the loop never actually runs.
 """
 
 import json

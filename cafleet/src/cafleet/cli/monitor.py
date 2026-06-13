@@ -1,9 +1,11 @@
-"""``cafleet monitor`` — supervision-scheduler lifecycle + schedule commands.
+"""``cafleet monitor`` — supervision-scheduler commands.
 
-``start`` / ``stop`` manage the detached per-fleet worker process; ``status`` /
-``config`` view and edit the per-agent schedule. The process layer is reached
-through module attributes (``process.start_detached`` / ``process.stop_monitor``
-/ ``loop.run_monitor_loop``) — the established broker-style indirection.
+``start`` runs the `scan → ping → sleep` loop in-process — a coding agent
+launches it as a background task and owns its lifetime (there is no detached
+process and no ``stop`` command; stop the background task to stop it).
+``status`` / ``config`` view and edit the per-agent schedule. The loop is
+reached through a module attribute (``loop.run_monitor_loop``) — the
+established broker-style indirection.
 """
 
 from datetime import UTC, datetime
@@ -12,7 +14,7 @@ import click
 
 from cafleet import broker, output
 from cafleet.cli._helpers import ensure_tmux_or_die, require_fleet_id
-from cafleet.monitor import DEFAULT_TICK_SECONDS, loop, process
+from cafleet.monitor import DEFAULT_TICK_SECONDS, loop
 
 
 @click.group()
@@ -34,53 +36,19 @@ def _require_live_fleet(fleet_id: int) -> None:
     show_default=True,
     help="Scan-tick cadence in seconds.",
 )
-@click.option(
-    "--foreground",
-    "foreground",
-    is_flag=True,
-    default=False,
-    help="Run the loop in the current pane instead of detaching (debugging).",
-)
 @click.pass_context
-def monitor_start(ctx: click.Context, tick: int, foreground: bool) -> None:
-    """Start the fleet's monitor (detached by default)."""
+def monitor_start(ctx: click.Context, tick: int) -> None:
+    """Run the fleet's monitor loop in-process (launch as a background task).
+
+    The loop blocks until signalled (SIGTERM/SIGINT) or the fleet is torn down.
+    A coding agent launches it as a background task and stops it by stopping
+    that task — there is no detached process and no ``stop`` command.
+    """
     require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
     _require_live_fleet(fleet_id)
     ensure_tmux_or_die()
-
-    if foreground:
-        loop.run_monitor_loop(fleet_id, tick)
-        return
-
-    result = process.start_detached(fleet_id, tick)
-    if ctx.obj["json_output"]:
-        click.echo(
-            output.format_json(
-                {
-                    "running": result.ok,
-                    "pid": result.pid,
-                    "tick_seconds": result.tick_seconds,
-                }
-            )
-        )
-    else:
-        click.echo(result.message)
-    if not result.ok:
-        ctx.exit(1)
-
-
-@monitor.command("stop")
-@click.pass_context
-def monitor_stop(ctx: click.Context) -> None:
-    """Stop the fleet's monitor (idempotent)."""
-    require_fleet_id(ctx)
-    fleet_id = ctx.obj["fleet_id"]
-    result = process.stop_monitor(fleet_id)
-    if ctx.obj["json_output"]:
-        click.echo(output.format_json({"stopped": result.stopped, "pid": result.pid}))
-    else:
-        click.echo(result.message)
+    loop.run_monitor_loop(fleet_id, tick)
 
 
 @monitor.command("status")

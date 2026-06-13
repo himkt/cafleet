@@ -256,7 +256,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 1b. Start the monitor
 
-BEFORE spawning any member, start the supervision heartbeat with `cafleet --fleet-id <fleet-id> monitor start` (it detaches and returns immediately; confirm with `cafleet --fleet-id <fleet-id> monitor status`). The monitor must stay running from the first `member create` until Step 6's shutdown cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
+BEFORE spawning any member, run the supervision heartbeat as a **background task** with `cafleet --fleet-id <fleet-id> monitor start` (the loop runs in-process and blocks the task; confirm with `cafleet --fleet-id <fleet-id> monitor status`). The monitor must stay running from the first `member create` until Step 6's shutdown cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -479,7 +479,7 @@ No round limit — loop continues until approved or aborted.
    Wait for the Drafter's `addressed (doc)` confirmation.
 
 2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*:
-   1. `cafleet --fleet-id <fleet-id> monitor stop` (started at Step 1b).
+   1. Stop the monitor's background task (started at Step 1b — there is no `monitor stop` command; stop the background task running `cafleet monitor start`).
    2. `cafleet member delete` for each member (Drafter, then Reviewer). Each call blocks until the pane is gone (15 s timeout); on exit 2 follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
    3. `cafleet member list` — the team's roster MUST be empty before continuing.
    4. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).

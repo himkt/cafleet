@@ -4,13 +4,17 @@ icon: lucide/heart-pulse
 
 # Monitoring
 
-`cafleet monitor` is a detached, fleet-scoped background process that supplies
-the **heartbeat** a Director needs to supervise its team. It is a plain Python
-loop — not a coding agent — that wakes due agents on a fixed cadence by
-keystroking `cafleet … message poll` into their tmux panes. One monitor per
-fleet, started with a single shell command from the Director's pane, gives a
-Director on **any** backend (`claude`, `codex`, `opencode`) the same supervision
-tick.
+`cafleet monitor` is a fleet-scoped foreground loop — `scan → ping → sleep` —
+that a coding agent runs as a **background task** (the Director's own background
+task, or a dedicated monitoring member). It supplies the **heartbeat** a
+Director needs to supervise its team: a plain loop, not agent reasoning, that
+wakes due agents on a fixed cadence by keystroking `cafleet … message poll` into
+their tmux panes. While the loop runs it spends **no model tokens**, and because
+it is just a backgrounded command it works identically on **any** backend
+(`claude`, `codex`, `opencode`). `cafleet monitor start` runs the loop
+in-process; the launching agent owns its lifetime — there is no detached
+subprocess and no `monitor stop` (stop the background task, or delete the
+monitoring member, to stop it). One monitor per fleet.
 
 ## Heartbeat vs facilitation
 
@@ -21,7 +25,7 @@ those require agent judgment and stay the Director's job, defined by the
 
 | Layer | Owns | Lives in |
 |---|---|---|
-| Heartbeat (the *when*) | which agents are due; the wake keystroke | `cafleet monitor` process |
+| Heartbeat (the *when*) | which agents are due; the wake keystroke | the `cafleet monitor` loop |
 | Facilitation (the *what*) | poll → ACK → dispatch → health-check → escalate | the Director, per the supervision skill |
 
 Pinging an agent keystrokes *exactly* `cafleet … message poll` into its pane
@@ -65,61 +69,58 @@ multiple of the tick snaps up to the next tick boundary (e.g. a 7 s interval
 under a 5 s tick fires at ~10 s). Set the tick smaller than the smallest
 interval you care about.
 
-## Single-instance, liveness, and the PID file
+## Single-instance and liveness
 
-Exactly one monitor may run per fleet. Two artifacts enforce and report that,
-with non-overlapping roles:
+Exactly one monitor may run per fleet. The **`monitor_runtime` DB row is the
+single authority** for both single-instance coordination and `status` liveness
+— there is no PID file and no state directory. The single-instance claim runs in
+one SQLite write transaction, so two concurrent `monitor start` calls cannot
+both win.
 
-| Artifact | Role |
-|---|---|
-| `monitor_runtime` DB row | Authoritative coordination + liveness record. The atomic single-instance claim and `status` liveness derive from it. |
-| PID file (`<state_dir>/<fleet_id>.pid`) | The conventional OS handle. Written at claim, removed at clean shutdown; the primary signal source for `stop`. |
-
-The single-instance claim runs in one SQLite write transaction, so two
-concurrent `monitor start` calls cannot both win. **Liveness is read from the DB
-heartbeat**, not from the process table: the running monitor rewrites
-`last_tick_at` every tick, so a monitor that died silently is detected as stale
-(`now - last_tick_at` exceeds the stale window) even though nothing cleaned up
-its PID file. `os.kill(pid, 0)` is a corroborating signal, not the authority.
+**Liveness is read from the DB heartbeat**, not from the process table: the
+running monitor rewrites `last_tick_at` every tick, so a monitor that died
+silently is detected as stale (`now - last_tick_at` exceeds the stale window)
+even though nothing cleaned up after it. `os.kill(pid, 0)` is a corroborating
+signal, not the authority.
 
 Because a stale heartbeat is treated as dead, a fresh `start` may reclaim the
 slot from a momentarily-wedged monitor. To keep two live monitors from both
 pinging, the slot has exactly one owner (the pid that claimed it) and both the
 per-tick heartbeat and the on-exit clear are **ownership-checked**: a displaced
 monitor's next heartbeat matches zero rows, so it self-terminates without
-pinging and without wiping the winner's row. The state directory defaults to
-`~/.local/share/cafleet/monitor/` and is configurable via
-`CAFLEET_MONITOR_STATE_DIR`.
+pinging and without wiping the winner's row.
 
 ## Lifecycle
 
 ```mermaid
 %%{init: {'theme': 'default', 'themeVariables': {'fontSize': '16px'}}}%%
 flowchart LR
-    Start["monitor start<br/>(detached)"] --> Claim["claim runtime<br/>+ PID file"]
+    Start["monitor start<br/>(agent's background task)"] --> Claim["claim runtime row"]
     Claim --> Tick["every tick:<br/>scan → ping due agents → heartbeat"]
     Tick --> Tick
-    Tick --> Stop["monitor stop /<br/>fleet delete"]
-    Stop --> Clear["clear runtime<br/>+ remove PID file"]
+    Tick --> Stop["stop the task /<br/>delete the member /<br/>fleet delete"]
+    Stop --> Clear["clear runtime row"]
     Tick -. keystroke .-> PaneD["Director pane"]
     Tick -. keystroke .-> PaneM["member pane"]
 ```
 
-- **Start** (`cafleet monitor start --fleet-id N`) spawns a detached worker and
-  returns control to the caller's turn immediately. `--foreground` runs the
-  identical loop in the current pane for debugging. The process inherits the
-  launching pane's environment (`$TMUX`, `$CAFLEET_DATABASE_URL`) and fails fast
-  if it cannot reach a tmux session.
+- **Start**: a coding agent runs `cafleet monitor start --fleet-id N` as a
+  **background task**. The loop runs in-process and inherits the launching pane's
+  environment (`$TMUX`, `$CAFLEET_DATABASE_URL`); it fails fast on startup if it
+  cannot reach a tmux session. There is no detached subprocess.
 - **Run**: each tick scans the fleet's enrolled agents, pings the due ones, and
   rewrites the heartbeat.
-- **Stop** (`cafleet monitor stop --fleet-id N`) signals the process to shut
-  down cleanly; `fleet delete` stops the monitor before soft-deleting the fleet.
-  Both are idempotent.
+- **Stop**: the launching agent stops the background task (or deletes the
+  monitoring member). A clean stop (SIGTERM/SIGINT) clears the runtime row; a
+  hard kill simply lets the heartbeat go stale, after which `status` reports
+  stopped. There is no `monitor stop` command. `fleet delete` needs no stop step
+  — a running loop's next tick sees the soft-deleted fleet and self-terminates,
+  and `delete_fleet` removes the `monitor_runtime` + `monitor_config` rows.
 
 Per-agent schedule (`interval_seconds`, `enabled`) is persisted, so cadence
 resumes from `last_ping_at` across a restart. The schedule is editable from both
-the CLI (`cafleet monitor config`) and the admin WebUI at parity; process
-lifecycle (`start` / `stop`) is CLI-only.
+the CLI (`cafleet monitor config`) and the admin WebUI at parity; launching and
+stopping the loop is CLI-only by nature (it is the agent's background task).
 
 ## Enrollment and schema
 
@@ -132,7 +133,7 @@ Two tables back the monitor. Both reuse a parent id as a 1:1 INTEGER primary key
   Director and every member); the write-only Administrator and card-only agents
   have no pane and are not enrolled. Director-vs-member is *derived* at scan time
   (`agent_id == fleets.director_agent_id`), not stored.
-- **`monitor_runtime`** — one row per fleet, holding the running worker's `pid`,
+- **`monitor_runtime`** — one row per fleet, holding the running loop's `pid`,
   `started_at`, `last_tick_at` heartbeat, and `tick_seconds`. "No monitor" is
   modeled cleanly as "no row".
 

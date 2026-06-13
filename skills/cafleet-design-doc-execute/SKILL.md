@@ -358,7 +358,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 3b. Start the monitor
 
-BEFORE spawning any member, start the supervision heartbeat with `cafleet --fleet-id <fleet-id> monitor start` (it detaches and returns immediately; confirm with `cafleet --fleet-id <fleet-id> monitor status`). The monitor runs **unchanged** through Steps 3–8 — it supplies the same heartbeat the whole way; when Step 7 runs, PR-review polling is added as a facilitation step the Director performs on each monitor wake (the scheduler itself does not change). It is stopped once in Step 8's cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
+BEFORE spawning any member, run the supervision heartbeat as a **background task** with `cafleet --fleet-id <fleet-id> monitor start` (the loop runs in-process and blocks the task; confirm with `cafleet --fleet-id <fleet-id> monitor status`). The monitor runs **unchanged** through Steps 3–8 — it supplies the same heartbeat the whole way; when Step 7 runs, PR-review polling is added as a facilitation step the Director performs on each monitor wake (the scheduler itself does not change). Its background task is stopped once in Step 8's cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -642,7 +642,7 @@ No round limit — the loop continues until the user approves or aborts.
 
 1. Update design document Status to "Aborted", add Changelog entry. Place a `COMMENT(director): aborting — finalize and stand by` marker near the top of the doc body (above the Overview section — `Status:` is bold metadata, not a heading, so it is not a valid `paragraph-` target). Notify any still-live members with a single `cafleet --fleet-id <fleet-id> message send ... --text "ready (doc)"` per member so they read the marker and stand by.
 2. Commit (separate commands): `git add <design-doc>` then `git commit -m "docs: mark design doc as aborted"`
-3. Follow Shutdown Protocol (Step 8: stop the monitor with `cafleet --fleet-id <fleet-id> monitor stop`, then delete members and run `cafleet fleet delete <fleet-id>` to tear down the fleet and sweep the root Director + Administrator).
+3. Follow Shutdown Protocol (Step 8: stop the monitor's background task, then delete members and run `cafleet fleet delete <fleet-id>` to tear down the fleet and sweep the root Director + Administrator).
 
 ### Step 6: Push & Create PR (Director)
 
@@ -796,7 +796,7 @@ Monitor wakes keep arriving while the user is speaking to the Director. **Stop m
 3. Treats subsequent monitor wakes as notification-only — runs the PR review poll for situational awareness but does NOT route comments, commit, or push until the user re-engages with a specific instruction.
 4. Does NOT silently tear the team down — the state stays paused so the user can resume or explicitly abort.
 
-If the user explicitly aborts, follow the Abort Flow (update doc Status → "Aborted", commit, run Shutdown Protocol). Step 7's cleanup is identical to Step 8's cleanup — stop the monitor (`cafleet monitor stop`), delete members, run `cafleet fleet delete`.
+If the user explicitly aborts, follow the Abort Flow (update doc Status → "Aborted", commit, run Shutdown Protocol). Step 7's cleanup is identical to Step 8's cleanup — stop the monitor's background task, delete members, run `cafleet fleet delete`.
 
 ### Step 8: Finalize & Clean Up (Director)
 
@@ -810,7 +810,7 @@ Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped (gh no
    - Non-zero exit: skip the push. The docs commit stays local.
    - The Director does NOT re-request Copilot review on this final docs commit.
 5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*:
-   1. `cafleet --fleet-id <fleet-id> monitor stop` (the heartbeat started in Step 3b; it ran unchanged through Step 7).
+   1. Stop the monitor's background task (the heartbeat started in Step 3b — there is no `monitor stop` command; it ran unchanged through Step 7).
    2. `cafleet member delete` for each spawned member (Programmer, Tester if spawned, Verifier if spawned). Each call blocks until the pane is gone; on exit 2 follow the `member capture` + `send-input` recovery, or rerun with `--force`.
    3. `cafleet member list` — the team's roster MUST be empty before continuing.
    4. `cafleet fleet delete <fleet-id>`.

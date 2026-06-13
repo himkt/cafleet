@@ -1,7 +1,7 @@
 # cafleet monitor — backend-agnostic external scheduler
 
 **Status**: Approved
-**Progress**: 59/76 tasks complete (Steps 1–8 done; Revision R1 re-work in progress)
+**Progress**: 75/76 tasks complete (Steps 1–8 done; Revision R1 re-work — only the live E2E smoke remains)
 **Last Updated**: 2026-06-13
 
 ## Overview
@@ -10,11 +10,11 @@
 
 ## Success Criteria
 
-- [x] `cafleet monitor start --fleet-id N` launches a detached process that returns control to the caller's turn immediately, on any backend.
-- [x] `cafleet monitor start --fleet-id N --foreground` runs the identical loop in the current pane for debugging.
+- [x] `cafleet monitor start --fleet-id N` runs the heartbeat loop in-process (a coding agent launches it as a background task), on any backend.
+- [x] The same loop runs whether launched as the Director's background task or in a dedicated monitoring member.
 - [x] A second `monitor start` for a fleet with a live monitor is refused (single-instance, enforced atomically in the DB).
 - [x] `cafleet monitor status --fleet-id N` reports true liveness from the DB heartbeat even when the process died silently, plus the per-agent schedule table.
-- [x] `cafleet monitor stop --fleet-id N` signals the process, which shuts down cleanly; `fleet delete` also stops the monitor.
+- [x] Stopping the monitor's background task shuts the loop down cleanly (SIGTERM clears the runtime row); `fleet delete` makes the loop self-terminate.
 - [x] The monitor pings the root Director **unconditionally** on its interval, and a member **only** when it has pending un-acked inbox items.
 - [x] Per-agent `interval_seconds` / `enabled` are persisted in `monitor_config`, auto-enrolled at agent registration, editable via CLI and WebUI at parity, and survive a monitor restart (cadence resumes from `last_ping_at`).
 - [x] The admin agents page shows each agent's monitoring schedule and lets the operator edit the interval and toggle enable/disable.
@@ -432,31 +432,31 @@ The monitor is no longer a detached OS subprocess. `cafleet monitor start` runs 
 
 **Code**
 
-- [ ] `cafleet/monitor/loop.py`: drop the PID-file write/remove from `run_monitor_loop` (claim → signal handlers → loop → ownership-checked clear remain). <!-- completed: -->
-- [ ] Remove `cafleet/monitor/process.py` (detach launcher, PID-file helpers, `start_detached`, `stop_monitor`, `StartResult`/`StopResult`). <!-- completed: -->
-- [ ] Remove `cafleet/__main__.py` (no detached re-exec target). <!-- completed: -->
-- [ ] `cafleet/monitor/__init__.py`: drop `MONITOR_STOP_TIMEOUT`; keep `DEFAULT_PING_INTERVAL_SECONDS` / `DEFAULT_TICK_SECONDS` / `MONITOR_STALE_FACTOR` / `MONITOR_STALE_FLOOR_SECONDS`. <!-- completed: -->
-- [ ] `cafleet/config.py`: remove `monitor_state_dir` + `CAFLEET_MONITOR_STATE_DIR`. <!-- completed: -->
-- [ ] `cafleet/cli/monitor.py`: `start` runs `run_monitor_loop` in-process (remove the `--foreground` flag + the detached `start_detached` path); remove the `stop` command; keep `status` + `config`. <!-- completed: -->
-- [ ] `cafleet/cli/fleet.py`: remove the `process.stop_monitor(fleet_id)` call from `fleet_delete` (the loop self-terminates; `broker.delete_fleet` cleans the rows). <!-- completed: -->
+- [x] `cafleet/monitor/loop.py`: drop the PID-file write/remove from `run_monitor_loop` (claim → signal handlers → loop → ownership-checked clear remain). <!-- completed: 2026-06-13T10:19 -->
+- [x] Remove `cafleet/monitor/process.py` (detach launcher, PID-file helpers, `start_detached`, `stop_monitor`, `StartResult`/`StopResult`). <!-- completed: 2026-06-13T10:25 (Director git rm) -->
+- [x] Remove `cafleet/__main__.py` (no detached re-exec target). <!-- completed: 2026-06-13T10:25 (Director git rm) -->
+- [x] `cafleet/monitor/__init__.py`: drop `MONITOR_STOP_TIMEOUT`; keep `DEFAULT_PING_INTERVAL_SECONDS` / `DEFAULT_TICK_SECONDS` / `MONITOR_STALE_FACTOR` / `MONITOR_STALE_FLOOR_SECONDS`. <!-- completed: 2026-06-13T10:19 -->
+- [x] `cafleet/config.py`: remove `monitor_state_dir` + `CAFLEET_MONITOR_STATE_DIR`. <!-- completed: 2026-06-13T10:19 -->
+- [x] `cafleet/cli/monitor.py`: `start` runs `run_monitor_loop` in-process (remove the `--foreground` flag + the detached `start_detached` path); remove the `stop` command; keep `status` + `config`. <!-- completed: 2026-06-13T10:19 -->
+- [x] `cafleet/cli/fleet.py`: remove the `process.stop_monitor(fleet_id)` call from `fleet_delete` (the loop self-terminates; `broker.delete_fleet` cleans the rows). <!-- completed: 2026-06-13T10:19 -->
 
 **Docs / skills**
 
-- [ ] `docs/spec/cli-options.md`: drop `monitor stop`; restate `monitor start` as the foreground loop (no `--foreground`, no detached/PID/log); drop `CAFLEET_MONITOR_STATE_DIR` from the Option Source Matrix. <!-- completed: -->
-- [ ] `docs/concepts/monitoring.md`: describe the agent-run foreground loop (background task / monitoring member) instead of the detached process + PID file; lifecycle = start as a background task → stop the task / delete the member / `fleet delete`. <!-- completed: -->
-- [ ] `docs/spec/data-model.md`: drop any PID-file / state-dir mention (keep `monitor_runtime.pid` — still recorded for liveness). <!-- completed: -->
-- [ ] `docs/how-to/monitor-and-recover.md`, `README.md`, and the skill lifecycle wording (`cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision`, design-doc-create/execute/interview, research-report/-presentation, `cafleet` reference/recovery, skill-author): replace "`cafleet monitor start`/`stop`" lifecycle with "run `cafleet monitor start` as a background task before the first member; stop it by stopping that task (or deleting the monitoring member) at teardown." No `monitor stop` usages remain. <!-- completed: -->
+- [x] `docs/spec/cli-options.md`: drop `monitor stop`; restate `monitor start` as the foreground loop (no `--foreground`, no detached/PID/log); drop `CAFLEET_MONITOR_STATE_DIR` from the Option Source Matrix. <!-- completed: 2026-06-13T10:19 -->
+- [x] `docs/concepts/monitoring.md`: describe the agent-run foreground loop (background task / monitoring member) instead of the detached process + PID file; lifecycle = start as a background task → stop the task / delete the member / `fleet delete`. <!-- completed: 2026-06-13T10:19 -->
+- [x] `docs/spec/data-model.md`: drop any PID-file / state-dir mention (keep `monitor_runtime.pid` — still recorded for liveness). <!-- completed: 2026-06-13T10:19 -->
+- [x] `docs/how-to/monitor-and-recover.md`, `README.md`, and the skill lifecycle wording (`cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision`, design-doc-create/execute/interview, research-report/-presentation, `cafleet` reference/recovery, skill-author): replace "`cafleet monitor start`/`stop`" lifecycle with "run `cafleet monitor start` as a background task before the first member; stop it by stopping that task (or deleting the monitoring member) at teardown." No `monitor stop` usages remain. <!-- completed: 2026-06-13T10:25 (skill-author applied by Director; other 9 files by Programmer) -->
 
 **Tests**
 
-- [ ] Remove `tests/monitor/test_process.py`. <!-- completed: -->
-- [ ] `tests/monitor/test_loop.py`: drop PID-file assertions from `run_monitor_loop`. <!-- completed: -->
-- [ ] `tests/monitor/test_constants.py`: assert the 4 remaining constants (no `MONITOR_STOP_TIMEOUT`). <!-- completed: -->
-- [ ] `tests/cli/test_monitor.py`: `start` invokes `run_monitor_loop` (foreground, no detached path); remove the `stop` tests and the `fleet delete → stop_monitor` test; keep status/config. <!-- completed: -->
+- [x] Remove `tests/monitor/test_process.py`. <!-- completed: 2026-06-13T10:25 (Director git rm; Tester flagged) -->
+- [x] `tests/monitor/test_loop.py`: drop PID-file assertions from `run_monitor_loop`. <!-- completed: 2026-06-13T10:25 (N/A — test_loop covers monitor_tick only, never had PID-file assertions) -->
+- [x] `tests/monitor/test_constants.py`: assert the 4 remaining constants (no `MONITOR_STOP_TIMEOUT`). <!-- completed: 2026-06-13T10:25 -->
+- [x] `tests/cli/test_monitor.py`: `start` invokes `run_monitor_loop` (foreground, no detached path); remove the `stop` tests and the `fleet delete → stop_monitor` test; keep status/config. <!-- completed: 2026-06-13T10:25 -->
 
 **Verify**
 
-- [ ] `mise //cafleet:format` + lint + typecheck + test green; `mise //admin:build`. <!-- completed: -->
+- [x] `mise //cafleet:format` + lint + typecheck + test green; `mise //admin:build`. <!-- completed: 2026-06-13T10:19 -->
 - [ ] E2E smoke (revised): `cafleet monitor start` as a background task → `monitor status` running + director enrolled → spawn a member + give it a pending message → observe the `message poll` keystroke land in the member pane on a tick → stop the background task → `monitor status` stopped → `fleet delete` (rows cleaned). <!-- completed: -->
 
 ---
