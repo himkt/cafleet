@@ -56,13 +56,15 @@ def _stub_tmux(monkeypatch, live_panes):
     return pings
 
 
-def test_monitor_tick__pings_exactly_due_agents_records_and_heartbeats(monkeypatch):
+def test_monitor_tick__pings_due_agents_records_heartbeats_and_logs(
+    capsys, monkeypatch
+):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
     alice = _register_member(fleet, "alice", "%7")  # pending, alive  → ping
-    bob = _register_member(fleet, "bob", "%9")  # no pending, alive  → skip
-    carol = _register_member(fleet, "carol", "%99")  # pending, dead → skip
+    bob = _register_member(fleet, "bob", "%9")  # idle, alive         → ping (R2)
+    carol = _register_member(fleet, "carol", "%99")  # pending, dead  → skip
 
     broker.send_message(sid, director_id, alice, "do x")
     broker.send_message(sid, director_id, carol, "do y")
@@ -75,20 +77,30 @@ def test_monitor_tick__pings_exactly_due_agents_records_and_heartbeats(monkeypat
     result = monitor_tick(sid, _NOW)
 
     assert result is CONTINUE
-    assert {agent_id for _, _, agent_id in pings} == {director_id, alice}
+    # R2: every due, enabled, live-pane agent is pinged — idle members too;
+    # only carol (dead pane) is skipped
+    assert {agent_id for _, _, agent_id in pings} == {director_id, alice, bob}
     assert ("%0", sid, director_id) in pings
     assert ("%7", sid, alice) in pings
+    assert ("%9", sid, bob) in pings
 
-    # record_ping advanced only the pinged agents
+    # record_ping advanced every pinged agent; carol (skipped) stays None
     assert (
         broker.get_monitor_config(sid, director_id)["last_ping_at"] == _NOW.isoformat()
     )
     assert broker.get_monitor_config(sid, alice)["last_ping_at"] == _NOW.isoformat()
-    assert broker.get_monitor_config(sid, bob)["last_ping_at"] is None
+    assert broker.get_monitor_config(sid, bob)["last_ping_at"] == _NOW.isoformat()
     assert broker.get_monitor_config(sid, carol)["last_ping_at"] is None
 
     # the heartbeat was written for this tick
     assert broker.read_monitor_runtime(sid)["last_tick_at"] == _NOW.isoformat()
+
+    # R2: one stdout ping-log line per dispatched ping
+    out = capsys.readouterr().out
+    assert f"ping agent {director_id} (Director)" in out
+    assert f"ping agent {alice} (alice)" in out
+    assert f"ping agent {bob} (bob)" in out
+    assert "carol" not in out
 
 
 def test_monitor_tick__stop_on_soft_deleted_fleet(broker_session, monkeypatch):

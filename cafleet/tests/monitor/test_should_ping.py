@@ -45,16 +45,14 @@ def test_should_ping__member_with_pending_due():
     assert should_ping(_target(pending_count=1), _NOW) is True
 
 
-def test_should_ping__member_without_pending_skipped():
-    # a periodic ping into an idle empty-inbox member is pure noise
-    assert should_ping(_target(pending_count=0), _NOW) is False
+def test_should_ping__member_without_pending_pinged():
+    # R2: members are pinged unconditionally once due, regardless of pending_count
+    assert should_ping(_target(pending_count=0), _NOW) is True
 
 
-def test_should_ping__member_not_due_skipped_despite_pending():
-    target = _target(
-        pending_count=5,
-        last_ping_at=(_NOW - timedelta(seconds=30)).isoformat(),
-    )
+def test_should_ping__member_not_due_skipped():
+    # the interval gate still applies — a not-yet-due agent is skipped
+    target = _target(last_ping_at=(_NOW - timedelta(seconds=30)).isoformat())
     assert should_ping(target, _NOW) is False
 
 
