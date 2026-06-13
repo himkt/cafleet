@@ -1,13 +1,49 @@
 """FastAPI endpoints backing the admin WebUI (``/api/*``)."""
 
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cafleet import broker
 
 webui_router = APIRouter(prefix="/api")
+
+
+def _monitor_config_response(cfg: dict) -> dict:
+    """Project a broker config dict to the WebUI's ``monitor`` shape (no ``agent_id``)."""
+    return {
+        "interval_seconds": cfg["interval_seconds"],
+        "last_ping_at": cfg["last_ping_at"],
+        "enabled": cfg["enabled"],
+    }
+
+
+def _monitor_runtime_payload(fleet_id: int) -> dict:
+    """Build the ``GET /api/monitor`` liveness dict from the DB heartbeat."""
+    now = datetime.now(UTC)
+    row = broker.read_monitor_runtime(fleet_id)
+    if row is None:
+        return {
+            "running": False,
+            "pid": None,
+            "tick_seconds": None,
+            "last_tick_at": None,
+            "last_tick_age_seconds": None,
+            "started_at": None,
+        }
+    age = None
+    if row["last_tick_at"] is not None:
+        age = int((now - datetime.fromisoformat(row["last_tick_at"])).total_seconds())
+    return {
+        "running": broker.monitor_is_live(fleet_id, now),
+        "pid": row["pid"],
+        "tick_seconds": row["tick_seconds"],
+        "last_tick_at": row["last_tick_at"],
+        "last_tick_age_seconds": age,
+        "started_at": row["started_at"],
+    }
 
 
 def get_webui_fleet(request: Request) -> int:
@@ -61,6 +97,13 @@ class SendMessageRequest(BaseModel):
     text: str
 
 
+class MonitorPatch(BaseModel):
+    """Body for ``PATCH /api/agents/{id}/monitor`` — both fields optional."""
+
+    interval_seconds: int | None = Field(default=None, ge=1)
+    enabled: bool | None = None
+
+
 @webui_router.get("/fleets")
 def list_fleets():
     return broker.list_fleets()
@@ -69,7 +112,41 @@ def list_fleets():
 @webui_router.get("/agents")
 def list_agents(fleet_id: int = Depends(get_webui_fleet)):
     agents = broker.list_fleet_agents(fleet_id)
+    configs = {c["agent_id"]: c for c in broker.list_monitor_configs(fleet_id)}
+    for agent in agents:
+        cfg = configs.get(agent["agent_id"])
+        agent["monitor"] = _monitor_config_response(cfg) if cfg is not None else None
     return {"agents": agents}
+
+
+@webui_router.get("/monitor")
+def get_monitor(fleet_id: int = Depends(get_webui_fleet)):
+    return _monitor_runtime_payload(fleet_id)
+
+
+@webui_router.get("/agents/{agent_id}/monitor")
+def get_agent_monitor(agent_id: int, fleet_id: int = Depends(get_webui_fleet)):
+    cfg = broker.get_monitor_config(fleet_id, agent_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="Agent not enrolled")
+    return _monitor_config_response(cfg)
+
+
+@webui_router.patch("/agents/{agent_id}/monitor")
+def patch_agent_monitor(
+    agent_id: int,
+    body: MonitorPatch,
+    fleet_id: int = Depends(get_webui_fleet),
+):
+    if broker.get_monitor_config(fleet_id, agent_id) is None:
+        raise HTTPException(status_code=404, detail="Agent not enrolled")
+    cfg = broker.update_monitor_config(
+        fleet_id,
+        agent_id,
+        interval_seconds=body.interval_seconds,
+        enabled=body.enabled,
+    )
+    return _monitor_config_response(cfg)
 
 
 @webui_router.get("/agents/{agent_id}/inbox")

@@ -1,7 +1,7 @@
 # cafleet monitor — backend-agnostic external scheduler
 
 **Status**: Approved
-**Progress**: 46/59 tasks complete
+**Progress**: 48/59 tasks complete
 **Last Updated**: 2026-06-13
 
 ## Overview
@@ -420,8 +420,8 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 
 ### Step 6: WebUI API
 
-- [ ] Add to `cafleet/webui/api.py`: `GET /api/monitor` (runtime liveness), `GET /api/agents/{agent_id}/monitor`, `PATCH /api/agents/{agent_id}/monitor` (Pydantic `MonitorPatch` with optional `interval_seconds>=1`, `enabled`), and fold a `monitor` field into `GET /api/agents` (null when not enrolled). All via `get_webui_fleet` + broker calls; 404/422 per §9. <!-- completed: -->
-- [ ] Tests (`tests/webui/test_monitor_api.py`): `GET /api/monitor` running/stopped; `GET /api/agents` carries `monitor` (null for Administrator); `GET /api/agents/{id}/monitor` 200 + 404 (not in fleet / not enrolled); `PATCH` updates interval + enabled, 422 on bad body, 404 on missing. <!-- completed: -->
+- [x] Add to `cafleet/webui/api.py`: `GET /api/monitor` (runtime liveness), `GET /api/agents/{agent_id}/monitor`, `PATCH /api/agents/{agent_id}/monitor` (Pydantic `MonitorPatch` with optional `interval_seconds>=1`, `enabled`), and fold a `monitor` field into `GET /api/agents` (null when not enrolled). All via `get_webui_fleet` + broker calls; 404/422 per §9. <!-- completed: 2026-06-13T08:39 -->
+- [x] Tests (`tests/webui/test_monitor_api.py`): `GET /api/monitor` running/stopped; `GET /api/agents` carries `monitor` (null for Administrator); `GET /api/agents/{id}/monitor` 200 + 404 (not in fleet / not enrolled); `PATCH` updates interval + enabled, 422 on bad body, 404 on missing. <!-- completed: 2026-06-13T08:40 -->
 
 ### Step 7: Admin SPA
 
