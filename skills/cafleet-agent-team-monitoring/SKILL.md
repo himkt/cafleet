@@ -1,11 +1,11 @@
 ---
 name: cafleet-agent-team-monitoring
-description: "Active monitoring mechanism for CAFleet Directors. Documents the cron-like loop primitive per backend (Claude Code: CronCreate + /loop; codex and opencode: no in-session scheduling, fallback options listed) and the team-facilitation instructions (poll, ACK, dispatch queued work, health-check, escalate). Load whenever you are about to spawn or manage CAFleet team members. Foundation layer — load before the cafleet-agent-team-supervision skill."
+description: "Active monitoring mechanism for CAFleet Directors. Documents the external cafleet monitor heartbeat process that wakes the Director on its interval (backend-agnostic), and the team-facilitation instructions (poll, ACK, dispatch queued work, health-check, escalate) the Director runs on each monitor tick. Load whenever you are about to spawn or manage CAFleet team members. Foundation layer — load before the cafleet-agent-team-supervision skill."
 ---
 
 # CAFleet Agent Team Monitoring
 
-Foundation layer for CAFleet Directors. This skill documents the cron-like mechanism a Director uses to wake itself up periodically and the team-facilitation instructions it executes on each tick. Load this skill before the `cafleet-agent-team-supervision` skill — supervision builds on the mechanism documented here.
+Foundation layer for CAFleet Directors. This skill documents the `cafleet monitor` heartbeat that wakes a Director periodically and the team-facilitation instructions it executes on each tick. Load this skill before the `cafleet-agent-team-supervision` skill — supervision builds on the mechanism documented here.
 
 ## Placeholder convention
 
@@ -17,47 +17,23 @@ Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id
 - `<director-agent-id>` — the root Director's UUID printed on line 2 of `cafleet fleet create` text output (or `director.agent_id` in `--json` output). `cafleet fleet create` inside a tmux session auto-bootstraps the root Director with its placement row — no separate `cafleet agent register` call is needed to obtain the Director's `agent_id`.
 - `<member-agent-id>` — a target member's agent UUID (from `member create` / `member list`)
 
-## Mechanism by backend
+## The monitor heartbeat
 
-CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. The mechanism for this differs between coding-agent backends.
+CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. That heartbeat is supplied by **`cafleet monitor`**, a per-fleet `scan → ping → sleep` loop that a coding agent runs as a **background task** (the Director's own, or a dedicated monitoring member). Because it is just a backgrounded command, the heartbeat is **backend-agnostic** — a root Director on `claude`, `codex`, or `opencode` gets the identical tick. There is no per-backend scheduling asymmetry: the monitor is the one mechanism for every backend.
 
-### Claude Code Director (default)
+Run the monitor once, as a background task, before the first `cafleet member create` call:
 
-Claude Code's harness exposes two in-session scheduling tools the Director can call:
+```bash
+cafleet --fleet-id <fleet-id> monitor start   # launch as a background task
+```
 
-| Tool | Use |
-|---|---|
-| `CronCreate` | Schedule a recurring prompt to fire at a cron interval. Used to set up the active `/loop` monitor (typically 1-minute cadence). |
-| `ScheduleWakeup` | Self-pacing dynamic-mode wake-up — used by `/loop` when the Director picks its own next-tick delay. |
+`monitor start` runs the loop in-process (it blocks the background task), so launch it as a background task and confirm it with `cafleet --fleet-id <fleet-id> monitor status`. The monitor pings **every** enrolled agent — the root Director and members alike — **unconditionally** on its interval (default 60 s) once due; `pending_count` is shown in `monitor status` but does not gate the ping. The keystroke differs by role: the **Director** gets a bare `cafleet … message poll`; a **member** gets a single-line *resume nudge* — the poll command plus a review-your-task-and-continue instruction — so a member that unexpectedly stopped resumes rather than going idle on an empty inbox. See the `cafleet` skill and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy.
 
-The `/loop` Prompt Template (§ `/loop` Prompt Template below) is the canonical setup — it uses `CronCreate` under the hood. **The loop is mandatory before any `cafleet member create` call** when the Director runs under Claude Code.
-
-### Codex Director / Opencode Director
-
-Neither Codex CLI (confirmed via survey of <https://developers.openai.com/codex/cli/features> as of 2026-05) nor opencode exposes an equivalent in-session scheduling primitive. There is no `CronCreate`, no `ScheduleWakeup`, no harness-level tool the model can invoke from inside a running session to schedule a future tick. Codex Automations exist but are app-only and cannot be triggered from the local CLI. Opencode's TUI similarly does not surface a self-wakeup primitive — its `--agent cafleet` binding controls the permission posture, not scheduling.
-
-This means: **a codex or opencode root Director cannot run the active `/loop` monitor.** The mechanism is unavailable on either backend.
-
-#### Recommendation
-
-When active supervision of a CAFleet member team is required, **use `cafleet fleet create --coding-agent claude`** for the root Director. Codex and opencode members are fully supported via `cafleet member create --coding-agent codex` (or `--coding-agent opencode`) — only the Director needs the cron mechanism. A mixed-backend team (claude Director + codex / opencode members) is the canonical configuration for active-supervision workloads.
-
-#### Fallback options when codex or opencode must be the Director
-
-If a codex or opencode root Director is required (e.g. operator preference, backend-specific workflow, no claude binary available), one of the following fallbacks must be in place. Active supervision **without** one of these fallbacks is not supported.
-
-| Fallback | Mechanism | Operational cost |
-|---|---|---|
-| **Out-of-band cron driver** | An OS-level scheduler (`cron(8)`, systemd timer, `watch -n 60 …`) running **outside** the Director's session keystrokes the supervision-tick prompt into the Director's tmux pane via `tmux send-keys`. (Operator-side; the Director itself never invokes raw tmux — that is forbidden by the `cafleet` skill § Shutdown Protocol's *use cafleet primitives only* rule. This fallback exists because neither codex CLI nor opencode has an in-session scheduler.) | Operator must set up + tear down the timer; not visible inside the session. |
-| **MCP scheduling server** | Codex CLI supports MCP servers; a custom MCP server can expose a scheduling tool the codex Director invokes inline. Opencode also supports MCP, but per `docs/reference/coding-agents/opencode.md` operators MUST NOT add MCP servers to any opencode config the CAFleet pane loads (MCP-contributed tools bypass the deny-list safety floor) — so this fallback is **codex-only**. | Requires writing or installing an MCP server; configuration lives in `~/.codex/config.toml`. |
-| **User-driven nudges** | The user types a tick prompt at intervals (e.g. "tick" every minute). | Manual, error-prone, doesn't scale beyond short sessions. |
-| **No active monitor — synchronous in-turn facilitation only** | The Director performs all health checks + dispatch within each of its own active turns; no scheduled wake-up. The team only progresses while the Director has an active turn. | Acceptable only for short, fully-Director-driven workflows (no long-running parallel members). The Director's idle window is the team's idle window. |
-
-The fallback in use must be documented in the session's launch instructions. The supervision skill's Authorization-Scope Guard applies regardless of which fallback is in use.
+**A monitor wake of the Director is a bare poll, so the cue to facilitate must come from the skill.** Pinging the Director keystrokes *exactly* `cafleet … message poll` into its pane — that bare poll, on its own, performs only **step 1** below. **Treat every monitor poll-trigger wake as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), not to read the inbox and stop. The monitor decides only *when*; this skill defines *what* the Director does on each wake. (Members do not facilitate — the member resume nudge tells them directly to poll, review, and continue.)
 
 ## Team-facilitation instructions
 
-On every supervision tick — whether fired by `/loop` (Claude Code) or by a fallback (codex or opencode), or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
+On every supervision tick — whether fired by a `cafleet monitor` wake or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
 
 1. **Poll inbox.** `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>` returns only the un-acked (`input_required`) deliveries; ACKing each one (step 2) consumes it, so the next tick's poll surfaces only what has arrived since.
 2. **ACK every message** that requires no further action: `cafleet --fleet-id <fleet-id> message ack --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.
@@ -77,38 +53,20 @@ Run this sequence once per supervision tick. Order matters — cheapest non-intr
 | 4 | Based on findings, `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` to any stalled or idle member with a specific instruction | Drive the team forward |
 | 5 | When all members have reported completion (via messages or visible in terminal output), report to the user: "All deliverables are ready for review." | Signal completion to user |
 
-## `/loop` Prompt Template (Claude Code only)
-
-> **Claude Code-specific.** This template depends on `CronCreate` / `ScheduleWakeup`, which are Claude Code harness tools. Codex and opencode Directors cannot use this template — see § Mechanism by backend → Codex Director / Opencode Director for fallback options.
-
-Substitute the literal UUIDs into every `<fleet-id>`, `<director-agent-id>`, and `<member-agent-id>` placeholder before passing the prompt to `/loop`. The prompt must contain literal UUIDs, **not** shell variables — the `permissions.allow` matcher only allows literal command strings. Remember: `--fleet-id` goes before the subcommand, `--agent-id` goes after.
-
-```
-Monitor team health (interval: 1 minute). For each member spawned via `cafleet member create`:
-
-1. Run `cafleet --fleet-id <fleet-id> --json member list` to enumerate members.
-2. Run `cafleet --fleet-id <fleet-id> --json message poll --agent-id <director-agent-id>` to check incoming un-acked messages. ACK any progress reports — ACKing consumes them, so the next tick's poll returns only what has arrived since.
-3. For each member that has NOT sent a message since last check, run `cafleet --fleet-id <fleet-id> member capture --member-id <member-agent-id> --lines 200` to inspect their terminal.
-4. If a member's terminal shows no forward progress, send a specific instruction via `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "Report your progress now. If blocked, state what is blocking you."`.
-5. If a member appears stalled despite a recent `message send` (auto-fire missed or pane was busy), re-poke its inbox via `cafleet --fleet-id <fleet-id> member ping --member-id <member-agent-id>`.
-6. If all members have reported completion, report to the user: "All deliverables are ready for review."
-7. If a member has been nudged 2 times with no progress, escalate to the user.
-```
-
-## Loop Lifecycle
+## Monitor Lifecycle
 
 | Phase | Action |
 |---|---|
-| Spawn members | Start the `/loop` (Claude Code) or fallback driver (codex or opencode) BEFORE the first `cafleet member create` call, so the first tick fires while spawning completes. |
-| Run work | Tick at the configured cadence (1 minute is the `CronCreate` floor); do not intervene unless a tick escalates. |
-| User review | Keep the loop alive during the review cycle — revisions and re-reviews still count as in-progress work. |
-| User approves final artifact | The loop terminates itself after teardown begins (see Cleanup below). |
+| Spawn members | Run `cafleet --fleet-id <fleet-id> monitor start` as a background task BEFORE the first `cafleet member create` call, so the first tick fires while spawning completes. Confirm with `monitor status`. |
+| Run work | The monitor ticks at its configured cadence (default ping interval 60 s); do not intervene unless a wake escalates. Each Director wake is the cue to run the 5-step facilitation loop above. |
+| User review | Keep the monitor running during the review cycle — revisions and re-reviews still count as in-progress work. |
+| User approves final artifact | Stop the monitor's background task once teardown begins (see Cleanup below). |
 
-**Lifecycle rule:** The loop MUST stay active from the first `member create` through every phase (research, compilation, review, revision, user approval). At teardown, **stop the loop BEFORE deleting members** — this is step 1 of the Shutdown Protocol in the `cafleet` skill and is non-negotiable. A loop that keeps firing after members are deleted spams `member list` / `message poll` against a tearing-down fleet, can race with the member-delete path, and (most visibly) leaks cron output into the operator's terminal after the team is ostensibly gone. Full teardown order: stop every `/loop` cron (or fallback driver) → `cafleet member delete` each member → `cafleet member list` to verify the roster is empty → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check. See the `cafleet` skill → "Shutdown Protocol" for the authoritative procedure.
+**Lifecycle rule:** The monitor MUST stay running from the first `member create` through every phase (research, compilation, review, revision, user approval). At teardown, **stop the monitor's background task BEFORE deleting members** — this is step 1 of the Shutdown Protocol in the `cafleet` skill and is non-negotiable. A monitor that keeps ticking after members are deleted keystrokes polls into tearing-down panes and can race with the member-delete path. There is no `cafleet monitor stop` — stop the loop by stopping the background task running `cafleet monitor start` (or deleting the monitoring member). Full teardown order: stop the monitor's background task → `cafleet member delete` each member → `cafleet member list` to verify the roster is empty → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check (`fleet delete` makes any still-running loop self-terminate on its next tick, so stopping the task first is belt-and-suspenders). See the `cafleet` skill → "Shutdown Protocol" for the authoritative procedure.
 
 ## Stall Response
 
-When you receive any signal that a member may be stalled (loop check, idle notification, user nudge), evaluate using this 2-stage protocol:
+When you receive any signal that a member may be stalled (monitor wake, idle notification, user nudge), evaluate using this 2-stage protocol:
 
 > **Bash request blocking case**: When `cafleet message poll` returns a member message asking for a shell command, dispatch via `cafleet member exec "<cmd>"` per the `cafleet` skill § Routing Bash via the Director. Member blocks until the keystroke lands; process requests one at a time, don't skip ahead to other inbox items.
 

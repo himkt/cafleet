@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Inbox, X } from "lucide-react";
+import { Activity, Inbox, X } from "lucide-react";
 import { Tabs } from "radix-ui";
 import type { Agent, TimelineMessage } from "../types";
-import { fetchInbox, fetchSent } from "../api";
+import { fetchInbox, fetchSent, updateAgentMonitor } from "../api";
 import AgentAvatar from "./AgentAvatar";
 import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
@@ -96,16 +96,134 @@ function MessageList({
 const TAB_TRIGGER_CLASS =
   "border-b-2 border-transparent px-3 py-1.5 text-sm text-text-muted hover:text-text focus-visible:outline-2 focus-visible:outline-accent data-[state=active]:border-accent data-[state=active]:font-medium data-[state=active]:text-text";
 
+function MonitoringSection({
+  agent,
+  onChanged,
+}: {
+  agent: Agent;
+  onChanged: () => void;
+}) {
+  const monitor = agent.monitor;
+  const monitorInterval = monitor?.interval_seconds ?? null;
+  const [intervalInput, setIntervalInput] = useState(
+    monitorInterval !== null ? String(monitorInterval) : "",
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Re-sync the input only when the polled interval value changes (or when
+  // switching agents) — keying on the scalar, not the per-poll object identity,
+  // so a 5 s refresh never clobbers an in-progress edit.
+  useEffect(() => {
+    if (monitorInterval !== null) setIntervalInput(String(monitorInterval));
+  }, [monitorInterval, agent.agent_id]);
+
+  if (monitor === null) return null;
+
+  const saveInterval = async () => {
+    const n = Number(intervalInput);
+    if (!Number.isInteger(n) || n < 1) {
+      setError("Interval must be a whole number ≥ 1.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await updateAgentMonitor(agent.agent_id, { interval_seconds: n });
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update interval.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleEnabled = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await updateAgentMonitor(agent.agent_id, { enabled: !monitor.enabled });
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to toggle monitoring.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="border-b border-border px-4 py-3">
+      <div className="mb-2 flex items-center gap-1.5">
+        <Activity size={14} className="text-text-muted" aria-hidden="true" />
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+          Monitoring
+        </h3>
+        <span
+          className={`ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+            monitor.enabled
+              ? "bg-success-soft text-success"
+              : "bg-surface-hover text-text-muted"
+          }`}
+        >
+          {monitor.enabled ? "Enabled" : "Disabled"}
+        </span>
+      </div>
+      <div className="flex items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs text-text-muted">
+          Interval (s)
+          <input
+            type="number"
+            min={1}
+            value={intervalInput}
+            onChange={(e) => setIntervalInput(e.target.value)}
+            disabled={busy}
+            className="w-20 rounded border border-border bg-surface px-2 py-1 text-sm outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30 disabled:opacity-50"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => {
+            void saveInterval();
+          }}
+          disabled={busy}
+          className="rounded-lg bg-accent px-2.5 py-1 text-sm font-medium text-accent-fg hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            void toggleEnabled();
+          }}
+          disabled={busy}
+          className="rounded-lg border border-border px-2.5 py-1 text-sm text-text-muted hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {monitor.enabled ? "Disable" : "Enable"}
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-text-faint">
+        Last ping:{" "}
+        {monitor.last_ping_at !== null
+          ? formatDateTime(monitor.last_ping_at)
+          : "never"}
+      </p>
+      {error !== null && <p className="mt-1 text-xs text-danger">{error}</p>}
+    </section>
+  );
+}
+
 interface AgentDetailProps {
   agent: Agent;
   refreshKey: number;
   onClose: () => void;
+  onChanged: () => void;
 }
 
 export default function AgentDetail({
   agent,
   refreshKey,
   onClose,
+  onChanged,
 }: AgentDetailProps) {
   const [inbox, setInbox] = useState<TimelineMessage[]>([]);
   const [sent, setSent] = useState<TimelineMessage[]>([]);
@@ -195,6 +313,10 @@ export default function AgentDetail({
           <X size={16} aria-hidden="true" />
         </button>
       </div>
+
+      {/* key by agent_id so switching agents remounts the section and resets
+          its transient busy/error/interval-input state (no leak across agents). */}
+      <MonitoringSection key={agent.agent_id} agent={agent} onChanged={onChanged} />
 
       <Tabs.Root defaultValue="inbox" className="flex min-h-0 flex-1 flex-col">
         <Tabs.List

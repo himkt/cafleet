@@ -52,7 +52,8 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
       "description": "Built-in administrator agent for fleet 1",
       "status": "active",
       "registered_at": "2026-04-15T10:00:00+00:00",
-      "kind": "builtin-administrator"
+      "kind": "builtin-administrator",
+      "monitor": null
     },
     {
       "agent_id": 4,
@@ -60,11 +61,19 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
       "description": "Reviewer",
       "status": "active",
       "registered_at": "2026-04-15T10:05:00+00:00",
-      "kind": "user"
+      "kind": "user",
+      "monitor": {"interval_seconds": 60, "last_ping_at": null, "enabled": true}
     }
   ]
 }
 ```
+
+**`monitor` field**: each agent carries its folded monitoring schedule —
+`{"interval_seconds": int, "last_ping_at": str|null, "enabled": bool}` — or
+`null` when the agent is not enrolled (the Administrator, deregistered agents,
+and card-only registrations have no pane and are never enrolled). Folding the
+schedule into the list lets the SPA render every agent's schedule without an
+extra request per agent. See [Monitoring](../concepts/monitoring.md).
 
 **`kind` values**:
 
@@ -74,6 +83,81 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
 | `"user"` | Any other agent (human-registered, spawned member, etc.). |
 
 The discriminator is derived at read time from the stored agent card; there is no dedicated column. See [data-model.md](./data-model.md) for the Administrator's full definition.
+
+### GET /api/monitor — Fleet Monitor Runtime
+
+Returns the liveness of the fleet's `cafleet monitor` process, derived from the
+`monitor_runtime` heartbeat (true even when the process died silently). Lets the
+agents page show a "monitor running / stopped" indicator so an inert schedule
+does not mislead. See [Monitoring](../concepts/monitoring.md).
+
+**Request**: `X-Fleet-Id: <fleet_id>` header.
+
+**Response** (200 OK):
+
+```json
+{
+  "running": true,
+  "pid": 4821,
+  "tick_seconds": 5,
+  "last_tick_at": "2026-06-13T04:51:02+00:00",
+  "last_tick_age_seconds": 2,
+  "started_at": "2026-06-13T04:50:00+00:00"
+}
+```
+
+When no monitor is running (no row, or a stale/cleared heartbeat) `running` is
+`false` and `pid` / `last_tick_at` / `started_at` / `last_tick_age_seconds` are
+`null`. `tick_seconds` is `null` only when **no runtime row has ever existed**;
+for a stale or cleared row it is **preserved** (the cadence the monitor last ran
+at). Launching the loop is CLI-only (`cafleet monitor start`, run as a
+background task); there is no `POST`/`DELETE` counterpart here and no
+`monitor stop` command — stop the background task to stop the loop.
+
+### GET /api/agents/{agent_id}/monitor — Agent Monitor Config
+
+Returns one agent's monitoring schedule.
+
+**Request**: `X-Fleet-Id: <fleet_id>` header.
+
+**Response** (200 OK):
+
+```json
+{
+  "interval_seconds": 60,
+  "last_ping_at": null,
+  "enabled": true
+}
+```
+
+**Errors**: 404 (`detail: "Agent not enrolled"`) when the agent is not in the
+fleet or not enrolled (Administrator, deregistered, card-only). 400 for a
+missing or non-integer `X-Fleet-Id`; 404 (`detail: "Fleet not found"`) for an
+unknown fleet. The SPA reads the folded `monitor` field on `GET /api/agents`
+instead of calling this endpoint per agent — it exists for CLI/API parity.
+
+### PATCH /api/agents/{agent_id}/monitor — Edit Agent Monitor Config
+
+Updates an agent's interval and/or enabled flag and returns the new config.
+
+**Request**: `X-Fleet-Id: <fleet_id>` header.
+
+```json
+{
+  "interval_seconds": 30,
+  "enabled": false
+}
+```
+
+Both fields are optional (Pydantic `MonitorPatch`); `interval_seconds >= 1` —
+the same lower bound the CLI `--interval` (`click.IntRange(min=1)`) enforces.
+
+**Response** (200 OK): the updated config, same shape as the `GET` above.
+
+**Errors**: 422 on an invalid body (e.g. `interval_seconds < 1`, wrong type) —
+FastAPI/Pydantic validation. 404 (`detail: "Agent not enrolled"`) when the agent
+is not in the fleet or not enrolled. 400 for a missing or non-integer
+`X-Fleet-Id`; 404 (`detail: "Fleet not found"`) for an unknown fleet.
 
 ### GET /api/agents/{agent_id}/inbox — Inbox Messages
 

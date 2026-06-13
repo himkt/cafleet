@@ -1,3 +1,18 @@
+export interface MonitorConfig {
+  interval_seconds: number;
+  last_ping_at: string | null;
+  enabled: boolean;
+}
+
+export interface MonitorRuntime {
+  running: boolean;
+  pid: number | null;
+  tick_seconds: number | null;
+  last_tick_at: string | null;
+  last_tick_age_seconds: number | null;
+  started_at: string | null;
+}
+
 export interface Agent {
   agent_id: number;
   name: string;
@@ -5,6 +20,7 @@ export interface Agent {
   status: "active" | "deregistered";
   registered_at: string;
   kind: "builtin-administrator" | "user";
+  monitor: MonitorConfig | null;
 }
 
 export interface TimelineMessage {

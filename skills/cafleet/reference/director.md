@@ -133,7 +133,7 @@ $ cafleet --fleet-id <s> member list --activity
   7         carol     idle    -            12:20:00     12:20:00     14m
 ```
 
-The `last_ack` aggregation filters `Task.type != 'broadcast_summary'` (mirrors `poll_tasks`). Use `--activity` for routine `/loop` ticks instead of capturing every member every minute — capture is reserved for the cases the activity columns flag.
+The `last_ack` aggregation filters `Task.type != 'broadcast_summary'` (mirrors `poll_tasks`). Use `--activity` for routine monitor ticks instead of capturing every member every wake — capture is reserved for the cases the activity columns flag.
 
 ## Member Capture
 
@@ -222,7 +222,7 @@ Validation: missing `COMMAND` → exit 2 (Click built-in). Empty/whitespace-only
 
 After every successful `cafleet member exec` (exit 0), the Director MUST immediately invoke `cafleet member ping` against the same member. `member exec` only stages the bang-command's stdout/stderr as context for the member's next turn — it does not advance the turn. The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll` (poll polls the Director's own inbox; ping injects the keystroke into the member's pane).
 
-Skip the ping only on non-zero `member exec` exit — the dispatch did not complete and the supervision tick (agent-team-monitoring `/loop`) is the safety net.
+Skip the ping only on non-zero `member exec` exit — the dispatch did not complete and the supervision tick (the `cafleet monitor` heartbeat) is the safety net.
 
 For a series of `member exec` calls on the same member, the ping follows each exec, not only the last.
 

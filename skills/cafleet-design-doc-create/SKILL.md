@@ -194,7 +194,7 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 | `Agent(team_name=..., subagent_type=...)` | `cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
 | `SendMessage(to="Drafter")` | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from member) | `cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `cafleet-agent-team-supervision` `/loop` | Load the `cafleet-agent-team-monitoring` skill (mechanism + `/loop`) and the `cafleet-agent-team-supervision` skill (governance), then run `/loop` from the `cafleet-agent-team-monitoring` skill |
+| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance), then start the heartbeat via `cafleet --fleet-id <fleet-id> monitor start` |
 | `TeamDelete` | `cafleet --fleet-id <fleet-id> member delete --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
@@ -254,9 +254,9 @@ Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute th
 
 If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `agent_id` instead of creating a new fleet. Do **not** attempt to register a second Director with `cafleet agent register --name Director` — the root Director from `fleet create` is the team lead; a second registration would just create an unrelated agent with no placement row.
 
-#### 1b. Start the monitoring `/loop`
+#### 1b. Start the monitor
 
-BEFORE spawning any member, use the `cafleet-agent-team-monitoring` skill's `/loop` Prompt Template and start a `/loop` monitor at the 1-minute interval using the literal `<fleet-id>` and `<director-agent-id>` UUIDs. The loop must stay active from the first `member create` until Step 6's shutdown cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
+BEFORE spawning any member, run the supervision heartbeat as a **background task** with `cafleet --fleet-id <fleet-id> monitor start` (the loop runs in-process and blocks the task; confirm with `cafleet --fleet-id <fleet-id> monitor status`). The monitor must stay running from the first `member create` until Step 6's shutdown cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -403,7 +403,7 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 > **Clarification Exemption**: Director-to-Drafter messages during this step are exempt from the verb + pointer schema documented in [the Coordination Protocol section above](#coordination-protocol). At clarification time the design doc does not yet exist (the Drafter is forbidden from creating any file before clarifying), so there is no in-doc target for `COMMENT(claude)` markers — the user-answer relay rides as a free-form multi-line cafleet body. From Step 3 onward (once the initial draft exists) every message falls back under the schema.
 
-1. Wait for the Drafter's clarifying questions. The monitoring `/loop` and periodic `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>` will surface the Drafter's message once it arrives.
+1. Wait for the Drafter's clarifying questions. The monitor wake and periodic `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>` will surface the Drafter's message once it arrives.
 2. `cafleet --fleet-id <fleet-id> message ack --agent-id <director-agent-id> --task-id <task-id>` each received message after reading it.
 3. Relay the questions to the user via `AskUserQuestion`. If the number of questions exceeds the per-call limit of `AskUserQuestion`, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter (free-form, per the Clarification Exemption above):
@@ -479,7 +479,7 @@ No round limit — loop continues until approved or aborted.
    Wait for the Drafter's `addressed (doc)` confirmation.
 
 2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*:
-   1. `CronDelete` the `/loop` monitor (cron ID recorded at Step 1b).
+   1. Stop the monitor's background task (started at Step 1b — there is no `monitor stop` command; stop the background task running `cafleet monitor start`).
    2. `cafleet member delete` for each member (Drafter, then Reviewer). Each call blocks until the pane is gone (15 s timeout); on exit 2 follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
    3. `cafleet member list` — the team's roster MUST be empty before continuing.
    4. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).

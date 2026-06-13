@@ -91,6 +91,17 @@ class Multiplexer(Protocol):
         """Return True iff ``target_pane_id`` is currently alive."""
         ...
 
+    def list_pane_ids(self) -> set[str]:
+        """Return the set of every live pane id across the multiplexer server.
+
+        The per-tick liveness query for ``cafleet monitor``: one call resolves
+        pane liveness for every agent in a tick (e.g. ``tmux list-panes -a``).
+
+        Returns:
+            A set of pane ids (e.g. ``{"%0", "%7"}``).
+        """
+        ...
+
     def wait_for_pane_gone(
         self,
         *,
@@ -136,6 +147,29 @@ class Multiplexer(Protocol):
         Returns:
             ``True`` if the keystroke landed; ``False`` if the pane is dead
             or the multiplexer is unreachable.
+        """
+        ...
+
+    def send_resume_trigger(
+        self, *, target_pane_id: str, fleet_id: int, agent_id: int
+    ) -> bool:
+        """Keystroke a single-line *resume nudge* into a member's pane.
+
+        Unlike :meth:`send_poll_trigger` (a bare ``cafleet … message poll``),
+        this carries the poll command **plus** an instruction to review the
+        member's current task and continue working — so a member that
+        unexpectedly stopped resumes rather than going idle on an empty inbox.
+        The Director receives the bare poll-trigger; only members receive this.
+
+        Args:
+            target_pane_id: Pane id of the member to nudge.
+            fleet_id: Fleet id embedded in the keystroked poll command.
+            agent_id: Recipient agent id embedded in the keystroked poll
+                command.
+
+        Returns:
+            ``True`` if the keystroke landed; ``False`` if the pane is dead or
+            the multiplexer is unreachable.
         """
         ...
 

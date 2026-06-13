@@ -83,7 +83,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
 ### Step 1: Bootstrap CAFleet Fleet, Start Monitor & Spawn Presentation + Transcript (Director)
 
-Load the `cafleet` and `cafleet-agent-team-monitoring` skills — this skill spawns parallel members (Presentation + Transcript, and later VR batches), so the `/loop` monitor is mandatory.
+Load the `cafleet` and `cafleet-agent-team-monitoring` skills — this skill spawns parallel members (Presentation + Transcript, and later VR batches), so the `cafleet monitor` heartbeat is mandatory.
 
 #### 1a. Environment precheck and fleet bootstrap
 
@@ -96,9 +96,9 @@ cafleet --json fleet create --label "present-[topic-slug]"
 
 `cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture `fleet_id` and `director.agent_id` from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
 
-#### 1b. Start the `/loop` monitor BEFORE the first `cafleet member create` call
+#### 1b. Start the monitor BEFORE the first `cafleet member create` call
 
-Per the `cafleet-agent-team-monitoring` skill, start a 1-minute interval monitor before spawning so the first tick fires while spawning completes. Use the `cafleet-agent-team-monitoring` skill's template with literal `[fleet-id]` and `[director-agent-id]` substituted in. Expected deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
+Per the `cafleet-agent-team-monitoring` skill, run the monitor as a background task with `cafleet --fleet-id [fleet-id] monitor start` before spawning so the heartbeat is running while spawning completes (confirm with `cafleet --fleet-id [fleet-id] monitor status`). Expected deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -345,7 +345,7 @@ No round limit — loop until approved.
 
 Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first.
 
-1. **Cancel the `/loop` monitor** with `CronDelete <job-id>`. The cron must stop firing BEFORE any member is deleted; a cron that keeps polling a tearing-down fleet spams `Error: fleet is deleted`.
+1. **Stop the monitor's background task** (there is no `monitor stop` command). The monitor must stop BEFORE any member is deleted; a monitor that keeps keystroking polls into a tearing-down fleet races with member-delete.
 2. **Delete every member** — Presentation, Transcript, and any active VR batch. For any active VR batch, run the explicit close handshake first (Director sends `CLOSE:` via `cafleet message send`, VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`), THEN run `cafleet member delete`. Once all VR browser sessions are closed:
    ```bash
    cafleet --fleet-id [fleet-id] member delete --member-id [presentation-agent-id]

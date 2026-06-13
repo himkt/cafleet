@@ -33,3 +33,22 @@ def test_tmux_context_discovery_returns_multiplexer_context(monkeypatch):
     assert ctx.session == "fake-session"
     assert ctx.window_id == "@1"
     assert ctx.pane_id == "%1"
+
+
+def test_protocol_declares_list_pane_ids():
+    """The per-tick pane-liveness query is part of the Multiplexer contract."""
+    assert hasattr(Multiplexer, "list_pane_ids")
+
+
+def test_protocol_declares_send_resume_trigger():
+    """The R3 member resume-nudge keystroke is part of the Multiplexer contract."""
+    assert hasattr(Multiplexer, "send_resume_trigger")
+
+
+def test_tmux_list_pane_ids_returns_set_of_pane_ids(monkeypatch):
+    """``list_pane_ids`` splits ``tmux list-panes -a`` output into a set."""
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux._run",
+        lambda *a, **k: "%0\n%1\n%2\n",
+    )
+    assert TmuxMultiplexer().list_pane_ids() == {"%0", "%1", "%2"}

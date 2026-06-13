@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { TriangleAlert, Users } from "lucide-react";
-import type { Agent } from "../types";
-import { getAgents } from "../api";
+import type { Agent, MonitorRuntime } from "../types";
+import { getAgents, getMonitor } from "../api";
 import { usePolling, POLL_INTERVAL_MS } from "../hooks/usePolling";
 import AgentDetail from "./AgentDetail";
 import AppHeader from "./AppHeader";
@@ -26,23 +26,36 @@ export default function Dashboard({
   onBack,
 }: DashboardProps) {
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
+  const [monitor, setMonitor] = useState<MonitorRuntime | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isPolling, setIsPolling] = useState(false);
 
   const refreshAll = useCallback(async () => {
     setIsPolling(true);
-    try {
-      const data = await getAgents();
-      setAgents(data.agents);
-    } catch {
-      /* preserve last-known agent list */
-    } finally {
-      setIsPolling(false);
+    // Decoupled: a transient /api/monitor failure must not block the agents
+    // refresh (and vice versa). allSettled never rejects; each result is
+    // applied only when fulfilled, preserving the last-known value otherwise.
+    const [agentsResult, monitorResult] = await Promise.allSettled([
+      getAgents(),
+      getMonitor(),
+    ]);
+    if (agentsResult.status === "fulfilled") {
+      setAgents(agentsResult.value.agents);
     }
+    if (monitorResult.status === "fulfilled") {
+      setMonitor(monitorResult.value);
+    }
+    setIsPolling(false);
     setRefreshKey((k) => k + 1);
   }, []);
 
   const trigger = usePolling(refreshAll, POLL_INTERVAL_MS);
+
+  // Seed the monitor indicator immediately (agents arrive via initialAgents);
+  // the periodic poll keeps both fresh thereafter.
+  useEffect(() => {
+    void trigger();
+  }, [trigger]);
 
   const handleSelectAgent = useCallback(
     (selectedId: number) => {
@@ -84,6 +97,7 @@ export default function Dashboard({
         fleetLabel={fleetLabel ?? String(fleetId)}
         onBack={onBack}
         sendingAsAdministrator={senderId !== null}
+        monitorRunning={monitor === null ? null : monitor.running}
       />
 
       <div className="flex flex-1 min-h-0">
@@ -136,6 +150,9 @@ export default function Dashboard({
             agent={detailAgent}
             refreshKey={refreshKey}
             onClose={closeDetail}
+            onChanged={() => {
+              void trigger();
+            }}
           />
         )}
       </div>

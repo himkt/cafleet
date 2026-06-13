@@ -35,6 +35,22 @@ function AgentRow({
           Admin
         </span>
       )}
+      {agent.monitor !== null && (
+        <span
+          title={
+            agent.monitor.enabled
+              ? `Monitoring every ${agent.monitor.interval_seconds}s`
+              : "Monitoring disabled"
+          }
+          className={`shrink-0 rounded px-1 py-0.5 font-mono text-[10px] ${
+            agent.monitor.enabled
+              ? "bg-surface-hover text-text-muted"
+              : "bg-surface-hover text-text-faint line-through"
+          }`}
+        >
+          {agent.monitor.enabled ? `${agent.monitor.interval_seconds}s` : "off"}
+        </span>
+      )}
       <span
         aria-hidden="true"
         className={`size-2 shrink-0 rounded-full ${

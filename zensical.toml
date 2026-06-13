@@ -28,6 +28,7 @@ nav = [
         { "Coding agents" = "concepts/coding-agents.md" },
         { "Bash routing" = "concepts/bash-routing.md" },
         { "tmux push notifications" = "concepts/tmux-push.md" },
+        { "Monitoring" = "concepts/monitoring.md" },
         { "Token reduction" = "concepts/token-reduction.md" },
     ] },
     { "Specification" = [

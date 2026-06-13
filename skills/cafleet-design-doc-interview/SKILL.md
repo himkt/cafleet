@@ -97,7 +97,7 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 | `Agent(subagent_type="Explore", prompt=...)` (Analyzer) | `cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> --name "Analyzer" --description "..." -- "<prompt>"` |
 | `SendMessage(to="Analyzer")` | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <analyzer-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from Analyzer) | `cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `cafleet-agent-team-supervision` `/loop` | Load the `cafleet-agent-team-monitoring` skill (mechanism + `/loop`) and the `cafleet-agent-team-supervision` skill (governance), then run `/loop` from the `cafleet-agent-team-monitoring` skill |
+| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance), then start the heartbeat via `cafleet --fleet-id <fleet-id> monitor start` |
 | `TeamDelete` | `cafleet --fleet-id <fleet-id> member delete --member-id <analyzer-agent-id>`, then `cafleet fleet delete <fleet-id>` |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
@@ -139,9 +139,9 @@ cafleet fleet create --label "design-doc-interview-{slug}" --json
 
 Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal UUIDs.
 
-#### 2b. Start the monitoring `/loop`
+#### 2b. Start the monitor
 
-BEFORE spawning the Analyzer, load both the `cafleet-agent-team-monitoring` skill and the `cafleet-agent-team-supervision` skill (in that order) and use the `cafleet-agent-team-monitoring` skill's `/loop` Prompt Template to start a `/loop` monitor at the 1-minute interval using the literal `<fleet-id>` and `<director-agent-id>` UUIDs. **Record the cron job ID returned by `/loop` (and by any `CronCreate` it issues underneath) — Step 2f references this exact ID when tearing the loop down via `CronDelete`.** The loop stays active until the Analyzer is torn down at the end of this step.
+BEFORE spawning the Analyzer, load both the `cafleet-agent-team-monitoring` skill and the `cafleet-agent-team-supervision` skill (in that order) and run the supervision heartbeat as a **background task** with `cafleet --fleet-id <fleet-id> monitor start` (the loop runs in-process and blocks the task; confirm with `cafleet --fleet-id <fleet-id> monitor status`). The monitor stays running until the Analyzer is torn down at the end of this step, when Step 2f stops its background task.
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
@@ -199,7 +199,7 @@ The reply must be a flat numbered list following the format specified in [roles/
 
 The Analyzer is stateless — keeping it alive through the Q&A rounds wastes a pane and a monitor. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received:
 
-1. `CronDelete` the `/loop` monitor (cron ID recorded at Step 2b).
+1. Stop the monitor's background task (the heartbeat started at Step 2b — there is no `monitor stop` command).
 2. `cafleet --fleet-id <fleet-id> member delete --member-id <analyzer-agent-id>`. The call blocks until the pane is gone (15 s timeout); on exit 2, follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
 3. `cafleet --fleet-id <fleet-id> member list` — the team's roster MUST be empty.
 4. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).

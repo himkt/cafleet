@@ -197,6 +197,55 @@ def _format_idle(seconds: int | None) -> str:
     return f"{seconds // 3600}h"
 
 
+def format_monitor_status(payload: dict) -> str:
+    """Render ``monitor status`` as text: a runtime line + per-agent schedule table.
+
+    ``payload`` is ``{"runtime": {...}, "agents": [...]}`` (the same shape the
+    ``--json`` path emits). The runtime line reads ``running``/``stopped`` from
+    the DB heartbeat; the table lists every enrolled agent's schedule.
+    """
+    rt = payload["runtime"]
+    if rt["running"]:
+        line1 = (
+            f"monitor: running (pid {rt['pid']}, "
+            f"last tick {rt['last_tick_age_seconds']}s ago, "
+            f"tick {rt['tick_seconds']}s, started {rt['started_at']})"
+        )
+    else:
+        line1 = "monitor: stopped"
+    lines = [line1]
+    agents = payload["agents"]
+    if agents:
+        lines.append(
+            "  agent_id  name         role      interval  "
+            "last_ping             enabled  pending"
+        )
+        lines.append(
+            "  --------  -----------  --------  --------  "
+            "-------------------  -------  -------"
+        )
+        for a in agents:
+            interval_s = f"{a['interval_seconds']}s"
+            last_ping = a["last_ping_at"] or "-"
+            enabled_s = "yes" if a["enabled"] else "no"
+            lines.append(
+                f"  {str(a['agent_id']):<8}  {a['name']:<11}  {a['role']:<8}  "
+                f"{interval_s:<8}  {last_ping:<19}  {enabled_s:<7}  "
+                f"{a['pending_count']}"
+            )
+    return "\n".join(lines)
+
+
+def format_monitor_config(cfg: dict) -> str:
+    """Render one agent's ``monitor config`` row as a single compact line."""
+    state = "enabled" if cfg["enabled"] else "disabled"
+    last_ping = cfg["last_ping_at"] or "-"
+    return (
+        f"agent {cfg['agent_id']}: interval {cfg['interval_seconds']}s, "
+        f"{state}, last_ping {last_ping}"
+    )
+
+
 def format_member_list(members: list) -> str:
     if not members:
         return "0 members."

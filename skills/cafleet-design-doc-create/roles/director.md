@@ -10,20 +10,20 @@ Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet fleet and monitor continuously.** Load the `cafleet`, `cafleet-agent-team-monitoring`, and `cafleet-agent-team-supervision` skills (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it). Create a CAFleet fleet via `cafleet fleet create --json` (must be run inside a tmux session) — this bootstraps the fleet, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Start the monitoring `/loop` BEFORE spawning any member. Keep the loop running until shutdown.
+- **Bootstrap the CAFleet fleet and monitor continuously.** Load the `cafleet`, `cafleet-agent-team-monitoring`, and `cafleet-agent-team-supervision` skills (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it). Create a CAFleet fleet via `cafleet fleet create --json` (must be run inside a tmux session) — this bootstraps the fleet, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Run the monitor (`cafleet --fleet-id <fleet-id> monitor start`) as a background task BEFORE spawning any member. Keep it running until shutdown.
 - **Enforce the clarification gate.** The Drafter MUST ask clarifying questions before drafting. If the Drafter sends a draft without having asked questions first, reject it via `cafleet message send` and instruct the Drafter to ask questions first.
 - **Relay communication faithfully.** Members cannot communicate with the user directly. You relay the Drafter's questions to the user via `AskUserQuestion`, and relay the user's answers back to the Drafter via `cafleet message send`.
 - **Orchestrate the internal quality loop.** After the Drafter produces a draft, route it to the Reviewer via `cafleet message send`. If the Reviewer has feedback, route it back to the Drafter for refinement via `cafleet message send`, then back to the Reviewer. Repeat until the Reviewer explicitly signals satisfaction. Do NOT present the draft to the user until the Reviewer has approved it.
 - **Present the polished draft to the user.** Only after the Reviewer is satisfied, present the draft to the user for approval via `AskUserQuestion`.
 - **Drive user feedback iterations.** Process the user's feedback selection and route revisions through the quality loop before re-presenting.
-- **Clean up when done.** Cancel the `/loop` monitor, delete each member via `cafleet member delete`, and tear down the fleet via `cafleet fleet delete <fleet-id>` after the user approves (or aborts). The root Director cannot be deregistered with `cafleet agent deregister` — `fleet delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
+- **Clean up when done.** Stop the monitor's background task (there is no `monitor stop` command), delete each member via `cafleet member delete`, and tear down the fleet via `cafleet fleet delete <fleet-id>` after the user approves (or aborts). The root Director cannot be deregistered with `cafleet agent deregister` — `fleet delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
 
 ## Idle Semantics
 
 **Members go idle after every turn. A member's tmux pane sitting at the prompt between turns is the expected state, NOT a stall.** A member sending you a `cafleet message send` and then returning to the prompt is the normal flow — they sent their output and are waiting for the next push notification or the next assignment.
 
 - Idle members receive messages normally; the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview` to wake them.
-- `/loop` notifications about idle panes are informational. Do not react unless you are ready to assign new work, OR the member's idleness is **blocking your next step** (a downstream phase cannot start, an expected deliverable file is missing past its milestone, you sent a message and received no reply after a reasonable window).
+- Idle-pane observations during a monitor tick are informational. Do not react unless you are ready to assign new work, OR the member's idleness is **blocking your next step** (a downstream phase cannot start, an expected deliverable file is missing past its milestone, you sent a message and received no reply after a reasonable window).
 - Do NOT comment on idleness or nudge a member just because they went idle. Only nudge per the Stall Response Ladder below.
 
 ## Stall Response Ladder
@@ -32,12 +32,12 @@ A member is stalled when they **block your next step** — not merely because th
 
 - The deliverable file you expect at this milestone does not exist.
 - `cafleet message poll --agent-id <director-agent-id>` shows no progress message from the member since the last assignment AND `cafleet member capture` shows no forward progress in the pane buffer.
-- You sent a `cafleet message send` and the member has not replied past one full `/loop` tick.
+- You sent a `cafleet message send` and the member has not replied past one full monitor tick.
 
 **Response ladder (in order — do NOT skip rungs):**
 
 1. Send a specific instruction via `cafleet message send` — never a generic "are you OK?". State the deliverable you expect and the blocker you are trying to unblock.
-2. If still no reply after a second nudge across one more `/loop` tick, run `cafleet member capture --member-id <member-agent-id> --lines 200` and inspect the pane state. If the pane is on an `AskUserQuestion` frame, follow the canonical three-beat workflow in the `cafleet` skill § *Answer a member's AskUserQuestion prompt*.
+2. If still no reply after a second nudge across one more monitor tick, run `cafleet member capture --member-id <member-agent-id> --lines 200` and inspect the pane state. If the pane is on an `AskUserQuestion` frame, follow the canonical three-beat workflow in the `cafleet` skill § *Answer a member's AskUserQuestion prompt*.
 3. After 2 nudges without progress, escalate to the user via `AskUserQuestion` with concrete options (re-spawn / redistribute / drop scope / Other). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
@@ -87,12 +87,12 @@ When the user selects "Other" and provides free text, use LLM reasoning to deter
 
 ### Abort Detection
 
-- If abort intent is detected, trigger the Abort Flow — cancel the `/loop` monitor, delete all members, and run `cafleet fleet delete <fleet-id>` to soft-delete the fleet and sweep the root Director + Administrator in one transaction.
+- If abort intent is detected, trigger the Abort Flow — stop the monitor's background task (there is no `monitor stop` command), delete all members, and run `cafleet fleet delete <fleet-id>` to soft-delete the fleet and sweep the root Director + Administrator in one transaction.
 - If non-abort intent is detected (e.g., verbal feedback), explain that feedback should be provided via COMMENT markers in the design document, then re-prompt with the same three-option pattern.
 
 ## Progress Monitoring
 
-Track team progress via the `cafleet-agent-team-monitoring` skill's `/loop` (1-minute interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next. Supervision obligations (Authorization-Scope Guard, idle semantics) come from the paired `cafleet-agent-team-supervision` skill.
+Track team progress on each `cafleet monitor` wake (default 60 s interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next. Supervision obligations (Authorization-Scope Guard, idle semantics) come from the paired `cafleet-agent-team-supervision` skill.
 
 ### User delegation for member send-input
 
@@ -113,4 +113,4 @@ Drafter and Reviewer members are spawned with `--permission-mode dontAsk` (Bash 
 
 ## Shutdown Protocol
 
-Run the canonical 5-rung teardown per the `cafleet` skill § *Shutdown Protocol* (CronDelete → `cafleet member delete` per member → `cafleet member list` verification → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check). The skill-specific cron-ID nuance: the `/loop` monitor cancelled at the first rung is the team-health cron recorded at Step 1b — this skill never creates a second loop, so there is only one cron ID to track.
+Run the canonical 5-rung teardown per the `cafleet` skill § *Shutdown Protocol* (stop the monitor's background task → `cafleet member delete` per member → `cafleet member list` verification → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check). The monitor stopped at the first rung is the heartbeat started at Step 1b (stop its background task — there is no `monitor stop` command); `cafleet fleet delete` makes any still-running loop self-terminate on its next tick, so stopping the task first is belt-and-suspenders.

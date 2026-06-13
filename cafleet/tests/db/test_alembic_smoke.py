@@ -38,6 +38,8 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
             "agents",
             "tasks",
             "agent_placements",
+            "monitor_config",
+            "monitor_runtime",
             "alembic_version",
         }
         missing = expected - tables
@@ -47,19 +49,19 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_alembic_version_table_records_collapsed_head_0001(alembic_upgraded_db):
+def test_alembic_version_table_records_head_0002(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version"))
             rows = result.fetchall()
-        assert rows == [("0001",)]
+        assert rows == [("0002",)]
     finally:
         engine.dispose()
 
 
-def test_only_one_migration_revision_exists():
-    """The migration history collapses to a single schema-only initial revision."""
+def test_two_migration_revisions_exist():
+    """The migration history is two revisions: 0001 (base) chained to 0002 (monitor tables)."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet.db") / "alembic.ini"
     ) as ini_path:
@@ -67,10 +69,12 @@ def test_only_one_migration_revision_exists():
         script = ScriptDirectory.from_config(cfg)
         revisions = list(script.walk_revisions())
 
-    assert len(revisions) == 1
-    only = revisions[0]
-    assert only.revision == "0001"
-    assert only.down_revision is None
+    assert len(revisions) == 2
+    by_revision = {rev.revision: rev for rev in revisions}
+    assert set(by_revision) == {"0001", "0002"}
+    assert by_revision["0001"].down_revision is None
+    assert by_revision["0002"].down_revision == "0001"
+    assert script.get_current_head() == "0002"
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
@@ -117,6 +121,8 @@ def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
         ("agents", "agent_id"),
         ("tasks", "task_id"),
         ("agent_placements", "agent_id"),
+        ("monitor_config", "agent_id"),
+        ("monitor_runtime", "fleet_id"),
     ],
 )
 def test_primary_key_columns_are_integer(alembic_upgraded_db, table, pk_column):
@@ -180,5 +186,103 @@ def test_tasks_table_has_origin_task_id_column(alembic_upgraded_db):
 
         # Must be nullable because unicast + historical rows store NULL
         assert cols["origin_task_id"]["nullable"] is True
+    finally:
+        engine.dispose()
+
+
+def _default_int(cols, name):
+    """Normalize a SQLite column default (PRAGMA returns text, maybe quoted)."""
+    raw = cols[name]["default"]
+    assert raw is not None, f"{name} must declare a default"
+    return int(str(raw).strip("'\""))
+
+
+def test_monitor_config_table_created_by_migration(alembic_upgraded_db):
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
+    try:
+        insp = inspect(engine)
+
+        tables = set(insp.get_table_names())
+        assert "monitor_config" in tables
+
+        cols = {col["name"]: col for col in insp.get_columns("monitor_config")}
+        expected_cols = {
+            "agent_id",
+            "interval_seconds",
+            "last_ping_at",
+            "enabled",
+        }
+        missing = expected_cols - set(cols.keys())
+        assert not missing
+
+        # NULL last_ping_at = never pinged ⇒ due immediately
+        assert cols["last_ping_at"]["nullable"] is True
+
+        # schedule columns are NOT NULL
+        for name in ("agent_id", "interval_seconds", "enabled"):
+            assert cols[name]["nullable"] is False
+
+        # defaults per §2: interval_seconds 60, enabled 1
+        assert _default_int(cols, "interval_seconds") == 60
+        assert _default_int(cols, "enabled") == 1
+
+        # agent_id is the agents FK reused as a 1:1 PK
+        fks = insp.get_foreign_keys("monitor_config")
+        assert any(fk["referred_table"] == "agents" for fk in fks)
+    finally:
+        engine.dispose()
+
+
+def test_monitor_runtime_table_created_by_migration(alembic_upgraded_db):
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
+    try:
+        insp = inspect(engine)
+
+        tables = set(insp.get_table_names())
+        assert "monitor_runtime" in tables
+
+        cols = {col["name"]: col for col in insp.get_columns("monitor_runtime")}
+        expected_cols = {
+            "fleet_id",
+            "pid",
+            "started_at",
+            "last_tick_at",
+            "tick_seconds",
+        }
+        missing = expected_cols - set(cols.keys())
+        assert not missing
+
+        # NULL after a clean stop / before a tick
+        for name in ("pid", "started_at", "last_tick_at"):
+            assert cols[name]["nullable"] is True
+
+        # PK + scan cadence are NOT NULL
+        for name in ("fleet_id", "tick_seconds"):
+            assert cols[name]["nullable"] is False
+
+        # default per §2: tick_seconds 5
+        assert _default_int(cols, "tick_seconds") == 5
+
+        # fleet_id reuses the fleets PK 1:1
+        fks = insp.get_foreign_keys("monitor_runtime")
+        assert any(fk["referred_table"] == "fleets" for fk in fks)
+    finally:
+        engine.dispose()
+
+
+def test_monitor_tables_do_not_declare_autoincrement(alembic_upgraded_db):
+    """monitor_config (agent_id) and monitor_runtime (fleet_id) reuse a parent id 1:1 — no AUTOINCREMENT."""
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
+    try:
+        with engine.connect() as conn:
+            for table in ("monitor_config", "monitor_runtime"):
+                ddl = conn.execute(
+                    text(
+                        "SELECT sql FROM sqlite_master WHERE type='table' AND name=:t"
+                    ),
+                    {"t": table},
+                ).scalar()
+                assert ddl is not None
+                assert "AUTOINCREMENT" not in ddl.upper()
     finally:
         engine.dispose()

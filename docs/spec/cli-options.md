@@ -36,6 +36,9 @@ One row per subcommand. "Identity flag" is the per-subcommand option naming the 
 | `member send-input` | Forward a restricted keystroke to a member's pane | yes | `--member-id` | [member send-input](#member-send-input) |
 | `member exec` | Dispatch a shell command into a member's pane | yes | `--member-id` | [member exec](#member-exec) |
 | `member ping` | Inject an inbox-poll keystroke into a member's pane | yes | `--member-id` | [member ping](#member-ping) |
+| `monitor start` | Run the per-fleet scheduler loop in-process (launch as a background task) | yes | none | [monitor start](#monitor-start) |
+| `monitor status` | Show monitor liveness and the per-agent schedule | yes | none | [monitor status](#monitor-status) |
+| `monitor config` | Show or edit an agent's monitor schedule | yes | `--agent-id` | [monitor config](#monitor-config) |
 
 ## Option Source Matrix
 
@@ -815,6 +818,73 @@ Two keys: `member_agent_id`, `pane_id`. Failures surface via exit 1.
 
 See [Member targeting and key delivery](#member-targeting-and-key-delivery) for the common exit codes. Unique to `member ping`: a missing `--member-id` exits 2, and a `tmux send-keys` failure exits 1 with `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.`.
 
+## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
+
+The `cafleet monitor` subgroup is the per-fleet scheduler that wakes due agents on a fixed cadence — the heartbeat behind a Director's supervision loop. All three subcommands require the global `--fleet-id`. `start` runs the loop in-process (a coding agent launches it as a **background task** and owns its lifetime); `status` and `config` view and edit the schedule. The conceptual model (heartbeat-vs-facilitation boundary, the director-vs-member ping split, the tick-precision floor, single-instance via the DB heartbeat) is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
+
+There is no `monitor stop` command and no detached process: the launching agent stops the loop by stopping its background task (or deleting the monitoring member), and the loop also self-terminates when the fleet is torn down. Launching/stopping the loop is **CLI-only** by nature; the schedule-view and schedule-edit surfaces are at WebUI/CLI parity ([WebUI API](./webui-api.md)).
+
+### `monitor start`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--tick` | no | Scan-tick cadence in seconds (`click.IntRange(min=1)`, default **5**). Stored in `monitor_runtime.tick_seconds` so `status` can report it. The tick is the floor on per-agent interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision). |
+
+Runs the `scan → ping due agents → heartbeat → sleep` loop **in-process** via `run_monitor_loop` — a coding agent launches it as a background task (the loop blocks the task). On startup it runs the tmux precondition guard (the same `TMUX`-env check the `member` commands use), then atomically claims the single-instance `monitor_runtime` row, installs `SIGTERM`/`SIGINT` handlers (a clean stop clears the row), and loops until signalled or the fleet is torn down (`monitor_tick` returns `STOP` once the fleet is soft-deleted). There is no detached subprocess, no PID file, and no log file — the loop writes to the launching task's own stdout.
+
+Every enrolled agent — Director and member alike — is pinged unconditionally once its interval has elapsed (the ping is **not** gated on the agent having pending inbox items; `pending_count` is informational, shown in `status`). The keystroke differs by role: the **Director** receives a bare `cafleet … message poll`, while a **member** receives a single-line *resume nudge* (the poll command plus a review-your-task-and-continue instruction), so a stopped member resumes rather than going idle on an empty inbox. Each dispatched ping is logged to stdout as `<iso-ts> ping agent <id> (<name>)`, so the launching background task's output shows live heartbeat activity.
+
+Exit codes: `0` clean exit (signalled, or the fleet was torn down); `1` already running (`monitor already running for fleet N`), unknown or soft-deleted fleet, or tmux unreachable; `2` click usage errors (e.g. `--tick 0`).
+
+### `monitor status`
+
+No flags beyond the global `--fleet-id`. Reports runtime liveness derived from the DB heartbeat (true even when the process died silently) plus the per-agent schedule table.
+
+Text output:
+
+```
+monitor: running (pid 4821, last tick 2s ago, tick 5s, started 2026-06-13T04:50:00+00:00)
+  agent_id  name         role      interval  last_ping             enabled  pending
+  --------  -----------  --------  --------  -------------------  -------  -------
+  2         Director     director  60s       2026-06-13T04:51:00   yes      0
+  4         alice        member    60s       -                    yes      2
+  5         bob          member    30s       2026-06-13T04:50:30   no       0
+```
+
+When no monitor is running the first line reads `monitor: stopped`; the schedule table still renders. JSON output:
+
+```json
+{
+  "runtime": {"running": true, "pid": 4821, "tick_seconds": 5,
+              "last_tick_at": "2026-06-13T04:51:02+00:00", "last_tick_age_seconds": 2,
+              "started_at": "2026-06-13T04:50:00+00:00"},
+  "agents": [
+    {"agent_id": 4, "name": "alice", "role": "member", "interval_seconds": 60,
+     "last_ping_at": null, "enabled": true, "pending_count": 2}
+  ]
+}
+```
+
+Exit `0` (`2` for click usage errors). On an unknown or soft-deleted fleet, exit 1.
+
+### `monitor config`
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The agent whose schedule is shown or edited. Must be an enrolled, in-fleet agent. |
+| `--interval` | no | New ping interval in seconds (`click.IntRange(min=1)` — the same `>= 1` lower bound the WebUI `PATCH` enforces). |
+| `--enable` / `--disable` | no | Enable or disable monitoring for the agent. Mutually exclusive. |
+
+With no edit flag, prints the agent's current config. With `--interval` / `--enable` / `--disable`, applies the update and prints the new config. Exits 1 if the agent is not in the fleet or not enrolled (the Administrator and card-only agents are never enrolled). `--enable` and `--disable` together exit 2.
+
+Text output:
+
+```
+agent 4: interval 60s, enabled, last_ping 2026-06-13T04:51:00
+```
+
+JSON output: `{"agent_id": 4, "interval_seconds": 60, "last_ping_at": "<iso8601>|null", "enabled": true}`.
+
 ## Error Messages
 
 | Situation | Error Message |
@@ -845,4 +915,8 @@ See [Member targeting and key delivery](#member-targeting-and-key-delivery) for 
 | `member create --prompt-file` to a file containing invalid UTF-8 | `Error: --prompt-file <path>: file is not valid UTF-8.` (exit 1) |
 | `member create --prompt-file` to a zero-byte or whitespace-only file | `Error: --prompt-file <path>: file is empty.` (exit 1) |
 | `member create --coding-agent opencode --model` with a value violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` (exit 2; fires before any agent registration or tmux side effect) |
+| `monitor start` for a fleet that already has a live monitor | `Error: monitor already running for fleet <id>` (exit 1) |
+| `monitor start` / `monitor status` against an unknown or soft-deleted fleet | `Error: fleet <id> not found` (exit 1) |
+| `monitor config` with both `--enable` and `--disable` | `Error: --enable and --disable are mutually exclusive.` (exit 2) |
+| `monitor config` against an agent not in the fleet or not enrolled | `Error: agent <id> is not enrolled in monitoring for fleet <fleet-id>.` (exit 1) |
 

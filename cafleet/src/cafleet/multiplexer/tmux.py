@@ -166,6 +166,31 @@ class TmuxMultiplexer:
             return False
         return True
 
+    def send_resume_trigger(
+        self, *, target_pane_id: str, fleet_id: int, agent_id: int
+    ) -> bool:
+        """Best-effort single-line resume nudge for a member's pane.
+
+        Carries the poll command plus a review-and-continue instruction (so a
+        stopped member resumes instead of going idle), with no shell-special
+        characters — like ``send_poll_trigger``, the keystroke is sane whether
+        it lands in the coding agent's input or at a shell prompt.
+        """
+        if shutil.which("tmux") is None:
+            return False
+        payload = (
+            f"[monitor] resume: run cafleet --fleet-id {fleet_id} message poll "
+            f"--agent-id {agent_id} to check your inbox, then review your current "
+            f"task and continue working if you had stopped."
+        )
+        try:
+            _send_literal_then_enter(
+                target_pane_id=target_pane_id, payload=payload, timeout=5
+            )
+        except TmuxError:
+            return False
+        return True
+
     def send_inline_preview(
         self,
         *,
@@ -234,8 +259,19 @@ class TmuxMultiplexer:
         Uses ``tmux list-panes -a`` (all sessions on the server) so the check stays
         correct even if the pane somehow migrated to a different window.
         """
-        out = _run(["tmux", "list-panes", "-a", "-F", "#{pane_id}"])
-        return target_pane_id in out.split()
+        return target_pane_id in self.list_pane_ids()
+
+    def list_pane_ids(self) -> set[str]:
+        """Return the set of all live pane ids across the tmux server.
+
+        ``tmux list-panes -a -F '#{pane_id}'`` lists every pane on the server
+        (all sessions), so one call resolves pane liveness for every agent in a
+        monitor tick. The 5 s timeout (consistent with the other tmux helpers)
+        keeps a hung tmux from blocking the monitor loop indefinitely.
+        """
+        return set(
+            _run(["tmux", "list-panes", "-a", "-F", "#{pane_id}"], timeout=5).split()
+        )
 
     def kill_pane(self, *, target_pane_id: str, ignore_missing: bool = False) -> None:
         """Unconditionally kill the target pane. Swallows pane-gone errors when ignore_missing=True."""

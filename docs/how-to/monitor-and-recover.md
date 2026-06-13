@@ -8,6 +8,26 @@ Members run unattended in tmux panes, so the Director needs two primitives:
 a cheap roster watch and an escalation ladder for a member that stopped
 reacting. This guide checks on a running team and recovers a quiet member.
 
+## Ensure the monitor is running
+
+The recovery ladder below is driven by a periodic supervision tick. That tick
+comes from `cafleet monitor` — a per-fleet loop a coding agent runs as a
+background task, waking due agents by keystroking `message poll` into their
+panes. Start it once as a background task, before the team gets busy, and it
+pings every enrolled agent on its interval — the Director and members alike,
+regardless of whether the inbox has pending items — which is what surfaces a
+quiet member in the first place ([Monitoring](../concepts/monitoring.md)):
+
+```bash
+cafleet --fleet-id 1 monitor start    # run as a background task
+cafleet --fleet-id 1 monitor status   # confirm it is running + see the schedule
+```
+
+The monitor supplies only the heartbeat; the inspect-and-recover steps below are
+the Director's job on each tick. Stop it at teardown by stopping that background
+task (there is no `monitor stop`); `fleet delete` also makes the loop
+self-terminate.
+
 ## Prompt
 
 ```text

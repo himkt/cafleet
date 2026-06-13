@@ -26,6 +26,6 @@ server to run.
 
 - [Get Started](get-started/) — install, configure, and quickstart walkthroughs.
 - [How-to guides](how-to/) — prompt-first task guides: mixed-backend teams, monitoring and recovery, the admin WebUI, design-doc-driven development.
-- [Concepts](concepts/overview.md) — architecture overview, fleet isolation, storage, member lifecycle, coding agents, bash routing, tmux push notifications, token reduction.
+- [Concepts](concepts/overview.md) — architecture overview, fleet isolation, storage, member lifecycle, coding agents, bash routing, tmux push notifications, monitoring, token reduction.
 - [Specification](spec/data-model.md) — data model, message envelope, CLI options, WebUI API, plus per-backend operational pages.
 - [API Reference](api/broker.md) — Python API documentation generated from source for `cafleet.broker`, `cafleet.config`, `cafleet.coding_agent.base`, and `cafleet.multiplexer.base`.

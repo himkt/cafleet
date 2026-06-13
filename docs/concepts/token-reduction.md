@@ -6,10 +6,14 @@ icon: lucide/coins
 
 CAFleet does not consume LLM tokens itself, but every byte it emits — member
 spawn prompts, message envelopes, poll output, broker auto-injected text,
-the `cafleet` skill, the project `CLAUDE.md` / rules files, the Director's
-`/loop` template, and (most expensively) the raw tmux pane content returned
+the `cafleet` skill, the project `CLAUDE.md` / rules files, the bare
+`message poll` keystroke the external monitor injects on each supervision tick,
+and (most expensively) the raw tmux pane content returned
 by `cafleet member capture` — lands in a coding agent's context and bills
-against its tokens. The architectural-shape choices that keep per-message,
+against its tokens. Moving the supervision scheduler out of the coding agent
+into the `cafleet monitor` process ([Monitoring](monitoring.md)) is itself a
+per-Director-tick reduction: the Director no longer carries a scheduling prompt
+template in context — the monitor wakes it with a single poll keystroke. The architectural-shape choices that keep per-message,
 per-spawn, per-Director-tick, and per-context-load cost down are summarized
 below.
 
