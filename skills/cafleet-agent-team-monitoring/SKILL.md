@@ -27,7 +27,7 @@ Run the monitor once, as a background task, before the first `cafleet member cre
 cafleet --fleet-id <fleet-id> monitor start   # launch as a background task
 ```
 
-`monitor start` runs the loop in-process (it blocks the background task), so launch it as a background task and confirm it with `cafleet --fleet-id <fleet-id> monitor status`. The monitor pings the root Director **unconditionally** on its interval (default 60 s) and pings a member **only** when that member has pending un-acked inbox items. See the `cafleet` skill and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy.
+`monitor start` runs the loop in-process (it blocks the background task), so launch it as a background task and confirm it with `cafleet --fleet-id <fleet-id> monitor status`. The monitor pings **every** enrolled agent — the root Director and members alike — **unconditionally** on its interval (default 60 s) once due; `pending_count` is shown in `monitor status` but does not gate the ping. See the `cafleet` skill and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy.
 
 **A monitor wake is a bare poll, so the cue to facilitate must come from the skill.** Pinging the Director keystrokes *exactly* `cafleet … message poll` into its pane — that bare poll, on its own, performs only **step 1** below. **Treat every monitor poll-trigger wake as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), not to read the inbox and stop. The monitor decides only *when*; this skill defines *what* the Director does on each wake.
 
