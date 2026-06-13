@@ -19,6 +19,11 @@ def _default_database_url() -> str:
     return f"sqlite:///{db_path}"
 
 
+def _default_monitor_state_dir() -> Path:
+    """Return the default ``cafleet monitor`` state dir (PID files + worker logs)."""
+    return Path("~/.local/share/cafleet/monitor/").expanduser()
+
+
 class Settings(BaseSettings):
     """Runtime configuration for the CAFleet broker, CLI, and server.
 
@@ -43,6 +48,11 @@ class Settings(BaseSettings):
             persisted ``Task.text`` column is never truncated, and the
             WebUI API returns raw broker dicts that do not apply this
             limit.
+        monitor_state_dir: Directory holding the per-fleet ``cafleet monitor``
+            PID file (``<fleet_id>.pid``) and detached-worker log
+            (``<fleet_id>.log``). Sourced from ``CAFLEET_MONITOR_STATE_DIR``;
+            defaults to ``~/.local/share/cafleet/monitor/`` (the home
+            directory is expanded at import time).
     """
 
     database_url: str = Field(
@@ -60,6 +70,10 @@ class Settings(BaseSettings):
     max_text_len: int = Field(
         default=200,
         validation_alias="CAFLEET_MAX_TEXT_LEN",
+    )
+    monitor_state_dir: Path = Field(
+        default_factory=_default_monitor_state_dir,
+        validation_alias="CAFLEET_MONITOR_STATE_DIR",
     )
 
 

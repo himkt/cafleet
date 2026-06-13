@@ -27,6 +27,7 @@ from cafleet.broker.monitor import (
     heartbeat_monitor_runtime,
     list_monitor_configs,
     list_monitor_targets,
+    monitor_is_live,
     read_monitor_runtime,
     record_ping,
     update_monitor_config,
@@ -67,4 +68,5 @@ __all__ = [
     "heartbeat_monitor_runtime",
     "clear_monitor_runtime",
     "read_monitor_runtime",
+    "monitor_is_live",
 ]

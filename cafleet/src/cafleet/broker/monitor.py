@@ -310,6 +310,20 @@ def read_monitor_runtime(fleet_id: int) -> dict | None:
         }
 
 
+def monitor_is_live(fleet_id: int, now: datetime) -> bool:
+    """Return True iff the fleet currently has a live monitor holding the slot.
+
+    The advisory single-instance pre-check for ``monitor start`` (the atomic
+    ``claim_monitor_runtime`` is the authoritative guard). Reuses ``_is_live``:
+    heartbeat freshness is authoritative, ``os.kill(pid, 0)`` corroborates.
+    """
+    with _shared.read_session() as session:
+        row = session.get(MonitorRuntime, fleet_id)
+        if row is None:
+            return False
+        return _is_live(row, now)
+
+
 def delete_fleet_monitor_rows(session, fleet_id: int) -> None:
     """Delete the fleet's ``monitor_config`` rows and its ``monitor_runtime`` row.
 

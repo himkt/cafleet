@@ -234,8 +234,16 @@ class TmuxMultiplexer:
         Uses ``tmux list-panes -a`` (all sessions on the server) so the check stays
         correct even if the pane somehow migrated to a different window.
         """
-        out = _run(["tmux", "list-panes", "-a", "-F", "#{pane_id}"])
-        return target_pane_id in out.split()
+        return target_pane_id in self.list_pane_ids()
+
+    def list_pane_ids(self) -> set[str]:
+        """Return the set of all live pane ids across the tmux server.
+
+        ``tmux list-panes -a -F '#{pane_id}'`` lists every pane on the server
+        (all sessions), so one call resolves pane liveness for every agent in a
+        monitor tick.
+        """
+        return set(_run(["tmux", "list-panes", "-a", "-F", "#{pane_id}"]).split())
 
     def kill_pane(self, *, target_pane_id: str, ignore_missing: bool = False) -> None:
         """Unconditionally kill the target pane. Swallows pane-gone errors when ignore_missing=True."""

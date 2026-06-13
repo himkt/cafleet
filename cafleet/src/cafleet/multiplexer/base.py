@@ -91,6 +91,17 @@ class Multiplexer(Protocol):
         """Return True iff ``target_pane_id`` is currently alive."""
         ...
 
+    def list_pane_ids(self) -> set[str]:
+        """Return the set of every live pane id across the multiplexer server.
+
+        The per-tick liveness query for ``cafleet monitor``: one call resolves
+        pane liveness for every agent in a tick (e.g. ``tmux list-panes -a``).
+
+        Returns:
+            A set of pane ids (e.g. ``{"%0", "%7"}``).
+        """
+        ...
+
     def wait_for_pane_gone(
         self,
         *,
