@@ -37,23 +37,27 @@ wake is the Director's cue to run its entire facilitation loop**, not to read
 its inbox and stop. The monitor never reasons about message content — it is the
 alarm clock; the Director is the worker.
 
-## The `should_ping` split
+## Who gets pinged
 
-Each tick, the monitor evaluates every enrolled, active agent and pings only
-those that are due:
+Each tick, the monitor evaluates every enrolled, active agent and pings the ones
+whose interval has elapsed. **Both roles — the root Director and every member —
+are pinged unconditionally once due**, regardless of whether the agent has any
+pending inbox items. The Director's facilitation does useful work even on an
+empty inbox (it still health-checks members, dispatches queued work, and detects
+stalls); pinging an idle member re-drains its inbox and keeps the heartbeat
+visible. The re-ping is unbounded — no backoff, no cap.
 
-- **The root Director pings unconditionally** on its interval. Its facilitation
-  does useful work even on an empty inbox — it still health-checks members,
-  dispatches queued work, and detects stalls.
-- **A member pings only with a reason** — that is, only when it has pending
-  un-acked inbox items. A periodic ping into an idle, empty-inbox member is pure
-  noise and risks interrupting mid-work. The re-ping is unbounded: as long as a
-  stuck member still has pending items and its interval has elapsed, it is
-  pinged every interval, with no backoff and no cap. It self-clears the moment
-  the member acks (its pending count drops to zero).
+`pending_count` (the count of an agent's un-acked inbox items) is still computed
+and shown in `monitor status`, but it no longer gates the ping — it is purely
+informational.
 
-A ping is also skipped when the agent is disabled, or when its pane is missing
-or dead.
+A ping is skipped only when the agent is disabled, when its pane is missing or
+dead, or when its interval has not yet elapsed.
+
+Each dispatched ping is logged to the monitor's stdout as
+`<iso-ts> ping agent <id> (<name>)`. Because `cafleet monitor start` runs in the
+foreground of the launching agent's background task, that task's output shows
+live heartbeat activity, one line per ping.
 
 ## Cadence and tick precision
 

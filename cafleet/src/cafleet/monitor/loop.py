@@ -38,10 +38,9 @@ STOP = _Sentinel("STOP")
 def should_ping(target: dict, now: datetime) -> bool:
     """Decide whether an enrolled agent is due for a ping this tick.
 
-    The Director pings unconditionally on its interval (its facilitation does
-    useful work even on an empty inbox); a member pings only when it has a
-    reason (pending un-acked items). Disabled agents and dead/missing panes are
-    always skipped.
+    Every enrolled agent — Director and member alike — is pinged once its
+    interval has elapsed, regardless of ``pending_count`` (R2). Disabled agents
+    and dead/missing panes are always skipped, and a not-yet-due agent waits.
     """
     if not target["enabled"]:
         return False
@@ -51,9 +50,7 @@ def should_ping(target: dict, now: datetime) -> bool:
         elapsed = (now - datetime.fromisoformat(target["last_ping_at"])).total_seconds()
         if elapsed < target["interval_seconds"]:
             return False
-    if target["is_director"]:
-        return True
-    return target["pending_count"] > 0
+    return True
 
 
 def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
@@ -82,6 +79,11 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
                 agent_id=target["agent_id"],
             )
             broker.record_ping(target["agent_id"], now.isoformat())
+            # Visible heartbeat: the launching agent's background task shows a
+            # line per dispatched ping on its stdout.
+            click.echo(
+                f"{now.isoformat()} ping agent {target['agent_id']} ({target['name']})"
+            )
     return CONTINUE
 
 

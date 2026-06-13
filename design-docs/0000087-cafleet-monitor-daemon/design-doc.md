@@ -1,7 +1,7 @@
 # cafleet monitor — backend-agnostic external scheduler
 
 **Status**: Approved
-**Progress**: 76/76 tasks complete (Steps 1–8 + Revision R1 done)
+**Progress**: 83/84 tasks complete (Steps 1–8 + Revision R1 done; Revision R2 in progress — E2E smoke pending)
 **Last Updated**: 2026-06-13
 
 ## Overview
@@ -15,7 +15,8 @@
 - [x] A second `monitor start` for a fleet with a live monitor is refused (single-instance, enforced atomically in the DB).
 - [x] `cafleet monitor status --fleet-id N` reports true liveness from the DB heartbeat even when the process died silently, plus the per-agent schedule table.
 - [x] Stopping the monitor's background task shuts the loop down cleanly (SIGTERM clears the runtime row); `fleet delete` makes the loop self-terminate.
-- [x] The monitor pings the root Director **unconditionally** on its interval, and a member **only** when it has pending un-acked inbox items.
+- [ ] The monitor pings the root Director and every member **unconditionally** on each agent's interval (members are no longer gated on pending inbox items) — R2.
+- [ ] `cafleet monitor start` logs each dispatched ping to stdout (`<iso-ts> ping agent <id> (<name>)`), so the launching agent's background-task output shows the live heartbeat — R2.
 - [x] Per-agent `interval_seconds` / `enabled` are persisted in `monitor_config`, auto-enrolled at agent registration, editable via CLI and WebUI at parity, and survive a monitor restart (cadence resumes from `last_ping_at`).
 - [x] The admin agents page shows each agent's monitoring schedule and lets the operator edit the interval and toggle enable/disable.
 - [x] The `CronCreate` / `/loop` scheduling-setup guidance and the codex/opencode "no in-session scheduler" fallback table are removed repo-wide and replaced with "ensure `cafleet monitor` is running"; the Director's facilitation loop is preserved; no deprecation notices remain.
@@ -135,9 +136,7 @@ def should_ping(target, now):
         elapsed = now - datetime.fromisoformat(target["last_ping_at"])
         if elapsed.total_seconds() < target["interval_seconds"]:
             return False
-    if target["is_director"]:                       # decision 5: director split
-        return True                                 # unconditional on its interval
-    return target["pending_count"] > 0              # member: only with a reason
+    return True              # R2: director and members alike ping unconditionally once the interval has elapsed
 ```
 
 | Field in `target` | Source |
@@ -146,13 +145,12 @@ def should_ping(target, now):
 | `pane_id` | `agent_placements.tmux_pane_id` |
 | `pane_alive` | membership of `pane_id` in the live-pane set fetched once per tick (see §5) |
 | `is_director` | `agent_id == fleets.director_agent_id` |
-| `pending_count` | count of `input_required` tasks where `context_id == agent_id` (excludes `broadcast_summary`), a correlated subquery in the scan |
+| `pending_count` | count of `input_required` tasks where `context_id == agent_id` (excludes `broadcast_summary`), a correlated subquery in the scan — surfaced in `monitor status`; **not** used by `should_ping` as of R2 |
 
 Policy rationale:
 
-- **Director pings unconditionally** because its facilitation does useful work even on an empty inbox (it still health-checks members, dispatches queued work, detects stalls).
-- **A member pings only with a reason** (pending un-acked `input_required` items). A periodic ping into an idle, empty-inbox member is pure noise and risks interrupting mid-work.
-- **Re-ping is unbounded** (decision 8): as long as a stuck member still has pending items and its interval has elapsed, it is pinged every interval. No backoff, no cap. It self-clears the moment the member acks (its `pending_count` drops to 0 ⇒ `should_ping` returns False).
+- **Every enrolled, active agent pings unconditionally on its interval** (R2). The Director's facilitation does useful work even on an empty inbox (health-check, dispatch, stall-detection); a member's poll re-drains its inbox and re-anchors it on its current task. A bare `cafleet … message poll` keystroke is cheap and idempotent, so a periodic poll into an idle member is acceptable and keeps the heartbeat uniform across roles. (This reverses R1's member-only-when-pending gate, which left idle members un-pinged and made the heartbeat invisible in smoke testing.)
+- **Re-ping is unbounded** (decision 8): each agent is pinged every interval as long as it stays enabled with a live pane. No backoff, no cap. Per-agent `enabled=0` (or a longer `interval_seconds`) is the operator's lever to quiet a member.
 
 `last_ping_at` advances whenever the decision to ping is **YES** (i.e. a keystroke is attempted), regardless of whether the best-effort `send_poll_trigger` keystroke reported success — consistent with the broker's existing best-effort keystroke semantics. The next interval retries.
 
@@ -177,6 +175,7 @@ def monitor_tick(fleet_id, now):                          # now: tz-aware dateti
             TmuxMultiplexer().send_poll_trigger(
                 target_pane_id=t["pane_id"], fleet_id=fleet_id, agent_id=t["agent_id"])
             broker.record_ping(t["agent_id"], now.isoformat())
+            log(f"{now.isoformat()} ping agent {t['agent_id']} ({t['name']})")  # R2: visible heartbeat to stdout
     return CONTINUE
 ```
 
@@ -459,6 +458,35 @@ The monitor is no longer a detached OS subprocess. `cafleet monitor start` runs 
 - [x] `mise //cafleet:format` + lint + typecheck + test green; `mise //admin:build`. <!-- completed: 2026-06-13T10:19 -->
 - [x] E2E smoke (revised): `cafleet monitor start` as a background task → `monitor status` running + director enrolled → spawn a member + give it a pending message → observe the `message poll` keystroke land in the member pane on a tick → stop the background task → `monitor status` stopped → `fleet delete` (rows cleaned). <!-- completed: 2026-06-13T10:39 (live member-ping keystroke observed in member pane; negative path — no ping while idle — also confirmed; TaskStop → status stopped; clean teardown) -->
 
+### Revision R2 — unconditional member ping + visible ping log
+
+Two changes requested after the R1 smoke test (where the heartbeat was invisible and idle members were never pinged):
+
+1. **Unconditional member ping.** The monitor now pings **every** enrolled, active agent — Director and member alike — once its interval has elapsed, regardless of `pending_count`. The member-only-when-pending gate in `should_ping` is removed (§4). `pending_count` is still computed and shown in `monitor status`, but no longer gates the ping. This reverses the original success-criterion-#6 member clause.
+2. **Visible ping log.** `cafleet monitor start` runs in the foreground of the launching agent's background task; it now logs each dispatched ping to stdout (`<iso-ts> ping agent <id> (<name>)`), so the background-task output shows live heartbeat activity. This makes the §8 "logging each tick" claim real (the loop previously emitted nothing per ping).
+
+**Unchanged:** schema + migration, broker config CRUD / scan / claim / heartbeat / `_is_live`, `monitor_tick` control flow, `monitor status`, `monitor config`, WebUI endpoints, admin SPA.
+
+**Code**
+
+- [x] `cafleet/monitor/loop.py`: `should_ping` returns `True` for every due, enabled, live-pane agent (drop the `is_director` / `pending_count > 0` split — both roles ping unconditionally once the interval has elapsed). <!-- completed: 2026-06-13T11:12 -->
+- [x] `cafleet/monitor/loop.py`: `monitor_tick` emits a stdout log line per dispatched ping (`<iso-ts> ping agent <id> (<name>)`) via `click.echo`, after `record_ping`. <!-- completed: 2026-06-13T11:12 -->
+
+**Tests**
+
+- [x] `tests/monitor/test_should_ping.py`: flip `test_should_ping__member_without_pending_skipped` to assert a member with `pending_count == 0` **is** pinged once due (rename to reflect the new behavior); keep the director-unconditional, disabled-skip, dead-pane-skip, not-due-skip, never-pinged-due cases. <!-- completed: 2026-06-13T11:08 -->
+- [x] `tests/monitor/test_loop.py`: assert `monitor_tick` writes a ping-log line to stdout for each pinged agent (capture stdout; assert the agent id/name appears). <!-- completed: 2026-06-13T11:08 -->
+
+**Docs / skills**
+
+- [x] `docs/concepts/monitoring.md`: update the director-vs-member split — members are pinged unconditionally each interval too; document the per-ping stdout log line. <!-- completed: 2026-06-13T11:12 -->
+- [x] `docs/spec/cli-options.md`: `monitor start` logs one line per dispatched ping to stdout; note members are pinged every interval (not gated on pending). <!-- completed: 2026-06-13T11:12 -->
+
+**Verify**
+
+- [x] `mise //cafleet:format` + lint + typecheck + test green; `mise //admin:build`. <!-- completed: 2026-06-13T11:12 -->
+- [ ] E2E smoke: `cafleet monitor start` as a background task → spawn an **idle** member → observe a ping-log line for that member on stdout each interval AND the `message poll` keystroke land in the member pane even with an empty inbox.
+
 ---
 
 ## Changelog
@@ -468,3 +496,4 @@ The monitor is no longer a detached OS subprocess. `cafleet monitor start` runs 
 | 2026-06-13 | Initial draft |
 | 2026-06-13 | Implemented Steps 1–8 (detached-process model) — committed. |
 | 2026-06-13 | **Revision R1 (post-approval pivot):** monitor is an agent-run foreground loop (`cafleet monitor start` runs in-process, launched by a coding agent as a background task), not a detached OS subprocess. Removed `start_detached`, the PID file, `state_dir`, `cafleet monitor stop`, `MONITOR_STOP_TIMEOUT`, and `cafleet/__main__.py`; `fleet delete` relies on loop self-termination. Schema/broker/`should_ping`/`monitor_tick`/status/config/WebUI/SPA unchanged. |
+| 2026-06-13 | **Revision R2:** members are pinged unconditionally on their interval (removed the `pending_count > 0` gate in `should_ping`); `cafleet monitor start` now logs each dispatched ping to stdout (`<iso-ts> ping agent <id> (<name>)`). Motivated by the R1 smoke test, where idle members were never pinged and the heartbeat was invisible. Schema/broker/runtime/WebUI/SPA unchanged. |
