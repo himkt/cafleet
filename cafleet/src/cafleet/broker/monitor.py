@@ -45,14 +45,15 @@ def _config_dict(row) -> dict:
     }
 
 
-def _enroll(
+def enroll_agent(
     session, agent_id: int, interval: int = DEFAULT_PING_INTERVAL_SECONDS
 ) -> None:
     """Insert a ``monitor_config`` row for a pane-bound agent.
 
-    Called inside the same write transaction as the agent/placement insert, so
-    enrollment is atomic with registration. Only agents with a tmux pane (the
-    root Director and members) are enrolled.
+    Called inside the same write transaction as the agent/placement insert (by
+    ``register_agent`` / ``create_fleet``), so enrollment is atomic with
+    registration. Only agents with a tmux pane (the root Director and members)
+    are enrolled.
     """
     session.add(MonitorConfig(agent_id=agent_id, interval_seconds=interval, enabled=1))
 
@@ -140,17 +141,27 @@ def update_monitor_config(
         return _config_dict(row)
 
 
-def record_ping(agent_id: int, when: str) -> None:
-    """Stamp ``last_ping_at`` for the agent after a ping is dispatched.
+def record_pings(agent_ids: list[int], when: str) -> None:
+    """Stamp ``last_ping_at`` for every agent in one write transaction.
 
-    ``when`` is an ISO-8601 string stored verbatim in the TEXT column.
+    Lets a tick's dispatched pings be recorded with a single ``UPDATE … WHERE
+    agent_id IN (…)`` instead of one transaction per agent. ``when`` is an
+    ISO-8601 string stored verbatim in the TEXT column. An empty list is a
+    no-op (no transaction, no ``IN ()``).
     """
+    if not agent_ids:
+        return
     with _shared.write_session() as session:
         session.execute(
             update(MonitorConfig)
-            .where(MonitorConfig.agent_id == agent_id)
+            .where(MonitorConfig.agent_id.in_(agent_ids))
             .values(last_ping_at=when)
         )
+
+
+def record_ping(agent_id: int, when: str) -> None:
+    """Stamp ``last_ping_at`` for a single agent (thin wrapper over ``record_pings``)."""
+    record_pings([agent_id], when)
 
 
 def list_monitor_targets(fleet_id: int) -> list[dict]:

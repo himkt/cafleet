@@ -70,6 +70,7 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
 
     mux = TmuxMultiplexer()
     live_panes = mux.list_pane_ids()
+    pinged: list[int] = []
     for target in broker.list_monitor_targets(fleet_id):
         target["pane_alive"] = target["pane_id"] in live_panes
         if should_ping(target, now):
@@ -78,12 +79,14 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
                 fleet_id=fleet_id,
                 agent_id=target["agent_id"],
             )
-            broker.record_ping(target["agent_id"], now.isoformat())
+            pinged.append(target["agent_id"])
             # Visible heartbeat: the launching agent's background task shows a
             # line per dispatched ping on its stdout.
             click.echo(
                 f"{now.isoformat()} ping agent {target['agent_id']} ({target['name']})"
             )
+    # Record every dispatched ping in one write transaction (no-op if none).
+    broker.record_pings(pinged, now.isoformat())
     return CONTINUE
 
 

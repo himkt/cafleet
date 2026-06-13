@@ -23,6 +23,7 @@ from cafleet.broker.messaging import (
 from cafleet.broker.monitor import (
     claim_monitor_runtime,
     clear_monitor_runtime,
+    enroll_agent,
     get_monitor_config,
     heartbeat_monitor_runtime,
     list_monitor_configs,
@@ -30,6 +31,7 @@ from cafleet.broker.monitor import (
     monitor_is_live,
     read_monitor_runtime,
     record_ping,
+    record_pings,
     update_monitor_config,
 )
 from cafleet.broker.queries import get_task, list_inbox, list_sent, list_timeline
@@ -59,10 +61,12 @@ __all__ = [
     "list_sent",
     "list_timeline",
     "get_task",
+    "enroll_agent",
     "get_monitor_config",
     "list_monitor_configs",
     "update_monitor_config",
     "record_ping",
+    "record_pings",
     "list_monitor_targets",
     "claim_monitor_runtime",
     "heartbeat_monitor_runtime",

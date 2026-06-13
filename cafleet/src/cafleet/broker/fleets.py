@@ -80,7 +80,7 @@ def create_fleet(
         session.flush()
         # Enroll the root Director (pane-bound) in monitoring; the Administrator
         # below has no placement and is intentionally not enrolled.
-        monitor._enroll(session, director_agent_id)
+        monitor.enroll_agent(session, director_agent_id)
         session.execute(
             update(Fleet)
             .where(Fleet.fleet_id == fleet_id)

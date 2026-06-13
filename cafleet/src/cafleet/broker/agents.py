@@ -112,7 +112,7 @@ def register_agent(
             )
             # Enroll the pane-bound agent in monitoring, atomically with its
             # placement insert (only agents with a pane can be pinged).
-            monitor._enroll(session, agent_id)
+            monitor.enroll_agent(session, agent_id)
 
     return {
         "agent_id": agent_id,

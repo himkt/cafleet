@@ -51,7 +51,7 @@ The monitor never reasons about message content. It is the alarm clock; the Dire
 |---|---|---|
 | DB models | `cafleet/db/models.py` | `MonitorConfig`, `MonitorRuntime` ORM classes |
 | Migration | `cafleet/db/alembic/versions/0002_monitor_tables.py` | Creates `monitor_config` + `monitor_runtime` (down_revision `0001`) |
-| Broker (DB) | `cafleet/broker/monitor.py` | Config CRUD, runtime claim/heartbeat/clear, per-tick scan, `record_ping`; enrollment helper |
+| Broker (DB) | `cafleet/broker/monitor.py` | Config CRUD, runtime claim/heartbeat/clear, per-tick scan, batched `record_pings` (one write txn/tick); `enroll_agent` helper |
 | Process/policy | `cafleet/monitor/` package | `loop.py` (`run_monitor_loop` foreground driver + SIGTERM/SIGINT handling, `monitor_tick`, `should_ping`), `__init__.py` (constants) |
 | CLI | `cafleet/cli/monitor.py` | `cafleet monitor start|status|config` (`start` runs the foreground loop in-process) |
 | WebUI API | `cafleet/webui/api.py` | `GET /api/monitor`, `GET`/`PATCH /api/agents/{id}/monitor`, folded `monitor` field on `GET /api/agents` |
@@ -120,7 +120,7 @@ A `monitor_config` row is inserted with the default interval (`60`) and `enabled
 | Administrator | `broker.create_fleet` (no placement) | **no** (write-only, no pane to ping) |
 | Card-only `agent register` | `broker.register_agent` with `placement is None` | **no** (no pane) |
 
-The rule is precisely **"enroll iff the agent has a placement"** — only an agent with a tmux pane can be pinged. The insert happens inside the same write transaction as the agent/placement insert (a shared helper `_enroll(session, agent_id, interval=DEFAULT_PING_INTERVAL_SECONDS)` in `broker/monitor.py`, called by `agents.py` and `fleets.py`), so enrollment is atomic with registration.
+The rule is precisely **"enroll iff the agent has a placement"** — only an agent with a tmux pane can be pinged. The insert happens inside the same write transaction as the agent/placement insert (a shared public helper `enroll_agent(session, agent_id, interval=DEFAULT_PING_INTERVAL_SECONDS)` in `broker/monitor.py`, called by `agents.py` and `fleets.py`), so enrollment is atomic with registration.
 
 ### 4. should_ping policy (pure function)
 
@@ -169,13 +169,15 @@ def monitor_tick(fleet_id, now):                          # now: tz-aware dateti
     if fleet is None or fleet["deleted_at"] is not None:
         return STOP            # fleet vanished/soft-deleted ⇒ self-terminate
     live_panes = TmuxMultiplexer().list_pane_ids()        # one tmux call per tick
+    pinged = []
     for t in broker.list_monitor_targets(fleet_id):       # active+enrolled agents
         t["pane_alive"] = t["pane_id"] in live_panes
         if should_ping(t, now):
             TmuxMultiplexer().send_poll_trigger(
                 target_pane_id=t["pane_id"], fleet_id=fleet_id, agent_id=t["agent_id"])
-            broker.record_ping(t["agent_id"], now.isoformat())
             log(f"{now.isoformat()} ping agent {t['agent_id']} ({t['name']})")  # R2: visible heartbeat to stdout
+            pinged.append(t["agent_id"])
+    broker.record_pings(pinged, now.isoformat())          # one write txn for all stamps this tick (no-op if empty)
     return CONTINUE
 ```
 
