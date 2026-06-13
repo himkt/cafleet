@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from cafleet import broker
-from cafleet.db.models import Fleet, MonitorRuntime
+from cafleet.db.models import Fleet
 from cafleet.monitor.loop import CONTINUE, STOP, monitor_tick
 from tests.broker._helpers import _create_fleet, _register_agent
 
@@ -107,24 +107,16 @@ def test_monitor_tick__stop_on_soft_deleted_fleet(broker_session, monkeypatch):
     assert pings == []
 
 
-def test_monitor_tick__stop_on_missing_fleet(broker_session, monkeypatch):
-    # a runtime row whose fleet has vanished (FK is not enforced on the
-    # in-memory test engine): heartbeat succeeds, get_fleet returns None → STOP
-    missing_fleet_id = 987654
-    with broker_session() as s:
-        s.add(
-            MonitorRuntime(
-                fleet_id=missing_fleet_id,
-                pid=os.getpid(),
-                started_at=_NOW.isoformat(),
-                last_tick_at=_NOW.isoformat(),
-                tick_seconds=5,
-            )
-        )
-        s.commit()
+def test_monitor_tick__stop_on_missing_fleet(monkeypatch):
+    # the fleet row vanished under a live monitor: the ownership-checked
+    # heartbeat passes, then get_fleet returns None → STOP (defensive §5 branch)
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    broker.claim_monitor_runtime(sid, os.getpid(), 5, _NOW.isoformat())
+    monkeypatch.setattr("cafleet.broker.get_fleet", lambda fleet_id: None)
 
     pings = _stub_tmux(monkeypatch, set())
-    assert monitor_tick(missing_fleet_id, _NOW) is STOP
+    assert monitor_tick(sid, _NOW) is STOP
     assert pings == []
 
 
