@@ -1,7 +1,7 @@
 # Monitor heartbeat nudges the monitoring member only
 
-**Status**: Approved
-**Progress**: 22/23 tasks complete
+**Status**: Complete
+**Progress**: 22/23 tasks complete (D2 is operator-optional manual smoke)
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -226,3 +226,4 @@ This works only if a nudge actually fires during a *quiet* Copilot wait — and 
 | 2026-06-14 | Initial draft |
 | 2026-06-14 | Reviewer pass: carved out `cafleet-design-doc-execute` (keeps a monitoring member; Step-7 Copilot loop reframed onto the monitoring member's idle-nudges) per user decision — only 4 skills drop the monitor (A8/A9 split); added the invalidated-docs task (A10) and the `test_monitor_api.py` task (C6); named the specific `test_monitor.py` tests in C2; C5 now updates the existing `0003` prune test; aligned §4 prose to `ensure_tmux_or_die` ordering; broadened the D1 sweep regex |
 | 2026-06-14 | Reviewer pass 2: pinned the execute carve-out's nudge trigger — execute's monitoring member runs an **extended** routine that nudges the idle Director **unconditionally** (no Step-7 handshake) to grant the `silence_ticks` re-poll turn; scoped the "routine unchanged from 0000090" claim to the canonical conditional nudge (Topology) and put the execute spawn-prompt delta in A9 |
+| 2026-06-14 | Implemented via cafleet-design-doc-execute (TDD). Phases A–D complete; 830 tests pass; lint/format/typecheck clean. PR #121 opened; Copilot review loop ran 2 rounds (test stderr robustness, then a source-tree residual sweep that closed a D1 gap in `cafleet/src/`) and reached a clean no-new-comments pass. Status → Complete. |
