@@ -147,6 +147,20 @@ def test_register_second_monitoring_member__rejected():
         _register_monitoring_member(fleet, name="watcher-2", pane_id="%6")
 
 
+def test_register_paneless_monitoring_member__rejected():
+    # a monitoring member must own a pane (placement) to run the monitor loop
+    # and receive wake nudges; registering one with placement=None is rejected.
+    fleet = _create_fleet()
+    with pytest.raises(click.ClickException, match="pane-bound"):
+        broker.register_agent(
+            fleet_id=fleet["fleet_id"],
+            name="paneless-watcher",
+            description="monitoring member without a pane",
+            placement=None,
+            kind="monitoring-member",
+        )
+
+
 # --- cleanup on teardown ---------------------------------------------------
 
 

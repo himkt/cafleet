@@ -53,7 +53,8 @@ def register_agent(
             named Director is not active in the same fleet, or the placement
             ``director_agent_id`` is not the fleet's root Director.
         click.ClickException: If the named Director is the built-in
-            Administrator, or the fleet already has an active monitoring member.
+            Administrator, the fleet already has an active monitoring member,
+            or a monitoring member is registered without a placement.
     """
     sess = get_fleet(fleet_id)
     if sess is None:
@@ -72,6 +73,15 @@ def register_agent(
 
     with _shared.write_session() as session:
         if kind == _shared.MONITORING_MEMBER_KIND:
+            # A monitoring member must be pane-bound: it owns the heartbeat and
+            # is the only enrolled non-Director role. Without a placement it
+            # would consume the one-per-fleet slot yet never enroll (enrollment
+            # is gated on the placement insert below) and have no pane to ping.
+            if placement is None:
+                raise click.ClickException(
+                    "a monitoring member must be pane-bound; register it via "
+                    "'cafleet member create --role monitor' (placement required)."
+                )
             # One monitoring member per fleet — the single enforcement site
             # (the CLI passes ``kind`` straight through without re-checking).
             existing = session.execute(
