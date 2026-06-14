@@ -35,7 +35,7 @@ You own these primitives. Members do NOT call them.
 | `cafleet member exec "<cmd>"` | Shell-dispatch via the coding agent's `!` shortcut. Operator-controlled `COMMAND` argument. | `permissions.ask` |
 | `cafleet member ping` | Fixed-action inbox-poll nudge. No `COMMAND` argument. | `permissions.allow` |
 
-The asymmetry between `member exec` and `member ping` is the whole point of having two subcommands: exec carries an operator-controlled command and stays under per-call ask; ping has no operator-controlled body and is pre-approved so the Director can fire it during supervision without prompts. See [`reference/exec-routing.md`](../reference/exec-routing.md) for the bash-via-Director fallback protocol that uses both.
+`member exec` carries an operator-controlled command and stays under per-call ask; `member ping` has no operator-controlled body and is pre-approved, so the Director can fire it during supervision without prompts. See [`reference/exec-routing.md`](../reference/exec-routing.md) for the bash-via-Director fallback protocol that uses both.
 
 ## When you, as Director, want to run your own command
 

@@ -96,7 +96,7 @@ CAFleet members never talk to the user directly — the Director relays. When a 
 2. **Ask the user.** No preamble sentence above the question — the conversation context plus the question text carry it.
 3. **Relay the answer back** via `cafleet message send` to the originating member. Pass through the user's selection verbatim; do not substitute your own judgment. If the user chose "Other" and typed custom text, send the typed text.
 
-**For `AskUserQuestion`-shaped pane prompts** (a member paused on the literal 4-option pane frame `1. … / 2. … / 3. … / 4. Type something`), follow the three-beat workflow in the `cafleet` skill § *Answer a member's AskUserQuestion prompt* (capture → user-facing decision prompt with shape-matched options → direct Bash invocation of the resolved `cafleet member send-input`). The pane-shapes table is canonical there; do not duplicate it.
+**For `AskUserQuestion`-shaped pane prompts** (a member paused on the literal 4-option pane frame `1. … / 2. … / 3. … / 4. Type something`), follow the three-beat workflow in the `cafleet` skill § *Answer a member's AskUserQuestion prompt*. The pane-shapes table is canonical there; do not duplicate it.
 
 **What you MUST NOT do:**
 
@@ -113,7 +113,7 @@ See the `cafleet-agent-team-monitoring` skill § Stall Response.
 
 Cleanup follows the `cafleet` skill § Shutdown Protocol — that is the canonical teardown order (stop the monitor's background task → `cafleet member delete` each member → verify roster empty → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check).
 
-The single rule supervision restates here: **stop the monitor BEFORE deleting members.** There is no `cafleet monitor stop` — stop the loop by stopping the background task running `cafleet monitor start` (or deleting the monitoring member). A monitor that keeps ticking after `member delete` keystrokes polls into tearing-down panes and races with the delete path. (`fleet delete` makes a still-running loop self-terminate on its next tick, so stopping the task first is belt-and-suspenders.)
+The single rule supervision restates here: **stop the monitor BEFORE deleting members.** There is no `cafleet monitor stop` — stop the background task running `cafleet monitor start` (or delete the monitoring member). A monitor that keeps ticking after `member delete` keystrokes polls into tearing-down panes and races with the delete path.
 
 ## Quick Reference
 

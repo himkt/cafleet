@@ -19,24 +19,22 @@ Load these skills at startup:
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) as **placeholders, not shell variables**. Your spawn prompt contained the literal UUIDs for FLEET ID, DIRECTOR AGENT ID, and YOUR AGENT ID — substitute those literal UUIDs directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
-
-**Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>`.
+Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are **placeholders, not shell variables** — substitute the literal ids from your spawn prompt directly into each command (`permissions.allow` matches command strings literally; shell expansion breaks it). Flag placement (`--fleet-id` before the subcommand, `--agent-id` after) follows the `cafleet` skill.
 
 ## Communication Protocol
 
 You do NOT speak to the user directly. All communication goes through the Director via the CAFleet message broker.
 
-**Coordination Protocol**: See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the `cafleet-design-doc-interview` skill). Phase 2 verification reports follow the schema.
+**Coordination Protocol**: See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the `cafleet-design-doc-interview` skill). Phase 2 verification reports follow the schema.
 
 **Sending a message to the Director:**
 ```bash
 cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "<your verification report>"
 ```
-The literal `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
+The literal `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` ids were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
-**Receiving tasks from the Director:** When the Director sends a message, the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into your tmux pane via `tmux.send_inline_preview`. You process the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body (e.g., the Director's verification task), run `cafleet message poll` yourself. Read the message, then acknowledge it:
+**Receiving tasks from the Director:** the broker keystrokes a 2-line inline preview of each message into your pane (mechanics in the `cafleet` skill § Send); to fetch the full body (e.g., the Director's verification task) run `cafleet message poll` yourself. Read the message, then acknowledge it:
 ```bash
 cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
@@ -71,24 +69,20 @@ For each verification task assigned by the Director (you receive `ready (doc)` o
 | Configuration change | Validate config syntax, dry-run | -- |
 
 3. **Execute verification**: Start the application/service if applicable, perform E2E interactions matching success criteria, and capture evidence (command output, screenshots via Playwright, HTTP responses, logs).
-4. **Record findings as inline markers in the design doc**: write each fail / suggested-fix as a `COMMENT(verifier)` marker per [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker*. Marker location MUST match the cafleet pointer used to report the failure (canonical pointer-marker pairing rule in `../SKILL.md § Coordination Protocol`).
+4. **Record findings as inline markers in the design doc**: write each fail / suggested-fix as a `COMMENT(verifier)` marker per [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker*. Marker location MUST match the cafleet pointer used to report the failure (canonical pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`).
 
    Then report to the Director via `cafleet message send` per the Verifier-specific reporting policy:
    - **Overall success** (all verifiable criteria pass): send a single `complete (doc)`. E2E commonly spans multiple steps, so success is reported once at doc-level.
-   - **Failures**: send one `escalating (paragraph-Implementation > Step N)` per affected step. The paired `COMMENT(verifier)` marker lives at the SAME `paragraph-Implementation > Step N` per the pointer-marker pairing rule in `../SKILL.md § Coordination Protocol`.
+   - **Failures**: send one `escalating (paragraph-Implementation > Step N)` per affected step. The paired `COMMENT(verifier)` marker lives at the SAME `paragraph-Implementation > Step N` per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`.
 
 ## Graceful Degradation
 
 If the best tool for a verification task is unavailable:
 
 1. **Fall back** to the next best alternative (e.g., `curl` instead of Playwright for HTTP checks)
-2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker. Place the marker at the paragraph that matches the cafleet pointer used to report the gap (per the pointer-marker pairing rule in `../SKILL.md § Coordination Protocol`).
+2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker. Place the marker at the paragraph that matches the cafleet pointer used to report the gap (per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`).
 3. Never fail silently — always record what could and could not be verified in `COMMENT(verifier)` markers.
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet --fleet-id <fleet-id> member delete --member-id <my-agent-id>`. The CLI sends `/exit` to your pane and waits up to 15 s for it to disappear.
-
-You do NOT need to handle any `shutdown_request` JSON message — that is the in-process Agent Teams primitive. The CAFleet equivalent is `/exit`, dispatched by the Director through the tmux push primitive. When you receive `/exit`, your `claude` process terminates immediately; nothing is required of you.
-
-If your Director sends `cafleet message send` instructing you to wrap up (e.g. "report final status, then I will run member delete"), do that one final report via `cafleet message send` and return to the prompt. The Director will then run `cafleet member delete` from its own pane.
+The Director terminates you via `cafleet --fleet-id <fleet-id> member delete --member-id <my-agent-id>` (sends `/exit`, waits up to 15 s). When `/exit` arrives your `claude` process exits immediately — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

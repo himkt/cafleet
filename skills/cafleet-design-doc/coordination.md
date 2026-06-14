@@ -43,8 +43,6 @@ Exactly 3 canonical forms. Use the tightest one that locates the target.
 | `<file>:<line>` | At that exact line in the file (immediately above or on `<line>` per the file's native comment syntax). |
 | `doc` | Doc-top — directly under the metadata block (`Status:` / `Progress:` / `Last Updated:`), before the first heading. |
 
-The ` > ` separator avoids the collision that would arise if `/` were used as a nesting separator (heading text in real-world design docs frequently contains `/`, e.g. `Step 2: Update docs/spec/cli-options.md`). ` > ` is unambiguous, ASCII-safe, and shell-safe inside double-quoted `--text` arguments.
-
 ## Message Format
 
 Every `cafleet message send --text` body, when used to coordinate within a `cafleet-design-doc-create` or `cafleet-design-doc-execute` skill team, MUST match:
@@ -111,7 +109,7 @@ Rules:
 
 | Class | Example | Lifecycle |
 |:--|:--|:--|
-| Issue | `COMMENT(reviewer): [GAP] Specification omits the retry budget.` | Persists in the doc until resolved. The resolver removes the marker as part of the fix. Per `skills/design-doc/guidelines.md` § *Completeness Check*, the doc cannot reach `Status: Approved` / `Status: Complete` while any `COMMENT(` marker remains. |
+| Issue | `COMMENT(reviewer): [GAP] Specification omits the retry budget.` | Persists in the doc until resolved. The resolver removes the marker as part of the fix. Per `skills/cafleet-design-doc/guidelines.md` § *Completeness Check*, the doc cannot reach `Status: Approved` / `Status: Complete` while any `COMMENT(` marker remains. |
 | Status | (none — never enters the doc) | Lives only in `cafleet message send` text. |
 
 This keeps the design doc clean: at any moment, the markers in the doc reflect *outstanding work*, never historical chatter.

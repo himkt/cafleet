@@ -4,7 +4,7 @@ You are the **Director** in a design document execution team orchestrated via th
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<programmer-agent-id>`, `<tester-agent-id>`, `<verifier-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet fleet create` (which returns the fleet UUID AND the root Director's `agent_id` — the Director does not need a separate `cafleet agent register` call) and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
+Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<programmer-agent-id>`, `<tester-agent-id>`, `<verifier-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal integer ids printed by `cafleet fleet create` (which returns the fleet id AND the root Director's `agent_id` — the Director does not need a separate `cafleet agent register` call) and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
 
 **Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>`.
 
@@ -28,33 +28,18 @@ Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id
 - **Run the PR & Copilot Review loop after Approve.** When the user selects Approve, the Director moves through Steps 6 → 7 → 8 without further prompting. Step 6 pushes the branch, runs `gh pr create --fill` (re-using an existing PR on the branch if one is present), records the PR number literally (no shell variables), requests `@copilot` via `gh pr edit <pr-number> --add-reviewer @copilot`, verifies the request with `gh api repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers`, and captures `last_push_ts`. Step 7 adds the PR-review poll to each monitor wake (no scheduler swap — the `cafleet monitor` started in Step 3b runs unchanged), classifies each new Copilot inline comment by file path (design doc → Director direct, test file → Tester via `cafleet message send`, other source → Programmer via `cafleet message send`), waits for the routed member's completion report, commits per scope with the Copilot-review commit messages, `git push`es, resets `silence_ticks = 0` + increments `round`, and re-requests `@copilot`. The loop never auto-exits on Copilot silence. It exits only on a **post-push** Copilot review with `state == "APPROVED"` (`submittedAt > last_push_ts`) or on user "Stop means stop". Two **escalations** can also lead to an exit, but only via a user choice: round-limit (7e — fires when `round >= 5`, options Continue / Finalize-now / Other) and silence escalation (7f — fires when `silence_ticks >= 30`, options Keep waiting / Re-request review / Finalize / Other). Both escalations leave the loop running unless the user picks Finalize / abort. Only after Step 7 exits does the Director mark the doc Complete and run Step 8 (commit + conditional `git push` when the branch is tracked on origin, then stop the monitor's background task + member deletes + `cafleet fleet delete`). When `gh auth status` fails, the branch equals the default branch, there are no commits beyond base, `git push`/`gh pr create` fails, or the user expresses approve-local intent under "Other", skip Steps 6 + 7 and proceed directly to Step 8 local-finalize.
 - **Clean up when done.** Final commit updating status to "Complete", then delete each member via `cafleet member delete`, and tear down the fleet via `cafleet fleet delete <fleet-id>`. The root Director cannot be deregistered with `cafleet agent deregister` — `fleet delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
 
-## Idle Semantics
+## Idle Semantics & Stall Response
 
-**Members go idle after every turn. A member's tmux pane sitting at the prompt between turns is the expected state, NOT a stall.** A member sending you a `cafleet message send` and then returning to the prompt is the normal flow — they sent their output and are waiting for the next push notification or the next assignment.
+Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet member capture` fallback → `AskUserQuestion` three-beat for a paused 4-option frame) follow the `cafleet-agent-team-supervision` skill § Idle Semantics and the `cafleet-agent-team-monitoring` skill § Stall Response — both loaded at startup. Two skill-specific rungs are NOT in those skills and stay here:
 
-- Idle members receive messages normally; the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview` to wake them.
-- Idle-pane observations during a monitor tick are informational. Do not react unless you are ready to assign new work, OR the member's idleness is **blocking your next step** (a downstream phase cannot start, an expected deliverable file is missing past its milestone, you sent a message and received no reply after a reasonable window).
-- Do NOT comment on idleness or nudge a member just because they went idle. Only nudge per the Stall Response Ladder below.
-
-## Stall Response Ladder
-
-A member is stalled when they **block your next step** — not merely because they are idle. Signals:
-
-- The deliverable file you expect at this milestone does not exist.
-- `cafleet message poll --agent-id <director-agent-id>` shows no progress message from the member since the last assignment AND `cafleet member capture` shows no forward progress in the pane buffer.
-- You sent a `cafleet message send` and the member has not replied past one full monitor tick.
-
-**Response ladder (in order — do NOT skip rungs):**
-
-1. Send a specific instruction via `cafleet message send` — never a generic "are you OK?". State the deliverable you expect and the blocker you are trying to unblock.
-2. If still no reply after a second nudge across one more monitor tick, run `cafleet member capture --member-id <member-agent-id> --lines 200` and inspect the pane state. If the pane is on an `AskUserQuestion` frame, follow the canonical three-beat workflow in the `cafleet` skill § *Answer a member's AskUserQuestion prompt*.
-3. After 2 nudges without progress, escalate to the user via `AskUserQuestion` with concrete options (re-spawn / redistribute / drop scope / Other). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
+- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet member capture --member-id <member-agent-id> --lines 200`, then escalate — in that order.
+- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via `AskUserQuestion` with concrete options (re-spawn / redistribute / drop scope / Other). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
 
 All Director-to-member messages use the CAFleet message broker. The Director stores each member's `agent_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-agent-id>` as the `--to` target.
 
-**Coordination Protocol**: See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* + § *Copilot Routing* + § *Director Per-File Detail Recovery* for the verb + pointer schema, role taxonomy, marker rules, Copilot anchor classes, and git-plumbing recovery commands. The Verifier's **Phase 1 tool-discovery** message is exempt from the schema (one-time discovery payload).
+**Coordination Protocol**: See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* + § *Copilot Routing* + § *Director Per-File Detail Recovery* for the verb + pointer schema, role taxonomy, marker rules, Copilot anchor classes, and git-plumbing recovery commands. The Verifier's **Phase 1 tool-discovery** message is exempt from the schema (one-time discovery payload).
 
 **Sending a task to a member:**
 ```bash
@@ -82,7 +67,7 @@ cafleet --fleet-id <fleet-id> member capture \
 
 When the Programmer sends `escalating (paragraph-Implementation > Step N)` (suspected test defect):
 
-1. **Programmer → Director**: Sends `escalating (paragraph-Implementation > Step N)` and writes a `COMMENT(programmer): test <test-name> expects X but design doc says Y; please arbitrate` marker at `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in `../SKILL.md § Coordination Protocol` — marker location matches the cafleet pointer). The cafleet body carries no rationale — the rationale lives in the marker. The marker body MAY cite the relevant `paragraph-Specification > <…>` heading.
+1. **Programmer → Director**: Sends `escalating (paragraph-Implementation > Step N)` and writes a `COMMENT(programmer): test <test-name> expects X but design doc says Y; please arbitrate` marker at `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md` — marker location matches the cafleet pointer). The cafleet body carries no rationale — the rationale lives in the marker. The marker body MAY cite the relevant `paragraph-Specification > <…>` heading.
 2. **Director**: Reads the design doc paragraph, the standing `COMMENT(programmer)` marker, and the failing test. Writes a `COMMENT(director): <decision> — <rationale, ≤2 sentences>` marker at the same `paragraph-Implementation > Step N` stating the arbitration outcome, then sends `ready (paragraph-Implementation > Step N)` to whichever member needs to act (Tester to fix the test, Programmer to adjust the implementation).
 3. **Recipient (Tester or Programmer)**: Acts on the Director's standing marker. If the Tester disagrees, the Tester replies `escalating (paragraph-Implementation > Step N)` with a `COMMENT(tester): <reasoning>` marker at the SAME `paragraph-Implementation > Step N`; otherwise the recipient applies the fix, removes the marker, and replies `addressed (paragraph-Implementation > Step N)`.
 4. If escalation exceeds 3 rounds, consult user via `AskUserQuestion` to break deadlock.
@@ -119,11 +104,11 @@ When the user selects "Scan for COMMENT markers":
 
 ### COMMENT Classification by File Location and Role
 
-See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* and § *Copilot Routing* for the role taxonomy, marker-location rules (design-doc → Director resolves directly, source → Programmer, test → Tester), and routing verb + pointer schema. The `drafter` role is N/A in this skill.
+See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* and § *Copilot Routing* for the role taxonomy, marker-location rules (design-doc → Director resolves directly, source → Programmer, test → Tester), and routing verb + pointer schema. The `drafter` role is N/A in this skill.
 
 ### Director's Per-File Detail Recovery
 
-See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *Director Per-File Detail Recovery* for the git plumbing (`git status` / `git diff --stat` / `git log --name-only` / `git diff -- <pattern>`). This applies in Phase A (test commits), Phase B/C (impl commits), Phase 7d (Copilot fix commits), and Step 8 (finalize commit).
+See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *Director Per-File Detail Recovery* for the git plumbing (`git status` / `git diff --stat` / `git log --name-only` / `git diff -- <pattern>`). This applies in Phase A (test commits), Phase B/C (impl commits), Phase 7d (Copilot fix commits), and Step 8 (finalize commit).
 
 ### LLM Intent Judgment
 
@@ -153,7 +138,7 @@ Programmer / Tester / Verifier members are spawned with `--permission-mode dontA
 
 | Phase | Expected event | Stall indicator | Director action |
 |:--|:--|:--|:--|
-| Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge — recipient interprets contextually per [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol): same target, same expected action) |
+| Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge — recipient interprets contextually per [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md): same target, same expected action) |
 | Implementation (Phase B) | Programmer implements code and runs tests | Programmer goes idle without reporting implementation result | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge) |
 | Verification (Phase D) | Verifier performs E2E testing | Verifier goes idle without reporting verification result | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <verifier-agent-id> --text "ready (doc)"` (re-sent stall-nudge — Verifier reads the design doc and the standing `COMMENT(verifier)` markers) |
 | PR Review (Step 7) | Copilot posts a review or inline comment on `<pr-number>` | No new Copilot-authored entry (login matching `^copilot`, timestamp > `last_push_ts`) on this tick | Increment `silence_ticks`. Evaluate the SKILL Step 7b branch table: exit on most-recent Copilot review `state == "APPROVED"`; trigger 7f silence-escalation when `silence_ticks >= 30` (AskUserQuestion: Keep waiting / Re-request review / Finalize / Other). On ≥ 1 new entry reset `silence_ticks = 0`, classify each new inline comment by file path per Step 7c, write `COMMENT(copilot): <body>` at the source `<file>:<line>` for source/test routes (or `COMMENT(director): <body>` at the affected paragraph for design-doc-anchored items, no cafleet route), and dispatch via `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<file>:<line>)"`. The loop never auto-exits on silence. |
@@ -163,4 +148,4 @@ Programmer / Tester / Verifier members are spawned with `--permission-mode dontA
 
 Shutdown runs as Step 8's tail — only AFTER Step 8's doc-complete commit (and the conditional `git push` when the branch is tracked on origin) has landed.
 
-Run the canonical 5-rung teardown per the `cafleet` skill § *Shutdown Protocol* (stop the monitor's background task → `cafleet member delete` per member → `cafleet member list` verification → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check). The monitor stopped at the first rung is the single heartbeat started at Step 3b — it runs unchanged through Steps 3–8, so there is only one background task to stop (there is no `monitor stop` command). `cafleet fleet delete` makes any still-running loop self-terminate on its next tick, so stopping the task first is belt-and-suspenders.
+Run the canonical 5-rung teardown per the `cafleet` skill § *Shutdown Protocol* (stop the monitor's background task → `cafleet member delete` per member → `cafleet member list` verification → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check). Stop the monitor (the single Step 3b heartbeat, run unchanged through Steps 3–8) FIRST — there is no `monitor stop` command, so stop its background task.

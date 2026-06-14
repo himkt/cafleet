@@ -19,24 +19,22 @@ Load these skills at startup:
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) as **placeholders, not shell variables**. Your spawn prompt contained the literal UUIDs for FLEET ID, DIRECTOR AGENT ID, and YOUR AGENT ID — substitute those literal UUIDs directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
-
-**Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>`.
+Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are **placeholders, not shell variables** — substitute the literal ids from your spawn prompt directly into each command (`permissions.allow` matches command strings literally; shell expansion breaks it). Flag placement (`--fleet-id` before the subcommand, `--agent-id` after) follows the `cafleet` skill.
 
 ## Communication Protocol
 
 You do NOT speak to the user directly. All communication goes through the Director via the CAFleet message broker.
 
-**Coordination Protocol**: From Step 3 onward (once the initial draft exists) every cafleet message between you and the Director follows the **verb + pointer + `COMMENT(role)`** schema documented in [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol): single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(role)` markers in the design doc. Step 2 clarifying-question messages are exempt — at clarification time the design doc does not yet exist, so your questions and the Director's "User answers: ..." relay ride as free-form multi-line bodies.
+**Coordination Protocol**: From Step 3 onward (once the initial draft exists) every cafleet message between you and the Director follows the **verb + pointer + `COMMENT(role)`** schema documented in [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md): single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(role)` markers in the design doc. Step 2 clarifying-question messages are exempt — at clarification time the design doc does not yet exist, so your questions and the Director's "User answers: ..." relay ride as free-form multi-line bodies.
 
 **Sending a message to the Director:**
 ```bash
 cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "<your report or questions>"
 ```
-The literal `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
+The literal `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` ids were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
-**Receiving tasks from the Director:** When the Director sends a message, the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into your tmux pane via `tmux.send_inline_preview`. You process the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, run `cafleet message poll` yourself. Read the message, then acknowledge it:
+**Receiving tasks from the Director:** the broker keystrokes a 2-line inline preview of each message into your pane (mechanics in the `cafleet` skill § Send); to fetch the full body run `cafleet message poll` yourself. Read the message, then acknowledge it:
 ```bash
 cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
@@ -75,13 +73,13 @@ You MUST present questions from at least 3 categories from the framework below. 
 
 1. **Clarify**: Read the target codebase for context. Send clarifying questions to the Director via `cafleet message send` (free-form body — Step 2 is exempt from the verb + pointer schema). Do NOT create any file until this step is complete.
 2. **Draft**: Create the document at the OUTPUT PATH you were given. Use the `cafleet-design-doc` skill template. Omit optional sections unless needed. Send `complete (doc)` for fresh drafts.
-3. **Internal Quality Loop**: The Director will route the Reviewer's feedback via `ready (doc)`. Read the inline `COMMENT(reviewer)` markers in the design doc, apply revisions to the affected sections, and remove each marker as part of the fix. Send `addressed (doc)` for revision rounds (resolving `COMMENT(reviewer)` markers). If you encounter a spec ambiguity you cannot resolve unaided, write a `COMMENT(drafter): <issue>` marker AND send `blocked (<same-pointer>)` — the marker MUST live at the SAME pointer as the cafleet body (per the pointer-marker pairing rule in `../SKILL.md § Coordination Protocol`). For paragraph-local ambiguities, use `blocked (paragraph-<HeadingPath>)` with the marker at that paragraph; for doc-wide ambiguities, use `blocked (doc)` with the marker placed near the top of the doc body. Repeat until the Reviewer approves.
+3. **Internal Quality Loop**: The Director will route the Reviewer's feedback via `ready (doc)`. Read the inline `COMMENT(reviewer)` markers in the design doc, apply revisions to the affected sections, and remove each marker as part of the fix. Send `addressed (doc)` for revision rounds (resolving `COMMENT(reviewer)` markers). If you encounter a spec ambiguity you cannot resolve unaided, write a `COMMENT(drafter): <issue>` marker AND send `blocked (<same-pointer>)` — the marker MUST live at the SAME pointer as the cafleet body (per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`). For paragraph-local ambiguities, use `blocked (paragraph-<HeadingPath>)` with the marker at that paragraph; for doc-wide ambiguities, use `blocked (doc)` with the marker placed near the top of the doc body. Repeat until the Reviewer approves.
 4. **User Approval**: The Director presents the polished draft to the user. If the user returns COMMENT markers or verbal feedback, the Director routes you with `ready (doc)`; resolve the markers and reply `addressed (doc)`. Repeat until approved.
 5. **Finalize**: When the Director signals user approval with `ready (doc)`, update Status, verify implementation steps are actionable, and reply `addressed (doc)` via `cafleet message send`.
 
 ## COMMENT Processing
 
-See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* for the role taxonomy, marker rules, and the issue-vs-status split.
+See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* for the role taxonomy, marker rules, and the issue-vs-status split.
 
 ## Resume Mode
 
@@ -96,8 +94,4 @@ When spawned with a resume mode prompt (the document already exists and contains
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet --fleet-id <fleet-id> member delete --member-id <my-agent-id>`. The CLI sends `/exit` to your pane and waits up to 15 s for it to disappear.
-
-You do NOT need to handle any `shutdown_request` JSON message — that is the in-process Agent Teams primitive. The CAFleet equivalent is `/exit`, dispatched by the Director through the tmux push primitive. When you receive `/exit`, your `claude` process terminates immediately; nothing is required of you.
-
-If your Director sends `cafleet message send` instructing you to wrap up (e.g. "report final status, then I will run member delete"), do that one final report via `cafleet message send` and return to the prompt. The Director will then run `cafleet member delete` from its own pane.
+The Director terminates you via `cafleet --fleet-id <fleet-id> member delete --member-id <my-agent-id>` (sends `/exit`, waits up to 15 s). When `/exit` arrives your `claude` process exits immediately — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

@@ -1,7 +1,7 @@
 # Slim Down the CAFleet Skill `.md` Files (Behavior-Preserving)
 
 **Status**: Approved
-**Progress**: 0/10 tasks complete (design approved; implementation pending)
+**Progress**: 9/10 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -10,12 +10,12 @@ Several CAFleet operational skill `.md` files are bloated with restated rational
 
 ## Success Criteria
 
-- [ ] Every in-scope file is reviewed against the principles below and slimmed where redundancy exists, with no change to any frozen token (commands, flags, error strings, gates, frontmatter `description` fields, verb/pointer tokens, spawn-prompt template bodies).
-- [ ] Each operational fact has exactly one canonical home; every other mention is a one-line cross-reference (extending the existing "canonical there; do not duplicate" pattern already used in the skills).
-- [ ] A before/after frozen-token inventory proves the set of CLI commands, flags, error strings, gates, and frontmatter descriptions is identical pre- and post-edit.
-- [ ] Cross-reference integrity holds: every "see X § Y" pointer resolves to an existing heading, and every role-file cross-reference points only to a skill the spawned member loads at startup.
-- [ ] No "for history" deprecation notes remain (per `.claude/rules/removal.md`): each slimmed file reads as if the removed redundancy never existed.
-- [ ] No behavior-describing documentation (`README.md`, `docs/concepts/`, `docs/`) requires any change, because the CLI / API / config surface is unchanged — verified, not assumed.
+- [x] Every in-scope file is reviewed against the principles below and slimmed where redundancy exists, with no change to any frozen token (commands, flags, error strings, gates, frontmatter `description` fields, verb/pointer tokens, spawn-prompt template bodies).
+- [x] Each operational fact has exactly one canonical home; every other mention is a one-line cross-reference (extending the existing "canonical there; do not duplicate" pattern already used in the skills).
+- [x] A before/after frozen-token inventory proves the set of CLI commands, flags, error strings, gates, and frontmatter descriptions is identical pre- and post-edit.
+- [x] Cross-reference integrity holds: every "see X § Y" pointer resolves to an existing heading, and every role-file cross-reference points only to a skill the spawned member loads at startup.
+- [x] No "for history" deprecation notes remain (per `.claude/rules/removal.md`): each slimmed file reads as if the removed redundancy never existed.
+- [x] No behavior-describing documentation (`README.md`, `docs/concepts/`, `docs/`) requires any change, because the CLI / API / config surface is unchanged — verified, not assumed.
 
 ---
 
@@ -190,55 +190,55 @@ This change edits the very skills (`cafleet-design-doc-create` / `-execute` and 
 
 ### Step 1: Frozen-token baseline
 
-- [ ] Extract the V1 frozen-token inventory from all 26 in-scope files into `${BASE}/verification/frozen-inventory-before.md` (commands, flags, error strings, gates, frontmatter descriptions, verb/pointer tokens, spawn-prompt template hashes). <!-- completed: -->
+- [x] Extract the V1 frozen-token inventory from all 26 in-scope files into `${BASE}/verification/frozen-inventory-before.md` (commands, flags, error strings, gates, frontmatter descriptions, verb/pointer tokens, spawn-prompt template hashes). <!-- completed: 2026-06-14T02:35 -->
 
 > **`verification/` is throwaway scratch.** The before/after inventory artifacts live under the committed design-doc directory but are NOT part of the permanent record. Do NOT stage them in the finalize commit — leave `${BASE}/verification/` unstaged / ignored. The durable record is this design doc; the per-file diffs live in git history.
 
 ### Step 2: Cluster A — `cafleet/` reference files
 
-- [ ] `reference/exec-routing.md`: remove the "Why no operator-prompts-for-routing" § (D4). <!-- completed: -->
-- [ ] `reference/broadcast.md`: collapse the 4× `--full` no-op restatement to one + cross-ref `output-flags.md` (D7). <!-- completed: -->
-- [ ] `reference/recovery.md`: drop the duplicated `member list --activity` example block (D3); keep Shutdown Protocol canonical here. <!-- completed: -->
-- [ ] `reference/director.md`: trim the `--model` catalog (D6) and the ARG_MAX spawn-size derivation (D5); keep `--activity` table canonical. <!-- completed: -->
-- [ ] `reference/output-flags.md`: light P5 trim. <!-- completed: -->
+- [x] `reference/exec-routing.md`: remove the "Why no operator-prompts-for-routing" § (D4). <!-- completed: 2026-06-14T02:45 -->
+- [x] `reference/broadcast.md`: collapse the 4× `--full` no-op restatement to one + cross-ref `output-flags.md` (D7). <!-- completed: 2026-06-14T02:45 -->
+- [x] `reference/recovery.md`: drop the duplicated `member list --activity` example block (D3); keep Shutdown Protocol canonical here. <!-- completed: 2026-06-14T02:45 -->
+- [x] `reference/director.md`: trim the `--model` catalog (D6) and the ARG_MAX spawn-size derivation (D5); keep `--activity` table canonical. <!-- completed: 2026-06-14T02:45 -->
+- [x] `reference/output-flags.md`: light P5 trim. <!-- completed: 2026-06-14T02:45 -->
 
 ### Step 3: Cluster A — `cafleet/` core + roles
 
-- [ ] `cafleet/SKILL.md`: trim "Why literal flags, not env vars?" to the one-line rule (D5). <!-- completed: -->
-- [ ] `cafleet/roles/member.md`: collapse the triple forbidden-behaviors statement (D4). <!-- completed: -->
-- [ ] `cafleet/roles/director.md`: light trim. <!-- completed: -->
+- [x] `cafleet/SKILL.md`: trim "Why literal flags, not env vars?" to the one-line rule (D5). <!-- completed: 2026-06-14T02:53 -->
+- [x] `cafleet/roles/member.md`: collapse the triple forbidden-behaviors statement (D4). <!-- completed: 2026-06-14T02:53 -->
+- [x] `cafleet/roles/director.md`: light trim. <!-- completed: 2026-06-14T02:53 -->
 
 ### Step 4: Cluster B — `cafleet-design-doc/` shared
 
-- [ ] `coordination.md`: confirm as canonical Coordination Protocol home; minor self-trim. Leave `guidelines.md` / `template.md` / `SKILL.md` essentially as-is. <!-- completed: -->
+- [x] `coordination.md`: confirm as canonical Coordination Protocol home; minor self-trim. Leave `guidelines.md` / `template.md` / `SKILL.md` essentially as-is. <!-- completed: 2026-06-14T02:57 -->
 
 ### Step 5: Cluster C — `cafleet-design-doc-create/`
 
-- [ ] `SKILL.md`: replace inlined Coordination Protocol with cross-ref to `coordination.md` + role-subset note + Clarification Exemption (D1); collapse spawn audit-file procedure to the two-step pattern (D10). <!-- completed: -->
-- [ ] `roles/director.md`: cross-ref Idle/Stall to supervision/monitoring + Shutdown to recovery.md (D9, D2). <!-- completed: -->
-- [ ] `roles/drafter.md` + `roles/reviewer.md`: trim Placeholder + Shutdown + broker-keystroke boilerplate (D9). <!-- completed: -->
+- [x] `SKILL.md`: replace inlined Coordination Protocol with cross-ref to `coordination.md` + role-subset note + Clarification Exemption (D1); collapse spawn audit-file procedure to the two-step pattern (D10). <!-- completed: 2026-06-14T03:22 -->
+- [x] `roles/director.md`: cross-ref Idle/Stall to supervision/monitoring + Shutdown to recovery.md (D9, D2). <!-- completed: 2026-06-14T03:22 -->
+- [x] `roles/drafter.md` + `roles/reviewer.md`: trim Placeholder + Shutdown + broker-keystroke boilerplate (D9). <!-- completed: 2026-06-14T03:22 -->
 
 ### Step 6: Cluster D — `cafleet-design-doc-execute/`
 
-- [ ] `SKILL.md`: replace inlined Coordination Protocol (D1); de-triplicate the spawn two-step procedure (D10); keep + tighten the silence / `reviewDecision` rationale (P2 exception); preserve all Steps 1–8 commands/tables/templates. <!-- completed: -->
-- [ ] `roles/director.md`: cross-ref Idle/Stall + Shutdown (D9, D2); keep Escalation + Commit Protocol + PR milestones. <!-- completed: -->
-- [ ] `roles/programmer.md` + `roles/tester.md` + `roles/verifier.md`: trim shared boilerplate (D9); keep all workflow/escalation logic. <!-- completed: -->
+- [x] `SKILL.md`: replace inlined Coordination Protocol (D1); de-triplicate the spawn two-step procedure (D10); keep + tighten the silence / `reviewDecision` rationale (P2 exception); preserve all Steps 1–8 commands/tables/templates. <!-- completed: 2026-06-14T03:34 -->
+- [x] `roles/director.md`: cross-ref Idle/Stall + Shutdown (D9, D2); keep Escalation + Commit Protocol + PR milestones. <!-- completed: 2026-06-14T03:34 -->
+- [x] `roles/programmer.md` + `roles/tester.md` + `roles/verifier.md`: trim shared boilerplate (D9); keep all workflow/escalation logic. <!-- completed: 2026-06-14T03:34 -->
 
 ### Step 7: Cluster E — `cafleet-design-doc-interview/`
 
-- [ ] `SKILL.md`: consolidate 3× `COMMENT(claude)` + 2× `question.md` format (D11); keep the single deliberate plugin-independent inline. <!-- completed: -->
-- [ ] `roles/analyzer.md`: trim shared boilerplate (D9). <!-- completed: -->
+- [x] `SKILL.md`: consolidate 3× `COMMENT(claude)` + 2× `question.md` format (D11); keep the single deliberate plugin-independent inline. <!-- completed: 2026-06-14T03:44 -->
+- [x] `roles/analyzer.md`: trim shared boilerplate (D9). <!-- completed: 2026-06-14T03:44 -->
 
 ### Step 8: Cluster F + G — agent-team + base-dir
 
-- [ ] `monitoring/SKILL.md` + `supervision/SKILL.md`: collapse Shutdown/monitor-stop restatement to the recovery.md cross-ref (D2); remove residual three-beat re-spelling. <!-- completed: -->
-- [ ] `cafleet-base-dir/SKILL.md`: light P5 trim; preserve every resolution branch + `<unset>` contract. <!-- completed: -->
+- [x] `monitoring/SKILL.md` + `supervision/SKILL.md`: collapse Shutdown/monitor-stop restatement to the recovery.md cross-ref (D2); remove residual three-beat re-spelling. <!-- completed: 2026-06-14T03:48 -->
+- [x] `cafleet-base-dir/SKILL.md`: light P5 trim; preserve every resolution branch + `<unset>` contract. <!-- completed: 2026-06-14T03:48 -->
 
 ### Step 9: Verification
 
-- [ ] Re-extract the frozen-token inventory (`…-after.md`) and run V2 (multiset diff identical); investigate/justify every delta as a pure relocation or revert it. <!-- completed: -->
-- [ ] Run V3 (frontmatter byte-identical), V5 (cross-reference integrity, incl. P7 for role files), V6 (no behavior-doc drift), V7 (removal totality). <!-- completed: -->
-- [ ] Per-file `git diff` review (V4) confirming only redundancy was removed; run V8 (content-superset) for every prose block collapsed to a cross-reference. <!-- completed: -->
+- [x] Re-extract the frozen-token inventory (`…-after.md`) and run V2 (multiset diff identical); investigate/justify every delta as a pure relocation or revert it. <!-- completed: 2026-06-14T04:05 -->
+- [x] Run V3 (frontmatter byte-identical), V5 (cross-reference integrity, incl. P7 for role files), V6 (no behavior-doc drift), V7 (removal totality). <!-- completed: 2026-06-14T04:05 -->
+- [x] Per-file `git diff` review (V4) confirming only redundancy was removed; run V8 (content-superset) for every prose block collapsed to a cross-reference. <!-- completed: 2026-06-14T04:05 -->
 
 ### Step 10: Finalize
 
