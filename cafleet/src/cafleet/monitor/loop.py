@@ -38,10 +38,12 @@ STOP = _Sentinel("STOP")
 def should_ping(target: dict, now: datetime) -> bool:
     """Decide whether an enrolled agent is due for a ping this tick.
 
-    Both enrolled roles — the root Director and the monitoring member — are
-    pinged once the interval has elapsed, regardless of ``pending_count`` (R2).
-    The policy is role-agnostic (``is_director`` / ``is_monitoring_member`` are
-    consulted by the loop for keystroke selection, not here). Disabled agents and
+    The dedicated monitoring member (the Director is no longer enrolled;
+    ``is_director`` is still derived for the loop's defensive skip and
+    ``monitor status`` labeling) is pinged once the interval has elapsed,
+    regardless of ``pending_count`` (R2). The policy is role-agnostic
+    (``is_director`` / ``is_monitoring_member`` are consulted by the loop for the
+    keystroke selection / defensive skip, not here). Disabled agents and
     dead/missing panes are always skipped, and a not-yet-due agent waits.
     """
     if not target["enabled"]:
@@ -77,14 +79,13 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
         target["pane_alive"] = target["pane_id"] in live_panes
         if not should_ping(target, now):
             continue
-        # Select the keystroke explicitly by role: the Director gets a bare poll
-        # (its facilitation contract lives in the supervision skill); the
-        # monitoring member gets a wake nudge driving its capture-and-assess
-        # routine. A stray/legacy enrolled row that is neither role is skipped,
-        # never woken — ordinary members are never pinged by the loop.
-        if target["is_director"]:
-            keystroke = mux.send_poll_trigger
-        elif target["is_monitoring_member"]:
+        # The loop wakes ONLY the monitoring member, with a wake nudge that
+        # drives its capture-and-assess routine. Any other enrolled row — a
+        # stray/legacy Director row that survived the prune, the Administrator,
+        # an ordinary member — is defensively skipped, never woken. The Director
+        # is no longer enrolled and is re-engaged on demand (the monitoring
+        # member's idle nudge + the broker's inline-preview keystroke).
+        if target["is_monitoring_member"]:
             keystroke = mux.send_wake_trigger
         else:
             continue

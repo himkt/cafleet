@@ -78,9 +78,6 @@ def create_fleet(
         director_agent_id = director.agent_id
         session.add(AgentPlacement(agent_id=director_agent_id, **director_placement))
         session.flush()
-        # Enroll the root Director (pane-bound) in monitoring; the Administrator
-        # below has no placement and is intentionally not enrolled.
-        monitor.enroll_agent(session, director_agent_id)
         session.execute(
             update(Fleet)
             .where(Fleet.fleet_id == fleet_id)

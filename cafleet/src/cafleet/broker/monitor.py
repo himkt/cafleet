@@ -52,9 +52,9 @@ def enroll_agent(
 
     Called inside the same write transaction as the agent/placement insert, so
     enrollment is atomic with registration. Enrollment is restricted to exactly
-    two roles per fleet: the root Director (enrolled by ``create_fleet``) and the
-    dedicated monitoring member (enrolled by ``register_agent`` when
-    ``kind == MONITORING_MEMBER_KIND``). Ordinary members are not enrolled.
+    one role per fleet: the dedicated monitoring member (enrolled by
+    ``register_agent`` when ``kind == MONITORING_MEMBER_KIND``). The root Director
+    is no longer enrolled, and ordinary members are not enrolled.
     """
     session.add(MonitorConfig(agent_id=agent_id, interval_seconds=interval, enabled=1))
 
@@ -168,13 +168,17 @@ def record_ping(agent_id: int, when: str) -> None:
 def list_monitor_targets(fleet_id: int) -> list[dict]:
     """Per-tick scan: one row per active, enrolled agent in the fleet.
 
-    Each dict carries ``agent_id``, ``name``, ``is_director`` (derived from
-    ``fleets.director_agent_id``), ``is_monitoring_member`` (derived from
-    ``agent_card_json.cafleet.kind``, so the loop selects the per-role keystroke
-    and ``monitor status`` labels the role), ``pane_id``, ``interval_seconds``,
-    ``last_ping_at``, ``enabled`` (bool), and ``pending_count`` — the count of
-    the agent's ``input_required`` deliveries excluding ``broadcast_summary``
-    rows, a correlated subquery mirroring ``members.py``.
+    Enrollment is restricted to exactly one role — the dedicated monitoring
+    member — so in normal operation this returns just that one row (a Director
+    row is not expected). Each dict carries ``agent_id``, ``name``,
+    ``is_director`` (derived from ``fleets.director_agent_id``, retained only for
+    the loop's defensive skip and ``monitor status`` labeling),
+    ``is_monitoring_member`` (derived from ``agent_card_json.cafleet.kind``, the
+    row the loop wakes and the one ``monitor status`` labels), ``pane_id``,
+    ``interval_seconds``, ``last_ping_at``, ``enabled`` (bool), and
+    ``pending_count`` — the count of the agent's ``input_required`` deliveries
+    excluding ``broadcast_summary`` rows, a correlated subquery mirroring
+    ``members.py``.
     """
     pending_sq = (
         select(func.count(Task.task_id))

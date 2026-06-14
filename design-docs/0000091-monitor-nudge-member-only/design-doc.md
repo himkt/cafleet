@@ -1,7 +1,7 @@
 # Monitor heartbeat nudges the monitoring member only
 
 **Status**: Approved
-**Progress**: 16/23 tasks complete
+**Progress**: 21/23 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -197,11 +197,11 @@ This works only if a nudge actually fires during a *quiet* Copilot wait — and 
 
 ### Phase B: Code
 
-- [ ] B1. `broker/fleets.py::create_fleet`: remove the `monitor.enroll_agent(session, director_agent_id)` call and its comment so the Director is no longer enrolled. <!-- completed: -->
-- [ ] B2. `monitor/loop.py::monitor_tick`: remove the `is_director` keystroke arm (collapse to the monitoring-member-only branch with the defensive `else: continue`); update the in-branch comment and `should_ping`'s docstring to drop the "root Director" framing (the Director is no longer enrolled; `is_director` is kept only for the defensive skip + status). <!-- completed: -->
-- [ ] B3. `broker/monitor.py`: update the `enroll_agent` and `list_monitor_targets` docstrings — enrollment is restricted to exactly one role (the monitoring member); `is_director` is a derived field retained for the loop's defensive skip and `monitor status` labeling, not because a Director row is expected. <!-- completed: -->
-- [ ] B4. `cli/monitor.py::monitor_start`: before `loop.run_monitor_loop`, warn (to stderr) when `list_monitor_targets(fleet_id)` contains no `is_monitoring_member` row, then run the loop unchanged (§4). <!-- completed: -->
-- [ ] B5. Add Alembic revision `cafleet/db/alembic/versions/0004_prune_director_monitor_config.py` (`down_revision="0003"`): `upgrade()` deletes `monitor_config` rows whose `agent_id` is a fleet's `director_agent_id`; `downgrade()` is a no-op (§5). <!-- completed: -->
+- [x] B1. `broker/fleets.py::create_fleet`: remove the `monitor.enroll_agent(session, director_agent_id)` call and its comment so the Director is no longer enrolled. <!-- completed: 2026-06-14T12:30 -->
+- [x] B2. `monitor/loop.py::monitor_tick`: remove the `is_director` keystroke arm (collapse to the monitoring-member-only branch with the defensive `else: continue`); update the in-branch comment and `should_ping`'s docstring to drop the "root Director" framing (the Director is no longer enrolled; `is_director` is kept only for the defensive skip + status). <!-- completed: 2026-06-14T12:30 -->
+- [x] B3. `broker/monitor.py`: update the `enroll_agent` and `list_monitor_targets` docstrings — enrollment is restricted to exactly one role (the monitoring member); `is_director` is a derived field retained for the loop's defensive skip and `monitor status` labeling, not because a Director row is expected. <!-- completed: 2026-06-14T12:30 -->
+- [x] B4. `cli/monitor.py::monitor_start`: before `loop.run_monitor_loop`, warn (to stderr) when `list_monitor_targets(fleet_id)` contains no `is_monitoring_member` row, then run the loop unchanged (§4). <!-- completed: 2026-06-14T12:30 -->
+- [x] B5. Add Alembic revision `cafleet/db/alembic/versions/0004_prune_director_monitor_config.py` (`down_revision="0003"`): `upgrade()` deletes `monitor_config` rows whose `agent_id` is a fleet's `director_agent_id`; `downgrade()` is a no-op (§5). <!-- completed: 2026-06-14T12:30 -->
 
 ### Phase C: Tests
 

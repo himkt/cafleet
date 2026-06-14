@@ -48,6 +48,14 @@ def monitor_start(ctx: click.Context, tick: int) -> None:
     fleet_id = ctx.obj["fleet_id"]
     _require_live_fleet(fleet_id)
     ensure_tmux_or_die()
+    targets = broker.list_monitor_targets(fleet_id)
+    if not any(t["is_monitoring_member"] for t in targets):
+        click.echo(
+            f"Warning: fleet {fleet_id} has no enrolled monitoring member; the "
+            f"monitor heartbeat will wake no agent. Spawn one first with "
+            f"'cafleet member create --role monitor'.",
+            err=True,
+        )
     loop.run_monitor_loop(fleet_id, tick)
 
 
