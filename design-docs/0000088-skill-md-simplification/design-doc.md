@@ -1,7 +1,7 @@
 # Slim Down the CAFleet Skill `.md` Files (Behavior-Preserving)
 
 **Status**: Approved
-**Progress**: 6/10 tasks complete
+**Progress**: 7/10 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -226,8 +226,8 @@ This change edits the very skills (`cafleet-design-doc-create` / `-execute` and 
 
 ### Step 7: Cluster E — `cafleet-design-doc-interview/`
 
-- [ ] `SKILL.md`: consolidate 3× `COMMENT(claude)` + 2× `question.md` format (D11); keep the single deliberate plugin-independent inline. <!-- completed: -->
-- [ ] `roles/analyzer.md`: trim shared boilerplate (D9). <!-- completed: -->
+- [x] `SKILL.md`: consolidate 3× `COMMENT(claude)` + 2× `question.md` format (D11); keep the single deliberate plugin-independent inline. <!-- completed: 2026-06-14T03:44 -->
+- [x] `roles/analyzer.md`: trim shared boilerplate (D9). <!-- completed: 2026-06-14T03:44 -->
 
 ### Step 8: Cluster F + G — agent-team + base-dir
 

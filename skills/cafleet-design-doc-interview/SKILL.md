@@ -33,6 +33,18 @@ Inline marker placed in the design document.
 COMMENT(claude): <description of discrepancy and what needs to change>
 ```
 
+Placed on its own line, immediately before the content it refers to — e.g.:
+
+```markdown
+## Specification
+
+COMMENT(claude): User confirmed the retry limit should be 5, not 3. Update the retry count and adjust the timeout calculation that depends on it.
+
+### Retry Strategy
+
+Maximum retries: 3 with exponential backoff...
+```
+
 Roles relevant in this skill:
 
 | Role | Who writes it | When |
@@ -207,18 +219,7 @@ The Analyzer is stateless — keeping it alive through the Q&A rounds wastes a p
 
 #### 2g. Persist the question list to `question.md`
 
-- **Fresh start** (file does not exist): write `{dir_path}/question.md` with:
-  ```markdown
-  <!-- interview-progress: [] -->
-
-  ## Questions
-
-  1. [Section: ...] Question text | Options: A) ... B) ...
-  2. ...
-
-  ## Answers
-  ```
-  The `interview-progress` starts as an empty array. The Questions section is a verbatim copy of the Analyzer's full numbered list. The Answers section is initially empty.
+- **Fresh start** (file does not exist): write `{dir_path}/question.md` per the § *`question.md` Format* below — `interview-progress` starts as an empty array `[]`, the Questions section is a verbatim copy of the Analyzer's full numbered list, and the Answers section is initially empty.
 
 - **Resume mode** (file already exists, Step 1 sent us here for a new batch): do NOT overwrite the file. Append the new questions to the end of the existing Questions list, continuing the numbering from the last existing question (e.g., if the last question is `#20`, start the new batch at `#21`). This preserves prior Answers, progress, and stable question numbers for Step 3.
 
@@ -259,7 +260,7 @@ After persisting the question list (Step 2g) — or directly when `SKIP_ANALYZER
 
 ### Step 4: Annotate & Update Progress (Director)
 
-1. **Annotate discrepancies**: For each discrepancy found, add a `COMMENT(claude): ...` annotation inline in the design document, immediately before the relevant content. Use `Edit` to insert each annotation.
+1. **Annotate discrepancies**: For each discrepancy found, add a `COMMENT(claude): ...` annotation inline in the design document, immediately before the relevant content (per § *COMMENT(claude) Marker*). Use `Edit` to insert each annotation.
 2. **Update progress in `question.md`**: Append the section headings reviewed in this invocation to the JSON array inside `<!-- interview-progress: [...] -->` in `question.md` (NOT in the design document).
 3. **If final session** (every section in the design document is now in the progress array): remove the `<!-- interview-progress: [...] -->` line from `question.md` entirely.
 4. **Verify**: Use `Grep` on the design document to confirm all intended COMMENT annotations were written.
@@ -282,29 +283,6 @@ Present a summary to the user:
 | Sections remain (with or without COMMENT markers) | Re-invoke the `cafleet-design-doc-interview` skill with `<doc-path>` for the next session |
 | All sections covered, COMMENT markers present in document | Invoke the `cafleet-design-doc-create` skill with `<doc-path>` to fix annotations (resume mode auto-detects markers and routes to the Drafter), then the `cafleet-design-doc-execute` skill |
 | All sections covered, no COMMENT markers in document | Invoke the `cafleet-design-doc-execute` skill with `<doc-path>` to implement |
-
-## COMMENT Annotation Format
-
-Annotations are plain text inserted inline in the markdown document, immediately before the content they refer to:
-
-```markdown
-## Specification
-
-COMMENT(claude): User confirmed the retry limit should be 5, not 3. Update the retry count and adjust the timeout calculation that depends on it.
-
-### Retry Strategy
-
-Maximum retries: 3 with exponential backoff...
-```
-
-Rules:
-
-- Format: `COMMENT(claude): <description of discrepancy and what needs to change>`
-- Placement: immediately before the relevant content, on its own line
-- One COMMENT per discrepancy (do not combine unrelated issues)
-- Description must be actionable — state what is wrong AND what the correct behavior should be
-
-The format matches the `cafleet-design-doc-create` skill's resume-mode expectations exactly, so a follow-up invocation of the `cafleet-design-doc-create` skill with `<doc-path>` auto-detects the markers and routes them to the Drafter.
 
 ## `question.md` Format
 
