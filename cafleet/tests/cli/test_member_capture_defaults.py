@@ -73,7 +73,7 @@ def _record_run(monkeypatch, *, returns: str = "") -> list[list[str]]:
 @pytest.mark.parametrize(
     ("scenario", "extra_args", "expected_argv_suffix"),
     [
-        ("default_no_flag_is_30", [], ["-S", "-30"]),
+        ("default_no_flag_is_20", [], ["-S", "-20"]),
         ("explicit_lines_overrides_default", ["--lines", "150"], ["-S", "-150"]),
         ("tail_alias_forwards_to_lines", ["--tail", "55"], ["-S", "-55"]),
     ],
@@ -230,7 +230,7 @@ def test_member_capture__json_envelope_post_processed_and_lines_default(
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["lines"] == 30
+    assert payload["lines"] == 20
     assert "\x1b" not in payload["content"]
     assert "hello" not in payload["content"]
     assert "world" in payload["content"]

@@ -433,7 +433,7 @@ def member_list(ctx, activity):
     "--tail",
     "lines",
     type=int,
-    default=30,
+    default=20,
     show_default=True,
     help="Lines to capture (alias: --tail).",
 )

@@ -275,10 +275,10 @@ class TmuxMultiplexer:
             target_pane_id=target_pane_id, payload=f"! {normalized_command}"
         )
 
-    def capture_pane(self, *, target_pane_id: str, lines: int = 30) -> str:
+    def capture_pane(self, *, target_pane_id: str, lines: int = 20) -> str:
         """Return the last ``lines`` lines of the pane's terminal buffer.
 
-        Default is 30 to keep per-tick Director monitoring captures from
+        Default is 20 to keep per-tick Director monitoring captures from
         dominating token cost. Explicit ``lines`` overrides apply unchanged.
         """
         if lines <= 0:
@@ -288,7 +288,11 @@ class TmuxMultiplexer:
         )
         # -S gives tmux a start hint but can return more lines than requested
         # (e.g. wrapped lines, partial scrollback); enforce the limit in Python.
-        return "\n".join(raw.splitlines()[-lines:])
+        # Split on \n only — splitlines() would also split on \r and break the
+        # CR-defragmentation step in the CLI layer.
+        # tmux always terminates output with \n, so split produces a trailing "".
+        # Taking -(lines+1) elements keeps that "" so the join restores the newline.
+        return "\n".join(raw.split("\n")[-(lines + 1):])
 
     def pane_exists(self, *, target_pane_id: str) -> bool:
         """Return True iff target_pane_id currently appears in the tmux server's pane list.
