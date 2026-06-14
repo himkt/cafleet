@@ -20,7 +20,7 @@ Load these skills at startup:
 
 ## Placeholder convention
 
-Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are **placeholders, not shell variables** — substitute the literal UUIDs from your spawn prompt directly into each command (`permissions.allow` matches command strings literally; shell expansion breaks it). Flag placement (`--fleet-id` before the subcommand, `--agent-id` after) follows the `cafleet` skill.
+Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are **placeholders, not shell variables** — substitute the literal ids from your spawn prompt directly into each command (`permissions.allow` matches command strings literally; shell expansion breaks it). Flag placement (`--fleet-id` before the subcommand, `--agent-id` after) follows the `cafleet` skill.
 
 ## Communication Protocol
 

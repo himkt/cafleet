@@ -9,13 +9,13 @@ Foundation layer for CAFleet Directors. This skill documents the `cafleet monito
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet fleet create` (which returns both the fleet UUID and the root Director's `agent_id` — see the `cafleet` skill § Typical Workflow for the exact output shape) directly into the command. Do **not** introduce shell variables for agent or fleet IDs — `permissions.allow` matches command strings literally, and shell expansion breaks that matching.
+Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal integer ids printed by `cafleet fleet create` (which returns both the fleet id and the root Director's `agent_id` — see the `cafleet` skill § Typical Workflow for the exact output shape) directly into the command. Do **not** introduce shell variables for agent or fleet IDs — `permissions.allow` matches command strings literally, and shell expansion breaks that matching.
 
 **Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>`.
 
-- `<fleet-id>` — the fleet UUID printed on line 1 of `cafleet fleet create` text output (or the `fleet_id` field in `--json` output)
-- `<director-agent-id>` — the root Director's UUID printed on line 2 of `cafleet fleet create` text output (or `director.agent_id` in `--json` output). `cafleet fleet create` inside a tmux session auto-bootstraps the root Director with its placement row — no separate `cafleet agent register` call is needed to obtain the Director's `agent_id`.
-- `<member-agent-id>` — a target member's agent UUID (from `member create` / `member list`)
+- `<fleet-id>` — the fleet id printed on line 1 of `cafleet fleet create` text output (or the `fleet_id` field in `--json` output)
+- `<director-agent-id>` — the root Director's id printed on line 2 of `cafleet fleet create` text output (or `director.agent_id` in `--json` output). `cafleet fleet create` inside a tmux session auto-bootstraps the root Director with its placement row — no separate `cafleet agent register` call is needed to obtain the Director's `agent_id`.
+- `<member-agent-id>` — a target member's agent id (from `member create` / `member list`)
 
 ## The monitor heartbeat
 

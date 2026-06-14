@@ -20,7 +20,7 @@ Load these skills at startup:
 
 ## Placeholder convention
 
-Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are **placeholders, not shell variables** — substitute the literal UUIDs from your spawn prompt directly into each command (`permissions.allow` matches command strings literally; shell expansion breaks it). Flag placement (`--fleet-id` before the subcommand, `--agent-id` after) follows the `cafleet` skill.
+Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are **placeholders, not shell variables** — substitute the literal ids from your spawn prompt directly into each command (`permissions.allow` matches command strings literally; shell expansion breaks it). Flag placement (`--fleet-id` before the subcommand, `--agent-id` after) follows the `cafleet` skill.
 
 ## Communication Protocol
 
@@ -39,7 +39,7 @@ cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "approved (doc)"
 ```
 Findings are NOT in the cafleet body — each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design document at the affected section (see [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) for the full schema).
-The literal `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
+The literal `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` ids were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
 **Receiving review assignments from the Director:** the broker keystrokes a 2-line inline preview of each message into your pane (mechanics in the `cafleet` skill § Send); to fetch the full body (e.g., the path to a draft) run `cafleet message poll` yourself. Read the message, then acknowledge it:
 ```bash

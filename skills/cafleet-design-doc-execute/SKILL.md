@@ -210,7 +210,7 @@ cafleet fleet create --label "design-doc-execute-{slug}" --json
 #   }
 ```
 
-Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal UUIDs. Remember: `--fleet-id` is a global flag that goes **before** the subcommand; `--agent-id` is a per-subcommand option that goes **after** the subcommand name.
+Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids. Remember: `--fleet-id` is a global flag that goes **before** the subcommand; `--agent-id` is a per-subcommand option that goes **after** the subcommand name.
 
 If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `agent_id` instead of creating a new fleet. Do **not** attempt to register a second Director with `cafleet agent register --name Director` — the root Director from `fleet create` is the team lead; a second registration would just create an unrelated agent with no placement row.
 
@@ -607,7 +607,7 @@ The 30-tick threshold is conservative: Copilot's first review after a `--add-rev
 
 #### Per-wake checklist (Step 7)
 
-This is the concrete command list the Director runs on each monitor wake while Step 7 is active — team health (unchanged from the `cafleet-agent-team-monitoring` skill) plus the PR-review poll. Substitute the literal UUIDs and the literal PR number — no shell variables.
+This is the concrete command list the Director runs on each monitor wake while Step 7 is active — team health (unchanged from the `cafleet-agent-team-monitoring` skill) plus the PR-review poll. Substitute the literal ids and the literal PR number — no shell variables.
 
 ```
 On each monitor wake, run team health AND PR review state.

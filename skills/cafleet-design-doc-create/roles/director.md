@@ -4,7 +4,7 @@ You are the **Director** in a design document creation team orchestrated via the
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<drafter-agent-id>`, `<reviewer-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal UUID strings printed by `cafleet fleet create` (which returns the fleet UUID AND the root Director's `agent_id` — the Director does not need a separate `cafleet agent register` call) and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
+Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<drafter-agent-id>`, `<reviewer-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal integer ids printed by `cafleet fleet create` (which returns the fleet id AND the root Director's `agent_id` — the Director does not need a separate `cafleet agent register` call) and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
 
 **Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>`.
 
