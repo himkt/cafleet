@@ -30,11 +30,13 @@ backend, and confirm all three reply. Then tear the team down.
 Your agent loads the `cafleet` skill plus `cafleet-agent-team-supervision`
 (which loads `cafleet-agent-team-monitoring`) before spawning members.
 
-The supervision tick is supplied by `cafleet monitor` — a per-fleet loop a
-coding agent runs as a background task — so a Director on **any** backend
-(`claude`, `codex`, or `opencode`) gets the same heartbeat. Run the monitor once
-as a background task with `cafleet monitor start --fleet-id <id>` regardless of
-the Director's backend ([Monitoring](../concepts/monitoring.md)).
+The supervision tick is supplied by `cafleet monitor` — a per-fleet loop the
+fleet's dedicated monitoring member runs as a background task in its own pane —
+and works the same on **any** backend (`claude`, `codex`, or `opencode`). The
+monitoring member (the first `cafleet member create`, `--role monitor`) is the
+one process that runs `cafleet monitor start`; the loop wakes only the monitoring
+member, which re-engages the idle Director on demand. The Director never runs the
+monitor itself ([Monitoring](../concepts/monitoring.md)).
 
 ## What to expect
 

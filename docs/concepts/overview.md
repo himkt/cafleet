@@ -40,12 +40,11 @@ flowchart LR
     Broker --> DB[(SQLite<br/>fleets / agents / tasks / agent_placements<br/>monitor_config / monitor_runtime)]
     subgraph Multiplexer["tmux"]
         PaneA["coding-agent pane"]
-        PaneB["coding-agent pane"]
+        PaneB["monitoring member pane"]
     end
     Broker -. inline-preview keystroke .-> PaneA
     Broker -. inline-preview keystroke .-> PaneB
-    Monitor -. poll-trigger keystroke .-> PaneA
-    Monitor -. poll-trigger keystroke .-> PaneB
+    Monitor -. wake nudge .-> PaneB
 ```
 
 The broker package is the single data access layer. Both the CLI and the Admin
@@ -75,11 +74,12 @@ and ACK chip metadata — lives at [WebUI API](../spec/webui-api.md).
 ## Monitoring
 
 A Director supervises its team on a periodic tick. That tick is supplied by
-`cafleet monitor` — a per-fleet loop a coding agent runs as a background task,
-waking due agents by keystroking `message poll` into their panes. It is a plain
-loop, not agent reasoning, so a Director on any backend gets the same heartbeat.
-The monitor owns only the *when* (which agents are due); the Director owns the
-*what* (poll, ACK, dispatch, health-check, escalate). See
+`cafleet monitor` — a per-fleet loop the fleet's dedicated monitoring member runs
+as a background task, waking **only** the monitoring member by keystroking a wake
+nudge into its pane. It is a plain loop, not agent reasoning, so the heartbeat
+works the same on any backend. The monitor owns only the *when* (the monitoring
+member is due); the monitoring member re-engages the idle Director on demand, and
+the Director owns the *what* (poll, ACK, dispatch, health-check, escalate). See
 [Monitoring](monitoring.md).
 
 ## Design document orchestration skills

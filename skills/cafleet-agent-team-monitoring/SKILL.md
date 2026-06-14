@@ -1,6 +1,6 @@
 ---
 name: cafleet-agent-team-monitoring
-description: "Active monitoring mechanism for CAFleet Directors. Documents the external cafleet monitor heartbeat process that wakes the Director on its interval (backend-agnostic), and the team-facilitation instructions (poll, ACK, dispatch queued work, health-check, escalate) the Director runs on each monitor tick. Load whenever you are about to spawn or manage CAFleet team members. Foundation layer — load before the cafleet-agent-team-supervision skill."
+description: "Active monitoring mechanism for CAFleet Directors. Documents the external cafleet monitor heartbeat process that wakes only the dedicated monitoring member on its interval (backend-agnostic), and the team-facilitation instructions (poll, ACK, dispatch queued work, health-check, escalate) the Director runs when the monitoring member re-engages it on demand. Load whenever you are about to spawn or manage CAFleet team members. Foundation layer — load before the cafleet-agent-team-supervision skill."
 ---
 
 # CAFleet Agent Team Monitoring
@@ -21,14 +21,11 @@ Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id
 
 CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. That heartbeat is supplied by **`cafleet monitor`**, a per-fleet `scan → ping → sleep` loop that the fleet's dedicated **monitoring member** runs as a **background task** in its own pane. Because it is just a backgrounded command, the heartbeat is **backend-agnostic** — a root Director on `claude`, `codex`, or `opencode` gets the identical tick. There is no per-backend scheduling asymmetry: the monitor is the one mechanism for every backend.
 
-The loop wakes **only two** agents per fleet — the root Director and the monitoring member itself — and **never** ordinary members. Every ping is **`Esc`-safeguarded**: the loop presses `Escape`, lets the pane settle ~0.1 s, then types the literal text and `Enter`, so a pane sitting on a pending permission-approval prompt dismisses the prompt instead of having the trailing `Enter` confirm it. Both enrolled agents are pinged **unconditionally** on their interval (default 60 s) once due; `pending_count` is shown in `monitor status` but does not gate the ping. The keystroke text differs by role:
-
-- the **Director** gets a bare `cafleet … message poll`;
-- the **monitoring member** gets a single-line *wake nudge* instructing it to run its capture-classify-reengage routine (see [The monitoring member](#the-monitoring-member)).
+The loop wakes **only the monitoring member** — never the root Director and never ordinary members. Every ping is **`Esc`-safeguarded**: the loop presses `Escape`, lets the pane settle ~0.1 s, then types the literal text and `Enter`, so a pane sitting on a pending permission-approval prompt dismisses the prompt instead of having the trailing `Enter` confirm it. The monitoring member is pinged **unconditionally** on its interval (default 60 s) once due; `pending_count` is shown in `monitor status` but does not gate the ping. The keystroke is a single-line *wake nudge* instructing the monitoring member to run its capture-classify-reengage routine (see [The monitoring member](#the-monitoring-member)).
 
 See the `cafleet` skill and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy. **The monitoring member — not the Director — runs `cafleet monitor start`** (see § Monitor Lifecycle).
 
-**A monitor wake of the Director is a bare poll, so the cue to facilitate must come from the skill.** Pinging the Director keystrokes *exactly* `cafleet … message poll` into its pane (after the leading `Esc`) — that bare poll, on its own, performs only **step 1** below. **Treat every monitor poll-trigger wake as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), not to read the inbox and stop. The monitor decides only *when*; this skill defines *what* the Director does on each wake.
+**The Director is never woken by the loop.** It is re-engaged only on demand: by the monitoring member's idle nudge (an `Esc`-safeguarded `cafleet message send` when the routine classifies the Director as idle), and by the broker's inline-preview keystroke on every inbound `cafleet message send`. When woken by one of those, the Director runs the entire 5-step facilitation loop (poll → ACK → dispatch → health-check → escalate), not just an inbox read. The monitor decides only *when* to wake the monitoring member; this skill defines *what* the Director does once re-engaged.
 
 ### How ordinary members are woken
 
@@ -95,7 +92,7 @@ the Director with an Esc-safeguarded nudge.
 
 ## Team-facilitation instructions
 
-On every supervision tick — whether fired by a `cafleet monitor` wake or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
+On every supervision tick — whether fired by the monitoring member's on-demand idle nudge, by inbound work arriving via the broker's inline-preview keystroke, or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
 
 1. **Poll inbox.** `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` returns only the un-acked (`input_required`) deliveries; ACKing each one (step 2) consumes it, so the next tick's poll surfaces only what has arrived since.
 2. **ACK every message** that requires no further action: `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.
@@ -121,7 +118,7 @@ Run this sequence once per supervision tick. Order matters — cheapest non-intr
 |---|---|
 | Spawn the monitoring member (first-in) | The **first** `cafleet member create` in the fleet IS the monitoring member: `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name monitor --description <…> --role monitor --model sonnet --prompt-file <rendered monitor prompt>`. It boots, launches `cafleet monitor start` as a background task in its own pane, confirms `monitor status`, and sends `ready: monitor live` to the Director. |
 | Gate ordinary members | Wait for the monitoring member's `ready: monitor live` message before the first ordinary `cafleet member create`. The Director MAY run `cafleet monitor status --fleet-id <fleet-id>` itself as optional corroboration, but it waits on the handshake message rather than block-polling status (consistent with the async wait rule). |
-| Run work | The monitor ticks at its configured cadence (default ping interval 60 s); do not intervene unless a wake escalates. Each Director wake is the cue to run the 5-step facilitation loop above. |
+| Run work | The monitor ticks at its configured cadence (default ping interval 60 s), waking the monitoring member; do not intervene unless an escalation arrives. Each on-demand idle nudge from the monitoring member (or inbound work via inline preview) is the Director's cue to run the 5-step facilitation loop above. |
 | User review | Keep the monitoring member and its `monitor start` task running during the review cycle — revisions and re-reviews still count as in-progress work. |
 | Teardown (first-out) | Stop the monitor's background task, then delete the monitoring member FIRST, before ordinary members (see Cleanup below). |
 
@@ -129,7 +126,7 @@ Run this sequence once per supervision tick. Order matters — cheapest non-intr
 
 ## Stall Response
 
-When you receive any signal that a member may be stalled (monitor wake, idle notification, user nudge), evaluate using this 2-stage protocol:
+When you receive any signal that a member may be stalled (the monitoring member's idle nudge, idle notification, user nudge), evaluate using this 2-stage protocol:
 
 > **Bash request blocking case**: When `cafleet message poll` returns a member message asking for a shell command, dispatch via `cafleet member exec "<cmd>"` per the `cafleet` skill § Routing Bash via the Director. Member blocks until the keystroke lands; process requests one at a time, don't skip ahead to other inbox items.
 

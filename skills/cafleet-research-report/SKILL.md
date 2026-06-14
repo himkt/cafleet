@@ -77,11 +77,11 @@ cafleet --json fleet create --label "research-[topic-slug]"
 
 Capture `fleet_id` and `director.agent_id` from the response. Treat `fleet_id` as `[fleet-id]` and `director.agent_id` as `[director-agent-id]` for the rest of this skill.
 
-### Step 1: Start Progress Monitor (Director — MANDATORY)
+### Step 1: Supervision Model (Director — request-driven, no monitor)
 
-Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill. Run the monitor as a background task with `cafleet monitor start --fleet-id [fleet-id]` BEFORE the first `cafleet member create` call so the heartbeat is running while the Manager is spawning (confirm with `cafleet monitor status --fleet-id [fleet-id]`).
+Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill for their facilitation and Stall Response policy. This team is **request-driven**: do **not** run `cafleet monitor` or spawn a `--role monitor` member. Members wake on the broker's inline-preview keystroke on every `message send`; the Director is woken by members' replies and drives work by active polling (`cafleet member ping` for manual recovery).
 
-The loop must check `${OUTPUT_DIR}` for these expected deliverables:
+On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 
 - `report.md` — required final compiled report from the Manager
 - `00-scout-*.md` — Scout landscape/discovery notes (one or more files may exist)
@@ -89,10 +89,9 @@ The loop must check `${OUTPUT_DIR}` for these expected deliverables:
 
 Readiness/stall rules (apply per the `cafleet-agent-team-monitoring` skill):
 
-- After Scouts/Researchers have been spawned and tasks have been assigned, expect at least one `00-scout-*.md` or `NN-research-*.md` file to appear within a couple of ticks.
+- After Scouts/Researchers have been spawned and tasks have been assigned, expect at least one `00-scout-*.md` or `NN-research-*.md` file to appear after the first round of replies.
 - Do not consider the workflow ready for Step 5 until `report.md` exists.
 - If a member owns an `in_progress` task but their deliverable file is missing past the expected milestone, run the 2-stage health-check from the `cafleet-agent-team-monitoring` skill: `cafleet message poll` → `cafleet member capture --lines 200` → directed `cafleet message send` nudge → user escalation.
-- Keep the monitor running until Step 8.
 
 ### Step 2: Spawn Manager (Director)
 
@@ -310,27 +309,26 @@ After user approval, offer to create a presentation via `AskUserQuestion` (adapt
 
 ### Step 8: Finalize & Clean Up (Director)
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first, otherwise the monitor keystrokes polls against dead members or orphan `claude` processes linger.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first, otherwise orphan `claude` processes linger. This team is request-driven, so there is no monitor to stop.
 
-1. **Stop the monitor's background task** (there is no `monitor stop` command). The monitor must stop BEFORE any member is deleted; a monitor that keeps keystroking polls into a tearing-down fleet races with member-delete.
-2. **Delete every member** in dependency order — Researchers first, then any active Scout, then the Manager:
+1. **Delete every member** in dependency order — Researchers first, then any active Scout, then the Manager:
    ```bash
    cafleet member delete --fleet-id [fleet-id] --member-id [researcher-agent-id]
    cafleet member delete --fleet-id [fleet-id] --member-id [scout-agent-id]
    cafleet member delete --fleet-id [fleet-id] --member-id [manager-agent-id]
    ```
    Each call sends `/exit` to the pane and waits up to 15 s for it to close. On exit 2 (timeout), the pane buffer tail is printed on stderr — inspect with `cafleet member capture`, answer any prompt with `cafleet member send-input`, then re-run. As a last resort, rerun with `--force` to skip the wait and kill-pane immediately.
-3. **Verify the roster is empty**:
+2. **Verify the roster is empty**:
    ```bash
    cafleet member list --fleet-id [fleet-id]
    ```
-   If anyone remains, repeat step 2 for that member.
-4. **Delete the fleet**:
+   If anyone remains, repeat step 1 for that member.
+3. **Delete the fleet**:
    ```bash
    cafleet fleet delete [fleet-id]
    ```
    This soft-deletes the fleet and deregisters the root Director, Administrator, and any surviving members in one transaction.
-5. **Confirm**:
+4. **Confirm**:
    ```bash
    cafleet fleet list
    ```

@@ -12,9 +12,9 @@ reacting. This guide checks on a running team and recovers a quiet member.
 
 The recovery ladder below is driven by a periodic supervision tick. That tick
 comes from `cafleet monitor` — a per-fleet loop the fleet's dedicated
-**monitoring member** runs as a background task in its own pane, waking the
-Director (and the monitoring member itself) on its interval with
-**`Esc`-safeguarded** keystrokes (an `Escape` precedes every ping so a pane on a
+**monitoring member** runs as a background task in its own pane, waking **only**
+the monitoring member on its interval with an
+**`Esc`-safeguarded** keystroke (an `Escape` precedes every ping so a pane on a
 pending permission prompt can't have it confirmed by the trailing `Enter`). The
 monitoring member is spawned **first**; it starts the loop and reports
 `ready: monitor live` (its canonical spawn prompt lives in the
@@ -28,10 +28,12 @@ cafleet member create --fleet-id 1 --agent-id 2 \
 cafleet monitor status --fleet-id 1              # confirm it is running + see the schedule
 ```
 
-The loop pings only two agents — the Director and the monitoring member — and
-**never** ordinary members ([Monitoring](../concepts/monitoring.md)). A quiet
-ordinary member is surfaced instead by the monitoring member's idle assessment
-of the Director, which re-engages the Director to run the inspect-and-recover
+The loop pings only the monitoring member — **never** the root Director and
+**never** ordinary members ([Monitoring](../concepts/monitoring.md)). The
+Director is re-engaged on demand by the monitoring member's idle assessment
+(and by the broker's inline-preview keystroke on every inbound `message send`);
+a quiet ordinary member is surfaced the same way — the monitoring member's idle
+assessment of the Director re-engages the Director to run the inspect-and-recover
 ladder below. The monitor supplies only the heartbeat; the inspect-and-recover
 steps are the Director's job. Stop it at teardown by stopping the monitoring
 member's background task (there is no `monitor stop`); `fleet delete` also makes

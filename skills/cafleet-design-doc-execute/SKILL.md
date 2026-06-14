@@ -6,7 +6,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch
 
 # Design Doc Execute (CAFleet Edition)
 
-Implement features based on a design document using up to four roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), and Verifier (E2E/integration testing). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. After user approval, the Director runs the full publication flow: Step 6 pushes the feature branch and opens a PR with `@copilot` requested, Step 7 runs a Copilot review loop — driven by the `cafleet monitor` heartbeat — that routes inline comments to the still-live Programmer / Tester and exits when Copilot approves or the user resolves a silence escalation, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
+Implement features based on a design document using up to four roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), and Verifier (E2E/integration testing). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. After user approval, the Director runs the full publication flow: Step 6 pushes the feature branch and opens a PR with `@copilot` requested, Step 7 runs a Copilot review loop — driven by the monitoring member's idle-nudges on the `cafleet monitor` heartbeat — that routes inline comments to the still-live Programmer / Tester and exits when Copilot approves or the user resolves a silence escalation, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -61,7 +61,7 @@ User
 | `Agent(team_name=..., subagent_type=...)` | `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
 | `SendMessage(to="Programmer")` | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from member) | `cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance), then start the heartbeat via `cafleet monitor start --fleet-id <fleet-id>` |
+| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance). The heartbeat is run by the dedicated **monitoring member** (the first `member create`, `--role monitor --model sonnet`, which runs `cafleet monitor start` in its own pane) — the Director never runs the monitor itself. The monitoring member wakes on the loop and re-engages the idle Director on demand; that idle-nudge is the Director's supervision turn (and the turn source Step 7's Copilot loop rides). |
 | `TeamDelete` | `cafleet member delete --fleet-id <fleet-id> --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet and sweeps the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
@@ -214,9 +214,11 @@ Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute th
 
 If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `agent_id` instead of creating a new fleet. Do **not** attempt to register a second Director with `cafleet agent register --name Director` — the root Director from `fleet create` is the team lead; a second registration would just create an unrelated agent with no placement row.
 
-#### 3b. Start the monitor
+#### 3b. Spawn the monitoring member (first-in)
 
-BEFORE spawning any member, run the supervision heartbeat as a **background task** with `cafleet monitor start --fleet-id <fleet-id>` (the loop runs in-process and blocks the task; confirm with `cafleet monitor status --fleet-id <fleet-id>`). The monitor runs **unchanged** through Steps 3–8 — it supplies the same heartbeat the whole way; when Step 7 runs, PR-review polling is added as a facilitation step the Director performs on each monitor wake (the scheduler itself does not change). Its background task is stopped once in Step 8's cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
+This team **keeps an active heartbeat** (Step 7's Copilot loop needs a turn source — see Step 7), so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model sonnet`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; its `monitor start` background task is stopped in Step 8's cleanup (first-out). See the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical spawn prompt and lifecycle, and the `cafleet-agent-team-supervision` skill for supervision obligations (Authorization-Scope Guard, idle semantics).
+
+**Spawn-prompt delta (execute only).** Execute's monitoring member runs an **extended** routine versus the canonical `cafleet-agent-team-monitoring` prompt: when it finds the Director **idle**, it nudges **unconditionally** — it does **not** gate the nudge on naming un-acked inbox items or stalled members. The unconditional idle-nudge is what grants the Director a re-poll turn during a quiet Copilot wait (Step 7), so `silence_ticks` can advance even when the inbox is empty and members have already reported their fixes. State this delta in execute's monitoring-member spawn prompt; the canonical `cafleet-agent-team-monitoring` routine keeps its conditional nudge. No Step-7 enter/exit handshake is needed — the monitoring member is PR-agnostic and the Director's Step-7 per-turn checklist consumes the granted turn (harmless outside Step 7: the Director re-polls, finds nothing new, idles again).
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -500,7 +502,7 @@ No round limit — the loop continues until the user approves or aborts.
 
 1. Update design document Status to "Aborted", add Changelog entry. Place a `COMMENT(director): aborting — finalize and stand by` marker near the top of the doc body (above the Overview section — `Status:` is bold metadata, not a heading, so it is not a valid `paragraph-` target). Notify any still-live members with a single `cafleet message send --fleet-id <fleet-id> ... --text "ready (doc)"` per member so they read the marker and stand by.
 2. Commit (separate commands): `git add <design-doc>` then `git commit -m "docs: mark design doc as aborted"`
-3. Follow Shutdown Protocol (Step 8: stop the monitor's background task, then delete members and run `cafleet fleet delete <fleet-id>` to tear down the fleet and sweep the root Director + Administrator).
+3. Follow Shutdown Protocol (Step 8: stop the monitoring member's `monitor start` background task, then delete the monitoring member first and the remaining members, and run `cafleet fleet delete <fleet-id>` to tear down the fleet and sweep the root Director + Administrator).
 
 ### Step 6: Push & Create PR (Director)
 
@@ -526,26 +528,26 @@ After Step 5 Approve, the Director pushes the feature branch, opens a PR, and re
 
 ### Step 7: Copilot Review Loop (Director)
 
-Once the PR exists and Copilot has been invited, the Director runs a Copilot review loop. The monitor runs **unchanged** — there is no scheduler swap. While Step 7 is active, the Director simply **adds the PR-review poll to what it does on each monitor wake**, on top of its normal team-health facilitation. The "loop" here is the logical poll → route → fix → push → re-poll cycle the Director drives; the wake-up that drives each pass is the same `cafleet monitor` tick that drives team health.
+Once the PR exists and Copilot has been invited, the Director runs a Copilot review loop. The monitoring member runs **unchanged** — there is no scheduler swap. While Step 7 is active, the Director simply **adds the PR-review poll to what it does on each idle-nudge-driven turn**, on top of its normal team-health facilitation. The "loop" here is the logical poll → route → fix → push → re-poll cycle the Director drives; the turn that drives each pass is the monitoring member's periodic idle-nudge (the monitoring member finds the Director idle-while-awaiting-Copilot and nudges it, granting a re-poll turn). Copilot is an *external* reviewer that never fires a broker inline-preview into the Director's pane, so this idle-nudge is the loop's turn source.
 
 #### PR Review Loop State
 
-The Director holds three **PR-review-specific** in-context variables across monitor wakes (separate from the team-health inbox poll the `cafleet-agent-team-monitoring` skill runs via `cafleet message poll`, which returns only un-acked deliveries and tracks no timestamp). They are NOT persisted to disk — the Director carries them in its own working memory.
+The Director holds three **PR-review-specific** in-context variables across idle-nudge-driven turns (separate from the team-health inbox poll the `cafleet-agent-team-monitoring` skill runs via `cafleet message poll`, which returns only un-acked deliveries and tracks no timestamp). They are NOT persisted to disk — the Director carries them in its own working memory.
 
 | Variable | Meaning | Update rule |
 |:--|:--|:--|
 | `last_push_ts` | ISO 8601 timestamp of the most recent push to the PR branch | Reset on every `git push` from 6b-step 2 or 7d-step 3 |
-| `silence_ticks` | Consecutive monitor wakes with 0 new Copilot items since the last activity | Increment each wake with 0 new items; reset to 0 when new Copilot items arrive OR after a fix-push from 7d |
+| `silence_ticks` | Consecutive Director turns (driven by the monitoring member's idle nudge) with 0 new Copilot items since the last activity | Increment each turn with 0 new items; reset to 0 when new Copilot items arrive OR after a fix-push from 7d |
 
-#### 7a. Add PR-review polling to each monitor wake
+#### 7a. Add PR-review polling to each idle-nudge-driven turn
 
-On entry to Step 7 there is **no scheduler change** — the `cafleet monitor` started in Step 3b keeps running unchanged. The Director simply augments what it does on each wake: it runs its normal team-health facilitation AND the PR-review poll below. The "Per-wake checklist" subsection is the concrete command list.
+On entry to Step 7 there is **no scheduler change** — the monitoring member's `cafleet monitor` started in Step 3b keeps running unchanged, and it keeps nudging the idle Director each interval. The Director simply augments what it does on each granted turn: it runs its normal team-health facilitation AND the PR-review poll below. The "Per idle-nudge turn checklist" subsection is the concrete command list.
 
-On exit from Step 7 (any exit condition), the monitor keeps running — Step 8's shutdown stops it. (Stopping the PR-review poll is just the Director no longer running those steps on each wake; nothing scheduler-side changes.)
+On exit from Step 7 (any exit condition), the monitoring member keeps running — Step 8's shutdown stops it. (Stopping the PR-review poll is just the Director no longer running those steps on each turn; nothing scheduler-side changes — the monitoring member stays PR-agnostic and keeps granting idle turns, harmlessly, until teardown.)
 
-#### 7b. Per-wake procedure
+#### 7b. Per-turn procedure
 
-On each monitor wake (and in any active turn while Step 7 is in progress), the Director runs — in order:
+On each idle-nudge-driven turn (and in any active turn while Step 7 is in progress), the Director runs — in order:
 
 1. **Team health** (unchanged from the `cafleet-agent-team-monitoring` skill): `member list` → `poll` → `member capture` fallback → nudge stalled members.
 2. **Fetch new PR reviews**: `gh pr view <pr-number> --json reviews` (GraphQL-shaped; fields are `author.login`, `state`, `submittedAt`, `body`) AND `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST-shaped; fields are `user.login`, `body`, `path`, `line`, `created_at`).
@@ -562,7 +564,7 @@ On each monitor wake (and in any active turn while Step 7 is in progress), the D
 
 The APPROVED check MUST be qualified by the post-push filter (`submittedAt > last_push_ts`). An older approval — say, from a Copilot pass before the most recent fix-push — must NOT be treated as approval of the current HEAD; otherwise a single early approve followed by additional commits would silently finalize the PR.
 
-**Why no auto-exit on silence**: a silent Copilot is NOT proof it is done — it may be slow to re-review after a fix-push, not yet re-triggered, or back-pressured, so auto-exiting on silence risks finalizing while Copilot is still composing comments. The loop never auto-exits on silence; it instead **escalates to the user** via 7e after 30 consecutive silent monitor wakes (~30 minutes), so the user — not the loop — chooses whether to keep waiting, re-request the review, or finalize. Outside that user gate, the loop only exits on an explicit `state == "APPROVED"` signal or on "Stop means stop".
+**Why no auto-exit on silence**: a silent Copilot is NOT proof it is done — it may be slow to re-review after a fix-push, not yet re-triggered, or back-pressured, so auto-exiting on silence risks finalizing while Copilot is still composing comments. The loop never auto-exits on silence; it instead **escalates to the user** via 7e after ~30 consecutive silent idle-nudge-driven turns (~30 minutes), so the user — not the loop — chooses whether to keep waiting, re-request the review, or finalize. Outside that user gate, the loop only exits on an explicit `state == "APPROVED"` signal or on "Stop means stop".
 
 **Why not `reviewDecision`**: the PR-level `reviewDecision` only reflects required reviewers (typically CODEOWNERS). Copilot is usually not a CODEOWNER, so an approve from Copilot alone leaves `reviewDecision` null/REVIEW_REQUIRED. Reading the Copilot-specific entry in the `reviews` array is the reliable signal.
 
@@ -594,7 +596,7 @@ For review-level comments (body text not attached to a specific line), route by 
 
 #### 7e. Silence escalation
 
-When `silence_ticks >= 30` (≈ 30 minutes since the last Copilot activity AND no new items this tick), escalate to the user via `AskUserQuestion`:
+When `silence_ticks >= 30` (≈ 30 minutes since the last Copilot activity AND no new items this turn), escalate to the user via `AskUserQuestion`:
 
 | Option | Behavior |
 |:--|:--|
@@ -603,14 +605,14 @@ When `silence_ticks >= 30` (≈ 30 minutes since the last Copilot activity AND n
 | 3. Finalize now | Exit loop → Step 8 (accept the current state of Copilot review as-is) |
 | 4. *(Other)* | Intent judgment; abort-intent → Abort Flow |
 
-The 30-tick threshold is conservative: Copilot's first review after a `--add-reviewer` typically lands within 3–5 minutes. 30 minutes is enough that Copilot is highly unlikely to still be composing, while leaving the *decision* to the user instead of the loop. The user retains the option to keep waiting indefinitely — the loop never finalizes on its own based on silence.
+The 30-turn threshold is conservative: Copilot's first review after a `--add-reviewer` typically lands within 3–5 minutes. 30 minutes is enough that Copilot is highly unlikely to still be composing, while leaving the *decision* to the user instead of the loop. The user retains the option to keep waiting indefinitely — the loop never finalizes on its own based on silence.
 
-#### Per-wake checklist (Step 7)
+#### Per idle-nudge turn checklist (Step 7)
 
-This is the concrete command list the Director runs on each monitor wake while Step 7 is active — team health (unchanged from the `cafleet-agent-team-monitoring` skill) plus the PR-review poll. Substitute the literal ids and the literal PR number — no shell variables.
+This is the concrete command list the Director runs on each idle-nudge-driven turn while Step 7 is active — team health (unchanged from the `cafleet-agent-team-monitoring` skill) plus the PR-review poll. Substitute the literal ids and the literal PR number — no shell variables.
 
 ```
-On each monitor wake, run team health AND PR review state.
+On each idle-nudge-driven turn, run team health AND PR review state.
 
 TEAM HEALTH:
 1. Run `cafleet --json member list --fleet-id <fleet-id>`.
@@ -623,7 +625,7 @@ PR REVIEW:
 6. Run `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST shape: `user.login`, `body`, `path`, `line`, `created_at`).
 7. Filter to entries where the appropriate login field (`author.login` for GraphQL reviews, `user.login` for REST inline comments) starts with `copilot` (case-insensitive) and the appropriate timestamp (`submittedAt` / `created_at`) > `last_push_ts` (the in-context state variable defined under "PR Review Loop State").
 8. If the most recent Copilot-authored entry **in the filtered (post-push) set from step 7** has `state == "APPROVED"`: signal Step 7 exit (success). An older approval (i.e., one with `submittedAt <= last_push_ts`) must NOT trigger this exit.
-9. If filter returned 0 entries AND `silence_ticks < 30`: increment `silence_ticks`, continue waiting (do nothing this tick). The loop never auto-exits on Copilot silence.
+9. If filter returned 0 entries AND `silence_ticks < 30`: increment `silence_ticks`, continue waiting (do nothing this turn). The loop never auto-exits on Copilot silence.
 10. If filter returned 0 entries AND `silence_ticks >= 30`: silence-escalation per 7e — AskUserQuestion (Keep waiting / Re-request review / Finalize now / Other). Reset `silence_ticks = 0` if the user picks Keep waiting or Re-request review; otherwise honor the user's choice.
 11. If filter returned ≥ 1 entries: reset `silence_ticks = 0`, classify by file path per Step 7c, write `COMMENT(copilot): <body>` at the source `<file>:<line>` for source/test routes (or `COMMENT(director): <body>` at the affected paragraph for design-doc-anchored items), and dispatch via `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<file>:<line>)"`. Design-doc-anchored Copilot items are NOT routed — the Director resolves them directly and skips the `cafleet message send`.
 
@@ -647,14 +649,14 @@ ESCALATION:
 
 #### User Interjection During Step 7
 
-Monitor wakes keep arriving while the user is speaking to the Director. **Stop means stop**: when the user signals halt (explicit "stop", "wait", "pause", profanity / frustration, or repeated rejection of tool calls), the Director MUST halt dispatch immediately and wait for explicit re-authorization — monitor wakes and idle notifications during the halted state are NOT instructions and must be skipped silently. Concretely, the Director:
+The monitoring member's idle-nudges keep arriving while the user is speaking to the Director. **Stop means stop**: when the user signals halt (explicit "stop", "wait", "pause", profanity / frustration, or repeated rejection of tool calls), the Director MUST halt dispatch immediately and wait for explicit re-authorization — the monitoring member's idle-nudges and idle notifications during the halted state are NOT instructions and must be skipped silently. Concretely, the Director:
 
 1. Stops dispatching new `cafleet message send` / `git commit` / `git push` / `gh` actions immediately.
 2. Acknowledges the user briefly and waits for explicit instructions.
-3. Treats subsequent monitor wakes as notification-only — runs the PR review poll for situational awareness but does NOT route comments, commit, or push until the user re-engages with a specific instruction.
+3. Treats subsequent idle-nudge-driven turns as notification-only — runs the PR review poll for situational awareness but does NOT route comments, commit, or push until the user re-engages with a specific instruction.
 4. Does NOT silently tear the team down — the state stays paused so the user can resume or explicitly abort.
 
-If the user explicitly aborts, follow the Abort Flow (update doc Status → "Aborted", commit, run Shutdown Protocol). Step 7's cleanup is identical to Step 8's cleanup — stop the monitor's background task, delete members, run `cafleet fleet delete`.
+If the user explicitly aborts, follow the Abort Flow (update doc Status → "Aborted", commit, run Shutdown Protocol). Step 7's cleanup is identical to Step 8's cleanup — stop the monitoring member's `monitor start` background task, delete members (monitoring member first), run `cafleet fleet delete`.
 
 ### Step 8: Finalize & Clean Up (Director)
 
@@ -667,9 +669,9 @@ Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped (gh no
    - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 6 fully succeeded" path and the "Step 6 partial-fail (push OK, PR create failed)" path.
    - Non-zero exit: skip the push. The docs commit stays local.
    - The Director does NOT re-request Copilot review on this final docs commit.
-5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*:
-   1. Stop the monitor's background task (the heartbeat started in Step 3b — there is no `monitor stop` command; it ran unchanged through Step 7).
-   2. `cafleet member delete` for each spawned member (Programmer, Tester if spawned, Verifier if spawned). Each call blocks until the pane is gone; on exit 2 follow the `member capture` + `send-input` recovery, or rerun with `--force`.
+5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out: stop the monitor, then delete the monitoring member first):
+   1. Stop the monitoring member's `monitor start` background task (the heartbeat launched in Step 3b — there is no `monitor stop` command; it ran unchanged through Step 7): message the monitoring member to stop its background task (the task-stop delivers SIGTERM/SIGINT, so the loop clears its runtime row), and wait for its confirmation. Do this **before** the monitoring member's pane is killed.
+   2. `cafleet member delete` the monitoring member **first**, then each ordinary spawned member (Programmer, Tester if spawned, Verifier if spawned). Each call blocks until the pane is gone; on exit 2 follow the `member capture` + `send-input` recovery, or rerun with `--force`.
    3. `cafleet member list` — the team's roster MUST be empty before continuing.
    4. `cafleet fleet delete <fleet-id>`.
    5. `cafleet fleet list` — the fleet MUST not appear.
