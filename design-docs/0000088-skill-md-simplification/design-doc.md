@@ -1,7 +1,7 @@
 # Slim Down the CAFleet Skill `.md` Files (Behavior-Preserving)
 
 **Status**: Approved
-**Progress**: 2/10 tasks complete
+**Progress**: 3/10 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -204,9 +204,9 @@ This change edits the very skills (`cafleet-design-doc-create` / `-execute` and 
 
 ### Step 3: Cluster A — `cafleet/` core + roles
 
-- [ ] `cafleet/SKILL.md`: trim "Why literal flags, not env vars?" to the one-line rule (D5). <!-- completed: -->
-- [ ] `cafleet/roles/member.md`: collapse the triple forbidden-behaviors statement (D4). <!-- completed: -->
-- [ ] `cafleet/roles/director.md`: light trim. <!-- completed: -->
+- [x] `cafleet/SKILL.md`: trim "Why literal flags, not env vars?" to the one-line rule (D5). <!-- completed: 2026-06-14T02:53 -->
+- [x] `cafleet/roles/member.md`: collapse the triple forbidden-behaviors statement (D4). <!-- completed: 2026-06-14T02:53 -->
+- [x] `cafleet/roles/director.md`: light trim. <!-- completed: 2026-06-14T02:53 -->
 
 ### Step 4: Cluster B — `cafleet-design-doc/` shared
 

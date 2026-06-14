@@ -41,7 +41,7 @@ Every `cafleet` invocation that touches agents or messages must carry two litera
 
 If `--fleet-id` is missing on a subcommand that needs it, the CLI exits with `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`
 
-> **Why literal flags, not env vars?** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --fleet-id <int> <subcmd> --agent-id <int>` invocation matches a single allow pattern across every subcommand for that fleet. Shell-expansion patterns (`export VAR=...` then `$VAR`) break that matching and force per-invocation permission prompts that interrupt agent loops. Substitute the literal ids printed by `cafleet fleet create` and `cafleet agent register` — never store them in shell variables.
+> **Why literal flags, not env vars?** `permissions.allow` matches Bash invocations as literal command strings — a literal `cafleet --fleet-id <int> <subcmd> --agent-id <int>` matches one allow pattern, while shell-expansion (`export VAR=...` then `$VAR`) breaks the match and forces per-invocation permission prompts. Substitute the literal ids printed by `cafleet fleet create` and `cafleet agent register`; never store them in shell variables.
 
 The environment variables the CLI reads (all wired through `cafleet.config.Settings` via explicit `validation_alias` on each field, so the `CAFLEET_` prefix is uniform):
 
