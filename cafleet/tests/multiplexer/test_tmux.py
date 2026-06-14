@@ -670,7 +670,7 @@ def test_send_literal_then_enter__esc_first_prepends_escape_and_settle(monkeypat
 
 
 def test_send_literal_then_enter__esc_first_default_sends_no_escape(monkeypatch):
-    """esc_first defaults to False: no `Escape` keystroke, single settle sleep."""
+    """esc_first defaults to False: no `Escape` keystroke, single submit-delay sleep."""
     captured: list[list[str]] = []
     sleeps: list[float] = []
 
