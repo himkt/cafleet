@@ -1,7 +1,7 @@
 # Per-Subcommand `--fleet-id` (Move the Global Flag onto Child Subcommands)
 
 **Status**: Approved
-**Progress**: 31/37 tasks complete
+**Progress**: 35/37 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -10,14 +10,14 @@ Move `--fleet-id` off the top-level `cafleet` click group and onto each child su
 
 ## Success Criteria
 
-- [ ] `--fleet-id` is a per-subcommand option on every client/member/monitor leaf command, accepted **after** the subcommand name (e.g. `cafleet message poll --fleet-id 56 --agent-id 234`).
-- [ ] The top-level `cafleet` group no longer defines `--fleet-id`; `cafleet --fleet-id <id> <subcmd>` (old global position) exits 2 with Click's `No such option: --fleet-id`.
-- [ ] `--json` and `--version` remain global (before the subcommand) and behave exactly as today.
-- [ ] `db init`, `fleet *`, `server`, and `doctor` do **not** accept `--fleet-id` at all (Click rejects it); the previous "silently accepted and ignored" behavior is gone.
-- [ ] Omitting `--fleet-id` on a subcommand that needs it prints the existing custom message (`--fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`) and exits 1.
-- [ ] The design doc specifies a recommended per-subcommand `permissions.allow` pattern set; the user applies the global `~/.claude/settings.json` change manually (no committed repo `.claude/settings.json` permissions block is added).
-- [ ] Every repo-committable `cafleet --fleet-id <id> <subcmd>` command example (docs, all skills, README, `.claude/rules/`, `CLAUDE.md`) is rewritten to the new shape, and every prose claim that `--fleet-id` is a global / before-the-subcommand flag is rewritten. After this lands the repo reads as if `--fleet-id` was always per-subcommand (no deprecation notices), per `.claude/rules/removal.md`.
-- [ ] `mise //cafleet:format`, `lint`, `typecheck`, and `test` are all green.
+- [x] `--fleet-id` is a per-subcommand option on every client/member/monitor leaf command, accepted **after** the subcommand name (e.g. `cafleet message poll --fleet-id 56 --agent-id 234`).
+- [x] The top-level `cafleet` group no longer defines `--fleet-id`; `cafleet --fleet-id <id> <subcmd>` (old global position) exits 2 with Click's `No such option: --fleet-id`.
+- [x] `--json` and `--version` remain global (before the subcommand) and behave exactly as today.
+- [x] `db init`, `fleet *`, `server`, and `doctor` do **not** accept `--fleet-id` at all (Click rejects it); the previous "silently accepted and ignored" behavior is gone.
+- [x] Omitting `--fleet-id` on a subcommand that needs it prints the existing custom message (`--fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`) and exits 1.
+- [x] The design doc specifies a recommended per-subcommand `permissions.allow` pattern set; the user applies the global `~/.claude/settings.json` change manually (no committed repo `.claude/settings.json` permissions block is added).
+- [x] Every repo-committable `cafleet --fleet-id <id> <subcmd>` command example (docs, all skills, README, `.claude/rules/`, `CLAUDE.md`) is rewritten to the new shape, and every prose claim that `--fleet-id` is a global / before-the-subcommand flag is rewritten. After this lands the repo reads as if `--fleet-id` was always per-subcommand (no deprecation notices), per `.claude/rules/removal.md`.
+- [x] `mise //cafleet:format`, `lint`, `typecheck`, and `test` are all green.
 
 ---
 
@@ -256,12 +256,12 @@ Per `removal.md`, the removal guards above test the **absence** of the old surfa
 
 ### Step 4: Verification
 
-- [ ] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck` all clean. <!-- completed: -->
-- [ ] `mise //cafleet:test` green. <!-- completed: -->
+- [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck` all clean. <!-- completed: 2026-06-14T10:40 -->
+- [x] `mise //cafleet:test` green. <!-- completed: 2026-06-14T10:40 (828 passed) -->
 - [ ] `mise //cafleet:install` (editable reinstall) so the new CLI surface is live for any manual/skill use. <!-- completed: -->
-- [ ] Repo grep (excluding `design-docs/`): `grep -rn "cafleet --fleet-id" docs/ skills/ README.md .claude/ CLAUDE.md` returns zero command-example hits; the doctrine-prose grep returns zero. <!-- completed: -->
+- [x] Repo grep (excluding `design-docs/`): `grep -rn "cafleet --fleet-id" docs/ skills/ README.md .claude/ CLAUDE.md` returns zero command-example hits; the doctrine-prose grep returns zero. <!-- completed: 2026-06-14T10:40 -->
 - [ ] Manual smoke: `cafleet agent list --fleet-id <id>` works; `cafleet --fleet-id <id> agent list` → exit 2 `No such option`; `cafleet db init --fleet-id <id>` → exit 2 `No such option`; omitting `--fleet-id` → custom message exit 1. <!-- completed: -->
-- [ ] Stage the design doc with the implementation commits (project git-workflow override: `design-docs/` is committed here). <!-- completed: -->
+- [x] Stage the design doc with the implementation commits (project git-workflow override: `design-docs/` is committed here). <!-- completed: 2026-06-14T10:40 -->
 
 ---
 
