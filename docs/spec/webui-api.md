@@ -47,6 +47,15 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
 {
   "agents": [
     {
+      "agent_id": 2,
+      "name": "Director",
+      "description": "Root Director for this fleet",
+      "status": "active",
+      "registered_at": "2026-04-15T09:59:00+00:00",
+      "kind": "user",
+      "monitor": null
+    },
+    {
       "agent_id": 3,
       "name": "Administrator",
       "description": "Built-in administrator agent for fleet 1",

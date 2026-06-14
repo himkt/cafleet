@@ -53,7 +53,7 @@ The default `cafleet member delete` path sends `/exit`, polls `tmux list-panes` 
 
 ## Shutdown Protocol
 
-The teardown MUST run in this exact order. Skipping any step leaves the monitor keystroking polls against dead agents, or orphan coding-agent processes lingering in panes.
+The teardown MUST run in this exact order. Skipping any step leaves the monitor keystroking its wake nudge into the monitoring member's tearing-down pane, or orphan coding-agent processes lingering in panes.
 
 **Rule: use cafleet primitives only.** All tmux interactions — write, inspect, and metadata — are encapsulated by cafleet commands. For tmux session/window/pane metadata at Director startup, use `cafleet doctor`. Never invoke raw tmux directly from the Director. If a workflow appears to need a raw tmux call, file a gap in `cafleet member *` or `cafleet doctor` — NOT a raw tmux invocation.
 

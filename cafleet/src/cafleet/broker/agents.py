@@ -74,9 +74,9 @@ def register_agent(
     with _shared.write_session() as session:
         if kind == _shared.MONITORING_MEMBER_KIND:
             # A monitoring member must be pane-bound: it owns the heartbeat and
-            # is the only enrolled non-Director role. Without a placement it
-            # would consume the one-per-fleet slot yet never enroll (enrollment
-            # is gated on the placement insert below) and have no pane to ping.
+            # is the only enrolled role. Without a placement it would consume the
+            # one-per-fleet slot yet never enroll (enrollment is gated on the
+            # placement insert below) and have no pane to ping.
             if placement is None:
                 raise click.ClickException(
                     "a monitoring member must be pane-bound; register it via "
@@ -146,9 +146,9 @@ def register_agent(
                 )
             )
             # Enroll ONLY the dedicated monitoring member in the heartbeat,
-            # atomically with its placement insert. Ordinary members are no
-            # longer auto-enrolled — the loop pings only the Director (enrolled
-            # at fleet create) and the monitoring member.
+            # atomically with its placement insert. It is the single enrolled
+            # role — the root Director is no longer enrolled and ordinary
+            # members never are, so the loop wakes only the monitoring member.
             if kind == _shared.MONITORING_MEMBER_KIND:
                 monitor.enroll_agent(session, agent_id)
 

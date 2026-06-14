@@ -198,13 +198,14 @@ class TmuxMultiplexer:
         """Best-effort Esc-safeguarded wake nudge for the monitoring member's pane.
 
         Carries a single-line instruction to run the monitoring member's
-        capture-classify-reengage routine — distinct from the Director's poll
-        command. No shell-special characters, so the keystroke is sane whether
-        it lands in the coding agent's input or at a shell prompt. ``fleet_id`` /
+        capture-classify-reengage routine — distinct from the poll command
+        ``send_poll_trigger`` carries (now used only by ``cafleet member ping``).
+        This is the sole keystroke the loop fires — it wakes only the monitoring
+        member. No shell-special characters, so the keystroke is sane whether it
+        lands in the coding agent's input or at a shell prompt. ``fleet_id`` /
         ``agent_id`` keep the keystroke-helper signature uniform with
-        ``send_poll_trigger`` (the loop calls both identically); the routine
-        itself runs in the monitoring member's own pane, so they are not echoed
-        into the nudge.
+        ``send_poll_trigger``; the routine itself runs in the monitoring member's
+        own pane, so they are not echoed into the nudge.
         """
         if shutil.which("tmux") is None:
             return False
