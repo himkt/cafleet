@@ -7,6 +7,7 @@ from typing import NoReturn
 import click
 
 from cafleet import broker, output
+from cafleet.broker import _shared
 from cafleet.cli._helpers import (
     director_member_options,
     ensure_tmux_or_die,
@@ -181,7 +182,7 @@ def member_create(
                 "tmux_pane_id": None,
                 "coding_agent": coding_agent,
             },
-            kind="monitoring-member" if role == "monitor" else None,
+            kind=_shared.MONITORING_MEMBER_KIND if role == "monitor" else None,
         )
     except click.ClickException:
         # The one-monitoring-member-per-fleet guard raises ClickException with a
