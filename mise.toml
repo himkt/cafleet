@@ -19,6 +19,14 @@ description = "Sync uv workspace dependencies (all groups, all packages, frozen 
 run = "bun install --frozen-lockfile"
 description = "Install bun dependencies (slidev, agent-browser, vue) into ./node_modules"
 
+[tasks.skill-install]
+run = [
+  "gh skill install ./ --from-local --agent claude-code --force --scope user",
+  "gh skill install ./ --from-local --agent codex --force --scope user",
+  "gh skill install ./ --from-local --agent opencode --force --scope user",
+]
+description = "Install skills"
+
 [tasks.slidev]
 usage = '''
 arg "<slide>" help="path to slide.md file"
