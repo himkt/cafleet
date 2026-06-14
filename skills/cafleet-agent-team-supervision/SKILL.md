@@ -61,17 +61,19 @@ If a queued action requires a *new* decision the user has not yet made (choosing
 
 ## Spawn Protocol
 
+**Spawn order (first-in): the monitoring member comes first.** The **first** `cafleet member create` in the fleet IS the dedicated monitoring member (`--role monitor --model sonnet`); it starts the monitor and gates every ordinary `member create` behind its `ready: monitor live` handshake. The Director never runs `cafleet monitor start` itself. See the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical spawn prompt.
+
 Every time you spawn a member:
 
 1. **Verify env, then ensure supervision is running**:
    - **Pre-spawn env-check (gating)**: run `cafleet doctor`. If it exits non-zero or reports missing `TMUX` / `TMUX_PANE`, ABORT the spawn protocol and surface the error to the user — `cafleet member create` requires the Director to be inside a tmux pane, and silently proceeding would fail later with a less-actionable error. This is the canonical pane-identity probe; do NOT reach for raw `tmux display-message` or `TMUX` env-var expansion. Backend binary availability (`claude` / `codex` / `opencode`) is NOT a separate pre-spawn step — `cafleet member create --coding-agent <backend>` performs its own `PATH` check and exits 1 with `Error: binary <name> not found on PATH` when missing. Do NOT run `<backend> --version` or `which <backend>` as a pre-spawn probe; trust the spawn-time check and let it surface the clean error.
-   - **Ensure the monitor is already running** — run it as a **background task** with `cafleet --fleet-id <fleet-id> monitor start` (all backends; the loop runs in-process and blocks the task, so background it) and confirm with `cafleet --fleet-id <fleet-id> monitor status`. The heartbeat is the same on `claude`, `codex`, and `opencode` — there is no per-backend fallback to choose. See the `cafleet-agent-team-monitoring` skill § The monitor heartbeat.
+   - **Ensure the monitoring member is up and the monitor is live before any ordinary member.** The Director does NOT run `cafleet monitor start` itself. The **first** `cafleet member create` is the monitoring member (`--role monitor --model sonnet`), which launches `cafleet monitor start` as a background task in its own pane and reports `ready: monitor live` once `cafleet monitor status` shows running. **Receipt of that handshake message is the gate for the first ordinary `member create`** — wait on the message, do not block-poll status (consistent with the Asynchronous Wait Rule). The Director MAY run `cafleet --fleet-id <fleet-id> monitor status` as optional corroboration. The heartbeat is the same on `claude`, `codex`, and `opencode` — there is no per-backend fallback to choose. See the `cafleet-agent-team-monitoring` skill § The monitoring member.
 2. **Spawn the member** via `cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> --name <name> --description <desc> --prompt-file <abs path to rendered prompt under ${BASE}/prompts/<role>-<UTC-compact>.md>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — see the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the canonical convention (including the `${BASE} == <unset>` guarded-skip + inline-positional fallback). Inline `-- "<prompt>"` is still permitted for trivial one-line ad-hoc spawns. An optional `--model <m>` pins the member's LLM (pass-through for `claude` / `codex`; `<provider-id>/<model-id>` format required for `opencode`) — see the `cafleet` skill's `reference/director.md` for the flag detail and the model-name-to-backend inference table.
 3. **Include the ready-signal directive in the spawn prompt.** Every spawn prompt MUST instruct the member, as its very first Bash call, to send `cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "ready"` (optionally `"ready: <brief role recap>"`). See the `cafleet` skill's `roles/member.md` reference file § *On Spawn — Send Ready Signal* for the canonical wording. A spawn prompt missing this directive is a defect — fix the prompt and re-spawn. The ready signal is the canonical "I am alive and accepting instructions" handshake; it is the ONLY signal that confirms the coding agent inside the pane has actually booted.
 4. **Verify the member is placed** by checking that `cafleet --fleet-id <fleet-id> member list` shows the new member with a non-null `pane_id`. This confirms the pane was created. Liveness of the coding agent inside the pane is confirmed asynchronously when the ready signal arrives — NOT by `member list`.
 5. **End the active turn after spawn-and-verify.** The ready signal arrives via broker auto-fire (member's `cafleet message send` → 2-line inline preview keystroked into your pane via `tmux.send_inline_preview`), with the monitor tick as the time-based backstop. You process it — ACK, dispatch first task — in your next active turn. See § *Asynchronous Wait Rule* below.
 
-Never spawn members without the monitor running. Never stop the monitor until all work is fully complete and the team is being shut down.
+Never spawn ordinary members before the monitoring member's `ready: monitor live` handshake. Never stop the monitor (the monitoring member's `monitor start` background task) until all work is fully complete and the team is being shut down.
 
 ### Asynchronous Wait Rule
 
@@ -109,18 +111,20 @@ CAFleet members never talk to the user directly — the Director relays. When a 
 
 See the `cafleet-agent-team-monitoring` skill § Stall Response.
 
+A quiet ordinary member is no longer woken by the monitor loop — it never pings ordinary members. Instead, the monitoring member's idle assessment **surfaces** the quiet member to the Director, who then re-engages it via `cafleet member ping` (an `Esc`-safeguarded inbox-poll keystroke) or re-sends the instruction with `cafleet message send`. Re-engagement of ordinary members is always Director-mediated.
+
 ## Cleanup Protocol
 
-Cleanup follows the `cafleet` skill § Shutdown Protocol — that is the canonical teardown order (stop the monitor's background task → `cafleet member delete` each member → verify roster empty → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check).
+Cleanup follows the `cafleet` skill § Shutdown Protocol — that is the canonical teardown order (stop the monitor's background task → `cafleet member delete` the monitoring member FIRST → `cafleet member delete` each ordinary member → verify roster empty → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check).
 
-The single rule supervision restates here: **stop the monitor BEFORE deleting members.** There is no `cafleet monitor stop` — stop the background task running `cafleet monitor start` (or delete the monitoring member). A monitor that keeps ticking after `member delete` keystrokes polls into tearing-down panes and races with the delete path.
+The single rule supervision restates here: **stop the monitor's background task BEFORE the monitoring member's pane is killed** (teardown is first-out — the mirror of the first-in spawn order). There is no `cafleet monitor stop` — message the monitoring member to stop its `monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so the loop clears its runtime row), have it confirm, then `cafleet member delete` it first, before ordinary members. A monitor that keeps ticking after the monitoring member is deleted keystrokes ping commands into tearing-down panes and races with the delete path.
 
 ## Quick Reference
 
 | Action | Primitive | Notes |
 |---|---|---|
 | Verify Director pane env | `cafleet doctor` | Pre-spawn precondition; gating. Aborts the spawn protocol when `TMUX` / `TMUX_PANE` are missing. Replaces raw `tmux display-message` and `TMUX` env-var expansion. |
-| Start the supervision tick | `cafleet --fleet-id <s> monitor start` run as a background task (all backends) — see the `cafleet-agent-team-monitoring` skill | Required before any `cafleet member create` call (after env-check). |
+| Start the supervision tick | Spawn the monitoring member first: `cafleet --fleet-id <s> member create --agent-id <director> --name monitor --description <…> --role monitor --model sonnet --prompt-file <…>`; it runs `cafleet monitor start` in its own pane — see the `cafleet-agent-team-monitoring` skill | Its `ready: monitor live` handshake gates the first ordinary `member create`. |
 | Spawn member | `cafleet --fleet-id <s> member create --agent-id <director> --name <n> --description <d> --prompt-file <abs path to ${BASE}/prompts/<role>-<UTC-compact>.md>` | Pre-spawn file IS the audit artifact (see the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*). Verify with `cafleet member list`. Inline `-- "<prompt>"` is still permitted for trivial one-line spawns. |
 | Message member | `cafleet --fleet-id <s> message send --agent-id <director> --to <member> --text "..."` | Broker keystrokes a 2-line inline preview into the member's pane via `tmux.send_inline_preview` |
 | ACK reply | `cafleet --fleet-id <s> message ack --agent-id <director> --task-id <task>` | Unacknowledged tasks accumulate; ACK every reply you act on |
@@ -129,4 +133,4 @@ The single rule supervision restates here: **stop the monitor BEFORE deleting me
 | Shell-dispatch on member's behalf | `cafleet --fleet-id <s> member exec --member-id <member> "<cmd>"` | Per the `cafleet` skill § Routing Bash via the Director; follow with `member ping` |
 | Answer 4-option pane prompt | `cafleet --fleet-id <s> member send-input --member-id <member> (--choice N \| --freetext "<text>")` | Delegate the decision via `AskUserQuestion` first; never decide silently |
 | Relay user input | `AskUserQuestion` → `cafleet message send` | Pass-through; never substitute judgment |
-| Shut down team | the `cafleet` skill § Shutdown Protocol | Stop monitor → `member delete` each → `fleet delete` |
+| Shut down team | the `cafleet` skill § Shutdown Protocol | Stop monitor → delete monitoring member first → `member delete` each ordinary → `fleet delete` |

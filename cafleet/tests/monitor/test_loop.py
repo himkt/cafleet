@@ -1,9 +1,11 @@
-"""Tests for ``monitor_tick`` — one full scan pass (§5).
+"""Tests for ``monitor_tick`` — one full scan pass (§4, §5).
 
 The global ``_silence_real_tmux_subprocess`` fixture already stubs the tmux
 ``_run`` subprocess; each test additionally stubs ``list_pane_ids`` (the
 per-tick liveness query) and captures the per-role keystrokes —
-``send_poll_trigger`` for the Director, ``send_resume_trigger`` for members.
+``send_poll_trigger`` for the Director, ``send_wake_trigger`` for the dedicated
+monitoring member. After design 0000090 the loop pings ONLY those two roles;
+ordinary members are not enrolled and ``send_resume_trigger`` no longer exists.
 """
 
 import os
@@ -24,93 +26,107 @@ def _autouse_broker(broker_session):
     return broker_session
 
 
+def _placement(fleet: dict, pane_id: str) -> dict:
+    return {
+        "director_agent_id": fleet["director"]["agent_id"],
+        "tmux_session": "main",
+        "tmux_window_id": "@3",
+        "tmux_pane_id": pane_id,
+        "coding_agent": "claude",
+    }
+
+
 def _register_member(fleet: dict, name: str, pane_id: str) -> int:
+    """Register an ordinary (non-enrolled) member under the fleet's Director."""
     return _register_agent(
-        fleet["fleet_id"],
+        fleet["fleet_id"], name=name, placement=_placement(fleet, pane_id)
+    )["agent_id"]
+
+
+def _register_monitoring_member(fleet: dict, name: str, pane_id: str) -> int:
+    """Register the dedicated monitoring member (``kind=monitoring-member``)."""
+    return broker.register_agent(
+        fleet_id=fleet["fleet_id"],
         name=name,
-        placement={
-            "director_agent_id": fleet["director"]["agent_id"],
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": pane_id,
-            "coding_agent": "claude",
-        },
+        description="monitoring member",
+        placement=_placement(fleet, pane_id),
+        kind="monitoring-member",
     )["agent_id"]
 
 
 def _stub_tmux(monkeypatch, live_panes):
-    """Stub pane liveness; capture poll-trigger (Director) and resume-trigger
-    (member) keystrokes into separate lists (R3)."""
+    """Stub pane liveness; capture poll-trigger (Director) and wake-trigger
+    (monitoring member) keystrokes into separate lists (§4)."""
     monkeypatch.setattr(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.list_pane_ids",
         lambda self: set(live_panes),
         raising=False,
     )
     polls = []
-    resumes = []
+    wakes = []
 
     def fake_poll(self, *, target_pane_id, fleet_id, agent_id):
         polls.append((target_pane_id, fleet_id, agent_id))
         return True
 
-    def fake_resume(self, *, target_pane_id, fleet_id, agent_id):
-        resumes.append((target_pane_id, fleet_id, agent_id))
+    def fake_wake(self, *, target_pane_id, fleet_id, agent_id):
+        wakes.append((target_pane_id, fleet_id, agent_id))
         return True
 
     monkeypatch.setattr(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.send_poll_trigger", fake_poll
     )
     monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.send_resume_trigger",
-        fake_resume,
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.send_wake_trigger",
+        fake_wake,
         raising=False,
     )
-    return polls, resumes
+    return polls, wakes
 
 
-def test_monitor_tick__routes_poll_to_director_resume_to_members(capsys, monkeypatch):
+def test_monitor_tick__poll_to_director_wake_to_monitor_skips_ordinary(
+    capsys, monkeypatch
+):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
-    alice = _register_member(fleet, "alice", "%7")  # member, alive → resume
-    bob = _register_member(fleet, "bob", "%9")  # member, alive     → resume
-    carol = _register_member(fleet, "carol", "%99")  # member, dead → skip
+    watcher = _register_monitoring_member(fleet, "watcher", "%7")  # enrolled → wake
+    alice = _register_member(fleet, "alice", "%9")  # ordinary, alive but NOT enrolled
 
-    broker.send_message(sid, director_id, alice, "do x")
-    broker.send_message(sid, director_id, carol, "do y")
     broker.claim_monitor_runtime(
         sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
     )
 
-    polls, resumes = _stub_tmux(monkeypatch, {"%0", "%7", "%9"})  # carol's %99 is dead
+    polls, wakes = _stub_tmux(monkeypatch, {"%0", "%7", "%9"})
 
     result = monitor_tick(sid, _NOW)
 
     assert result is CONTINUE
-    # R3: the Director receives a bare poll; members receive the resume nudge
+    # §4: the Director receives a bare poll; the monitoring member a wake nudge
     assert {agent_id for _, _, agent_id in polls} == {director_id}
-    assert {agent_id for _, _, agent_id in resumes} == {alice, bob}
+    assert {agent_id for _, _, agent_id in wakes} == {watcher}
     assert ("%0", sid, director_id) in polls
-    assert ("%7", sid, alice) in resumes
-    assert ("%9", sid, bob) in resumes
+    assert ("%7", sid, watcher) in wakes
 
-    # record_ping advanced every pinged agent (both roles); carol (dead) stays None
+    # the ordinary member is never enrolled, so it is never pinged by either path
+    assert alice not in {agent_id for _, _, agent_id in polls}
+    assert alice not in {agent_id for _, _, agent_id in wakes}
+    assert broker.get_monitor_config(sid, alice) is None
+
+    # record_ping advanced both enrolled roles; the ordinary member has no config
     assert (
         broker.get_monitor_config(sid, director_id)["last_ping_at"] == _NOW.isoformat()
     )
-    assert broker.get_monitor_config(sid, alice)["last_ping_at"] == _NOW.isoformat()
-    assert broker.get_monitor_config(sid, bob)["last_ping_at"] == _NOW.isoformat()
-    assert broker.get_monitor_config(sid, carol)["last_ping_at"] is None
+    assert broker.get_monitor_config(sid, watcher)["last_ping_at"] == _NOW.isoformat()
 
     # the heartbeat was written for this tick
     assert broker.read_monitor_runtime(sid)["last_tick_at"] == _NOW.isoformat()
 
-    # one stdout ping-log line per dispatched ping (unchanged by R3)
+    # one stdout ping-log line per dispatched ping; the ordinary member is absent
     out = capsys.readouterr().out
     assert f"ping agent {director_id} (Director)" in out
-    assert f"ping agent {alice} (alice)" in out
-    assert f"ping agent {bob} (bob)" in out
-    assert "carol" not in out
+    assert f"ping agent {watcher} (watcher)" in out
+    assert "alice" not in out
 
 
 def test_monitor_tick__stop_on_soft_deleted_fleet(broker_session, monkeypatch):
@@ -124,10 +140,10 @@ def test_monitor_tick__stop_on_soft_deleted_fleet(broker_session, monkeypatch):
         s.get(Fleet, sid).deleted_at = _NOW.isoformat()
         s.commit()
 
-    polls, resumes = _stub_tmux(monkeypatch, set())
+    polls, wakes = _stub_tmux(monkeypatch, set())
     assert monitor_tick(sid, _NOW) is STOP
     assert polls == []
-    assert resumes == []
+    assert wakes == []
 
 
 def test_monitor_tick__stop_on_missing_fleet(monkeypatch):
@@ -138,10 +154,10 @@ def test_monitor_tick__stop_on_missing_fleet(monkeypatch):
     broker.claim_monitor_runtime(sid, os.getpid(), 5, _NOW.isoformat())
     monkeypatch.setattr("cafleet.broker.get_fleet", lambda fleet_id: None)
 
-    polls, resumes = _stub_tmux(monkeypatch, set())
+    polls, wakes = _stub_tmux(monkeypatch, set())
     assert monitor_tick(sid, _NOW) is STOP
     assert polls == []
-    assert resumes == []
+    assert wakes == []
 
 
 def test_monitor_tick__stop_when_ownership_lost(monkeypatch):
@@ -151,7 +167,7 @@ def test_monitor_tick__stop_when_ownership_lost(monkeypatch):
     # heartbeat matches zero rows and the loser self-terminates without pinging
     broker.claim_monitor_runtime(sid, os.getpid() + 1, 5, _NOW.isoformat())
 
-    polls, resumes = _stub_tmux(monkeypatch, {"%0"})
+    polls, wakes = _stub_tmux(monkeypatch, {"%0"})
     assert monitor_tick(sid, _NOW) is STOP
     assert polls == []
-    assert resumes == []
+    assert wakes == []

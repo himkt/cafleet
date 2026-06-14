@@ -5,16 +5,23 @@ icon: lucide/heart-pulse
 # Monitoring
 
 `cafleet monitor` is a fleet-scoped foreground loop — `scan → ping → sleep` —
-that a coding agent runs as a **background task** (the Director's own background
-task, or a dedicated monitoring member). It supplies the **heartbeat** a
-Director needs to supervise its team: a plain loop, not agent reasoning, that
-wakes due agents on a fixed cadence by keystroking `cafleet … message poll` into
-their tmux panes. While the loop runs it spends **no model tokens**, and because
-it is just a backgrounded command it works identically on **any** backend
-(`claude`, `codex`, `opencode`). `cafleet monitor start` runs the loop
-in-process; the launching agent owns its lifetime — there is no detached
-subprocess and no `monitor stop` (stop the background task, or delete the
-monitoring member, to stop it). One monitor per fleet.
+that the fleet's dedicated **monitoring member** runs as a **background task** in
+its own pane. It supplies the **heartbeat** a Director needs to supervise its
+team: a plain loop, not agent reasoning, that wakes the Director (and the
+monitoring member itself) on a fixed cadence by keystroking into their tmux
+panes. While the loop runs it spends **no model tokens**, and because it is just
+a backgrounded command it works identically on **any** backend (`claude`,
+`codex`, `opencode`). `cafleet monitor start` runs the loop in-process; the
+monitoring member owns its lifetime — there is no detached subprocess and no
+`monitor stop` (stop the background task, or delete the monitoring member, to
+stop it). One monitor per fleet, and one monitoring member per fleet.
+
+Every keystroke the loop sends is **`Esc`-safeguarded**: it presses `Escape`
+first, lets the pane settle for ~0.1 s, then types the literal text and `Enter`.
+The leading `Esc` means a pane sitting on a pending permission-approval prompt
+dismisses that prompt instead of having the trailing `Enter` confirm it — a
+heartbeat keystroke can never blindly approve a coding agent's pending
+permission request.
 
 ## Heartbeat vs facilitation
 
@@ -30,41 +37,91 @@ those require agent judgment and stay the Director's job, defined by the
 
 The wake keystroke differs by role:
 
-- **The Director** gets a bare `cafleet … message poll`. That bare poll, on its
-  own, performs only the first step of facilitation, so the contract that makes
-  a woken Director run its full facilitation loop lives in the supervision
-  skill, not in the keystroke: **a monitor poll-trigger wake is the Director's
-  cue to run its entire facilitation loop**, not to read its inbox and stop.
-- **A member** gets a single-line *resume nudge* — the same poll command plus an
-  instruction to review its current task and continue working — so a member that
-  unexpectedly stopped resumes rather than going idle on an empty inbox. This is
-  the one place a monitor keystroke carries more than a bare poll, and only for
-  members; the Director's wake stays the bare poll above.
+- **The Director** gets an `Esc`-safeguarded bare `cafleet … message poll`. That
+  bare poll, on its own, performs only the first step of facilitation, so the
+  contract that makes a woken Director run its full facilitation loop lives in
+  the supervision skill, not in the keystroke: **a monitor poll-trigger wake is
+  the Director's cue to run its entire facilitation loop**, not to read its inbox
+  and stop.
+- **The monitoring member** gets an `Esc`-safeguarded *wake nudge* — a
+  single-line instruction to run its capture-classify-reengage routine now. The
+  loop runs inside the monitoring member's own pane, so this wake is a deliberate
+  self-ping that drives the routine each tick (see [The monitoring
+  member](#the-monitoring-member)).
 
 The monitor never reasons about message content — it is the alarm clock; the
-Director is the worker.
+Director is the worker, and the monitoring member is the watcher that re-engages
+a stalled Director.
 
 ## Who gets pinged
 
-Each tick, the monitor evaluates every enrolled, active agent and pings the ones
-whose interval has elapsed. **Both roles — the root Director and every member —
-are pinged unconditionally once due**, regardless of whether the agent has any
-pending inbox items. The Director's facilitation does useful work even on an
-empty inbox (it still health-checks members, dispatches queued work, and detects
-stalls); pinging an idle member re-drains its inbox and keeps the heartbeat
-visible. The re-ping is unbounded — no backoff, no cap.
+Each tick, the monitor evaluates its enrolled, active agents and pings the ones
+whose interval has elapsed. Enrollment is restricted to exactly two agents per
+fleet: the **root Director** and the **monitoring member**. Ordinary members are
+**not** enrolled and are **never** pinged by the loop — re-engaging a quiet
+member is always Director-mediated (the broker's inline-preview keystroke on
+every `cafleet message send` is the primary member-wake path; the Director's
+`Esc`-safeguarded `cafleet member ping` is the manual recovery path).
+
+Both enrolled roles are pinged **unconditionally once due**, regardless of
+whether the agent has any pending inbox items. The Director's facilitation does
+useful work even on an empty inbox (it still health-checks members, dispatches
+queued work, and detects stalls); the monitoring member's wake drives its
+capture-and-assess routine each tick. The re-ping is unbounded — no backoff, no
+cap.
 
 `pending_count` (the count of an agent's un-acked inbox items) is still computed
-and shown in `monitor status`, but it no longer gates the ping — it is purely
+and shown in `monitor status`, but it does not gate the ping — it is purely
 informational.
 
 A ping is skipped only when the agent is disabled, when its pane is missing or
-dead, or when its interval has not yet elapsed.
+dead, or when its interval has not yet elapsed. The loop selects the keystroke
+explicitly by role — `message poll` for the Director, the wake nudge for the
+monitoring member — so a stray or legacy enrolled row that is neither role is
+defensively **skipped**, never woken.
 
 Each dispatched ping is logged to the monitor's stdout as
 `<iso-ts> ping agent <id> (<name>)`. Because `cafleet monitor start` runs in the
-foreground of the launching agent's background task, that task's output shows
+foreground of the monitoring member's background task, that task's output shows
 live heartbeat activity, one line per ping.
+
+## The monitoring member
+
+The monitoring member is a single, dedicated coding-agent member — spawned with
+`cafleet member create --role monitor` (the Director passes `--model sonnet`) —
+that owns the heartbeat and applies LLM judgment to the Director's state. It is
+identified by `agent_card_json.cafleet.kind == "monitoring-member"` (the same
+`kind`-marker pattern the built-in Administrator uses; no new SQL column), and it
+is the **one** process in the fleet that runs `cafleet monitor start`. There is
+at most one monitoring member per fleet; a second `--role monitor` spawn is
+rejected.
+
+On each `Esc`-safeguarded wake the loop keystrokes into its own pane, the
+monitoring member runs its routine:
+
+1. **Capture the Director's pane** via `cafleet member capture --member-id
+   <director-id>` (read-only; `member capture` accepts any in-fleet agent with a
+   placement, the root Director included).
+2. **Classify the Director active vs idle** with its own judgment.
+   - **ACTIVE** → do nothing.
+   - **IDLE** → assess the full picture (the Director's inbox state, its current
+     task, and ordinary members' panes via read-only `cafleet member capture`),
+     then **re-engage the Director** with a concise `Esc`-safeguarded nudge via
+     `cafleet message send --to <director-id>` summarizing what needs attention
+     (un-ACKed inbox items, stalled members).
+
+The monitoring member **never** keystrokes ordinary members with task
+instructions — all member-driving routes back through the Director, who owns the
+whole task. A member that has gone quiet is surfaced to the Director by the
+monitoring member's idle assessment; the Director then re-pings it (via
+`cafleet member ping`) or re-sends the instruction.
+
+Because the monitoring member is itself enrolled, the loop running inside its
+pane keystrokes the wake nudge into that same pane's foreground — a deliberate
+self-ping. The leading `Esc` will interrupt the monitoring member's own
+in-progress turn if a wake lands mid-routine; because the ping interval (default
+60 s) is far longer than a routine's duration, the overlap is rare and the
+self-interrupt is accepted.
 
 ## Cadence and tick precision
 
@@ -106,47 +163,66 @@ pinging and without wiping the winner's row.
 ```mermaid
 %%{init: {'theme': 'default', 'themeVariables': {'fontSize': '16px'}}}%%
 flowchart LR
-    Start["monitor start<br/>(agent's background task)"] --> Claim["claim runtime row"]
+    Start["monitor start<br/>(monitoring member's background task)"] --> Claim["claim runtime row"]
     Claim --> Tick["every tick:<br/>scan → ping due agents → heartbeat"]
     Tick --> Tick
-    Tick --> Stop["stop the task /<br/>delete the member /<br/>fleet delete"]
+    Tick --> Stop["stop the task /<br/>delete the monitoring member /<br/>fleet delete"]
     Stop --> Clear["clear runtime row"]
-    Tick -. keystroke .-> PaneD["Director pane"]
-    Tick -. keystroke .-> PaneM["member pane"]
+    Tick -. Esc + poll .-> PaneD["Director pane"]
+    Tick -. Esc + wake nudge .-> PaneMon["monitoring member pane"]
 ```
 
-- **Start**: a coding agent runs `cafleet --fleet-id N monitor start` as a
-  **background task**. The loop runs in-process and inherits the launching pane's
-  environment (`$TMUX`, `$CAFLEET_DATABASE_URL`); it fails fast on startup if it
-  cannot reach a tmux session. There is no detached subprocess.
-- **Run**: each tick scans the fleet's enrolled agents, pings the due ones, and
-  rewrites the heartbeat.
-- **Stop**: the launching agent stops the background task (or deletes the
-  monitoring member). A clean stop (SIGTERM/SIGINT) clears the runtime row; a
-  hard kill simply lets the heartbeat go stale, after which `status` reports
-  stopped. There is no `monitor stop` command. `fleet delete` needs no stop step
-  — a running loop's next tick sees the soft-deleted fleet and self-terminates,
-  and `delete_fleet` removes the `monitor_runtime` + `monitor_config` rows.
+- **Spawned first.** The monitoring member is the **first** `member create` in
+  the fleet (first-in). After it boots it launches `cafleet --fleet-id N monitor
+  start` as a **background task** in its own pane, confirms with `cafleet monitor
+  status`, and reports `ready: monitor live` to the Director. Receipt of that
+  handshake message is the gate for spawning ordinary members — this is the only
+  `monitor start` in the fleet; the Director no longer runs it. The loop inherits
+  the monitoring member's pane environment (`$TMUX`, `$CAFLEET_DATABASE_URL`) and
+  fails fast on startup if it cannot reach a tmux session.
+- **Run**: each tick scans the two enrolled agents, pings the due ones with the
+  role-selected `Esc`-safeguarded keystroke, and rewrites the heartbeat.
+- **Stop (first-out).** Teardown stops the monitor **before** the monitoring
+  member's pane is killed: the Director messages the monitoring member to stop
+  its `monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so
+  the loop runs its `finally` and clears the runtime row), the monitoring member
+  confirms, and only then does the Director `cafleet member delete` it — first,
+  before the ordinary members. A hard pane-kill instead leaves the heartbeat to
+  go stale, after which `status` reports stopped (the accepted degraded path).
+  There is no `monitor stop` command. `fleet delete` needs no stop step — a
+  running loop's next tick sees the soft-deleted fleet and self-terminates, and
+  `delete_fleet` removes the `monitor_runtime` + `monitor_config` rows.
 
 Per-agent schedule (`interval_seconds`, `enabled`) is persisted, so cadence
 resumes from `last_ping_at` across a restart. The schedule is editable from both
 the CLI (`cafleet monitor config`) and the admin WebUI at parity; launching and
-stopping the loop is CLI-only by nature (it is the agent's background task).
+stopping the loop is CLI-only by nature (it is the monitoring member's background
+task).
 
 ## Enrollment and schema
 
 Two tables back the monitor. Both reuse a parent id as a 1:1 INTEGER primary key
 (no fresh sequence), and both are cleaned explicitly on teardown.
 
-- **`monitor_config`** — one row per **pane-bound** agent, holding its
-  `interval_seconds`, `last_ping_at`, and `enabled` flag. A row is inserted
-  automatically at registration for every agent that has a tmux pane (the root
-  Director and every member); the write-only Administrator and card-only agents
-  have no pane and are not enrolled. Director-vs-member is *derived* at scan time
-  (`agent_id == fleets.director_agent_id`), not stored.
+- **`monitor_config`** — one row per **enrolled** agent, holding its
+  `interval_seconds`, `last_ping_at`, and `enabled` flag. Enrollment is
+  restricted to exactly two agents per fleet: the root Director (enrolled at
+  `create_fleet`) and the monitoring member (enrolled when `register_agent` sees
+  `kind == "monitoring-member"`). Ordinary members, the write-only
+  Administrator, and card-only agents are **not** enrolled. Director-vs-member is
+  *derived* at scan time (`agent_id == fleets.director_agent_id`), and the
+  monitoring member is *derived* from `agent_card_json.cafleet.kind`, so the loop
+  can select the keystroke per role and `monitor status` can label it — neither
+  is denormalized.
 - **`monitor_runtime`** — one row per fleet, holding the running loop's `pid`,
   `started_at`, `last_tick_at` heartbeat, and `tick_seconds`. "No monitor" is
   modeled cleanly as "no row".
+
+A one-shot Alembic data migration prunes any pre-existing non-Director
+`monitor_config` rows so an upgraded database matches the new
+`{Director, monitoring member}` enrollment world (pre-upgrade there are no
+monitoring members, so it leaves exactly the root-Director rows). The downgrade
+is a no-op.
 
 See [Data model](../spec/data-model.md) for the full column definitions and the
 [CLI options](../spec/cli-options.md#cafleet-monitor) page for the

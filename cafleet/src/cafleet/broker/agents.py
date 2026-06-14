@@ -16,6 +16,7 @@ def register_agent(
     description: str,
     skills: list[dict] | None = None,
     placement: dict | None = None,
+    kind: str | None = None,
 ) -> dict:
     """Register a new agent in the fleet and optionally create its placement.
 
@@ -38,6 +39,11 @@ def register_agent(
             ``tmux_session``, ``tmux_window_id``, ``tmux_pane_id``, and
             ``coding_agent``. When present, an ``AgentPlacement`` row is
             created alongside the agent.
+        kind: Optional ``agent_card_json.cafleet.kind`` marker. When set to
+            ``_shared.MONITORING_MEMBER_KIND`` the new agent is the fleet's
+            dedicated monitoring member: it is enrolled in ``monitor_config``
+            and a second active one per fleet is rejected. Ordinary members
+            pass ``None`` and are not enrolled.
 
     Returns:
         Dict with ``agent_id``, ``name``, and ``registered_at``.
@@ -47,7 +53,8 @@ def register_agent(
             named Director is not active in the same fleet, or the placement
             ``director_agent_id`` is not the fleet's root Director.
         click.ClickException: If the named Director is the built-in
-            Administrator.
+            Administrator, the fleet already has an active monitoring member,
+            or a monitoring member is registered without a placement.
     """
     sess = get_fleet(fleet_id)
     if sess is None:
@@ -56,13 +63,41 @@ def register_agent(
         raise click.UsageError(f"fleet {fleet_id} is deleted")
 
     registered_at = _shared.now_iso()
-    agent_card = {
+    agent_card: dict[str, object] = {
         "name": name,
         "description": description,
         "skills": skills or [],
     }
+    if kind is not None:
+        agent_card["cafleet"] = {"kind": kind}
 
     with _shared.write_session() as session:
+        if kind == _shared.MONITORING_MEMBER_KIND:
+            # A monitoring member must be pane-bound: it owns the heartbeat and
+            # is the only enrolled non-Director role. Without a placement it
+            # would consume the one-per-fleet slot yet never enroll (enrollment
+            # is gated on the placement insert below) and have no pane to ping.
+            if placement is None:
+                raise click.ClickException(
+                    "a monitoring member must be pane-bound; register it via "
+                    "'cafleet member create --role monitor' (placement required)."
+                )
+            # One monitoring member per fleet — the single enforcement site
+            # (the CLI passes ``kind`` straight through without re-checking).
+            existing = session.execute(
+                select(Agent.agent_id).where(
+                    Agent.fleet_id == fleet_id,
+                    Agent.status == "active",
+                    func.json_extract(Agent.agent_card_json, "$.cafleet.kind")
+                    == _shared.MONITORING_MEMBER_KIND,
+                )
+            ).first()
+            if existing is not None:
+                raise click.ClickException(
+                    f"fleet {fleet_id} already has an active monitoring member "
+                    f"(agent {existing.agent_id}); only one is allowed."
+                )
+
         if placement is not None:
             director_id = placement["director_agent_id"]
             director_card = session.execute(
@@ -110,9 +145,12 @@ def register_agent(
                     created_at=registered_at,
                 )
             )
-            # Enroll the pane-bound agent in monitoring, atomically with its
-            # placement insert (only agents with a pane can be pinged).
-            monitor.enroll_agent(session, agent_id)
+            # Enroll ONLY the dedicated monitoring member in the heartbeat,
+            # atomically with its placement insert. Ordinary members are no
+            # longer auto-enrolled — the loop pings only the Director (enrolled
+            # at fleet create) and the monitoring member.
+            if kind == _shared.MONITORING_MEMBER_KIND:
+                monitor.enroll_agent(session, agent_id)
 
     return {
         "agent_id": agent_id,

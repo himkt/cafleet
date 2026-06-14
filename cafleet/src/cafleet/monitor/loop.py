@@ -38,9 +38,11 @@ STOP = _Sentinel("STOP")
 def should_ping(target: dict, now: datetime) -> bool:
     """Decide whether an enrolled agent is due for a ping this tick.
 
-    Every enrolled agent — Director and member alike — is pinged once its
-    interval has elapsed, regardless of ``pending_count`` (R2). Disabled agents
-    and dead/missing panes are always skipped, and a not-yet-due agent waits.
+    Both enrolled roles — the root Director and the monitoring member — are
+    pinged once the interval has elapsed, regardless of ``pending_count`` (R2).
+    The policy is role-agnostic (``is_director`` / ``is_monitoring_member`` are
+    consulted by the loop for keystroke selection, not here). Disabled agents and
+    dead/missing panes are always skipped, and a not-yet-due agent waits.
     """
     if not target["enabled"]:
         return False
@@ -73,26 +75,30 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
     pinged: list[int] = []
     for target in broker.list_monitor_targets(fleet_id):
         target["pane_alive"] = target["pane_id"] in live_panes
-        if should_ping(target, now):
-            # The Director gets a bare poll (its facilitation contract lives in
-            # the supervision skill); a member gets a resume nudge so a stopped
-            # member reviews its task and continues rather than going idle.
-            keystroke = (
-                mux.send_poll_trigger
-                if target["is_director"]
-                else mux.send_resume_trigger
-            )
-            keystroke(
-                target_pane_id=target["pane_id"],
-                fleet_id=fleet_id,
-                agent_id=target["agent_id"],
-            )
-            pinged.append(target["agent_id"])
-            # Visible heartbeat: the launching agent's background task shows a
-            # line per dispatched ping on its stdout.
-            click.echo(
-                f"{now.isoformat()} ping agent {target['agent_id']} ({target['name']})"
-            )
+        if not should_ping(target, now):
+            continue
+        # Select the keystroke explicitly by role: the Director gets a bare poll
+        # (its facilitation contract lives in the supervision skill); the
+        # monitoring member gets a wake nudge driving its capture-and-assess
+        # routine. A stray/legacy enrolled row that is neither role is skipped,
+        # never woken — ordinary members are never pinged by the loop.
+        if target["is_director"]:
+            keystroke = mux.send_poll_trigger
+        elif target["is_monitoring_member"]:
+            keystroke = mux.send_wake_trigger
+        else:
+            continue
+        keystroke(
+            target_pane_id=target["pane_id"],
+            fleet_id=fleet_id,
+            agent_id=target["agent_id"],
+        )
+        pinged.append(target["agent_id"])
+        # Visible heartbeat: the launching agent's background task shows a
+        # line per dispatched ping on its stdout.
+        click.echo(
+            f"{now.isoformat()} ping agent {target['agent_id']} ({target['name']})"
+        )
     # Record every dispatched ping in one write transaction (no-op if none).
     broker.record_pings(pinged, now.isoformat())
     return CONTINUE

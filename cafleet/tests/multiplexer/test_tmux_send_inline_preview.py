@@ -125,14 +125,17 @@ def test_send_poll_trigger__keystroke_contract(monkeypatch):
     assert callable(TmuxMultiplexer.send_poll_trigger)
 
     captured = _capture_run(monkeypatch)
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
     ok = _tmux.send_poll_trigger(
         target_pane_id="%5",
         fleet_id=42,
         agent_id=7,
     )
     assert ok is True
-    assert len(captured) == 2
-    keystroke = captured[0][-1]
+    # send_poll_trigger is Esc-first (design 0000090): Escape → -l poll → Enter.
+    assert len(captured) == 3
+    assert captured[0] == ["tmux", "send-keys", "-t", "%5", "Escape"]
+    keystroke = captured[1][-1]
     assert keystroke.startswith("cafleet --fleet-id ")
     assert "message poll --agent-id" in keystroke
-    assert captured[1] == ["tmux", "send-keys", "-t", "%5", "Enter"]
+    assert captured[2] == ["tmux", "send-keys", "-t", "%5", "Enter"]

@@ -396,6 +396,7 @@ def test_send_poll_trigger__return_branches_and_argv(
         return ""
 
     monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
     result = _tmux.send_poll_trigger(
         target_pane_id="%7",
         fleet_id="sess-001",
@@ -403,7 +404,11 @@ def test_send_poll_trigger__return_branches_and_argv(
     )
     assert result is expected_result
     if expect_run_called and scenario == "success_returns_true":
+        # `send_poll_trigger` passes `esc_first=True`: the keystroke leads with
+        # `Escape` (permission-prompt safeguard) before the unchanged poll
+        # command + Enter (spec §1, §2).
         assert captured == [
+            ["tmux", "send-keys", "-t", "%7", "Escape"],
             [
                 "tmux",
                 "send-keys",
@@ -626,3 +631,219 @@ def test_send_bash_command__argv_and_validation(
             expected_literal,
         ]
         assert captured[1] == ["tmux", "send-keys", "-t", "%5", "Enter"]
+
+
+# --- Esc keystroke safeguard (design 0000090 §1, §2) ---------------------------
+
+
+def test_send_literal_then_enter__esc_first_prepends_escape_and_settle(monkeypatch):
+    """esc_first=True prepends an `Escape` keystroke + settle sleep before the
+    literal-text/Enter pair — the permission-prompt safeguard (spec §1).
+
+    Full sequence: Escape → _ESC_SETTLE_DELAY → send-keys -l <text> →
+    _SUBMIT_DELAY → Enter.
+    """
+    captured: list[list[str]] = []
+    sleeps: list[float] = []
+
+    monkeypatch.setattr(
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: captured.append(list(args)) or "",
+    )
+    monkeypatch.setattr("time.sleep", lambda secs: sleeps.append(secs))
+
+    multiplexer_tmux._send_literal_then_enter(
+        target_pane_id="%7", payload="hello", esc_first=True
+    )
+
+    assert captured == [
+        ["tmux", "send-keys", "-t", "%7", "Escape"],
+        ["tmux", "send-keys", "-t", "%7", "-l", "hello"],
+        ["tmux", "send-keys", "-t", "%7", "Enter"],
+    ]
+    # Escape settles first, then the literal/Enter submit delay.
+    assert sleeps == [
+        multiplexer_tmux._ESC_SETTLE_DELAY,
+        multiplexer_tmux._SUBMIT_DELAY,
+    ]
+
+
+def test_send_literal_then_enter__esc_first_default_sends_no_escape(monkeypatch):
+    """esc_first defaults to False: no `Escape` keystroke, single submit-delay sleep."""
+    captured: list[list[str]] = []
+    sleeps: list[float] = []
+
+    monkeypatch.setattr(
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: captured.append(list(args)) or "",
+    )
+    monkeypatch.setattr("time.sleep", lambda secs: sleeps.append(secs))
+
+    multiplexer_tmux._send_literal_then_enter(target_pane_id="%7", payload="hello")
+
+    assert captured == [
+        ["tmux", "send-keys", "-t", "%7", "-l", "hello"],
+        ["tmux", "send-keys", "-t", "%7", "Enter"],
+    ]
+    assert all("Escape" not in call for call in captured)
+    assert sleeps == [multiplexer_tmux._SUBMIT_DELAY]
+
+
+def test_send_literal_then_enter__esc_first_forwards_timeout_to_all_calls(monkeypatch):
+    """The Escape send-keys call forwards the same timeout as the literal/Enter
+    pair (three calls, three timeouts)."""
+    captured_timeouts: list[float | None] = []
+
+    def mock_run(args, *, timeout=None, **_kwargs):
+        captured_timeouts.append(timeout)
+        return ""
+
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+
+    multiplexer_tmux._send_literal_then_enter(
+        target_pane_id="%7", payload="hello", timeout=5, esc_first=True
+    )
+    assert captured_timeouts == [5, 5, 5]
+
+
+@pytest.mark.parametrize(
+    ("scenario", "which_return", "mock_error", "expected_result", "expect_run_called"),
+    [
+        ("success_returns_true", "/usr/bin/tmux", None, True, True),
+        (
+            "pane_not_found_returns_false",
+            "/usr/bin/tmux",
+            TmuxError(
+                "tmux command failed: tmux send-keys -t %99\n"
+                "stderr: can't find pane: %99"
+            ),
+            False,
+            True,
+        ),
+        ("tmux_binary_missing_returns_false", None, None, False, False),
+        (
+            "never_raises_on_tmux_error",
+            "/usr/bin/tmux",
+            TmuxError("tmux command failed: server exited unexpectedly"),
+            False,
+            True,
+        ),
+    ],
+)
+def test_send_wake_trigger__return_branches_and_argv(
+    monkeypatch,
+    scenario,
+    which_return,
+    mock_error,
+    expected_result,
+    expect_run_called,
+):
+    """`send_wake_trigger` mirrors `send_poll_trigger`'s return branches and is
+    `esc_first=True`: the success keystroke leads with `Escape` (spec §2)."""
+    monkeypatch.setattr("shutil.which", lambda _: which_return)
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+    captured: list[list[str]] = []
+
+    def mock_run(args, **_kwargs):
+        captured.append(list(args))
+        if mock_error is not None:
+            raise mock_error
+        return ""
+
+    monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
+    result = _tmux.send_wake_trigger(
+        target_pane_id="%7",
+        fleet_id=59,
+        agent_id=247,
+    )
+    assert result is expected_result
+    if scenario == "success_returns_true":
+        assert len(captured) == 3
+        assert captured[0] == ["tmux", "send-keys", "-t", "%7", "Escape"]
+        assert captured[1][:5] == ["tmux", "send-keys", "-t", "%7", "-l"]
+        assert captured[2] == ["tmux", "send-keys", "-t", "%7", "Enter"]
+    elif not expect_run_called:
+        assert captured == []
+
+
+def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
+    """The wake nudge is a single-line monitoring instruction, NOT the poll
+    command keystroke (spec §2 — distinct payload for the monitoring member)."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: captured.append(list(args)) or "",
+    )
+
+    result = _tmux.send_wake_trigger(target_pane_id="%7", fleet_id=59, agent_id=247)
+    assert result is True
+
+    literal_call = captured[1]
+    assert literal_call[:5] == ["tmux", "send-keys", "-t", "%7", "-l"]
+    payload = literal_call[5]
+    # Single line — a raw newline under tmux ``-l`` would submit mid-payload.
+    assert "\n" not in payload
+    assert "\r" not in payload
+    # A monitoring-member wake nudge (``[monitor]`` provenance tag), not the
+    # ``cafleet ... message poll`` command the Director receives.
+    assert payload.startswith("[monitor]")
+    assert not payload.startswith("cafleet")
+
+
+@pytest.mark.parametrize(
+    ("helper_name", "invoke"),
+    [
+        ("send_exit", lambda t: t.send_exit(target_pane_id="%7")),
+        (
+            "send_inline_preview",
+            lambda t: t.send_inline_preview(
+                target_pane_id="%7",
+                task_id=1,
+                sender_id=2,
+                ts="2026-06-14T00:00:00+00:00",
+                text="hello",
+            ),
+        ),
+        (
+            "send_bash_command",
+            lambda t: t.send_bash_command(target_pane_id="%7", command="git status"),
+        ),
+        (
+            "send_freetext_and_submit",
+            lambda t: t.send_freetext_and_submit(
+                target_pane_id="%7", text="free text answer"
+            ),
+        ),
+    ],
+)
+def test_esc_first_false_helpers__never_send_escape(monkeypatch, helper_name, invoke):
+    """The four §1 opt-out helpers — `send_exit`, `send_inline_preview`,
+    `send_bash_command`, and `send_freetext_and_submit` — must NOT send an `Esc`
+    first. An Escape before `/exit`, an inline preview, `! <cmd>`, or the
+    freetext answer to an AskUserQuestion prompt would mis-fire (spec §1: the
+    safeguard is opt-in, ping helpers only)."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: captured.append(list(args)) or "",
+    )
+
+    invoke(_tmux)
+
+    assert captured, "expected the helper to issue send-keys calls"
+    assert all("Escape" not in call for call in captured)
+
+
+def test_send_resume_trigger__removed():
+    """`send_resume_trigger` (the blind ordinary-member resume nudge) is removed
+    entirely — no caller remains (spec §2, Success Criteria)."""
+    assert not hasattr(TmuxMultiplexer, "send_resume_trigger")

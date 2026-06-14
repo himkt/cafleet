@@ -20,6 +20,11 @@ _PANE_GONE_MARKERS = ("can't find pane", "no such pane")
 # the helpers backend-agnostic).
 _SUBMIT_DELAY = 0.12
 
+# Sleep after a leading ``send-keys Escape`` (the opt-in ``esc_first`` safeguard)
+# so the agent dismisses a pending permission-approval prompt and the pane
+# settles before the literal text is typed.
+_ESC_SETTLE_DELAY = 0.1
+
 
 def _run(args: list[str], *, timeout: float | None = None) -> str:
     try:
@@ -56,7 +61,19 @@ def _send_literal_then_enter(
     payload: str,
     timeout: float | None = None,
     ignore_missing: bool = False,
+    esc_first: bool = False,
 ) -> None:
+    if esc_first:
+        # Permission-prompt safeguard: a leading ``Escape`` dismisses a pending
+        # permission-approval prompt so the trailing ``Enter`` below cannot
+        # blindly confirm it. Opt-in (ping helpers only) — an ``Esc`` before
+        # ``/exit``, an inline preview, or ``! <cmd>`` would mis-fire.
+        _run_tolerating_pane_gone(
+            ["tmux", "send-keys", "-t", target_pane_id, "Escape"],
+            ignore_missing=ignore_missing,
+            timeout=timeout,
+        )
+        time.sleep(_ESC_SETTLE_DELAY)
     _run_tolerating_pane_gone(
         ["tmux", "send-keys", "-t", target_pane_id, "-l", payload],
         ignore_missing=ignore_missing,
@@ -154,38 +171,55 @@ class TmuxMultiplexer:
     def send_poll_trigger(
         self, *, target_pane_id: str, fleet_id: int, agent_id: int
     ) -> bool:
-        """Best-effort ``cafleet ... message poll`` keystroke for the recipient's pane."""
+        """Best-effort Esc-safeguarded ``cafleet ... message poll`` keystroke.
+
+        ``esc_first=True`` leads with ``Escape`` so a pane on a pending
+        permission-approval prompt dismisses it rather than confirming it with
+        the trailing ``Enter``. The Director's manual ``cafleet member ping``
+        reuses this helper, inheriting the safeguard for free.
+        """
         if shutil.which("tmux") is None:
             return False
         payload = f"cafleet --fleet-id {fleet_id} message poll --agent-id {agent_id}"
         try:
             _send_literal_then_enter(
-                target_pane_id=target_pane_id, payload=payload, timeout=5
+                target_pane_id=target_pane_id,
+                payload=payload,
+                timeout=5,
+                esc_first=True,
             )
         except TmuxError:
             return False
         return True
 
-    def send_resume_trigger(
+    def send_wake_trigger(
         self, *, target_pane_id: str, fleet_id: int, agent_id: int
     ) -> bool:
-        """Best-effort single-line resume nudge for a member's pane.
+        """Best-effort Esc-safeguarded wake nudge for the monitoring member's pane.
 
-        Carries the poll command plus a review-and-continue instruction (so a
-        stopped member resumes instead of going idle), with no shell-special
-        characters — like ``send_poll_trigger``, the keystroke is sane whether
-        it lands in the coding agent's input or at a shell prompt.
+        Carries a single-line instruction to run the monitoring member's
+        capture-classify-reengage routine — distinct from the Director's poll
+        command. No shell-special characters, so the keystroke is sane whether
+        it lands in the coding agent's input or at a shell prompt. ``fleet_id`` /
+        ``agent_id`` keep the keystroke-helper signature uniform with
+        ``send_poll_trigger`` (the loop calls both identically); the routine
+        itself runs in the monitoring member's own pane, so they are not echoed
+        into the nudge.
         """
         if shutil.which("tmux") is None:
             return False
         payload = (
-            f"[monitor] resume: run cafleet --fleet-id {fleet_id} message poll "
-            f"--agent-id {agent_id} to check your inbox, then review your current "
-            f"task and continue working if you had stopped."
+            "[monitor] wake: run your monitoring routine now — capture the "
+            "Director pane, judge it active vs idle, and if idle assess the "
+            "inbox and members and re-engage the Director with an "
+            "Esc-safeguarded nudge."
         )
         try:
             _send_literal_then_enter(
-                target_pane_id=target_pane_id, payload=payload, timeout=5
+                target_pane_id=target_pane_id,
+                payload=payload,
+                timeout=5,
+                esc_first=True,
             )
         except TmuxError:
             return False

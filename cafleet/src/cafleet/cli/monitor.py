@@ -92,7 +92,13 @@ def monitor_status(ctx: click.Context) -> None:
         {
             "agent_id": t["agent_id"],
             "name": t["name"],
-            "role": "director" if t["is_director"] else "member",
+            "role": (
+                "director"
+                if t["is_director"]
+                else "monitor"
+                if t["is_monitoring_member"]
+                else "member"
+            ),
             "interval_seconds": t["interval_seconds"],
             "last_ping_at": t["last_ping_at"],
             "enabled": t["enabled"],

@@ -1,7 +1,7 @@
 # Safe Director-only Monitoring with a Dedicated Monitoring Member
 
-**Status**: Approved
-**Progress**: 0/26 tasks complete
+**Status**: Complete
+**Progress**: 25/26 tasks complete (D2 live operator smoke deferred)
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -10,12 +10,12 @@ Close the `cafleet monitor` safety hole where a bare `Enter` keystroke confirms 
 
 ## Success Criteria
 
-- [ ] Every monitor keystroke ping sends `Esc` before the literal text + `Enter`, so a pending permission prompt can never be confirmed by the trailing `Enter`.
-- [ ] The monitor loop pings **only** the root Director and the monitoring member; ordinary members are never enrolled and never pinged by the loop.
-- [ ] A monitoring member can be spawned via `cafleet member create --role monitor`, is marked `agent_card_json.cafleet.kind == "monitoring-member"`, and is the one process that runs `cafleet monitor start`.
-- [ ] The monitoring member captures the Director's pane, classifies it active vs idle, and on idle re-engages **the Director** (never drives ordinary members directly).
-- [ ] `send_resume_trigger` (the blind ordinary-member resume nudge) is removed entirely — the repo reads as if member-pinging never existed.
-- [ ] `mise //cafleet:lint`, `:format`, `:typecheck`, and `:test` all pass; docs, README, and every affected SKILL are consistent with the new behavior.
+- [x] Every monitor keystroke ping sends `Esc` before the literal text + `Enter`, so a pending permission prompt can never be confirmed by the trailing `Enter`.
+- [x] The monitor loop pings **only** the root Director and the monitoring member; ordinary members are never enrolled and never pinged by the loop.
+- [x] A monitoring member can be spawned via `cafleet member create --role monitor`, is marked `agent_card_json.cafleet.kind == "monitoring-member"`, and is the one process that runs `cafleet monitor start`.
+- [x] The monitoring member captures the Director's pane, classifies it active vs idle, and on idle re-engages **the Director** (never drives ordinary members directly).
+- [x] `send_resume_trigger` (the blind ordinary-member resume nudge) is removed entirely — the repo reads as if member-pinging never existed.
+- [x] `mise //cafleet:lint`, `:format`, `:typecheck`, and `:test` all pass; docs, README, and every affected SKILL are consistent with the new behavior.
 
 ---
 
@@ -239,40 +239,40 @@ Pre-upgrade there are no monitoring members, so this leaves exactly the root-Dir
 
 ### Phase A: Documentation
 
-- [ ] A1. Rewrite `docs/concepts/monitoring.md`: who-gets-pinged = Director + monitoring member only; the two `Esc`-safeguarded keystrokes (Director poll, monitoring-member wake); the monitoring member's capture-classify-reengage role; enrollment restricted to those two; lifecycle now runs `monitor start` in the monitoring member's pane. Delete all ordinary-member resume-nudge content. <!-- completed: -->
-- [ ] A2. Update `docs/spec/data-model.md`: `monitor_config` is enrolled only for the root Director + the monitoring member; document `agent_card_json.cafleet.kind == "monitoring-member"`; note the Alembic data migration that prunes legacy non-Director rows. <!-- completed: -->
-- [ ] A3. Update `docs/spec/cli-options.md`: add `cafleet member create --role {member,monitor}`; note the `Esc` safeguard on the monitor pings and `member ping`; refresh the `cafleet monitor` section. <!-- completed: -->
-- [ ] A4. Update `README.md` monitoring summary: dedicated monitoring member + `Esc` safeguard + Director-and-monitoring-member-only heartbeat. <!-- completed: -->
-- [ ] A5. Update `skills/cafleet-agent-team-monitoring/SKILL.md`: document the dedicated monitoring member, the canonical monitoring-member spawn prompt and its capture-classify-reengage routine, the two `Esc`-safeguarded keystrokes, and the replacement member-wake paths (inline preview primary, Director `member ping` manual recovery — §6); remove the member resume-nudge; update Monitor Lifecycle (start runs inside the monitoring member; first-in/first-out; the `ready: monitor live` handshake gate; stop the monitor background task before deleting the monitoring member). <!-- completed: -->
-- [ ] A6. Update `skills/cafleet-agent-team-supervision/SKILL.md`: Spawn Protocol reorder (monitoring member is the first `member create` and starts the monitor; the monitoring member's `ready: monitor live` message gates the first ordinary `member create`); Stall Response notes that a quiet member is surfaced by the monitoring member and re-woken via the Director's `member ping`; Cleanup reorder (stop the monitor's background task, then delete the monitoring member first). <!-- completed: -->
-- [ ] A7. Update `skills/cafleet/SKILL.md` + `skills/cafleet/reference/director.md`: `member create --role monitor`; the `Esc`-first `member ping` mechanism; the revised Shutdown Protocol ordering (stop the monitor's background task in the monitoring member → delete the monitoring member → delete ordinary members → `fleet delete`). <!-- completed: -->
-- [ ] A8. Update `.claude/rules/bash-tool.md`: the `member ping` description becomes an `Esc` + `cafleet … message poll` + `Enter` keystroke (the leading `Esc` is the safeguard). <!-- completed: -->
+- [x] A1. Rewrite `docs/concepts/monitoring.md`: who-gets-pinged = Director + monitoring member only; the two `Esc`-safeguarded keystrokes (Director poll, monitoring-member wake); the monitoring member's capture-classify-reengage role; enrollment restricted to those two; lifecycle now runs `monitor start` in the monitoring member's pane. Delete all ordinary-member resume-nudge content. <!-- completed: 2026-06-14T06:15 -->
+- [x] A2. Update `docs/spec/data-model.md`: `monitor_config` is enrolled only for the root Director + the monitoring member; document `agent_card_json.cafleet.kind == "monitoring-member"`; note the Alembic data migration that prunes legacy non-Director rows. <!-- completed: 2026-06-14T06:16 -->
+- [x] A3. Update `docs/spec/cli-options.md`: add `cafleet member create --role {member,monitor}`; note the `Esc` safeguard on the monitor pings and `member ping`; refresh the `cafleet monitor` section. <!-- completed: 2026-06-14T06:17 -->
+- [x] A4. Update `README.md` monitoring summary: dedicated monitoring member + `Esc` safeguard + Director-and-monitoring-member-only heartbeat. <!-- completed: 2026-06-14T06:18 -->
+- [x] A5. Update `skills/cafleet-agent-team-monitoring/SKILL.md`: document the dedicated monitoring member, the canonical monitoring-member spawn prompt and its capture-classify-reengage routine, the two `Esc`-safeguarded keystrokes, and the replacement member-wake paths (inline preview primary, Director `member ping` manual recovery — §6); remove the member resume-nudge; update Monitor Lifecycle (start runs inside the monitoring member; first-in/first-out; the `ready: monitor live` handshake gate; stop the monitor background task before deleting the monitoring member). <!-- completed: 2026-06-14T06:20 -->
+- [x] A6. Update `skills/cafleet-agent-team-supervision/SKILL.md`: Spawn Protocol reorder (monitoring member is the first `member create` and starts the monitor; the monitoring member's `ready: monitor live` message gates the first ordinary `member create`); Stall Response notes that a quiet member is surfaced by the monitoring member and re-woken via the Director's `member ping`; Cleanup reorder (stop the monitor's background task, then delete the monitoring member first). <!-- completed: 2026-06-14T06:22 -->
+- [x] A7. Update `skills/cafleet/SKILL.md` + `skills/cafleet/reference/director.md`: `member create --role monitor`; the `Esc`-first `member ping` mechanism; the revised Shutdown Protocol ordering (stop the monitor's background task in the monitoring member → delete the monitoring member → delete ordinary members → `fleet delete`). <!-- completed: 2026-06-14T06:24 -->
+- [x] A8. Update `.claude/rules/bash-tool.md`: the `member ping` description becomes an `Esc` + `cafleet … message poll` + `Enter` keystroke (the leading `Esc` is the safeguard). <!-- completed: 2026-06-14T06:32 -->
 
 ### Phase B: Code
 
-- [ ] B1. `cafleet/src/cafleet/multiplexer/tmux.py`: add `_ESC_SETTLE_DELAY = 0.1` and an `esc_first: bool = False` parameter to `_send_literal_then_enter` (Escape → settle → text → submit-delay → Enter). <!-- completed: -->
-- [ ] B2. `tmux.py`: pass `esc_first=True` from `send_poll_trigger`; add `send_wake_trigger` (`esc_first=True`, the single-line monitoring-member wake nudge); **remove `send_resume_trigger` entirely**. <!-- completed: -->
-- [ ] B3. `cafleet/src/cafleet/broker/_shared.py`: add `MONITORING_MEMBER_KIND = "monitoring-member"` and `is_monitoring_member(agent_card_json)` (mirrors `is_administrator`). <!-- completed: -->
-- [ ] B4. `cafleet/src/cafleet/broker/agents.py::register_agent`: add `kind: str | None = None`; write `agent_card["cafleet"] = {"kind": kind}` when set; gate `monitor.enroll_agent` on `kind == MONITORING_MEMBER_KIND` (ordinary members no longer enrolled); reject a second active monitoring member per fleet. <!-- completed: -->
-- [ ] B5. `cafleet/src/cafleet/broker/monitor.py::list_monitor_targets`: add `is_monitoring_member` to each row (derived from `agent_card_json` kind) for explicit keystroke selection and `status` labeling. <!-- completed: -->
-- [ ] B6. `cafleet/src/cafleet/monitor/loop.py::monitor_tick`: select `send_poll_trigger` for the Director and `send_wake_trigger` for the monitoring member; update `should_ping` docstring/comments to drop the "every member alike" framing. <!-- completed: -->
-- [ ] B7. `cafleet/src/cafleet/cli/member.py::member_create`: add `--role {member,monitor}` (default `member`); pass `kind="monitoring-member"` to `register_agent` when `--role monitor`. <!-- completed: -->
-- [ ] B8. `cafleet/src/cafleet/cli/monitor.py::monitor_status`: label the monitoring member's role (e.g. `monitor`) in the agents table, derived from `is_monitoring_member`. <!-- completed: -->
-- [ ] B9. New Alembic revision: data-only step deleting `monitor_config` rows for non-Director agents (§8); downgrade is a no-op. <!-- completed: -->
+- [x] B1. `cafleet/src/cafleet/multiplexer/tmux.py`: add `_ESC_SETTLE_DELAY = 0.1` and an `esc_first: bool = False` parameter to `_send_literal_then_enter` (Escape → settle → text → submit-delay → Enter). <!-- completed: 2026-06-14T07:20 -->
+- [x] B2. `tmux.py`: pass `esc_first=True` from `send_poll_trigger`; add `send_wake_trigger` (`esc_first=True`, the single-line monitoring-member wake nudge); **remove `send_resume_trigger` entirely**. <!-- completed: 2026-06-14T07:20 -->
+- [x] B3. `cafleet/src/cafleet/broker/_shared.py`: add `MONITORING_MEMBER_KIND = "monitoring-member"` and `is_monitoring_member(agent_card_json)` (mirrors `is_administrator`). <!-- completed: 2026-06-14T07:20 -->
+- [x] B4. `cafleet/src/cafleet/broker/agents.py::register_agent`: add `kind: str | None = None`; write `agent_card["cafleet"] = {"kind": kind}` when set; gate `monitor.enroll_agent` on `kind == MONITORING_MEMBER_KIND` (ordinary members no longer enrolled); reject a second active monitoring member per fleet. <!-- completed: 2026-06-14T07:20 -->
+- [x] B5. `cafleet/src/cafleet/broker/monitor.py::list_monitor_targets`: add `is_monitoring_member` to each row (derived from `agent_card_json` kind) for explicit keystroke selection and `status` labeling. <!-- completed: 2026-06-14T07:20 -->
+- [x] B6. `cafleet/src/cafleet/monitor/loop.py::monitor_tick`: select `send_poll_trigger` for the Director and `send_wake_trigger` for the monitoring member; update `should_ping` docstring/comments to drop the "every member alike" framing. <!-- completed: 2026-06-14T07:20 -->
+- [x] B7. `cafleet/src/cafleet/cli/member.py::member_create`: add `--role {member,monitor}` (default `member`); pass `kind="monitoring-member"` to `register_agent` when `--role monitor`. <!-- completed: 2026-06-14T07:20 -->
+- [x] B8. `cafleet/src/cafleet/cli/monitor.py::monitor_status`: label the monitoring member's role (e.g. `monitor`) in the agents table, derived from `is_monitoring_member`. <!-- completed: 2026-06-14T07:20 -->
+- [x] B9. New Alembic revision: data-only step deleting `monitor_config` rows for non-Director agents (§8); downgrade is a no-op. <!-- completed: 2026-06-14T07:20 -->
 
 ### Phase C: Tests
 
-- [ ] C1. tmux multiplexer tests: assert the `Esc`-first sequence (`Escape` → text → `Enter`) for `send_poll_trigger` and `send_wake_trigger`; assert `esc_first=False` helpers (`send_exit`, `send_inline_preview`, `send_bash_command`) send **no** `Esc`; assert `send_resume_trigger` no longer exists. <!-- completed: -->
-- [ ] C2. `tests/monitor/test_should_ping.py`: update fixtures for the Director + monitoring-member enrollment world. <!-- completed: -->
-- [ ] C3. `tests/monitor/test_loop.py`: Director receives the poll keystroke, the monitoring member receives the wake keystroke, and a never-enrolled ordinary member is never pinged. <!-- completed: -->
-- [ ] C4. `tests/broker/test_monitor.py`: enrollment is restricted to Director + monitoring member; `is_monitoring_member` / kind marker; `list_monitor_targets` surfaces the new field; the Alembic data migration prunes legacy rows. <!-- completed: -->
-- [ ] C5. `tests/cli/test_monitor.py`: `monitor status` reflects the monitoring member's role. <!-- completed: -->
-- [ ] C6. `tests/cli/test_member.py` (create path): `--role monitor` sets the kind marker and enrolls in `monitor_config`; an ordinary `--role member` create does **not** enroll; a second `--role monitor` spawn is rejected. <!-- completed: -->
-- [ ] C7. `tests/cli/test_member_ping.py`: `member ping` now keystrokes `Esc` first (inherited from `send_poll_trigger`). <!-- completed: -->
+- [x] C1. tmux multiplexer tests: assert the `Esc`-first sequence (`Escape` → text → `Enter`) for `send_poll_trigger` and `send_wake_trigger`; assert `esc_first=False` helpers (`send_exit`, `send_inline_preview`, `send_bash_command`) send **no** `Esc`; assert `send_resume_trigger` no longer exists. <!-- completed: 2026-06-14T07:20 -->
+- [x] C2. `tests/monitor/test_should_ping.py`: update fixtures for the Director + monitoring-member enrollment world. <!-- completed: 2026-06-14T07:20 -->
+- [x] C3. `tests/monitor/test_loop.py`: Director receives the poll keystroke, the monitoring member receives the wake keystroke, and a never-enrolled ordinary member is never pinged. <!-- completed: 2026-06-14T07:20 -->
+- [x] C4. `tests/broker/test_monitor.py`: enrollment is restricted to Director + monitoring member; `is_monitoring_member` / kind marker; `list_monitor_targets` surfaces the new field; the Alembic data migration prunes legacy rows. <!-- completed: 2026-06-14T07:20 -->
+- [x] C5. `tests/cli/test_monitor.py`: `monitor status` reflects the monitoring member's role. <!-- completed: 2026-06-14T07:20 -->
+- [x] C6. `tests/cli/test_member.py` (create path): `--role monitor` sets the kind marker and enrolls in `monitor_config`; an ordinary `--role member` create does **not** enroll; a second `--role monitor` spawn is rejected. <!-- completed: 2026-06-14T07:20 -->
+- [x] C7. `tests/cli/test_member_ping.py`: `member ping` now keystrokes `Esc` first (inherited from `send_poll_trigger`). <!-- completed: 2026-06-14T07:20 -->
 
 ### Phase D: Verification
 
-- [ ] D1. `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass. <!-- completed: -->
+- [x] D1. `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass. <!-- completed: 2026-06-14T07:25 -->
 - [ ] D2. Manual smoke: spawn a monitoring member (`--role monitor --model sonnet`), confirm `monitor status` is live, confirm an ordinary member receives no loop keystroke, and confirm the `Esc` prefix dismisses a pending permission prompt instead of confirming it. <!-- completed: -->
 
 ---
@@ -283,3 +283,4 @@ Pre-upgrade there are no monitoring members, so this leaves exactly the root-Dir
 |------|---------|
 | 2026-06-14 | Initial draft |
 | 2026-06-14 | Reviewer pass: split Overview; documented the self-ping interrupt, member-wake recovery paths, the `monitor live` handshake gate, and the clean teardown stop (SIGTERM before pane-kill); pinned the monitor-uniqueness guard to `register_agent` with detection + error text; made the loop keystroke branch explicit |
+| 2026-06-14 | Implemented (Phases A–D1): Esc-safeguarded keystrokes; dedicated monitoring member (`--role monitor`, `cafleet.kind` marker, one-per-fleet + pane-bound guards); enrollment restricted to Director + monitoring member; `send_resume_trigger` removed; 0003 prune migration; docs/README/SKILLs updated. Full suite green (826 tests); Copilot review clean (no new comments). PR #119. D2 live permission-prompt smoke deferred to operator (keystroke sequence + enrollment covered by C1/C3/C5/C6). |

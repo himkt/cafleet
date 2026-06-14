@@ -7,6 +7,7 @@ from typing import NoReturn
 import click
 
 from cafleet import broker, output
+from cafleet.broker import _shared
 from cafleet.cli._helpers import (
     director_member_options,
     ensure_tmux_or_die,
@@ -118,6 +119,14 @@ def _rollback_register(new_agent_id: int, *, fleet_id: int, reason: str) -> NoRe
     help="Model passed to the backend binary.",
 )
 @click.option(
+    "--role",
+    "role",
+    type=click.Choice(["member", "monitor"]),
+    default="member",
+    show_default=True,
+    help="Member role. 'monitor' spawns the dedicated monitoring member.",
+)
+@click.option(
     "--prompt-file",
     "prompt_file",
     type=str,
@@ -134,6 +143,7 @@ def member_create(
     description,
     coding_agent,
     model,
+    role,
     prompt_file,
     full,
     prompt_argv,
@@ -172,7 +182,12 @@ def member_create(
                 "tmux_pane_id": None,
                 "coding_agent": coding_agent,
             },
+            kind=_shared.MONITORING_MEMBER_KIND if role == "monitor" else None,
         )
+    except click.ClickException:
+        # The one-monitoring-member-per-fleet guard raises ClickException with a
+        # user-facing message; surface it verbatim rather than wrapping it.
+        raise
     except Exception as exc:
         raise click.ClickException(f"register failed: {exc}") from exc
     new_agent_id = result["agent_id"]

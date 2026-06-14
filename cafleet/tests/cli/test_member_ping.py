@@ -7,6 +7,7 @@ from click.testing import CliRunner
 
 from cafleet import broker
 from cafleet.cli import cli
+from cafleet.multiplexer import tmux as multiplexer_tmux
 from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
 from tests.cli._member_helpers import (
     MEMBER_ID,
@@ -84,6 +85,39 @@ def test_ping_dispatch__poll_trigger_called_with_correct_kwargs(
     assert call["target_pane_id"] == PANE_ID
     assert call["fleet_id"] == fleet_id
     assert call["agent_id"] == MEMBER_ID
+
+
+def test_ping__keystrokes_escape_first(runner, fleet_id, happy_path_agent, monkeypatch):
+    """`member ping` inherits the `Esc` safeguard from `send_poll_trigger`: with
+    the real keystroke helper in play, the sequence leads with `Escape` before
+    the literal poll command + Enter (design 0000090 §2, C7).
+
+    Unlike the other tests in this module, this one does NOT stub
+    `send_poll_trigger` — it lets the real helper run with `_run`/`shutil.which`
+    mocked so the inherited `esc_first=True` behavior is exercised end-to-end.
+    """
+    monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/tmux")
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: captured.append(list(args)) or "",
+    )
+
+    result = _invoke(runner, fleet_id)
+    assert result.exit_code == 0, result.output
+
+    assert captured[0] == ["tmux", "send-keys", "-t", PANE_ID, "Escape"]
+    assert captured[1] == [
+        "tmux",
+        "send-keys",
+        "-t",
+        PANE_ID,
+        "-l",
+        f"cafleet --fleet-id {fleet_id} message poll --agent-id {MEMBER_ID}",
+    ]
+    assert captured[-1] == ["tmux", "send-keys", "-t", PANE_ID, "Enter"]
 
 
 def test_ping_dispatch__text_output(runner, fleet_id, happy_path_agent, poll_recorder):
