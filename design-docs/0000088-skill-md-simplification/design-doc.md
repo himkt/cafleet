@@ -1,7 +1,7 @@
 # Slim Down the CAFleet Skill `.md` Files (Behavior-Preserving)
 
 **Status**: Approved
-**Progress**: 5/10 tasks complete
+**Progress**: 6/10 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -220,9 +220,9 @@ This change edits the very skills (`cafleet-design-doc-create` / `-execute` and 
 
 ### Step 6: Cluster D — `cafleet-design-doc-execute/`
 
-- [ ] `SKILL.md`: replace inlined Coordination Protocol (D1); de-triplicate the spawn two-step procedure (D10); keep + tighten the silence / `reviewDecision` rationale (P2 exception); preserve all Steps 1–8 commands/tables/templates. <!-- completed: -->
-- [ ] `roles/director.md`: cross-ref Idle/Stall + Shutdown (D9, D2); keep Escalation + Commit Protocol + PR milestones. <!-- completed: -->
-- [ ] `roles/programmer.md` + `roles/tester.md` + `roles/verifier.md`: trim shared boilerplate (D9); keep all workflow/escalation logic. <!-- completed: -->
+- [x] `SKILL.md`: replace inlined Coordination Protocol (D1); de-triplicate the spawn two-step procedure (D10); keep + tighten the silence / `reviewDecision` rationale (P2 exception); preserve all Steps 1–8 commands/tables/templates. <!-- completed: 2026-06-14T03:34 -->
+- [x] `roles/director.md`: cross-ref Idle/Stall + Shutdown (D9, D2); keep Escalation + Commit Protocol + PR milestones. <!-- completed: 2026-06-14T03:34 -->
+- [x] `roles/programmer.md` + `roles/tester.md` + `roles/verifier.md`: trim shared boilerplate (D9); keep all workflow/escalation logic. <!-- completed: 2026-06-14T03:34 -->
 
 ### Step 7: Cluster E — `cafleet-design-doc-interview/`
 

@@ -19,15 +19,13 @@ Load these skills at startup:
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) as **placeholders, not shell variables**. Your spawn prompt contained the literal UUIDs for FLEET ID, DIRECTOR AGENT ID, and YOUR AGENT ID — substitute those literal UUIDs directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
-
-**Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>`.
+Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are **placeholders, not shell variables** — substitute the literal UUIDs from your spawn prompt directly into each command (`permissions.allow` matches command strings literally; shell expansion breaks it). Flag placement (`--fleet-id` before the subcommand, `--agent-id` after) follows the `cafleet` skill.
 
 ## Communication Protocol
 
 You do NOT speak to the user directly. All communication goes through the Director via the CAFleet message broker.
 
-**Coordination Protocol**: See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules.
+**Coordination Protocol**: See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules.
 
 **Sending a message to the Director:**
 ```bash
@@ -36,7 +34,7 @@ cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
 ```
 The literal `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
-**Receiving tasks from the Director:** When the Director sends a message, the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into your tmux pane via `tmux.send_inline_preview`. You process the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, run `cafleet message poll` yourself. Read the message, then acknowledge it:
+**Receiving tasks from the Director:** the broker keystrokes a 2-line inline preview of each message into your pane (mechanics in the `cafleet` skill § Send); to fetch the full body run `cafleet message poll` yourself. Read the message, then acknowledge it:
 ```bash
 cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
@@ -103,7 +101,7 @@ For each step assigned by the Director (you receive `ready (paragraph-Implementa
    - **Tests fail (suspected test defect)**: If your implementation matches the design doc but tests expect something different, escalate to the Director via `cafleet message send`. See Escalation below.
 6. **Update the design document**: Mark each completed task's checkbox `- [ ]` → `- [x]` AND set `<!-- completed: YYYY-MM-DDTHH:MM -->` in the same edit. Never leave a checked box without a timestamp. Update immediately after each task, before writing more code.
 7. **Update the Progress counter** in the document header after each task completion.
-8. **Send `complete (paragraph-Implementation > Step N)` via `cafleet message send`** when the step is complete. An optional summary may follow `— ` (≤ 80 codepoints, ≤ 3-item enumeration), e.g. `complete (paragraph-Implementation > Step N) — 12 tests pass`. **Do NOT enumerate per-file or per-test detail in the body** — the Director recovers it directly via `git status` / `git diff --stat`. If issues block you, send `blocked (paragraph-Implementation > Step N)` and write a `COMMENT(programmer): <note>` marker at the SAME `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in `../SKILL.md § Coordination Protocol`).
+8. **Send `complete (paragraph-Implementation > Step N)` via `cafleet message send`** when the step is complete. An optional summary may follow `— ` (≤ 80 codepoints, ≤ 3-item enumeration), e.g. `complete (paragraph-Implementation > Step N) — 12 tests pass`. **Do NOT enumerate per-file or per-test detail in the body** — the Director recovers it directly via `git status` / `git diff --stat`. If issues block you, send `blocked (paragraph-Implementation > Step N)` and write a `COMMENT(programmer): <note>` marker at the SAME `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`).
 9. **Handle Director feedback**: The Director will review your code for quality and design doc compliance. If feedback arrives as `ready (paragraph-Implementation > Step N)` (or `ready (<file>:<line>)`), read the standing `COMMENT(director)` markers at the pointer, fix the issues, re-run tests to ensure they still pass, remove the markers as part of the fix, and reply `addressed (paragraph-Implementation > Step N)` (or `addressed (<file>:<line>)`).
 
 **CRITICAL: The design document MUST always reflect current progress. Every completed task MUST have its checkbox checked and timestamp set before moving to the next task. If you forgot a checkbox or timestamp, stop and fix it before continuing.**
@@ -115,14 +113,10 @@ For each step assigned by the Director (you receive `ready (paragraph-Implementa
 If tests fail and you believe the test is defective (your implementation matches the design doc but tests expect something different):
 
 1. **Do NOT modify any test files.** Only the Tester can change tests.
-2. Write a `COMMENT(programmer): test <test-name> expects X but design doc says Y; please arbitrate` marker at `paragraph-Implementation > Step N` in the design doc (per the pointer-marker pairing rule in `../SKILL.md § Coordination Protocol` — marker location matches the cafleet pointer in step 3 below). The marker carries the rationale (specific test failure, why your implementation is correct per the design doc with the cited section, what the test appears to expect differently); the cafleet body does NOT. You may cite the relevant `paragraph-Specification > <…>` heading inside the marker body, but the marker itself MUST live at the `paragraph-Implementation > Step N` you escalate from.
+2. Write a `COMMENT(programmer): test <test-name> expects X but design doc says Y; please arbitrate` marker at `paragraph-Implementation > Step N` in the design doc (per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md` — marker location matches the cafleet pointer in step 3 below). The marker carries the rationale (specific test failure, why your implementation is correct per the design doc with the cited section, what the test appears to expect differently); the cafleet body does NOT. You may cite the relevant `paragraph-Specification > <…>` heading inside the marker body, but the marker itself MUST live at the `paragraph-Implementation > Step N` you escalate from.
 3. Send `escalating (paragraph-Implementation > Step N)` via `cafleet message send`.
 4. **STOP and wait** for the Director's decision. The Director writes a `COMMENT(director): <decision> — <rationale>` arbitration marker at the same paragraph and sends `ready (paragraph-Implementation > Step N)` to either you or the Tester. If the recipient is you, act on the standing marker and reply `addressed (paragraph-Implementation > Step N)`.
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet --fleet-id <fleet-id> member delete --member-id <my-agent-id>`. The CLI sends `/exit` to your pane and waits up to 15 s for it to disappear.
-
-You do NOT need to handle any `shutdown_request` JSON message — that is the in-process Agent Teams primitive. The CAFleet equivalent is `/exit`, dispatched by the Director through the tmux push primitive. When you receive `/exit`, your `claude` process terminates immediately; nothing is required of you.
-
-If your Director sends `cafleet message send` instructing you to wrap up (e.g. "report final status, then I will run member delete"), do that one final report via `cafleet message send` and return to the prompt. The Director will then run `cafleet member delete` from its own pane.
+The Director terminates you via `cafleet --fleet-id <fleet-id> member delete --member-id <my-agent-id>` (sends `/exit`, waits up to 15 s). When `/exit` arrives your `claude` process exits immediately — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

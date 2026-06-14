@@ -19,157 +19,15 @@ Implement features based on a design document using up to four roles orchestrate
 
 - For the document template, see: [../cafleet-design-doc/template.md](../cafleet-design-doc/template.md)
 - For section guidelines and quality standards, see: [../cafleet-design-doc/guidelines.md](../cafleet-design-doc/guidelines.md)
+- For the inter-agent coordination protocol (verb + pointer schema, `COMMENT(role)` markers), see: [../cafleet-design-doc/coordination.md](../cafleet-design-doc/coordination.md)
 
 ## Coordination Protocol
 
-Mechanics for inter-agent coordination in this skill. The design document is the substantive communication medium; `cafleet message send --text` carries only a single-line **verb + pointer** poke. Substantive content (feedback, reports, escalation reasons, review items) lives in inline `COMMENT(role)` markers in the design doc — except for source-anchored Copilot inline review, which is annotated in the source file at `<file>:<line>` because that is where the comment lives.
+This skill's Director, Programmer, Tester, and Verifier coordinate via the verb + pointer schema and `COMMENT(role)` markers defined canonically in [../cafleet-design-doc/coordination.md](../cafleet-design-doc/coordination.md) — the single source of truth for the 6 verbs, the 3 pointer forms, the message format, the `COMMENT(role)` marker grammar, the issue/status split, Copilot routing, anchorless status, finalize-time cleanup, and Director per-file detail recovery.
 
-### Core Principle
+Two skill-specific notes layer on top of that canonical protocol:
 
-`cafleet message send` is a poke, not a payload. Status hops travel as compact `<verb> (<pointer>)` lines on the broker; reasoning, findings, and item-by-item routing live as `COMMENT(role)` markers inside the design document (or, for source-anchored Copilot, the source file). Anchorless meta-events (member crashed/restarted, generic ping ack, "still working") do NOT use a verb from the canonical list and do NOT touch the design doc.
-
-### Verb Vocabulary
-
-The canonical set is exactly 6. Members and the Director MUST pick from this list and MUST NOT invent new verbs.
-
-| Verb | Sender direction | Meaning | Used for |
-|:--|:--|:--|:--|
-| `ready` | Director → member, or member → Director | "The pointer target is ready for you to read / act on." | Fresh assignments, member-to-Director "I have something for you to look at," and Director stall-nudges (the recipient interprets contextually — see below). |
-| `complete` | Member → Director | "I finished a fresh deliverable at the pointer target." | Initial drafts, freshly written tests, freshly written implementation, FIXME-resolution sweeps. |
-| `addressed` | Member → Director, or Director → Director (self-note) | "I resolved a pre-existing marker (a `COMMENT(role)` marker, a Copilot inline comment, or a Director-arbitration note) at the pointer." | Round-2+ work on items already flagged in the doc or in source. |
-| `blocked` | Member → Director | "I cannot proceed at the pointer; the blocker rationale is in a `COMMENT(role)` marker at the same pointer." | Spec ambiguity, missing deps, environmental issues. |
-| `escalating` | Member → Director | "I am escalating an issue (e.g. a suspected test defect) at the pointer; the rationale is in a `COMMENT(role)` marker at the same pointer." | Test-defect arbitration, multi-round disagreements. |
-| `approved` | Reviewer → Director, or Director → user-result | "All quality criteria are met at the pointer (typically `doc`)." | Reviewer approval signal. |
-
-**Verb choice for `complete` vs `addressed`**: `complete` signals a fresh deliverable (work that did not previously have a marker waiting). `addressed` signals resolution of a pre-existing marker (any `COMMENT(role)`, any Copilot line, any Director arbitration). When in doubt, ask: "did a marker exist before I started this turn?" — if yes, use `addressed`; if no, use `complete`.
-
-**Director stall-nudges** reuse `ready (doc)` or `ready (paragraph-...)` — they are `ready` from the Director's perspective ("the pointer target is ready for you, please act"). The recipient interprets contextually: on receiving `ready (...)`, scan the pointer target for any `COMMENT(role)` markers addressed to your role or relevant to your current phase, and act accordingly. Re-sent `ready (...)` after a member's idle window is a nudge, not a new assignment — same target, same expected action.
-
-### Pointer Forms
-
-Exactly 3 canonical forms. Use the tightest one that locates the target.
-
-| Form | Example | When to use |
-|:--|:--|:--|
-| `paragraph-<HeadingPath>` | `paragraph-Implementation > Step 2` | The target is a heading (or sub-heading) inside the design document. Use the literal heading text. Nest with the three-character separator ` > ` (space, greater-than, space). Heading text is preserved verbatim — slashes, colons, hyphens, and other punctuation inside a heading remain literal. |
-| `<file>:<line>` or `<file>:<line-start>-<line-end>` | `cafleet/src/cafleet/cli/main.py:142` | The target is a specific line (or range) in a source file, test file, or the design doc itself. Used for source-anchored Copilot inline review and for source-file `COMMENT` markers added during code review. |
-| `doc` | `doc` | The target is the design document as a whole (e.g., Verifier signalling overall E2E success). |
-
-**Pointer-marker pairing rule.** When a verb's spec requires a paired `COMMENT(role)` marker (`blocked` / `escalating`, also Director arbitration replies and `COMMENT(copilot)` placements), the marker MUST live at the SAME pointer as the cafleet body:
-
-| Pointer | Canonical marker placement |
-|:--|:--|
-| `paragraph-<HeadingPath>` | Inline within that heading's section. |
-| `<file>:<line>` | At that exact line in the file (immediately above or on `<line>` per the file's native comment syntax). |
-| `doc` | Doc-top — directly under the metadata block (`Status:` / `Progress:` / `Last Updated:`), before the first heading. |
-
-The ` > ` separator avoids the collision that would arise if `/` were used as a nesting separator (heading text in real-world design docs frequently contains `/`, e.g. `Step 2: Update docs/spec/cli-options.md`). ` > ` is unambiguous, ASCII-safe, and shell-safe inside double-quoted `--text` arguments.
-
-### Message Format
-
-Every `cafleet message send --text` body, when used to coordinate within a `cafleet-design-doc-execute` skill team, MUST match:
-
-```
-<verb> (<pointer>)
-```
-
-Optional one-line summary may follow, separated by ` — ` (space, em-dash, space):
-
-```
-<verb> (<pointer>) — <one-line summary>
-```
-
-Constraints:
-
-| Constraint | Rule |
-|:--|:--|
-| Single line | The body MUST be a single line. No literal newlines. |
-| Summary cap | The optional summary SHOULD fit on one terminal line; aim for ≤ 80 codepoints. |
-| Enumeration cap | The summary MUST NOT enumerate more than 3 items. Longer enumerations belong in a `COMMENT(role)` marker at the pointer. |
-| No payloads | The summary is for human readability in the admin WebUI timeline; substantive content (reasoning, file lists beyond 3, multi-paragraph reports) MUST go in a `COMMENT(role)` marker. |
-
-Examples:
-
-- `ready (paragraph-Implementation > Step 1)`
-- `complete (paragraph-Implementation > Step 1) — 12 tests pass`
-- `addressed (cafleet/src/cafleet/cli/main.py:142)`
-- `blocked (paragraph-Specification > Retry Strategy)`
-- `escalating (paragraph-Implementation > Step 3)`
-
-### COMMENT(role) Marker
-
-Inline marker placed in the design document (or, for source-anchored Copilot inline review, in the source file at `file:line`).
-
-```
-COMMENT(<role>): <substantive content>
-```
-
-Roles:
-
-| Role | Who writes it | When |
-|:--|:--|:--|
-| `claude` | The Director acting as user-mediator | Carries user-derived clarifications (e.g. test-framework arbitration). |
-| `director` | The Director | Spec resolution notes, Director judgments, ambiguity arbitration, design-doc-anchored Copilot review (see *Copilot Routing* below), Phase C code-review feedback. |
-| `programmer` | The Programmer | Implementation-side notes, escalation rationales, observations of spec gaps that block implementation. |
-| `tester` | The Tester | Test-spec gaps (Phase 2 and Phase 1 framework-selection), escalation rationales, evaluation of Programmer-routed test-defect reports. |
-| `verifier` | The Verifier | E2E findings, evidence pointers (`see file:line`), suggested-fix categorisation (impl bug / test gap / spec issue). |
-| `copilot` | The Director on Copilot's behalf (Copilot does not edit files) | One marker per source-anchored inline review item, written into the **source file** at `<file>:<line>`. Design-doc-anchored Copilot lines route through `COMMENT(director)` instead — see *Copilot Routing*. |
-
-Rules:
-
-- One marker per logical issue. Do not bundle.
-- Body must be actionable — state the issue and what should change.
-- Markers are split into two classes — *issue* and *status*. Only the *issue* class enters the doc.
-
-### Issue Markers vs Status Markers (split)
-
-`COMMENT(role)` markers carry **issue and feedback content only**. Status updates ("ready", "complete") stay as pure cafleet messages with verb + pointer; they do NOT add a marker to the design doc.
-
-| Class | Example | Lifecycle |
-|:--|:--|:--|
-| Issue | `COMMENT(programmer): test <test-name> expects X but design doc says Y; please arbitrate` | Persists in the doc until resolved. The resolver removes the marker as part of the fix. Per `skills/cafleet-design-doc/guidelines.md` § *Completeness Check*, the doc cannot reach `Status: Complete` while any `COMMENT(` marker remains. |
-| Status | (none — never enters the doc) | Lives only in `cafleet message send` text. |
-
-This keeps the design doc clean: at any moment, the markers in the doc reflect *outstanding work*, never historical chatter.
-
-### Copilot Routing
-
-Copilot reviews split into two line-anchored classes (source file, design doc) plus a PR-level catch-all:
-
-| Anchor | Where the marker lives | cafleet message | Resolver |
-|:--|:--|:--|:--|
-| Source file (e.g. `cafleet/.../foo.py:42`) | `COMMENT(copilot): <body>` in the source file at `<file>:<line>` | `ready (<file>:<line>)` to Programmer or Tester per the existing path-pattern routing | Routed member fixes source, removes marker, replies `addressed (<file>:<line>)` |
-| Design doc (e.g. `design-docs/foo/design-doc.md:42`) | `COMMENT(director): <body>` inline at the affected paragraph in the design doc | (no cafleet route — Director resolves directly per the existing rule) | Director applies the spec change and removes the marker. **No self-note cafleet message is sent** — the git commit and marker removal are sufficient audit trail. |
-| PR-level (non-line-anchored) | Director judgment per existing classification (spec → `COMMENT(director)` in design doc; impl → `COMMENT(copilot)` at a representative file:line; test → `COMMENT(copilot)` at a representative test file:line) | `ready (...)` per anchor | per anchor |
-
-The Director's commit message follows the existing convention (`fix: address Copilot review - <short summary>`); the message text contains the summary, not the `COMMENT(copilot)` body (which would be gone from source by then).
-
-### Anchorless Status
-
-A member may need to communicate something that does not point at any heading, file, or doc — e.g. "I crashed and restarted," "still working, no progress yet," a generic ping ack.
-
-- These ride as a pure cafleet message with a freeform short phrase. The set is **NOT a fixed canonical list** — members may use whatever short phrase fits ("restarted", "still working", "ack", "noted", etc.).
-- They MUST NOT match the `<verb> (<pointer>)` schema (no parentheses) and the Director MUST treat them as informational, not as work signals.
-- They do NOT add markers to the design doc.
-
-If a member finds themselves needing to send anchorless status updates frequently, that is a stall signal — the Director's stall-response ladder (per `skills/cafleet/SKILL.md` and the existing role files) still applies.
-
-### Finalize-Time Cleanup
-
-When the design doc moves to `Status: Complete` (Step 8):
-
-1. Issue markers (`COMMENT(role)` for `director`, `programmer`, `tester`, `verifier`, `claude`) MUST already be resolved per `skills/cafleet-design-doc/guidelines.md` § *Completeness Check* — the existing rule "No `COMMENT(` markers remain" stays.
-2. Status markers do not exist in the design doc by construction (split), so there is nothing to strip.
-3. `COMMENT(copilot)` markers in source files are removed by the routed member as part of each fix commit; finalize-time validation only needs to confirm the design doc is marker-free.
-
-The audit trail of every status hop lives in the cafleet message log (admin WebUI timeline) and in git history. The design document itself reads as the current state, not an archaeological dig.
-
-### Director Per-File Detail Recovery
-
-Members do not ship file lists in cafleet bodies (the verb + pointer schema carries only a poke). The Director recovers per-file detail directly via git when a commit message needs it: `git status` for unstaged/staged file lists, `git diff --stat <base>..HEAD` for cumulative scope, `git log <base>..HEAD --name-only` for file-touch history, `git diff <base>..HEAD -- <pattern>` for content. This applies in Phase A (test commits), Phase B/C (impl commits), Phase 7d (Copilot fix commits), and Step 8 (finalize commit).
-
-### Skill-specific overrides
-
+- **Roles in play**: this skill uses only the `director`, `programmer`, `tester`, `verifier`, `claude`, and `copilot` marker roles — never `drafter` or `reviewer` (those belong to the `cafleet-design-doc-create` skill). Copilot review here is the full source-file / design-doc / PR-level routing; finalize happens at `Status: Complete` (Step 8).
 - **Verifier Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the `cafleet-design-doc-interview` skill). Phase 2 verification reports follow the schema.
 
 ## Architecture
@@ -384,7 +242,7 @@ The spawn prompts below use `{fleet_id}` / `{agent_id}` / `{director_agent_id}` 
 
 > **Path-by-reference for role docs**: Each spawn prompt below references its role file by **absolute path**. The spawned member opens its role doc with `Read` on its first turn. Do NOT inline the role content — cafleet `member create` hits a `tmux command failed: command too long` error once the shell-quoted prompt grows past a few KB, and rolls back the registration. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up. Resolve the absolute path for each of `roles/programmer.md`, `roles/tester.md`, and `roles/verifier.md` (from this skill's `roles/` directory) and substitute into the `[INSERT abs path to …]` markers below.
 >
-> **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see the per-role flow below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
+> **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet member create --prompt-file <abs path>` (see the per-role spawn templates and commands below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 **Programmer spawn prompt:**
 
@@ -417,7 +275,7 @@ Start by reading the design document. Then wait for the Director to assign your 
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
 1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
-2. **Write the rendered text** to `${BASE}/prompts/programmer-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
+2. **Write the rendered text** to `${BASE}/prompts/programmer-<UTC-compact>.md` per the two-step audit-file procedure in 3e.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
@@ -427,7 +285,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
      --prompt-file ${BASE}/prompts/programmer-<UTC-compact>.md
    ```
 
-   Parse `agent_id` from the JSON response and substitute it for `<programmer-agent-id>` in every subsequent command. The pre-spawn file at `${BASE}/prompts/programmer-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
+   Parse `agent_id` from the JSON response and substitute it for `<programmer-agent-id>` in every subsequent command.
 
 **Tester spawn prompt (if needed):**
 
@@ -461,7 +319,7 @@ Start by reading the design document. Then wait for the Director to assign your 
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
 1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
-2. **Write the rendered text** to `${BASE}/prompts/tester-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
+2. **Write the rendered text** to `${BASE}/prompts/tester-<UTC-compact>.md` per the two-step audit-file procedure in 3e.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
@@ -471,7 +329,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
      --prompt-file ${BASE}/prompts/tester-<UTC-compact>.md
    ```
 
-   Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>` in every subsequent command. The pre-spawn file at `${BASE}/prompts/tester-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
+   Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>` in every subsequent command.
 
 **Verifier spawn prompt (if needed):**
 
@@ -507,7 +365,7 @@ Then wait for the Director to assign your first verification task.
 Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 
 1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
-2. **Write the rendered text** to `${BASE}/prompts/verifier-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 1; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
+2. **Write the rendered text** to `${BASE}/prompts/verifier-<UTC-compact>.md` per the two-step audit-file procedure in 3e.
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
@@ -517,7 +375,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
      --prompt-file ${BASE}/prompts/verifier-<UTC-compact>.md
    ```
 
-   Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-id>` in every subsequent command. The pre-spawn file at `${BASE}/prompts/verifier-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
+   Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-id>` in every subsequent command.
 
 #### 3f. Verify members are live
 
@@ -704,7 +562,7 @@ On each monitor wake (and in any active turn while Step 7 is in progress), the D
 
 The APPROVED check MUST be qualified by the post-push filter (`submittedAt > last_push_ts`). An older approval — say, from a Copilot pass before the most recent fix-push — must NOT be treated as approval of the current HEAD; otherwise a single early approve followed by additional commits would silently finalize the PR.
 
-**Why no auto-exit on silence**: a silent Copilot is NOT proof Copilot is done. Copilot may take longer than expected to re-review after a fix-push, may not have been re-triggered yet, or may be back-pressured. **Auto-exiting** on silence risks finalizing a PR while Copilot is still composing comments. The loop never auto-exits on silence; it instead **escalates to the user** via 7e after 30 consecutive silent monitor wakes (~30 minutes), so the user — not the loop — chooses whether to keep waiting, re-request the review, or finalize. Outside that user gate, the loop only exits on an explicit `state == "APPROVED"` signal or on "Stop means stop".
+**Why no auto-exit on silence**: a silent Copilot is NOT proof it is done — it may be slow to re-review after a fix-push, not yet re-triggered, or back-pressured, so auto-exiting on silence risks finalizing while Copilot is still composing comments. The loop never auto-exits on silence; it instead **escalates to the user** via 7e after 30 consecutive silent monitor wakes (~30 minutes), so the user — not the loop — chooses whether to keep waiting, re-request the review, or finalize. Outside that user gate, the loop only exits on an explicit `state == "APPROVED"` signal or on "Stop means stop".
 
 **Why not `reviewDecision`**: the PR-level `reviewDecision` only reflects required reviewers (typically CODEOWNERS). Copilot is usually not a CODEOWNER, so an approve from Copilot alone leaves `reviewDecision` null/REVIEW_REQUIRED. Reading the Copilot-specific entry in the `reviews` array is the reliable signal.
 
