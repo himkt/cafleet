@@ -292,7 +292,7 @@ class TmuxMultiplexer:
         # CR-defragmentation step in the CLI layer.
         # tmux always terminates output with \n, so split produces a trailing "".
         # Taking -(lines+1) elements keeps that "" so the join restores the newline.
-        return "\n".join(raw.split("\n")[-(lines + 1):])
+        return "\n".join(raw.split("\n")[-(lines + 1) :])
 
     def pane_exists(self, *, target_pane_id: str) -> bool:
         """Return True iff target_pane_id currently appears in the tmux server's pane list.
