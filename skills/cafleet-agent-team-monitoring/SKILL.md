@@ -119,7 +119,7 @@ Run this sequence once per supervision tick. Order matters — cheapest non-intr
 
 | Phase | Action |
 |---|---|
-| Spawn the monitoring member (first-in) | The **first** `cafleet member create` in the fleet IS the monitoring member: `cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> --role monitor --model sonnet --prompt-file <rendered monitor prompt>`. It boots, launches `cafleet monitor start` as a background task in its own pane, confirms `monitor status`, and sends `ready: monitor live` to the Director. |
+| Spawn the monitoring member (first-in) | The **first** `cafleet member create` in the fleet IS the monitoring member: `cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> --name monitor --description <…> --role monitor --model sonnet --prompt-file <rendered monitor prompt>`. It boots, launches `cafleet monitor start` as a background task in its own pane, confirms `monitor status`, and sends `ready: monitor live` to the Director. |
 | Gate ordinary members | Wait for the monitoring member's `ready: monitor live` message before the first ordinary `cafleet member create`. The Director MAY run `cafleet --fleet-id <fleet-id> monitor status` itself as optional corroboration, but it waits on the handshake message rather than block-polling status (consistent with the async wait rule). |
 | Run work | The monitor ticks at its configured cadence (default ping interval 60 s); do not intervene unless a wake escalates. Each Director wake is the cue to run the 5-step facilitation loop above. |
 | User review | Keep the monitoring member and its `monitor start` task running during the review cycle — revisions and re-reviews still count as in-progress work. |

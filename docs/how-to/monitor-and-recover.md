@@ -21,7 +21,9 @@ monitoring member is spawned **first**; it starts the loop and reports
 `cafleet-agent-team-monitoring` skill):
 
 ```bash
-cafleet --fleet-id 1 member create --agent-id 2 --role monitor --model sonnet \
+cafleet --fleet-id 1 member create --agent-id 2 \
+  --name monitor --description "Monitoring member: owns the heartbeat" \
+  --role monitor --model sonnet \
   --prompt-file /abs/path/to/monitor-prompt.md   # spawned first; runs monitor start in its own pane
 cafleet --fleet-id 1 monitor status              # confirm it is running + see the schedule
 ```
