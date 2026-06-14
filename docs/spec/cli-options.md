@@ -869,7 +869,7 @@ See [Member targeting and key delivery](#member-targeting-and-key-delivery) for 
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
-The `cafleet monitor` subgroup is the per-fleet scheduler that wakes the Director and the monitoring member on a fixed cadence — the heartbeat behind a Director's supervision loop. All three subcommands require the per-subcommand `--fleet-id`. `start` runs the loop in-process (the fleet's dedicated **monitoring member** launches it as a **background task** in its own pane and owns its lifetime); `status` and `config` view and edit the schedule. The conceptual model (heartbeat-vs-facilitation boundary, the director-vs-monitoring-member keystroke split, the `Esc`-safeguarded keystrokes, the tick-precision floor, single-instance via the DB heartbeat) is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
+The `cafleet monitor` subgroup is the per-fleet scheduler that wakes only the monitoring member on a fixed cadence — the heartbeat behind a Director's supervision loop. All three subcommands require the per-subcommand `--fleet-id`. `start` runs the loop in-process (the fleet's dedicated **monitoring member** launches it as a **background task** in its own pane and owns its lifetime); `status` and `config` view and edit the schedule. The conceptual model (heartbeat-vs-facilitation boundary, the monitoring-member wake nudge, the `Esc`-safeguarded keystrokes, the tick-precision floor, single-instance via the DB heartbeat) is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
 
 There is no `monitor stop` command and no detached process: stop the loop by stopping the monitoring member's background task (or deleting the monitoring member), and the loop also self-terminates when the fleet is torn down. Launching/stopping the loop is **CLI-only** by nature; the schedule-view and schedule-edit surfaces are at WebUI/CLI parity ([WebUI API](./webui-api.md)).
 
@@ -881,7 +881,9 @@ There is no `monitor stop` command and no detached process: stop the loop by sto
 
 Runs the `scan → ping due agents → heartbeat → sleep` loop **in-process** via `run_monitor_loop` — the fleet's monitoring member launches it as a background task in its own pane (the loop blocks the task). On startup it runs the tmux precondition guard (the same `TMUX`-env check the `member` commands use), then atomically claims the single-instance `monitor_runtime` row, installs `SIGTERM`/`SIGINT` handlers (a clean stop clears the row), and loops until signalled or the fleet is torn down (`monitor_tick` returns `STOP` once the fleet is soft-deleted). There is no detached subprocess, no PID file, and no log file — the loop writes to the launching task's own stdout.
 
-The two enrolled agents — the root Director and the monitoring member — are pinged unconditionally once their interval has elapsed (the ping is **not** gated on the agent having pending inbox items; `pending_count` is informational, shown in `status`). Every ping is **`Esc`-safeguarded**: `Escape` → ~0.1 s settle → literal text → `Enter`, so a pane on a pending permission prompt dismisses it rather than confirming it with the trailing `Enter`. The keystroke text differs by role: the **Director** receives a bare `cafleet … message poll`, while the **monitoring member** receives a single-line *wake nudge* instructing it to run its capture-classify-reengage routine. Ordinary members are **not** enrolled and receive nothing from the loop. Each dispatched ping is logged to stdout as `<iso-ts> ping agent <id> (<name>)`, so the launching background task's output shows live heartbeat activity.
+The single enrolled agent — the monitoring member — is pinged unconditionally once its interval has elapsed (the ping is **not** gated on the agent having pending inbox items; `pending_count` is informational, shown in `status`). Every ping is **`Esc`-safeguarded**: `Escape` → ~0.1 s settle → literal text → `Enter`, so a pane on a pending permission prompt dismisses it rather than confirming it with the trailing `Enter`. The monitoring member receives a single-line *wake nudge* instructing it to run its capture-classify-reengage routine. The root Director and ordinary members are **not** enrolled and receive nothing from the loop. Each dispatched ping is logged to stdout as `<iso-ts> ping agent <id> (<name>)`, so the launching background task's output shows live heartbeat activity.
+
+If the fleet has **no** enrolled monitoring member when `start` runs, the command prints a warning to stderr (`Warning: fleet <id> has no enrolled monitoring member; the monitor heartbeat will wake no agent. Spawn one first with 'cafleet member create --role monitor'.`) and then runs the loop anyway (warn-but-run). In the canonical flow the warning never fires — the monitoring member is enrolled at `member create`, before it launches `monitor start` in its own pane.
 
 Exit codes: `0` clean exit (signalled, or the fleet was torn down); `1` already running (`monitor already running for fleet N`), unknown or soft-deleted fleet, or tmux unreachable; `2` click usage errors (e.g. `--tick 0`).
 
@@ -895,11 +897,10 @@ Text output:
 monitor: running (pid 4821, last tick 2s ago, tick 5s, started 2026-06-13T04:50:00+00:00)
   agent_id  name         role      interval  last_ping             enabled  pending
   --------  -----------  --------  --------  -------------------  -------  -------
-  2         Director     director  60s       2026-06-13T04:51:00   yes      0
   7         monitor      monitor   60s       2026-06-13T04:50:30   yes      0
 ```
 
-Only the two enrolled agents appear — the root Director (`role: director`) and the monitoring member (`role: monitor`, derived from its `cafleet.kind`). Ordinary members are not enrolled, so they never show in this table. When no monitor is running the first line reads `monitor: stopped`; the schedule table still renders. JSON output:
+Only the enrolled monitoring member appears (`role: monitor`, derived from its `cafleet.kind`). The root Director and ordinary members are not enrolled, so they never show in this table. The `director` role label is still derived defensively, so a stray/legacy enrolled Director row would render as `role: director` — but none is expected in normal operation. When no monitor is running the first line reads `monitor: stopped`; the schedule table still renders. JSON output:
 
 ```json
 {

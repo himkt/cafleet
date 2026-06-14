@@ -1,11 +1,12 @@
-"""Unit tests for the pure ``should_ping`` policy (§4).
+"""Unit tests for the pure ``should_ping`` policy (§1).
 
 ``should_ping(target, now)`` is a pure function of a scan-row dict and a
 tz-aware ``now``, so these tests need neither tmux nor the DB. After design
-0000090 only the root Director and the dedicated monitoring member are ever
-enrolled, so the scan row now carries an ``is_monitoring_member`` discriminator
-(used by the loop for keystroke selection, NOT by ``should_ping``). The policy
-itself is unchanged: enabled + live pane + interval elapsed ⇒ due, role-agnostic.
+0000091 the dedicated monitoring member is the only enrolled role (the root
+Director is no longer enrolled), so the scan row carries an
+``is_monitoring_member`` discriminator (used by the loop for keystroke
+selection / the defensive skip, NOT by ``should_ping``). The policy itself is
+unchanged: enabled + live pane + interval elapsed ⇒ due, role-agnostic.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -32,25 +33,19 @@ def _target(**overrides):
     return base
 
 
-def test_should_ping__director_unconditional_when_never_pinged():
-    # the Director pings even with an empty inbox
-    assert should_ping(_target(is_director=True), _NOW) is True
+def test_should_ping__monitoring_member_due_when_never_pinged():
+    # the monitoring member is the only enrolled role (design 0000091); a
+    # never-pinged target is due even with an empty inbox
+    assert should_ping(_target(is_monitoring_member=True), _NOW) is True
 
 
-def test_should_ping__director_pings_after_interval_with_empty_inbox():
+def test_should_ping__monitoring_member_pings_after_interval_with_empty_inbox():
     target = _target(
-        is_director=True,
+        is_monitoring_member=True,
         pending_count=0,
         last_ping_at=(_NOW - timedelta(seconds=120)).isoformat(),
     )
     assert should_ping(target, _NOW) is True
-
-
-def test_should_ping__monitoring_member_due_when_never_pinged():
-    # the monitoring member is the only other enrolled role; it is due once its
-    # interval elapses, exactly like the Director (the loop sends it a wake, not
-    # a poll — but that selection is the loop's job, not should_ping's)
-    assert should_ping(_target(is_monitoring_member=True), _NOW) is True
 
 
 def test_should_ping__pinged_regardless_of_pending_count():
@@ -73,27 +68,19 @@ def test_should_ping__not_due_skipped():
     assert should_ping(target, _NOW) is False
 
 
-def test_should_ping__director_not_due_skipped():
-    target = _target(
-        is_director=True,
-        last_ping_at=(_NOW - timedelta(seconds=30)).isoformat(),
-    )
-    assert should_ping(target, _NOW) is False
-
-
 def test_should_ping__disabled_skipped():
-    # disable wins over everything, including a due Director with pending work
-    target = _target(is_director=True, pending_count=3, enabled=False)
+    # disable wins over everything, including a due target with pending work
+    target = _target(is_monitoring_member=True, pending_count=3, enabled=False)
     assert should_ping(target, _NOW) is False
 
 
 def test_should_ping__missing_pane_skipped():
-    target = _target(is_director=True, pending_count=3, pane_id=None)
+    target = _target(is_monitoring_member=True, pending_count=3, pane_id=None)
     assert should_ping(target, _NOW) is False
 
 
 def test_should_ping__dead_pane_skipped():
-    target = _target(is_director=True, pending_count=3, pane_alive=False)
+    target = _target(is_monitoring_member=True, pending_count=3, pane_alive=False)
     assert should_ping(target, _NOW) is False
 
 

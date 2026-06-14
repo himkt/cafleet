@@ -98,6 +98,27 @@ def _soft_delete_fleet(db_file, fleet_id: int) -> None:
         conn.close()
 
 
+def _register_monitoring_member(
+    sid: int, director_id: int, *, name: str = "watcher", pane_id: str = "%7"
+) -> dict:
+    """Register the dedicated monitoring member — the only enrolled role after
+    design 0000091 (the ``member create --role monitor`` CLI path is exercised
+    in test_member.py)."""
+    return broker.register_agent(
+        fleet_id=sid,
+        name=name,
+        description="monitoring member",
+        placement={
+            "director_agent_id": director_id,
+            "tmux_session": "main",
+            "tmux_window_id": "@3",
+            "tmux_pane_id": pane_id,
+            "coding_agent": "claude",
+        },
+        kind="monitoring-member",
+    )
+
+
 # --- monitor start ---------------------------------------------------------
 
 
@@ -169,12 +190,56 @@ def test_monitor_start__soft_deleted_fleet_exits_one(fleet, monkeypatch):
     assert calls == []
 
 
+def test_monitor_start__warns_when_no_monitoring_member_but_still_runs(
+    fleet, monkeypatch
+):
+    # §4 / Q3: warn-but-run — a fleet with no enrolled monitoring member prints a
+    # startup warning to stderr, then runs the loop unchanged.
+    db_file, runner, data = fleet
+    sid = data["fleet_id"]
+    calls = []
+    monkeypatch.setattr(
+        loop,
+        "run_monitor_loop",
+        lambda fleet_id, tick_seconds: calls.append((fleet_id, tick_seconds)),
+    )
+    result = runner.invoke(cli, ["monitor", "start", "--fleet-id", str(sid)])
+
+    assert result.exit_code == 0, result.output
+    # combine stdout+stderr so the assertion is robust to Click's stderr
+    # capture mode (the established tests/cli pattern)
+    combined = (result.output or "") + (getattr(result, "stderr", "") or "")
+    assert "no enrolled monitoring member" in combined
+    assert calls == [(sid, DEFAULT_TICK_SECONDS)]  # the loop still runs
+
+
+def test_monitor_start__no_warning_when_monitoring_member_enrolled(fleet, monkeypatch):
+    db_file, runner, data = fleet
+    sid = data["fleet_id"]
+    director_id = data["director"]["agent_id"]
+    _register_monitoring_member(sid, director_id)
+    calls = []
+    monkeypatch.setattr(
+        loop,
+        "run_monitor_loop",
+        lambda fleet_id, tick_seconds: calls.append((fleet_id, tick_seconds)),
+    )
+    result = runner.invoke(cli, ["monitor", "start", "--fleet-id", str(sid)])
+
+    assert result.exit_code == 0, result.output
+    combined = (result.output or "") + (getattr(result, "stderr", "") or "")
+    assert "no enrolled monitoring member" not in combined
+    assert calls == [(sid, DEFAULT_TICK_SECONDS)]
+
+
 # --- monitor status --------------------------------------------------------
 
 
 def test_monitor_status__running_text_shows_runtime_and_agent_table(fleet):
     db_file, runner, data = fleet
     sid = data["fleet_id"]
+    director_id = data["director"]["agent_id"]
+    _register_monitoring_member(sid, director_id)
     _seed_runtime(db_file, sid, os.getpid())
 
     result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid)])
@@ -183,13 +248,15 @@ def test_monitor_status__running_text_shows_runtime_and_agent_table(fleet):
     out = result.output.lower()
     assert "running" in out
     assert str(os.getpid()) in result.output
-    assert "Director" in result.output  # the enrolled root director row
+    assert "watcher" in result.output  # the enrolled monitoring member row
+    assert "Director" not in result.output  # the Director is no longer enrolled
 
 
 def test_monitor_status__json_shape(fleet):
     db_file, runner, data = fleet
     sid = data["fleet_id"]
     director_id = data["director"]["agent_id"]
+    watcher_id = _register_monitoring_member(sid, director_id)["agent_id"]
     _seed_runtime(db_file, sid, os.getpid())
 
     result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
@@ -202,12 +269,15 @@ def test_monitor_status__json_shape(fleet):
     for key in ("tick_seconds", "last_tick_at", "last_tick_age_seconds", "started_at"):
         assert key in runtime
 
-    director = next(a for a in payload["agents"] if a["agent_id"] == director_id)
-    assert director["role"] == "director"
-    assert director["enabled"] is True
-    assert director["pending_count"] == 0
+    # only the monitoring member appears; the Director is no longer enrolled
+    agent_ids = {a["agent_id"] for a in payload["agents"]}
+    assert agent_ids == {watcher_id}
+    watcher = next(a for a in payload["agents"] if a["agent_id"] == watcher_id)
+    assert watcher["role"] == "monitor"
+    assert watcher["enabled"] is True
+    assert watcher["pending_count"] == 0
     for key in ("name", "interval_seconds", "last_ping_at"):
-        assert key in director
+        assert key in watcher
 
 
 def test_monitor_status__not_running_when_no_runtime(fleet):
@@ -220,32 +290,19 @@ def test_monitor_status__not_running_when_no_runtime(fleet):
 
 
 def test_monitor_status__labels_monitoring_member_role(fleet):
-    # B8: the agents table labels the dedicated monitoring member's role as
-    # ``monitor`` (derived from is_monitoring_member), distinct from the
-    # Director's ``director``. The member is registered directly here — the
-    # ``member create --role monitor`` CLI path is exercised in test_member.py.
+    # the agents table labels the dedicated monitoring member's role as
+    # ``monitor`` (derived from is_monitoring_member). After design 0000091 the
+    # Director is no longer enrolled, so it does not appear in the table at all.
     db_file, runner, data = fleet
     sid = data["fleet_id"]
     director_id = data["director"]["agent_id"]
-    watcher = broker.register_agent(
-        fleet_id=sid,
-        name="watcher",
-        description="monitoring member",
-        placement={
-            "director_agent_id": director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": "%7",
-            "coding_agent": "claude",
-        },
-        kind="monitoring-member",
-    )
+    watcher = _register_monitoring_member(sid, director_id)
     _seed_runtime(db_file, sid, os.getpid())
 
     result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
     assert result.exit_code == 0, result.output
     roles = {a["agent_id"]: a["role"] for a in json.loads(result.output)["agents"]}
-    assert roles[director_id] == "director"
+    assert director_id not in roles
     assert roles[watcher["agent_id"]] == "monitor"
 
 
@@ -272,12 +329,14 @@ def test_monitor_status__stale_row_reports_not_running_with_nulls(fleet):
 
 
 def test_monitor_config__show(fleet):
+    # the monitoring member is the only enrolled role (design 0000091)
     db_file, runner, data = fleet
     sid = data["fleet_id"]
     director_id = data["director"]["agent_id"]
+    watcher_id = _register_monitoring_member(sid, director_id)["agent_id"]
     result = runner.invoke(
         cli,
-        ["monitor", "config", "--fleet-id", str(sid), "--agent-id", str(director_id)],
+        ["monitor", "config", "--fleet-id", str(sid), "--agent-id", str(watcher_id)],
     )
 
     assert result.exit_code == 0, result.output
@@ -288,6 +347,7 @@ def test_monitor_config__set_interval_persists(fleet):
     db_file, runner, data = fleet
     sid = data["fleet_id"]
     director_id = data["director"]["agent_id"]
+    watcher_id = _register_monitoring_member(sid, director_id)["agent_id"]
     result = runner.invoke(
         cli,
         [
@@ -296,20 +356,21 @@ def test_monitor_config__set_interval_persists(fleet):
             "--fleet-id",
             str(sid),
             "--agent-id",
-            str(director_id),
+            str(watcher_id),
             "--interval",
             "30",
         ],
     )
 
     assert result.exit_code == 0, result.output
-    assert _monitor_config_row(db_file, director_id)[0] == 30
+    assert _monitor_config_row(db_file, watcher_id)[0] == 30
 
 
 def test_monitor_config__disable_then_enable(fleet):
     db_file, runner, data = fleet
     sid = data["fleet_id"]
     director_id = data["director"]["agent_id"]
+    watcher_id = _register_monitoring_member(sid, director_id)["agent_id"]
 
     disabled = runner.invoke(
         cli,
@@ -319,12 +380,12 @@ def test_monitor_config__disable_then_enable(fleet):
             "--fleet-id",
             str(sid),
             "--agent-id",
-            str(director_id),
+            str(watcher_id),
             "--disable",
         ],
     )
     assert disabled.exit_code == 0, disabled.output
-    assert _monitor_config_row(db_file, director_id)[1] == 0
+    assert _monitor_config_row(db_file, watcher_id)[1] == 0
 
     enabled = runner.invoke(
         cli,
@@ -334,15 +395,17 @@ def test_monitor_config__disable_then_enable(fleet):
             "--fleet-id",
             str(sid),
             "--agent-id",
-            str(director_id),
+            str(watcher_id),
             "--enable",
         ],
     )
     assert enabled.exit_code == 0, enabled.output
-    assert _monitor_config_row(db_file, director_id)[1] == 1
+    assert _monitor_config_row(db_file, watcher_id)[1] == 1
 
 
 def test_monitor_config__mutual_exclusion_exits_two(fleet):
+    # the mutual-exclusion guard fires before any enrollment lookup, so the
+    # target agent need not be enrolled
     db_file, runner, data = fleet
     sid = data["fleet_id"]
     director_id = data["director"]["agent_id"]

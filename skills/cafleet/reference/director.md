@@ -137,7 +137,7 @@ $ cafleet member list --fleet-id <s> --activity
   7         carol     idle    -            12:20:00     12:20:00     14m
 ```
 
-The `last_ack` aggregation filters `Task.type != 'broadcast_summary'` (mirrors `poll_tasks`). Use `--activity` for routine monitor ticks instead of capturing every member every wake — capture is reserved for the cases the activity columns flag.
+The `last_ack` aggregation filters `Task.type != 'broadcast_summary'` (mirrors `poll_tasks`). Use `--activity` for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the activity columns flag.
 
 ## Member Capture
 
@@ -226,13 +226,13 @@ Validation: missing `COMMAND` → exit 2 (Click built-in). Empty/whitespace-only
 
 After every successful `cafleet member exec` (exit 0), the Director MUST immediately invoke `cafleet member ping` against the same member. `member exec` only stages the bang-command's stdout/stderr as context for the member's next turn — it does not advance the turn. The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll` (poll polls the Director's own inbox; ping injects the keystroke into the member's pane).
 
-Skip the ping only on non-zero `member exec` exit — the dispatch did not complete and the supervision tick (the `cafleet monitor` heartbeat) is the safety net.
+Skip the ping only on non-zero `member exec` exit — the dispatch did not complete and the supervision tick (driven by the monitoring member's idle nudge on the `cafleet monitor` heartbeat) is the safety net.
 
 For a series of `member exec` calls on the same member, the ping follows each exec, not only the last.
 
 ## Member Ping
 
-Director-only manual inbox-poll nudge. The broker's auto-fire on every `cafleet message send` is an inline preview keystroked into the recipient's pane (`tmux.send_inline_preview`). `member ping` is the manually-invokable counterpart for re-poking a member that missed an inline preview. It reuses the monitor's `send_poll_trigger` helper, so it keystrokes **`Esc` → `cafleet … message poll` → `Enter`** (Escape, ~0.1 s settle, then the literal poll command and Enter): the leading `Esc` dismisses any pending permission-approval prompt in the member's pane, so the trailing `Enter` cannot blindly confirm it. The safeguard is inherited for free — the same `esc_first=True` the monitor loop's Director poll uses.
+Director-only manual inbox-poll nudge. The broker's auto-fire on every `cafleet message send` is an inline preview keystroked into the recipient's pane (`tmux.send_inline_preview`). `member ping` is the manually-invokable counterpart for re-poking a member that missed an inline preview. It reuses the `send_poll_trigger` helper, so it keystrokes **`Esc` → `cafleet … message poll` → `Enter`** (Escape, ~0.1 s settle, then the literal poll command and Enter): the leading `Esc` dismisses any pending permission-approval prompt in the member's pane, so the trailing `Enter` cannot blindly confirm it. `send_poll_trigger` is **unchanged** by the monitor-heartbeat narrowing — the monitor loop no longer calls it (it wakes only the monitoring member via `send_wake_trigger`), but the helper and its `esc_first=True` safeguard survive intact for `cafleet member ping`'s manual recovery use.
 
 ```bash
 cafleet member ping --fleet-id <fleet-id> \

@@ -47,6 +47,15 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
 {
   "agents": [
     {
+      "agent_id": 2,
+      "name": "Director",
+      "description": "Root Director for this fleet",
+      "status": "active",
+      "registered_at": "2026-04-15T09:59:00+00:00",
+      "kind": "user",
+      "monitor": null
+    },
+    {
       "agent_id": 3,
       "name": "Administrator",
       "description": "Built-in administrator agent for fleet 1",
@@ -57,8 +66,8 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
     },
     {
       "agent_id": 4,
-      "name": "Claude-B",
-      "description": "Reviewer",
+      "name": "monitor",
+      "description": "Monitoring member: owns the heartbeat",
       "status": "active",
       "registered_at": "2026-04-15T10:05:00+00:00",
       "kind": "user",
@@ -70,10 +79,12 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
 
 **`monitor` field**: each agent carries its folded monitoring schedule —
 `{"interval_seconds": int, "last_ping_at": str|null, "enabled": bool}` — or
-`null` when the agent is not enrolled (the Administrator, deregistered agents,
-and card-only registrations have no pane and are never enrolled). Folding the
-schedule into the list lets the SPA render every agent's schedule without an
-extra request per agent. See [Monitoring](../concepts/monitoring.md).
+`null` when the agent is not enrolled. Only the fleet's dedicated monitoring
+member is enrolled; the root Director, ordinary members, the Administrator,
+deregistered agents, and card-only registrations are **never** enrolled and so
+carry `monitor: null`. Folding the schedule into the list lets the SPA render
+every agent's schedule without an extra request per agent. See
+[Monitoring](../concepts/monitoring.md).
 
 **`kind` values**:
 

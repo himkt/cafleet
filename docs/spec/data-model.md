@@ -127,7 +127,7 @@ Per-agent monitoring schedule, one row per **enrolled** agent. The `cafleet moni
 | `last_ping_at` | `TEXT` | nullable | ISO-8601 of the last ping the monitor dispatched to this agent. `NULL` = never pinged ⇒ due immediately. Persisted (not in-memory) so a monitor restart resumes cadence and `monitor status` can display it. |
 | `enabled` | `INTEGER` | `NOT NULL`, `DEFAULT 1` | Boolean stored as SQLite `0`/`1`. `0` = the monitor skips this agent while preserving its interval for re-enable. Every broker read casts it to a Python `bool` at the read boundary, so the integer representation never leaks past the broker (the CLI and the WebUI/JSON contract both see `enabled: bool`). |
 
-Enrollment is restricted to exactly two agents per fleet: the **root Director** (enrolled at `create_fleet`) and the fleet's dedicated **monitoring member** (enrolled by `register_agent` only when the new agent's `agent_card_json.cafleet.kind == "monitoring-member"` — see below). Ordinary members are **not** enrolled, so the loop never keystrokes into their panes; the write-only Administrator and card-only `agent register` calls (no placement) are likewise not enrolled. There is no `fleet_id` column — fleet scoping is reached through the `monitor_config.agent_id → agents.agent_id → agents.fleet_id` join (the same pattern `agent_placements` uses), and director-vs-member is **derived** at scan time (`agent_id == fleets.director_agent_id`), never denormalized.
+Enrollment is restricted to exactly one agent per fleet: the fleet's dedicated **monitoring member** (enrolled by `register_agent` only when the new agent's `agent_card_json.cafleet.kind == "monitoring-member"` — see below). The root Director is **not** enrolled; ordinary members are **not** enrolled, so the loop never keystrokes into their panes; the write-only Administrator and card-only `agent register` calls (no placement) are likewise not enrolled. There is no `fleet_id` column — fleet scoping is reached through the `monitor_config.agent_id → agents.agent_id → agents.fleet_id` join (the same pattern `agent_placements` uses). `is_director` is still **derived** at scan time (`agent_id == fleets.director_agent_id`), never denormalized, but it is retained purely for the loop's defensive skip and `monitor status` labeling — a Director row is not expected in normal operation.
 
 The row is hard-deleted (not soft-deleted) when the agent is deregistered, alongside its `agent_placements` row — runtime config with no historical value, on the same lifecycle as the placement.
 
@@ -146,11 +146,11 @@ The dedicated monitoring member is identified the same way the built-in Administ
 }
 ```
 
-The marker is written by `register_agent` when `cafleet member create --role monitor` passes `kind="monitoring-member"` through. It serves two purposes: `register_agent` gates the `monitor_config` enrollment on it (only this kind enrolls), and the loop derives the per-role keystroke and `monitor status` label from it (`is_monitoring_member`, derived from the card — mirrors `is_administrator`). At most one active monitoring member is allowed per fleet; `register_agent` rejects a second.
+The marker is written by `register_agent` when `cafleet member create --role monitor` passes `kind="monitoring-member"` through. It serves two purposes: `register_agent` gates the `monitor_config` enrollment on it (only this kind enrolls), and the loop wakes only the agent it identifies (`is_monitoring_member`, derived from the card — mirrors `is_administrator`) and uses it for the `monitor status` label. At most one active monitoring member is allowed per fleet; `register_agent` rejects a second.
 
-#### Legacy-row data migration
+#### Legacy-row data migrations
 
-A one-shot Alembic revision (data-only, no schema change) prunes any pre-existing non-Director `monitor_config` rows so an upgraded database matches the new `{Director, monitoring member}` enrollment world:
+Two one-shot Alembic revisions (data-only, no schema change) bring an upgraded database to the new monitoring-member-only enrollment world. `0003` first prunes any pre-existing non-Director `monitor_config` rows:
 
 ```sql
 DELETE FROM monitor_config
@@ -159,7 +159,16 @@ WHERE agent_id NOT IN (
 );
 ```
 
-Pre-upgrade there are no monitoring members, so this leaves exactly the root-Director rows enrolled; new monitoring members enroll going forward via the gated `register_agent` path. The downgrade is a no-op (re-enrolling every pane-bound agent is neither possible nor desirable).
+`0004` then prunes the root-Director rows that `0003` deliberately kept:
+
+```sql
+DELETE FROM monitor_config
+WHERE agent_id IN (
+    SELECT director_agent_id FROM fleets WHERE director_agent_id IS NOT NULL
+);
+```
+
+After both run, `monitor_config` holds only monitoring-member rows; new monitoring members enroll going forward via the gated `register_agent` path. Both downgrades are no-ops (re-enrolling a Director or every pane-bound agent is neither possible nor desirable).
 
 ### `monitor_runtime`
 

@@ -64,6 +64,25 @@ def _register_member(fleet: dict, name: str = "member", pane_id: str = "%5") -> 
     )["agent_id"]
 
 
+def _register_monitoring_member(
+    fleet: dict, name: str = "watcher", pane_id: str = "%7"
+) -> int:
+    """The dedicated monitoring member — the only enrolled role (design 0000091)."""
+    return broker.register_agent(
+        fleet_id=fleet["fleet_id"],
+        name=name,
+        description="monitoring member",
+        placement={
+            "director_agent_id": fleet["director"]["agent_id"],
+            "tmux_session": "main",
+            "tmux_window_id": "@3",
+            "tmux_pane_id": pane_id,
+            "coding_agent": "claude",
+        },
+        kind="monitoring-member",
+    )["agent_id"]
+
+
 def _headers(fleet_id: int) -> dict:
     return {"X-Fleet-Id": str(fleet_id)}
 
@@ -118,32 +137,19 @@ def test_get_agents__monitor_field_folded(api_db, client):
     director_id = fleet["director"]["agent_id"]
     admin_id = fleet["administrator_agent_id"]
     member_id = _register_member(fleet, name="alice")
-    watcher_id = broker.register_agent(
-        fleet_id=sid,
-        name="watcher",
-        description="monitoring member",
-        placement={
-            "director_agent_id": director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": "%7",
-            "coding_agent": "claude",
-        },
-        kind="monitoring-member",
-    )["agent_id"]
+    watcher_id = _register_monitoring_member(fleet)
 
     resp = client.get("/api/agents", headers=_headers(sid))
     assert resp.status_code == 200, resp.text
     agents = {a["agent_id"]: a for a in resp.json()["agents"]}
 
-    # the two enrolled roles — the root Director and the dedicated monitoring
-    # member — fold a monitor object; ordinary members and the Administrator
-    # fold null (design 0000090: ordinary members are no longer enrolled, so
-    # their monitor config is absent)
-    assert agents[director_id]["monitor"]["enabled"] is True
-    assert agents[director_id]["monitor"]["interval_seconds"] == 60
+    # design 0000091: the dedicated monitoring member is the ONLY enrolled role,
+    # so it folds a monitor object; the root Director, ordinary members, and the
+    # Administrator all fold null (their monitor config is absent)
     assert agents[watcher_id]["monitor"] is not None
     assert agents[watcher_id]["monitor"]["enabled"] is True
+    assert agents[watcher_id]["monitor"]["interval_seconds"] == 60
+    assert agents[director_id]["monitor"] is None
     assert agents[member_id]["monitor"] is None
     assert agents[admin_id]["monitor"] is None
 
@@ -152,16 +158,27 @@ def test_get_agents__monitor_field_folded(api_db, client):
 
 
 def test_get_agent_monitor__200_for_enrolled(api_db, client):
+    # the monitoring member is the only enrolled role (design 0000091)
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    director_id = fleet["director"]["agent_id"]
+    watcher_id = _register_monitoring_member(fleet)
 
-    resp = client.get(f"/api/agents/{director_id}/monitor", headers=_headers(sid))
+    resp = client.get(f"/api/agents/{watcher_id}/monitor", headers=_headers(sid))
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["interval_seconds"] == 60
     assert data["enabled"] is True
     assert "last_ping_at" in data
+
+
+def test_get_agent_monitor__404_for_director_not_enrolled(api_db, client):
+    # design 0000091: the root Director is no longer enrolled
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["agent_id"]
+
+    resp = client.get(f"/api/agents/{director_id}/monitor", headers=_headers(sid))
+    assert resp.status_code == 404, resp.text
 
 
 def test_get_agent_monitor__404_for_administrator_not_enrolled(api_db, client):
@@ -183,12 +200,13 @@ def test_get_agent_monitor__404_for_unknown_agent(api_db, client):
 
 
 def test_patch_agent_monitor__updates_interval_and_enabled(api_db, client):
+    # the monitoring member is the only enrolled role (design 0000091)
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    director_id = fleet["director"]["agent_id"]
+    watcher_id = _register_monitoring_member(fleet)
 
     resp = client.patch(
-        f"/api/agents/{director_id}/monitor",
+        f"/api/agents/{watcher_id}/monitor",
         headers=_headers(sid),
         json={"interval_seconds": 30, "enabled": False},
     )
@@ -197,7 +215,7 @@ def test_patch_agent_monitor__updates_interval_and_enabled(api_db, client):
     assert data["interval_seconds"] == 30
     assert data["enabled"] is False
 
-    cfg = broker.get_monitor_config(sid, director_id)
+    cfg = broker.get_monitor_config(sid, watcher_id)
     assert cfg["interval_seconds"] == 30
     assert cfg["enabled"] is False
 
@@ -244,9 +262,11 @@ def test_patch_agent_monitor__404_not_500_when_update_raises(
     # TOCTOU race: the agent passes the initial enrolled check, then
     # update_monitor_config raises a ClickException (e.g. deregistered mid-call).
     # The endpoint must surface 404, not let the ClickException become a 500.
+    # The target must be enrolled to pass the pre-check, so use the monitoring
+    # member (the Director is no longer enrolled — design 0000091).
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    director_id = fleet["director"]["agent_id"]
+    watcher_id = _register_monitoring_member(fleet)
 
     def boom(*args, **kwargs):
         raise click.ClickException("agent not enrolled")
@@ -259,7 +279,7 @@ def test_patch_agent_monitor__404_not_500_when_update_raises(
         create_app(str(tmp_path / "nodist")), raise_server_exceptions=False
     )
     resp = client.patch(
-        f"/api/agents/{director_id}/monitor",
+        f"/api/agents/{watcher_id}/monitor",
         headers=_headers(sid),
         json={"interval_seconds": 30},
     )

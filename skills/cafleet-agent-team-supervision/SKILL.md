@@ -20,9 +20,9 @@ Supervision happens over the CAFleet message broker. The flow:
 1. The Director sends a message: `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "..."`.
 2. The broker persists the task and immediately keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the recipient's pane via `tmux.send_inline_preview`. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves.
 3. The member's next turn picks up the polled task, processes it, and (when a reply is expected) sends a `cafleet message send` back to the Director.
-4. The Director receives the reply on the next supervision tick — a `cafleet monitor` wake keystrokes `cafleet … message poll` into the Director's pane (see the `cafleet-agent-team-monitoring` skill § The monitor heartbeat) — and ACKs it via `cafleet message ack`.
+4. The Director receives the reply via the broker's inline-preview keystroke fired into the Director's pane when the member sends (`tmux.send_inline_preview`), and ACKs it via `cafleet message ack`.
 
-**Wake-trigger cue (load-bearing).** A monitor poll-trigger wake is a *bare* `cafleet … message poll` keystroke landing in the Director's pane. On its own that bare poll performs only step 1 of facilitation. **Treat every such wake as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), NOT to read the inbox and stop. The monitor decides only *when* to wake the Director; this skill defines *what* the Director does on each wake.
+**Facilitation cue (load-bearing).** The monitor loop does **not** wake the Director (it wakes only the monitoring member — see the `cafleet-agent-team-monitoring` skill § The monitor heartbeat). The Director is re-engaged on demand: by the monitoring member's idle nudge (an `Esc`-safeguarded `cafleet message send` when the monitoring member finds the Director idle), and by the broker's inline-preview keystroke on every inbound `cafleet message send`. **Treat each such re-engagement as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), NOT to read the inbox and stop.
 
 The Director never polls a member's pane via raw `tmux`. Inspection is via `cafleet member capture`; write is via `cafleet member send-input` / `cafleet member exec` / `cafleet member ping`. See the `cafleet` skill for the canonical command surface.
 
@@ -41,19 +41,19 @@ Idleness alone is never a stop signal, never a stall, and never grounds for a pa
 
 ## Authorization-Scope Guard (CRITICAL)
 
-**Absence of confirmation is not a stop signal.** User authorization persists across monitor ticks, broker auto-fires, and teammate idle notifications until an explicit stop signal arrives. The Director MUST dispatch queued work as soon as a teammate is idle and the inputs the work depends on are available; do NOT emit passive-hold messages in response to a supervision tick.
+**Absence of confirmation is not a stop signal.** User authorization persists across the monitoring member's idle nudges, broker auto-fires, and teammate idle notifications until an explicit stop signal arrives. The Director MUST dispatch queued work as soon as a teammate is idle and the inputs the work depends on are available; do NOT emit passive-hold messages in response to a supervision tick.
 
 ### Real stop signals (treat as halt; everything else is a tick to evaluate)
 
 | Signal | Director response |
 |---|---|
 | User typed an explicit "stop" / "wait" / "pause" | Halt dispatch; wait for explicit re-authorization. |
-| User typed profanity / frustration / a negative reaction | Halt dispatch; wait. Monitor wakes during this state are skipped silently. |
+| User typed profanity / frustration / a negative reaction | Halt dispatch; wait. The monitoring member's idle nudges during this state are skipped silently. |
 | User rejected your last 2+ tool calls | Halt dispatch; treat the rejections as a halt signal even if no profanity arrived. |
 | User typed `/clear` or restarted the session | Authorization is gone; do not resume from prior context without a fresh instruction. |
 | Member's reply contains a clear blocker; wait for guidance | Pause that one task only; continue dispatching to the rest of the team. |
 
-Monitor wakes, teammate idle notifications, broker auto-fire receipts, and the absence of a fresh "go" message are **not** stop signals. Treat them as inputs to evaluate, not gates to pass through.
+The monitoring member's idle nudges, teammate idle notifications, broker auto-fire receipts, and the absence of a fresh "go" message are **not** stop signals. Treat them as inputs to evaluate, not gates to pass through.
 
 ### When you genuinely need user input
 
@@ -71,17 +71,17 @@ Every time you spawn a member:
 2. **Spawn the member** via `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name <name> --description <desc> --prompt-file <abs path to rendered prompt under ${BASE}/prompts/<role>-<UTC-compact>.md>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — see the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the canonical convention (including the `${BASE} == <unset>` guarded-skip + inline-positional fallback). Inline `-- "<prompt>"` is still permitted for trivial one-line ad-hoc spawns. An optional `--model <m>` pins the member's LLM (pass-through for `claude` / `codex`; `<provider-id>/<model-id>` format required for `opencode`) — see the `cafleet` skill's `reference/director.md` for the flag detail and the model-name-to-backend inference table.
 3. **Include the ready-signal directive in the spawn prompt.** Every spawn prompt MUST instruct the member, as its very first Bash call, to send `cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> --to <director-agent-id> --text "ready"` (optionally `"ready: <brief role recap>"`). See the `cafleet` skill's `roles/member.md` reference file § *On Spawn — Send Ready Signal* for the canonical wording. A spawn prompt missing this directive is a defect — fix the prompt and re-spawn. The ready signal is the canonical "I am alive and accepting instructions" handshake; it is the ONLY signal that confirms the coding agent inside the pane has actually booted.
 4. **Verify the member is placed** by checking that `cafleet member list --fleet-id <fleet-id>` shows the new member with a non-null `pane_id`. This confirms the pane was created. Liveness of the coding agent inside the pane is confirmed asynchronously when the ready signal arrives — NOT by `member list`.
-5. **End the active turn after spawn-and-verify.** The ready signal arrives via broker auto-fire (member's `cafleet message send` → 2-line inline preview keystroked into your pane via `tmux.send_inline_preview`), with the monitor tick as the time-based backstop. You process it — ACK, dispatch first task — in your next active turn. See § *Asynchronous Wait Rule* below.
+5. **End the active turn after spawn-and-verify.** The ready signal arrives via broker auto-fire (member's `cafleet message send` → 2-line inline preview keystroked into your pane via `tmux.send_inline_preview`), with the monitoring member's idle nudge as the time-based backstop. You process it — ACK, dispatch first task — in your next active turn. See § *Asynchronous Wait Rule* below.
 
 Never spawn ordinary members before the monitoring member's `ready: monitor live` handshake. Never stop the monitor (the monitoring member's `monitor start` background task) until all work is fully complete and the team is being shut down.
 
 ### Asynchronous Wait Rule
 
-The active turn consumes inputs that have already arrived and dispatches what is ready — then returns control. Waiting for things that have not yet arrived is the job of the wake-up channels: broker auto-fire keystroke into the Director's pane on every member `cafleet message send`, plus the `cafleet monitor` tick on its scheduled cadence.
+The active turn consumes inputs that have already arrived and dispatches what is ready — then returns control. Waiting for things that have not yet arrived is the job of the wake-up channels: broker auto-fire keystroke into the Director's pane on every member `cafleet message send`, plus the monitoring member's idle nudge on the monitor's scheduled cadence.
 
 | Situation | Director action |
 |---|---|
-| Just spawned a member; ready signal not yet arrived | End the turn. Auto-fire delivers the ready signal as it lands; the monitor tick is the backstop. |
+| Just spawned a member; ready signal not yet arrived | End the turn. Auto-fire delivers the ready signal as it lands; the monitoring member's idle nudge is the backstop. |
 | Just dispatched to a member; reply not yet arrived | End the turn. Same wake-up channels surface the reply. |
 | Waiting on multiple members' replies before next step | End the turn. React to each arrival as its own wake-up, not all-at-once. |
 | User asks "what's the status?" while members are working | Report the asynchronous truth (e.g. "Alice is processing X; her completion will surface in my next turn"). For a live snapshot, use `cafleet member capture`. |

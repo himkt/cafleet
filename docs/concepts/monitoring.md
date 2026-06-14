@@ -7,9 +7,9 @@ icon: lucide/heart-pulse
 `cafleet monitor` is a fleet-scoped foreground loop — `scan → ping → sleep` —
 that the fleet's dedicated **monitoring member** runs as a **background task** in
 its own pane. It supplies the **heartbeat** a Director needs to supervise its
-team: a plain loop, not agent reasoning, that wakes the Director (and the
-monitoring member itself) on a fixed cadence by keystroking into their tmux
-panes. While the loop runs it spends **no model tokens**, and because it is just
+team: a plain loop, not agent reasoning, that wakes **only** the monitoring
+member on a fixed cadence by keystroking into its tmux pane. While the loop runs
+it spends **no model tokens**, and because it is just
 a backgrounded command it works identically on **any** backend (`claude`,
 `codex`, `opencode`). `cafleet monitor start` runs the loop in-process; the
 monitoring member owns its lifetime — there is no detached subprocess and no
@@ -35,50 +35,46 @@ those require agent judgment and stay the Director's job, defined by the
 | Heartbeat (the *when*) | which agents are due; the wake keystroke | the `cafleet monitor` loop |
 | Facilitation (the *what*) | poll → ACK → dispatch → health-check → escalate | the Director, per the supervision skill |
 
-The wake keystroke differs by role:
+The loop wakes only one role, the **monitoring member**, with an
+`Esc`-safeguarded *wake nudge* — a single-line instruction to run its
+capture-classify-reengage routine now. The loop runs inside the monitoring
+member's own pane, so this wake is a deliberate self-ping that drives the routine
+each tick (see [The monitoring member](#the-monitoring-member)).
 
-- **The Director** gets an `Esc`-safeguarded bare `cafleet … message poll`. That
-  bare poll, on its own, performs only the first step of facilitation, so the
-  contract that makes a woken Director run its full facilitation loop lives in
-  the supervision skill, not in the keystroke: **a monitor poll-trigger wake is
-  the Director's cue to run its entire facilitation loop**, not to read its inbox
-  and stop.
-- **The monitoring member** gets an `Esc`-safeguarded *wake nudge* — a
-  single-line instruction to run its capture-classify-reengage routine now. The
-  loop runs inside the monitoring member's own pane, so this wake is a deliberate
-  self-ping that drives the routine each tick (see [The monitoring
-  member](#the-monitoring-member)).
+The Director receives **no** keystroke from the loop. It is re-engaged only on
+demand: by the monitoring member's idle nudge (an `Esc`-safeguarded
+`cafleet message send` when the routine classifies the Director as idle) and by
+the broker's inline-preview keystroke on every inbound `cafleet message send`.
 
 The monitor never reasons about message content — it is the alarm clock; the
 Director is the worker, and the monitoring member is the watcher that re-engages
-a stalled Director.
+a stalled Director on demand.
 
 ## Who gets pinged
 
 Each tick, the monitor evaluates its enrolled, active agents and pings the ones
-whose interval has elapsed. Enrollment is restricted to exactly two agents per
-fleet: the **root Director** and the **monitoring member**. Ordinary members are
-**not** enrolled and are **never** pinged by the loop — re-engaging a quiet
-member is always Director-mediated (the broker's inline-preview keystroke on
-every `cafleet message send` is the primary member-wake path; the Director's
+whose interval has elapsed. Enrollment is restricted to exactly one agent per
+fleet: the **monitoring member**. The root Director is **not** enrolled, and
+ordinary members are **not** enrolled — neither is ever pinged by the loop. The
+Director is re-engaged on demand (the monitoring member's idle nudge, plus the
+broker's inline-preview keystroke on every `cafleet message send`); re-engaging
+a quiet member is always Director-mediated (the broker's inline-preview keystroke
+on every `cafleet message send` is the primary member-wake path; the Director's
 `Esc`-safeguarded `cafleet member ping` is the manual recovery path).
 
-Both enrolled roles are pinged **unconditionally once due**, regardless of
-whether the agent has any pending inbox items. The Director's facilitation does
-useful work even on an empty inbox (it still health-checks members, dispatches
-queued work, and detects stalls); the monitoring member's wake drives its
-capture-and-assess routine each tick. The re-ping is unbounded — no backoff, no
-cap.
+The monitoring member is pinged **unconditionally once due**, regardless of
+whether it has any pending inbox items: each wake drives its capture-and-assess
+routine. The re-ping is unbounded — no backoff, no cap.
 
 `pending_count` (the count of an agent's un-acked inbox items) is still computed
 and shown in `monitor status`, but it does not gate the ping — it is purely
 informational.
 
 A ping is skipped only when the agent is disabled, when its pane is missing or
-dead, or when its interval has not yet elapsed. The loop selects the keystroke
-explicitly by role — `message poll` for the Director, the wake nudge for the
-monitoring member — so a stray or legacy enrolled row that is neither role is
-defensively **skipped**, never woken.
+dead, or when its interval has not yet elapsed. The loop wakes only the
+monitoring member (with the wake nudge), so any other enrolled row — a
+stray/legacy Director row that survived the prune, the Administrator, an ordinary
+member — is defensively **skipped**, never woken.
 
 Each dispatched ping is logged to the monitor's stdout as
 `<iso-ts> ping agent <id> (<name>)`. Because `cafleet monitor start` runs in the
@@ -168,7 +164,6 @@ flowchart LR
     Tick --> Tick
     Tick --> Stop["stop the task /<br/>delete the monitoring member /<br/>fleet delete"]
     Stop --> Clear["clear runtime row"]
-    Tick -. Esc + poll .-> PaneD["Director pane"]
     Tick -. Esc + wake nudge .-> PaneMon["monitoring member pane"]
 ```
 
@@ -179,8 +174,8 @@ flowchart LR
   `monitor start` in the fleet; the Director no longer runs it. The loop inherits
   the monitoring member's pane environment (`$TMUX`, `$CAFLEET_DATABASE_URL`) and
   fails fast on startup if it cannot reach a tmux session.
-- **Run**: each tick scans the two enrolled agents, pings the due ones with the
-  role-selected `Esc`-safeguarded keystroke, and rewrites the heartbeat.
+- **Run**: each tick scans the enrolled monitoring member, wakes it with the
+  `Esc`-safeguarded wake nudge when due, and rewrites the heartbeat.
 - **Stop (first-out).** Teardown stops the monitor **before** the monitoring
   member's pane is killed: the Director messages the monitoring member to stop
   its `monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so
@@ -205,23 +200,23 @@ Two tables back the monitor. Both reuse a parent id as a 1:1 INTEGER primary key
 
 - **`monitor_config`** — one row per **enrolled** agent, holding its
   `interval_seconds`, `last_ping_at`, and `enabled` flag. Enrollment is
-  restricted to exactly two agents per fleet: the root Director (enrolled at
-  `create_fleet`) and the monitoring member (enrolled when `register_agent` sees
-  `kind == "monitoring-member"`). Ordinary members, the write-only
-  Administrator, and card-only agents are **not** enrolled. Director-vs-member is
-  *derived* at scan time (`agent_id == fleets.director_agent_id`), and the
-  monitoring member is *derived* from `agent_card_json.cafleet.kind`, so the loop
-  can select the keystroke per role and `monitor status` can label it — neither
-  is denormalized.
+  restricted to exactly one agent per fleet: the monitoring member (enrolled when
+  `register_agent` sees `kind == "monitoring-member"`). The root Director is
+  **not** enrolled, nor are ordinary members, the write-only Administrator, or
+  card-only agents. `is_director` is still *derived* at scan time
+  (`agent_id == fleets.director_agent_id`) purely for the loop's defensive skip
+  and `monitor status` labeling — a Director row is not expected — and the
+  monitoring member is *derived* from `agent_card_json.cafleet.kind`; neither is
+  denormalized.
 - **`monitor_runtime`** — one row per fleet, holding the running loop's `pid`,
   `started_at`, `last_tick_at` heartbeat, and `tick_seconds`. "No monitor" is
   modeled cleanly as "no row".
 
-A one-shot Alembic data migration prunes any pre-existing non-Director
-`monitor_config` rows so an upgraded database matches the new
-`{Director, monitoring member}` enrollment world (pre-upgrade there are no
-monitoring members, so it leaves exactly the root-Director rows). The downgrade
-is a no-op.
+Two one-shot Alembic data migrations bring an upgraded database to the new
+`{monitoring member}`-only enrollment world. `0003` pruned every non-Director
+`monitor_config` row (leaving the root-Director rows), and `0004` then prunes
+those root-Director rows, so after both run `monitor_config` holds only
+monitoring-member rows. Both downgrades are no-ops.
 
 See [Data model](../spec/data-model.md) for the full column definitions and the
 [CLI options](../spec/cli-options.md#cafleet-monitor) page for the

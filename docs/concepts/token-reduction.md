@@ -6,16 +6,19 @@ icon: lucide/coins
 
 CAFleet does not consume LLM tokens itself, but every byte it emits — member
 spawn prompts, message envelopes, poll output, broker auto-injected text,
-the `cafleet` skill, the project `CLAUDE.md` / rules files, the bare
-`message poll` keystroke the external monitor injects on each supervision tick,
-and (most expensively) the raw tmux pane content returned
+the `cafleet` skill, the project `CLAUDE.md` / rules files, the wake-nudge
+keystroke the monitor injects into the monitoring member on each supervision
+tick, and (most expensively) the raw tmux pane content returned
 by `cafleet member capture` — lands in a coding agent's context and bills
-against its tokens. Moving the supervision scheduler out of the coding agent
-into the `cafleet monitor` process ([Monitoring](monitoring.md)) is itself a
-per-Director-tick reduction: the Director no longer carries a scheduling prompt
-template in context — the monitor wakes it with a single poll keystroke. The architectural-shape choices that keep per-message,
-per-spawn, per-Director-tick, and per-context-load cost down are summarized
-below.
+against its tokens. Moving the supervision scheduler out of the coding agents
+into the monitoring member's `cafleet monitor` process
+([Monitoring](monitoring.md)) is itself a per-tick reduction: no agent carries a
+scheduling prompt template in context — the monitor wakes only the monitoring
+member with a single wake-nudge keystroke, and the Director is re-engaged on
+demand (the monitoring member's idle nudge plus the broker's inline-preview
+keystroke), not by a per-tick poll keystroke. The architectural-shape choices
+that keep per-message, per-spawn, per-tick, and per-context-load cost down are
+summarized below.
 
 | Technique | Architectural touch-points |
 |---|---|
