@@ -118,16 +118,32 @@ def test_get_agents__monitor_field_folded(api_db, client):
     director_id = fleet["director"]["agent_id"]
     admin_id = fleet["administrator_agent_id"]
     member_id = _register_member(fleet, name="alice")
+    watcher_id = broker.register_agent(
+        fleet_id=sid,
+        name="watcher",
+        description="monitoring member",
+        placement={
+            "director_agent_id": director_id,
+            "tmux_session": "main",
+            "tmux_window_id": "@3",
+            "tmux_pane_id": "%7",
+            "coding_agent": "claude",
+        },
+        kind="monitoring-member",
+    )["agent_id"]
 
     resp = client.get("/api/agents", headers=_headers(sid))
     assert resp.status_code == 200, resp.text
     agents = {a["agent_id"]: a for a in resp.json()["agents"]}
 
-    # the enrolled root Director folds an object; ordinary members and the
-    # Administrator fold null (design 0000090: ordinary members are no longer
-    # enrolled, so their monitor config is absent)
+    # the two enrolled roles — the root Director and the dedicated monitoring
+    # member — fold a monitor object; ordinary members and the Administrator
+    # fold null (design 0000090: ordinary members are no longer enrolled, so
+    # their monitor config is absent)
     assert agents[director_id]["monitor"]["enabled"] is True
     assert agents[director_id]["monitor"]["interval_seconds"] == 60
+    assert agents[watcher_id]["monitor"] is not None
+    assert agents[watcher_id]["monitor"]["enabled"] is True
     assert agents[member_id]["monitor"] is None
     assert agents[admin_id]["monitor"] is None
 
