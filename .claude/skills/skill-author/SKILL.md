@@ -94,7 +94,7 @@ CAFleet members do not auto-poll. The broker delivers a 2-line inline preview in
 
 To prevent dead waits, the Director MUST run the `cafleet monitor` heartbeat — a per-fleet foreground loop the Director runs as a **background task** (or a dedicated monitoring member runs) that wakes due agents by keystroking `cafleet message poll` into their panes on each tick. On each monitor wake the Director polls its own inbox, inspects member health via `cafleet member capture`, and nudges stalled members with `cafleet member ping`. The skill `agent-team-monitoring` documents the monitor lifecycle and the per-wake facilitation steps; the loop spends no model tokens while running and is just a backgrounded command, so a Director on any backend (claude, codex, opencode) gets the same heartbeat.
 
-Start the monitor with `cafleet --fleet-id <fleet-id> monitor start` **as a background task** **before** the first `cafleet member create` call so the first tick fires while the first member is spawning. `monitor start` runs the loop in-process (background it) — there is no detached mode and no `monitor stop`.
+Start the monitor with `cafleet monitor start --fleet-id <fleet-id>` **as a background task** **before** the first `cafleet member create` call so the first tick fires while the first member is spawning. `monitor start` runs the loop in-process (background it) — there is no detached mode and no `monitor stop`.
 
 ### 2.4 Spawn members with `cafleet member create --prompt-file <abs path>`
 
@@ -107,7 +107,7 @@ For each member you spawn, follow the **two-step render-to-file pattern**:
 3. **Spawn with `--prompt-file`** pointing at the absolute path of the rendered file:
 
    ```bash
-   cafleet --fleet-id <fleet-id> --json member create --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "<member-name>" \
      --description "<one-sentence purpose>" \
      --prompt-file ${BASE}/prompts/<role>-<UTC-compact>.md
@@ -164,8 +164,8 @@ BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` ski
 <role-specific assignment text — e.g. CURRENT DATE, USER REQUEST, OUTPUT PATH, YOUR TASK ID>
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 
 <role-specific instructions>
 ```
@@ -312,7 +312,7 @@ The phrasing deliberately omits parentheses so a parser does not misinterpret it
 After acting on a polled message, the recipient MUST `cafleet message ack` it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle, polluting the recipient's context with stale work.
 
 ```bash
-cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 The `<task-id>` is the full UUID returned by `cafleet --json message poll --agent-id <my-agent-id> --full`. The default text-mode poll output truncates to an 8-character prefix; pass `--full` when you need the full UUID for ack.
@@ -355,7 +355,7 @@ Substitute `abc...` and `def...` literally into every subsequent call.
 ### Monitor start
 
 ```
-cafleet --fleet-id abc... monitor start   # run as a background task — the loop blocks
+cafleet monitor start --fleet-id abc...   # run as a background task — the loop blocks
 ```
 
 `monitor start` runs the loop in-process, so launch it as a background task. The monitor ticks starting before the first `member create`.
@@ -381,8 +381,8 @@ INPUT FILE: /repo/researches/pr-1234/diff.patch
 OUTPUT FILE: /repo/researches/pr-1234/summary.md
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 
 Read INPUT FILE, write a 200-word summary highlighting the top 3 risk areas to OUTPUT FILE, then send `complete (doc)` to the Director.
 ```
@@ -392,7 +392,7 @@ The Director writes this rendered text to `/repo/researches/pr-1234/prompts/summ
 ### Spawn the Summarizer
 
 ```bash
-cafleet --fleet-id abc... --json member create --agent-id def... \
+cafleet --json member create --fleet-id abc... --agent-id def... \
   --name "summarizer" \
   --description "Digests a PR diff into a 200-word risk summary" \
   --prompt-file /repo/researches/pr-1234/prompts/summarizer-20260516T003344Z.md
@@ -406,14 +406,14 @@ Capture `jkl...` as the Summarizer's UUID for the rest of the run.
 The Summarizer reads the diff, writes the summary, and sends:
 
 ```bash
-cafleet --fleet-id abc... message send --agent-id jkl... --to def... \
+cafleet message send --fleet-id abc... --agent-id jkl... --to def... \
   --text "complete (doc) — summary 198 words, 3 risk areas"
 ```
 
 The Director polls, acks, reads `${BASE}/summary.md`, presents it to the user via `AskUserQuestion`. If the user approves, the Director tears down. If the user requests revisions, the Director sends:
 
 ```bash
-cafleet --fleet-id abc... message send --agent-id def... --to jkl... \
+cafleet message send --fleet-id abc... --agent-id def... --to jkl... \
   --text "ready (doc)"
 ```
 
@@ -423,7 +423,7 @@ cafleet --fleet-id abc... message send --agent-id def... --to jkl... \
 
 ```bash
 # stop the monitor's background task first (no `monitor stop` command)
-cafleet --fleet-id abc... member delete --member-id jkl...
+cafleet member delete --fleet-id abc... --member-id jkl...
 cafleet fleet delete abc...
 ```
 

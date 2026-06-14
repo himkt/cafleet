@@ -29,14 +29,14 @@ You do NOT speak to the user directly. All coordination flows through the Direct
 **Sending the Visual Review Report to the Director:**
 
 ```bash
-cafleet --fleet-id [fleet-id] message send --agent-id [my-agent-id] \
+cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
   --to [director-agent-id] \
   --text "[the structured Visual Review Report]"
 ```
 
 Substitute the literal `[fleet-id]`, `[my-agent-id]`, and `[director-agent-id]` UUIDs from your spawn prompt. Never use shell variables.
 
-**Receiving messages.** When the Director sends you a message (a re-check request with a new `ROUND: N` line, or other instruction), the broker keystrokes `cafleet --fleet-id [fleet-id] message poll --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the `[task-id]`. After acting on the polled message, ack it via `cafleet --fleet-id [fleet-id] message ack --agent-id [my-agent-id] --task-id [task-id]`.
+**Receiving messages.** When the Director sends you a message (a re-check request with a new `ROUND: N` line, or other instruction), the broker keystrokes `cafleet message poll --fleet-id [fleet-id] --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the `[task-id]`. After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]`.
 
 ## Visual Issue Categories
 

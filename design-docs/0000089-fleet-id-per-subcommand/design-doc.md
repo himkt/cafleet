@@ -1,7 +1,7 @@
 # Per-Subcommand `--fleet-id` (Move the Global Flag onto Child Subcommands)
 
 **Status**: Approved
-**Progress**: 0/32 tasks complete
+**Progress**: 14/32 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -212,20 +212,20 @@ Per `removal.md`, the removal guards above test the **absence** of the old surfa
 
 ### Step 1: Documentation first (per `.claude/rules/design-doc-numbering.md`)
 
-- [ ] `docs/spec/cli-options.md`: Option Source Matrix — change Fleet ID source to a per-subcommand `--fleet-id <int>` option. <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: rewrite the "Why `--fleet-id` is a literal CLI flag" callout — keep the env-var-vs-flag rationale, replace the single-pattern/silently-ignored claims with the per-subcommand reality (one pattern per subcommand, canonical-order dependency, non-fleet subcommands reject it). <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: remove the `--fleet-id` row from **Global Options**; add a per-subcommand "Fleet ID (`--fleet-id`)" subsection mirroring `--agent-id`; update the Subcommand-summary note so the `--fleet-id` "no" rows read as "rejected" not "silently ignored". <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: doctor — remove the "`--fleet-id` silently accepted and ignored" row; server — rewrite the silently-accepted paragraph + the `cafleet --fleet-id 1 server` example to "not accepted". <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: update the agent/message/member/monitor section intros and **every** example command to the new flag position; add a `permissions.allow` subsection with the recommended per-subcommand pattern set, the `member exec` exclusion, the canonical-order caveat, and the `--json` companion-pattern note (global `--json` precedes the subcommand, so JSON invocations need `Bash(cafleet --json <grp> <cmd> --fleet-id *)` companions). <!-- completed: -->
-- [ ] `skills/cafleet/SKILL.md`: Required Flags table, Global Options section, the "Why literal flags, not env vars?" callout, and all command examples → new shape (only `--json`/`--version` global; `cafleet --fleet-id … <subcmd>` now fails). <!-- completed: -->
-- [ ] `skills/cafleet/reference/*.md` (`director.md`, `recovery.md`, `exec-routing.md`, `broadcast.md`, `output-flags.md`): rewrite every command example. <!-- completed: -->
-- [ ] `skills/cafleet/roles/director.md` + `roles/member.md`: rewrite command examples **and** the "flag placement" doctrine sentence (per the doctrine-class note in the Specification). <!-- completed: -->
-- [ ] `.claude/rules/bash-tool.md`: rewrite every `cafleet --fleet-id <s> …` example (member side `message send`; Director side `member ping` / `member exec`). <!-- completed: -->
-- [ ] `skills/cafleet-design-doc-create/roles/drafter.md`: rewrite the **"Flag placement"** doctrine paragraph (no longer global) and its examples; update `cafleet-design-doc-create` SKILL + `roles/director.md` + `roles/reviewer.md` examples and spawn-prompt templates — including the "flag placement" doctrine sentence in `roles/director.md` and `roles/reviewer.md` (not just their examples). <!-- completed: -->
-- [ ] Orchestration-skill catch-all: `grep -rn "cafleet --fleet-id" skills/` and rewrite every command example + spawn-prompt template across `cafleet-design-doc-execute`, `cafleet-design-doc-interview`, `cafleet-research-report`, `cafleet-research-presentation`, `cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision` to the new shape. <!-- completed: -->
-- [ ] docs/ examples: `get-started/quickstart.md`, `get-started/configure.md`, `concepts/data-model.md`, `concepts/member-lifecycle.md`, `concepts/monitoring.md`, `how-to/mixed-backend-team.md`, `how-to/monitor-and-recover.md`, `reference/coding-agents/codex.md`, `reference/coding-agents/opencode.md` — rewrite command examples. <!-- completed: -->
-- [ ] `README.md`: rewrite the `cafleet --fleet-id …` example to the new shape; run `/update-readme` if the surface change is material. <!-- completed: -->
-- [ ] Sweep for doctrine prose: `grep -rniE "global .*fleet-id|fleet-id.*global|before the subcommand|placed before" docs/ skills/ .claude/ CLAUDE.md` and rewrite each remaining hit. <!-- completed: -->
+- [x] `docs/spec/cli-options.md`: Option Source Matrix — change Fleet ID source to a per-subcommand `--fleet-id <int>` option. <!-- completed: 2026-06-14T09:13 -->
+- [x] `docs/spec/cli-options.md`: rewrite the "Why `--fleet-id` is a literal CLI flag" callout — keep the env-var-vs-flag rationale, replace the single-pattern/silently-ignored claims with the per-subcommand reality (one pattern per subcommand, canonical-order dependency, non-fleet subcommands reject it). <!-- completed: 2026-06-14T09:13 -->
+- [x] `docs/spec/cli-options.md`: remove the `--fleet-id` row from **Global Options**; add a per-subcommand "Fleet ID (`--fleet-id`)" subsection mirroring `--agent-id`; update the Subcommand-summary note so the `--fleet-id` "no" rows read as "rejected" not "silently ignored". <!-- completed: 2026-06-14T09:13 -->
+- [x] `docs/spec/cli-options.md`: doctor — remove the "`--fleet-id` silently accepted and ignored" row; server — rewrite the silently-accepted paragraph + the `cafleet --fleet-id 1 server` example to "not accepted". <!-- completed: 2026-06-14T09:13 -->
+- [x] `docs/spec/cli-options.md`: update the agent/message/member/monitor section intros and **every** example command to the new flag position; add a `permissions.allow` subsection with the recommended per-subcommand pattern set, the `member exec` exclusion, the canonical-order caveat, and the `--json` companion-pattern note (global `--json` precedes the subcommand, so JSON invocations need `Bash(cafleet --json <grp> <cmd> --fleet-id *)` companions). <!-- completed: 2026-06-14T09:13 -->
+- [x] `skills/cafleet/SKILL.md`: Required Flags table, Global Options section, the "Why literal flags, not env vars?" callout, and all command examples → new shape (only `--json`/`--version` global; `cafleet --fleet-id … <subcmd>` now fails). <!-- completed: 2026-06-14T09:18 -->
+- [x] `skills/cafleet/reference/*.md` (`director.md`, `recovery.md`, `exec-routing.md`, `broadcast.md`, `output-flags.md`): rewrite every command example. <!-- completed: 2026-06-14T09:18 -->
+- [x] `skills/cafleet/roles/director.md` + `roles/member.md`: rewrite command examples **and** the "flag placement" doctrine sentence (per the doctrine-class note in the Specification). <!-- completed: 2026-06-14T09:18 -->
+- [x] `.claude/rules/bash-tool.md`: rewrite every `cafleet --fleet-id <s> …` example (member side `message send`; Director side `member ping` / `member exec`). <!-- completed: 2026-06-14T09:36 (Director-owned: harness denies member edits under .claude/) -->
+- [x] `skills/cafleet-design-doc-create/roles/drafter.md`: rewrite the **"Flag placement"** doctrine paragraph (no longer global) and its examples; update `cafleet-design-doc-create` SKILL + `roles/director.md` + `roles/reviewer.md` examples and spawn-prompt templates — including the "flag placement" doctrine sentence in `roles/director.md` and `roles/reviewer.md` (not just their examples). <!-- completed: 2026-06-14T09:36 -->
+- [x] Orchestration-skill catch-all: `grep -rn "cafleet --fleet-id" skills/` and rewrite every command example + spawn-prompt template across `cafleet-design-doc-execute`, `cafleet-design-doc-interview`, `cafleet-research-report`, `cafleet-research-presentation`, `cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision` to the new shape. <!-- completed: 2026-06-14T09:36 -->
+- [x] docs/ examples: `get-started/quickstart.md`, `get-started/configure.md`, `concepts/data-model.md`, `concepts/member-lifecycle.md`, `concepts/monitoring.md`, `how-to/mixed-backend-team.md`, `how-to/monitor-and-recover.md`, `reference/coding-agents/codex.md`, `reference/coding-agents/opencode.md` — rewrite command examples. <!-- completed: 2026-06-14T09:36 (data-model.md is docs/spec/, schema-only — no flag-placement edits needed) -->
+- [x] `README.md`: rewrite the `cafleet --fleet-id …` example to the new shape; run `/update-readme` if the surface change is material. <!-- completed: 2026-06-14T09:36 -->
+- [x] Sweep for doctrine prose: `grep -rniE "global .*fleet-id|fleet-id.*global|before the subcommand|placed before" docs/ skills/ .claude/ CLAUDE.md` and rewrite each remaining hit. <!-- completed: 2026-06-14T09:36 -->
 
 ### Step 2: Code
 

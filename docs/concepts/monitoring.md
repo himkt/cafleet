@@ -173,8 +173,7 @@ flowchart LR
 ```
 
 - **Spawned first.** The monitoring member is the **first** `member create` in
-  the fleet (first-in). After it boots it launches `cafleet --fleet-id N monitor
-  start` as a **background task** in its own pane, confirms with `cafleet monitor
+  the fleet (first-in). After it boots it launches `cafleet monitor start --fleet-id N` as a **background task** in its own pane, confirms with `cafleet monitor
   status`, and reports `ready: monitor live` to the Director. Receipt of that
   handshake message is the gate for spawning ordinary members — this is the only
   `monitor start` in the fleet; the Director no longer runs it. The loop inherits

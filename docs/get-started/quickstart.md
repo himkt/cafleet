@@ -68,7 +68,7 @@ Optional: add `--model <m>` (e.g. `--model sonnet`) to pin a member's LLM;
 omitted, the backend binary uses its own default model:
 
 ```bash
-cafleet --fleet-id 1 member create \
+cafleet member create --fleet-id 1 \
   --agent-id 2 \
   --name "demo-member" \
   --description "Demo member" \
@@ -80,7 +80,7 @@ cafleet --fleet-id 1 member create \
 ```
 
 ```bash
-cafleet --fleet-id 1 member create \
+cafleet member create --fleet-id 1 \
   --agent-id 2 \
   --name "reviewer" \
   --description "Reviewer member" \
@@ -95,7 +95,7 @@ List the fleet's agents — the new members' ids (`4` and `5`) appear
 alongside the Director and the Administrator:
 
 ```bash
-cafleet --fleet-id 1 agent list
+cafleet agent list --fleet-id 1
 ```
 
 ```
@@ -112,7 +112,7 @@ Send a message between the members — `demo-member` (`4`) messages
 `reviewer` (`5`):
 
 ```bash
-cafleet --fleet-id 1 message send --agent-id 4 --to 5 --text "hi"
+cafleet message send --fleet-id 1 --agent-id 4 --to 5 --text "hi"
 ```
 
 ```
@@ -129,8 +129,8 @@ once it has consumed the message.
 When you are done, tear the fleet down:
 
 ```bash
-cafleet --fleet-id 1 member delete --member-id 4
-cafleet --fleet-id 1 member delete --member-id 5
+cafleet member delete --fleet-id 1 --member-id 4
+cafleet member delete --fleet-id 1 --member-id 5
 cafleet fleet delete 1
 ```
 

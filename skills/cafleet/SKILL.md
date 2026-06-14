@@ -36,12 +36,12 @@ Every `cafleet` invocation that touches agents or messages must carry two litera
 
 | Flag | Scope | Required for | Notes |
 |---|---|---|---|
-| `--fleet-id <int>` | global (placed **before** the subcommand) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `show`, `agent *`, `deregister`, `member *`) | Integer id of the fleet created via `cafleet fleet create`. Typed `int` — a non-integer fails with Click's standard "is not a valid integer" error. Silently accepted (and ignored) on `db init` / `fleet *` / `server` / `doctor`. |
+| `--fleet-id <int>` | per-subcommand (placed **after** the subcommand name) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `show`, `agent *`, `deregister`, `member *`) | Integer id of the fleet created via `cafleet fleet create`. Typed `int` — a non-integer fails with Click's standard "is not a valid integer" error. Rejected with `No such option` on `db init` / `fleet *` / `server` / `doctor`. |
 | `--agent-id <int>` | per-subcommand (placed **after** the subcommand name) | every subcommand **except** `register` | The acting agent's integer id. `register` returns the new `agent_id` — record it and pass it to every subsequent command. |
 
 If `--fleet-id` is missing on a subcommand that needs it, the CLI exits with `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`
 
-> **Why literal flags, not env vars?** `permissions.allow` matches Bash invocations as literal command strings — a literal `cafleet --fleet-id <int> <subcmd> --agent-id <int>` matches one allow pattern, while shell-expansion (`export VAR=...` then `$VAR`) breaks the match and forces per-invocation permission prompts. Substitute the literal ids printed by `cafleet fleet create` and `cafleet agent register`; never store them in shell variables.
+> **Why literal flags, not env vars?** `permissions.allow` matches Bash invocations as literal command strings — a literal `--fleet-id <int>` keeps the command a fixed string an allow pattern can match, while shell-expansion (`export VAR=...` then `$VAR`) breaks the match and forces per-invocation permission prompts. Substitute the literal ids printed by `cafleet fleet create` and `cafleet agent register`; never store them in shell variables. Because `--fleet-id` is per-subcommand, coverage uses one allow pattern per subcommand (`Bash(cafleet <grp> <cmd> --fleet-id *)`), matched only in the canonical flag order (`--fleet-id` first after the subcommand name); `--json` is a top-level option, so JSON invocations need companion `Bash(cafleet --json <grp> <cmd> --fleet-id *)` patterns. See [cli-options.md](../../docs/spec/cli-options.md#permissionsallow-coverage).
 
 The environment variables the CLI reads (all wired through `cafleet.config.Settings` via explicit `validation_alias` on each field, so the `CAFLEET_` prefix is uniform):
 
@@ -63,15 +63,15 @@ In every example below, substitute the literal integer ids printed by `cafleet f
 
 ## Global Options
 
-Only `--json`, `--fleet-id`, and `--version` are global (before the subcommand). `--agent-id` is a per-subcommand option and must appear **after** the subcommand name:
+Only `--json` and `--version` are top-level options (they precede the subcommand name). `--agent-id` and `--fleet-id` are per-subcommand options and must appear **after** the subcommand name:
 
 ```bash
-cafleet --fleet-id <fleet-id> --json agent register --name "My Agent" --description "..."
-cafleet --fleet-id <fleet-id> --json agent list
-cafleet --fleet-id <fleet-id> --json message poll --agent-id <my-agent-id>
+cafleet --json agent register --fleet-id <fleet-id> --name "My Agent" --description "..."
+cafleet --json agent list --fleet-id <fleet-id>
+cafleet --json message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
 ```
 
-`cafleet agent list --json` will fail with `No such option: --json`. Same for `--fleet-id` placed after the subcommand — keep it before. `--agent-id` must come **after** the subcommand, not before it.
+`cafleet agent list --json` will fail with `No such option: --json` — `--json` is a top-level option and must precede the subcommand name. `--agent-id` and `--fleet-id`, by contrast, are per-subcommand options and must come **after** the subcommand name; a `--fleet-id` preceding the subcommand fails with `No such option: --fleet-id`.
 
 `cafleet --version` prints `cafleet <version>` and exits 0 without `--fleet-id`.
 
@@ -84,7 +84,7 @@ Three backends are supported: `claude` (default), `codex`, and `opencode`. The D
 Use `--json` so the output is machine-parseable, and capture `agent_id` for every subsequent call:
 
 ```bash
-cafleet --fleet-id <fleet-id> --json agent register \
+cafleet --json agent register --fleet-id <fleet-id> \
   --name "<short-label>" \
   --description "<one-sentence purpose>"
 ```
@@ -101,7 +101,7 @@ Rules:
 - **Description**: one sentence stating who the agent is and what it is for.
 - **Capture `agent_id` immediately.** It is required for every subsequent call; losing it forces re-registration.
 - Non-`--json` output prints `Agent registered successfully!` followed by `  agent_id:  <id>` and `  name:      <name>`. Parse the `agent_id:` line if `--json` is not an option.
-- Call `cafleet --fleet-id <fleet-id> agent deregister --agent-id <my-agent-id>` at end of fleet so stale registrations do not accumulate.
+- Call `cafleet agent deregister --fleet-id <fleet-id> --agent-id <my-agent-id>` at end of fleet so stale registrations do not accumulate.
 
 > **Reserved name — `Administrator`**: every fleet is auto-seeded with exactly one built-in `Administrator` agent at `fleet create` time. Do NOT register a human or member agent under the name `Administrator`. The built-in Administrator is marked internally via `agent_card_json.cafleet.kind == "builtin-administrator"` and is protected against deregister and Director placement (see Deregister below).
 
@@ -110,7 +110,7 @@ Rules:
 Send a message to a specific agent by ID.
 
 ```bash
-cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
+cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <target-agent-id> --text "Did the API schema change?"
 ```
 
@@ -135,8 +135,8 @@ The recipient's coding agent processes the keystroked text as a fresh user-turn 
 Poll for incoming messages. Returns only un-acked (`input_required`) deliveries addressed to this agent, newest first — once a task is ACKed it no longer appears in `poll` output.
 
 ```bash
-cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
-cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --full
+cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
+cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id> --full
 ```
 
 | Flag | Required | Notes |
@@ -148,8 +148,8 @@ cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --full
 Acknowledge receipt of a message. Moves the task from `INPUT_REQUIRED` to `COMPLETED`.
 
 ```bash
-cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
-cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id> --quiet
+cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id> --quiet
 ```
 
 | Flag | Required | Notes |
@@ -163,7 +163,7 @@ cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <ta
 Cancel a sent message that has not been acknowledged yet. Only the sender can cancel.
 
 ```bash
-cafleet --fleet-id <fleet-id> message cancel --agent-id <my-agent-id> --task-id <task-id>
+cafleet message cancel --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 | Flag | Required | Notes |
@@ -176,7 +176,7 @@ cafleet --fleet-id <fleet-id> message cancel --agent-id <my-agent-id> --task-id 
 Get details of a specific task by ID.
 
 ```bash
-cafleet --fleet-id <fleet-id> message show --agent-id <my-agent-id> --task-id <task-id>
+cafleet message show --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 | Flag | Required | Notes |
@@ -189,8 +189,8 @@ cafleet --fleet-id <fleet-id> message show --agent-id <my-agent-id> --task-id <t
 `agent list` returns all registered agents in the fleet. To fetch detail for a single agent, use `agent show --id <target-agent-id>`.
 
 ```bash
-cafleet --fleet-id <fleet-id> agent list
-cafleet --fleet-id <fleet-id> agent show --agent-id <my-agent-id> --id <target-agent-id>
+cafleet agent list --fleet-id <fleet-id>
+cafleet agent show --fleet-id <fleet-id> --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
 Default output is one row per agent (`<id> <name> <status>`); `description` is truncated to 60 codepoints. Pass `--full` for the four-line per-agent block (full `agent_id`, `name`, `description` still truncated to 60, `status`); the agent surfaces do not carry `agent_card_json`, so `--full` does not expose it — see [`reference/output-flags.md`](reference/output-flags.md).
@@ -211,7 +211,7 @@ Does NOT require `--fleet-id`. Requires `TMUX` and `TMUX_PANE` env vars to be se
 Remove this agent's registration from the broker.
 
 ```bash
-cafleet --fleet-id <fleet-id> agent deregister --agent-id <my-agent-id>
+cafleet agent deregister --fleet-id <fleet-id> --agent-id <my-agent-id>
 ```
 
 > **Root Director cannot be deregistered**. The agent created by `cafleet fleet create` (the fleet's `fleets.director_agent_id`) is protected — `cafleet agent deregister --agent-id <root-director-id>` exits 1 with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` Use `cafleet fleet delete <fleet-id>` for fleet teardown.
@@ -227,7 +227,7 @@ cafleet fleet delete <fleet-id>
 
 Soft-deletes a fleet in a single transaction: stamps `fleets.deleted_at`, deregisters every active agent in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. Idempotent.
 
-After soft-delete, the fleet is hidden from `cafleet fleet list` and further `cafleet --fleet-id <deleted> agent register` calls fail with `Error: fleet <id> is deleted`. Surviving member coding-agent processes are **not** automatically closed — call `cafleet member delete` per member **before** `cafleet fleet delete` for a clean teardown. See the Shutdown Protocol in [`reference/recovery.md`](reference/recovery.md) for the full ordering.
+After soft-delete, the fleet is hidden from `cafleet fleet list` and further `cafleet agent register --fleet-id <deleted>` calls fail with `Error: fleet <id> is deleted`. Surviving member coding-agent processes are **not** automatically closed — call `cafleet member delete` per member **before** `cafleet fleet delete` for a clean teardown. See the Shutdown Protocol in [`reference/recovery.md`](reference/recovery.md) for the full ordering.
 
 ## Typical Workflow
 
@@ -255,33 +255,33 @@ After soft-delete, the fleet is hidden from `cafleet fleet list` and further `ca
 
 2. **Register** with the broker:
    ```bash
-   cafleet --fleet-id <fleet-id> agent register \
+   cafleet agent register --fleet-id <fleet-id> \
      --name "Code Review Agent" --description "Reviews pull requests"
    # → returns <my-agent-id>
    ```
 
 3. **Discover** other agents:
    ```bash
-   cafleet --fleet-id <fleet-id> agent list
+   cafleet agent list --fleet-id <fleet-id>
    ```
 
 4. **Send** a message:
    ```bash
-   cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
+   cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
      --to <target-agent-id> --text "Please review PR #42"
    ```
 
 5. **Poll** for incoming messages:
    ```bash
-   cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
+   cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
    ```
 
 6. **Acknowledge** received messages:
    ```bash
-   cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+   cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
    ```
 
-7. **Repeat** steps 4–6 as needed. Use `cafleet --fleet-id <fleet-id> --json <cmd>` when parsing output programmatically.
+7. **Repeat** steps 4–6 as needed. Use `cafleet --json <cmd> --fleet-id <fleet-id>` when parsing output programmatically.
 
 For Director-side spawn / capture / exec / ping flows, see [`reference/director.md`](reference/director.md). For shutdown ordering, see [`reference/recovery.md`](reference/recovery.md).
 
@@ -300,5 +300,5 @@ For broadcast threading (the `origin_task_id` self-reference shape), see [`refer
 - Missing `--fleet-id` on a client/member subcommand exits with `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1).
 - Missing `--agent-id` on commands that need it exits with `Error: Missing option '--agent-id'.` (Click built-in, exit 2).
 - Errors print to stderr and exit non-zero.
-- Use `cafleet --fleet-id <fleet-id> --json <cmd>` for machine-parseable output (including errors).
+- Use `cafleet --json <cmd> --fleet-id <fleet-id>` for machine-parseable output (including errors).
 - `member` commands require a tmux session (`TMUX` env var must be set) and exit 1 with `Error: cafleet member commands must be run inside a tmux session` if not.

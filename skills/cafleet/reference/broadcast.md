@@ -3,7 +3,7 @@
 Send a message to every active recipient in the fleet (except the sender and the built-in Administrator). Returns a single `broadcast_summary` envelope to the caller.
 
 ```bash
-cafleet --fleet-id <fleet-id> message broadcast --agent-id <my-agent-id> \
+cafleet message broadcast --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --text "Build failed on main branch"
 ```
 
@@ -47,7 +47,7 @@ The rendered envelope's compact form surfaces the threading link as `origin: <id
 A broadcast recipient acks their own delivery row exactly the same way a unicast recipient acks a message:
 
 ```bash
-cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 The summary row is NOT acked by recipients — it is a sender-side artifact, addressed back to the broadcaster, that captures the fan-out outcome. The broadcaster sees their own summary row in their inbox alongside any unicast deliveries to themselves.

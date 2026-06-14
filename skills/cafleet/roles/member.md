@@ -19,7 +19,7 @@ On your very first turn, send a `ready` message to the Director as your first Ba
 Send the ready signal with this exact shape:
 
 ```bash
-cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
+cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <director-agent-id> --text "ready"
 ```
 
@@ -28,7 +28,7 @@ Use the literal body `ready` (the Director matches that prefix). Optionally appe
 Then poll your inbox for the Director's first real instruction:
 
 ```bash
-cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
+cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
 ```
 
 If the Director has already queued your first task, it appears in the poll output — ACK and process it. If the poll returns empty, go idle. The broker keystrokes an inline preview into your pane when the Director sends one, and your next turn picks it up.
@@ -55,10 +55,10 @@ If the Director has already queued your first task, it appears in the poll outpu
 Your harness lets you call cafleet directly:
 
 ```bash
-cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
-cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
+cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
+cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <director-agent-id> --text "..."
-cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 These are normal Bash invocations — nothing special. Workspace-scoped auto-approval auto-resolves permission prompts, so they execute without operator interaction.

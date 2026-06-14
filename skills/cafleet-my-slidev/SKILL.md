@@ -259,7 +259,7 @@ Use this when:
 When you want a dedicated codex member running the spec, spawn it via `cafleet member create` with `--coding-agent codex`. The spawn prompt is positional (`[PROMPT_ARGV]...`) — there is no `--spawn-prompt-from-text` flag. Paste the embedded spec body verbatim into the positional argument, then append the per-call inputs:
 
 ```bash
-cafleet --fleet-id <fleet-id> member create \
+cafleet member create --fleet-id <fleet-id> \
   --agent-id <director-agent-id> \
   --name slide-creator-codex \
   --description "Generate a Slidev presentation autonomously" \

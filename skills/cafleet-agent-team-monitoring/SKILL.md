@@ -11,7 +11,7 @@ Foundation layer for CAFleet Directors. This skill documents the `cafleet monito
 
 Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal integer ids printed by `cafleet fleet create` (which returns both the fleet id and the root Director's `agent_id` — see the `cafleet` skill § Typical Workflow for the exact output shape) directly into the command. Do **not** introduce shell variables for agent or fleet IDs — `permissions.allow` matches command strings literally, and shell expansion breaks that matching.
 
-**Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>`.
+**Flag placement**: `--fleet-id` and `--agent-id` are both per-subcommand options (placed **after** the subcommand name). For example: `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`.
 
 - `<fleet-id>` — the fleet id printed on line 1 of `cafleet fleet create` text output (or the `fleet_id` field in `--json` output)
 - `<director-agent-id>` — the root Director's id printed on line 2 of `cafleet fleet create` text output (or `director.agent_id` in `--json` output). `cafleet fleet create` inside a tmux session auto-bootstraps the root Director with its placement row — no separate `cafleet agent register` call is needed to obtain the Director's `agent_id`.
@@ -56,27 +56,27 @@ member-driving routes back through the Director.
 
 Startup (in order, as your first actions):
 1. Send the ready signal to the Director:
-   cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "ready: monitoring member"
+   cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "ready: monitoring member"
 2. Launch the heartbeat as a background task in THIS pane (the loop blocks, so
-   background it): cafleet --fleet-id {fleet_id} monitor start
-3. Confirm it is live: cafleet --fleet-id {fleet_id} monitor status
+   background it): cafleet monitor start --fleet-id {fleet_id}
+3. Confirm it is live: cafleet monitor status --fleet-id {fleet_id}
 4. Only after status shows running, report the gate signal:
-   cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "ready: monitor live"
+   cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "ready: monitor live"
    This message gates the Director's first ordinary member create.
 
 On each wake (a "[monitor] wake: ..." nudge keystroked into this pane by the loop):
 1. Capture the Director's pane:
-   cafleet --fleet-id {fleet_id} member capture --member-id {director_agent_id} --lines 120
+   cafleet member capture --fleet-id {fleet_id} --member-id {director_agent_id} --lines 120
 2. Classify the Director ACTIVE vs IDLE with your own judgment (mid-turn, running
    a tool, or typing = ACTIVE; sitting at an empty prompt with un-acked inbox or
    visibly stalled members = IDLE).
    - ACTIVE -> do nothing; end your turn.
    - IDLE -> assess the full picture: the Director's inbox, its current task, and
      any ordinary members that look stalled (read-only
-     cafleet --fleet-id {fleet_id} member capture --member-id <member-id>). Then
+     cafleet member capture --fleet-id {fleet_id} --member-id <member-id>). Then
      re-engage the DIRECTOR with a concise nudge naming what needs attention
      (un-acked inbox items, stalled members):
-     cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "<summary>"
+     cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "<summary>"
    Never keystroke task instructions into an ordinary member's pane.
 
 Teardown: when the Director messages you to wrap up, stop your `monitor start`
@@ -97,8 +97,8 @@ the Director with an Esc-safeguarded nudge.
 
 On every supervision tick — whether fired by a `cafleet monitor` wake or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
 
-1. **Poll inbox.** `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>` returns only the un-acked (`input_required`) deliveries; ACKing each one (step 2) consumes it, so the next tick's poll surfaces only what has arrived since.
-2. **ACK every message** that requires no further action: `cafleet --fleet-id <fleet-id> message ack --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.
+1. **Poll inbox.** `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` returns only the un-acked (`input_required`) deliveries; ACKing each one (step 2) consumes it, so the next tick's poll surfaces only what has arrived since.
+2. **ACK every message** that requires no further action: `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.
 3. **Dispatch queued work.** If a member is idle and inputs are available (review comments to route, the next implementation step in a design doc, reviewer feedback waiting at the Drafter, a teammate reply waiting to be acted on), send the instruction immediately via `cafleet message send`. **Do not wait for a fresh "go" from the user** — the user's original authorization persists across ticks; see the `cafleet-agent-team-supervision` skill § Authorization-Scope Guard.
 4. **Run the health-check sequence** below for any member that has not reported recent progress.
 5. **Escalate** to the user via `AskUserQuestion` after two nudges produce no progress, or whenever a queued action requires a *new* user decision (option choice, risky/remote-visible operation, ambiguous teammate question). Do **not** emit passive-hold messages like `Skipping. Holding for go.` — the tick is a health check, not a permission renewal.
@@ -109,18 +109,18 @@ Run this sequence once per supervision tick. Order matters — cheapest non-intr
 
 | Step | Command | Purpose |
 |---|---|---|
-| 1 | `cafleet --fleet-id <fleet-id> member list` | Enumerate all live members and their pane status |
-| 2 | `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>` | Check inbox for progress reports or help requests from members |
-| 3 | For each member with no recent message: `cafleet --fleet-id <fleet-id> member capture --member-id <member-agent-id>` | Terminal capture fallback — inspect what the member is doing when it has not reported in. If the capture shows an `AskUserQuestion`-style prompt, see Stall Response below for the `member send-input` escape hatch. |
-| 4 | Based on findings, `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "..."` to any stalled or idle member with a specific instruction | Drive the team forward |
+| 1 | `cafleet member list --fleet-id <fleet-id>` | Enumerate all live members and their pane status |
+| 2 | `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` | Check inbox for progress reports or help requests from members |
+| 3 | For each member with no recent message: `cafleet member capture --fleet-id <fleet-id> --member-id <member-agent-id>` | Terminal capture fallback — inspect what the member is doing when it has not reported in. If the capture shows an `AskUserQuestion`-style prompt, see Stall Response below for the `member send-input` escape hatch. |
+| 4 | Based on findings, `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "..."` to any stalled or idle member with a specific instruction | Drive the team forward |
 | 5 | When all members have reported completion (via messages or visible in terminal output), report to the user: "All deliverables are ready for review." | Signal completion to user |
 
 ## Monitor Lifecycle
 
 | Phase | Action |
 |---|---|
-| Spawn the monitoring member (first-in) | The **first** `cafleet member create` in the fleet IS the monitoring member: `cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> --name monitor --description <…> --role monitor --model sonnet --prompt-file <rendered monitor prompt>`. It boots, launches `cafleet monitor start` as a background task in its own pane, confirms `monitor status`, and sends `ready: monitor live` to the Director. |
-| Gate ordinary members | Wait for the monitoring member's `ready: monitor live` message before the first ordinary `cafleet member create`. The Director MAY run `cafleet --fleet-id <fleet-id> monitor status` itself as optional corroboration, but it waits on the handshake message rather than block-polling status (consistent with the async wait rule). |
+| Spawn the monitoring member (first-in) | The **first** `cafleet member create` in the fleet IS the monitoring member: `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name monitor --description <…> --role monitor --model sonnet --prompt-file <rendered monitor prompt>`. It boots, launches `cafleet monitor start` as a background task in its own pane, confirms `monitor status`, and sends `ready: monitor live` to the Director. |
+| Gate ordinary members | Wait for the monitoring member's `ready: monitor live` message before the first ordinary `cafleet member create`. The Director MAY run `cafleet monitor status --fleet-id <fleet-id>` itself as optional corroboration, but it waits on the handshake message rather than block-polling status (consistent with the async wait rule). |
 | Run work | The monitor ticks at its configured cadence (default ping interval 60 s); do not intervene unless a wake escalates. Each Director wake is the cue to run the 5-step facilitation loop above. |
 | User review | Keep the monitoring member and its `monitor start` task running during the review cycle — revisions and re-reviews still count as in-progress work. |
 | Teardown (first-out) | Stop the monitor's background task, then delete the monitoring member FIRST, before ordinary members (see Cleanup below). |
@@ -136,7 +136,7 @@ When you receive any signal that a member may be stalled (monitor wake, idle not
 ### Stage 1 — Message-based check (`cafleet message poll`)
 
 ```bash
-cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>
+cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>
 ```
 
 `cafleet message poll` returns only the un-acked (`input_required`) deliveries addressed to the Director, newest first. ACKing a delivery consumes it, so a later poll surfaces only what has arrived since the last ACK — there is no last-tick timestamp to track. If the member has sent a progress report or help request via `cafleet message send`, you can act on it immediately without interrupting the member's work. This is non-intrusive and preferred.
@@ -144,7 +144,7 @@ cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>
 ### Stage 2 — Terminal capture fallback (`cafleet member capture`)
 
 ```bash
-cafleet --fleet-id <fleet-id> member capture \
+cafleet member capture --fleet-id <fleet-id> \
   --member-id <member-agent-id> --lines 120
 ```
 

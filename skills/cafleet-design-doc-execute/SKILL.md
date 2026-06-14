@@ -46,7 +46,7 @@ User
 - **Director ↔ Tester**: `cafleet message send` (step assignments, test review feedback, test defect reports)
 - **Director ↔ Verifier**: `cafleet message send` (verification assignments, results, failure routing)
 - **Director**: git operations (commit after each phase — tests and implementation separately)
-- Members receive messages via push notification: the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview`. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves. `--fleet-id` is a global flag (placed **before** the subcommand); `--agent-id` is a per-subcommand option (placed **after** the subcommand name).
+- Members receive messages via push notification: the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview`. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves. `--fleet-id` and `--agent-id` are per-subcommand options (placed **after** the subcommand name).
 
 ## Prerequisites
 
@@ -58,11 +58,11 @@ User
 | Agent Teams primitive | CAFleet equivalent |
 |---|---|
 | `TeamCreate(name="execute-{slug}")` | CAFleet fleet created via `cafleet fleet create` — it bootstraps the fleet + root Director + placement + Administrator in one transaction (no separate `cafleet agent register` call needed for the Director) |
-| `Agent(team_name=..., subagent_type=...)` | `cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
-| `SendMessage(to="Programmer")` | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."` |
-| `SendMessage(to="Director")` (from member) | `cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance), then start the heartbeat via `cafleet --fleet-id <fleet-id> monitor start` |
-| `TeamDelete` | `cafleet --fleet-id <fleet-id> member delete --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet and sweeps the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
+| `Agent(team_name=..., subagent_type=...)` | `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
+| `SendMessage(to="Programmer")` | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."` |
+| `SendMessage(to="Director")` (from member) | `cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
+| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance), then start the heartbeat via `cafleet monitor start --fleet-id <fleet-id>` |
+| `TeamDelete` | `cafleet member delete --fleet-id <fleet-id> --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet and sweeps the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
 ## Process
@@ -210,13 +210,13 @@ cafleet fleet create --label "design-doc-execute-{slug}" --json
 #   }
 ```
 
-Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids. Remember: `--fleet-id` is a global flag that goes **before** the subcommand; `--agent-id` is a per-subcommand option that goes **after** the subcommand name.
+Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids. Remember: `--fleet-id` and `--agent-id` are per-subcommand options that go **after** the subcommand name.
 
 If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `agent_id` instead of creating a new fleet. Do **not** attempt to register a second Director with `cafleet agent register --name Director` — the root Director from `fleet create` is the team lead; a second registration would just create an unrelated agent with no placement row.
 
 #### 3b. Start the monitor
 
-BEFORE spawning any member, run the supervision heartbeat as a **background task** with `cafleet --fleet-id <fleet-id> monitor start` (the loop runs in-process and blocks the task; confirm with `cafleet --fleet-id <fleet-id> monitor status`). The monitor runs **unchanged** through Steps 3–8 — it supplies the same heartbeat the whole way; when Step 7 runs, PR-review polling is added as a facilitation step the Director performs on each monitor wake (the scheduler itself does not change). Its background task is stopped once in Step 8's cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
+BEFORE spawning any member, run the supervision heartbeat as a **background task** with `cafleet monitor start --fleet-id <fleet-id>` (the loop runs in-process and blocks the task; confirm with `cafleet monitor status --fleet-id <fleet-id>`). The monitor runs **unchanged** through Steps 3–8 — it supplies the same heartbeat the whole way; when Step 7 runs, PR-review polling is added as a facilitation step the Director performs on each monitor wake (the scheduler itself does not change). Its background task is stopped once in Step 8's cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -262,7 +262,7 @@ BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` ski
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
@@ -279,7 +279,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --fleet-id <fleet-id> --json member create --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Programmer" \
      --description "Implements code to pass tests per step" \
      --prompt-file ${BASE}/prompts/programmer-<UTC-compact>.md
@@ -305,7 +305,7 @@ BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` ski
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
@@ -323,7 +323,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --fleet-id <fleet-id> --json member create --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Tester" \
      --description "Writes unit tests per step" \
      --prompt-file ${BASE}/prompts/tester-<UTC-compact>.md
@@ -351,7 +351,7 @@ BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` ski
 DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: Do NOT commit code or modify implementation/test files.
@@ -369,7 +369,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --fleet-id <fleet-id> --json member create --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Verifier" \
      --description "E2E/integration testing and evidence collection" \
      --prompt-file ${BASE}/prompts/verifier-<UTC-compact>.md
@@ -380,7 +380,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 #### 3f. Verify members are live
 
 ```bash
-cafleet --fleet-id <fleet-id> member list
+cafleet member list --fleet-id <fleet-id>
 ```
 
 All spawned members must show `status: active` with a non-null `pane_id`. If any is missing or pending, retry the spawn before proceeding.
@@ -397,10 +397,10 @@ For each step in the design document:
 
 1. **Assign**: Send the Tester a verb + pointer poke. The Tester reads the step description and specification directly from the design document at the pointer.
    ```bash
-   cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> \
+   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --to <tester-agent-id> --text "ready (paragraph-Implementation > Step N)"
    ```
-2. **Wait for the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)** via `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>`. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (per the pointer-marker pairing rule in the Coordination Protocol section above); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via `AskUserQuestion`, write the answer back as `COMMENT(claude): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
+2. **Wait for the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)** via `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (per the pointer-marker pairing rule in the Coordination Protocol section above); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via `AskUserQuestion`, write the answer back as `COMMENT(claude): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
 3. **Review tests** against the design doc. If issues are found, write `COMMENT(director): <issue>` markers at `paragraph-Implementation > Step N` (matching the cafleet pointer per the pointer-marker pairing rule in the Coordination Protocol section above) and reply `ready (paragraph-Implementation > Step N)`; the Tester resolves the markers and replies `addressed (paragraph-Implementation > Step N)`. Repeat until satisfied.
 4. **Commit tests** (separate commands, do NOT chain with `&&`). Recover the per-test file list directly via git (`git status` / `git diff --stat` / `git log --name-only`) — the Tester does not embed file lists in cafleet bodies under the verb + pointer schema.
    - `git add <test-files>`
@@ -410,10 +410,10 @@ For each step in the design document:
 
 1. **Assign**: Send the Programmer a verb + pointer poke. The Programmer reads the step spec at the pointer and locates the Tester's freshly-committed test files via git (`git log <base>..HEAD --name-only -- '**/test_*' '**/tests/**'`); the prior Tester `complete (...) — N tests` summary went Tester → Director, not Tester → Programmer.
    ```bash
-   cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> \
+   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --to <programmer-agent-id> --text "ready (paragraph-Implementation > Step N)"
    ```
-2. **Wait for the Programmer's `complete (paragraph-Implementation > Step N)`** via `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>`. On `escalating (paragraph-Implementation > Step N)` (suspected test defect), see [roles/director.md](roles/director.md) for the escalation protocol; the rationale lives in a `COMMENT(programmer)` marker at the pointer, not in the cafleet body.
+2. **Wait for the Programmer's `complete (paragraph-Implementation > Step N)`** via `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`. On `escalating (paragraph-Implementation > Step N)` (suspected test defect), see [roles/director.md](roles/director.md) for the escalation protocol; the rationale lives in a `COMMENT(programmer)` marker at the pointer, not in the cafleet body.
 3. **Programmer updates design doc**: Checkboxes, timestamps, and Progress counter.
 
 #### Phase C: Code Review (Director)
@@ -444,7 +444,7 @@ If the Verifier was spawned, assign verification:
 
 1. Send the Verifier a verb + pointer poke — the Verifier reads the design document and the completed Implementation paragraphs directly at the pointer:
    ```bash
-   cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> \
+   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --to <verifier-agent-id> --text "ready (doc)"
    ```
 2. The Verifier discovers tools, executes E2E verification, captures evidence, and writes each fail / suggested-fix as a `COMMENT(verifier): <category> <body>` marker (category = impl bug / test gap / spec issue). Marker location MUST match the cafleet pointer used to report the failure — for per-step `escalating (paragraph-Implementation > Step N)` reports, the paired `COMMENT(verifier)` marker lives at the SAME `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in the Coordination Protocol section above). On overall success the Verifier sends a single `complete (doc)`; on failures the Verifier sends one `escalating (paragraph-Implementation > Step N)` per affected step.
@@ -487,8 +487,8 @@ See [roles/director.md](roles/director.md) for user interaction rules (COMMENT h
 
 When the user selects "Scan for COMMENT markers": scan changed files for `COMMENT(` markers. Classify by file location (see [roles/director.md](roles/director.md)) and route via the verb + pointer schema:
 - Design-doc `COMMENT(...)` markers → Director resolves directly (apply spec change, remove marker; no cafleet route).
-- Source-file `COMMENT(...)` markers → `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (<file>:<line>)"`. The Programmer reads the marker at the source pointer, fixes the source, removes the marker, and replies `addressed (<file>:<line>)`.
-- Test-file `COMMENT(...)` markers → `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (<file>:<line>)"`. The Tester reads, fixes, removes the marker, and replies `addressed (<file>:<line>)`.
+- Source-file `COMMENT(...)` markers → `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (<file>:<line>)"`. The Programmer reads the marker at the source pointer, fixes the source, removes the marker, and replies `addressed (<file>:<line>)`.
+- Test-file `COMMENT(...)` markers → `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (<file>:<line>)"`. The Tester reads, fixes, removes the marker, and replies `addressed (<file>:<line>)`.
 
 After all `COMMENT(...)` markers are resolved and verified, re-present to user.
 
@@ -498,7 +498,7 @@ No round limit — the loop continues until the user approves or aborts.
 
 #### Abort Flow
 
-1. Update design document Status to "Aborted", add Changelog entry. Place a `COMMENT(director): aborting — finalize and stand by` marker near the top of the doc body (above the Overview section — `Status:` is bold metadata, not a heading, so it is not a valid `paragraph-` target). Notify any still-live members with a single `cafleet --fleet-id <fleet-id> message send ... --text "ready (doc)"` per member so they read the marker and stand by.
+1. Update design document Status to "Aborted", add Changelog entry. Place a `COMMENT(director): aborting — finalize and stand by` marker near the top of the doc body (above the Overview section — `Status:` is bold metadata, not a heading, so it is not a valid `paragraph-` target). Notify any still-live members with a single `cafleet message send --fleet-id <fleet-id> ... --text "ready (doc)"` per member so they read the marker and stand by.
 2. Commit (separate commands): `git add <design-doc>` then `git commit -m "docs: mark design doc as aborted"`
 3. Follow Shutdown Protocol (Step 8: stop the monitor's background task, then delete members and run `cafleet fleet delete <fleet-id>` to tear down the fleet and sweep the root Director + Administrator).
 
@@ -573,8 +573,8 @@ For each new inline comment, pick the owner by file-path pattern. **Source-ancho
 | Path pattern | Owner | Marker location | Route |
 |:--|:--|:--|:--|
 | Design doc (`design-docs/**/design-doc.md`) | Director | `COMMENT(director): <body>` at the affected paragraph in the design doc | (no cafleet route — Director resolves silently) |
-| Test file (e.g. `**/test_*.py`, `**/*_test.py`, `**/tests/**`) | Tester | `COMMENT(copilot): <body>` in the test file at `<file>:<line>` | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (<file>:<line>)"` |
-| Any other source file | Programmer | `COMMENT(copilot): <body>` in the source file at `<file>:<line>` | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (<file>:<line>)"` |
+| Test file (e.g. `**/test_*.py`, `**/*_test.py`, `**/tests/**`) | Tester | `COMMENT(copilot): <body>` in the test file at `<file>:<line>` | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (<file>:<line>)"` |
+| Any other source file | Programmer | `COMMENT(copilot): <body>` in the source file at `<file>:<line>` | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (<file>:<line>)"` |
 
 The routed member fixes the source, removes the `COMMENT(copilot)` marker as part of the fix, and replies `addressed (<file>:<line>)`.
 
@@ -613,10 +613,10 @@ This is the concrete command list the Director runs on each monitor wake while S
 On each monitor wake, run team health AND PR review state.
 
 TEAM HEALTH:
-1. Run `cafleet --fleet-id <fleet-id> --json member list`.
-2. Run `cafleet --fleet-id <fleet-id> --json message poll --agent-id <director-agent-id>` (un-acked deliveries). ACK progress reports — ACKing consumes them, so the next tick's poll returns only what has arrived since.
-3. For each member that has not sent a message since last check, run `cafleet --fleet-id <fleet-id> member capture --member-id <member-agent-id> --lines 200`.
-4. Nudge stalled members via `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<original-pointer>)"` — re-send the same `ready (paragraph-Implementation > Step N)` or `ready (<file>:<line>)` body that was used for the original assignment. The recipient interprets a re-sent `ready (...)` contextually as a stall-nudge per [the Coordination Protocol section above](#coordination-protocol) (same target, same expected action).
+1. Run `cafleet --json member list --fleet-id <fleet-id>`.
+2. Run `cafleet --json message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` (un-acked deliveries). ACK progress reports — ACKing consumes them, so the next tick's poll returns only what has arrived since.
+3. For each member that has not sent a message since last check, run `cafleet member capture --fleet-id <fleet-id> --member-id <member-agent-id> --lines 200`.
+4. Nudge stalled members via `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<original-pointer>)"` — re-send the same `ready (paragraph-Implementation > Step N)` or `ready (<file>:<line>)` body that was used for the original assignment. The recipient interprets a re-sent `ready (...)` contextually as a stall-nudge per [the Coordination Protocol section above](#coordination-protocol) (same target, same expected action).
 
 PR REVIEW:
 5. Run `gh pr view <pr-number> --json reviews` (GraphQL shape: `author.login`, `state`, `submittedAt`, `body`).
@@ -625,7 +625,7 @@ PR REVIEW:
 8. If the most recent Copilot-authored entry **in the filtered (post-push) set from step 7** has `state == "APPROVED"`: signal Step 7 exit (success). An older approval (i.e., one with `submittedAt <= last_push_ts`) must NOT trigger this exit.
 9. If filter returned 0 entries AND `silence_ticks < 30`: increment `silence_ticks`, continue waiting (do nothing this tick). The loop never auto-exits on Copilot silence.
 10. If filter returned 0 entries AND `silence_ticks >= 30`: silence-escalation per 7e — AskUserQuestion (Keep waiting / Re-request review / Finalize now / Other). Reset `silence_ticks = 0` if the user picks Keep waiting or Re-request review; otherwise honor the user's choice.
-11. If filter returned ≥ 1 entries: reset `silence_ticks = 0`, classify by file path per Step 7c, write `COMMENT(copilot): <body>` at the source `<file>:<line>` for source/test routes (or `COMMENT(director): <body>` at the affected paragraph for design-doc-anchored items), and dispatch via `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<file>:<line>)"`. Design-doc-anchored Copilot items are NOT routed — the Director resolves them directly and skips the `cafleet message send`.
+11. If filter returned ≥ 1 entries: reset `silence_ticks = 0`, classify by file path per Step 7c, write `COMMENT(copilot): <body>` at the source `<file>:<line>` for source/test routes (or `COMMENT(director): <body>` at the affected paragraph for design-doc-anchored items), and dispatch via `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<file>:<line>)"`. Design-doc-anchored Copilot items are NOT routed — the Director resolves them directly and skips the `cafleet message send`.
 
 ESCALATION:
 12. If any member has been nudged 2 times with no progress, escalate to the user.

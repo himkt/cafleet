@@ -13,7 +13,7 @@ For the multi-backend overview and selection rules, see the [Coding agents](../.
 A codex member is a cafleet member whose `agent_placements.coding_agent` value is `"codex"`. The Director selects the backend at member-create time:
 
 ```bash
-cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Codex-A --description "<one-sentence purpose>" --coding-agent codex
 ```
 
@@ -56,10 +56,10 @@ If the `codex` binary is not on `PATH`, `cafleet member create --coding-agent co
 Codex members cannot load Claude Code skills, so their spawn prompt points them at this page instead. The same cafleet CLI surface works from a codex pane unchanged:
 
 ```bash
-cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
-cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
+cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
+cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <director-agent-id> --text "..."
-cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 Members substitute the literal ids from their spawn prompt; there is no env-var fallback.
@@ -83,24 +83,24 @@ cafleet fleet create --label codex-smoke --coding-agent claude
 # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
 # Note the fleet and Director ids — the steps below use 1 and 2.
 
-cafleet --fleet-id 1 member create --agent-id 2 \
+cafleet member create --fleet-id 1 --agent-id 2 \
   --name Claude-Smoke --description "claude smoke member" --coding-agent claude
-cafleet --fleet-id 1 member create --agent-id 2 \
+cafleet member create --fleet-id 1 --agent-id 2 \
   --name Codex-Smoke --description "codex smoke member" --coding-agent codex
 
-cafleet --fleet-id 1 member list
+cafleet member list --fleet-id 1
 # Expect: two rows, backend column shows 'claude' and 'codex' respectively.
 
-cafleet --fleet-id 1 message send --agent-id 2 \
+cafleet message send --fleet-id 1 --agent-id 2 \
   --to 5 --text "ping"
 # Expect: the codex pane receives the 2-line inline preview and the member ack-loops correctly.
 
-cafleet --fleet-id 1 member exec \
+cafleet member exec --fleet-id 1 \
   --member-id 5 "git status --short"
 # Expect: '! git status --short' lands in the codex pane and the command runs.
 
-cafleet --fleet-id 1 member delete --member-id 5
-cafleet --fleet-id 1 member delete --member-id 4
+cafleet member delete --fleet-id 1 --member-id 5
+cafleet member delete --fleet-id 1 --member-id 4
 cafleet fleet delete 1
 ```
 

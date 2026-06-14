@@ -1,6 +1,6 @@
 # Director-only commands (`cafleet member *`)
 
-Reference page for the `cafleet member` subgroup — `member create`, `member delete`, `member list` (with `--activity`), `member capture`, `member send-input`, `member exec`, `member ping`. All must be run inside a tmux session. `member create` takes `--agent-id` (the spawning Director's ID, validated to equal the fleet root); the other subcommands identify their target by `--member-id`, scoped to the global `--fleet-id`.
+Reference page for the `cafleet member` subgroup — `member create`, `member delete`, `member list` (with `--activity`), `member capture`, `member send-input`, `member exec`, `member ping`. All must be run inside a tmux session. `member create` takes `--agent-id` (the spawning Director's ID, validated to equal the fleet root); the other subcommands identify their target by `--member-id`, scoped to the per-subcommand `--fleet-id`.
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/exec-routing.md`.
 
@@ -11,21 +11,21 @@ Members do NOT need to read this file. Member-side flows (poll / send / ack / re
 Register a new member agent and spawn a coding-agent pane in the Director's own tmux window. The command atomically registers the agent, creates a placement row, spawns the pane, and patches the placement with the real pane ID.
 
 ```bash
-cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42"
 
-cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42" \
   -- "Review PR #42, post feedback via cafleet message send, and deregister on completion."
 
-cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Codex-A --description "Reviewer for PR #42" --coding-agent codex
 
-cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Drafter --description "Writes and revises the design document" \
   --prompt-file /abs/path/to/<BASE>/prompts/drafter-20260514T145000Z.md
 
-cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name monitor --description "Monitoring member: owns the heartbeat" \
   --role monitor --model sonnet \
   --prompt-file /abs/path/to/<BASE>/prompts/monitor-20260514T145000Z.md
@@ -100,10 +100,10 @@ If the tmux `split-window` fails, the registered agent is rolled back. If the pl
 The CLI sends `/exit`, polls `tmux list-panes` for the target `pane_id` until it disappears (15 s timeout), then deregisters the agent and rebalances the layout. On timeout, the pane buffer tail is captured and printed on stderr, and the command exits 2 without deregistering. Rerun with `--force` to skip `/exit` and kill the pane immediately.
 
 ```bash
-cafleet --fleet-id <fleet-id> member delete \
+cafleet member delete --fleet-id <fleet-id> \
   --member-id <member-agent-id>
 
-cafleet --fleet-id <fleet-id> member delete \
+cafleet member delete --fleet-id <fleet-id> \
   --member-id <member-agent-id> --force
 ```
 
@@ -119,8 +119,8 @@ The only boundary is fleet isolation: a `--member-id` outside `--fleet-id` exits
 ## Member List (with `--activity`)
 
 ```bash
-cafleet --fleet-id <fleet-id> member list
-cafleet --fleet-id <fleet-id> member list --activity
+cafleet member list --fleet-id <fleet-id>
+cafleet member list --fleet-id <fleet-id> --activity
 ```
 
 Default columns: `agent_id`, `name`, `status`, `backend`, `session`, `window_id`, `pane_id`, `created_at`. Pending placement renders `(pending)` in text mode, `null` in JSON.
@@ -128,7 +128,7 @@ Default columns: `agent_id`, `name`, `status`, `backend`, `session`, `window_id`
 `--activity` adds `last_sent` / `last_recv` / `last_ack` / `idle` columns aggregated from `tasks`:
 
 ```
-$ cafleet --fleet-id <s> member list --activity
+$ cafleet member list --fleet-id <s> --activity
 3 members:
   agent_id  name      state   last_sent    last_recv    last_ack     idle
   --------  --------  ------  -----------  -----------  -----------  -----
@@ -144,10 +144,10 @@ The `last_ack` aggregation filters `Task.type != 'broadcast_summary'` (mirrors `
 Capture the last N lines of a member's pane buffer. Default `--lines 30`; `--no-ansi` is the default and strips ANSI escapes.
 
 ```bash
-cafleet --fleet-id <fleet-id> member capture \
+cafleet member capture --fleet-id <fleet-id> \
   --member-id <member-agent-id>
 
-cafleet --fleet-id <fleet-id> member capture \
+cafleet member capture --fleet-id <fleet-id> \
   --member-id <member-agent-id> --lines 200
 ```
 
@@ -211,7 +211,7 @@ The pane is ALWAYS on the AskUserQuestion 4-option frame when `send-input` is ap
 Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into the member's pane via `tmux.send_bash_command` so the coding agent's `!` shortcut runs the command natively. All three backends — `claude`, `codex`, and `opencode` — honor the leading-`!` shortcut. See [`reference/exec-routing.md`](exec-routing.md) for the full bash-via-Director fallback protocol.
 
 ```bash
-cafleet --fleet-id <fleet-id> member exec \
+cafleet member exec --fleet-id <fleet-id> \
   --member-id <member-agent-id> "git log -1 --oneline"
 ```
 
@@ -235,7 +235,7 @@ For a series of `member exec` calls on the same member, the ping follows each ex
 Director-only manual inbox-poll nudge. The broker's auto-fire on every `cafleet message send` is an inline preview keystroked into the recipient's pane (`tmux.send_inline_preview`). `member ping` is the manually-invokable counterpart for re-poking a member that missed an inline preview. It reuses the monitor's `send_poll_trigger` helper, so it keystrokes **`Esc` → `cafleet … message poll` → `Enter`** (Escape, ~0.1 s settle, then the literal poll command and Enter): the leading `Esc` dismisses any pending permission-approval prompt in the member's pane, so the trailing `Enter` cannot blindly confirm it. The safeguard is inherited for free — the same `esc_first=True` the monitor loop's Director poll uses.
 
 ```bash
-cafleet --fleet-id <fleet-id> member ping \
+cafleet member ping --fleet-id <fleet-id> \
   --member-id <member-agent-id>
 ```
 

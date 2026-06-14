@@ -43,7 +43,7 @@ User
 - **Director ↔ User**: `AskUserQuestion` (clarification relay, draft presentation, feedback collection)
 - **Director ↔ Drafter**: `cafleet message send` (questions relay, user answers, reviewer feedback, drafting instructions)
 - **Director ↔ Reviewer**: `cafleet message send` (draft review requests, review feedback)
-- Members receive messages via a push notification: the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview` whenever a `cafleet message send` is persisted. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves. `--fleet-id` is global (before the subcommand); `--agent-id` is per-subcommand (after the subcommand name).
+- Members receive messages via a push notification: the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview` whenever a `cafleet message send` is persisted. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves. `--fleet-id` and `--agent-id` are per-subcommand options (after the subcommand name).
 
 ## Prerequisites
 
@@ -54,11 +54,11 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 | Agent Teams primitive | CAFleet equivalent |
 |---|---|
 | `TeamCreate(name="create-{slug}")` | CAFleet fleet created via `cafleet fleet create` — it bootstraps the fleet + root Director + placement + Administrator in one transaction (no separate `cafleet agent register` call needed for the Director) |
-| `Agent(team_name=..., subagent_type=...)` | `cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
-| `SendMessage(to="Drafter")` | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."` |
-| `SendMessage(to="Director")` (from member) | `cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance), then start the heartbeat via `cafleet --fleet-id <fleet-id> monitor start` |
-| `TeamDelete` | `cafleet --fleet-id <fleet-id> member delete --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
+| `Agent(team_name=..., subagent_type=...)` | `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
+| `SendMessage(to="Drafter")` | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."` |
+| `SendMessage(to="Director")` (from member) | `cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
+| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance), then start the heartbeat via `cafleet monitor start --fleet-id <fleet-id>` |
+| `TeamDelete` | `cafleet member delete --fleet-id <fleet-id> --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
 ## Process
@@ -119,7 +119,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 1b. Start the monitor
 
-BEFORE spawning any member, run the supervision heartbeat as a **background task** with `cafleet --fleet-id <fleet-id> monitor start` (the loop runs in-process and blocks the task; confirm with `cafleet --fleet-id <fleet-id> monitor status`). The monitor must stay running from the first `member create` until Step 6's shutdown cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
+BEFORE spawning any member, run the supervision heartbeat as a **background task** with `cafleet monitor start --fleet-id <fleet-id>` (the loop runs in-process and blocks the task; confirm with `cafleet monitor status --fleet-id <fleet-id>`). The monitor must stay running from the first `member create` until Step 6's shutdown cleanup. Supervision obligations (Authorization-Scope Guard, idle semantics, etc.) come from the `cafleet-agent-team-supervision` skill, which loads the `cafleet-agent-team-monitoring` skill as a hard prerequisite.
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -158,7 +158,7 @@ OUTPUT PATH: [INSERT DOC PATH]
 The user's request: [INSERT USER'S ORIGINAL REQUEST]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.
@@ -187,7 +187,7 @@ BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` ski
 DESIGN DOCUMENT: [INSERT DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 This is a RESUME run. The document contains COMMENT markers from a previous
@@ -203,7 +203,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --fleet-id <fleet-id> --json member create --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Drafter" \
      --description "Writes and revises the design document" \
      --prompt-file ${BASE}/prompts/drafter-<UTC-compact>.md
@@ -231,7 +231,7 @@ BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` ski
 DESIGN DOCUMENT: [INSERT DOC PATH]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "your report"
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
 - When you see cafleet message poll output with a message from the Director, act on those instructions.
 
 Wait for the Director to assign a document for review (cafleet body: `ready (doc)`). When you receive that message, the `doc` pointer refers to the DESIGN DOCUMENT path above — read that file and provide specific, actionable feedback per the role definition.
@@ -244,7 +244,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --fleet-id <fleet-id> --json member create --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Reviewer" \
      --description "Critically reviews drafts for rule compliance and quality" \
      --prompt-file ${BASE}/prompts/reviewer-<UTC-compact>.md
@@ -255,7 +255,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 #### 1f. Verify members are live
 
 ```bash
-cafleet --fleet-id <fleet-id> member list
+cafleet member list --fleet-id <fleet-id>
 ```
 
 Both members must show `status: active` with a non-null `pane_id`. If either is missing or pending, retry the spawn before proceeding.
@@ -266,17 +266,17 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 > **Clarification Exemption**: Director-to-Drafter messages during this step are exempt from the verb + pointer schema documented in [the Coordination Protocol section above](#coordination-protocol). At clarification time the design doc does not yet exist (the Drafter is forbidden from creating any file before clarifying), so there is no in-doc target for `COMMENT(claude)` markers — the user-answer relay rides as a free-form multi-line cafleet body. From Step 3 onward (once the initial draft exists) every message falls back under the schema.
 
-1. Wait for the Drafter's clarifying questions. The monitor wake and periodic `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>` will surface the Drafter's message once it arrives.
-2. `cafleet --fleet-id <fleet-id> message ack --agent-id <director-agent-id> --task-id <task-id>` each received message after reading it.
+1. Wait for the Drafter's clarifying questions. The monitor wake and periodic `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` will surface the Drafter's message once it arrives.
+2. `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>` each received message after reading it.
 3. Relay the questions to the user via `AskUserQuestion`. If the number of questions exceeds the per-call limit of `AskUserQuestion`, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter (free-form, per the Clarification Exemption above):
    ```bash
-   cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> \
+   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --to <drafter-agent-id> --text "User answers: ..."
    ```
 5. **Gate check**: If the Drafter produces a draft without prior questions, reject it and instruct them to ask first (also free-form, per the Clarification Exemption):
    ```bash
-   cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> \
+   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --to <drafter-agent-id> --text "Stop — you must send clarifying questions before drafting. Discard the draft and send questions first."
    ```
    A focused confirmation round counts as valid clarification.
@@ -287,13 +287,13 @@ Enter this step after the Drafter reports `complete (doc)`, **or immediately** w
 
 1. **Route to Reviewer**. The Reviewer reads `${DOC_PATH}` directly; no path needs to be embedded in the cafleet body.
    ```bash
-   cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> \
+   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --to <reviewer-agent-id> --text "ready (doc)"
    ```
-2. **Wait** for the Reviewer's response via `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>`. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
+2. **Wait** for the Reviewer's response via `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
 3. **On feedback**: Route the Drafter to address the markers in-doc:
    ```bash
-   cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> \
+   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --to <drafter-agent-id> --text "ready (doc)"
    ```
 4. Wait for the Drafter's `addressed (doc)` reply (revisions resolve the `COMMENT(reviewer)` markers), then loop back to step 1 (re-route to Reviewer with `ready (doc)`).
@@ -320,7 +320,7 @@ Process the user's selection:
   1. **Immediately** scan the document with Grep for `COMMENT(` markers — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
   2. **If markers are found**: Route the Drafter to read and resolve the markers in-doc with `ready (doc)` — no marker content is quoted in the cafleet body:
      ```bash
-     cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> \
+     cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
        --to <drafter-agent-id> --text "ready (doc)"
      ```
      After the Drafter replies `addressed (doc)` and removes the markers, verify with Grep that no `COMMENT(` markers remain. Then re-enter the quality loop (Step 3) and re-present (Step 4).
@@ -336,7 +336,7 @@ No round limit — loop continues until approved or aborted.
 
 1. Instruct the Drafter to finalize. The Drafter's role definition spells out the finalize checklist (set Status to Approved, refresh Last Updated, bump the Progress header field if present, verify implementation steps are actionable); the cafleet body is just the verb + pointer poke:
    ```bash
-   cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> \
+   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --to <drafter-agent-id> --text "ready (doc)"
    ```
    Wait for the Drafter's `addressed (doc)` confirmation.
