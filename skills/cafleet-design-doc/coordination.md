@@ -43,8 +43,6 @@ Exactly 3 canonical forms. Use the tightest one that locates the target.
 | `<file>:<line>` | At that exact line in the file (immediately above or on `<line>` per the file's native comment syntax). |
 | `doc` | Doc-top — directly under the metadata block (`Status:` / `Progress:` / `Last Updated:`), before the first heading. |
 
-The ` > ` separator avoids the collision that would arise if `/` were used as a nesting separator (heading text in real-world design docs frequently contains `/`, e.g. `Step 2: Update docs/spec/cli-options.md`). ` > ` is unambiguous, ASCII-safe, and shell-safe inside double-quoted `--text` arguments.
-
 ## Message Format
 
 Every `cafleet message send --text` body, when used to coordinate within a `cafleet-design-doc-create` or `cafleet-design-doc-execute` skill team, MUST match:

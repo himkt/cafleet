@@ -1,7 +1,7 @@
 # Slim Down the CAFleet Skill `.md` Files (Behavior-Preserving)
 
 **Status**: Approved
-**Progress**: 3/10 tasks complete
+**Progress**: 4/10 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -210,7 +210,7 @@ This change edits the very skills (`cafleet-design-doc-create` / `-execute` and 
 
 ### Step 4: Cluster B — `cafleet-design-doc/` shared
 
-- [ ] `coordination.md`: confirm as canonical Coordination Protocol home; minor self-trim. Leave `guidelines.md` / `template.md` / `SKILL.md` essentially as-is. <!-- completed: -->
+- [x] `coordination.md`: confirm as canonical Coordination Protocol home; minor self-trim. Leave `guidelines.md` / `template.md` / `SKILL.md` essentially as-is. <!-- completed: 2026-06-14T02:57 -->
 
 ### Step 5: Cluster C — `cafleet-design-doc-create/`
 
