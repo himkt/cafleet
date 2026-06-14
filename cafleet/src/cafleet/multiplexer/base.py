@@ -150,22 +150,22 @@ class Multiplexer(Protocol):
         """
         ...
 
-    def send_resume_trigger(
+    def send_wake_trigger(
         self, *, target_pane_id: str, fleet_id: int, agent_id: int
     ) -> bool:
-        """Keystroke a single-line *resume nudge* into a member's pane.
+        """Keystroke a single-line *wake nudge* into the monitoring member's pane.
 
-        Unlike :meth:`send_poll_trigger` (a bare ``cafleet … message poll``),
-        this carries the poll command **plus** an instruction to review the
-        member's current task and continue working — so a member that
-        unexpectedly stopped resumes rather than going idle on an empty inbox.
-        The Director receives the bare poll-trigger; only members receive this.
+        Unlike :meth:`send_poll_trigger` (a bare ``cafleet … message poll`` the
+        Director receives), this carries an instruction to run the monitoring
+        member's capture-classify-reengage routine. Both ping helpers lead with
+        an ``Esc`` safeguard. ``fleet_id`` / ``agent_id`` keep the signature
+        uniform with :meth:`send_poll_trigger`; the routine runs in the
+        monitoring member's own pane, so they are not echoed into the nudge.
 
         Args:
-            target_pane_id: Pane id of the member to nudge.
-            fleet_id: Fleet id embedded in the keystroked poll command.
-            agent_id: Recipient agent id embedded in the keystroked poll
-                command.
+            target_pane_id: Pane id of the monitoring member to nudge.
+            fleet_id: Fleet id (signature parity with ``send_poll_trigger``).
+            agent_id: Monitoring member's agent id (signature parity).
 
         Returns:
             ``True`` if the keystroke landed; ``False`` if the pane is dead or

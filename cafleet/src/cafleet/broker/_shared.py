@@ -10,6 +10,7 @@ from cafleet.db.engine import get_sync_sessionmaker
 from cafleet.db.models import Agent, Task
 
 ADMINISTRATOR_KIND = "builtin-administrator"
+MONITORING_MEMBER_KIND = "monitoring-member"
 
 TASK_COLUMNS = tuple(Task.__table__.columns.keys())
 
@@ -38,6 +39,16 @@ def is_administrator(agent_card_json: str | None) -> bool:
     except ValueError:
         return False
     return kind == ADMINISTRATOR_KIND
+
+
+def is_monitoring_member(agent_card_json: str | None) -> bool:
+    if not agent_card_json:
+        return False
+    try:
+        kind = json.loads(agent_card_json).get("cafleet", {}).get("kind")
+    except ValueError:
+        return False
+    return kind == MONITORING_MEMBER_KIND
 
 
 def now_iso() -> str:

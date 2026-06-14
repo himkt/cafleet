@@ -48,12 +48,13 @@ def _config_dict(row) -> dict:
 def enroll_agent(
     session, agent_id: int, interval: int = DEFAULT_PING_INTERVAL_SECONDS
 ) -> None:
-    """Insert a ``monitor_config`` row for a pane-bound agent.
+    """Insert a ``monitor_config`` row for an enrolled agent.
 
-    Called inside the same write transaction as the agent/placement insert (by
-    ``register_agent`` / ``create_fleet``), so enrollment is atomic with
-    registration. Only agents with a tmux pane (the root Director and members)
-    are enrolled.
+    Called inside the same write transaction as the agent/placement insert, so
+    enrollment is atomic with registration. Enrollment is restricted to exactly
+    two roles per fleet: the root Director (enrolled by ``create_fleet``) and the
+    dedicated monitoring member (enrolled by ``register_agent`` when
+    ``kind == MONITORING_MEMBER_KIND``). Ordinary members are not enrolled.
     """
     session.add(MonitorConfig(agent_id=agent_id, interval_seconds=interval, enabled=1))
 
@@ -168,7 +169,9 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
     """Per-tick scan: one row per active, enrolled agent in the fleet.
 
     Each dict carries ``agent_id``, ``name``, ``is_director`` (derived from
-    ``fleets.director_agent_id``), ``pane_id``, ``interval_seconds``,
+    ``fleets.director_agent_id``), ``is_monitoring_member`` (derived from
+    ``agent_card_json.cafleet.kind``, so the loop selects the per-role keystroke
+    and ``monitor status`` labels the role), ``pane_id``, ``interval_seconds``,
     ``last_ping_at``, ``enabled`` (bool), and ``pending_count`` — the count of
     the agent's ``input_required`` deliveries excluding ``broadcast_summary``
     rows, a correlated subquery mirroring ``members.py``.
@@ -183,6 +186,9 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
         .correlate(Agent)
         .scalar_subquery()
     )
+    kind_expr = func.coalesce(
+        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"), ""
+    )
     stmt = (
         select(
             Agent.agent_id,
@@ -192,6 +198,7 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
             MonitorConfig.interval_seconds,
             MonitorConfig.last_ping_at,
             MonitorConfig.enabled,
+            kind_expr.label("kind_raw"),
             pending_sq.label("pending_count"),
         )
         .join(MonitorConfig, MonitorConfig.agent_id == Agent.agent_id)
@@ -206,6 +213,7 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
             "agent_id": row.agent_id,
             "name": row.name,
             "is_director": row.agent_id == row.director_agent_id,
+            "is_monitoring_member": row.kind_raw == _shared.MONITORING_MEMBER_KIND,
             "pane_id": row.tmux_pane_id,
             "interval_seconds": row.interval_seconds,
             "last_ping_at": row.last_ping_at,

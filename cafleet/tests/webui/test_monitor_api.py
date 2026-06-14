@@ -123,10 +123,12 @@ def test_get_agents__monitor_field_folded(api_db, client):
     assert resp.status_code == 200, resp.text
     agents = {a["agent_id"]: a for a in resp.json()["agents"]}
 
-    # enrolled agents fold an object; the Administrator folds null
+    # the enrolled root Director folds an object; ordinary members and the
+    # Administrator fold null (design 0000090: ordinary members are no longer
+    # enrolled, so their monitor config is absent)
     assert agents[director_id]["monitor"]["enabled"] is True
     assert agents[director_id]["monitor"]["interval_seconds"] == 60
-    assert agents[member_id]["monitor"] is not None
+    assert agents[member_id]["monitor"] is None
     assert agents[admin_id]["monitor"] is None
 
 

@@ -49,19 +49,20 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_alembic_version_table_records_head_0002(alembic_upgraded_db):
+def test_alembic_version_table_records_head_0003(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version"))
             rows = result.fetchall()
-        assert rows == [("0002",)]
+        assert rows == [("0003",)]
     finally:
         engine.dispose()
 
 
-def test_two_migration_revisions_exist():
-    """The migration history is two revisions: 0001 (base) chained to 0002 (monitor tables)."""
+def test_three_migration_revisions_exist():
+    """The migration history is three revisions: 0001 (base) → 0002 (monitor
+    tables) → 0003 (prune legacy non-Director monitor_config rows)."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet.db") / "alembic.ini"
     ) as ini_path:
@@ -69,12 +70,13 @@ def test_two_migration_revisions_exist():
         script = ScriptDirectory.from_config(cfg)
         revisions = list(script.walk_revisions())
 
-    assert len(revisions) == 2
+    assert len(revisions) == 3
     by_revision = {rev.revision: rev for rev in revisions}
-    assert set(by_revision) == {"0001", "0002"}
+    assert set(by_revision) == {"0001", "0002", "0003"}
     assert by_revision["0001"].down_revision is None
     assert by_revision["0002"].down_revision == "0001"
-    assert script.get_current_head() == "0002"
+    assert by_revision["0003"].down_revision == "0002"
+    assert script.get_current_head() == "0003"
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
