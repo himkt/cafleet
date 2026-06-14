@@ -17,7 +17,7 @@ cafleet --fleet-id <fleet-id> member capture \
 
 ## Routine monitoring via `member list --activity`
 
-The `--activity` flag aggregates per-member `last_sent` / `last_recv` / `last_ack` / `idle` columns so a routine monitor tick can decide which members need a capture WITHOUT capturing every member every wake. See [`reference/director.md`](director.md#member-list-with-activity).
+The `--activity` flag aggregates per-member `last_sent` / `last_recv` / `last_ack` / `idle` columns so a routine monitor tick can decide which members need a capture WITHOUT capturing every member every wake. See [`reference/director.md`](director.md) § *Member List (with `--activity`)*.
 
 Heuristic: capture only members whose `idle > 5m` AND who have an unread inbox (the broker just delivered an inline preview that they have not yet acked). Capture is the expensive operation; use it sparingly.
 
