@@ -1,7 +1,7 @@
 # Slim Down the CAFleet Skill `.md` Files (Behavior-Preserving)
 
 **Status**: Approved
-**Progress**: 8/10 tasks complete
+**Progress**: 9/10 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -10,12 +10,12 @@ Several CAFleet operational skill `.md` files are bloated with restated rational
 
 ## Success Criteria
 
-- [ ] Every in-scope file is reviewed against the principles below and slimmed where redundancy exists, with no change to any frozen token (commands, flags, error strings, gates, frontmatter `description` fields, verb/pointer tokens, spawn-prompt template bodies).
-- [ ] Each operational fact has exactly one canonical home; every other mention is a one-line cross-reference (extending the existing "canonical there; do not duplicate" pattern already used in the skills).
-- [ ] A before/after frozen-token inventory proves the set of CLI commands, flags, error strings, gates, and frontmatter descriptions is identical pre- and post-edit.
-- [ ] Cross-reference integrity holds: every "see X § Y" pointer resolves to an existing heading, and every role-file cross-reference points only to a skill the spawned member loads at startup.
-- [ ] No "for history" deprecation notes remain (per `.claude/rules/removal.md`): each slimmed file reads as if the removed redundancy never existed.
-- [ ] No behavior-describing documentation (`README.md`, `docs/concepts/`, `docs/`) requires any change, because the CLI / API / config surface is unchanged — verified, not assumed.
+- [x] Every in-scope file is reviewed against the principles below and slimmed where redundancy exists, with no change to any frozen token (commands, flags, error strings, gates, frontmatter `description` fields, verb/pointer tokens, spawn-prompt template bodies).
+- [x] Each operational fact has exactly one canonical home; every other mention is a one-line cross-reference (extending the existing "canonical there; do not duplicate" pattern already used in the skills).
+- [x] A before/after frozen-token inventory proves the set of CLI commands, flags, error strings, gates, and frontmatter descriptions is identical pre- and post-edit.
+- [x] Cross-reference integrity holds: every "see X § Y" pointer resolves to an existing heading, and every role-file cross-reference points only to a skill the spawned member loads at startup.
+- [x] No "for history" deprecation notes remain (per `.claude/rules/removal.md`): each slimmed file reads as if the removed redundancy never existed.
+- [x] No behavior-describing documentation (`README.md`, `docs/concepts/`, `docs/`) requires any change, because the CLI / API / config surface is unchanged — verified, not assumed.
 
 ---
 
@@ -236,9 +236,9 @@ This change edits the very skills (`cafleet-design-doc-create` / `-execute` and 
 
 ### Step 9: Verification
 
-- [ ] Re-extract the frozen-token inventory (`…-after.md`) and run V2 (multiset diff identical); investigate/justify every delta as a pure relocation or revert it. <!-- completed: -->
-- [ ] Run V3 (frontmatter byte-identical), V5 (cross-reference integrity, incl. P7 for role files), V6 (no behavior-doc drift), V7 (removal totality). <!-- completed: -->
-- [ ] Per-file `git diff` review (V4) confirming only redundancy was removed; run V8 (content-superset) for every prose block collapsed to a cross-reference. <!-- completed: -->
+- [x] Re-extract the frozen-token inventory (`…-after.md`) and run V2 (multiset diff identical); investigate/justify every delta as a pure relocation or revert it. <!-- completed: 2026-06-14T04:05 -->
+- [x] Run V3 (frontmatter byte-identical), V5 (cross-reference integrity, incl. P7 for role files), V6 (no behavior-doc drift), V7 (removal totality). <!-- completed: 2026-06-14T04:05 -->
+- [x] Per-file `git diff` review (V4) confirming only redundancy was removed; run V8 (content-superset) for every prose block collapsed to a cross-reference. <!-- completed: 2026-06-14T04:05 -->
 
 ### Step 10: Finalize
 
