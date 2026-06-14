@@ -2,10 +2,12 @@
 
 The global ``_silence_real_tmux_subprocess`` fixture already stubs the tmux
 ``_run`` subprocess; each test additionally stubs ``list_pane_ids`` (the
-per-tick liveness query) and captures the per-role keystrokes —
-``send_poll_trigger`` for the Director, ``send_wake_trigger`` for the dedicated
-monitoring member. After design 0000090 the loop pings ONLY those two roles;
-ordinary members are not enrolled and ``send_resume_trigger`` no longer exists.
+per-tick liveness query) and captures the per-role keystrokes. After design
+0000091 the loop wakes ONLY the dedicated monitoring member
+(``send_wake_trigger``); the root Director is no longer enrolled and receives
+no keystroke from the loop. ``send_poll_trigger`` still exists (``cafleet
+member ping`` reuses it) but the loop no longer calls it, so the captured
+``polls`` list stays empty.
 """
 
 import os
@@ -55,8 +57,10 @@ def _register_monitoring_member(fleet: dict, name: str, pane_id: str) -> int:
 
 
 def _stub_tmux(monkeypatch, live_panes):
-    """Stub pane liveness; capture poll-trigger (Director) and wake-trigger
-    (monitoring member) keystrokes into separate lists (§4)."""
+    """Stub pane liveness; capture poll-trigger and wake-trigger keystrokes into
+    separate lists. After 0000091 the loop only ever fires the wake-trigger (for
+    the monitoring member); ``polls`` is captured to assert the Director is never
+    pinged by the loop (§1)."""
     monkeypatch.setattr(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.list_pane_ids",
         lambda self: set(live_panes),
@@ -84,7 +88,7 @@ def _stub_tmux(monkeypatch, live_panes):
     return polls, wakes
 
 
-def test_monitor_tick__poll_to_director_wake_to_monitor_skips_ordinary(
+def test_monitor_tick__wake_to_monitor_only_director_not_pinged_not_enrolled(
     capsys, monkeypatch
 ):
     fleet = _create_fleet()
@@ -102,30 +106,31 @@ def test_monitor_tick__poll_to_director_wake_to_monitor_skips_ordinary(
     result = monitor_tick(sid, _NOW)
 
     assert result is CONTINUE
-    # §4: the Director receives a bare poll; the monitoring member a wake nudge
-    assert {agent_id for _, _, agent_id in polls} == {director_id}
+    # §1: the loop wakes ONLY the monitoring member; nobody is poll-triggered
+    assert polls == []
     assert {agent_id for _, _, agent_id in wakes} == {watcher}
-    assert ("%0", sid, director_id) in polls
     assert ("%7", sid, watcher) in wakes
 
-    # the ordinary member is never enrolled, so it is never pinged by either path
-    assert alice not in {agent_id for _, _, agent_id in polls}
+    # the Director is no longer enrolled and receives no keystroke from the loop
+    assert broker.get_monitor_config(sid, director_id) is None
+    assert director_id not in {agent_id for _, _, agent_id in wakes}
+    assert ("%0", sid, director_id) not in polls
+
+    # the ordinary member is never enrolled, so it is never pinged either
     assert alice not in {agent_id for _, _, agent_id in wakes}
     assert broker.get_monitor_config(sid, alice) is None
 
-    # record_ping advanced both enrolled roles; the ordinary member has no config
-    assert (
-        broker.get_monitor_config(sid, director_id)["last_ping_at"] == _NOW.isoformat()
-    )
+    # record_ping advanced only the monitoring member's last_ping_at
     assert broker.get_monitor_config(sid, watcher)["last_ping_at"] == _NOW.isoformat()
 
     # the heartbeat was written for this tick
     assert broker.read_monitor_runtime(sid)["last_tick_at"] == _NOW.isoformat()
 
-    # one stdout ping-log line per dispatched ping; the ordinary member is absent
+    # one stdout ping-log line for the monitoring member; the Director and the
+    # ordinary member are both absent
     out = capsys.readouterr().out
-    assert f"ping agent {director_id} (Director)" in out
     assert f"ping agent {watcher} (watcher)" in out
+    assert "Director" not in out
     assert "alice" not in out
 
 

@@ -1,12 +1,13 @@
 """Broker DB-layer tests for the monitor schedule + runtime functions.
 
-Covers selective enrollment-on-registration (Director + the dedicated
-monitoring member only, per design 0000090), the ``monitoring-member`` kind
-marker, cleanup-on-teardown, per-agent config edits, the per-tick scan
-(``list_monitor_targets``, now surfacing ``is_monitoring_member``), ping
-recording, the single-instance runtime claim/heartbeat/clear with the
-ownership-checked split-brain guard, and the Alembic data migration that prunes
-legacy non-Director ``monitor_config`` rows.
+Covers selective enrollment-on-registration (the dedicated monitoring member is
+the ONLY enrolled role, per design 0000091 — the root Director is no longer
+enrolled), the ``monitoring-member`` kind marker, cleanup-on-teardown, per-agent
+config edits, the per-tick scan (``list_monitor_targets``, surfacing
+``is_monitoring_member``), ping recording, the single-instance runtime
+claim/heartbeat/clear with the ownership-checked split-brain guard, and the
+Alembic data migrations that prune ``monitor_config`` rows (``0003`` prunes
+non-Director rows; ``0004`` then prunes the root-Director rows).
 """
 
 import importlib.resources
@@ -71,15 +72,13 @@ def _iso_now() -> str:
 # --- enrollment on registration -------------------------------------------
 
 
-def test_enroll_on_create__director_enrolled_administrator_not():
+def test_enroll_on_create__director_not_enrolled_administrator_not():
+    # design 0000091: create_fleet no longer enrolls the root Director; the only
+    # enrolled role is the dedicated monitoring member (registered separately).
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
 
-    director_cfg = broker.get_monitor_config(sid, fleet["director"]["agent_id"])
-    assert director_cfg is not None
-    assert director_cfg["interval_seconds"] == 60
-    assert director_cfg["enabled"] is True
-
+    assert broker.get_monitor_config(sid, fleet["director"]["agent_id"]) is None
     assert broker.get_monitor_config(sid, fleet["administrator_agent_id"]) is None
 
 
@@ -199,10 +198,11 @@ def test_cleanup_on_fleet_delete__config_and_runtime_removed(broker_session):
 
 
 def test_update_monitor_config__interval_and_enabled_persist():
-    # the Director is always enrolled, so it exercises the config-edit mechanics
+    # the monitoring member is the only enrolled role (design 0000091), so it is
+    # what exercises the config-edit mechanics
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    aid = fleet["director"]["agent_id"]
+    aid = _register_monitoring_member(fleet, name="watcher")["agent_id"]
 
     updated = broker.update_monitor_config(sid, aid, interval_seconds=30)
     assert updated["interval_seconds"] == 30
@@ -248,9 +248,10 @@ def test_update_monitor_config__cross_fleet_raises():
 
 
 def test_record_ping__sets_last_ping_at():
+    # the monitoring member is the only enrolled role (design 0000091)
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    aid = fleet["director"]["agent_id"]
+    aid = _register_monitoring_member(fleet, name="pinger")["agent_id"]
 
     assert broker.get_monitor_config(sid, aid)["last_ping_at"] is None
     when = _iso_now()
@@ -269,7 +270,8 @@ def test_list_monitor_configs__enrolled_only_and_bool_enabled():
 
     configs = broker.list_monitor_configs(sid)
     enrolled_ids = {c["agent_id"] for c in configs}
-    assert enrolled_ids == {fleet["director"]["agent_id"], watcher["agent_id"]}
+    # only the monitoring member is enrolled (design 0000091); the Director is not
+    assert enrolled_ids == {watcher["agent_id"]}
     for c in configs:
         assert isinstance(c["enabled"], bool)
 
@@ -277,7 +279,7 @@ def test_list_monitor_configs__enrolled_only_and_bool_enabled():
 # --- list_monitor_targets (per-tick scan) ----------------------------------
 
 
-def test_list_monitor_targets__director_and_monitoring_member_shape():
+def test_list_monitor_targets__monitoring_member_only_shape():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
@@ -286,24 +288,19 @@ def test_list_monitor_targets__director_and_monitoring_member_shape():
     _register_ordinary_member(fleet, name="ordinary", pane_id="%8")  # excluded
 
     targets = {t["agent_id"]: t for t in broker.list_monitor_targets(sid)}
-    assert set(targets) == {director_id, watcher_id}
-
-    d = targets[director_id]
-    assert d["is_director"] is True
-    assert d["is_monitoring_member"] is False
-    assert d["name"] == "Director"
-    assert d["pane_id"] == "%0"
-    assert d["interval_seconds"] == 60
-    assert d["last_ping_at"] is None
-    assert isinstance(d["enabled"], bool)
-    assert d["enabled"] is True
-    assert d["pending_count"] == 0
+    # design 0000091: only the monitoring member is enrolled; the Director is not
+    assert set(targets) == {watcher_id}
+    assert director_id not in targets
 
     m = targets[watcher_id]
     assert m["is_director"] is False
     assert m["is_monitoring_member"] is True
     assert m["name"] == "hank"
     assert m["pane_id"] == "%7"
+    assert m["interval_seconds"] == 60
+    assert m["last_ping_at"] is None
+    assert isinstance(m["enabled"], bool)
+    assert m["enabled"] is True
     assert m["pending_count"] == 0
 
 
@@ -321,7 +318,8 @@ def test_list_monitor_targets__pending_count_input_required_only():
 
     targets = {t["agent_id"]: t for t in broker.list_monitor_targets(sid)}
     assert targets[watcher_id]["pending_count"] == 3
-    assert targets[director_id]["pending_count"] == 0
+    # the Director is no longer enrolled, so it is not a scan target at all
+    assert director_id not in targets
 
     broker.ack_task(watcher_id, first["task"]["task_id"])
     targets = {t["agent_id"]: t for t in broker.list_monitor_targets(sid)}
@@ -479,7 +477,7 @@ def test_read_monitor_runtime__round_trips_claim():
     assert row["last_tick_at"] == now
 
 
-# --- Alembic data migration: prune legacy non-Director rows (§8) -----------
+# --- Alembic data migrations: prune monitor_config rows --------------------
 
 _SEED_TS = "2026-06-14T00:00:00+00:00"
 
@@ -557,11 +555,89 @@ def test_prune_migration__deletes_non_director_rows_downgrade_noop(tmp_path):
         _seed_legacy_monitor_config(url)
         assert _monitor_config_agent_ids(url) == {10, 20}
 
-        # upgrading to head runs the data migration: the non-Director row (20)
-        # is pruned, the root-Director row (10) is kept.
-        command.upgrade(cfg, "head")
+        # 0003 prunes the non-Director row (20) and keeps the root-Director row
+        # (10). Pin to 0003 (not head) so this exercises 0003 in isolation —
+        # 0004 (the new head) deletes row 10, which the 0004 test covers.
+        command.upgrade(cfg, "0003")
         assert _monitor_config_agent_ids(url) == {10}
 
         # the downgrade is a no-op — it does NOT resurrect the pruned row.
         command.downgrade(cfg, "0002")
         assert _monitor_config_agent_ids(url) == {10}
+
+
+def _seed_director_and_monitoring_member(url: str) -> None:
+    """Seed a fleet + Director (10) + monitoring member (30), each with a
+    ``monitor_config`` row, at the 0003 boundary (before 0004 prunes Director).
+
+    FK-safe ordering mirrors ``_seed_legacy_monitor_config``: fleet with a NULL
+    ``director_agent_id`` → agents → patch the Director FK → ``monitor_config``.
+    """
+    engine = create_engine(url)
+    try:
+        with Session(engine) as s:
+            s.add(Fleet(fleet_id=1, created_at=_SEED_TS))
+            s.flush()
+            s.add_all(
+                [
+                    Agent(
+                        agent_id=10,
+                        fleet_id=1,
+                        name="Director",
+                        description="director",
+                        status="active",
+                        registered_at=_SEED_TS,
+                        agent_card_json="{}",
+                    ),
+                    Agent(
+                        agent_id=30,
+                        fleet_id=1,
+                        name="watcher",
+                        description="monitoring member",
+                        status="active",
+                        registered_at=_SEED_TS,
+                        agent_card_json=json.dumps(
+                            {"cafleet": {"kind": "monitoring-member"}}
+                        ),
+                    ),
+                ]
+            )
+            s.flush()
+            s.get(Fleet, 1).director_agent_id = 10
+            s.add_all(
+                [
+                    MonitorConfig(agent_id=10, interval_seconds=60, enabled=1),
+                    MonitorConfig(agent_id=30, interval_seconds=60, enabled=1),
+                ]
+            )
+            s.commit()
+    finally:
+        engine.dispose()
+
+
+def test_prune_director_migration__deletes_director_row_keeps_monitoring_member(
+    tmp_path,
+):
+    db_file = tmp_path / "cafleet.db"
+    url = f"sqlite:///{db_file}"
+
+    with importlib.resources.as_file(
+        importlib.resources.files("cafleet.db") / "alembic.ini"
+    ) as ini_path:
+        cfg = Config(str(ini_path))
+        cfg.set_main_option("sqlalchemy.url", url)
+
+        # at the 0003 boundary, seed a Director (10) + monitoring member (30),
+        # both enrolled (this is the post-0003 / pre-0004 world).
+        command.upgrade(cfg, "0003")
+        _seed_director_and_monitoring_member(url)
+        assert _monitor_config_agent_ids(url) == {10, 30}
+
+        # upgrading to head runs 0004: the root-Director row (10) is pruned, the
+        # monitoring member's row (30) is kept.
+        command.upgrade(cfg, "head")
+        assert _monitor_config_agent_ids(url) == {30}
+
+        # the downgrade is a no-op — it does NOT resurrect the Director row.
+        command.downgrade(cfg, "0003")
+        assert _monitor_config_agent_ids(url) == {30}
