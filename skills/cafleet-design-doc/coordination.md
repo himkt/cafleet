@@ -109,7 +109,7 @@ Rules:
 
 | Class | Example | Lifecycle |
 |:--|:--|:--|
-| Issue | `COMMENT(reviewer): [GAP] Specification omits the retry budget.` | Persists in the doc until resolved. The resolver removes the marker as part of the fix. Per `skills/design-doc/guidelines.md` § *Completeness Check*, the doc cannot reach `Status: Approved` / `Status: Complete` while any `COMMENT(` marker remains. |
+| Issue | `COMMENT(reviewer): [GAP] Specification omits the retry budget.` | Persists in the doc until resolved. The resolver removes the marker as part of the fix. Per `skills/cafleet-design-doc/guidelines.md` § *Completeness Check*, the doc cannot reach `Status: Approved` / `Status: Complete` while any `COMMENT(` marker remains. |
 | Status | (none — never enters the doc) | Lives only in `cafleet message send` text. |
 
 This keeps the design doc clean: at any moment, the markers in the doc reflect *outstanding work*, never historical chatter.
