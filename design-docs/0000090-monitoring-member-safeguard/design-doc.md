@@ -1,7 +1,7 @@
 # Safe Director-only Monitoring with a Dedicated Monitoring Member
 
-**Status**: Approved
-**Progress**: 25/26 tasks complete
+**Status**: Complete
+**Progress**: 25/26 tasks complete (D2 live operator smoke deferred)
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -283,3 +283,4 @@ Pre-upgrade there are no monitoring members, so this leaves exactly the root-Dir
 |------|---------|
 | 2026-06-14 | Initial draft |
 | 2026-06-14 | Reviewer pass: split Overview; documented the self-ping interrupt, member-wake recovery paths, the `monitor live` handshake gate, and the clean teardown stop (SIGTERM before pane-kill); pinned the monitor-uniqueness guard to `register_agent` with detection + error text; made the loop keystroke branch explicit |
+| 2026-06-14 | Implemented (Phases A–D1): Esc-safeguarded keystrokes; dedicated monitoring member (`--role monitor`, `cafleet.kind` marker, one-per-fleet + pane-bound guards); enrollment restricted to Director + monitoring member; `send_resume_trigger` removed; 0003 prune migration; docs/README/SKILLs updated. Full suite green (826 tests); Copilot review clean (no new comments). PR #119. D2 live permission-prompt smoke deferred to operator (keystroke sequence + enrollment covered by C1/C3/C5/C6). |
