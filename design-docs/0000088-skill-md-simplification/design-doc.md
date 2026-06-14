@@ -1,7 +1,7 @@
 # Slim Down the CAFleet Skill `.md` Files (Behavior-Preserving)
 
-**Status**: Approved
-**Progress**: 9/10 tasks complete
+**Status**: Complete
+**Progress**: 10/10 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -242,7 +242,7 @@ This change edits the very skills (`cafleet-design-doc-create` / `-execute` and 
 
 ### Step 10: Finalize
 
-- [ ] Record the global `~/.claude/skills/` re-sync as an operator follow-up in the completion report (out of scope per Q3). Mark this design doc complete. <!-- completed: -->
+- [x] Record the global `~/.claude/skills/` re-sync as an operator follow-up in the completion report (out of scope per Q3). Mark this design doc complete. <!-- completed: 2026-06-14T05:14 -->
 
 ---
 
@@ -251,3 +251,4 @@ This change edits the very skills (`cafleet-design-doc-create` / `-execute` and 
 | Date | Changes |
 |------|---------|
 | 2026-06-14 | Initial draft |
+| 2026-06-14 | Implementation complete — 23 in-scope skill files slimmed (−403 net lines), frozen set preserved (V1–V8 PASS, double-verified by Director + Verifier). Copilot review addressed (UUIDs→integer ids; fragment-free Member List cross-ref). |
