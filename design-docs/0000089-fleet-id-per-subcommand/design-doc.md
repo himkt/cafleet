@@ -1,7 +1,7 @@
 # Per-Subcommand `--fleet-id` (Move the Global Flag onto Child Subcommands)
 
-**Status**: Approved
-**Progress**: 35/37 tasks complete
+**Status**: Complete
+**Progress**: 37/37 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -258,9 +258,9 @@ Per `removal.md`, the removal guards above test the **absence** of the old surfa
 
 - [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck` all clean. <!-- completed: 2026-06-14T10:40 -->
 - [x] `mise //cafleet:test` green. <!-- completed: 2026-06-14T10:40 (828 passed) -->
-- [ ] `mise //cafleet:install` (editable reinstall) so the new CLI surface is live for any manual/skill use. <!-- completed: -->
+- [x] `mise //cafleet:install` (editable reinstall) so the new CLI surface is live for any manual/skill use. <!-- completed: 2026-06-14T11:05 -->
 - [x] Repo grep (excluding `design-docs/`): `grep -rn "cafleet --fleet-id" docs/ skills/ README.md .claude/ CLAUDE.md` returns zero command-example hits; the doctrine-prose grep returns zero. <!-- completed: 2026-06-14T10:40 -->
-- [ ] Manual smoke: `cafleet agent list --fleet-id <id>` works; `cafleet --fleet-id <id> agent list` → exit 2 `No such option`; `cafleet db init --fleet-id <id>` → exit 2 `No such option`; omitting `--fleet-id` → custom message exit 1. <!-- completed: -->
+- [x] Manual smoke: `cafleet agent list --fleet-id <id>` works; `cafleet --fleet-id <id> agent list` → exit 2 `No such option`; `cafleet db init --fleet-id <id>` → exit 2 `No such option`; omitting `--fleet-id` → custom message exit 1. <!-- completed: 2026-06-14T11:05 (live-verified on the editable install) -->
 - [x] Stage the design doc with the implementation commits (project git-workflow override: `design-docs/` is committed here). <!-- completed: 2026-06-14T10:40 -->
 
 ---
@@ -272,3 +272,4 @@ Per `removal.md`, the removal guards above test the **absence** of the old surfa
 | 2026-06-14 | Initial draft |
 | 2026-06-14 | Director scope amendment during execution (Tester-surfaced): the original Step 2 list enumerated `--fleet-id` option *definitions* but omitted three internal command-string *emission* sites that hardcode the old shape and would break at runtime under the new surface — `cli/_prompt.py` (`MEMBER_PROMPT_TEMPLATE` poll line), `cli/member.py` (`_deregister_with_warning` suggested command), `multiplexer/tmux.py` (`send_poll_trigger` keystroke payload). Added 3 Step-2 tasks + 1 Step-3 task (update the two payload assertions in `test_member_ping.py` and `multiplexer/test_tmux.py`; `test_member_prompt_template.py` is shape-agnostic). Corrected the Tests table: `test_doctor.py`/`test_server.py` get rejection guards (not flag-moves) per SC#4; `tests/multiplexer/test_tmux.py` and `tests/output/test_render_agent.py` moved out of the "no change" row. Confirmed the Tester's three reconciliation decisions. Progress 32 → 36. |
 | 2026-06-14 | Programmer-surfaced escalation, Director-arbitrated: the 11 code tasks landed correctly (820/828 green) but `tests/cli/test_help_budget.py` (never in the Tests table) failed 8 cases — the spec-mandated `fleet_id_option` help string adds one `--help` line to every fleet-scoped subcommand, blowing the per-subcommand line budgets and the aggregate byte budget (5769 > 4480). Arbitration: keep the spec help string; bump the budgets (the per-subcommand option intrinsically grows help). Added 1 Step-3 task + a Tests-table row. Progress 36 → 37. |
+| 2026-06-14 | Implementation complete (37/37). All quality gates green (format/lint/typecheck, 828 tests) and live-smoke verified on the editable install. PR #120 opened. CI initially failed on a ruff-format drift (`tmux.py` slice-colon spacing under CI's freshly-resolved ruff vs the local stale `.venv` ruff) — fixed and pushed, CI green (lint/test/build). Copilot review (COMMENTED) raised 6 non-blocking comments, all the pre-existing repo-wide "UUID vs integer id" terminology issue — out of scope for this `--fleet-id` repositioning (≈13 files share the same wording; a partial fix would diverge), deferred to a dedicated cleanup per user direction. Status → Complete. |
