@@ -11,22 +11,29 @@ reacting. This guide checks on a running team and recovers a quiet member.
 ## Ensure the monitor is running
 
 The recovery ladder below is driven by a periodic supervision tick. That tick
-comes from `cafleet monitor` — a per-fleet loop a coding agent runs as a
-background task, waking due agents by keystroking `message poll` into their
-panes. Start it once as a background task, before the team gets busy, and it
-pings every enrolled agent on its interval — the Director and members alike,
-regardless of whether the inbox has pending items — which is what surfaces a
-quiet member in the first place ([Monitoring](../concepts/monitoring.md)):
+comes from `cafleet monitor` — a per-fleet loop the fleet's dedicated
+**monitoring member** runs as a background task in its own pane, waking the
+Director (and the monitoring member itself) on its interval with
+**`Esc`-safeguarded** keystrokes (an `Escape` precedes every ping so a pane on a
+pending permission prompt can't have it confirmed by the trailing `Enter`). The
+monitoring member is spawned **first**; it starts the loop and reports
+`ready: monitor live` (its canonical spawn prompt lives in the
+`cafleet-agent-team-monitoring` skill):
 
 ```bash
-cafleet --fleet-id 1 monitor start    # run as a background task
-cafleet --fleet-id 1 monitor status   # confirm it is running + see the schedule
+cafleet --fleet-id 1 member create --agent-id 2 --role monitor --model sonnet \
+  --prompt-file /abs/path/to/monitor-prompt.md   # spawned first; runs monitor start in its own pane
+cafleet --fleet-id 1 monitor status              # confirm it is running + see the schedule
 ```
 
-The monitor supplies only the heartbeat; the inspect-and-recover steps below are
-the Director's job on each tick. Stop it at teardown by stopping that background
-task (there is no `monitor stop`); `fleet delete` also makes the loop
-self-terminate.
+The loop pings only two agents — the Director and the monitoring member — and
+**never** ordinary members ([Monitoring](../concepts/monitoring.md)). A quiet
+ordinary member is surfaced instead by the monitoring member's idle assessment
+of the Director, which re-engages the Director to run the inspect-and-recover
+ladder below. The monitor supplies only the heartbeat; the inspect-and-recover
+steps are the Director's job. Stop it at teardown by stopping the monitoring
+member's background task (there is no `monitor stop`); `fleet delete` also makes
+the loop self-terminate.
 
 ## Prompt
 
@@ -87,10 +94,10 @@ cafleet --fleet-id 1 member capture --member-id 4
    2. No
 ```
 
-Ladder rung 1, `member ping` — injects a `cafleet message poll` keystroke
-so the member drains anything it missed; panes need re-poking at all
-because inline previews are best-effort keystrokes
-([tmux push](../concepts/tmux-push.md)):
+Ladder rung 1, `member ping` — injects an `Esc`-safeguarded `cafleet message
+poll` keystroke (the leading `Esc` dismisses any pending permission prompt) so
+the member drains anything it missed; panes need re-poking at all because
+inline previews are best-effort keystrokes ([tmux push](../concepts/tmux-push.md)):
 
 ```bash
 cafleet --fleet-id 1 member ping --member-id 4

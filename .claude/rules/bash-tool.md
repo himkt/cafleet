@@ -67,7 +67,7 @@ The Bash tool is the entry point for every shell-execution request. If you can p
 
 If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you.
 
-For the **inbox-poll-only nudge case** (the monitoring loop wants the member to re-check its inbox after a missed broker auto-fire, or after a long idle window), the Director's primitive is `cafleet member ping`. This subcommand takes no positional argument — its action is fixed (it injects `cafleet --fleet-id <s> message poll --agent-id <m>` + Enter into the member's pane via the existing `tmux.send_poll_trigger` helper) — so it is pre-approved in `permissions.allow` and fires without a per-call confirmation prompt:
+For the **inbox-poll-only nudge case** (the monitoring loop wants the member to re-check its inbox after a missed broker auto-fire, or after a long idle window), the Director's primitive is `cafleet member ping`. This subcommand takes no positional argument — its action is fixed (it injects `Esc` + `cafleet --fleet-id <s> message poll --agent-id <m>` + Enter into the member's pane via the existing `tmux.send_poll_trigger` helper; the leading `Esc` is the permission-prompt safeguard, inherited because `send_poll_trigger` now passes `esc_first=True`) — so it is pre-approved in `permissions.allow` and fires without a per-call confirmation prompt:
 
 ```bash
 cafleet --fleet-id <fleet-id> member ping \

@@ -1,7 +1,7 @@
 # Safe Director-only Monitoring with a Dedicated Monitoring Member
 
 **Status**: Approved
-**Progress**: 0/26 tasks complete
+**Progress**: 8/26 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -239,14 +239,14 @@ Pre-upgrade there are no monitoring members, so this leaves exactly the root-Dir
 
 ### Phase A: Documentation
 
-- [ ] A1. Rewrite `docs/concepts/monitoring.md`: who-gets-pinged = Director + monitoring member only; the two `Esc`-safeguarded keystrokes (Director poll, monitoring-member wake); the monitoring member's capture-classify-reengage role; enrollment restricted to those two; lifecycle now runs `monitor start` in the monitoring member's pane. Delete all ordinary-member resume-nudge content. <!-- completed: -->
-- [ ] A2. Update `docs/spec/data-model.md`: `monitor_config` is enrolled only for the root Director + the monitoring member; document `agent_card_json.cafleet.kind == "monitoring-member"`; note the Alembic data migration that prunes legacy non-Director rows. <!-- completed: -->
-- [ ] A3. Update `docs/spec/cli-options.md`: add `cafleet member create --role {member,monitor}`; note the `Esc` safeguard on the monitor pings and `member ping`; refresh the `cafleet monitor` section. <!-- completed: -->
-- [ ] A4. Update `README.md` monitoring summary: dedicated monitoring member + `Esc` safeguard + Director-and-monitoring-member-only heartbeat. <!-- completed: -->
-- [ ] A5. Update `skills/cafleet-agent-team-monitoring/SKILL.md`: document the dedicated monitoring member, the canonical monitoring-member spawn prompt and its capture-classify-reengage routine, the two `Esc`-safeguarded keystrokes, and the replacement member-wake paths (inline preview primary, Director `member ping` manual recovery — §6); remove the member resume-nudge; update Monitor Lifecycle (start runs inside the monitoring member; first-in/first-out; the `ready: monitor live` handshake gate; stop the monitor background task before deleting the monitoring member). <!-- completed: -->
-- [ ] A6. Update `skills/cafleet-agent-team-supervision/SKILL.md`: Spawn Protocol reorder (monitoring member is the first `member create` and starts the monitor; the monitoring member's `ready: monitor live` message gates the first ordinary `member create`); Stall Response notes that a quiet member is surfaced by the monitoring member and re-woken via the Director's `member ping`; Cleanup reorder (stop the monitor's background task, then delete the monitoring member first). <!-- completed: -->
-- [ ] A7. Update `skills/cafleet/SKILL.md` + `skills/cafleet/reference/director.md`: `member create --role monitor`; the `Esc`-first `member ping` mechanism; the revised Shutdown Protocol ordering (stop the monitor's background task in the monitoring member → delete the monitoring member → delete ordinary members → `fleet delete`). <!-- completed: -->
-- [ ] A8. Update `.claude/rules/bash-tool.md`: the `member ping` description becomes an `Esc` + `cafleet … message poll` + `Enter` keystroke (the leading `Esc` is the safeguard). <!-- completed: -->
+- [x] A1. Rewrite `docs/concepts/monitoring.md`: who-gets-pinged = Director + monitoring member only; the two `Esc`-safeguarded keystrokes (Director poll, monitoring-member wake); the monitoring member's capture-classify-reengage role; enrollment restricted to those two; lifecycle now runs `monitor start` in the monitoring member's pane. Delete all ordinary-member resume-nudge content. <!-- completed: 2026-06-14T06:15 -->
+- [x] A2. Update `docs/spec/data-model.md`: `monitor_config` is enrolled only for the root Director + the monitoring member; document `agent_card_json.cafleet.kind == "monitoring-member"`; note the Alembic data migration that prunes legacy non-Director rows. <!-- completed: 2026-06-14T06:16 -->
+- [x] A3. Update `docs/spec/cli-options.md`: add `cafleet member create --role {member,monitor}`; note the `Esc` safeguard on the monitor pings and `member ping`; refresh the `cafleet monitor` section. <!-- completed: 2026-06-14T06:17 -->
+- [x] A4. Update `README.md` monitoring summary: dedicated monitoring member + `Esc` safeguard + Director-and-monitoring-member-only heartbeat. <!-- completed: 2026-06-14T06:18 -->
+- [x] A5. Update `skills/cafleet-agent-team-monitoring/SKILL.md`: document the dedicated monitoring member, the canonical monitoring-member spawn prompt and its capture-classify-reengage routine, the two `Esc`-safeguarded keystrokes, and the replacement member-wake paths (inline preview primary, Director `member ping` manual recovery — §6); remove the member resume-nudge; update Monitor Lifecycle (start runs inside the monitoring member; first-in/first-out; the `ready: monitor live` handshake gate; stop the monitor background task before deleting the monitoring member). <!-- completed: 2026-06-14T06:20 -->
+- [x] A6. Update `skills/cafleet-agent-team-supervision/SKILL.md`: Spawn Protocol reorder (monitoring member is the first `member create` and starts the monitor; the monitoring member's `ready: monitor live` message gates the first ordinary `member create`); Stall Response notes that a quiet member is surfaced by the monitoring member and re-woken via the Director's `member ping`; Cleanup reorder (stop the monitor's background task, then delete the monitoring member first). <!-- completed: 2026-06-14T06:22 -->
+- [x] A7. Update `skills/cafleet/SKILL.md` + `skills/cafleet/reference/director.md`: `member create --role monitor`; the `Esc`-first `member ping` mechanism; the revised Shutdown Protocol ordering (stop the monitor's background task in the monitoring member → delete the monitoring member → delete ordinary members → `fleet delete`). <!-- completed: 2026-06-14T06:24 -->
+- [x] A8. Update `.claude/rules/bash-tool.md`: the `member ping` description becomes an `Esc` + `cafleet … message poll` + `Enter` keystroke (the leading `Esc` is the safeguard). <!-- completed: 2026-06-14T06:32 -->
 
 ### Phase B: Code
 

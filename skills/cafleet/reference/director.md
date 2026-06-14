@@ -24,6 +24,11 @@ cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
 cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
   --name Drafter --description "Writes and revises the design document" \
   --prompt-file /abs/path/to/<BASE>/prompts/drafter-20260514T145000Z.md
+
+cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
+  --name monitor --description "Monitoring member: owns the heartbeat" \
+  --role monitor --model sonnet \
+  --prompt-file /abs/path/to/<BASE>/prompts/monitor-20260514T145000Z.md
 ```
 
 | Flag | Required | Notes |
@@ -33,6 +38,7 @@ cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`. The flag both selects the spawn-command builder AND is recorded as `placement.coding_agent`. Validated via `click.Choice(list(CODING_AGENTS.keys()))` — the choice set is registry-driven (currently `["claude", "codex", "opencode"]`) so adding a future backend is one entry in `cafleet.coding_agent.CODING_AGENTS`. Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. For the `opencode` backend, the spawn-precondition step also materializes `~/.opencode/agents/cafleet.md` from the in-source `CAFLEET_AGENT` preset on first spawn (skip-if-exists) — see [`docs/reference/coding-agents/opencode.md`](../../../docs/reference/coding-agents/opencode.md). |
 | `--model` | no | Model passed to the backend binary via its `--model` flag, appended immediately before the prompt tokens (for `opencode`, before the `--prompt <prompt>` pair). Omitted → no model tokens in the spawn argv; the binary uses its own default model. `claude` and `codex` accept any string (pass-through — the binary itself rejects unknown models, so newly released models work without a cafleet release). `opencode` requires the `<provider-id>/<model-id>` format (split on the **first** `/` into two non-empty segments; model ids may themselves contain slashes) and rejects violations at create time with exit 2 — `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` — before any agent registration or tmux side effect. Spawn-time only: not recorded in `agent_placements`, not shown in `member list`. Example models (not enforced by cafleet): `claude` → `sonnet`; `codex` → `gpt-5.5`; `opencode` → `anthropic/claude-sonnet-4-6`. |
+| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member**: it sets `agent_card_json.cafleet.kind == "monitoring-member"` and enrolls the agent in `monitor_config` so the monitor loop wakes it; ordinary `member` does neither. `--role` controls only the kind marker and enrollment — the LLM is still selected by `--model` (the Director passes `--model sonnet`). Only one monitoring member is allowed per fleet; a second `--role monitor` spawn is rejected by `register_agent` with `Error: fleet <id> already has an active monitoring member (agent <existing-id>); only one is allowed.` (exit 1). The monitoring member is spawned **first** and is the one process that runs `cafleet monitor start`; see the `cafleet-agent-team-monitoring` skill § The monitoring member for its canonical spawn prompt and the first-in/first-out lifecycle. |
 | `--prompt-file` | no | Absolute path to a UTF-8 file whose contents are the spawn prompt. Mutually exclusive with the positional prompt argument. Read verbatim (no stripping); passes through the same `str.format()` substitution as the inline form. Relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all error non-zero with the messages catalogued in [`docs/spec/cli-options.md`](../../../docs/spec/cli-options.md) § Error Messages. The canonical input mode for every CAFleet-native team-skill spawn — see § *Member Create — Scratch and audit files* below. |
 | *(positional, after `--`)* | no | Prompt for the spawned coding-agent process. Mutually exclusive with `--prompt-file`. If both are omitted the default prompt template is used. The default template and any custom prompt go through `str.format()` with `fleet_id` / `agent_id` / `director_agent_id` as kwargs, so callers may embed those placeholders in custom prompts and have the new member's literal ids substituted in. |
 
@@ -226,7 +232,7 @@ For a series of `member exec` calls on the same member, the ping follows each ex
 
 ## Member Ping
 
-Director-only manual inbox-poll nudge. The broker's auto-fire on every `cafleet message send` is an inline preview keystroked into the recipient's pane (`tmux.send_inline_preview`). `member ping` is the manually-invokable counterpart for re-poking a member that missed an inline preview.
+Director-only manual inbox-poll nudge. The broker's auto-fire on every `cafleet message send` is an inline preview keystroked into the recipient's pane (`tmux.send_inline_preview`). `member ping` is the manually-invokable counterpart for re-poking a member that missed an inline preview. It reuses the monitor's `send_poll_trigger` helper, so it keystrokes **`Esc` → `cafleet … message poll` → `Enter`** (Escape, ~0.1 s settle, then the literal poll command and Enter): the leading `Esc` dismisses any pending permission-approval prompt in the member's pane, so the trailing `Enter` cannot blindly confirm it. The safeguard is inherited for free — the same `esc_first=True` the monitor loop's Director poll uses.
 
 ```bash
 cafleet --fleet-id <fleet-id> member ping \
