@@ -1,7 +1,7 @@
 # Safe Director-only Monitoring with a Dedicated Monitoring Member
 
 **Status**: Approved
-**Progress**: 24/26 tasks complete
+**Progress**: 25/26 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -10,12 +10,12 @@ Close the `cafleet monitor` safety hole where a bare `Enter` keystroke confirms 
 
 ## Success Criteria
 
-- [ ] Every monitor keystroke ping sends `Esc` before the literal text + `Enter`, so a pending permission prompt can never be confirmed by the trailing `Enter`.
-- [ ] The monitor loop pings **only** the root Director and the monitoring member; ordinary members are never enrolled and never pinged by the loop.
-- [ ] A monitoring member can be spawned via `cafleet member create --role monitor`, is marked `agent_card_json.cafleet.kind == "monitoring-member"`, and is the one process that runs `cafleet monitor start`.
-- [ ] The monitoring member captures the Director's pane, classifies it active vs idle, and on idle re-engages **the Director** (never drives ordinary members directly).
-- [ ] `send_resume_trigger` (the blind ordinary-member resume nudge) is removed entirely — the repo reads as if member-pinging never existed.
-- [ ] `mise //cafleet:lint`, `:format`, `:typecheck`, and `:test` all pass; docs, README, and every affected SKILL are consistent with the new behavior.
+- [x] Every monitor keystroke ping sends `Esc` before the literal text + `Enter`, so a pending permission prompt can never be confirmed by the trailing `Enter`.
+- [x] The monitor loop pings **only** the root Director and the monitoring member; ordinary members are never enrolled and never pinged by the loop.
+- [x] A monitoring member can be spawned via `cafleet member create --role monitor`, is marked `agent_card_json.cafleet.kind == "monitoring-member"`, and is the one process that runs `cafleet monitor start`.
+- [x] The monitoring member captures the Director's pane, classifies it active vs idle, and on idle re-engages **the Director** (never drives ordinary members directly).
+- [x] `send_resume_trigger` (the blind ordinary-member resume nudge) is removed entirely — the repo reads as if member-pinging never existed.
+- [x] `mise //cafleet:lint`, `:format`, `:typecheck`, and `:test` all pass; docs, README, and every affected SKILL are consistent with the new behavior.
 
 ---
 
@@ -272,7 +272,7 @@ Pre-upgrade there are no monitoring members, so this leaves exactly the root-Dir
 
 ### Phase D: Verification
 
-- [ ] D1. `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass. <!-- completed: -->
+- [x] D1. `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass. <!-- completed: 2026-06-14T07:25 -->
 - [ ] D2. Manual smoke: spawn a monitoring member (`--role monitor --model sonnet`), confirm `monitor status` is live, confirm an ordinary member receives no loop keystroke, and confirm the `Esc` prefix dismisses a pending permission prompt instead of confirming it. <!-- completed: -->
 
 ---
