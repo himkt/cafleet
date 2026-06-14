@@ -56,14 +56,14 @@ def bash_recorder(monkeypatch):
 
 
 def _invoke(runner, fleet_id, *extra_args, **invoke_kwargs):
-    """Helper: call ``cafleet --fleet-id <sid> member exec ...``."""
+    """Helper: call ``cafleet member exec --fleet-id <sid> ...``."""
     return runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "member",
             "exec",
+            "--fleet-id",
+            str(fleet_id),
             "--member-id",
             str(MEMBER_ID),
             *extra_args,
@@ -100,11 +100,11 @@ def test_exec_dispatch__json_output_three_keys(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "--json",
             "member",
             "exec",
+            "--fleet-id",
+            str(fleet_id),
             "--member-id",
             str(MEMBER_ID),
             payload,
@@ -189,10 +189,10 @@ def test_flag_removed__agent_id_no_longer_accepted(runner, fleet_id):
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "member",
             "exec",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             "999",
             "--member-id",

@@ -125,13 +125,15 @@ def _invoke_member_create(
     model: str | None = None,
     role: str | None = None,
 ):
-    args = ["--fleet-id", str(fleet_id)]
+    args: list[str] = []
     if json_output:
         args.append("--json")
     args.extend(
         [
             "member",
             "create",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(director_id),
             "--name",

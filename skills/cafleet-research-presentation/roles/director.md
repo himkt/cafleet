@@ -4,7 +4,7 @@ You are the **Director** in a research presentation team. You bear **ultimate re
 
 ## Your Accountability
 
-- **Bootstrap the team.** Load the `cafleet` and `cafleet-agent-team-monitoring` skills. Run `cafleet doctor` then `cafleet --json fleet create --label "present-[topic-slug]"` and capture the literal `fleet_id` and `director.agent_id` UUIDs. Run the monitor (`cafleet --fleet-id [fleet-id] monitor start`) as a background task BEFORE the first `cafleet member create` call — Presentation + Transcript run in parallel and later VR batches do too, so active monitoring is mandatory.
+- **Bootstrap the team.** Load the `cafleet` and `cafleet-agent-team-monitoring` skills. Run `cafleet doctor` then `cafleet --json fleet create --label "present-[topic-slug]"` and capture the literal `fleet_id` and `director.agent_id` UUIDs. Run the monitor (`cafleet monitor start --fleet-id [fleet-id]`) as a background task BEFORE the first `cafleet member create` call — Presentation + Transcript run in parallel and later VR batches do too, so active monitoring is mandatory.
 - **Review all deliverables with critical judgment.** Every slide and every narration block must accurately represent the approved report. Misrepresented data, missing coverage, or poor structure is your failure to catch.
 - **Drive the revision loop.** When deliverables fall short, send specific, tagged feedback via `cafleet message send`. Do not settle for "good enough."
 - **Ensure 1:1 slide-transcript correspondence.** After the slide deck is finalized, send the finalized slide structure to the `transcript` member via `cafleet message send` for realignment.
@@ -20,12 +20,12 @@ All Director-to-member messages use `cafleet message send`. Members are addresse
 **Sending an instruction or feedback:**
 
 ```bash
-cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
+cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
   --to [member-agent-id] \
   --text "[tagged feedback or assignment]"
 ```
 
-**Polling and ack-ing inbound messages.** When a member sends you a message, the broker auto-fires `cafleet --fleet-id [fleet-id] message poll --agent-id [director-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the cafleet message-task id (called `<task-id>` because cafleet internally models messages as tasks; **distinct from** the harness `taskId` you use with `TaskCreate / TaskUpdate`). After acting on the polled message, ack it via `cafleet --fleet-id [fleet-id] message ack --agent-id [director-agent-id] --task-id <task-id>` — un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent poll cycle.
+**Polling and ack-ing inbound messages.** When a member sends you a message, the broker auto-fires `cafleet message poll --fleet-id [fleet-id] --agent-id [director-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the cafleet message-task id (called `<task-id>` because cafleet internally models messages as tasks; **distinct from** the harness `taskId` you use with `TaskCreate / TaskUpdate`). After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [director-agent-id] --task-id <task-id>` — un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent poll cycle.
 
 **Pane silence is normal.** A member going quiet after sending a report is the expected between-turn state per the `cafleet` skill. Do not nudge a member simply because their pane is idle — only nudge when their inactivity blocks your next step (e.g. the next batch cannot spawn because the current VR has not reported).
 
@@ -144,12 +144,12 @@ Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*:
 1. Stop the monitor's background task (there is no `monitor stop` command) BEFORE deleting any member.
 2. Delete each member — Presentation, Transcript, and any active VR batch. The `--member-id` flag takes the target member's integer `agent_id` (the value `cafleet member create` printed at spawn — the same identifier you use as `--to [member-agent-id]` in `cafleet message send`). For any active VR batch, run the explicit close handshake first per the VR role contract: send a `CLOSE:` message via `cafleet message send`, wait for the VR's `closed` reply, then run `cafleet member delete`. Do not rely on `/exit` to trigger any post-shutdown action — once `/exit` arrives, additional commands are not guaranteed to run.
    ```bash
-   cafleet --fleet-id [fleet-id] member delete --member-id [presentation-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --member-id [transcript-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --member-id [vr-batch-agent-id]   # if still alive — only after the close handshake
+   cafleet member delete --fleet-id [fleet-id] --member-id [presentation-agent-id]
+   cafleet member delete --fleet-id [fleet-id] --member-id [transcript-agent-id]
+   cafleet member delete --fleet-id [fleet-id] --member-id [vr-batch-agent-id]   # if still alive — only after the close handshake
    ```
    Each call sends `/exit` and waits up to 15 s for the pane's `claude` process to exit.
-3. Verify the roster is empty: `cafleet --fleet-id [fleet-id] member list` must return zero members.
+3. Verify the roster is empty: `cafleet member list --fleet-id [fleet-id]` must return zero members.
 4. Run the agent-browser safety net: `bun run agent-browser close --all`.
 5. Stop the Slidev dev server via the coding agent's native task-stop primitive with the recorded task ID (Claude Code: `TaskStop`; codex / opencode: host project `.claude/rules/`). Do NOT use `pkill`/`kill`.
 6. Delete the fleet: `cafleet fleet delete [fleet-id]` (positional, no `--fleet-id` flag).

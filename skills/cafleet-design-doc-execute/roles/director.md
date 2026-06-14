@@ -6,11 +6,11 @@ You are the **Director** in a design document execution team orchestrated via th
 
 Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<programmer-agent-id>`, `<tester-agent-id>`, `<verifier-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal integer ids printed by `cafleet fleet create` (which returns the fleet id AND the root Director's `agent_id` — the Director does not need a separate `cafleet agent register` call) and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
 
-**Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>`.
+**Flag placement**: `--fleet-id` and `--agent-id` are both per-subcommand options (placed **after** the subcommand name). For example: `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`.
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet fleet and monitor continuously.** Load the `cafleet`, `cafleet-agent-team-monitoring`, and `cafleet-agent-team-supervision` skills (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it). Create a CAFleet fleet via `cafleet fleet create --json` (must be run inside a tmux session) — this bootstraps the fleet, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Run the monitor (`cafleet --fleet-id <fleet-id> monitor start`) as a background task BEFORE spawning any member. Keep it running until shutdown.
+- **Bootstrap the CAFleet fleet and monitor continuously.** Load the `cafleet`, `cafleet-agent-team-monitoring`, and `cafleet-agent-team-supervision` skills (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it). Create a CAFleet fleet via `cafleet fleet create --json` (must be run inside a tmux session) — this bootstraps the fleet, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Run the monitor (`cafleet monitor start --fleet-id <fleet-id>`) as a background task BEFORE spawning any member. Keep it running until shutdown.
 - **Validate the design document first.** Before spawning any teammates, read the document, check for COMMENT markers and FIXME(claude) markers. If COMMENTs exist, resolve them directly when they are clear: read each COMMENT marker, apply the requested changes to the document, and remove the markers before proceeding. If a COMMENT is ambiguous, conflicts with other parts of the design, or requires a product decision, ask the user for clarification via `AskUserQuestion` before resolving it.
 - **Judge team composition and spawn needed members.** Before spawning, analyze the nature of implementation tasks. Only spawn roles that are actually needed:
   - Code implementation → Programmer + Tester (TDD)
@@ -43,23 +43,23 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 
 **Sending a task to a member:**
 ```bash
-cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> \
+cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --to <member-agent-id> --text "<instruction>"
 ```
 A push notification automatically keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's tmux pane via `tmux.send_inline_preview`. The member processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the member calls `cafleet message poll` themselves.
 
 **Checking for incoming messages from members:**
 ```bash
-cafleet --fleet-id <fleet-id> --json message poll --agent-id <director-agent-id>
+cafleet --json message poll --fleet-id <fleet-id> --agent-id <director-agent-id>
 ```
 Acknowledge each message after reading:
 ```bash
-cafleet --fleet-id <fleet-id> message ack --agent-id <director-agent-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>
 ```
 
 **Inspecting a stalled member's terminal (2-stage fallback):**
 ```bash
-cafleet --fleet-id <fleet-id> member capture \
+cafleet member capture --fleet-id <fleet-id> \
   --member-id <member-agent-id> --lines 200
 ```
 
@@ -138,11 +138,11 @@ Programmer / Tester / Verifier members are spawned with `--permission-mode dontA
 
 | Phase | Expected event | Stall indicator | Director action |
 |:--|:--|:--|:--|
-| Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge — recipient interprets contextually per [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md): same target, same expected action) |
-| Implementation (Phase B) | Programmer implements code and runs tests | Programmer goes idle without reporting implementation result | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge) |
-| Verification (Phase D) | Verifier performs E2E testing | Verifier goes idle without reporting verification result | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <verifier-agent-id> --text "ready (doc)"` (re-sent stall-nudge — Verifier reads the design doc and the standing `COMMENT(verifier)` markers) |
-| PR Review (Step 7) | Copilot posts a review or inline comment on `<pr-number>` | No new Copilot-authored entry (login matching `^copilot`, timestamp > `last_push_ts`) on this tick | Increment `silence_ticks`. Evaluate the SKILL Step 7b branch table: exit on most-recent Copilot review `state == "APPROVED"`; trigger 7f silence-escalation when `silence_ticks >= 30` (AskUserQuestion: Keep waiting / Re-request review / Finalize / Other). On ≥ 1 new entry reset `silence_ticks = 0`, classify each new inline comment by file path per Step 7c, write `COMMENT(copilot): <body>` at the source `<file>:<line>` for source/test routes (or `COMMENT(director): <body>` at the affected paragraph for design-doc-anchored items, no cafleet route), and dispatch via `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<file>:<line>)"`. The loop never auto-exits on silence. |
-| Escalation | Member responds to escalation | Escalation recipient goes idle without responding | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <member-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent — the standing `COMMENT(director)` arbitration marker carries the issue) |
+| Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge — recipient interprets contextually per [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md): same target, same expected action) |
+| Implementation (Phase B) | Programmer implements code and runs tests | Programmer goes idle without reporting implementation result | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge) |
+| Verification (Phase D) | Verifier performs E2E testing | Verifier goes idle without reporting verification result | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <verifier-agent-id> --text "ready (doc)"` (re-sent stall-nudge — Verifier reads the design doc and the standing `COMMENT(verifier)` markers) |
+| PR Review (Step 7) | Copilot posts a review or inline comment on `<pr-number>` | No new Copilot-authored entry (login matching `^copilot`, timestamp > `last_push_ts`) on this tick | Increment `silence_ticks`. Evaluate the SKILL Step 7b branch table: exit on most-recent Copilot review `state == "APPROVED"`; trigger 7f silence-escalation when `silence_ticks >= 30` (AskUserQuestion: Keep waiting / Re-request review / Finalize / Other). On ≥ 1 new entry reset `silence_ticks = 0`, classify each new inline comment by file path per Step 7c, write `COMMENT(copilot): <body>` at the source `<file>:<line>` for source/test routes (or `COMMENT(director): <body>` at the affected paragraph for design-doc-anchored items, no cafleet route), and dispatch via `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<file>:<line>)"`. The loop never auto-exits on silence. |
+| Escalation | Member responds to escalation | Escalation recipient goes idle without responding | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent — the standing `COMMENT(director)` arbitration marker carries the issue) |
 
 ## Shutdown Protocol
 

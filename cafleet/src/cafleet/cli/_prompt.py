@@ -8,7 +8,7 @@ MEMBER_PROMPT_TEMPLATE = (
     "Member of cafleet fleet {fleet_id} "
     "(agent={agent_id}, director={director_agent_id}).\n"
     "Load skill 'cafleet'. Bash auto-approves. Poll: "
-    "cafleet --fleet-id {fleet_id} message poll --agent-id {agent_id}"
+    "cafleet message poll --fleet-id {fleet_id} --agent-id {agent_id}"
 )
 
 

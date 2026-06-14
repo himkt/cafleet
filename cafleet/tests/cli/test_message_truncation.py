@@ -90,7 +90,17 @@ def _setup_subcommand(
                 _task_payload(1, sender=11, recipient=agent_id, text=LONG_BODY)
             ],
         )
-        return ["message", "poll", "--agent-id", str(agent_id)], "list"
+        return (
+            [
+                "message",
+                "poll",
+                "--fleet-id",
+                str(fleet_id),
+                "--agent-id",
+                str(agent_id),
+            ],
+            "list",
+        )
     if subcommand == "show":
         monkeypatch.setattr(
             broker,
@@ -104,6 +114,8 @@ def _setup_subcommand(
         return [
             "message",
             "show",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             "--task-id",
@@ -122,6 +134,8 @@ def _setup_subcommand(
     return [
         "message",
         "send",
+        "--fleet-id",
+        str(fleet_id),
         "--agent-id",
         str(agent_id),
         "--to",
@@ -140,7 +154,7 @@ def test_truncation__poll_show_send_text_output(
         monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
     )
     full_args = args + (["--full"] if full else [])
-    result = runner.invoke(cli, ["--fleet-id", str(fleet_id), *full_args])
+    result = runner.invoke(cli, full_args)
     assert result.exit_code == 0, result.output
     if full:
         assert LONG_BODY in result.output
@@ -158,7 +172,7 @@ def test_truncation__poll_show_send_json_output(
         monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
     )
     full_args = args + (["--full"] if full else [])
-    result = runner.invoke(cli, ["--fleet-id", str(fleet_id), "--json", *full_args])
+    result = runner.invoke(cli, ["--json", *full_args])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     task = payload[0] if shape == "list" else payload["task"]
@@ -173,10 +187,8 @@ def test_truncation__non_text_fields_byte_identical_between_default_and_full(
     args, shape = _setup_subcommand(
         monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
     )
-    default_res = runner.invoke(cli, ["--fleet-id", str(fleet_id), "--json", *args])
-    full_res = runner.invoke(
-        cli, ["--fleet-id", str(fleet_id), "--json", *args, "--full"]
-    )
+    default_res = runner.invoke(cli, ["--json", *args])
+    full_res = runner.invoke(cli, ["--json", *args, "--full"])
     assert default_res.exit_code == 0, default_res.output
     assert full_res.exit_code == 0, full_res.output
     if shape == "list":
@@ -200,13 +212,22 @@ def test_truncation__broadcast_summary_emitted_verbatim(
         "broadcast_message",
         lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
     )
-    args = ["message", "broadcast", "--agent-id", str(agent_id), "--text", LONG_BODY]
+    args = [
+        "message",
+        "broadcast",
+        "--fleet-id",
+        str(fleet_id),
+        "--agent-id",
+        str(agent_id),
+        "--text",
+        LONG_BODY,
+    ]
     if full:
         args.append("--full")
     if output_mode == "json":
-        result = runner.invoke(cli, ["--fleet-id", str(fleet_id), "--json", *args])
+        result = runner.invoke(cli, ["--json", *args])
     else:
-        result = runner.invoke(cli, ["--fleet-id", str(fleet_id), *args])
+        result = runner.invoke(cli, args)
     assert result.exit_code == 0, result.output
     if output_mode == "json":
         payload = json.loads(result.output)
@@ -245,11 +266,11 @@ def test_truncation__poll_list_of_three_tasks_each_truncated(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "--json",
             "message",
             "poll",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
         ],

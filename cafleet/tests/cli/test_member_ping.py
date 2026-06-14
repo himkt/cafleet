@@ -60,14 +60,14 @@ def poll_recorder(monkeypatch):
 
 
 def _invoke(runner, fleet_id, **invoke_kwargs):
-    """Helper: call ``cafleet --fleet-id <sid> member ping ...`` (no positional)."""
+    """Helper: call ``cafleet member ping --fleet-id <sid> ...`` (no positional)."""
     return runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "member",
             "ping",
+            "--fleet-id",
+            str(fleet_id),
             "--member-id",
             str(MEMBER_ID),
         ],
@@ -115,7 +115,7 @@ def test_ping__keystrokes_escape_first(runner, fleet_id, happy_path_agent, monke
         "-t",
         PANE_ID,
         "-l",
-        f"cafleet --fleet-id {fleet_id} message poll --agent-id {MEMBER_ID}",
+        f"cafleet message poll --fleet-id {fleet_id} --agent-id {MEMBER_ID}",
     ]
     assert captured[-1] == ["tmux", "send-keys", "-t", PANE_ID, "Enter"]
 
@@ -136,11 +136,11 @@ def test_ping_dispatch__json_output_two_keys(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "--json",
             "member",
             "ping",
+            "--fleet-id",
+            str(fleet_id),
             "--member-id",
             str(MEMBER_ID),
         ],
@@ -238,10 +238,10 @@ def test_input_validation__agent_id_flag_removed(runner, fleet_id):
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "member",
             "ping",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             "999",
             "--member-id",
@@ -256,10 +256,10 @@ def test_input_validation__missing_member_id_exits_two(runner, fleet_id):
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "member",
             "ping",
+            "--fleet-id",
+            str(fleet_id),
         ],
     )
     assert result.exit_code == 2, result.output
@@ -272,10 +272,10 @@ def test_input_validation__unexpected_positional_argument_exits_two(runner, flee
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "member",
             "ping",
+            "--fleet-id",
+            str(fleet_id),
             "--member-id",
             str(MEMBER_ID),
             "extra",

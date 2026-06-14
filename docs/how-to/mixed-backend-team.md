@@ -33,7 +33,7 @@ Your agent loads the `cafleet` skill plus `cafleet-agent-team-supervision`
 The supervision tick is supplied by `cafleet monitor` — a per-fleet loop a
 coding agent runs as a background task — so a Director on **any** backend
 (`claude`, `codex`, or `opencode`) gets the same heartbeat. Run the monitor once
-as a background task with `cafleet --fleet-id <id> monitor start` regardless of
+as a background task with `cafleet monitor start --fleet-id <id>` regardless of
 the Director's backend ([Monitoring](../concepts/monitoring.md)).
 
 ## What to expect
@@ -67,7 +67,7 @@ cafleet fleet create --label "demo" --coding-agent claude
 Spawn one member per backend:
 
 ```bash
-cafleet --fleet-id 1 member create --agent-id 2 \
+cafleet member create --fleet-id 1 --agent-id 2 \
   --name "alice" --description "claude member" \
   --coding-agent claude -- "You are alice. Wait for instructions."
 ```
@@ -77,7 +77,7 @@ cafleet --fleet-id 1 member create --agent-id 2 \
 ```
 
 ```bash
-cafleet --fleet-id 1 member create --agent-id 2 \
+cafleet member create --fleet-id 1 --agent-id 2 \
   --name "bob" --description "codex member" \
   --coding-agent codex -- "You are bob. Wait for instructions."
 ```
@@ -87,7 +87,7 @@ cafleet --fleet-id 1 member create --agent-id 2 \
 ```
 
 ```bash
-cafleet --fleet-id 1 member create --agent-id 2 \
+cafleet member create --fleet-id 1 --agent-id 2 \
   --name "carol" --description "opencode member" \
   --coding-agent opencode -- "You are carol. Wait for instructions."
 ```
@@ -101,7 +101,7 @@ List the panes — only the `claude` pane titles itself with the member name
 so use the `pane_id` column to locate `bob` and `carol`:
 
 ```bash
-cafleet --fleet-id 1 member list
+cafleet member list --fleet-id 1
 ```
 
 ```
@@ -118,7 +118,7 @@ the 2-line inline preview are identical for every backend
 ([tmux push](../concepts/tmux-push.md)):
 
 ```bash
-cafleet --fleet-id 1 message send --agent-id 2 --to 4 --text "alice: report status"
+cafleet message send --fleet-id 1 --agent-id 2 --to 4 --text "alice: report status"
 ```
 
 ```
@@ -131,7 +131,7 @@ Tear down — repeat `member delete` for members `5` and `6`, then delete the
 fleet:
 
 ```bash
-cafleet --fleet-id 1 member delete --member-id 4
+cafleet member delete --fleet-id 1 --member-id 4
 ```
 
 ```

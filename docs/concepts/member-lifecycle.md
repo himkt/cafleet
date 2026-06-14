@@ -78,7 +78,7 @@ per-member `last_sent` / `last_recv` / `last_ack` / `idle` aggregation),
 `member capture`, `member send-input`, `member exec`, and `member ping`.
 `member create` takes `--agent-id` (the spawning Director's ID, which must
 equal the fleet root); the others target by `--member-id`, scoped to the
-global `--fleet-id` — a `--member-id` outside the fleet returns "not found".
+per-subcommand `--fleet-id` — a `--member-id` outside the fleet returns "not found".
 See [CLI options](../spec/cli-options.md) for every flag and the shared
 member-resolution rules.
 

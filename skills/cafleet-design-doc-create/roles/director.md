@@ -6,11 +6,11 @@ You are the **Director** in a design document creation team orchestrated via the
 
 Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<drafter-agent-id>`, `<reviewer-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal integer ids printed by `cafleet fleet create` (which returns the fleet id AND the root Director's `agent_id` — the Director does not need a separate `cafleet agent register` call) and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
 
-**Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <director-agent-id>`.
+**Flag placement**: `--fleet-id` and `--agent-id` are both per-subcommand options (placed **after** the subcommand name). For example: `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`.
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet fleet and monitor continuously.** Load the `cafleet`, `cafleet-agent-team-monitoring`, and `cafleet-agent-team-supervision` skills (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it). Create a CAFleet fleet via `cafleet fleet create --json` (must be run inside a tmux session) — this bootstraps the fleet, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Run the monitor (`cafleet --fleet-id <fleet-id> monitor start`) as a background task BEFORE spawning any member. Keep it running until shutdown.
+- **Bootstrap the CAFleet fleet and monitor continuously.** Load the `cafleet`, `cafleet-agent-team-monitoring`, and `cafleet-agent-team-supervision` skills (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it). Create a CAFleet fleet via `cafleet fleet create --json` (must be run inside a tmux session) — this bootstraps the fleet, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. Run the monitor (`cafleet monitor start --fleet-id <fleet-id>`) as a background task BEFORE spawning any member. Keep it running until shutdown.
 - **Enforce the clarification gate.** The Drafter MUST ask clarifying questions before drafting. If the Drafter sends a draft without having asked questions first, reject it via `cafleet message send` and instruct the Drafter to ask questions first.
 - **Relay communication faithfully.** Members cannot communicate with the user directly. You relay the Drafter's questions to the user via `AskUserQuestion`, and relay the user's answers back to the Drafter via `cafleet message send`.
 - **Orchestrate the internal quality loop.** After the Drafter produces a draft, route it to the Reviewer via `cafleet message send`. If the Reviewer has feedback, route it back to the Drafter for refinement via `cafleet message send`, then back to the Reviewer. Repeat until the Reviewer explicitly signals satisfaction. Do NOT present the draft to the user until the Reviewer has approved it.
@@ -33,23 +33,23 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 
 **Sending a task to a member:**
 ```bash
-cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> \
+cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --to <member-agent-id> --text "<instruction>"
 ```
 A push notification automatically keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's tmux pane via `tmux.send_inline_preview`. The member processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the member calls `cafleet message poll` themselves.
 
 **Checking for incoming messages from members:**
 ```bash
-cafleet --fleet-id <fleet-id> --json message poll --agent-id <director-agent-id>
+cafleet --json message poll --fleet-id <fleet-id> --agent-id <director-agent-id>
 ```
 Acknowledge each message after reading:
 ```bash
-cafleet --fleet-id <fleet-id> message ack --agent-id <director-agent-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>
 ```
 
 **Inspecting a stalled member's terminal (2-stage fallback):**
 ```bash
-cafleet --fleet-id <fleet-id> member capture \
+cafleet member capture --fleet-id <fleet-id> \
   --member-id <member-agent-id> --lines 200
 ```
 
@@ -91,10 +91,10 @@ Drafter and Reviewer members are spawned with `--permission-mode dontAsk` (Bash 
 
 | Phase | Expected event | Stall indicator | Director action |
 |:--|:--|:--|:--|
-| Clarification | Drafter sends clarifying questions via `cafleet message send` | Drafter goes idle without sending questions or a draft | Free-form nudge (Clarification Exemption — design doc does not yet exist): `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "Please send your clarifying questions so I can relay them to the user."` |
-| Drafting | Drafter writes the design document | Drafter goes idle after receiving user answers without producing a draft | Free-form nudge (still pre-doc, Clarification Exemption window): `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "You have received the user's answers. Please proceed with writing the design document."` |
-| Review | Reviewer sends review feedback via `cafleet message send` | Reviewer goes idle without sending feedback | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <reviewer-agent-id> --text "ready (doc)"` (re-sent `ready (doc)` is interpreted contextually as a stall-nudge per [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) — same target, same expected action) |
-| Revision | Drafter revises based on feedback | Drafter goes idle without sending revised draft | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "ready (doc)"` (re-sent stall-nudge — Drafter resolves the standing `COMMENT(reviewer)` markers in the doc) |
+| Clarification | Drafter sends clarifying questions via `cafleet message send` | Drafter goes idle without sending questions or a draft | Free-form nudge (Clarification Exemption — design doc does not yet exist): `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <drafter-agent-id> --text "Please send your clarifying questions so I can relay them to the user."` |
+| Drafting | Drafter writes the design document | Drafter goes idle after receiving user answers without producing a draft | Free-form nudge (still pre-doc, Clarification Exemption window): `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <drafter-agent-id> --text "You have received the user's answers. Please proceed with writing the design document."` |
+| Review | Reviewer sends review feedback via `cafleet message send` | Reviewer goes idle without sending feedback | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <reviewer-agent-id> --text "ready (doc)"` (re-sent `ready (doc)` is interpreted contextually as a stall-nudge per [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) — same target, same expected action) |
+| Revision | Drafter revises based on feedback | Drafter goes idle without sending revised draft | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <drafter-agent-id> --text "ready (doc)"` (re-sent stall-nudge — Drafter resolves the standing `COMMENT(reviewer)` markers in the doc) |
 
 ## Shutdown Protocol
 

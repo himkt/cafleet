@@ -29,7 +29,7 @@ The skill writes its working folder to `<CWD>/researches/<topic-slug>/` (one fol
 
 ## Architecture
 
-The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns every member via `cafleet --fleet-id [fleet-id] member create --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications) and a shared task list.
+The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns every member via `cafleet member create --fleet-id [fleet-id] --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications) and a shared task list.
 
 ```text
 User
@@ -46,7 +46,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays. Members cannot talk to each other directly either — Manager requests are always mediated by the Director (Manager → Director → Scout/Researcher, and Scout/Researcher → Director → Manager).
 
-> **Literal-UUID flag rule** — substitute the UUIDs printed by `cafleet fleet create` and `cafleet member create` directly into every `cafleet ...` call (the harness matches Bash invocations as literal command strings). Never store IDs in shell variables. `--fleet-id` is a global flag (placed BEFORE the subcommand); `--agent-id` is a per-subcommand option (placed AFTER the subcommand name). See the `cafleet` skill for the full convention.
+> **Literal-UUID flag rule** — substitute the UUIDs printed by `cafleet fleet create` and `cafleet member create` directly into every `cafleet ...` call (the harness matches Bash invocations as literal command strings). Never store IDs in shell variables. `--fleet-id` and `--agent-id` are per-subcommand options (placed AFTER the subcommand name). See the `cafleet` skill for the full convention.
 
 ## Process
 
@@ -79,7 +79,7 @@ Capture `fleet_id` and `director.agent_id` from the response. Treat `fleet_id` a
 
 ### Step 1: Start Progress Monitor (Director — MANDATORY)
 
-Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill. Run the monitor as a background task with `cafleet --fleet-id [fleet-id] monitor start` BEFORE the first `cafleet member create` call so the heartbeat is running while the Manager is spawning (confirm with `cafleet --fleet-id [fleet-id] monitor status`).
+Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill. Run the monitor as a background task with `cafleet monitor start --fleet-id [fleet-id]` BEFORE the first `cafleet member create` call so the heartbeat is running while the Manager is spawning (confirm with `cafleet monitor status --fleet-id [fleet-id]`).
 
 The loop must check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -141,8 +141,8 @@ OUTPUT DIRECTORY: [INSERT OUTPUT DIRECTORY]
 LANGUAGE: [INSERT user's language preference if specified]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 - You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.
 - The team shares a harness task list (TaskList / TaskGet / TaskUpdate). Use it to track sub-topic assignments.
 
@@ -158,7 +158,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --fleet-id [fleet-id] --json member create --agent-id [director-agent-id] \
+   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "manager" \
      --description "Compiles the research report" \
      --prompt-file ${BASE}/prompts/manager-<UTC-compact>.md
@@ -190,8 +190,8 @@ YOUR ASSIGNMENT: [landscape scope and what areas to map]
 OUTPUT FILE: [INSERT <resolved-path>/00-scout-<topic>.md]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 
 Write findings to the output file, then send the Director a completion summary. The Director will relay your findings to the Manager.
 ```
@@ -203,7 +203,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern. Use `sco
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --fleet-id [fleet-id] --json member create --agent-id [director-agent-id] \
+   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "scout-<NN>" \
      --description "Landscape scout" \
      --prompt-file ${BASE}/prompts/scout-<NN>-<UTC-compact>.md
@@ -260,8 +260,8 @@ YOUR TASK ID: [INSERT the taskId the Manager created for this sub-topic]
 OUTPUT FILE: [INSERT <resolved-path>/NN-research-<subtopic>.md]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 - On start, claim your task: TaskUpdate(taskId: YOUR TASK ID, owner: "researcher-NN", status: "in_progress").
 - On completion, mark your task completed: TaskUpdate(taskId: YOUR TASK ID, status: "completed").
 
@@ -275,7 +275,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern — the `
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --fleet-id [fleet-id] --json member create --agent-id [director-agent-id] \
+   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "researcher-NN" \
      --description "Researcher for sub-topic <slug>" \
      --prompt-file ${BASE}/prompts/researcher-NN-<UTC-compact>.md
@@ -290,12 +290,12 @@ When the Manager delivers the compiled `report.md`:
 1. The Director reads `${OUTPUT_DIR}/report.md` and reviews it critically against the checklist in [roles/director.md](roles/director.md).
 2. The Director sends tagged feedback to the Manager:
    ```bash
-   cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
+   cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --to [manager-agent-id] \
      --text "review feedback round <N>: [FACTUAL ERROR] ... / [GAP] ... / ..."
    ```
 3. The Manager revises the report (requesting additional Researchers from the Director as needed) and sends a completion message back via `cafleet message send`.
-4. Each polled inbound message MUST be `ack`ed via `cafleet --fleet-id [fleet-id] message ack --agent-id [director-agent-id] --task-id [task-id]` after acting on it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle.
+4. Each polled inbound message MUST be `ack`ed via `cafleet message ack --fleet-id [fleet-id] --agent-id [director-agent-id] --task-id [task-id]` after acting on it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle.
 5. Repeat until the Director judges quality is sufficient. Aim for 2–3 rounds maximum.
 
 If the Manager asks the Director a question that is really a user decision (e.g. language choice, scope trade-off), the Director MUST relay via `AskUserQuestion` and pass the user's verbatim answer back via `cafleet message send`. Never decide on the user's behalf.
@@ -315,14 +315,14 @@ Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Orde
 1. **Stop the monitor's background task** (there is no `monitor stop` command). The monitor must stop BEFORE any member is deleted; a monitor that keeps keystroking polls into a tearing-down fleet races with member-delete.
 2. **Delete every member** in dependency order — Researchers first, then any active Scout, then the Manager:
    ```bash
-   cafleet --fleet-id [fleet-id] member delete --member-id [researcher-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --member-id [scout-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --member-id [manager-agent-id]
+   cafleet member delete --fleet-id [fleet-id] --member-id [researcher-agent-id]
+   cafleet member delete --fleet-id [fleet-id] --member-id [scout-agent-id]
+   cafleet member delete --fleet-id [fleet-id] --member-id [manager-agent-id]
    ```
    Each call sends `/exit` to the pane and waits up to 15 s for it to close. On exit 2 (timeout), the pane buffer tail is printed on stderr — inspect with `cafleet member capture`, answer any prompt with `cafleet member send-input`, then re-run. As a last resort, rerun with `--force` to skip the wait and kill-pane immediately.
 3. **Verify the roster is empty**:
    ```bash
-   cafleet --fleet-id [fleet-id] member list
+   cafleet member list --fleet-id [fleet-id]
    ```
    If anyone remains, repeat step 2 for that member.
 4. **Delete the fleet**:
@@ -516,7 +516,7 @@ Use this when:
 When you want a dedicated codex member running the spec (e.g., for parallel multi-topic research), spawn it via `cafleet member create` with `--coding-agent codex`. The spawn prompt is positional (`[PROMPT_ARGV]...`) — there is no `--spawn-prompt-from-text` flag. Paste the embedded spec body verbatim into the positional argument, then append the per-call inputs:
 
 ```bash
-cafleet --fleet-id <fleet-id> member create \
+cafleet member create --fleet-id <fleet-id> \
   --agent-id <director-agent-id> \
   --name web-researcher-codex \
   --description "Web research on <topic>" \

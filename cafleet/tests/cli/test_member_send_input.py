@@ -62,13 +62,15 @@ def freetext_recorder(monkeypatch):
 
 
 def _invoke(runner, fleet_id, *extra_args, json_output=False):
-    args = ["--fleet-id", str(fleet_id)]
+    args: list[str] = []
     if json_output:
         args.append("--json")
     args.extend(
         [
             "member",
             "send-input",
+            "--fleet-id",
+            str(fleet_id),
             "--member-id",
             str(MEMBER_ID),
             *extra_args,

@@ -21,11 +21,11 @@ monitoring member is spawned **first**; it starts the loop and reports
 `cafleet-agent-team-monitoring` skill):
 
 ```bash
-cafleet --fleet-id 1 member create --agent-id 2 \
+cafleet member create --fleet-id 1 --agent-id 2 \
   --name monitor --description "Monitoring member: owns the heartbeat" \
   --role monitor --model sonnet \
   --prompt-file /abs/path/to/monitor-prompt.md   # spawned first; runs monitor start in its own pane
-cafleet --fleet-id 1 monitor status              # confirm it is running + see the schedule
+cafleet monitor status --fleet-id 1              # confirm it is running + see the schedule
 ```
 
 The loop pings only two agents — the Director and the monitoring member — and
@@ -70,7 +70,7 @@ it acknowledged, and `idle` the wall-time since the latest of `last_sent` /
 [CLI options](../spec/cli-options.md#member-list-activity-output)):
 
 ```bash
-cafleet --fleet-id 1 member list --activity
+cafleet member list --fleet-id 1 --activity
 ```
 
 ```
@@ -87,7 +87,7 @@ ANSI escapes stripped (`--lines N` for a longer tail); a stalled member
 typically shows a pending prompt:
 
 ```bash
-cafleet --fleet-id 1 member capture --member-id 4
+cafleet member capture --fleet-id 1 --member-id 4
 ```
 
 ```
@@ -102,7 +102,7 @@ the member drains anything it missed; panes need re-poking at all because
 inline previews are best-effort keystrokes ([tmux push](../concepts/tmux-push.md)):
 
 ```bash
-cafleet --fleet-id 1 member ping --member-id 4
+cafleet member ping --fleet-id 1 --member-id 4
 ```
 
 ```
@@ -114,7 +114,7 @@ AskUserQuestion option; `--freetext "<text>"` fills the "Type something"
 field:
 
 ```bash
-cafleet --fleet-id 1 member send-input --member-id 4 --choice 1
+cafleet member send-input --fleet-id 1 --member-id 4 --choice 1
 ```
 
 ```
@@ -126,7 +126,7 @@ the coding agent runs it natively, the dispatch half of the
 bash-via-Director protocol ([Bash routing](../concepts/bash-routing.md)):
 
 ```bash
-cafleet --fleet-id 1 member exec --member-id 4 "git status"
+cafleet member exec --fleet-id 1 --member-id 4 "git status"
 ```
 
 ```
@@ -137,7 +137,7 @@ Ladder rung 4, `member delete` (last resort) — sends `/exit` and waits up
 to 15 s for the pane to close:
 
 ```bash
-cafleet --fleet-id 1 member delete --member-id 4
+cafleet member delete --fleet-id 1 --member-id 4
 ```
 
 ```

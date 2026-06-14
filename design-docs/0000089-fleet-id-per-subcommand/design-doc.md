@@ -1,7 +1,7 @@
 # Per-Subcommand `--fleet-id` (Move the Global Flag onto Child Subcommands)
 
-**Status**: Approved
-**Progress**: 0/32 tasks complete
+**Status**: Complete
+**Progress**: 37/37 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -10,14 +10,14 @@ Move `--fleet-id` off the top-level `cafleet` click group and onto each child su
 
 ## Success Criteria
 
-- [ ] `--fleet-id` is a per-subcommand option on every client/member/monitor leaf command, accepted **after** the subcommand name (e.g. `cafleet message poll --fleet-id 56 --agent-id 234`).
-- [ ] The top-level `cafleet` group no longer defines `--fleet-id`; `cafleet --fleet-id <id> <subcmd>` (old global position) exits 2 with Click's `No such option: --fleet-id`.
-- [ ] `--json` and `--version` remain global (before the subcommand) and behave exactly as today.
-- [ ] `db init`, `fleet *`, `server`, and `doctor` do **not** accept `--fleet-id` at all (Click rejects it); the previous "silently accepted and ignored" behavior is gone.
-- [ ] Omitting `--fleet-id` on a subcommand that needs it prints the existing custom message (`--fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`) and exits 1.
-- [ ] The design doc specifies a recommended per-subcommand `permissions.allow` pattern set; the user applies the global `~/.claude/settings.json` change manually (no committed repo `.claude/settings.json` permissions block is added).
-- [ ] Every repo-committable `cafleet --fleet-id <id> <subcmd>` command example (docs, all skills, README, `.claude/rules/`, `CLAUDE.md`) is rewritten to the new shape, and every prose claim that `--fleet-id` is a global / before-the-subcommand flag is rewritten. After this lands the repo reads as if `--fleet-id` was always per-subcommand (no deprecation notices), per `.claude/rules/removal.md`.
-- [ ] `mise //cafleet:format`, `lint`, `typecheck`, and `test` are all green.
+- [x] `--fleet-id` is a per-subcommand option on every client/member/monitor leaf command, accepted **after** the subcommand name (e.g. `cafleet message poll --fleet-id 56 --agent-id 234`).
+- [x] The top-level `cafleet` group no longer defines `--fleet-id`; `cafleet --fleet-id <id> <subcmd>` (old global position) exits 2 with Click's `No such option: --fleet-id`.
+- [x] `--json` and `--version` remain global (before the subcommand) and behave exactly as today.
+- [x] `db init`, `fleet *`, `server`, and `doctor` do **not** accept `--fleet-id` at all (Click rejects it); the previous "silently accepted and ignored" behavior is gone.
+- [x] Omitting `--fleet-id` on a subcommand that needs it prints the existing custom message (`--fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`) and exits 1.
+- [x] The design doc specifies a recommended per-subcommand `permissions.allow` pattern set; the user applies the global `~/.claude/settings.json` change manually (no committed repo `.claude/settings.json` permissions block is added).
+- [x] Every repo-committable `cafleet --fleet-id <id> <subcmd>` command example (docs, all skills, README, `.claude/rules/`, `CLAUDE.md`) is rewritten to the new shape, and every prose claim that `--fleet-id` is a global / before-the-subcommand flag is rewritten. After this lands the repo reads as if `--fleet-id` was always per-subcommand (no deprecation notices), per `.claude/rules/removal.md`.
+- [x] `mise //cafleet:format`, `lint`, `typecheck`, and `test` are all green.
 
 ---
 
@@ -197,9 +197,13 @@ The broker/webui/multiplexer tests pass `fleet_id` as a Python argument to broke
 | Test target | Change |
 |---|---|
 | `tests/cli/test_fleet_flag.py` | Rewrite. Keep the missing-fleet-id custom-message test (invoke without `--fleet-id` → exit 1, custom message). Move `--fleet-id` after the subcommand in the flows-into-broker tests. **Replace** the two `…silently_accepted…` tests with removal guards: `db init` / `fleet create` reject `--fleet-id` in **both** the old global position and the per-subcommand position (exit 2, `no such option`). Add `test_old_surface_removed__global_fleet_id_no_longer_parses` (`cafleet --fleet-id 100 agent list` → exit 2, `no such option`), modeled on the existing `test_old_surface_removed__session_flag_and_group_no_longer_parse`. |
-| `tests/cli/test_agent.py`, `test_message.py`, `test_member*.py`, `test_monitor.py`, `test_fleet.py`, `test_doctor.py`, `test_server.py`, `test_compact_echo.py`, `test_message_truncation.py`, `test_fleet_bootstrap.py` | Move `--fleet-id <id>` from before the group to immediately after the leaf subcommand in every `runner.invoke(cli, [...])` arg list. |
+| `tests/cli/test_agent.py`, `test_message.py`, `test_member*.py`, `test_monitor.py`, `test_fleet.py`, `test_compact_echo.py`, `test_message_truncation.py`, `test_fleet_bootstrap.py` | Move `--fleet-id <id>` from before the group to immediately after the leaf subcommand in every `runner.invoke(cli, [...])` arg list. |
+| `tests/cli/test_doctor.py`, `test_server.py` | `doctor`/`server` reject `--fleet-id` (SC#4), so convert their silently-accepted invocations into both-position rejection guards (exit 2, `No such option`) rather than flag-moves. |
 | `tests/cli/test_client_command.py` | If its in-test harness group declares a global `--fleet-id`, switch the harness to the per-subcommand `fleet_id_option` shape; otherwise no change. |
-| `tests/broker/**`, `tests/webui/**`, `tests/multiplexer/**`, `tests/monitor/test_loop.py`, `tests/output/**`, `tests/db/**` | No change — verify none invoke the CLI with a global `--fleet-id`. |
+| `tests/cli/test_help_budget.py` | Bump the per-subcommand line budgets (+1 for every fleet-scoped subcommand — each gains one `--fleet-id` help line) and the aggregate byte budget (4480 → accommodate the measured ~5769). Do **not** shorten the spec-mandated `fleet_id_option` help string. |
+| `tests/cli/test_member_ping.py`, `tests/multiplexer/test_tmux.py` | Update the `send_poll_trigger` keystroke-payload assertions to the new shape (`cafleet message poll --fleet-id <s> --agent-id <m>`), paired with the `multiplexer/tmux.py` source change. `test_member_prompt_template.py` is shape-agnostic — no change. |
+| `tests/output/test_render_agent.py` | Move the one `--fleet-id` CLI invocation to the new shape (the Tests table's earlier "output no-change" assumption was wrong). |
+| `tests/broker/**`, `tests/webui/**`, `tests/monitor/test_loop.py`, `tests/db/**` | No change — verify none invoke the CLI with a global `--fleet-id`. |
 
 Per `removal.md`, the removal guards above test the **absence** of the old surface (Click's built-in `No such option`), which is allowed; no deprecation shims are added.
 
@@ -212,47 +216,52 @@ Per `removal.md`, the removal guards above test the **absence** of the old surfa
 
 ### Step 1: Documentation first (per `.claude/rules/design-doc-numbering.md`)
 
-- [ ] `docs/spec/cli-options.md`: Option Source Matrix — change Fleet ID source to a per-subcommand `--fleet-id <int>` option. <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: rewrite the "Why `--fleet-id` is a literal CLI flag" callout — keep the env-var-vs-flag rationale, replace the single-pattern/silently-ignored claims with the per-subcommand reality (one pattern per subcommand, canonical-order dependency, non-fleet subcommands reject it). <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: remove the `--fleet-id` row from **Global Options**; add a per-subcommand "Fleet ID (`--fleet-id`)" subsection mirroring `--agent-id`; update the Subcommand-summary note so the `--fleet-id` "no" rows read as "rejected" not "silently ignored". <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: doctor — remove the "`--fleet-id` silently accepted and ignored" row; server — rewrite the silently-accepted paragraph + the `cafleet --fleet-id 1 server` example to "not accepted". <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: update the agent/message/member/monitor section intros and **every** example command to the new flag position; add a `permissions.allow` subsection with the recommended per-subcommand pattern set, the `member exec` exclusion, the canonical-order caveat, and the `--json` companion-pattern note (global `--json` precedes the subcommand, so JSON invocations need `Bash(cafleet --json <grp> <cmd> --fleet-id *)` companions). <!-- completed: -->
-- [ ] `skills/cafleet/SKILL.md`: Required Flags table, Global Options section, the "Why literal flags, not env vars?" callout, and all command examples → new shape (only `--json`/`--version` global; `cafleet --fleet-id … <subcmd>` now fails). <!-- completed: -->
-- [ ] `skills/cafleet/reference/*.md` (`director.md`, `recovery.md`, `exec-routing.md`, `broadcast.md`, `output-flags.md`): rewrite every command example. <!-- completed: -->
-- [ ] `skills/cafleet/roles/director.md` + `roles/member.md`: rewrite command examples **and** the "flag placement" doctrine sentence (per the doctrine-class note in the Specification). <!-- completed: -->
-- [ ] `.claude/rules/bash-tool.md`: rewrite every `cafleet --fleet-id <s> …` example (member side `message send`; Director side `member ping` / `member exec`). <!-- completed: -->
-- [ ] `skills/cafleet-design-doc-create/roles/drafter.md`: rewrite the **"Flag placement"** doctrine paragraph (no longer global) and its examples; update `cafleet-design-doc-create` SKILL + `roles/director.md` + `roles/reviewer.md` examples and spawn-prompt templates — including the "flag placement" doctrine sentence in `roles/director.md` and `roles/reviewer.md` (not just their examples). <!-- completed: -->
-- [ ] Orchestration-skill catch-all: `grep -rn "cafleet --fleet-id" skills/` and rewrite every command example + spawn-prompt template across `cafleet-design-doc-execute`, `cafleet-design-doc-interview`, `cafleet-research-report`, `cafleet-research-presentation`, `cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision` to the new shape. <!-- completed: -->
-- [ ] docs/ examples: `get-started/quickstart.md`, `get-started/configure.md`, `concepts/data-model.md`, `concepts/member-lifecycle.md`, `concepts/monitoring.md`, `how-to/mixed-backend-team.md`, `how-to/monitor-and-recover.md`, `reference/coding-agents/codex.md`, `reference/coding-agents/opencode.md` — rewrite command examples. <!-- completed: -->
-- [ ] `README.md`: rewrite the `cafleet --fleet-id …` example to the new shape; run `/update-readme` if the surface change is material. <!-- completed: -->
-- [ ] Sweep for doctrine prose: `grep -rniE "global .*fleet-id|fleet-id.*global|before the subcommand|placed before" docs/ skills/ .claude/ CLAUDE.md` and rewrite each remaining hit. <!-- completed: -->
+- [x] `docs/spec/cli-options.md`: Option Source Matrix — change Fleet ID source to a per-subcommand `--fleet-id <int>` option. <!-- completed: 2026-06-14T09:13 -->
+- [x] `docs/spec/cli-options.md`: rewrite the "Why `--fleet-id` is a literal CLI flag" callout — keep the env-var-vs-flag rationale, replace the single-pattern/silently-ignored claims with the per-subcommand reality (one pattern per subcommand, canonical-order dependency, non-fleet subcommands reject it). <!-- completed: 2026-06-14T09:13 -->
+- [x] `docs/spec/cli-options.md`: remove the `--fleet-id` row from **Global Options**; add a per-subcommand "Fleet ID (`--fleet-id`)" subsection mirroring `--agent-id`; update the Subcommand-summary note so the `--fleet-id` "no" rows read as "rejected" not "silently ignored". <!-- completed: 2026-06-14T09:13 -->
+- [x] `docs/spec/cli-options.md`: doctor — remove the "`--fleet-id` silently accepted and ignored" row; server — rewrite the silently-accepted paragraph + the `cafleet --fleet-id 1 server` example to "not accepted". <!-- completed: 2026-06-14T09:13 -->
+- [x] `docs/spec/cli-options.md`: update the agent/message/member/monitor section intros and **every** example command to the new flag position; add a `permissions.allow` subsection with the recommended per-subcommand pattern set, the `member exec` exclusion, the canonical-order caveat, and the `--json` companion-pattern note (global `--json` precedes the subcommand, so JSON invocations need `Bash(cafleet --json <grp> <cmd> --fleet-id *)` companions). <!-- completed: 2026-06-14T09:13 -->
+- [x] `skills/cafleet/SKILL.md`: Required Flags table, Global Options section, the "Why literal flags, not env vars?" callout, and all command examples → new shape (only `--json`/`--version` global; `cafleet --fleet-id … <subcmd>` now fails). <!-- completed: 2026-06-14T09:18 -->
+- [x] `skills/cafleet/reference/*.md` (`director.md`, `recovery.md`, `exec-routing.md`, `broadcast.md`, `output-flags.md`): rewrite every command example. <!-- completed: 2026-06-14T09:18 -->
+- [x] `skills/cafleet/roles/director.md` + `roles/member.md`: rewrite command examples **and** the "flag placement" doctrine sentence (per the doctrine-class note in the Specification). <!-- completed: 2026-06-14T09:18 -->
+- [x] `.claude/rules/bash-tool.md`: rewrite every `cafleet --fleet-id <s> …` example (member side `message send`; Director side `member ping` / `member exec`). <!-- completed: 2026-06-14T09:36 (Director-owned: harness denies member edits under .claude/) -->
+- [x] `skills/cafleet-design-doc-create/roles/drafter.md`: rewrite the **"Flag placement"** doctrine paragraph (no longer global) and its examples; update `cafleet-design-doc-create` SKILL + `roles/director.md` + `roles/reviewer.md` examples and spawn-prompt templates — including the "flag placement" doctrine sentence in `roles/director.md` and `roles/reviewer.md` (not just their examples). <!-- completed: 2026-06-14T09:36 -->
+- [x] Orchestration-skill catch-all: `grep -rn "cafleet --fleet-id" skills/` and rewrite every command example + spawn-prompt template across `cafleet-design-doc-execute`, `cafleet-design-doc-interview`, `cafleet-research-report`, `cafleet-research-presentation`, `cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision` to the new shape. <!-- completed: 2026-06-14T09:36 -->
+- [x] docs/ examples: `get-started/quickstart.md`, `get-started/configure.md`, `concepts/data-model.md`, `concepts/member-lifecycle.md`, `concepts/monitoring.md`, `how-to/mixed-backend-team.md`, `how-to/monitor-and-recover.md`, `reference/coding-agents/codex.md`, `reference/coding-agents/opencode.md` — rewrite command examples. <!-- completed: 2026-06-14T09:36 (data-model.md is docs/spec/, schema-only — no flag-placement edits needed) -->
+- [x] `README.md`: rewrite the `cafleet --fleet-id …` example to the new shape; run `/update-readme` if the surface change is material. <!-- completed: 2026-06-14T09:36 -->
+- [x] Sweep for doctrine prose: `grep -rniE "global .*fleet-id|fleet-id.*global|before the subcommand|placed before" docs/ skills/ .claude/ CLAUDE.md` and rewrite each remaining hit. <!-- completed: 2026-06-14T09:36 -->
 
 ### Step 2: Code
 
-- [ ] `cli/_helpers.py`: add `_fleet_id_callback` + `fleet_id_option` (custom missing message, `type=int`, `expose_value=False`, sets `ctx.obj["fleet_id"]`). <!-- completed: -->
-- [ ] `cli/_helpers.py`: delete `require_fleet_id`; remove the `require_fleet_id(ctx)` call from the `client_command` wrapper. <!-- completed: -->
-- [ ] `cli/__init__.py`: remove the `--fleet-id` option and `fleet_id` param from `cli()`; keep `--json` + `--version`; `ctx.obj` no longer sets `fleet_id`. <!-- completed: -->
-- [ ] `cli/agent.py`: add `@fleet_id_option` to `register`, `list`, `show`, `deregister` — place it among the option decorators, mirroring the existing `--agent-id` decorator position (above `@click.pass_context` and the `@client_command` wrapper). The same stacking applies to `message.py`, `member.py`, and `monitor.py` below. <!-- completed: -->
-- [ ] `cli/message.py`: add `@fleet_id_option` to `send`, `broadcast`, `poll`, `ack`, `cancel`, `show`. <!-- completed: -->
-- [ ] `cli/member.py`: add `@fleet_id_option` to all 7 subcommands; remove the `require_fleet_id` import and the `require_fleet_id(ctx)` body lines (keep `fleet_id = ctx.obj["fleet_id"]`); note the `member create` error-precedence change. <!-- completed: -->
-- [ ] `cli/monitor.py`: add `@fleet_id_option` to `start`, `status`, `config`; remove the `require_fleet_id` import and body lines. <!-- completed: -->
-- [ ] Confirm `cli/fleet.py`, `cli/db.py`, `cli/doctor.py`, `cli/server.py` need no body change (none read `ctx.obj["fleet_id"]`) and now reject `--fleet-id` automatically. <!-- completed: -->
+- [x] `cli/_helpers.py`: add `_fleet_id_callback` + `fleet_id_option` (custom missing message, `type=int`, `expose_value=False`, sets `ctx.obj["fleet_id"]`). <!-- completed: 2026-06-14T10:37 -->
+- [x] `cli/_helpers.py`: delete `require_fleet_id`; remove the `require_fleet_id(ctx)` call from the `client_command` wrapper. <!-- completed: 2026-06-14T10:37 -->
+- [x] `cli/__init__.py`: remove the `--fleet-id` option and `fleet_id` param from `cli()`; keep `--json` + `--version`; `ctx.obj` no longer sets `fleet_id`. <!-- completed: 2026-06-14T10:37 -->
+- [x] `cli/agent.py`: add `@fleet_id_option` to `register`, `list`, `show`, `deregister` — place it among the option decorators, mirroring the existing `--agent-id` decorator position (above `@click.pass_context` and the `@client_command` wrapper). The same stacking applies to `message.py`, `member.py`, and `monitor.py` below. <!-- completed: 2026-06-14T10:37 -->
+- [x] `cli/message.py`: add `@fleet_id_option` to `send`, `broadcast`, `poll`, `ack`, `cancel`, `show`. <!-- completed: 2026-06-14T10:37 -->
+- [x] `cli/member.py`: add `@fleet_id_option` to all 7 subcommands; remove the `require_fleet_id` import and the `require_fleet_id(ctx)` body lines (keep `fleet_id = ctx.obj["fleet_id"]`); note the `member create` error-precedence change. <!-- completed: 2026-06-14T10:37 -->
+- [x] `cli/monitor.py`: add `@fleet_id_option` to `start`, `status`, `config`; remove the `require_fleet_id` import and body lines. <!-- completed: 2026-06-14T10:37 -->
+- [x] Confirm `cli/fleet.py`, `cli/db.py`, `cli/doctor.py`, `cli/server.py` need no body change (none read `ctx.obj["fleet_id"]`) and now reject `--fleet-id` automatically. <!-- completed: 2026-06-14T10:37 -->
+- [x] `cli/_prompt.py`: rewrite the `MEMBER_PROMPT_TEMPLATE` poll line to the new shape (`cafleet message poll --fleet-id {fleet_id} --agent-id {agent_id}`) so the default member spawn prompt keystrokes a command the post-change CLI accepts. <!-- completed: 2026-06-14T10:37 -->
+- [x] `cli/member.py`: rewrite the orphan-rollback warning's suggested command in `_deregister_with_warning` to the new shape (`cafleet agent deregister --fleet-id {fleet_id} --agent-id {new_agent_id}`). <!-- completed: 2026-06-14T10:37 -->
+- [x] `multiplexer/tmux.py`: rewrite the `send_poll_trigger` payload to the new shape (`cafleet message poll --fleet-id {fleet_id} --agent-id {agent_id}`) — the keystroke `member ping` and the monitor loop inject into agent panes. <!-- completed: 2026-06-14T10:37 -->
 
 ### Step 3: Tests
 
-- [ ] `tests/cli/test_fleet_flag.py`: rewrite per the Tests table — keep custom missing-message test; move flag position in flows-into-broker tests; replace the two `silently_accepted` tests with removal guards (db init / fleet create reject `--fleet-id` in both positions, exit 2); add `test_old_surface_removed__global_fleet_id_no_longer_parses`. <!-- completed: -->
-- [ ] `tests/cli/*.py` (agent, message, member*, monitor, fleet, doctor, server, compact_echo, message_truncation, fleet_bootstrap): move `--fleet-id` after the leaf subcommand in every `runner.invoke` arg list. <!-- completed: -->
-- [ ] `tests/cli/test_client_command.py`: update the in-test harness to the per-subcommand `fleet_id_option` shape if it declares a global `--fleet-id`; else leave unchanged. <!-- completed: -->
-- [ ] Confirm `tests/broker/**`, `tests/webui/**`, `tests/multiplexer/**`, `tests/monitor/test_loop.py`, `tests/output/**`, `tests/db/**` require no change (no CLI global `--fleet-id` invocations). <!-- completed: -->
+- [x] `tests/cli/test_fleet_flag.py`: rewrite per the Tests table — keep custom missing-message test; move flag position in flows-into-broker tests; replace the two `silently_accepted` tests with removal guards (db init / fleet create reject `--fleet-id` in both positions, exit 2); add `test_old_surface_removed__global_fleet_id_no_longer_parses`. <!-- completed: 2026-06-14T10:15 -->
+- [x] `tests/cli/*.py` (agent, message, member*, monitor, fleet, doctor, server, compact_echo, message_truncation, fleet_bootstrap): move `--fleet-id` after the leaf subcommand in every `runner.invoke` arg list. <!-- completed: 2026-06-14T10:15 -->
+- [x] `tests/cli/test_client_command.py`: update the in-test harness to the per-subcommand `fleet_id_option` shape if it declares a global `--fleet-id`; else leave unchanged. <!-- completed: 2026-06-14T10:15 -->
+- [x] Confirm `tests/broker/**`, `tests/webui/**`, `tests/monitor/test_loop.py`, `tests/db/**` require no change (no CLI global `--fleet-id` invocations). <!-- completed: 2026-06-14T10:15 -->
+- [x] Internal-keystroke payload assertions: update `tests/cli/test_member_ping.py::test_ping__keystrokes_escape_first`, `tests/multiplexer/test_tmux.py::test_send_poll_trigger__return_branches_and_argv`, and `tests/multiplexer/test_tmux_send_inline_preview.py::test_send_poll_trigger__keystroke_contract` to assert the new-shape payload (`cafleet message poll --fleet-id <s> --agent-id <m>`). `tests/cli/test_member_prompt_template.py` is shape-agnostic — no change. <!-- completed: 2026-06-14T10:20 -->
+- [x] `tests/cli/test_help_budget.py`: bump the fleet-scoped per-subcommand line budgets (+1 each; `member create` +2 — its wide option column wraps `--fleet-id` help to 2 lines) and the aggregate byte budget (4480 → 5800, measured 5769) for the new per-subcommand option; kept the spec-mandated help string. <!-- completed: 2026-06-14T10:37 -->
 
 ### Step 4: Verification
 
-- [ ] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck` all clean. <!-- completed: -->
-- [ ] `mise //cafleet:test` green. <!-- completed: -->
-- [ ] `mise //cafleet:install` (editable reinstall) so the new CLI surface is live for any manual/skill use. <!-- completed: -->
-- [ ] Repo grep (excluding `design-docs/`): `grep -rn "cafleet --fleet-id" docs/ skills/ README.md .claude/ CLAUDE.md` returns zero command-example hits; the doctrine-prose grep returns zero. <!-- completed: -->
-- [ ] Manual smoke: `cafleet agent list --fleet-id <id>` works; `cafleet --fleet-id <id> agent list` → exit 2 `No such option`; `cafleet db init --fleet-id <id>` → exit 2 `No such option`; omitting `--fleet-id` → custom message exit 1. <!-- completed: -->
-- [ ] Stage the design doc with the implementation commits (project git-workflow override: `design-docs/` is committed here). <!-- completed: -->
+- [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck` all clean. <!-- completed: 2026-06-14T10:40 -->
+- [x] `mise //cafleet:test` green. <!-- completed: 2026-06-14T10:40 (828 passed) -->
+- [x] `mise //cafleet:install` (editable reinstall) so the new CLI surface is live for any manual/skill use. <!-- completed: 2026-06-14T11:05 -->
+- [x] Repo grep (excluding `design-docs/`): `grep -rn "cafleet --fleet-id" docs/ skills/ README.md .claude/ CLAUDE.md` returns zero command-example hits; the doctrine-prose grep returns zero. <!-- completed: 2026-06-14T10:40 -->
+- [x] Manual smoke: `cafleet agent list --fleet-id <id>` works; `cafleet --fleet-id <id> agent list` → exit 2 `No such option`; `cafleet db init --fleet-id <id>` → exit 2 `No such option`; omitting `--fleet-id` → custom message exit 1. <!-- completed: 2026-06-14T11:05 (live-verified on the editable install) -->
+- [x] Stage the design doc with the implementation commits (project git-workflow override: `design-docs/` is committed here). <!-- completed: 2026-06-14T10:40 -->
 
 ---
 
@@ -261,3 +270,6 @@ Per `removal.md`, the removal guards above test the **absence** of the old surfa
 | Date | Changes |
 |------|---------|
 | 2026-06-14 | Initial draft |
+| 2026-06-14 | Director scope amendment during execution (Tester-surfaced): the original Step 2 list enumerated `--fleet-id` option *definitions* but omitted three internal command-string *emission* sites that hardcode the old shape and would break at runtime under the new surface — `cli/_prompt.py` (`MEMBER_PROMPT_TEMPLATE` poll line), `cli/member.py` (`_deregister_with_warning` suggested command), `multiplexer/tmux.py` (`send_poll_trigger` keystroke payload). Added 3 Step-2 tasks + 1 Step-3 task (update the two payload assertions in `test_member_ping.py` and `multiplexer/test_tmux.py`; `test_member_prompt_template.py` is shape-agnostic). Corrected the Tests table: `test_doctor.py`/`test_server.py` get rejection guards (not flag-moves) per SC#4; `tests/multiplexer/test_tmux.py` and `tests/output/test_render_agent.py` moved out of the "no change" row. Confirmed the Tester's three reconciliation decisions. Progress 32 → 36. |
+| 2026-06-14 | Programmer-surfaced escalation, Director-arbitrated: the 11 code tasks landed correctly (820/828 green) but `tests/cli/test_help_budget.py` (never in the Tests table) failed 8 cases — the spec-mandated `fleet_id_option` help string adds one `--help` line to every fleet-scoped subcommand, blowing the per-subcommand line budgets and the aggregate byte budget (5769 > 4480). Arbitration: keep the spec help string; bump the budgets (the per-subcommand option intrinsically grows help). Added 1 Step-3 task + a Tests-table row. Progress 36 → 37. |
+| 2026-06-14 | Implementation complete (37/37). All quality gates green (format/lint/typecheck, 828 tests) and live-smoke verified on the editable install. PR #120 opened. CI initially failed on a ruff-format drift (`tmux.py` slice-colon spacing under CI's freshly-resolved ruff vs the local stale `.venv` ruff) — fixed and pushed, CI green (lint/test/build). Copilot review (COMMENTED) raised 6 non-blocking comments, all the pre-existing repo-wide "UUID vs integer id" terminology issue — out of scope for this `--fleet-id` repositioning (≈13 files share the same wording; a partial fix would diverge), deferred to a dedicated cleanup per user direction. Status → Complete. |

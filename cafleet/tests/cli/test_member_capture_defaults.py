@@ -73,7 +73,7 @@ def _record_run(monkeypatch, *, returns: str = "") -> list[list[str]]:
 @pytest.mark.parametrize(
     ("scenario", "extra_args", "expected_argv_suffix"),
     [
-        ("default_no_flag_is_30", [], ["-S", "-30"]),
+        ("default_no_flag_is_20", [], ["-S", "-20"]),
         ("explicit_lines_overrides_default", ["--lines", "150"], ["-S", "-150"]),
         ("tail_alias_forwards_to_lines", ["--tail", "55"], ["-S", "-55"]),
     ],
@@ -86,10 +86,10 @@ def test_member_capture__default_lines_and_flag_aliases(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            sid,
             "member",
             "capture",
+            "--fleet-id",
+            sid,
             "--member-id",
             member_id,
             *extra_args,
@@ -138,10 +138,10 @@ def test_member_capture__ansi_handling(
     sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
-        "--fleet-id",
-        sid,
         "member",
         "capture",
+        "--fleet-id",
+        sid,
         "--member-id",
         member_id,
     ]
@@ -193,10 +193,10 @@ def test_member_capture__cr_defragmentation(
     sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
-        "--fleet-id",
-        sid,
         "member",
         "capture",
+        "--fleet-id",
+        sid,
         "--member-id",
         member_id,
     ]
@@ -219,18 +219,18 @@ def test_member_capture__json_envelope_post_processed_and_lines_default(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            sid,
             "--json",
             "member",
             "capture",
+            "--fleet-id",
+            sid,
             "--member-id",
             member_id,
         ],
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["lines"] == 30
+    assert payload["lines"] == 20
     assert "\x1b" not in payload["content"]
     assert "hello" not in payload["content"]
     assert "world" in payload["content"]

@@ -8,7 +8,7 @@ How the unified CAFleet CLI (`cafleet`) accepts configuration parameters.
 
 ## Subcommand summary
 
-One row per subcommand. "Identity flag" is the per-subcommand option naming the acting agent (`--agent-id`) or the target member (`--member-id`).
+One row per subcommand. "Identity flag" is the per-subcommand option naming the acting agent (`--agent-id`) or the target member (`--member-id`). In the `--fleet-id` column, **yes** means the flag is a required per-subcommand option (placed after the subcommand name); **no** means the subcommand rejects `--fleet-id` with `No such option`.
 
 | Subcommand | Purpose | `--fleet-id` | Identity flag | Section |
 |---|---|---|---|---|
@@ -46,12 +46,14 @@ Each parameter has exactly one input source:
 
 | Parameter | Source |
 |---|---|
-| Fleet ID | `--fleet-id <int>` global flag |
+| Fleet ID | `--fleet-id <int>` per-subcommand option (placed after the subcommand name) |
 | Database URL | `CAFLEET_DATABASE_URL` env var (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/cafleet.db` with `~` expanded at load time. When setting `CAFLEET_DATABASE_URL` yourself, use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs.) |
 | Agent ID | `--agent-id <int>` subcommand option |
 | JSON output | `--json` global flag |
 
-> **Why `--fleet-id` is a literal CLI flag, not an environment variable.** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `cafleet --fleet-id <int> ...` invocation matches a single `permissions.allow` pattern of the same shape across every subcommand for that fleet. Shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts that interrupt agent work. Substitute the literal integer ids printed by `cafleet fleet create` and `cafleet agent register` — do not use shell variables to hold them.
+> **Why `--fleet-id` is a literal CLI flag, not an environment variable.** Claude Code's `permissions.allow` matches Bash invocations as literal command strings. A literal `--fleet-id <int>` argument keeps the invocation a fixed string that an allow pattern can match; shell-expansion patterns (`export VAR=...` followed by `$VAR` substitution) break that matching and force per-invocation permission prompts that interrupt agent work. Substitute the literal integer ids printed by `cafleet fleet create` and `cafleet agent register` — do not use shell variables to hold them.
+>
+> Because `--fleet-id` is a **per-subcommand** option (placed immediately after the subcommand name), coverage uses **one `permissions.allow` pattern per subcommand** — see [`permissions.allow` coverage](#permissionsallow-coverage). Matching depends on the canonical flag order (`--fleet-id` first after the subcommand name); a different order (e.g. `--agent-id` before `--fleet-id`) does not match the pattern and prompts. Subcommands that do not need a fleet id (`db init`, `fleet *`, `server`, `doctor`) reject `--fleet-id` outright.
 
 Create a fleet first if you don't have one:
 
@@ -69,7 +71,6 @@ Placed **before** the subcommand:
 | Flag | Required | Notes |
 |---|---|---|
 | `--json` | no | Emit JSON output. JSON encoding is compact single-line JSON; non-ASCII (like the `…` truncation suffix) is emitted as UTF-8, not escaped. |
-| `--fleet-id <int>` | see the [Subcommand summary](#subcommand-summary) | Fleet identifier (integer, typed `int`; new fleets receive a DB-assigned id). Also called the namespace identifier. Passing a non-integer fails with Click's standard `Error: Invalid value for '--fleet-id': '<x>' is not a valid integer.` (exit 2). Silently accepted (and ignored) when supplied to subcommands that do not need it, so a single `permissions.allow` pattern of the form `cafleet --fleet-id <literal-id> *` works for every subcommand. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--fleet-id` requirement. |
 
 ### `--full` semantics (cross-subcommand escape hatch) {#full-semantics}
@@ -83,9 +84,57 @@ Placed **before** the subcommand:
 | `agent list` / `agent show` | One row per agent (`<id> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status`. `agent show` additionally emits `coding_agent` when the agent has a placement; `agent list` never does — it does not load placement data. | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never emit it. |
 | `member capture` | Default `--lines 30`; ANSI escape sequences stripped in post-process unless `--ansi` is supplied. | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `member capture` for surface consistency but is a no-op there. |
 
+## Fleet ID (`--fleet-id`)
+
+`--fleet-id` is a **per-subcommand option** (not a top-level option). It names the fleet the command acts on and is placed immediately **after** the subcommand name (the canonical position), ahead of the other flags — e.g. `cafleet message poll --fleet-id <id> --agent-id <id>`. It is typed `int`; a non-integer fails with Click's standard `Error: Invalid value for '--fleet-id': '<x>' is not a valid integer.` (exit 2). Every client/member/monitor leaf command that touches agents, messages, members, or the scheduler carries it; `db init`, `fleet *`, `server`, and `doctor` do **not** accept it and reject it with `No such option: --fleet-id`. Which subcommand takes it is in the [Subcommand summary](#subcommand-summary).
+
+Unlike `--agent-id` (which uses Click's built-in `required=True`), a missing `--fleet-id` is reported with a custom helpful message — `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1). The canonical flag order matters for `permissions.allow` matching — see [`permissions.allow` coverage](#permissionsallow-coverage).
+
 ## Agent ID (`--agent-id`)
 
 `--agent-id` is a **per-subcommand option** (not a global option). It identifies which agent is acting and must be specified on each invocation. It is typed `int`; a non-integer fails with Click's standard `Error: Invalid value for '--agent-id': '<x>' is not a valid integer.` (exit 2). The same `type=int` applies to every id option — `--to`, `--id` (`agent show`), `--member-id`, and `--task-id` — so each rejects a non-integer the same way. Ids are short by construction (DB-assigned integers, typically 1–4 digits), so they are pasted in full; there is no prefix resolution. Which subcommand takes which identity flag is in the [Subcommand summary](#subcommand-summary).
+
+## `permissions.allow` coverage
+
+Because `--fleet-id` is a per-subcommand option, coverage uses **one `permissions.allow` pattern per allow-listed subcommand**, each matching the canonical flag order (`--fleet-id` first after the subcommand name). Apply these to your user-level `~/.claude/settings.json` manually; the repo does **not** ship a committed `.claude/settings.json` permissions block.
+
+Recommended pattern set (19 patterns — the 20 leaf subcommands minus the deliberately excluded `member exec`):
+
+```
+Bash(cafleet agent register --fleet-id *)
+Bash(cafleet agent list --fleet-id *)
+Bash(cafleet agent show --fleet-id *)
+Bash(cafleet agent deregister --fleet-id *)
+Bash(cafleet message send --fleet-id *)
+Bash(cafleet message broadcast --fleet-id *)
+Bash(cafleet message poll --fleet-id *)
+Bash(cafleet message ack --fleet-id *)
+Bash(cafleet message cancel --fleet-id *)
+Bash(cafleet message show --fleet-id *)
+Bash(cafleet member create --fleet-id *)
+Bash(cafleet member delete --fleet-id *)
+Bash(cafleet member list --fleet-id *)
+Bash(cafleet member capture --fleet-id *)
+Bash(cafleet member send-input --fleet-id *)
+Bash(cafleet member ping --fleet-id *)
+Bash(cafleet monitor start --fleet-id *)
+Bash(cafleet monitor status --fleet-id *)
+Bash(cafleet monitor config --fleet-id *)
+```
+
+- **`member exec` is deliberately excluded** so it stays under `permissions.ask` (its positional command body is operator-controlled). Under the per-subcommand scheme the split is clean — `member exec` is simply not in the allow set, with no carve-out needed.
+- **Coverage depends on the canonical flag order.** `cafleet message poll --agent-id 234 --fleet-id 56` (fleet-id last) does **not** match `Bash(cafleet message poll --fleet-id *)` and prompts. Always write `--fleet-id` first, immediately after the subcommand name.
+- **`--json` invocations need companion patterns.** `--json` is a top-level option (it precedes the subcommand name), so `cafleet --json message poll --fleet-id 56 ...` does **not** match `Bash(cafleet message poll --fleet-id *)` — the leading `--json` breaks the prefix. The canonical JSON shape is `cafleet --json <grp> <cmd> --fleet-id <id>`; mint one companion per subcommand an agent actually runs with `--json`:
+
+```
+Bash(cafleet --json agent register --fleet-id *)
+Bash(cafleet --json agent list --fleet-id *)
+Bash(cafleet --json message poll --fleet-id *)
+Bash(cafleet --json message send --fleet-id *)
+Bash(cafleet --json message ack --fleet-id *)
+Bash(cafleet --json member create --fleet-id *)
+Bash(cafleet --json member list --fleet-id *)
+```
 
 ## Message Body Truncation
 
@@ -116,8 +165,8 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split.
 
 ```bash
-cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>          # default: text truncated to 200 cp + "…"
-cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id> --full   # full body
+cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>          # default: text truncated to 200 cp + "…"
+cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id> --full   # full body
 ```
 
 This applies to CLI emit sites only. FastAPI `/api/*` responses (see [webui-api.md](./webui-api.md)) are unchanged — the WebUI is human-facing and renders full bodies. `agent.description`, `skills[].description`, `agent_card_json` sub-fields, and `member capture` content are also untouched.
@@ -194,7 +243,7 @@ administrator:    <administrator_agent_id>
 
 `placement.director_agent_id` is `null` because the root Director has no parent. `placement.coding_agent` is the value of `--coding-agent` (default `"claude"`); operators running the codex CLI in the calling pane should pass `--coding-agent codex` so the placement metadata is accurate. cafleet does not spawn the root Director's coding-agent process and cannot auto-detect what is running in the calling pane.
 
-Attempting `cafleet --fleet-id <fleet_id> agent deregister --agent-id <director_agent_id>` is rejected by the broker with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` and exits 1. Attempting `cafleet --fleet-id <fleet_id> agent deregister --agent-id <administrator_agent_id>` is rejected with `Error: Administrator cannot be deregistered` (exit 1).
+Attempting `cafleet agent deregister --fleet-id <fleet_id> --agent-id <director_agent_id>` is rejected by the broker with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` and exits 1. Attempting `cafleet agent deregister --fleet-id <fleet_id> --agent-id <administrator_agent_id>` is rejected with `Error: Administrator cannot be deregistered` (exit 1).
 
 ### `fleet list`
 
@@ -255,8 +304,7 @@ Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--json` | no | Global `--json`, placed before the subcommand (same pattern as every other CLI command). |
-| `--fleet-id` | no | Silently accepted and ignored, matching `db init` / `fleet *` / `server`. |
+| `--json` | no | Top-level `--json`, written ahead of the subcommand name (same pattern as every other CLI command). |
 
 Environment requirements:
 
@@ -297,7 +345,7 @@ Exit codes:
 
 Starts the admin WebUI FastAPI app (the same app served by `mise //cafleet:dev`) via uvicorn. CLI commands do not require this server to be running — it is only needed when a user wants to view the WebUI at `/` or hit the `/api/*` endpoints from a browser.
 
-`cafleet server` does NOT require `--fleet-id`. Supplying `--fleet-id` is silently accepted and ignored, matching the `db init` / `fleet *` pattern.
+`cafleet server` does NOT accept `--fleet-id`. Supplying it exits 2 with `No such option: --fleet-id`, matching the `db init` / `fleet *` / `doctor` pattern.
 
 | Flag | Default | Notes |
 |---|---|---|
@@ -335,13 +383,13 @@ cafleet server --host 0.0.0.0 --port 9000
 # Override via env vars
 CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 
-# --fleet-id is silently accepted and ignored
-cafleet --fleet-id 1 server
+# --fleet-id is not accepted: exits 2 with "No such option: --fleet-id"
+cafleet server --fleet-id 1
 ```
 
 ## `cafleet agent` — Agent Registry
 
-All four subcommands require the global `--fleet-id`. The default-vs-`--full`
+All four subcommands require the per-subcommand `--fleet-id`. The default-vs-`--full`
 output projection shared by `agent list` and `agent show` is documented in
 [`--full` semantics](#full-semantics) and is not restated per subcommand.
 
@@ -379,7 +427,7 @@ protected — see [Error Messages](#error-messages).
 |---|---|---|
 | `--full` | no | See [`--full` semantics](#full-semantics). |
 
-No identity flag — the listing is scoped by the global `--fleet-id` alone.
+No identity flag — the listing is scoped by the per-subcommand `--fleet-id` alone.
 Default text output is one `<agent_id> <name> <status>` line per agent,
 blank-line separated; an empty fleet prints `No agents found.`:
 
@@ -406,7 +454,7 @@ Default text output is the same one-line `<agent_id> <name> <status>` row as
 
 ## `cafleet message` — Message Broker
 
-All six subcommands require the global `--fleet-id` and act as `--agent-id`.
+All six subcommands require the per-subcommand `--fleet-id` and act as `--agent-id`.
 The task envelope schema is canonical in
 [Message envelope](./message-envelope.md); body truncation and the
 `--full` / `--quiet` flags are canonical in
@@ -482,7 +530,7 @@ Text output is the compact envelope alone.
 
 ## Member Commands
 
-The `cafleet member` subgroup manages tmux-backed member agents and must be run inside a tmux session. `member create` takes `--agent-id` (the spawning Director's agent ID, validated to equal the fleet root); the other subcommands identify their target by `--member-id`, scoped to the global `--fleet-id`.
+The `cafleet member` subgroup manages tmux-backed member agents and must be run inside a tmux session. `member create` takes `--agent-id` (the spawning Director's agent ID, validated to equal the fleet root); the other subcommands identify their target by `--member-id`, scoped to the per-subcommand `--fleet-id`.
 
 ### `member create`
 
@@ -581,7 +629,7 @@ Recovery: inspect with `cafleet member capture`, answer any prompt with `cafleet
 
 ### `member list`
 
-Lists every member of the fleet identified by the global `--fleet-id`. The root Director is never surfaced in the output.
+Lists every member of the fleet identified by the per-subcommand `--fleet-id`. The root Director is never surfaced in the output.
 
 | Flag | Required | Notes |
 |---|---|---|
@@ -590,7 +638,7 @@ Lists every member of the fleet identified by the global `--fleet-id`. The root 
 #### `member list --activity` output {#member-list-activity-output}
 
 ```
-cafleet --fleet-id 1 member list --activity
+cafleet member list --fleet-id 1 --activity
 3 members:
   agent_id        name      status  last_sent  last_recv  last_ack   idle
   --------------  --------  ------  ---------  ---------  ---------  -----
@@ -612,7 +660,7 @@ cafleet --fleet-id 1 member list --activity
 
 ### Member targeting and key delivery
 
-`member send-input`, `member exec`, and `member ping` all target a member by `--member-id` (scoped to the global `--fleet-id`) and deliver keystrokes into that member's tmux pane. They share the resolution, key-delivery, and exit-code rules below; each subcommand's own section documents only its unique flags, key sequence, validation, and output.
+`member send-input`, `member exec`, and `member ping` all target a member by `--member-id` (scoped to the per-subcommand `--fleet-id`) and deliver keystrokes into that member's tmux pane. They share the resolution, key-delivery, and exit-code rules below; each subcommand's own section documents only its unique flags, key sequence, validation, and output.
 
 #### Member resolution
 
@@ -710,7 +758,7 @@ The canonical three-beat workflow (`member capture` → AskUserQuestion → `mem
 Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane so the coding agent's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). All three backends (`claude`, `codex`, and `opencode`) honor the leading-`!` shortcut on their input line, so `member exec` works against any backend without modification. The fallback path for the bash-via-Director protocol — see [Bash routing](../concepts/bash-routing.md).
 
 ```bash
-cafleet --fleet-id <fleet-id> member exec \
+cafleet member exec --fleet-id <fleet-id> \
   --member-id <member-agent-id> "git log -1 --oneline"
 ```
 
@@ -765,10 +813,10 @@ See [Member targeting and key delivery](#member-targeting-and-key-delivery) for 
 
 ### `member ping`
 
-Director-only manual inbox-poll nudge. Keystrokes `Esc` → `cafleet --fleet-id <fleet-id> message poll --agent-id <member-id>` → `Enter` into the member's pane so the member drains its inbox via a normal poll. The leading `Esc` is the same safeguard the monitor loop applies (it reuses the `send_poll_trigger` helper): if the member's pane is sitting on a pending permission-approval prompt, the `Esc` dismisses it so the trailing `Enter` cannot blindly confirm it. This is the manual re-poke for a pane that missed the broker's automatic on-delivery notification — which keystrokes a 2-line inline preview (not a poll command) — so the two keystroke paths are distinct. As an operator-driven entry-point, failures surface as exit 1 (the auto-fire path swallows failures silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
+Director-only manual inbox-poll nudge. Keystrokes `Esc` → `cafleet message poll --fleet-id <fleet-id> --agent-id <member-id>` → `Enter` into the member's pane so the member drains its inbox via a normal poll. The leading `Esc` is the same safeguard the monitor loop applies (it reuses the `send_poll_trigger` helper): if the member's pane is sitting on a pending permission-approval prompt, the `Esc` dismisses it so the trailing `Enter` cannot blindly confirm it. This is the manual re-poke for a pane that missed the broker's automatic on-delivery notification — which keystrokes a 2-line inline preview (not a poll command) — so the two keystroke paths are distinct. As an operator-driven entry-point, failures surface as exit 1 (the auto-fire path swallows failures silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
 
 ```bash
-cafleet --fleet-id <fleet-id> member ping \
+cafleet member ping --fleet-id <fleet-id> \
   --member-id <member-agent-id>
 ```
 
@@ -780,7 +828,7 @@ cafleet --fleet-id <fleet-id> member ping \
 
 | Invocation | tmux calls issued in order |
 |---|---|
-| `member ping` | Sends `Escape`, settles ~0.1 s, then types `cafleet --fleet-id <fleet-id> message poll --agent-id <member-id>` + `Enter` into the pane. |
+| `member ping` | Sends `Escape`, settles ~0.1 s, then types `cafleet message poll --fleet-id <fleet-id> --agent-id <member-id>` + `Enter` into the pane. |
 
 #### Validation rules
 
@@ -821,7 +869,7 @@ See [Member targeting and key delivery](#member-targeting-and-key-delivery) for 
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
-The `cafleet monitor` subgroup is the per-fleet scheduler that wakes the Director and the monitoring member on a fixed cadence — the heartbeat behind a Director's supervision loop. All three subcommands require the global `--fleet-id`. `start` runs the loop in-process (the fleet's dedicated **monitoring member** launches it as a **background task** in its own pane and owns its lifetime); `status` and `config` view and edit the schedule. The conceptual model (heartbeat-vs-facilitation boundary, the director-vs-monitoring-member keystroke split, the `Esc`-safeguarded keystrokes, the tick-precision floor, single-instance via the DB heartbeat) is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
+The `cafleet monitor` subgroup is the per-fleet scheduler that wakes the Director and the monitoring member on a fixed cadence — the heartbeat behind a Director's supervision loop. All three subcommands require the per-subcommand `--fleet-id`. `start` runs the loop in-process (the fleet's dedicated **monitoring member** launches it as a **background task** in its own pane and owns its lifetime); `status` and `config` view and edit the schedule. The conceptual model (heartbeat-vs-facilitation boundary, the director-vs-monitoring-member keystroke split, the `Esc`-safeguarded keystrokes, the tick-precision floor, single-instance via the DB heartbeat) is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
 
 There is no `monitor stop` command and no detached process: stop the loop by stopping the monitoring member's background task (or deleting the monitoring member), and the loop also self-terminates when the fleet is torn down. Launching/stopping the loop is **CLI-only** by nature; the schedule-view and schedule-edit surfaces are at WebUI/CLI parity ([WebUI API](./webui-api.md)).
 
@@ -839,7 +887,7 @@ Exit codes: `0` clean exit (signalled, or the fleet was torn down); `1` already 
 
 ### `monitor status`
 
-No flags beyond the global `--fleet-id`. Reports runtime liveness derived from the DB heartbeat (true even when the process died silently) plus the per-agent schedule table.
+No flags beyond the per-subcommand `--fleet-id`. Reports runtime liveness derived from the DB heartbeat (true even when the process died silently) plus the per-agent schedule table.
 
 Text output:
 

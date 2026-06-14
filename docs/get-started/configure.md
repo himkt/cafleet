@@ -95,20 +95,13 @@ sequence — Codex's `prefix_rule` is a positional prefix matcher, so a broad
 `["cafleet"]` allow would also cover `cafleet member exec`. Enumerating the
 safe subgroups explicitly keeps the `member exec` prompt rule effective.
 
-The `cafleet --fleet-id <int> <subgroup> …` invocations also need to be
-allowed; since `--fleet-id` and its integer value sit between `cafleet` and the
-subgroup name, add a per-fleet allow for the specific fleet ids you use:
-
-```text
-prefix_rule(pattern = ["cafleet", "--fleet-id", "<your-fleet-id>"], decision = "allow")
-prefix_rule(pattern = ["cafleet", "--fleet-id", "<your-fleet-id>", "member", "exec"],
-            decision = "prompt",
-            justification = "cafleet member exec runs arbitrary commands on a member")
-```
-
-Repeat the pair for every fleet id you operate. The per-fleet prompt
-rule is more specific than the per-fleet allow, so `member exec` keeps
-prompting even with the broader allow in place.
+Because `--fleet-id` is a per-subcommand option — a trailing argument after the
+subcommand name (e.g. `cafleet message send --fleet-id <int> ...`) — the
+positional `prefix_rule`s above already cover every fleet-scoped invocation: the
+fleet id sits past the matched prefix, so no per-fleet rule is needed.
+`cafleet member exec --fleet-id <int> ...` still matches the
+`["cafleet", "member", "exec"]` prompt rule (the prefix is matched before the
+trailing `--fleet-id`), so `member exec` keeps prompting.
 
 ## Opencode
 

@@ -161,10 +161,10 @@ def _invoke(runner, fleet_id, *extra_args):
     return runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "member",
             "delete",
+            "--fleet-id",
+            str(fleet_id),
             "--member-id",
             str(MEMBER_ID),
             *extra_args,
@@ -176,11 +176,11 @@ def _invoke_json(runner, fleet_id, *extra_args):
     return runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "--json",
             "member",
             "delete",
+            "--fleet-id",
+            str(fleet_id),
             "--member-id",
             str(MEMBER_ID),
             *extra_args,

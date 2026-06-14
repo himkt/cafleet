@@ -13,7 +13,7 @@ For the multi-backend overview and selection rules, see the [Coding agents](../.
 An opencode member is a cafleet member whose `agent_placements.coding_agent` value is `"opencode"`. The Director selects the backend at member-create time:
 
 ```bash
-cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Opencode-A --description "<one-sentence purpose>" --coding-agent opencode
 ```
 
@@ -47,7 +47,7 @@ Skip-if-exists means a CAFleet upgrade that improves the deny-list (e.g. a new w
 
 ```bash
 rm ~/.opencode/agents/cafleet.md
-cafleet --fleet-id <fleet-id> member create --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Opencode-Refresh --description "preset refresh" --coding-agent opencode
 ```
 
@@ -70,10 +70,10 @@ If `~/.opencode/agents/cafleet.md` cannot be written (e.g. `$HOME` is read-only,
 Opencode members cannot load Claude Code skills, so their spawn prompt points them at this page instead. The same cafleet CLI surface works from an opencode pane unchanged:
 
 ```bash
-cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>
-cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
+cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
+cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <director-agent-id> --text "..."
-cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
 ```
 
 Members substitute the literal ids from their spawn prompt; there is no env-var fallback.
@@ -116,30 +116,30 @@ cafleet fleet create --label opencode-smoke --coding-agent claude
 # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
 # Note the fleet and Director ids — the steps below use 1 and 2.
 
-cafleet --fleet-id 1 member create --agent-id 2 \
+cafleet member create --fleet-id 1 --agent-id 2 \
   --name Opencode-Smoke --description "opencode smoke member" --coding-agent opencode
 # Expect: ~/.opencode/agents/cafleet.md is materialized with the
 # cafleet preset (cat it and verify the JSON frontmatter).
 
-cafleet --fleet-id 1 member list
+cafleet member list --fleet-id 1
 # Expect: backend column shows 'opencode' for the smoke member.
 
-cafleet --fleet-id 1 message send --agent-id 2 \
+cafleet message send --fleet-id 1 --agent-id 2 \
   --to 4 --text "ping"
 # Expect: the opencode pane receives the inline preview and the member ack-loops.
 
-cafleet --fleet-id 1 member exec \
+cafleet member exec --fleet-id 1 \
   --member-id 4 "git status --short"
 # Expect: '! git status --short' lands in the opencode pane and the
 # command runs.
 
-cafleet --fleet-id 1 member exec \
+cafleet member exec --fleet-id 1 \
   --member-id 4 "curl https://example.com"
 # Expect: the deny-list blocks the curl command. If it does NOT, the
 # safety floor is broken — STOP and re-run the agent-load smoke from
 # the design doc's Step 0 GATE.
 
-cafleet --fleet-id 1 member delete --member-id 4
+cafleet member delete --fleet-id 1 --member-id 4
 cafleet fleet delete 1
 ```
 

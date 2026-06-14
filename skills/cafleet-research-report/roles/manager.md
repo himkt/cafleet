@@ -32,14 +32,14 @@ You do NOT speak to the user directly. All communication goes through the Direct
 **Sending a message to the Director** (spawn requests, contradiction flags, completion reports):
 
 ```bash
-cafleet --fleet-id [fleet-id] message send --agent-id [my-agent-id] \
+cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
   --to [director-agent-id] \
   --text "[your report, spawn request, or question]"
 ```
 
 Substitute the literal `[fleet-id]`, `[my-agent-id]`, and `[director-agent-id]` UUIDs that were baked into your spawn prompt. Never use shell variables — `permissions.allow` matches command strings literally.
 
-**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet --fleet-id [fleet-id] message poll --agent-id [my-agent-id]` into your pane via tmux push notification, so the keystroke arrives as your next turn. Every entry in the poll output carries an `id:` line — that UUID is the cafleet message-task id (called `[task-id]` because cafleet internally models messages as tasks; **distinct from** the harness `taskId` you use with `TaskCreate / TaskUpdate` for sub-topic tracking). After acting on the polled message, ack it via `cafleet --fleet-id [fleet-id] message ack --agent-id [my-agent-id] --task-id [task-id]`. Un-acked messages re-surface on every subsequent `message poll` cycle.
+**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet message poll --fleet-id [fleet-id] --agent-id [my-agent-id]` into your pane via tmux push notification, so the keystroke arrives as your next turn. Every entry in the poll output carries an `id:` line — that UUID is the cafleet message-task id (called `[task-id]` because cafleet internally models messages as tasks; **distinct from** the harness `taskId` you use with `TaskCreate / TaskUpdate` for sub-topic tracking). After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]`. Un-acked messages re-surface on every subsequent `message poll` cycle.
 
 **Pane silence is normal.** After sending a message you sit at the prompt until the Director replies. That is the expected flow — do not try to "check in" or send status pings. Work resumes when a new message arrives.
 

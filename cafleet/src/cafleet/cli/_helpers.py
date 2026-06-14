@@ -26,12 +26,28 @@ def director_member_options(func):
     )(func)
 
 
-def require_fleet_id(ctx: click.Context) -> None:
-    if ctx.obj["fleet_id"] is None:
+def _fleet_id_callback(
+    ctx: click.Context, param: click.Parameter, value: int | None
+) -> int:
+    if value is None:
         raise click.ClickException(
             "--fleet-id <int> is required for this subcommand. "
             "Create a fleet with 'cafleet fleet create' and pass its id."
         )
+    ctx.ensure_object(dict)
+    ctx.obj["fleet_id"] = value
+    return value
+
+
+fleet_id_option = click.option(
+    "--fleet-id",
+    "fleet_id",
+    type=int,
+    default=None,
+    callback=_fleet_id_callback,
+    expose_value=False,
+    help="Fleet ID (integer); required for this subcommand.",
+)
 
 
 def client_command(
@@ -65,7 +81,6 @@ def client_command(
     def decorator(func):
         @functools.wraps(func)
         def wrapper(ctx, *args, **kwargs):
-            require_fleet_id(ctx)
             fleet_id = ctx.obj["fleet_id"]
             try:
                 if requires_agent_fleet:

@@ -243,12 +243,12 @@ class Multiplexer(Protocol):
         """
         ...
 
-    def capture_pane(self, *, target_pane_id: str, lines: int = 30) -> str:
+    def capture_pane(self, *, target_pane_id: str, lines: int = 20) -> str:
         """Return the last ``lines`` of the pane's visible buffer as text.
 
         Args:
             target_pane_id: Pane id to capture from.
-            lines: Number of trailing lines to capture (default 30).
+            lines: Number of trailing lines to capture (default 20).
 
         Returns:
             Captured pane text, newline-joined.

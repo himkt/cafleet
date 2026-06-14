@@ -27,7 +27,7 @@ cafleet --json message poll --agent-id <m> --full
 On `message send`, `message ack`, and `member ping`: emit only the new task id on stdout, nothing else. Mutually exclusive with `--full`. Useful for scripted loops where the rest of the echo is noise.
 
 ```bash
-cafleet --fleet-id <s> message send --agent-id <m> --to <r> --text "..." --quiet
+cafleet message send --fleet-id <s> --agent-id <m> --to <r> --text "..." --quiet
 # → 42
 ```
 

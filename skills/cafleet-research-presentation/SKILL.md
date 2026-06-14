@@ -23,7 +23,7 @@ For autonomous Slidev generation, see `my-slidev/SKILL.md` § Spawnable Agents �
 
 ## Architecture
 
-The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns every member via `cafleet --fleet-id [fleet-id] member create --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications).
+The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns every member via `cafleet member create --fleet-id [fleet-id] --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications).
 
 ```text
 User
@@ -40,7 +40,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays.
 
-> **Literal-UUID flag rule** — every `cafleet ...` invocation carries the literal `fleet_id` and `agent_id` UUIDs as flags (not shell variables). `--fleet-id` is global (before the subcommand); `--agent-id` is a per-subcommand option (after the subcommand name). See the `cafleet` skill for the full convention.
+> **Literal-UUID flag rule** — every `cafleet ...` invocation carries the literal `fleet_id` and `agent_id` UUIDs as flags (not shell variables). `--fleet-id` and `--agent-id` are per-subcommand options (after the subcommand name). See the `cafleet` skill for the full convention.
 
 > Never store IDs in shell variables — substitute the UUIDs printed by `cafleet fleet create` and `cafleet member create` directly into every `cafleet ...` call.
 
@@ -98,7 +98,7 @@ cafleet --json fleet create --label "present-[topic-slug]"
 
 #### 1b. Start the monitor BEFORE the first `cafleet member create` call
 
-Per the `cafleet-agent-team-monitoring` skill, run the monitor as a background task with `cafleet --fleet-id [fleet-id] monitor start` before spawning so the heartbeat is running while spawning completes (confirm with `cafleet --fleet-id [fleet-id] monitor status`). Expected deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
+Per the `cafleet-agent-team-monitoring` skill, run the monitor as a background task with `cafleet monitor start --fleet-id [fleet-id]` before spawning so the heartbeat is running while spawning completes (confirm with `cafleet monitor status --fleet-id [fleet-id]`). Expected deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -143,8 +143,8 @@ FIGURE BASE:      [INSERT <folder>]    (substitute literally for the FIGURE_BASE
 OUTPUT:           [INSERT <folder>/slide.md]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
 
 When complete, send the file path to the Director via cafleet message send.
 ```
@@ -156,7 +156,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --fleet-id [fleet-id] --json member create --agent-id [director-agent-id] \
+   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "presentation" \
      --description "Authors slide.md" \
      --prompt-file ${BASE}/prompts/presentation-<UTC-compact>.md
@@ -185,8 +185,8 @@ LANGUAGE: [INSERT language detected from report.md]
 OUTPUT:   [INSERT <folder>/transcript.md]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
 
 When complete, send the file path to the Director via cafleet message send.
 ```
@@ -198,7 +198,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --fleet-id [fleet-id] --json member create --agent-id [director-agent-id] \
+   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "transcript" \
      --description "Authors transcript.md" \
      --prompt-file ${BASE}/prompts/transcript-<UTC-compact>.md
@@ -211,16 +211,16 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
 Read the output files (`${FOLDER}/slide.md`, `${FOLDER}/transcript.md`) and review using the tag criteria in [roles/director.md](roles/director.md). Send tagged feedback via `cafleet message send`; members revise and reply. See [roles/director.md](roles/director.md) for revision approach and iteration limits.
 
 ```bash
-cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
+cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
   --to [presentation-agent-id] \
   --text "slide revisions: [SLIDE STRUCTURE] ... / [VISUAL] ... / ..."
 
-cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
+cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
   --to [transcript-agent-id] \
   --text "transcript revisions: [FLOW] ... / [TIMING] ... / ..."
 ```
 
-Each polled inbound message MUST be `ack`ed via `cafleet --fleet-id [fleet-id] message ack --agent-id [director-agent-id] --task-id <task-id>` after acting on it.
+Each polled inbound message MUST be `ack`ed via `cafleet message ack --fleet-id [fleet-id] --agent-id [director-agent-id] --task-id <task-id>` after acting on it.
 
 Once the slide deck is finalized, send the finalized slide structure to the Transcript member for 1:1 realignment.
 
@@ -263,19 +263,19 @@ while start <= total_slides:
         wait for report from VR for round <vr_round> via cafleet message poll arrival
         if no issues: break
         if vr_round >= 3: break                # max 2 re-check rounds reached; remaining issues escalate to user in Step 4
-        cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
+        cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
             --to [presentation-agent-id] --text "<tagged issues>"   # fix
         vr_round += 1
-        cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
+        cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
             --to [vr-batch-agent-id] --text "ROUND: <vr_round>\nRe-check slides: <list>"
         # VR writes the next capture to `vr<start>-r<vr_round>-p<slide_number>.png` and
         # the next persisted report to `vr<start>-r<vr_round>.md`, preserving prior rounds
 
     # Explicit close handshake before delete: the VR cannot reliably run extra commands after /exit.
-    cafleet --fleet-id [fleet-id] message send --agent-id [director-agent-id] \
+    cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
         --to [vr-batch-agent-id] --text "CLOSE: run `bun run agent-browser --session vr-batch-<start> close`, then reply 'closed'."
     wait for the VR's "closed" confirmation via cafleet message poll
-    cafleet --fleet-id [fleet-id] member delete --member-id [vr-batch-agent-id]
+    cafleet member delete --fleet-id [fleet-id] --member-id [vr-batch-agent-id]
     start = end + 1
 ```
 
@@ -303,8 +303,8 @@ CHECK SLIDES:    [INSERT <start> to <end>]
 ROUND:           [INSERT <round>]
 
 COMMUNICATION PROTOCOL:
-- Report to Director: cafleet --fleet-id {fleet_id} message send --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet --fleet-id {fleet_id} message ack --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
+- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
 
 When complete, persist the report to <folder>/screenshots/vr<start>-r<round>.md and send it to the Director via cafleet message send.
 ```
@@ -316,7 +316,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern. Each VR 
 3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
 
    ```bash
-   cafleet --fleet-id [fleet-id] --json member create --agent-id [director-agent-id] \
+   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "vr-batch-<start>" \
      --description "Visual Reviewer for slides <start>..<end>" \
      --prompt-file ${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md
@@ -348,12 +348,12 @@ Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Orde
 1. **Stop the monitor's background task** (there is no `monitor stop` command). The monitor must stop BEFORE any member is deleted; a monitor that keeps keystroking polls into a tearing-down fleet races with member-delete.
 2. **Delete every member** — Presentation, Transcript, and any active VR batch. For any active VR batch, run the explicit close handshake first (Director sends `CLOSE:` via `cafleet message send`, VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`), THEN run `cafleet member delete`. Once all VR browser sessions are closed:
    ```bash
-   cafleet --fleet-id [fleet-id] member delete --member-id [presentation-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --member-id [transcript-agent-id]
-   cafleet --fleet-id [fleet-id] member delete --member-id [vr-batch-agent-id]   # if still alive — only after the close handshake
+   cafleet member delete --fleet-id [fleet-id] --member-id [presentation-agent-id]
+   cafleet member delete --fleet-id [fleet-id] --member-id [transcript-agent-id]
+   cafleet member delete --fleet-id [fleet-id] --member-id [vr-batch-agent-id]   # if still alive — only after the close handshake
    ```
    Each call sends `/exit` and waits up to 15 s for the pane's `claude` process to exit. Do not rely on `/exit` to trigger any post-shutdown action — additional commands are not guaranteed to run after `/exit` arrives.
-3. **Verify the roster is empty**: `cafleet --fleet-id [fleet-id] member list` must return zero members.
+3. **Verify the roster is empty**: `cafleet member list --fleet-id [fleet-id]` must return zero members.
 4. **Run the agent-browser safety net** to close any orphan browser sessions left behind:
    ```bash
    bun run agent-browser close --all

@@ -415,7 +415,7 @@ def test_send_poll_trigger__return_branches_and_argv(
                 "-t",
                 "%7",
                 "-l",
-                "cafleet --fleet-id sess-001 message poll --agent-id agent-001",
+                "cafleet message poll --fleet-id sess-001 --agent-id agent-001",
             ],
             ["tmux", "send-keys", "-t", "%7", "Enter"],
         ]

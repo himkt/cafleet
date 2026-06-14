@@ -21,21 +21,29 @@ def uvicorn_recorder(monkeypatch):
     return captured
 
 
-def test_server_help__shows_host_port_and_fleet_id_accepted_silently():
+def test_server_help__shows_host_port():
     runner = CliRunner()
-    no_fleet_result = runner.invoke(cli, ["server", "--help"])
-    assert no_fleet_result.exit_code == 0
-    assert "--host" in no_fleet_result.output
-    assert "--port" in no_fleet_result.output
-    assert "is required" not in no_fleet_result.output
+    result = runner.invoke(cli, ["server", "--help"])
+    assert result.exit_code == 0
+    assert "--host" in result.output
+    assert "--port" in result.output
+    assert "is required" not in result.output
 
-    # --fleet-id is silently accepted and ignored on `server`.
+
+def test_server_rejects_fleet_id__rejected_in_both_positions(uvicorn_recorder):
+    """``server`` does not accept ``--fleet-id`` in either position — Click
+    rejects it with its standard 'no such option' error (exit 2). The
+    ``uvicorn_recorder`` fixture stubs ``uvicorn.run`` so a mis-accepted flag
+    cannot actually launch the server."""
+    runner = CliRunner()
     sid = "100"
-    with_fleet = runner.invoke(cli, ["--fleet-id", sid, "server", "--help"])
-    assert with_fleet.exit_code == 0
-    out_lower = with_fleet.output.lower()
-    for forbidden in ("unused", "unexpected", "no such option"):
-        assert forbidden not in out_lower
+    global_pos = runner.invoke(cli, ["--fleet-id", sid, "server"])
+    assert global_pos.exit_code == 2, global_pos.output
+    assert "no such option" in (global_pos.output or "").lower()
+
+    per_subcommand = runner.invoke(cli, ["server", "--fleet-id", sid])
+    assert per_subcommand.exit_code == 2, per_subcommand.output
+    assert "no such option" in (per_subcommand.output or "").lower()
 
 
 @pytest.mark.parametrize(

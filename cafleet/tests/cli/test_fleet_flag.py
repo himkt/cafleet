@@ -1,4 +1,4 @@
-"""Tests for the ``cafleet --fleet-id <int>`` global CLI flag."""
+"""Tests for the per-subcommand ``cafleet <subcommand> --fleet-id <int>`` CLI option."""
 
 import json
 import sqlite3
@@ -79,10 +79,10 @@ def test_fleet_id_flag_flows_into_broker__register_passes_fleet_id_to_broker(
     result = db_runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(sid),
             "agent",
             "register",
+            "--fleet-id",
+            str(sid),
             "--name",
             "A",
             "--description",
@@ -129,10 +129,10 @@ def test_fleet_id_flag_flows_into_broker__send_passes_fleet_id_to_broker(
     result = db_runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(sid),
             "message",
             "send",
+            "--fleet-id",
+            str(sid),
             "--agent-id",
             str(aid),
             "--to",
@@ -188,9 +188,12 @@ def test_subcommands_that_do_not_require_fleet_id__fleet_list_without_fleet_id(
     assert result.exit_code == 0, result.output
 
 
-def test_fleet_id_silently_accepted_where_not_required__db_init_accepts_fleet_id_silently(
+def test_fleet_id_rejected_where_not_required__db_init_rejects_in_both_positions(
     tmp_path, monkeypatch
 ):
+    """``db init`` rejects ``--fleet-id`` in both the old global position and the
+    per-subcommand position (exit 2, 'no such option'); the previous
+    silent-accept behavior is gone."""
     db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
@@ -199,22 +202,32 @@ def test_fleet_id_silently_accepted_where_not_required__db_init_accepts_fleet_id
     )
     runner = CliRunner()
     sid = "100"
-    result = runner.invoke(cli, ["--fleet-id", sid, "db", "init"])
-    assert result.exit_code == 0, result.output
-    combined = (result.output or "").lower()
-    assert "unused" not in combined
-    assert "unexpected" not in combined
+    global_pos = runner.invoke(cli, ["--fleet-id", sid, "db", "init"])
+    assert global_pos.exit_code == 2, global_pos.output
+    assert "no such option" in (global_pos.output or "").lower()
+
+    per_subcommand = runner.invoke(cli, ["db", "init", "--fleet-id", sid])
+    assert per_subcommand.exit_code == 2, per_subcommand.output
+    assert "no such option" in (per_subcommand.output or "").lower()
 
 
-def test_fleet_id_silently_accepted_where_not_required__fleet_create_accepts_fleet_id_silently(
+def test_fleet_id_rejected_where_not_required__fleet_create_rejects_in_both_positions(
     db_runner,
 ):
+    """``fleet create`` rejects ``--fleet-id`` in both the old global position and
+    the per-subcommand position (exit 2, 'no such option')."""
     sid = "100"
-    result = db_runner.invoke(
-        cli,
-        ["--fleet-id", sid, "fleet", "create", "--label", "x"],
+    global_pos = db_runner.invoke(
+        cli, ["--fleet-id", sid, "fleet", "create", "--label", "x"]
     )
-    assert result.exit_code == 0, result.output
+    assert global_pos.exit_code == 2, global_pos.output
+    assert "no such option" in (global_pos.output or "").lower()
+
+    per_subcommand = db_runner.invoke(
+        cli, ["fleet", "create", "--fleet-id", sid, "--label", "x"]
+    )
+    assert per_subcommand.exit_code == 2, per_subcommand.output
+    assert "no such option" in (per_subcommand.output or "").lower()
 
 
 def _create_fleet_via_cli(runner: CliRunner) -> tuple[int, int]:
@@ -257,10 +270,10 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "agent",
             "deregister",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(admin_id),
         ],
@@ -286,10 +299,10 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_use
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "agent",
             "deregister",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(admin_id),
         ],
@@ -318,10 +331,10 @@ def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "agent",
             "deregister",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(bogus_agent_id),
         ],
@@ -348,10 +361,10 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_act
     runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "agent",
             "deregister",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(admin_id),
         ],
@@ -372,3 +385,12 @@ def test_old_surface_removed__session_flag_and_group_no_longer_parse(db_runner):
     group = db_runner.invoke(cli, ["session", "create"])
     assert group.exit_code == 2
     assert "no such command" in (group.output or "").lower()
+
+
+def test_old_surface_removed__global_fleet_id_no_longer_parses(db_runner):
+    """Regression guard: ``--fleet-id`` is no longer a global option, so the old
+    surface (flag before the subcommand) is rejected by Click with its standard
+    'no such option' error (exit 2)."""
+    result = db_runner.invoke(cli, ["--fleet-id", "100", "agent", "list"])
+    assert result.exit_code == 2, result.output
+    assert "no such option" in (result.output or "").lower()

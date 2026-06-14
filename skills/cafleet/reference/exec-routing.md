@@ -9,7 +9,7 @@ The fallback fires only when the coding-agent harness deny-list rejects a Bash i
 | Primitive | Purpose | Permission gate |
 |---|---|---|
 | [`cafleet member exec`](director.md#member-exec) | **Shell-dispatch** with operator-controlled `COMMAND` argument. Keystrokes `! <cmd>` + `Enter` into the member's pane via the coding agent's `!` shortcut. | `permissions.ask` — every invocation prompts the operator. |
-| [`cafleet member ping`](director.md#member-ping) | **Inbox-poll-only** nudge. Keystrokes `cafleet --fleet-id <s> message poll --agent-id <m>` + `Enter` into the member's pane. Action is fixed by the subcommand name; no operator-controlled keystroke body. | `permissions.allow` — pre-approved. |
+| [`cafleet member ping`](director.md#member-ping) | **Inbox-poll-only** nudge. Keystrokes `cafleet message poll --fleet-id <s> --agent-id <m>` + `Enter` into the member's pane. Action is fixed by the subcommand name; no operator-controlled keystroke body. | `permissions.allow` — pre-approved. |
 
 `member exec` is for shell dispatch. `member ping` is for nudging a member that missed an inline-preview keystroke (e.g. its TUI was in a non-input state when the preview arrived). Do not conflate them.
 
@@ -30,7 +30,7 @@ When a member decides to route after reconsidering:
 
 1. Send a plain CAFleet message to the Director:
    ```bash
-   cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
+   cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
      --to <director-agent-id> \
      --text "Need to run: <command>. My harness denied it (<reason if known>)."
    ```
@@ -56,13 +56,13 @@ When a Director receives a member's denial-fallback request:
 2. Verify the request makes sense (the command is reasonable, comes from a real member of your team, and has not already been served).
 3. Dispatch via [`cafleet member exec`](director.md#member-exec):
    ```bash
-   cafleet --fleet-id <fleet-id> member exec \
+   cafleet member exec --fleet-id <fleet-id> \
      --member-id <member-agent-id> \
      "<command>"
    ```
 4. **Immediately follow up with `cafleet member ping`** so the member's TUI advances its turn and consumes the bang-output as fresh context (see `member exec` § Required follow-up in `reference/director.md`):
    ```bash
-   cafleet --fleet-id <fleet-id> member ping \
+   cafleet member ping --fleet-id <fleet-id> \
      --member-id <member-agent-id>
    ```
 5. ACK the member's request message via `cafleet message ack --task-id <task-id>` so it does not re-fire on the next poll.
