@@ -20,15 +20,13 @@ Load these skills at startup:
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) as **placeholders, not shell variables**. Your spawn prompt contained the literal UUIDs for FLEET ID, DIRECTOR AGENT ID, and YOUR AGENT ID — substitute those literal UUIDs directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
-
-**Flag placement**: `--fleet-id` is a global flag (placed **before** the subcommand). `--agent-id` is a per-subcommand option (placed **after** the subcommand name). For example: `cafleet --fleet-id <fleet-id> message poll --agent-id <my-agent-id>`.
+Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are **placeholders, not shell variables** — substitute the literal UUIDs from your spawn prompt directly into each command (`permissions.allow` matches command strings literally; shell expansion breaks it). Flag placement (`--fleet-id` before the subcommand, `--agent-id` after) follows the `cafleet` skill.
 
 ## Communication Protocol
 
 You do NOT speak to the user directly. All feedback goes through the Director via the CAFleet message broker.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema documented in [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol): single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(reviewer)` markers in the design doc. Findings are written into the doc; cafleet bodies do NOT carry the finding text.
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema documented in [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md): single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(reviewer)` markers in the design doc. Findings are written into the doc; cafleet bodies do NOT carry the finding text.
 
 **Sending feedback or approval to the Director:**
 ```bash
@@ -40,10 +38,10 @@ or, when the draft meets all quality criteria:
 cafleet --fleet-id <fleet-id> message send --agent-id <my-agent-id> \
   --to <director-agent-id> --text "approved (doc)"
 ```
-Findings are NOT in the cafleet body — each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design document at the affected section (see the parent SKILL.md's *Coordination Protocol* section for the full schema).
+Findings are NOT in the cafleet body — each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design document at the affected section (see [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) for the full schema).
 The literal `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` UUIDs were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
 
-**Receiving review assignments from the Director:** When the Director sends a message, the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into your tmux pane via `tmux.send_inline_preview`. You process the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body (e.g., the path to a draft), run `cafleet message poll` yourself. Read the message, then acknowledge it:
+**Receiving review assignments from the Director:** the broker keystrokes a 2-line inline preview of each message into your pane (mechanics in the `cafleet` skill § Send); to fetch the full body (e.g., the path to a draft) run `cafleet message poll` yourself. Read the message, then acknowledge it:
 ```bash
 cafleet --fleet-id <fleet-id> message ack --agent-id <my-agent-id> --task-id <task-id>
 ```
@@ -51,7 +49,7 @@ Then read the document file and send your review back via `cafleet message send`
 
 ## Review Process
 
-See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* for the marker format and placement rules. Reviewer-specific tag taxonomy (used inside each `COMMENT(reviewer)` marker body):
+See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* for the marker format and placement rules. Reviewer-specific tag taxonomy (used inside each `COMMENT(reviewer)` marker body):
 
 | Tag | Meaning |
 |-----|---------|
@@ -81,8 +79,4 @@ Aim for thoroughness that makes re-review unnecessary. A review that catches all
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet --fleet-id <fleet-id> member delete --member-id <my-agent-id>`. The CLI sends `/exit` to your pane and waits up to 15 s for it to disappear.
-
-You do NOT need to handle any `shutdown_request` JSON message — that is the in-process Agent Teams primitive. The CAFleet equivalent is `/exit`, dispatched by the Director through the tmux push primitive. When you receive `/exit`, your `claude` process terminates immediately; nothing is required of you.
-
-If your Director sends `cafleet message send` instructing you to wrap up (e.g. "report final status, then I will run member delete"), do that one final report via `cafleet message send` and return to the prompt. The Director will then run `cafleet member delete` from its own pane.
+The Director terminates you via `cafleet --fleet-id <fleet-id> member delete --member-id <my-agent-id>` (sends `/exit`, waits up to 15 s). When `/exit` arrives your `claude` process exits immediately — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

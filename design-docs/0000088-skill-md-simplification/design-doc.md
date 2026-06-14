@@ -1,7 +1,7 @@
 # Slim Down the CAFleet Skill `.md` Files (Behavior-Preserving)
 
 **Status**: Approved
-**Progress**: 4/10 tasks complete
+**Progress**: 5/10 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -214,9 +214,9 @@ This change edits the very skills (`cafleet-design-doc-create` / `-execute` and 
 
 ### Step 5: Cluster C — `cafleet-design-doc-create/`
 
-- [ ] `SKILL.md`: replace inlined Coordination Protocol with cross-ref to `coordination.md` + role-subset note + Clarification Exemption (D1); collapse spawn audit-file procedure to the two-step pattern (D10). <!-- completed: -->
-- [ ] `roles/director.md`: cross-ref Idle/Stall to supervision/monitoring + Shutdown to recovery.md (D9, D2). <!-- completed: -->
-- [ ] `roles/drafter.md` + `roles/reviewer.md`: trim Placeholder + Shutdown + broker-keystroke boilerplate (D9). <!-- completed: -->
+- [x] `SKILL.md`: replace inlined Coordination Protocol with cross-ref to `coordination.md` + role-subset note + Clarification Exemption (D1); collapse spawn audit-file procedure to the two-step pattern (D10). <!-- completed: 2026-06-14T03:22 -->
+- [x] `roles/director.md`: cross-ref Idle/Stall to supervision/monitoring + Shutdown to recovery.md (D9, D2). <!-- completed: 2026-06-14T03:22 -->
+- [x] `roles/drafter.md` + `roles/reviewer.md`: trim Placeholder + Shutdown + broker-keystroke boilerplate (D9). <!-- completed: 2026-06-14T03:22 -->
 
 ### Step 6: Cluster D — `cafleet-design-doc-execute/`
 

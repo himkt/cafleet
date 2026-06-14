@@ -18,33 +18,18 @@ Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id
 - **Drive user feedback iterations.** Process the user's feedback selection and route revisions through the quality loop before re-presenting.
 - **Clean up when done.** Stop the monitor's background task (there is no `monitor stop` command), delete each member via `cafleet member delete`, and tear down the fleet via `cafleet fleet delete <fleet-id>` after the user approves (or aborts). The root Director cannot be deregistered with `cafleet agent deregister` — `fleet delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
 
-## Idle Semantics
+## Idle Semantics & Stall Response
 
-**Members go idle after every turn. A member's tmux pane sitting at the prompt between turns is the expected state, NOT a stall.** A member sending you a `cafleet message send` and then returning to the prompt is the normal flow — they sent their output and are waiting for the next push notification or the next assignment.
+Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet member capture` fallback → `AskUserQuestion` three-beat for a paused 4-option frame) follow the `cafleet-agent-team-supervision` skill § Idle Semantics and the `cafleet-agent-team-monitoring` skill § Stall Response — both loaded at startup. Two skill-specific rungs are NOT in those skills and stay here:
 
-- Idle members receive messages normally; the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview` to wake them.
-- Idle-pane observations during a monitor tick are informational. Do not react unless you are ready to assign new work, OR the member's idleness is **blocking your next step** (a downstream phase cannot start, an expected deliverable file is missing past its milestone, you sent a message and received no reply after a reasonable window).
-- Do NOT comment on idleness or nudge a member just because they went idle. Only nudge per the Stall Response Ladder below.
-
-## Stall Response Ladder
-
-A member is stalled when they **block your next step** — not merely because they are idle. Signals:
-
-- The deliverable file you expect at this milestone does not exist.
-- `cafleet message poll --agent-id <director-agent-id>` shows no progress message from the member since the last assignment AND `cafleet member capture` shows no forward progress in the pane buffer.
-- You sent a `cafleet message send` and the member has not replied past one full monitor tick.
-
-**Response ladder (in order — do NOT skip rungs):**
-
-1. Send a specific instruction via `cafleet message send` — never a generic "are you OK?". State the deliverable you expect and the blocker you are trying to unblock.
-2. If still no reply after a second nudge across one more monitor tick, run `cafleet member capture --member-id <member-agent-id> --lines 200` and inspect the pane state. If the pane is on an `AskUserQuestion` frame, follow the canonical three-beat workflow in the `cafleet` skill § *Answer a member's AskUserQuestion prompt*.
-3. After 2 nudges without progress, escalate to the user via `AskUserQuestion` with concrete options (re-spawn / redistribute / drop scope / Other). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
+- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet member capture --member-id <member-agent-id> --lines 200`, then escalate — in that order.
+- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via `AskUserQuestion` with concrete options (re-spawn / redistribute / drop scope / Other). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
 
 All Director-to-member messages use the CAFleet message broker. The Director stores each member's `agent_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-agent-id>` as the `--to` target.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema shared with the `cafleet-design-doc-execute` and `cafleet-design-doc-interview` skills — every body is a single-line `<verb> (<pointer>)` poke; substantive content (Reviewer findings, Drafter spec questions, Director arbitration) lives in inline `COMMENT(role)` markers in the design document. Canonical mechanics: [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol). **Step 2 clarification messages are exempt** — the design doc does not yet exist when the Drafter asks clarifying questions, so the Director's "User answers: ..." relay rides as a free-form multi-line body.
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema shared with the `cafleet-design-doc-execute` and `cafleet-design-doc-interview` skills — every body is a single-line `<verb> (<pointer>)` poke; substantive content (Reviewer findings, Drafter spec questions, Director arbitration) lives in inline `COMMENT(role)` markers in the design document. Canonical mechanics: [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md). **Step 2 clarification messages are exempt** — the design doc does not yet exist when the Drafter asks clarifying questions, so the Director's "User answers: ..." relay rides as a free-form multi-line body.
 
 **Sending a task to a member:**
 ```bash
@@ -72,7 +57,7 @@ cafleet --fleet-id <fleet-id> member capture \
 
 ### COMMENT Marker Handling
 
-See [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) § *COMMENT(role) Marker* for the role taxonomy and marker rules. Skill-specific user-feedback workflow when the user selects "Scan for COMMENT markers":
+See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* for the role taxonomy and marker rules. Skill-specific user-feedback workflow when the user selects "Scan for COMMENT markers":
 
 1. **Immediately** scan for `COMMENT(` markers in the design document using Grep — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
 2. **If markers are found**: Route the Drafter to address them in-doc with `ready (doc)`. After the Drafter replies `addressed (doc)`, verify with Grep that no `COMMENT(` markers remain.
@@ -108,9 +93,9 @@ Drafter and Reviewer members are spawned with `--permission-mode dontAsk` (Bash 
 |:--|:--|:--|:--|
 | Clarification | Drafter sends clarifying questions via `cafleet message send` | Drafter goes idle without sending questions or a draft | Free-form nudge (Clarification Exemption — design doc does not yet exist): `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "Please send your clarifying questions so I can relay them to the user."` |
 | Drafting | Drafter writes the design document | Drafter goes idle after receiving user answers without producing a draft | Free-form nudge (still pre-doc, Clarification Exemption window): `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "You have received the user's answers. Please proceed with writing the design document."` |
-| Review | Reviewer sends review feedback via `cafleet message send` | Reviewer goes idle without sending feedback | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <reviewer-agent-id> --text "ready (doc)"` (re-sent `ready (doc)` is interpreted contextually as a stall-nudge per [../SKILL.md § Coordination Protocol](../SKILL.md#coordination-protocol) — same target, same expected action) |
+| Review | Reviewer sends review feedback via `cafleet message send` | Reviewer goes idle without sending feedback | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <reviewer-agent-id> --text "ready (doc)"` (re-sent `ready (doc)` is interpreted contextually as a stall-nudge per [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) — same target, same expected action) |
 | Revision | Drafter revises based on feedback | Drafter goes idle without sending revised draft | `cafleet --fleet-id <fleet-id> message send --agent-id <director-agent-id> --to <drafter-agent-id> --text "ready (doc)"` (re-sent stall-nudge — Drafter resolves the standing `COMMENT(reviewer)` markers in the doc) |
 
 ## Shutdown Protocol
 
-Run the canonical 5-rung teardown per the `cafleet` skill § *Shutdown Protocol* (stop the monitor's background task → `cafleet member delete` per member → `cafleet member list` verification → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check). The monitor stopped at the first rung is the heartbeat started at Step 1b (stop its background task — there is no `monitor stop` command); `cafleet fleet delete` makes any still-running loop self-terminate on its next tick, so stopping the task first is belt-and-suspenders.
+Run the canonical 5-rung teardown per the `cafleet` skill § *Shutdown Protocol* (stop the monitor's background task → `cafleet member delete` per member → `cafleet member list` verification → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check). Stop the monitor (the Step 1b heartbeat) FIRST — there is no `monitor stop` command, so stop its background task.
