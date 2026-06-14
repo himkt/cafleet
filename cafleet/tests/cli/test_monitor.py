@@ -15,7 +15,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from cafleet import config
+from cafleet import broker, config
 from cafleet.cli import cli
 from cafleet.monitor import DEFAULT_TICK_SECONDS, loop
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
@@ -217,6 +217,36 @@ def test_monitor_status__not_running_when_no_runtime(fleet):
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["runtime"]["running"] is False
+
+
+def test_monitor_status__labels_monitoring_member_role(fleet):
+    # B8: the agents table labels the dedicated monitoring member's role as
+    # ``monitor`` (derived from is_monitoring_member), distinct from the
+    # Director's ``director``. The member is registered directly here — the
+    # ``member create --role monitor`` CLI path is exercised in test_member.py.
+    db_file, runner, data = fleet
+    sid = data["fleet_id"]
+    director_id = data["director"]["agent_id"]
+    watcher = broker.register_agent(
+        fleet_id=sid,
+        name="watcher",
+        description="monitoring member",
+        placement={
+            "director_agent_id": director_id,
+            "tmux_session": "main",
+            "tmux_window_id": "@3",
+            "tmux_pane_id": "%7",
+            "coding_agent": "claude",
+        },
+        kind="monitoring-member",
+    )
+    _seed_runtime(db_file, sid, os.getpid())
+
+    result = runner.invoke(cli, ["--fleet-id", str(sid), "--json", "monitor", "status"])
+    assert result.exit_code == 0, result.output
+    roles = {a["agent_id"]: a["role"] for a in json.loads(result.output)["agents"]}
+    assert roles[director_id] == "director"
+    assert roles[watcher["agent_id"]] == "monitor"
 
 
 def test_monitor_status__stale_row_reports_not_running_with_nulls(fleet):

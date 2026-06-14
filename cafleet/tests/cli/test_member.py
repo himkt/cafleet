@@ -14,8 +14,10 @@ import pytest
 from click.testing import CliRunner
 
 from cafleet import broker, config
+from cafleet.broker import _shared
 from cafleet.cli import cli
 from cafleet.cli._prompt import resolve_prompt
+from cafleet.db.models import Agent
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
@@ -121,6 +123,7 @@ def _invoke_member_create(
     name: str = "Member",
     json_output: bool = False,
     model: str | None = None,
+    role: str | None = None,
 ):
     args = ["--fleet-id", str(fleet_id)]
     if json_output:
@@ -141,6 +144,8 @@ def _invoke_member_create(
         args.extend(["--coding-agent", coding_agent])
     if model is not None:
         args.extend(["--model", model])
+    if role is not None:
+        args.extend(["--role", role])
     if prompt_file is not None:
         args.extend(["--prompt-file", prompt_file])
     if inline_prompt is not None:
@@ -711,3 +716,127 @@ def test_member_create__claude_default_injects_dontask_permission_mode(
     assert "Bash" not in command
     name_index = command.index("--name")
     assert perm_index < name_index
+
+
+# --- member create --role (design 0000090 §5) ------------------------------
+
+
+def _read_agent_card(new_agent_id: int) -> dict:
+    with _shared.read_session() as s:
+        return json.loads(s.get(Agent, new_agent_id).agent_card_json)
+
+
+def test_member_create__role_monitor_sets_kind_and_enrolls(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        inline_prompt="hello",
+        name="Watcher",
+        role="monitor",
+        json_output=True,
+    )
+    assert result.exit_code == 0, result.output
+    new_id = json.loads(result.output)["agent_id"]
+
+    # the kind marker is written into the agent card …
+    assert _read_agent_card(new_id)["cafleet"]["kind"] == "monitoring-member"
+    # … and the monitoring member is enrolled in monitor_config
+    assert broker.get_monitor_config(fleet_id, new_id) is not None
+
+
+def test_member_create__role_member_does_not_enroll(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        inline_prompt="hello",
+        name="Ordinary",
+        role="member",
+        json_output=True,
+    )
+    assert result.exit_code == 0, result.output
+    new_id = json.loads(result.output)["agent_id"]
+
+    # an ordinary member carries no kind marker and is NOT enrolled
+    assert "cafleet" not in _read_agent_card(new_id)
+    assert broker.get_monitor_config(fleet_id, new_id) is None
+
+
+def test_member_create__default_role_is_member_not_enrolled(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # omitting --role defaults to 'member': no kind marker, no enrollment
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        inline_prompt="hello",
+        name="Plain",
+        json_output=True,
+    )
+    assert result.exit_code == 0, result.output
+    new_id = json.loads(result.output)["agent_id"]
+    assert "cafleet" not in _read_agent_card(new_id)
+    assert broker.get_monitor_config(fleet_id, new_id) is None
+
+
+def test_member_create__second_role_monitor_rejected(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    first = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        inline_prompt="hi",
+        name="Watcher-1",
+        role="monitor",
+    )
+    assert first.exit_code == 0, first.output
+
+    # only one monitoring member per fleet — the second --role monitor is rejected
+    second = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        inline_prompt="hi",
+        name="Watcher-2",
+        role="monitor",
+    )
+    assert second.exit_code == 1, second.output
+    assert "monitoring member" in second.output
+
+
+def test_member_create__invalid_role_choice_rejected(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # --role is a Choice(['member', 'monitor']); any other value is a usage error
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        inline_prompt="hi",
+        name="Bad-Role",
+        role="director",
+    )
+    assert result.exit_code == 2, result.output
+    assert "not one of" in result.output
