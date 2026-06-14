@@ -17,18 +17,10 @@ from cafleet.cli.server import server
 @click.option(
     "--json", "json_output", is_flag=True, default=False, help="Output in JSON format"
 )
-@click.option(
-    "--fleet-id",
-    "fleet_id",
-    type=int,
-    default=None,
-    help="Fleet ID (integer); required for client subcommands.",
-)
 @click.pass_context
-def cli(ctx, json_output, fleet_id):
+def cli(ctx, json_output):
     """CAFleet — CLI for the message broker and agent registry."""
     ctx.ensure_object(dict)
-    ctx.obj["fleet_id"] = fleet_id
     ctx.obj["json_output"] = json_output
 
 

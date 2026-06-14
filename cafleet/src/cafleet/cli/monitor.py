@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import click
 
 from cafleet import broker, output
-from cafleet.cli._helpers import ensure_tmux_or_die, require_fleet_id
+from cafleet.cli._helpers import ensure_tmux_or_die, fleet_id_option
 from cafleet.monitor import DEFAULT_TICK_SECONDS, loop
 
 
@@ -29,6 +29,7 @@ def _require_live_fleet(fleet_id: int) -> None:
 
 
 @monitor.command("start")
+@fleet_id_option
 @click.option(
     "--tick",
     type=click.IntRange(min=1),
@@ -44,7 +45,6 @@ def monitor_start(ctx: click.Context, tick: int) -> None:
     A coding agent launches it as a background task and stops it by stopping
     that task — there is no detached process and no ``stop`` command.
     """
-    require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
     _require_live_fleet(fleet_id)
     ensure_tmux_or_die()
@@ -52,10 +52,10 @@ def monitor_start(ctx: click.Context, tick: int) -> None:
 
 
 @monitor.command("status")
+@fleet_id_option
 @click.pass_context
 def monitor_status(ctx: click.Context) -> None:
     """Show monitor liveness plus the per-agent schedule table."""
-    require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
     _require_live_fleet(fleet_id)
 
@@ -115,6 +115,7 @@ def monitor_status(ctx: click.Context) -> None:
 
 
 @monitor.command("config")
+@fleet_id_option
 @click.option("--agent-id", "agent_id", type=int, required=True, help="Target agent.")
 @click.option(
     "--interval",
@@ -138,7 +139,6 @@ def monitor_config(
     disable: bool,
 ) -> None:
     """Show or edit an agent's monitor schedule."""
-    require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
     if enable and disable:
         raise click.UsageError("--enable and --disable are mutually exclusive.")

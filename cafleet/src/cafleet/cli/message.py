@@ -3,7 +3,7 @@
 import click
 
 from cafleet import broker, output
-from cafleet.cli._helpers import client_command, full_flag, quiet_flag
+from cafleet.cli._helpers import client_command, fleet_id_option, full_flag, quiet_flag
 
 
 @click.group()
@@ -12,6 +12,7 @@ def message() -> None:
 
 
 @message.command("send")
+@fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option("--to", type=int, required=True, help="Recipient agent ID")
 @click.option("--text", required=True, help="Message text")
@@ -39,6 +40,7 @@ def message_send(ctx, agent_id, to, text, full, quiet):
 
 
 @message.command("broadcast")
+@fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option("--text", required=True, help="Message text")
 @full_flag
@@ -62,6 +64,7 @@ def message_broadcast(ctx, agent_id, text, full):
 
 
 @message.command("poll")
+@fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @full_flag
 @click.pass_context
@@ -78,6 +81,7 @@ def message_poll(ctx, agent_id, full):
 
 
 @message.command("ack")
+@fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option("--task-id", type=int, required=True, help="Task ID to acknowledge")
 @full_flag
@@ -98,6 +102,7 @@ def message_ack(ctx, agent_id, task_id, full, quiet):
 
 
 @message.command("cancel")
+@fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option("--task-id", type=int, required=True, help="Task ID to cancel")
 @full_flag
@@ -115,6 +120,7 @@ def message_cancel(ctx, agent_id, task_id, full):
 
 
 @message.command("show")
+@fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option("--task-id", type=int, required=True, help="Task ID to retrieve")
 @full_flag

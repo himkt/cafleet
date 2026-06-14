@@ -11,9 +11,9 @@ from cafleet.broker import _shared
 from cafleet.cli._helpers import (
     director_member_options,
     ensure_tmux_or_die,
+    fleet_id_option,
     full_flag,
     quiet_flag,
-    require_fleet_id,
 )
 from cafleet.cli._prompt import resolve_prompt
 from cafleet.coding_agent import CODING_AGENTS
@@ -86,8 +86,8 @@ def _deregister_with_warning(new_agent_id: int, *, fleet_id: int) -> None:
     except Exception as drop_exc:
         click.echo(
             f"WARNING: rollback deregister failed — agent {new_agent_id} is "
-            f"orphaned in the registry. Run `cafleet --fleet-id {fleet_id} "
-            f"agent deregister --agent-id {new_agent_id}` manually to clean up. "
+            f"orphaned in the registry. Run `cafleet agent deregister "
+            f"--fleet-id {fleet_id} --agent-id {new_agent_id}` manually to clean up. "
             f"Cause: {drop_exc}",
             err=True,
         )
@@ -100,6 +100,7 @@ def _rollback_register(new_agent_id: int, *, fleet_id: int, reason: str) -> NoRe
 
 
 @member.command("create")
+@fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Director's agent ID")
 @click.option("--name", required=True, help="Member name")
 @click.option("--description", required=True, help="Member description")
@@ -153,7 +154,6 @@ def member_create(
         raise click.UsageError(
             "--prompt-file and the positional prompt argument are mutually exclusive."
         )
-    require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
 
     agent = CODING_AGENTS[coding_agent]
@@ -250,6 +250,7 @@ def member_create(
 
 
 @member.command("delete")
+@fleet_id_option
 @director_member_options
 @click.option(
     "--force",
@@ -262,7 +263,6 @@ def member_create(
 @click.pass_context
 def member_delete(ctx, member_id, force):
     """Deregister a member agent and close its tmux pane."""
-    require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
 
     ensure_tmux_or_die()
@@ -396,6 +396,7 @@ def _emit_member_delete_output(
 
 
 @member.command("list")
+@fleet_id_option
 @click.option(
     "--activity",
     "activity",
@@ -406,7 +407,6 @@ def _emit_member_delete_output(
 @click.pass_context
 def member_list(ctx, activity):
     """List every member of the fleet (the root Director is excluded)."""
-    require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
     try:
         if activity:
@@ -426,6 +426,7 @@ def member_list(ctx, activity):
 
 
 @member.command("capture")
+@fleet_id_option
 @director_member_options
 @click.option(
     "--lines",
@@ -444,7 +445,6 @@ def member_list(ctx, activity):
 @click.pass_context
 def member_capture(ctx, member_id, lines, ansi):
     """Capture the last N lines of a member pane's terminal buffer."""
-    require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
 
     ensure_tmux_or_die()
@@ -483,6 +483,7 @@ def member_capture(ctx, member_id, lines, ansi):
 
 
 @member.command("send-input")
+@fleet_id_option
 @director_member_options
 @click.option(
     "--choice",
@@ -499,7 +500,6 @@ def member_capture(ctx, member_id, lines, ansi):
 @click.pass_context
 def member_send_input(ctx, member_id, choice, freetext):
     """Safely forward a restricted keystroke to a member pane."""
-    require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
 
     if freetext is not None and freetext.lstrip().startswith("!"):
@@ -555,12 +555,12 @@ def member_send_input(ctx, member_id, choice, freetext):
 
 
 @member.command("exec")
+@fleet_id_option
 @director_member_options
 @click.argument("command")
 @click.pass_context
 def member_exec(ctx, member_id, command):
     """Dispatch a shell command via the coding agent's `!` shortcut."""
-    require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
 
     if "\n" in command or "\r" in command:
@@ -600,12 +600,12 @@ def member_exec(ctx, member_id, command):
 
 
 @member.command("ping")
+@fleet_id_option
 @director_member_options
 @quiet_flag
 @click.pass_context
 def member_ping(ctx, member_id, quiet):
     """Inject an inbox-poll keystroke into a member's pane (Director-only)."""
-    require_fleet_id(ctx)
     fleet_id = ctx.obj["fleet_id"]
 
     ensure_tmux_or_die()

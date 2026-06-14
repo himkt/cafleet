@@ -5,7 +5,7 @@ import json
 import click
 
 from cafleet import broker, output
-from cafleet.cli._helpers import client_command, full_flag
+from cafleet.cli._helpers import client_command, fleet_id_option, full_flag
 
 
 @click.group()
@@ -14,6 +14,7 @@ def agent() -> None:
 
 
 @agent.command("register")
+@fleet_id_option
 @click.option("--name", required=True, help="Agent name")
 @click.option("--description", required=True, help="Agent description")
 @click.option("--skills", default=None, help="Skills as JSON string")
@@ -36,6 +37,7 @@ def agent_register(ctx, name, description, skills):
 
 
 @agent.command("list")
+@fleet_id_option
 @full_flag
 @click.pass_context
 @client_command(
@@ -50,6 +52,7 @@ def agent_list(ctx, full):
 
 
 @agent.command("show")
+@fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option(
     "--id", "target_agent_id", type=int, required=True, help="Target agent ID"
@@ -71,6 +74,7 @@ def agent_show(ctx, agent_id, target_agent_id, full):
 
 
 @agent.command("deregister")
+@fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.pass_context
 @client_command(

@@ -180,7 +180,7 @@ class TmuxMultiplexer:
         """
         if shutil.which("tmux") is None:
             return False
-        payload = f"cafleet --fleet-id {fleet_id} message poll --agent-id {agent_id}"
+        payload = f"cafleet message poll --fleet-id {fleet_id} --agent-id {agent_id}"
         try:
             _send_literal_then_enter(
                 target_pane_id=target_pane_id,
@@ -283,9 +283,12 @@ class TmuxMultiplexer:
         """
         if lines <= 0:
             raise TmuxError(f"capture_pane: lines must be positive, got {lines}")
-        return _run(
+        raw = _run(
             ["tmux", "capture-pane", "-p", "-t", target_pane_id, "-S", f"-{lines}"]
         )
+        # -S gives tmux a start hint but can return more lines than requested
+        # (e.g. wrapped lines, partial scrollback); enforce the limit in Python.
+        return "\n".join(raw.splitlines()[-lines:])
 
     def pane_exists(self, *, target_pane_id: str) -> bool:
         """Return True iff target_pane_id currently appears in the tmux server's pane list.
