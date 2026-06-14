@@ -1,7 +1,7 @@
 # Monitor heartbeat nudges the monitoring member only
 
 **Status**: Approved
-**Progress**: 21/23 tasks complete
+**Progress**: 22/23 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -10,13 +10,13 @@ Narrow the `cafleet monitor` heartbeat so it wakes **only** the dedicated monito
 
 ## Success Criteria
 
-- [ ] `monitor_tick` wakes only the monitoring member (`send_wake_trigger`); the Director is never pinged by the loop.
-- [ ] The root Director is no longer enrolled in `monitor_config`: `create_fleet` stops enrolling it, and a new Alembic data step prunes pre-existing Director `monitor_config` rows.
-- [ ] `list_monitor_targets` returns only the monitoring member (plus any stray/legacy enrolled row, which the loop's defensive `else: continue` skips); `monitor status` shows only the monitoring member.
-- [ ] `monitor start` prints a startup warning when no monitoring member is enrolled, but still runs the loop.
-- [ ] `send_poll_trigger` and `send_wake_trigger` both stay — `cafleet member ping` reuses `send_poll_trigger`; no keystroke helper is removed.
-- [ ] Four request-driven orchestration skills (`cafleet-design-doc-create`, `-interview`, `cafleet-research-report`, `-presentation`) drop `cafleet monitor start`; `cafleet-design-doc-execute` instead adopts the monitoring-member model (its Copilot review loop is heartbeat-driven). No "Director runs monitor start" / "start the heartbeat" text or deprecation notes remain anywhere outside this design doc.
-- [ ] `mise //cafleet:lint`, `:format`, `:typecheck`, and `:test` all pass; `docs/`, `README.md`, and every affected `SKILL.md` are consistent with the new behavior.
+- [x] `monitor_tick` wakes only the monitoring member (`send_wake_trigger`); the Director is never pinged by the loop.
+- [x] The root Director is no longer enrolled in `monitor_config`: `create_fleet` stops enrolling it, and a new Alembic data step prunes pre-existing Director `monitor_config` rows.
+- [x] `list_monitor_targets` returns only the monitoring member (plus any stray/legacy enrolled row, which the loop's defensive `else: continue` skips); `monitor status` shows only the monitoring member.
+- [x] `monitor start` prints a startup warning when no monitoring member is enrolled, but still runs the loop.
+- [x] `send_poll_trigger` and `send_wake_trigger` both stay — `cafleet member ping` reuses `send_poll_trigger`; no keystroke helper is removed.
+- [x] Four request-driven orchestration skills (`cafleet-design-doc-create`, `-interview`, `cafleet-research-report`, `-presentation`) drop `cafleet monitor start`; `cafleet-design-doc-execute` instead adopts the monitoring-member model (its Copilot review loop is heartbeat-driven). No "Director runs monitor start" / "start the heartbeat" text or deprecation notes remain anywhere outside this design doc.
+- [x] `mise //cafleet:lint`, `:format`, `:typecheck`, and `:test` all pass; `docs/`, `README.md`, and every affected `SKILL.md` are consistent with the new behavior.
 
 ---
 
@@ -214,7 +214,7 @@ This works only if a nudge actually fires during a *quiet* Copilot wait — and 
 
 ### Phase D: Verification
 
-- [ ] D1. `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass. Sweep for residual Director-heartbeat / orphaned `monitor start` references across `docs/`, `README.md`, `skills/`, `.claude/`, root `CLAUDE.md`, `cafleet/.claude/` with a regex broad enough to catch non-contiguous phrasings (e.g. `git grep -nIE "pings? the (root )?Director|Director \+ monitoring member|Director and the monitoring member|two (enrolled|agents)|Esc.?\+.?poll|poll-trigger|gets the same heartbeat"`); the only legitimate remaining hits are under `design-docs/` (history). Note: `cafleet member ping` / `send_poll_trigger` references are **not** residuals — that keystroke is unchanged — so do not "fix" them. <!-- completed: -->
+- [x] D1. `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass. Sweep for residual Director-heartbeat / orphaned `monitor start` references across `docs/`, `README.md`, `skills/`, `.claude/`, root `CLAUDE.md`, `cafleet/.claude/` with a regex broad enough to catch non-contiguous phrasings (e.g. `git grep -nIE "pings? the (root )?Director|Director \+ monitoring member|Director and the monitoring member|two (enrolled|agents)|Esc.?\+.?poll|poll-trigger|gets the same heartbeat"`); the only legitimate remaining hits are under `design-docs/` (history). Note: `cafleet member ping` / `send_poll_trigger` references are **not** residuals — that keystroke is unchanged — so do not "fix" them. <!-- completed: 2026-06-14T12:34 -->
 - [ ] D2. Manual smoke (operator, optional): with a monitoring member live, confirm the loop wakes the monitoring member but never keystrokes the Director's pane; confirm `monitor start` in a fleet with no monitoring member prints the warning and still runs; confirm `cafleet member ping` still keystrokes the Director's pane (`send_poll_trigger` intact). <!-- completed: -->
 
 ---
