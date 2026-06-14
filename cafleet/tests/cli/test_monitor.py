@@ -206,7 +206,10 @@ def test_monitor_start__warns_when_no_monitoring_member_but_still_runs(
     result = runner.invoke(cli, ["monitor", "start", "--fleet-id", str(sid)])
 
     assert result.exit_code == 0, result.output
-    assert "no enrolled monitoring member" in result.stderr
+    # combine stdout+stderr so the assertion is robust to Click's stderr
+    # capture mode (the established tests/cli pattern)
+    combined = (result.output or "") + (getattr(result, "stderr", "") or "")
+    assert "no enrolled monitoring member" in combined
     assert calls == [(sid, DEFAULT_TICK_SECONDS)]  # the loop still runs
 
 
@@ -224,7 +227,8 @@ def test_monitor_start__no_warning_when_monitoring_member_enrolled(fleet, monkey
     result = runner.invoke(cli, ["monitor", "start", "--fleet-id", str(sid)])
 
     assert result.exit_code == 0, result.output
-    assert "no enrolled monitoring member" not in result.stderr
+    combined = (result.output or "") + (getattr(result, "stderr", "") or "")
+    assert "no enrolled monitoring member" not in combined
     assert calls == [(sid, DEFAULT_TICK_SECONDS)]
 
 
